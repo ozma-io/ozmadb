@@ -1,0 +1,14 @@
+<Project Sdk="FSharp.NET.Sdk;Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputName>FunWithFlags.FunDB</OutputName>
+    <TargetFramework>netcoreapp1.1</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="1.1.1" />
+
+    <PackageReference Include="FunWithFlags.FunCore" />
+  </ItemGroup>
+
+</Project>
