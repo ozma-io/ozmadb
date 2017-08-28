@@ -1,9 +1,11 @@
 namespace FunWithFlags.FunDB
 
+open System
 open System.Runtime.InteropServices
 open System.Linq.Expressions
 open Npgsql
 open Microsoft.EntityFrameworkCore
+open Microsoft.Extensions.Logging
 
 open FunWithFlags.FunCore
 
@@ -138,9 +140,12 @@ module private Render =
             | CBool(b) -> renderBool b
             | CEq(a, b) -> sprintf "(%s = %s)" (renderCond a) (renderCond b)
 
-type DBQuery(connectionString : string) =
+type DBQuery(connectionString : string, loggerFactory : ILoggerFactory) =
     let connection = new NpgsqlConnection(connectionString)
-    let db = new DatabaseContext((new DbContextOptionsBuilder<DatabaseContext>()).UseNpgsql(connectionString).Options)
+    let dbOptions = (new DbContextOptionsBuilder<DatabaseContext>())
+                        .UseNpgsql(connectionString)
+                        .UseLoggerFactory(loggerFactory)
+    let db = new DatabaseContext(dbOptions.Options)
 
     interface System.IDisposable with
         member this.Dispose() =
