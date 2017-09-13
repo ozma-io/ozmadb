@@ -157,7 +157,10 @@ type DBQuery(connectionString : string, loggerFactory : ILoggerFactory) =
     member this.Query(expr: SelectExpr) : seq<string[]> =
         use command = new NpgsqlCommand(Render.renderSelect expr, connection)
         connection.Open()
-        use reader = command.ExecuteReader()
-        seq { while reader.Read() do
-                  yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i].ToString()) |> Seq.toArray
-            } |> Seq.toList |> List.toSeq
+        try
+            use reader = command.ExecuteReader()
+            seq { while reader.Read() do
+                      yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i].ToString()) |> Seq.toArray
+                } |> Seq.toList |> List.toSeq
+        finally
+            connection.Close()
