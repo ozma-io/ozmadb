@@ -11,6 +11,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="src/Query.fs" />
+    <Compile Include="src/FunQL/Attribute.fs" />
+    <Compile Include="src/FunQL/AST.fs" />
     <FsYacc Include="src/FunQL/Parser.fsy">
       <OtherFlags>--module FunWithFlags.FunDB.FunQL.Parser</OtherFlags>
     </FsYacc>
@@ -19,13 +22,15 @@
       <OtherFlags>--unicode</OtherFlags>
     </FsLex>
     <Compile Include="$(RootIntermediateOutputPath)/gen/Lexer.fs" />
-
-    <Compile Include="src/Query.fs" />
+    <Compile Include="src/FunQL/Qualifier.fs" />
+    <Compile Include="src/FunQL/Compiler.fs" />
+    <Compile Include="src/View.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="3.2.*" />
     <PackageReference Include="FsLexYacc" Version="7.0.*" />
+    <PackageReference Include="YC.PrettyPrinter" Version="0.0.5" />
 
     <ProjectReference Include="../FunCore/FunCore.csproj" />
   </ItemGroup>

@@ -2,25 +2,119 @@
 
 module FunWithFlags.FunDB.FunQL.Lexer
 
+open System.Text
 open Microsoft.FSharp.Text.Lexing
 
-open FunWithFlags.FunDB.FunQL.Parser
+open FunWithFlags.FunDB.FunQL
 
-let newline (lexbuf: LexBuffer<_>) = 
-  lexbuf.StartPos <- lexbuf.StartPos.NextLine
+let newline (lexbuf: LexBuffer<_>) =
+    lexbuf.StartPos <- lexbuf.StartPos.NextLine
+
+let parseString (quoteChar: char) (lexbuf: LexBuffer<_>) =
+    let strBuilder = new StringBuilder(lexbuf.LexemeLength)
+    let rec parseChar i =
+        if i < lexbuf.LexemeLength - 1 then
+            let c = lexbuf.LexemeChar i
+            if c = '\\' then
+                let sp = lexbuf.LexemeChar (i + 1)
+                ignore <|
+                    match sp with
+                        | '\\' -> strBuilder.Append '\\'
+                        | 't' -> strBuilder.Append '\t'
+                        | 'r' -> strBuilder.Append '\r'
+                        | 'n' -> strBuilder.Append '\n'
+                        | _ -> if sp = quoteChar
+                               then strBuilder.Append quoteChar
+                               else failwith (sprintf "Invalid escape sequence: \\%c" sp)
+                parseChar (i + 2)
+            else
+                ignore <| strBuilder.Append c
+                parseChar (i + 1)
+
+    parseChar 1 // Skip double quotes
+    strBuilder.ToString()
 
 }
 
 // Regular expressions
 let whitespace = [' ' '\t' ]
-let newline = ('\n' | '\r' '\n')
+let newline = ('\n' | "\r\n")
+let escapes = "\\" ['\\' 't' 'r' 'n']
+
+// Case-insensitive chars
+let a = ['A' 'a']
+let b = ['B' 'b']
+let c = ['C' 'c']
+let d = ['D' 'd']
+let e = ['E' 'e']
+let f = ['F' 'f']
+let g = ['G' 'g']
+let h = ['H' 'h']
+let i = ['I' 'i']
+let j = ['J' 'j']
+let k = ['K' 'k']
+let l = ['L' 'l']
+let m = ['M' 'm']
+let n = ['N' 'n']
+let o = ['O' 'o']
+let p = ['P' 'p']
+let q = ['Q' 'q']
+let r = ['R' 'r']
+let s = ['S' 's']
+let t = ['T' 't']
+let u = ['U' 'u']
+let v = ['V' 'v']
+let w = ['W' 'w']
+let x = ['X' 'x']
+let y = ['Y' 'y']
+let z = ['Z' 'z']
+
 
 rule tokenstream = parse
-// --------------------------
-| "hello" 		{ HELLO }
-// --------------------------
-| whitespace	{ tokenstream lexbuf }
-| newline	{ newline lexbuf; tokenstream lexbuf }
-// --------------------------
-| _    		{ failwith ("ParseError" + LexBuffer<_>.LexemeString lexbuf) }
-| eof   	{ EOF }
+
+// Atoms
+| ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> System.String |> int) }
+// FIXME: Add floats
+| "\"" ([^ '\\' '"'] | "\\\"" | escapes) "\"" { Parser.ID(parseString '\"' lexbuf) }
+| "'" ([^ '\\' '\''] | "\\'" | escapes) "'" { Parser.STRING(parseString '\'' lexbuf) }
+| "{" { Parser.LEFT_BRACE }
+| "}" { Parser.RIGHT_BRACE }
+| "[" { Parser.LEFT_BRACKET }
+| "]" { Parser.RIGHT_BRACKET }
+| "(" { Parser.LEFT_PARENS }
+| ")" { Parser.RIGHT_PARENS }
+| ":" { Parser.COLON }
+| ";" { Parser.SEMICOLON }
+| "," { Parser.COMMA }
+| "." { Parser.DOT }
+| "=" { Parser.EQ }
+
+// Keywords
+| n u l l { Parser.NULL }
+| t r u e { Parser.TRUE }
+| f a l s e { Parser.FALSE }
+| s e l e c t { Parser.SELECT }
+| f r o m { Parser.FROM }
+| w h e r e { Parser.WHERE }
+| l e f t { Parser.LEFT }
+| r i g h t { Parser.RIGHT }
+| i n n e r { Parser.INNER }
+| o u t e r { Parser.OUTER }
+| j o i n { Parser.JOIN }
+| o n { Parser.ON }
+| o r d e r { Parser.ORDER }
+| b y { Parser.BY }
+| a s { Parser.AS }
+| a s c { Parser.ASC }
+| d e s c { Parser.DESC }
+
+// Unescaped ids
+| ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9'] { Parser.ID((System.String lexbuf.Lexeme).ToLower()) }
+
+// Whitespace
+| whitespace { tokenstream lexbuf }
+| newline    { newline lexbuf; tokenstream lexbuf }
+
+// Misc
+| _    	  { failwith ("Parse error: " + LexBuffer<_>.LexemeString lexbuf) }
+| eof     { Parser.EOF }
