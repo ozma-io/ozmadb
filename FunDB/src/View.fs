@@ -4,10 +4,12 @@ open System.Linq
 open Microsoft.FSharp.Text.Lexing
 
 open FunWithFlags.FunCore
+open FunWithFlags.FunDB.Attribute
+open FunWithFlags.FunDB.Query
 open FunWithFlags.FunDB.FunQL
 
 type ViewRow =
-    { Cells : string[];
+    { Cells : string array;
       Attributes : AttributeMap;
     }
 
@@ -18,13 +20,13 @@ type ViewColumn =
 
 type ViewResult =
     { View : UserView;
-      Columns : ViewColumn[];
+      Columns : ViewColumn array;
       Rows : ViewRow list;
     }
 
 exception UserViewError of string
 
-type ViewResolver() =
+type ViewResolver () =
     let parseQuery dbQuery queryString =
         let qualifier = new Qualifier.Qualifier(dbQuery)
         let lexbuf = LexBuffer<char>.FromString queryString

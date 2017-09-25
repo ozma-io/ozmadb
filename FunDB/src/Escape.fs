@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.Escape
+module internal FunWithFlags.FunDB.Escape
 
 let renderSqlName (str : string) = sprintf "\"%s\"" (str.Replace("\"", "\\\""))
 

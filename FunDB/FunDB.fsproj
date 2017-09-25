@@ -11,11 +11,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="src/Escape.fs" />
+    <Compile Include="src/Attribute.fs" />
     <Compile Include="src/Query.fs" />
-    <Compile Include="src/FunQL/Attribute.fs" />
+
     <Compile Include="src/FunQL/AST.fs" />
     <FsYacc Include="src/FunQL/Parser.fsy">
-      <OtherFlags>--module FunWithFlags.FunDB.FunQL.Parser</OtherFlags>
+      <OtherFlags>--module FunWithFlags.FunDB.FunQL.Parser --internal</OtherFlags>
     </FsYacc>
     <Compile Include="$(RootIntermediateOutputPath)/gen/Parser.fs" />
     <FsLex Include="src/FunQL/Lexer.fsl">
@@ -24,6 +26,8 @@
     <Compile Include="$(RootIntermediateOutputPath)/gen/Lexer.fs" />
     <Compile Include="src/FunQL/Qualifier.fs" />
     <Compile Include="src/FunQL/Compiler.fs" />
+    <Compile Include="src/FunQL/PrettyPrinter.fs" />
+
     <Compile Include="src/View.fs" />
   </ItemGroup>
 

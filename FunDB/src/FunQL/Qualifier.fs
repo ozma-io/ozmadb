@@ -1,32 +1,49 @@
-module FunWithFlags.FunDB.FunQL.Qualifier
+module internal FunWithFlags.FunDB.FunQL.Qualifier
 
 open System.Linq
 open Microsoft.EntityFrameworkCore
 
 open FunWithFlags.FunCore
+open FunWithFlags.FunDB.Escape
+open FunWithFlags.FunDB.Query
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
-open FunWithFlags.FunDB
+
+let renderEntityName (e : Entity) =
+    if e.Schema = null then
+        renderSqlName e.Name
+    else
+        sprintf "%s.%s" (renderSqlName e.Schema.Name) (renderSqlName e.Name)
 
 type QEntityName =
     | QEEntity of Entity * Map<ColumnName, Field>
     | QESubquery of TableName * Set<ColumnName>
+    with
+        override this.ToString () =
+            match this with
+                | QEEntity(e, _) -> renderEntityName e
+                | QESubquery(name, _) -> renderSqlName name
 
 // FIXME: allow non-qualified field names, like in SQL
 type QFieldName =
-    | QFField of Entity * Field
+    | QFField of Field
     | QFSubquery of TableName * ColumnName
+    with
+        override this.ToString () =
+            match this with
+                | QFField(f) -> sprintf "%s.%s" (renderEntityName f.Entity) f.Name
+                | QFSubquery(tableName, columnName) -> sprintf "%s.%s" (renderSqlName tableName) (renderSqlName columnName)
 
 type QualifiedQueryExpr = QueryExpr<QEntityName, QFieldName>
 
 let resultName = function
-    | RField(QFField(entity, field)) -> field.Name
+    | RField(QFField(field)) -> field.Name
     | RField(QFSubquery(entityName, fieldName)) -> fieldName
     | RExpr(e, name) -> name
 
 exception QualifierError of string
 
-type Qualifier(dbQuery : DatabaseHandle) =
+type Qualifier (dbQuery : DatabaseHandle) =
     let getDbEntity (e : EntityName) =
         let q = dbQuery.Database.Entities
                     .Include(fun ent -> ent.Fields)
@@ -58,7 +75,7 @@ type Qualifier(dbQuery : DatabaseHandle) =
             | Some(QEEntity(entity, fields)) ->
                 match Map.tryFind f.name fields with
                     | None -> raise (QualifierError (sprintf "Field not found: %s" f.name))
-                    | Some(field) -> QFField(entity, field)
+                    | Some(field) -> QFField(field)
             | Some(QESubquery(queryName, fields)) ->
                 if Set.contains f.name fields then
                     QFSubquery(queryName, f.name)

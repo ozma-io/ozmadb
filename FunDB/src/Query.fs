@@ -8,8 +8,9 @@ open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 
 open FunWithFlags.FunCore
+open FunWithFlags.FunDB.Escape
 
-module AST =
+module internal AST =
     type ColumnName = string
     type TableName = string
 
@@ -46,6 +47,7 @@ module AST =
     and ColumnExpr =
         | CColumn of Column
 
+    // FIXME: convert to arrays
     and SelectExpr =
         { columns: SelectedColumn list;
           from: FromExpr;
@@ -55,11 +57,8 @@ module AST =
           offset: int option;
           }
 
-module Render =
+module internal Render =
     open AST
-
-    let renderSqlName (str : string) = sprintf "\"%s\"" (str.Replace("\"", "\\\""))
-    let renderSqlString (str : string) = sprintf "'%s'" (str.Replace("'", "''"))
 
     let renderTable (table : Table) =
         match table.schema with
@@ -126,7 +125,7 @@ module Render =
         | WBool(b) -> renderBool b
         | WEq(a, b) -> sprintf "(%s = %s)" (renderWhere a) (renderWhere b)
 
-type DatabaseHandle(connectionString : string, loggerFactory : ILoggerFactory) =
+type DatabaseHandle (connectionString : string, loggerFactory : ILoggerFactory) =
     let connection = new NpgsqlConnection(connectionString)
     let dbOptions = (new DbContextOptionsBuilder<DatabaseContext>())
                         .UseNpgsql(connectionString)
@@ -140,7 +139,7 @@ type DatabaseHandle(connectionString : string, loggerFactory : ILoggerFactory) =
 
     member this.Database = db
 
-    member this.Query (expr: AST.SelectExpr) : string[] list =
+    member internal this.Query (expr: AST.SelectExpr) : string[] list =
         use command = new NpgsqlCommand(Render.renderSelect expr, connection)
         connection.Open()
         try

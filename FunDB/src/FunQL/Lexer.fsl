@@ -1,6 +1,6 @@
 {
 
-module FunWithFlags.FunDB.FunQL.Lexer
+module internal FunWithFlags.FunDB.FunQL.Lexer
 
 open System.Text
 open Microsoft.FSharp.Text.Lexing

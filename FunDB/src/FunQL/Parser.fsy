@@ -1,5 +1,6 @@
 %{
 
+open FunWithFlags.FunDB.Escape
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.FunQL.AST
 
@@ -9,13 +10,18 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 type EntityName =
     { schema: string option;
       name: TableName;
-    }
+    } with
+        override this.ToString () =
+            match this.schema with
+                | None -> renderSqlName this.name
+                | Some(x) -> sprintf "%s.%s" (renderSqlName x) (renderSqlName this.name)
 
 // FIXME: allow non-qualified field names, like in SQL
 type FieldName =
     { entity: EntityName;
       name: ColumnName;
-    }
+    } with
+        override this.ToString () = sprintf "%s.%s" (this.entity.ToString ()) (renderSqlName this.name)
 
 type ParsedQueryExpr = QueryExpr<EntityName, FieldName>
 
@@ -102,7 +108,7 @@ Attribute:
   | AttributeMap  { AAssoc($1) }
 
 AttributeList:
-  | LEFT_BRACKET AttributeItems RIGHT_BRACKET { $2 }
+  | LEFT_BRACKET AttributeItems RIGHT_BRACKET { List.toArray $2 }
 
 AttributeItems:
   | { [] }

@@ -1,6 +1,6 @@
 namespace FunWithFlags.FunDB.FunQL.AST
 
-open FunWithFlags.FunDB.FunQL
+open FunWithFlags.FunDB.Attribute
 
 type ColumnName = string
 type TableName = string
@@ -16,6 +16,7 @@ type Result<'e, 'f> =
 
 type JoinType = Inner | Left | Right | Outer
 
+// FIXME: convert to arrays
 type QueryExpr<'e, 'f> =
     { results: (Result<'e, 'f> * AttributeMap) list;
       from: FromExpr<'e, 'f>;
@@ -29,6 +30,7 @@ and WhereExpr<'e, 'f> =
     | WFloat of double
     | WString of string
     | WBool of bool
+    // FIXME: actually not all where expressions are valid here 
     | WEq of WhereExpr<'e, 'f> * WhereExpr<'e, 'f>
 
 and FromExpr<'e, 'f> =
