@@ -30,15 +30,18 @@ module Name =
     // FIXME: allow non-qualified field names, like in SQL
     type QFieldName =
         | QFField of Field
+        | QFEntityId of Entity
         | QFSubquery of TableName * ColumnName
         with
             override this.ToString () =
                 match this with
-                    | QFField(f) -> sprintf "%s.%s" (renderEntityName f.Entity) f.Name
+                    | QFField(f) -> sprintf "%s.%s" (renderEntityName f.Entity) (renderSqlName f.Name)
+                    | QFEntityId(e) -> sprintf "%s.\"Id\"" (renderEntityName e)
                     | QFSubquery(tableName, columnName) -> sprintf "%s.%s" (renderSqlName tableName) (renderSqlName columnName)
 
     let internal resultName = function
         | RField(QFField(field)) -> field.Name
+        | RField(QFEntityId(entity)) -> "Id"
         | RField(QFSubquery(entityName, fieldName)) -> fieldName
         | RExpr(e, name) -> name
 
@@ -91,9 +94,12 @@ type Qualifier internal (db : DatabaseContext) =
         match entity with
             // FIXME: improve error reporting
             | QMEntity(entity, fields) ->
-                match Map.tryFind f.name fields with
-                    | None -> raise <| QualifierError (sprintf "Field not found: %s" f.name)
-                    | Some(field) -> QFField(field)
+                if f.name = "Id" then
+                    QFEntityId(entity)
+                else
+                    match Map.tryFind f.name fields with
+                        | None -> raise <| QualifierError (sprintf "Field not found: %s" f.name)
+                        | Some(field) -> QFField(field)
             | QMSubquery(queryName, fields) ->
                 if Set.contains f.name fields then
                     QFSubquery(queryName, f.name)
@@ -101,7 +107,7 @@ type Qualifier internal (db : DatabaseContext) =
                     raise <| QualifierError (sprintf "Field not found: %s" f.name)
 
     let rec qualifyQuery mapping query =
-        let (newMapping, qFrom) = qualifyFrom mapping query.from;
+        let (newMapping, qFrom) = qualifyFrom mapping query.from
 
         { results = Array.map (fun (res, attr) -> (qualifyResult newMapping res, attr)) query.results;
           from = qFrom;

@@ -27,6 +27,10 @@ let compileField = function
         { AST.Column.table = makeEntity field.Entity;
           AST.Column.name = field.Name;
         }
+    | QFEntityId(entity) ->
+        { AST.Column.table = makeEntity entity;
+          AST.Column.name = "Id";
+        }
     | QFSubquery(entityName, fieldName) ->
         { AST.Column.table = { schema = None; name = entityName; };
           AST.Column.name = fieldName;

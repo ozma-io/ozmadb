@@ -75,8 +75,8 @@ rule tokenstream = parse
 // Atoms
 | ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> System.String |> int) }
 // FIXME: Add floats
-| "\"" ([^ '\\' '"'] | "\\\"" | escapes) "\"" { Parser.ID(parseString '\"' lexbuf) }
-| "'" ([^ '\\' '\''] | "\\'" | escapes) "'" { Parser.STRING(parseString '\'' lexbuf) }
+| "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.ID(parseString '\"' lexbuf) }
+| "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING(parseString '\'' lexbuf) }
 | "{" { Parser.LEFT_BRACE }
 | "}" { Parser.RIGHT_BRACE }
 | "[" { Parser.LEFT_BRACKET }
@@ -110,7 +110,7 @@ rule tokenstream = parse
 | a n d { Parser.AND }
 
 // Unescaped ids
-| ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9'] { Parser.ID((System.String lexbuf.Lexeme).ToLower()) }
+| ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID((System.String lexbuf.Lexeme).ToLower()) }
 
 // Whitespace
 | whitespace { tokenstream lexbuf }

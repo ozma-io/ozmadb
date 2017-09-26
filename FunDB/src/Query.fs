@@ -82,7 +82,7 @@ module Render =
     let rec renderSelect (expr : SelectExpr) : string =
         let condExpr =
             match expr.where with
-                | Some(c) -> renderWhere c
+                | Some(c) -> sprintf "WHERE %s" <| renderWhere c
                 | None -> ""
         let orderExpr =
             if Array.isEmpty expr.orderBy
@@ -132,7 +132,9 @@ type QueryConnection (connectionString : string) =
             connection.Dispose()
 
     member this.Query (expr: AST.SelectExpr) : string array array =
-        use command = new NpgsqlCommand(Render.renderSelect expr, connection)
+        let queryStr = Render.renderSelect expr
+        printf "QUERY: %s" queryStr
+        use command = new NpgsqlCommand(queryStr, connection)
         connection.Open()
         try
             use reader = command.ExecuteReader()

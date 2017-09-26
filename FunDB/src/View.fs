@@ -44,7 +44,9 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         try
             qualifier.Qualify parsedQuery
         with
-            | QualifierError(msg) -> raise <| UserViewError msg
+            | QualifierError(msg) ->
+                printf "Qualifier error: %s" msg
+                raise <| UserViewError msg
 
     let toViewColumn (res, attrs) =
         { name = Name.resultName res;
