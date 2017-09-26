@@ -31,8 +31,8 @@ let internal renderJoin = function
     | Outer -> "OUTER"
 
 let rec internal ppAttributeMap attrMap =
-    let values = attrMap |> Seq.map (function | KeyValue(name, attr) -> wordL (renderSqlName name) ++ wordL "=" ++ ppAttribute attr) |> Seq.toList
-    wordL "{" -- aboveSemicolonListL values ^^ wordL "}"
+    let values = attrMap |> Seq.map (function | KeyValue(name, attr) -> wordL (renderSqlName name) ++ wordL "=" ++ ppAttribute attr ^^ wordL ";") |> Seq.toList
+    wordL "{" -- aboveListL values ^^ wordL "}"
 
 and internal ppAttribute = function
     | ABool(b) -> wordL <| renderBool b
