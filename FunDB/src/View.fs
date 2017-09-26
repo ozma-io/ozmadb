@@ -6,10 +6,13 @@ open Microsoft.FSharp.Text.Lexing
 
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Attribute
+open FunWithFlags.FunDB.Escape
 open FunWithFlags.FunDB.Query
 open FunWithFlags.FunDB.FunQL
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier
+
+type EntityId = int
 
 type ViewRow =
     internal { cells : string array;
@@ -17,6 +20,7 @@ type ViewRow =
              } with
         member this.Cells = this.cells
         member this.Attributes = this.attributes
+        member this.IDs = this.attributes
 
 type ViewColumn =
     internal { name : string;
@@ -37,12 +41,19 @@ type ViewResult =
         member this.Columns = this.columns
         member this.Rows = this.rows
 
+type TemplateColumn =
+    internal { field : Field;
+               defaultValue : string;
+             } with
+        member this.Field = this.field
+        member this.Default = this.defaultValue
+
 exception UserViewError of string
 
 type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qualifier : Qualifier) =
     let qualifyQuery parsedQuery =
         try
-            qualifier.Qualify parsedQuery
+            qualifier.QualifyQuery parsedQuery
         with
             | QualifierError(msg) ->
                 printf "Qualifier error: %s" msg
@@ -64,7 +75,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
     static member ParseQuery (uv : UserView) =
         let lexbuf = LexBuffer<char>.FromString uv.Query
         try
-            Parser.start Lexer.tokenstream lexbuf
+            Parser.query Lexer.tokenstream lexbuf
         with
             | Failure(msg) -> raise <| UserViewError msg
 
@@ -76,3 +87,18 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         { columns = columns;
           rows = Array.map toViewRow results;
         }
+
+    member this.GetTemplate (entity : Entity) =
+        let templateColumn (field : Field) =
+            let defaultValue =
+                if field.Default = null then
+                    null
+                else
+                    let lexbufDefault = LexBuffer<char>.FromString field.Default
+                    let defVal = Parser.value Lexer.tokenstream lexbufDefault
+                    defVal.ToString ()
+            { field = field;
+              defaultValue = defaultValue;
+            }
+
+        db.Fields.Where(fun f -> f.EntityId = entity.Id).Select(templateColumn).ToArray()

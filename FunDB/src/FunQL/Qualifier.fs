@@ -45,9 +45,19 @@ module Name =
         | RField(QFSubquery(entityName, fieldName)) -> fieldName
         | RExpr(e, name) -> name
 
+    type QDbEntityName =
+        internal
+        | QDEEntity of Entity
+        with
+            override this.ToString () =
+                match this with
+                    | QDEEntity(e) -> renderEntityName e
+
 open Name
 
 type QualifiedQueryExpr = QueryExpr<QEntityName, QFieldName>
+
+type QualifiedFieldType = FieldType<QDbEntityName>
 
 type private QMappedEntity =
     | QMEntity of Entity * Map<ColumnName, Field>
@@ -72,11 +82,11 @@ type Qualifier internal (db : DatabaseContext) =
         if res = null then
             raise <| QualifierError (sprintf "Entity not found: %s" e.name)
         else
-            QMEntity(res, res.Fields |> Seq.map (fun f -> (f.Name, f)) |> Map.ofSeq)
+            (res, res.Fields |> Seq.map (fun f -> (f.Name, f)) |> Map.ofSeq)
 
     let lookupDbEntity mapping ename =
         match Map.tryFind ename mapping with
-            | Some(QMEntity(_, _) as entity) -> entity
+            | Some(QMEntity(entity, fields)) -> (entity, fields)
             | _ -> getDbEntity ename
 
     let lookupField (mapping : QMapping) f =
@@ -106,37 +116,35 @@ type Qualifier internal (db : DatabaseContext) =
                 else
                     raise <| QualifierError (sprintf "Field not found: %s" f.name)
 
+
     let rec qualifyQuery mapping query =
         let (newMapping, qFrom) = qualifyFrom mapping query.from
 
         { results = Array.map (fun (res, attr) -> (qualifyResult newMapping res, attr)) query.results;
           from = qFrom;
-          where = Option.map (qualifyWhere newMapping) query.where;
+          where = Option.map (qualifyValueExpr newMapping) query.where;
           orderBy = Array.map (fun (field, ord) -> (lookupField newMapping field, ord)) query.orderBy;
         }
 
     and qualifyFrom mapping = function
         | FEntity(e) ->
-            let newE = lookupDbEntity mapping e
-            (Map.add e newE mapping, FEntity(mappedToName newE))
+            let (entity, fields) = lookupDbEntity mapping e
+            (Map.add e (QMEntity(entity, fields)) mapping, FEntity(QEEntity(entity)))
         | FJoin(jt, e1, e2, where) ->
             let (newMapping1, newE1) = qualifyFrom mapping e1
             let (newMapping2, newE2) = qualifyFrom newMapping1 e2
-            let newWhere = qualifyWhere newMapping2 where
-            (newMapping2, FJoin(jt, newE1, newE2, newWhere))
+            let newValueExpr = qualifyValueExpr newMapping2 where
+            (newMapping2, FJoin(jt, newE1, newE2, newValueExpr))
         | FSubExpr(q, name) ->
             let newQ = qualifyQuery mapping q
             let fields = newQ.results |> Seq.map (fun (res, attr) -> resultName res) |> Set.ofSeq
             (Map.add { schema = None; name = name; } (QMSubquery(name, fields)) mapping, FSubExpr(newQ, name))
                 
-    and qualifyWhere mapping = function
+    and qualifyValueExpr mapping = function
         | WField(f) -> WField(lookupField mapping f)
-        | WInt(i) -> WInt(i)
-        | WFloat(f) -> WFloat(f)
-        | WString(s) -> WString(s)
-        | WBool(b) -> WBool(b)
-        | WEq(a, b) -> WEq(qualifyWhere mapping a, qualifyWhere mapping b)
-        | WAnd(a, b) -> WAnd(qualifyWhere mapping a, qualifyWhere mapping b)
+        | WValue(v) -> WValue(v)
+        | WEq(a, b) -> WEq(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
+        | WAnd(a, b) -> WAnd(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
 
     and qualifyResult mapping = function
         | RField(f) -> RField(lookupField mapping f)
@@ -145,5 +153,15 @@ type Qualifier internal (db : DatabaseContext) =
     and qualifyResultExpr mapping = function
         | REField(f) -> REField(lookupField mapping f)
 
-    member this.Qualify (query: ParsedQueryExpr) : QualifiedQueryExpr =
+    and qualifyFieldType mapping = function
+        | FTInt -> FTInt
+        | FTString -> FTString
+        | FTReference(e) ->
+            let (entity, _) = lookupDbEntity mapping e
+            FTReference(QDEEntity(entity))
+
+    member this.QualifyQuery (query: ParsedQueryExpr) : QualifiedQueryExpr =
         qualifyQuery Map.empty query
+
+    member this.QualifyType (ftype: ParsedFieldType) : QualifiedFieldType =
+        qualifyFieldType Map.empty ftype

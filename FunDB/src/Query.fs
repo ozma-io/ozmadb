@@ -29,6 +29,8 @@ module AST =
         | WInt of int
         | WString of string
         | WBool of bool
+        | WFloat of float
+        | WNull
         | WEq of WhereExpr * WhereExpr
         | WAnd of WhereExpr * WhereExpr
 
@@ -119,10 +121,13 @@ module Render =
     and renderWhere = function
         | WColumn(col) -> renderColumn col
         | WInt(i) -> i.ToString()
+        // FIXME
+        | WFloat(f) -> invalidOp "Not supported"
         | WString(str) -> renderSqlString str
         | WBool(b) -> renderBool b
         | WEq(a, b) -> sprintf "(%s) = (%s)" (renderWhere a) (renderWhere b)
         | WAnd(a, b) -> sprintf "(%s) AND (%s)" (renderWhere a) (renderWhere b)
+        | WNull -> "NULL"
 
 type QueryConnection (connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)

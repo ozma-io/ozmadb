@@ -22,6 +22,13 @@ let compileEntity = function
           AST.name = name;
         }
 
+let compileValue = function
+    | VInt(i) -> AST.WInt(i)
+    | VFloat(f) -> AST.WFloat(f)
+    | VString(s) -> AST.WString(s)
+    | VBool(b) -> AST.WBool(b)
+    | VNull -> AST.WNull
+
 let compileField = function
     | QFField(field) ->
         { AST.Column.table = makeEntity field.Entity;
@@ -62,12 +69,8 @@ and compileFrom = function
     | FSubExpr(q, name) -> AST.FSubExpr(compileQuery q, name)
 
 and compileWhere = function
+    | WValue(v) -> compileValue v
     | WField(f) -> AST.WColumn(compileField f)
-    | WInt(i) -> AST.WInt(i)
-    // FIXME
-    | WFloat(f) -> invalidOp "Not supported"
-    | WString(s) -> AST.WString(s)
-    | WBool(b) -> AST.WBool(b)
     | WEq(a, b) -> AST.WEq(compileWhere a, compileWhere b)
     | WAnd(a, b) -> AST.WAnd(compileWhere a, compileWhere b)
 

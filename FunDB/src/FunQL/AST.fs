@@ -8,7 +8,14 @@ open FunWithFlags.FunDB.Escape
 type ColumnName = string
 type TableName = string
 
-type SortOrder = Asc | Desc
+type SortOrder =
+    | Asc
+    | Desc
+    with
+        override this.ToString () =
+            match this with
+                | Asc -> "ASC"
+                | Desc -> "DESC"
 
 type ResultExpr<'e, 'f> =
     | REField of 'f
@@ -17,13 +24,23 @@ type Result<'e, 'f> =
     | RField of 'f
     | RExpr of ResultExpr<'e, 'f> * ColumnName
 
-type JoinType = Inner | Left | Right | Outer
+type JoinType =
+    | Inner
+    | Left
+    | Right
+    | Outer
+    with
+        override this.ToString () =
+            match this with
+                | Left -> "LEFT"
+                | Right -> "RIGHT"
+                | Inner -> "INNER"
+                | Outer -> "OUTER"
 
-// FIXME: convert to arrays
 type QueryExpr<'e, 'f> =
     { results: (Result<'e, 'f> * AttributeMap) array;
       from: FromExpr<'e, 'f>;
-      where: WhereExpr<'e, 'f> option;
+      where: ValueExpr<'e, 'f> option;
       orderBy: ('f * SortOrder) array;
     } with
         static member Create
@@ -48,18 +65,30 @@ type QueryExpr<'e, 'f> =
 
           member this.MergeOrderBy additionalOrderBy = { this with orderBy = Array.append this.orderBy additionalOrderBy; }
 
-and WhereExpr<'e, 'f> =
+and Value =
+    | VInt of int
+    | VFloat of double
+    | VString of string
+    | VBool of bool
+    | VNull
+    with
+        override this.ToString () =
+            match this with
+                | VInt(i) -> i.ToString ()
+                | VFloat(f) -> invalidOp "Not supported"
+                | VString(s) -> renderSqlString s
+                | VBool(b) -> renderBool b
+                | VNull -> "NULL"
+
+and ValueExpr<'e, 'f> =
+    | WValue of Value
     | WField of 'f
-    | WInt of int
-    | WFloat of double
-    | WString of string
-    | WBool of bool
-    | WEq of WhereExpr<'e, 'f> * WhereExpr<'e, 'f>
-    | WAnd of WhereExpr<'e, 'f> * WhereExpr<'e, 'f>
+    | WEq of ValueExpr<'e, 'f> * ValueExpr<'e, 'f>
+    | WAnd of ValueExpr<'e, 'f> * ValueExpr<'e, 'f>
 
 and FromExpr<'e, 'f> =
     | FEntity of 'e
-    | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * WhereExpr<'e, 'f>
+    | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * ValueExpr<'e, 'f>
     | FSubExpr of QueryExpr<'e, 'f> * TableName
 
 
@@ -93,3 +122,10 @@ type FieldName =
             }
 
 type ParsedQueryExpr = QueryExpr<EntityName, FieldName>
+
+type FieldType<'e> =
+    | FTInt
+    | FTString
+    | FTReference of 'e
+
+type ParsedFieldType = FieldType<EntityName>
