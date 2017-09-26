@@ -2,7 +2,7 @@ module internal FunWithFlags.FunDB.FunQL.Compiler
 
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Qualifier
+open FunWithFlags.FunDB.FunQL.Qualifier.Name
 open FunWithFlags.FunDB.Query
 
 let makeEntity (fentity : Entity) : AST.Table =
@@ -16,8 +16,8 @@ let makeEntity (fentity : Entity) : AST.Table =
     }
 
 let compileEntity = function
-    | QEEntity(entity, fields) -> makeEntity entity
-    | QESubquery(name, fields) ->
+    | QEEntity(entity) -> makeEntity entity
+    | QESubquery(name) ->
         { AST.schema = None;
           AST.name = name;
         }
@@ -43,10 +43,10 @@ let compileJoin = function
     | Outer -> AST.Full
 
 let rec compileQuery query =
-    { AST.columns = List.map (fun (res, attr) -> compileResult res) query.results;
+    { AST.columns = Array.map (fun (res, attr) -> compileResult res) query.results;
       AST.from = compileFrom query.from;
       AST.where = Option.map compileWhere query.where;
-      AST.orderBy = List.map (fun (field, ord) -> (compileField field, compileOrder ord)) query.orderBy;
+      AST.orderBy = Array.map (fun (field, ord) -> (compileField field, compileOrder ord)) query.orderBy;
       // FIXME: support them!
       AST.limit = None;
       AST.offset = None;
@@ -65,6 +65,7 @@ and compileWhere = function
     | WString(s) -> AST.WString(s)
     | WBool(b) -> AST.WBool(b)
     | WEq(a, b) -> AST.WEq(compileWhere a, compileWhere b)
+    | WAnd(a, b) -> AST.WAnd(compileWhere a, compileWhere b)
 
 and compileResult = function
     | RField(f) -> AST.SCColumn(compileField f)

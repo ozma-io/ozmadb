@@ -31,7 +31,7 @@ let internal renderJoin = function
     | Outer -> "OUTER"
 
 let rec internal ppAttributeMap attrMap =
-    let values = Map.toList attrMap |> List.map (fun (name, attr) -> wordL (renderSqlName name) ++ wordL "=" ++ ppAttribute attr)
+    let values = attrMap |> Seq.map (function | KeyValue(name, attr) -> wordL (renderSqlName name) ++ wordL "=" ++ ppAttribute attr) |> Seq.toList
     wordL "{" -- aboveSemicolonListL values ^^ wordL "}"
 
 and internal ppAttribute = function
@@ -40,25 +40,30 @@ and internal ppAttribute = function
     | AInt(i) -> wordL <| i.ToString ()
     | AString(s) -> wordL <| renderSqlString s
     | AList(l) ->
-        Array.toList l |> List.map ppAttribute |> commaListL |> squareBracketL
+        Array.toSeq l |> Seq.map ppAttribute |> Seq.toList |> commaListL |> squareBracketL
     | AAssoc(a) -> ppAttributeMap a
 
 let rec internal ppQuery query =
-   let maybeWhere =
-       match query.where with
-           | None -> emptyL
-           | Some(whereE) -> wordL "WHERE" @@- ppWhere whereE
-   let maybeOrderBy =
-       if List.isEmpty query.orderBy
-       then emptyL
-       else wordL "ORDER BY" @@- aboveCommaListL (List.map (fun (field, ord) -> wordL (field.ToString ()) ++ wordL (renderOrder ord)) query.orderBy);
+    let resultsList = query.results |> Array.toSeq |> Seq.map (fun (res, attr) -> ppResult res -- ppAttributeMap attr) |> Seq.toList
+    let maybeWhere =
+        match query.where with
+            | None -> emptyL
+            | Some(whereE) -> wordL "WHERE" @@- ppWhere whereE
 
-   wordL "SELECT"
-       @@- aboveCommaListL (List.map (fun (res, attr) -> ppResult res -- ppAttributeMap attr) query.results)
-       @@ wordL "FROM"
-       @@- ppFrom query.from
-       @@ maybeWhere
-       @@ maybeOrderBy
+    let maybeOrderBy =
+        if Array.isEmpty query.orderBy
+        then
+            emptyL
+        else
+            let orderByList = query.orderBy |> Array.toSeq |> Seq.map (fun (field, ord) -> wordL (field.ToString ()) ++ wordL (renderOrder ord)) |> Seq.toList
+            wordL "ORDER BY" @@- aboveCommaListL orderByList
+    
+    wordL "SELECT"
+        @@- aboveCommaListL resultsList
+        @@ wordL "FROM"
+        @@- ppFrom query.from
+        @@ maybeWhere
+        @@ maybeOrderBy
 
 and internal ppFrom = function
     | FEntity(e) -> wordL <| e.ToString ()
@@ -72,7 +77,8 @@ and internal ppWhere = function
     | WFloat(f) -> invalidOp "Not supported"
     | WString(s) -> wordL <| renderSqlString s
     | WBool(b) -> wordL <| renderBool b
-    | WEq(a, b) -> ppWhere a ++ wordL " = " ++ ppWhere b
+    | WEq(a, b) -> bracketL (ppWhere a) ++ wordL "=" ++ bracketL (ppWhere b)
+    | WAnd(a, b) -> bracketL (ppWhere a) ++ wordL "AND" ++ bracketL (ppWhere b)
 
 and internal ppResult = function
     | RField(f) -> wordL <| f.ToString ()

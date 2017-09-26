@@ -29,6 +29,8 @@
     <Compile Include="src/FunQL/PrettyPrinter.fs" />
 
     <Compile Include="src/View.fs" />
+
+    <Compile Include="src/Context.fs" />
   </ItemGroup>
 
   <ItemGroup>

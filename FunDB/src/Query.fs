@@ -1,16 +1,12 @@
-namespace FunWithFlags.FunDB.Query
+module internal FunWithFlags.FunDB.Query
 
 open System
-open System.Runtime.InteropServices
-open System.Linq.Expressions
 open Npgsql
-open Microsoft.EntityFrameworkCore
-open Microsoft.Extensions.Logging
 
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Escape
 
-module internal AST =
+module AST =
     type ColumnName = string
     type TableName = string
 
@@ -34,6 +30,7 @@ module internal AST =
         | WString of string
         | WBool of bool
         | WEq of WhereExpr * WhereExpr
+        | WAnd of WhereExpr * WhereExpr
 
     and FromExpr =
         | FTable of Table
@@ -49,15 +46,16 @@ module internal AST =
 
     // FIXME: convert to arrays
     and SelectExpr =
-        { columns: SelectedColumn list;
+        { columns: SelectedColumn array;
           from: FromExpr;
           where: WhereExpr option;
-          orderBy: (Column * SortOrder) list;
+          orderBy: (Column * SortOrder) array;
           limit: int option;
           offset: int option;
           }
 
-module internal Render =
+
+module Render =
     open AST
 
     let renderTable (table : Table) =
@@ -87,9 +85,9 @@ module internal Render =
                 | Some(c) -> renderWhere c
                 | None -> ""
         let orderExpr =
-            if List.isEmpty expr.orderBy
+            if Array.isEmpty expr.orderBy
             then ""
-            else sprintf "ORDER BY %s" (List.map (fun (fexpr, sord) -> sprintf "%s %s" (renderColumn fexpr) (renderSortOrder sord)) expr.orderBy |> String.concat ", ")
+            else sprintf "ORDER BY %s" (Array.map (fun (fexpr, sord) -> sprintf "%s %s" (renderColumn fexpr) (renderSortOrder sord)) expr.orderBy |> String.concat ", ")
         let limitExpr =
             match expr.limit with
                 | Some(n) -> sprintf "LIMIT %i" n
@@ -99,7 +97,7 @@ module internal Render =
                 | Some(n) -> sprintf "OFFSET %i" n
                 | None -> ""
         sprintf "SELECT %s FROM %s %s %s %s %s"
-            (List.map renderSelectedColumn expr.columns |> String.concat ", ")
+            (Array.map renderSelectedColumn expr.columns |> String.concat ", ")
             (renderFrom expr.from)
             condExpr
             orderExpr
@@ -123,29 +121,23 @@ module internal Render =
         | WInt(i) -> i.ToString()
         | WString(str) -> renderSqlString str
         | WBool(b) -> renderBool b
-        | WEq(a, b) -> sprintf "(%s = %s)" (renderWhere a) (renderWhere b)
+        | WEq(a, b) -> sprintf "(%s) = (%s)" (renderWhere a) (renderWhere b)
+        | WAnd(a, b) -> sprintf "(%s) AND (%s)" (renderWhere a) (renderWhere b)
 
-type DatabaseHandle (connectionString : string, loggerFactory : ILoggerFactory) =
+type QueryConnection (connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
-    let dbOptions = (new DbContextOptionsBuilder<DatabaseContext>())
-                        .UseNpgsql(connectionString)
-                        .UseLoggerFactory(loggerFactory)
-    let db = new DatabaseContext(dbOptions.Options)
 
     interface IDisposable with
-        member this.Dispose() =
+        member this.Dispose () =
             connection.Dispose()
-            db.Dispose()
 
-    member this.Database = db
-
-    member internal this.Query (expr: AST.SelectExpr) : string[] list =
+    member this.Query (expr: AST.SelectExpr) : string array array =
         use command = new NpgsqlCommand(Render.renderSelect expr, connection)
         connection.Open()
         try
             use reader = command.ExecuteReader()
             seq { while reader.Read() do
                       yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i].ToString()) |> Seq.toArray
-                } |> Seq.toList
+                } |> Seq.toArray
         finally
             connection.Close()

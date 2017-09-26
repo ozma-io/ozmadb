@@ -1,5 +1,6 @@
 namespace FunWithFlags.FunDB.View
 
+open System.Runtime.InteropServices
 open System.Linq
 open Microsoft.FSharp.Text.Lexing
 
@@ -7,62 +8,69 @@ open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.Query
 open FunWithFlags.FunDB.FunQL
+open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Qualifier
 
 type ViewRow =
-    { Cells : string array;
-      Attributes : AttributeMap;
-    }
+    internal { cells : string array;
+               attributes : AttributeMap;
+             } with
+        member this.Cells = this.cells
+        member this.Attributes = this.attributes
 
 type ViewColumn =
-    { Name : string;
-      Attributes : AttributeMap;
-    }
+    internal { name : string;
+               field : Field option;
+               attributes : AttributeMap;
+             } with
+        member this.Name = this.name
+        member this.Field =
+            match this.field with
+                | Some(f) -> f
+                | None -> null
+        member this.Attributes = this.attributes
 
 type ViewResult =
-    { View : UserView;
-      Columns : ViewColumn array;
-      Rows : ViewRow list;
-    }
+    internal { columns : ViewColumn array;
+               rows : ViewRow array;
+             } with
+        member this.Columns = this.columns
+        member this.Rows = this.rows
 
 exception UserViewError of string
 
-type ViewResolver () =
-    let parseQuery dbQuery queryString =
-        let qualifier = new Qualifier.Qualifier(dbQuery)
-        let lexbuf = LexBuffer<char>.FromString queryString
-        let parsedQuery =
-            try
-                Parser.start Lexer.tokenstream lexbuf
-            with
-                | Failure(msg) -> raise (UserViewError msg)
+type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qualifier : Qualifier) =
+    let qualifyQuery parsedQuery =
         try
             qualifier.Qualify parsedQuery
         with
-            | Qualifier.QualifierError(msg) -> raise (UserViewError msg)
+            | QualifierError(msg) -> raise <| UserViewError msg
 
     let toViewColumn (res, attrs) =
-        { Name = Qualifier.resultName res;
-          Attributes = attrs;
+        { name = Name.resultName res;
+          field = match res with
+                      | RField(Name.QFField(f)) -> Some(f)
+                      | _ -> None
+          attributes = attrs;
         }
 
     let toViewRow row =
-        { Cells = row;
-          Attributes = Map.empty;
+        { cells = row;
+          attributes = new AttributeMap()
         }
 
-    member this.QueryById (dbQuery : DatabaseHandle) (uvId: int) : ViewResult =
-        let uv = dbQuery.Database.UserViews.FirstOrDefault(fun u -> u.Id = uvId)
-        if uv = null then
-            raise (UserViewError (sprintf "User view not found: %i" uvId))
-        else
-            this.Query dbQuery uv
+    static member ParseQuery (uv : UserView) =
+        let lexbuf = LexBuffer<char>.FromString uv.Query
+        try
+            Parser.start Lexer.tokenstream lexbuf
+        with
+            | Failure(msg) -> raise <| UserViewError msg
 
-    member this.Query (dbQuery : DatabaseHandle) (uv: UserView) : ViewResult =
-        let queryTree = parseQuery dbQuery uv.Query
-        let columns = queryTree.results |> List.map toViewColumn |> Seq.toArray
-        let results = dbQuery.Query (Compiler.compileQuery queryTree)
+    member this.RunQuery (parsedQuery : ParsedQueryExpr) =
+        let queryTree = qualifyQuery parsedQuery
+        let columns = queryTree.results |> Array.map toViewColumn
+        let results = Compiler.compileQuery queryTree |> dbQuery.Query
 
-        { View = uv;
-          Columns = columns;
-          Rows = List.map toViewRow results;
+        { columns = columns;
+          rows = Array.map toViewRow results;
         }

@@ -107,6 +107,7 @@ rule tokenstream = parse
 | a s { Parser.AS }
 | a s c { Parser.ASC }
 | d e s c { Parser.DESC }
+| a n d { Parser.AND }
 
 // Unescaped ids
 | ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9'] { Parser.ID((System.String lexbuf.Lexeme).ToLower()) }
