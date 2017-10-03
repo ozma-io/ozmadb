@@ -1,9 +1,10 @@
 module internal FunWithFlags.FunDB.FunQL.Compiler
 
 open FunWithFlags.FunCore
+open FunWithFlags.FunDB.SQL.Value
+open FunWithFlags.FunDB.SQL
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier.Name
-open FunWithFlags.FunDB.Query
 
 let makeEntity (fentity : Entity) : AST.Table =
     let schema =

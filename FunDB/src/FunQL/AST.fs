@@ -3,7 +3,8 @@ namespace FunWithFlags.FunDB.FunQL.AST
 open System.Runtime.InteropServices
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Attribute
-open FunWithFlags.FunDB.Escape
+open FunWithFlags.FunDB.SQL.Value
+open FunWithFlags.FunDB.SQL.Utils
 
 type ColumnName = string
 type TableName = string
@@ -38,19 +39,22 @@ type JoinType =
                 | Outer -> "OUTER"
 
 type QueryExpr<'e, 'f> =
-    { results: (Result<'e, 'f> * AttributeMap) array;
+    { attributes: AttributeMap;
+      results: (Result<'e, 'f> * AttributeMap) array;
       from: FromExpr<'e, 'f>;
       where: ValueExpr<'e, 'f> option;
       orderBy: ('f * SortOrder) array;
     } with
         static member Create
             (
+                attributes,
                 results,
                 from,
                 [<Optional; DefaultParameterValue(null)>] ?where,
                 [<Optional; DefaultParameterValue(null)>] ?orderBy
             ) =
-                { results = results;
+                { attributes = attributes;
+                  results = results;
                   from = from;
                   where = where;
                   orderBy = defaultArg orderBy Array.empty;
@@ -64,21 +68,6 @@ type QueryExpr<'e, 'f> =
                   | Some(w1) -> { this with where = Some(WAnd(w1, additionalWhere)); }
 
           member this.MergeOrderBy additionalOrderBy = { this with orderBy = Array.append this.orderBy additionalOrderBy; }
-
-and Value =
-    | VInt of int
-    | VFloat of double
-    | VString of string
-    | VBool of bool
-    | VNull
-    with
-        override this.ToString () =
-            match this with
-                | VInt(i) -> i.ToString ()
-                | VFloat(f) -> invalidOp "Not supported"
-                | VString(s) -> renderSqlString s
-                | VBool(b) -> renderBool b
-                | VNull -> "NULL"
 
 and ValueExpr<'e, 'f> =
     | WValue of Value

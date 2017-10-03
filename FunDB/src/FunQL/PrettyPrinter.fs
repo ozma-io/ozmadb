@@ -5,7 +5,7 @@ open YC.PrettyPrinter.Doc
 open YC.PrettyPrinter.StructuredFormat
 
 open FunWithFlags.FunDB.Attribute
-open FunWithFlags.FunDB.Escape
+open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 let rec internal aboveTagListL tagger = function
@@ -30,8 +30,13 @@ and internal ppAttribute = function
         Array.toSeq l |> Seq.map ppAttribute |> Seq.toList |> commaListL |> squareBracketL
     | AAssoc(a) -> ppAttributeMap a
 
+let internal ppMaybeAttributeMap (attrMap : AttributeMap) =
+    if attrMap.Count = 0
+    then emptyL
+    else ppAttributeMap attrMap
+
 let rec internal ppQuery query =
-    let resultsList = query.results |> Array.toSeq |> Seq.map (fun (res, attr) -> ppResult res -- ppAttributeMap attr) |> Seq.toList
+    let resultsList = query.results |> Array.toSeq |> Seq.map (fun (res, attr) -> ppResult res -- ppMaybeAttributeMap attr) |> Seq.toList
     let maybeWhere =
         match query.where with
             | None -> emptyL
@@ -45,7 +50,8 @@ let rec internal ppQuery query =
             let orderByList = query.orderBy |> Array.toSeq |> Seq.map (fun (field, ord) -> wordL (field.ToString ()) ++ wordL (ord.ToString ())) |> Seq.toList
             wordL "ORDER BY" @@- aboveCommaListL orderByList
     
-    wordL "SELECT"
+    ppMaybeAttributeMap query.attributes
+        @@ wordL "SELECT"
         @@- aboveCommaListL resultsList
         @@ wordL "FROM"
         @@- ppFrom query.from

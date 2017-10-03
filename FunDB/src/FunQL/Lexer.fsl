@@ -5,6 +5,7 @@ module internal FunWithFlags.FunDB.FunQL.Lexer
 open System.Text
 open Microsoft.FSharp.Text.Lexing
 
+open FunWithFlags.FunDB.SQL
 open FunWithFlags.FunDB.FunQL
 
 let newline (lexbuf: LexBuffer<_>) =
@@ -89,9 +90,9 @@ rule tokenstream = parse
 | "=" { Parser.EQ }
 
 // Keywords
+| t r u e { Parser.BOOL(true) }
+| f a l s e { Parser.BOOL(false) }
 | n u l l { Parser.NULL }
-| t r u e { Parser.TRUE }
-| f a l s e { Parser.FALSE }
 | s e l e c t { Parser.SELECT }
 | f r o m { Parser.FROM }
 | w h e r e { Parser.WHERE }

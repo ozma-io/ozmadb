@@ -5,7 +5,7 @@ open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 
 open FunWithFlags.FunCore
-open FunWithFlags.FunDB.Query
+open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.FunQL.Qualifier
 open FunWithFlags.FunDB.View
 

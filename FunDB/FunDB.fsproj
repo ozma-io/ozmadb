@@ -11,9 +11,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="src/Escape.fs" />
     <Compile Include="src/Attribute.fs" />
-    <Compile Include="src/Query.fs" />
+
+    <Compile Include="src/SQL/Utils.fs" />
+    <Compile Include="src/SQL/Value.fs" />
+    <Compile Include="src/SQL/AST.fs" />
+    <Compile Include="src/SQL/Parse.fs" />
+    <Compile Include="src/SQL/Render.fs" />
+    <Compile Include="src/SQL/Query.fs" />
 
     <Compile Include="src/FunQL/AST.fs" />
     <FsYacc Include="src/FunQL/Parser.fsy">

@@ -2,13 +2,15 @@ namespace FunWithFlags.FunDB.View
 
 open System.Runtime.InteropServices
 open System.Linq
+open System.Collections.Generic
 open Microsoft.FSharp.Text.Lexing
 
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Attribute
-open FunWithFlags.FunDB.Escape
-open FunWithFlags.FunDB.Query
 open FunWithFlags.FunDB.FunQL
+open FunWithFlags.FunDB.SQL.Parse
+open FunWithFlags.FunDB.SQL.Value
+open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier
 
@@ -35,7 +37,8 @@ type ViewColumn =
         member this.Attributes = this.attributes
 
 type ViewResult =
-    internal { columns : ViewColumn array;
+    internal { attributes : AttributeMap;
+               columns : ViewColumn array;
                rows : ViewRow array;
              } with
         member this.Columns = this.columns
@@ -84,7 +87,8 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         let columns = queryTree.results |> Array.map toViewColumn
         let results = Compiler.compileQuery queryTree |> dbQuery.Query
 
-        { columns = columns;
+        { attributes = queryTree.attributes;
+          columns = columns;
           rows = Array.map toViewRow results;
         }
 
@@ -102,3 +106,26 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             }
 
         db.Fields.Where(fun f -> f.EntityId = entity.Id).Select(templateColumn).ToArray()
+
+    member this.InsertEntry (entity : Entity, row : IDictionary<string, string>) =
+        db.Entry(entity).Collection("Fields").Load()
+
+        let toValueType name =
+            let lexbuf = LexBuffer<char>.FromString name
+            let ftype = Parser.fieldType Lexer.tokenstream lexbuf
+            match ftype with
+                | FTInt -> VTInt
+                | FTString -> VTString
+                | FTReference(_) -> VTInt
+            
+        let types = entity.Fields |> Seq.map (fun f -> (f.Name, toValueType f.Type)) |> Map.ofSeq
+
+        let toValue = function
+            | KeyValue(k, v) -> (k, parseValue types.[k] v |> Option.get)
+
+        let (columns, values) = row |> Seq.map toValue |> List.ofSeq |> List.unzip
+
+        dbQuery.Insert { name = Compiler.makeEntity entity;
+                         columns = Array.ofList columns;
+                         values = [| Array.ofList values |];
+                       }

@@ -1,64 +1,6 @@
-module internal FunWithFlags.FunDB.Query
-
-open System
-open Npgsql
-
-open FunWithFlags.FunCore
-open FunWithFlags.FunDB.Escape
 
 module AST =
-    type ColumnName = string
-    type TableName = string
-
-    type Table =
-        { schema: string option;
-          name: TableName;
-        }
-
-    type Column =
-        { table: Table;
-          name: ColumnName;
-        }
-
-    type SortOrder = Asc | Desc
-
-    type JoinType = Inner | Left | Right | Full
-
-    type WhereExpr =
-        | WColumn of Column
-        | WInt of int
-        | WString of string
-        | WBool of bool
-        | WFloat of float
-        | WNull
-        | WEq of WhereExpr * WhereExpr
-        | WAnd of WhereExpr * WhereExpr
-
-    and FromExpr =
-        | FTable of Table
-        | FJoin of JoinType * FromExpr * FromExpr * WhereExpr
-        | FSubExpr of SelectExpr * TableName
-
-    and SelectedColumn =
-        | SCColumn of Column
-        | SCExpr of ColumnExpr * TableName
-    
-    and ColumnExpr =
-        | CColumn of Column
-
-    // FIXME: convert to arrays
-    and SelectExpr =
-        { columns: SelectedColumn array;
-          from: FromExpr;
-          where: WhereExpr option;
-          orderBy: (Column * SortOrder) array;
-          limit: int option;
-          offset: int option;
-          }
-
-
-module Render =
-    open AST
+    open FunWithFlags.FunDB.SQL.AST
 
     let renderTable (table : Table) =
         match table.schema with
@@ -129,22 +71,11 @@ module Render =
         | WAnd(a, b) -> sprintf "(%s) AND (%s)" (renderWhere a) (renderWhere b)
         | WNull -> "NULL"
 
-type QueryConnection (connectionString : string) =
-    let connection = new NpgsqlConnection(connectionString)
+    let renderInsertValue values = 
+        values |> Array.map (fun v -> v.ToString ()) |> String.concat ", " |> sprintf "(%s)"
 
-    interface IDisposable with
-        member this.Dispose () =
-            connection.Dispose()
-
-    member this.Query (expr: AST.SelectExpr) : string array array =
-        let queryStr = Render.renderSelect expr
-        printf "QUERY: %s" queryStr
-        use command = new NpgsqlCommand(queryStr, connection)
-        connection.Open()
-        try
-            use reader = command.ExecuteReader()
-            seq { while reader.Read() do
-                      yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i].ToString()) |> Seq.toArray
-                } |> Seq.toArray
-        finally
-            connection.Close()
+    let renderInsert (expr : InsertExpr) = 
+        sprintf "INSERT INTO %s (%s) VALUES %s"
+            (renderTable expr.name)
+            (expr.columns |> Array.map renderSqlName |> String.concat ", ")
+            (expr.values |> Array.map renderInsertValue |> String.concat ", ")

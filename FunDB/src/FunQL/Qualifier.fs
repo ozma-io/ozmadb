@@ -4,7 +4,7 @@ open System.Linq
 open Microsoft.EntityFrameworkCore
 
 open FunWithFlags.FunCore
-open FunWithFlags.FunDB.Escape
+open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
 
@@ -120,7 +120,8 @@ type Qualifier internal (db : DatabaseContext) =
     let rec qualifyQuery mapping query =
         let (newMapping, qFrom) = qualifyFrom mapping query.from
 
-        { results = Array.map (fun (res, attr) -> (qualifyResult newMapping res, attr)) query.results;
+        { attributes = query.attributes;
+          results = Array.map (fun (res, attr) -> (qualifyResult newMapping res, attr)) query.results;
           from = qFrom;
           where = Option.map (qualifyValueExpr newMapping) query.where;
           orderBy = Array.map (fun (field, ord) -> (lookupField newMapping field, ord)) query.orderBy;
