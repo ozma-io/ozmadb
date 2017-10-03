@@ -41,6 +41,7 @@ type ViewResult =
                columns : ViewColumn array;
                rows : ViewRow array;
              } with
+        member this.Attributes = this.attributes
         member this.Columns = this.columns
         member this.Rows = this.rows
 
