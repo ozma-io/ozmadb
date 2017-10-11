@@ -112,6 +112,7 @@ rule tokenstream = parse
 // Types
 | i n t { Parser.INT_TYPE }
 | s t r i n g { Parser.STRING_TYPE }
+| b o o l { Parser.BOOL_TYPE }
 | r e f e r e n c e { Parser.REFERENCE_TYPE }
 
 // Unescaped ids

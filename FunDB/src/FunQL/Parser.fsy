@@ -48,6 +48,7 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 // Types
 %token INT_TYPE
 %token STRING_TYPE
+%token BOOL_TYPE
 %token REFERENCE_TYPE
 
 // Misc
@@ -181,6 +182,7 @@ fieldType: FieldType EOF { $1 }
 FieldType:
   | INT_TYPE                  { FTInt }
   | STRING_TYPE               { FTString }
+  | BOOL_TYPE                 { FTBool }
   | REFERENCE_TYPE EntityName { FTReference($2) }
 
 value: Value EOF { $1 }

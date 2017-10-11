@@ -75,6 +75,31 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
           attributes = new AttributeMap()
         }
 
+    let realizeFields (entity : Entity) (row : IDictionary<string, string>) =
+        db.Entry(entity).Reference("Schema").Load()
+        db.Entry(entity).Collection("Fields").Load()
+
+        let toValueType name =
+            let lexbuf = LexBuffer<char>.FromString name
+            let ftype = Parser.fieldType Lexer.tokenstream lexbuf
+            Compiler.compileValueType ftype
+            
+        let types = entity.Fields |> Seq.map (fun f -> (f.Name, (f, toValueType f.Type))) |> Map.ofSeq
+
+        let toValue = function
+            | KeyValue(k, v) ->
+                let (field, ftype) = types.[k]
+                let value =
+                    if field.Nullable && v = null
+                    then VNull
+                    else
+                        match parseValue ftype v with
+                            | Some(r) -> r
+                            | None -> raise <| UserViewError(sprintf "Invalid value of field %s" k)
+                (k, WValue(value))
+
+        row |> Seq.map toValue
+
     static member ParseQuery (uv : UserView) =
         let lexbuf = LexBuffer<char>.FromString uv.Query
         try
@@ -108,24 +133,21 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         db.Fields.Where(fun f -> f.EntityId = entity.Id).Select(templateColumn).ToArray()
 
     member this.InsertEntry (entity : Entity, row : IDictionary<string, string>) =
-        db.Entry(entity).Collection("Fields").Load()
-
-        let toValueType name =
-            let lexbuf = LexBuffer<char>.FromString name
-            let ftype = Parser.fieldType Lexer.tokenstream lexbuf
-            match ftype with
-                | FTInt -> VTInt
-                | FTString -> VTString
-                | FTReference(_) -> VTInt
-            
-        let types = entity.Fields |> Seq.map (fun f -> (f.Name, toValueType f.Type)) |> Map.ofSeq
-
-        let toValue = function
-            | KeyValue(k, v) -> (k, parseValue types.[k] v |> Option.get)
-
-        let (columns, values) = row |> Seq.map toValue |> List.ofSeq |> List.unzip
+        let (columns, values) = realizeFields entity row |> List.ofSeq |> List.unzip
 
         dbQuery.Insert { name = Compiler.makeEntity entity;
                          columns = Array.ofList columns;
                          values = [| Array.ofList values |];
+                       }
+
+    member this.UpdateEntry (entity : Entity, id : int, row : IDictionary<string, string>) =
+        let values = realizeFields entity row |> Array.ofSeq
+        dbQuery.Update { name = Compiler.makeEntity entity;
+                         columns = values;
+                         where = Some(WEq(WColumn("Id"), WValue(VInt(id))));
+                       }
+
+    member this.DeleteEntry (entity : Entity, id : int) =
+        dbQuery.Delete { name = Compiler.makeEntity entity;
+                         where = Some(WEq(WColumn("Id"), WValue(VInt(id))));
                        }

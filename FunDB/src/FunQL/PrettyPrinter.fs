@@ -77,6 +77,7 @@ and internal ppResult = function
 and internal ppFieldType = function
     | FTInt -> wordL "int"
     | FTString -> wordL "string"
+    | FTBool -> wordL "bool"
     | FTReference(e) -> wordL "reference" ++ wordL (e.ToString ())
 
 let QueryToString width q = print width <| ppQuery q

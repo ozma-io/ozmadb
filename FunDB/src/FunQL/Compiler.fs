@@ -37,6 +37,12 @@ let compileField = function
           AST.Column.name = fieldName;
         }
 
+let compileValueType = function
+    | FTInt -> VTInt
+    | FTString -> VTString
+    | FTBool -> VTBool
+    | FTReference(_) -> VTInt
+
 let compileOrder = function
     | Asc -> AST.Asc
     | Desc -> AST.Desc

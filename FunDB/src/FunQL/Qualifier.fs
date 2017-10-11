@@ -155,6 +155,7 @@ type Qualifier internal (db : DatabaseContext) =
     and qualifyFieldType mapping = function
         | FTInt -> FTInt
         | FTString -> FTString
+        | FTBool -> FTBool
         | FTReference(e) ->
             let (entity, _) = lookupDbEntity mapping e
             FTReference(QDEEntity(entity))

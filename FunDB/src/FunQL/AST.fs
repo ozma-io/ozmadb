@@ -106,6 +106,7 @@ type ParsedQueryExpr = QueryExpr<EntityName, FieldName>
 type FieldType<'e> =
     | FTInt
     | FTString
+    | FTBool
     | FTReference of 'e
 
 type ParsedFieldType = FieldType<EntityName>

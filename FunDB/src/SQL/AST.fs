@@ -48,5 +48,16 @@ and SelectExpr =
 type InsertExpr =
     { name: Table;
       columns: string array;
-      values: Value array array;
+      values: ValueExpr<ColumnName> array array;
+    }
+
+type UpdateExpr =
+    { name: Table;
+      columns: (ColumnName * ValueExpr<ColumnName>) array;
+      where: ValueExpr<ColumnName> option;
+    }
+
+type DeleteExpr =
+    { name: Table;
+      where: ValueExpr<ColumnName> option;
     }
