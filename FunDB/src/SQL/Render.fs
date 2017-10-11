@@ -1,12 +1,8 @@
 module internal FunWithFlags.FunDB.SQL.Render
 
 open FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.Utils
-
-let renderTable (table : Table) =
-    match table.schema with
-        | None -> renderSqlName table.name
-        | Some(schema) -> sprintf "%s.%s" (renderSqlName schema) (renderSqlName table.name)
 
 let renderSortOrder = function
     | Asc -> "ASC"
@@ -18,21 +14,25 @@ let renderJoinType = function
     | Right -> "RIGHT"
     | Full -> "FULL"
 
-let renderColumn (column : Column) = sprintf "%s.%s" (renderTable column.table) (renderSqlName column.name)
-
 let renderBool = function
     | true -> "TRUE"
     | false -> "FALSE"
 
+let rec renderValueExpr = function
+    | WValue(v) -> v.ToString ()
+    | WColumn(col) -> col.ToString ()
+    | WEq(a, b) -> sprintf "(%s) = (%s)" (renderValueExpr a) (renderValueExpr b)
+    | WAnd(a, b) -> sprintf "(%s) AND (%s)" (renderValueExpr a) (renderValueExpr b)
+
 let rec renderSelect (expr : SelectExpr) : string =
     let condExpr =
         match expr.where with
-            | Some(c) -> sprintf "WHERE %s" <| renderWhere c
+            | Some(c) -> sprintf "WHERE %s" <| renderValueExpr c
             | None -> ""
     let orderExpr =
         if Array.isEmpty expr.orderBy
         then ""
-        else sprintf "ORDER BY %s" (Array.map (fun (fexpr, sord) -> sprintf "%s %s" (renderColumn fexpr) (renderSortOrder sord)) expr.orderBy |> String.concat ", ")
+        else sprintf "ORDER BY %s" (Array.map (fun (fexpr, sord) -> sprintf "%s %s" (fexpr.ToString ()) (renderSortOrder sord)) expr.orderBy |> String.concat ", ")
     let limitExpr =
         match expr.limit with
             | Some(n) -> sprintf "LIMIT %i" n
@@ -50,33 +50,38 @@ let rec renderSelect (expr : SelectExpr) : string =
         offsetExpr
 
 and renderSelectedColumn = function
-    | SCColumn(col) -> renderColumn col
-    | SCExpr(expr, name) -> sprintf "%s AS %s" (renderSelectExpr expr) (renderSqlName name)
-
-and renderSelectExpr = function
-    | CColumn(col) -> renderColumn col
+    | SCColumn(col) -> col.ToString ()
+    | SCExpr(expr, name) -> sprintf "%s AS %s" (renderValueExpr expr) (renderSqlName name)
 
 and renderFrom = function
-    | FTable(table) -> renderTable table
-    | FJoin(typ, a, b, on) -> sprintf "(%s %s JOIN %s ON %s)" (renderFrom a) (renderJoinType typ) (renderFrom b) (renderWhere on)
+    | FTable(table) -> table.ToString ()
+    | FJoin(typ, a, b, on) -> sprintf "(%s %s JOIN %s ON %s)" (renderFrom a) (renderJoinType typ) (renderFrom b) (renderValueExpr on)
     | FSubExpr(sel, name) -> sprintf "(%s) AS %s" (renderSelect sel) (renderSqlName name)
 
-and renderWhere = function
-    | WColumn(col) -> renderColumn col
-    | WInt(i) -> i.ToString()
-    // FIXME
-    | WFloat(f) -> invalidOp "Not supported"
-    | WString(str) -> renderSqlString str
-    | WBool(b) -> renderBool b
-    | WEq(a, b) -> sprintf "(%s) = (%s)" (renderWhere a) (renderWhere b)
-    | WAnd(a, b) -> sprintf "(%s) AND (%s)" (renderWhere a) (renderWhere b)
-    | WNull -> "NULL"
-
 let renderInsertValue values = 
-    values |> Array.map (fun v -> v.ToString ()) |> String.concat ", " |> sprintf "(%s)"
+    values |> Array.map renderValueExpr |> String.concat ", " |> sprintf "(%s)"
 
 let renderInsert (expr : InsertExpr) = 
     sprintf "INSERT INTO %s (%s) VALUES %s"
-        (renderTable expr.name)
+        (expr.name.ToString ())
         (expr.columns |> Array.map renderSqlName |> String.concat ", ")
         (expr.values |> Array.map renderInsertValue |> String.concat ", ")
+
+let renderUpdate (expr : UpdateExpr) =
+    let condExpr =
+        match expr.where with
+            | Some(c) -> sprintf "WHERE %s" <| renderValueExpr c
+            | None -> ""
+    sprintf "UPDATE %s SET %s %s"
+        (expr.name.ToString ())
+        (Array.map (fun (name, expr) -> sprintf "%s = %s" (renderSqlName name) (renderValueExpr expr)) expr.columns |> String.concat ", ")
+        condExpr
+
+let renderDelete (expr : DeleteExpr) =
+    let condExpr =
+        match expr.where with
+            | Some(c) -> sprintf "WHERE %s" <| renderValueExpr c
+            | None -> ""
+    sprintf "DELETE FROM %s %s"
+        (expr.name.ToString ())
+        condExpr

@@ -30,3 +30,9 @@ type Value =
                 | VString(s) -> s
                 | VBool(b) -> renderBool b
                 | VNull -> "NULL"
+
+type ValueExpr<'c> =
+    | WValue of Value
+    | WColumn of 'c
+    | WEq of ValueExpr<'c> * ValueExpr<'c>
+    | WAnd of ValueExpr<'c> * ValueExpr<'c>

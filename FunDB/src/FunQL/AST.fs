@@ -18,12 +18,9 @@ type SortOrder =
                 | Asc -> "ASC"
                 | Desc -> "DESC"
 
-type ResultExpr<'e, 'f> =
-    | REField of 'f
-
 type Result<'e, 'f> =
     | RField of 'f
-    | RExpr of ResultExpr<'e, 'f> * ColumnName
+    | RExpr of ValueExpr<'f> * ColumnName
 
 type JoinType =
     | Inner
@@ -42,7 +39,7 @@ type QueryExpr<'e, 'f> =
     { attributes: AttributeMap;
       results: (Result<'e, 'f> * AttributeMap) array;
       from: FromExpr<'e, 'f>;
-      where: ValueExpr<'e, 'f> option;
+      where: ValueExpr<'f> option;
       orderBy: ('f * SortOrder) array;
     } with
         static member Create
@@ -69,15 +66,9 @@ type QueryExpr<'e, 'f> =
 
           member this.MergeOrderBy additionalOrderBy = { this with orderBy = Array.append this.orderBy additionalOrderBy; }
 
-and ValueExpr<'e, 'f> =
-    | WValue of Value
-    | WField of 'f
-    | WEq of ValueExpr<'e, 'f> * ValueExpr<'e, 'f>
-    | WAnd of ValueExpr<'e, 'f> * ValueExpr<'e, 'f>
-
 and FromExpr<'e, 'f> =
     | FEntity of 'e
-    | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * ValueExpr<'e, 'f>
+    | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * ValueExpr<'f>
     | FSubExpr of QueryExpr<'e, 'f> * TableName
 
 

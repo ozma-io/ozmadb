@@ -23,13 +23,6 @@ let compileEntity = function
           AST.name = name;
         }
 
-let compileValue = function
-    | VInt(i) -> AST.WInt(i)
-    | VFloat(f) -> AST.WFloat(f)
-    | VString(s) -> AST.WString(s)
-    | VBool(b) -> AST.WBool(b)
-    | VNull -> AST.WNull
-
 let compileField = function
     | QFField(field) ->
         { AST.Column.table = makeEntity field.Entity;
@@ -54,10 +47,16 @@ let compileJoin = function
     | Inner -> AST.Inner
     | Outer -> AST.Full
 
+let rec compileValueExpr = function
+    | WValue(v) -> WValue(v)
+    | WColumn(c) -> WColumn(compileField c)
+    | WEq(a, b) -> WEq(compileValueExpr a, compileValueExpr b)
+    | WAnd(a, b) -> WAnd(compileValueExpr a, compileValueExpr b)
+
 let rec compileQuery query =
     { AST.columns = Array.map (fun (res, attr) -> compileResult res) query.results;
       AST.from = compileFrom query.from;
-      AST.where = Option.map compileWhere query.where;
+      AST.where = Option.map compileValueExpr query.where;
       AST.orderBy = Array.map (fun (field, ord) -> (compileField field, compileOrder ord)) query.orderBy;
       // FIXME: support them!
       AST.limit = None;
@@ -66,18 +65,9 @@ let rec compileQuery query =
 
 and compileFrom = function
     | FEntity(e) -> AST.FTable(compileEntity e)
-    | FJoin(jt, e1, e2, where) -> AST.FJoin(compileJoin jt, compileFrom e1, compileFrom e2, compileWhere where)
+    | FJoin(jt, e1, e2, where) -> AST.FJoin(compileJoin jt, compileFrom e1, compileFrom e2, compileValueExpr where)
     | FSubExpr(q, name) -> AST.FSubExpr(compileQuery q, name)
-
-and compileWhere = function
-    | WValue(v) -> compileValue v
-    | WField(f) -> AST.WColumn(compileField f)
-    | WEq(a, b) -> AST.WEq(compileWhere a, compileWhere b)
-    | WAnd(a, b) -> AST.WAnd(compileWhere a, compileWhere b)
 
 and compileResult = function
     | RField(f) -> AST.SCColumn(compileField f)
-    | RExpr(e, name) -> AST.SCExpr(compileResultExpr e, name)
-
-and compileResultExpr = function
-    | REField(f) -> AST.CColumn(compileField f)
+    | RExpr(e, name) -> AST.SCExpr(compileValueExpr e, name)

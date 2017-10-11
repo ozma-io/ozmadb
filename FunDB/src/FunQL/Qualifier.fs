@@ -5,6 +5,7 @@ open Microsoft.EntityFrameworkCore
 
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.SQL.Utils
+open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
 
@@ -142,17 +143,14 @@ type Qualifier internal (db : DatabaseContext) =
             (Map.add { schema = None; name = name; } (QMSubquery(name, fields)) mapping, FSubExpr(newQ, name))
                 
     and qualifyValueExpr mapping = function
-        | WField(f) -> WField(lookupField mapping f)
+        | WColumn(f) -> WColumn(lookupField mapping f)
         | WValue(v) -> WValue(v)
         | WEq(a, b) -> WEq(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
         | WAnd(a, b) -> WAnd(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
 
     and qualifyResult mapping = function
         | RField(f) -> RField(lookupField mapping f)
-        | RExpr(e, name) -> RExpr(qualifyResultExpr mapping e, name)
-
-    and qualifyResultExpr mapping = function
-        | REField(f) -> REField(lookupField mapping f)
+        | RExpr(e, name) -> RExpr(qualifyValueExpr mapping e, name)
 
     and qualifyFieldType mapping = function
         | FTInt -> FTInt

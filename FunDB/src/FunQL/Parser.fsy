@@ -107,10 +107,7 @@ AttributeItems:
 
 Result:
   | FieldName { RField($1) }
-  | ResultExpr AS ID { RExpr($1, $3) }
-
-ResultExpr:
-  | FieldName { REField($1) }
+  | ValueExpr AS ID { RExpr($1, $3) }
 
 QuerySource:
   | LEFT_PARENS Query RIGHT_PARENS AS ID { FSubExpr($2, $5) }
@@ -152,7 +149,7 @@ ValueExprOp:
   | ValueExprVal EQ ValueExprVal { WEq($1, $3) }
 
 ValueExprVal:
-  | FieldName                          { WField($1) }
+  | FieldName                          { WColumn($1) }
   | Value                              { WValue($1) }
   | LEFT_PARENS ValueExpr RIGHT_PARENS { $2 }
 

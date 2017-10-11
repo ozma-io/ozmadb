@@ -6,6 +6,7 @@ open YC.PrettyPrinter.StructuredFormat
 
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.SQL.Utils
+open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.FunQL.AST
 
 let rec internal aboveTagListL tagger = function
@@ -40,7 +41,7 @@ let rec internal ppQuery query =
     let maybeWhere =
         match query.where with
             | None -> emptyL
-            | Some(whereE) -> wordL "WHERE" @@- ppWhere whereE
+            | Some(whereE) -> wordL "WHERE" @@- ppValueExpr whereE
 
     let maybeOrderBy =
         if Array.isEmpty query.orderBy
@@ -60,21 +61,18 @@ let rec internal ppQuery query =
 
 and internal ppFrom = function
     | FEntity(e) -> wordL <| e.ToString ()
-    | FJoin(jt, e1, e2, where) -> ppFrom e1 @@ (wordL (jt.ToString ()) ++ wordL "JOIN") @@ ppFrom e2 @@ (wordL "ON" ++ ppWhere where)
+    | FJoin(jt, e1, e2, where) -> ppFrom e1 @@ (wordL (jt.ToString ()) ++ wordL "JOIN") @@ ppFrom e2 @@ (wordL "ON" ++ ppValueExpr where)
     | FSubExpr(q, name) -> bracketL (ppQuery q) @@ (wordL "AS" ++ wordL (name.ToString ()))
 
-and internal ppWhere = function
-    | WField(f) -> wordL <| f.ToString ()
+and internal ppValueExpr = function
     | WValue(v) -> wordL <| v.ToString ()
-    | WEq(a, b) -> bracketL (ppWhere a) ++ wordL "=" ++ bracketL (ppWhere b)
-    | WAnd(a, b) -> bracketL (ppWhere a) ++ wordL "AND" ++ bracketL (ppWhere b)
+    | WColumn(c) -> wordL <| c.ToString ()
+    | WEq(a, b) -> bracketL (ppValueExpr a) ++ wordL "=" ++ bracketL (ppValueExpr b)
+    | WAnd(a, b) -> bracketL (ppValueExpr a) ++ wordL "AND" ++ bracketL (ppValueExpr b)
 
 and internal ppResult = function
     | RField(f) -> wordL <| f.ToString ()
-    | RExpr(e, name) -> bracketL (ppResultExpr e) @@ (wordL "AS" ++ wordL (name.ToString ()))
-
-and internal ppResultExpr = function
-    | REField(f) -> wordL <| f.ToString ()
+    | RExpr(e, name) -> bracketL (ppValueExpr e) @@ (wordL "AS" ++ wordL (name.ToString ()))
 
 and internal ppFieldType = function
     | FTInt -> wordL "int"

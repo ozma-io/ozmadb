@@ -60,7 +60,6 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             qualifier.QualifyQuery parsedQuery
         with
             | QualifierError(msg) ->
-                printf "Qualifier error: %s" msg
                 raise <| UserViewError msg
 
     let toViewColumn (res, attrs) =
