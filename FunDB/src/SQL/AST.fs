@@ -6,6 +6,12 @@ open FunWithFlags.FunDB.SQL.Utils
 type ColumnName = string
 type TableName = string
 
+type LocalColumn = LocalColumn of string
+    with
+        override this.ToString () =
+            match this with
+                | LocalColumn(c) -> renderSqlName c
+
 type Table =
     { schema: string option;
       name: TableName;
@@ -48,16 +54,16 @@ and SelectExpr =
 type InsertExpr =
     { name: Table;
       columns: string array;
-      values: ValueExpr<ColumnName> array array;
+      values: ValueExpr<LocalColumn> array array;
     }
 
 type UpdateExpr =
     { name: Table;
-      columns: (ColumnName * ValueExpr<ColumnName>) array;
-      where: ValueExpr<ColumnName> option;
+      columns: (string * ValueExpr<LocalColumn>) array;
+      where: ValueExpr<LocalColumn> option;
     }
 
 type DeleteExpr =
     { name: Table;
-      where: ValueExpr<ColumnName> option;
+      where: ValueExpr<LocalColumn> option;
     }

@@ -11,6 +11,7 @@ open FunWithFlags.FunDB.FunQL
 open FunWithFlags.FunDB.SQL.Parse
 open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.Query
+open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier
 
@@ -144,10 +145,10 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         let values = realizeFields entity row |> Array.ofSeq
         dbQuery.Update { name = Compiler.makeEntity entity;
                          columns = values;
-                         where = Some(WEq(WColumn("Id"), WValue(VInt(id))));
+                         where = Some(WEq(WColumn(LocalColumn("Id")), WValue(VInt(id))));
                        }
 
     member this.DeleteEntry (entity : Entity, id : int) =
         dbQuery.Delete { name = Compiler.makeEntity entity;
-                         where = Some(WEq(WColumn("Id"), WValue(VInt(id))));
+                         where = Some(WEq(WColumn(LocalColumn("Id")), WValue(VInt(id))));
                        }
