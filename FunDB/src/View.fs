@@ -77,7 +77,6 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         }
 
     let realizeFields (entity : Entity) (row : IDictionary<string, string>) =
-        db.Entry(entity).Reference("Schema").Load()
         db.Entry(entity).Collection("Fields").Load()
 
         let toValueType name =
@@ -119,6 +118,8 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         }
 
     member this.GetTemplate (entity : Entity) =
+        db.Entry(entity).Reference("Fields").Load()
+
         let templateColumn (field : Field) =
             let defaultValue =
                 if field.Default = null then
@@ -131,9 +132,11 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
               defaultValue = defaultValue;
             }
 
-        db.Fields.Where(fun f -> f.EntityId = entity.Id).Select(templateColumn).ToArray()
+        entity.Fields.Select(templateColumn).ToArray()
 
     member this.InsertEntry (entity : Entity, row : IDictionary<string, string>) =
+        db.Entry(entity).Reference("Schema").Load()
+
         let (columns, values) = realizeFields entity row |> List.ofSeq |> List.unzip
 
         dbQuery.Insert { name = Compiler.makeEntity entity;
@@ -142,6 +145,8 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                        }
 
     member this.UpdateEntry (entity : Entity, id : int, row : IDictionary<string, string>) =
+        db.Entry(entity).Reference("Schema").Load()
+
         let values = realizeFields entity row |> Array.ofSeq
         dbQuery.Update { name = Compiler.makeEntity entity;
                          columns = values;
@@ -149,6 +154,8 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                        }
 
     member this.DeleteEntry (entity : Entity, id : int) =
+        db.Entry(entity).Reference("Schema").Load()
+
         dbQuery.Delete { name = Compiler.makeEntity entity;
                          where = Some(WEq(WColumn(LocalColumn("Id")), WValue(VInt(id))));
                        }
