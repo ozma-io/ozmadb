@@ -12,8 +12,11 @@ open FunWithFlags.FunDB.SQL.Parse
 open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDB.SQL.Meta
+open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier
+open FunWithFlags.FunDB.FunQL.Meta
 
 type EntityId = int
 
@@ -93,7 +96,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                     if field.Nullable && v = null
                     then VNull
                     else
-                        match parseValue ftype v with
+                        match parseSimpleValue ftype v with
                             | Some(r) -> r
                             | None -> raise <| UserViewError(sprintf "Invalid value of field %s" k)
                 (k, WValue(value))
@@ -159,3 +162,10 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         dbQuery.Delete { name = Compiler.makeEntity entity;
                          where = Some(WEq(WColumn(LocalColumn("Id")), WValue(VInt(id))));
                        }
+
+    // XXX: make this atomic!
+    member this.Migrate () =
+        let toMeta = buildFunMeta db qualifier
+        let fromMeta = getDatabaseMeta dbQuery
+        let plan = migrateDatabase fromMeta toMeta
+        Seq.iter dbQuery.ApplyOperation plan

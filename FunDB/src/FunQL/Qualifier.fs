@@ -143,10 +143,15 @@ type Qualifier internal (db : DatabaseContext) =
             (Map.add { schema = None; name = name; } (QMSubquery(name, fields)) mapping, FSubExpr(newQ, name))
                 
     and qualifyValueExpr mapping = function
-        | WColumn(f) -> WColumn(lookupField mapping f)
         | WValue(v) -> WValue(v)
+        | WColumn(f) -> WColumn(lookupField mapping f)
+        | WNot(a) -> WNot(qualifyValueExpr mapping a)
+        | WConcat(a, b) -> WConcat(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
         | WEq(a, b) -> WEq(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
+        | WIn(a, b) -> WIn(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
         | WAnd(a, b) -> WAnd(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
+        | WFunc(name, args) -> WFunc(name, Array.map (qualifyValueExpr mapping) args)
+        | WCast(a, typ) -> WCast(qualifyValueExpr mapping a, typ)
 
     and qualifyResult mapping = function
         | RField(f) -> RField(lookupField mapping f)

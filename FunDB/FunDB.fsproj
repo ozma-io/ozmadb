@@ -11,6 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="src/Utils.fs" />
     <Compile Include="src/Attribute.fs" />
 
     <Compile Include="src/SQL/Utils.fs" />
@@ -19,6 +20,7 @@
     <Compile Include="src/SQL/Parse.fs" />
     <Compile Include="src/SQL/Render.fs" />
     <Compile Include="src/SQL/Query.fs" />
+    <Compile Include="src/SQL/Migration.fs" />
 
     <Compile Include="src/FunQL/AST.fs" />
     <FsYacc Include="src/FunQL/Parser.fsy">
@@ -32,6 +34,9 @@
     <Compile Include="src/FunQL/Qualifier.fs" />
     <Compile Include="src/FunQL/Compiler.fs" />
     <Compile Include="src/FunQL/PrettyPrinter.fs" />
+
+    <Compile Include="src/SQL/Meta.fs" />
+    <Compile Include="src/FunQL/Meta.fs" />
 
     <Compile Include="src/View.fs" />
 

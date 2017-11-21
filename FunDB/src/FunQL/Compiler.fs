@@ -8,10 +8,10 @@ open FunWithFlags.FunDB.FunQL.Qualifier.Name
 
 let makeEntity (fentity : Entity) : AST.Table =
     let schema =
-        if fentity.Schema = null then
-            None
-        else
+        if fentity.SchemaId.HasValue then
             Some(fentity.Schema.Name)
+        else
+            None
     { AST.schema = schema;
       AST.name = fentity.Name;
     }
@@ -56,8 +56,13 @@ let compileJoin = function
 let rec compileValueExpr = function
     | WValue(v) -> WValue(v)
     | WColumn(c) -> WColumn(compileField c)
+    | WNot(a) -> WNot(compileValueExpr a)
+    | WConcat(a, b) -> WConcat(compileValueExpr a, compileValueExpr b)
     | WEq(a, b) -> WEq(compileValueExpr a, compileValueExpr b)
+    | WIn(a, b) -> WIn(compileValueExpr a, compileValueExpr b)
     | WAnd(a, b) -> WAnd(compileValueExpr a, compileValueExpr b)
+    | WFunc(name, args) -> WFunc(name, Array.map compileValueExpr args)
+    | WCast(a, typ) -> WCast(compileValueExpr a, typ)
 
 let rec compileQuery query =
     { AST.columns = Array.map (fun (res, attr) -> compileResult res) query.results;

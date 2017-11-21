@@ -103,6 +103,8 @@ type FieldName =
 
 type ParsedQueryExpr = QueryExpr<EntityName, FieldName>
 
+type ParsedValueExpr = ValueExpr<FieldName>
+
 type FieldType<'e> =
     | FTInt
     | FTString

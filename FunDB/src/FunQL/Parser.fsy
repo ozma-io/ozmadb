@@ -2,6 +2,7 @@
 
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.SQL.Value
+open FunWithFlags.FunDB.SQL.Parse
 open FunWithFlags.FunDB.FunQL.AST
 
 let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
@@ -16,13 +17,15 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %token <string> STRING
 %token <bool> BOOL
 %token NULL
+
+// Symbols
+%token DOUBLE_COLON
 %token LEFT_BRACE
 %token RIGHT_BRACE
 %token LEFT_BRACKET
 %token RIGHT_BRACKET
 %token LEFT_PARENS
 %token RIGHT_PARENS
-%token COLON
 %token SEMICOLON
 %token COMMA
 %token DOT
@@ -65,10 +68,18 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %start value
 %type <Value> value
 
+%start valueExpr
+%type <ParsedValueExpr> valueExpr
+
 %%
 
+// Entry points
 query: Query EOF { $1 }
+valueExpr : ValueExpr EOF { $1 }
+value : Value EOF { $1 }
+fieldType : FieldType EOF { $1 }
 
+// Expressions
 Query:
 	| MaybeAttributeMap SELECT Results FROM FromExpr WhereClause OrderByClause { { attributes = $1; results = List.toArray $3; from = $5; where = $6; orderBy = List.toArray $7; } }
 
@@ -141,18 +152,30 @@ WhereClause:
   |                 { None }
   | WHERE ValueExpr { Some($2) }
 
-ValueExpr:
-  | ValueExpr AND ValueExpr { WAnd($1, $3) }
-  | ValueExprOp             { $1 }
+ValueExprList:
+  |                               { [] }
+  | ValueExpr COMMA ValueExprList { $1 :: $3 }
 
-ValueExprOp:
-  | ValueExprVal                 { $1 }
-  | ValueExprVal EQ ValueExprVal { WEq($1, $3) }
+ValueExpr:
+  | ValueExprAnd                              { $1 }
+
+ValueExprAnd:
+  | ValueExprEq AND ValueExprAnd { WAnd($1, $3) }
+  | ValueExprEq                  { $1 }
+  
+ValueExprEq:
+  | ValueExprEq EQ ValueExprVal { WEq($1, $3) }
+  | ValueExprCast               { $1 }
+
+ValueExprCast:
+  | ValueExprCast DOUBLE_COLON ID { WCast($1, $3 |> parseValueType |> Option.get) }
+  | ValueExprVal                  { $1 }
 
 ValueExprVal:
-  | FieldName                          { WColumn($1) }
-  | Value                              { WValue($1) }
-  | LEFT_PARENS ValueExpr RIGHT_PARENS { $2 }
+  | ID LEFT_PARENS ValueExprList RIGHT_PARENS { WFunc($1, List.toArray $3) }
+  | FieldName                                 { WColumn($1) }
+  | Value                                     { WValue($1) }
+  | LEFT_PARENS ValueExpr RIGHT_PARENS        { $2 }
 
 Value:
   | INT                                { VInt($1) }
@@ -177,12 +200,8 @@ OrderByDirection:
   | ASC  { Asc }
   | DESC { Desc }
 
-fieldType: FieldType EOF { $1 }
-
 FieldType:
   | INT_TYPE                  { FTInt }
   | STRING_TYPE               { FTString }
   | BOOL_TYPE                 { FTBool }
   | REFERENCE_TYPE EntityName { FTReference($2) }
-
-value: Value EOF { $1 }

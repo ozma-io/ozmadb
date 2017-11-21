@@ -67,8 +67,13 @@ and internal ppFrom = function
 and internal ppValueExpr = function
     | WValue(v) -> wordL <| v.ToString ()
     | WColumn(c) -> wordL <| c.ToString ()
+    | WNot(a) -> wordL "NOT" ++ bracketL (ppValueExpr a)
+    | WConcat(a, b) -> bracketL (ppValueExpr a) ++ wordL "||" ++ bracketL (ppValueExpr b)
     | WEq(a, b) -> bracketL (ppValueExpr a) ++ wordL "=" ++ bracketL (ppValueExpr b)
+    | WIn(a, b) -> bracketL (ppValueExpr a) ++ wordL "IN" ++ bracketL (ppValueExpr b)
     | WAnd(a, b) -> bracketL (ppValueExpr a) ++ wordL "AND" ++ bracketL (ppValueExpr b)
+    | WFunc(name, args) -> wordL (renderSqlName name) >|< bracketL (args |> Array.toSeq |> Seq.map ppValueExpr |> Seq.toList |> commaListL)
+    | WCast(a, typ) -> bracketL (ppValueExpr a) ++ wordL "::" ++ wordL (typ.ToString ())
 
 and internal ppResult = function
     | RField(f) -> wordL <| f.ToString ()

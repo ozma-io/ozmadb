@@ -77,13 +77,13 @@ rule tokenstream = parse
 // FIXME: Add floats
 | "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.ID(parseString '\"' lexbuf) }
 | "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING(parseString '\'' lexbuf) }
+| "::" { Parser.DOUBLE_COLON }
 | "{" { Parser.LEFT_BRACE }
 | "}" { Parser.RIGHT_BRACE }
 | "[" { Parser.LEFT_BRACKET }
 | "]" { Parser.RIGHT_BRACKET }
 | "(" { Parser.LEFT_PARENS }
 | ")" { Parser.RIGHT_PARENS }
-| ":" { Parser.COLON }
 | ";" { Parser.SEMICOLON }
 | "," { Parser.COMMA }
 | "." { Parser.DOT }

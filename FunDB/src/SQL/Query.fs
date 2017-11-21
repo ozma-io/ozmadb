@@ -15,7 +15,7 @@ type QueryConnection (connectionString : string) =
         use command = new NpgsqlCommand(queryStr, connection)
         connection.Open()
         try
-            command.ExecuteNonQuery()
+            ignore <| command.ExecuteNonQuery()
         finally
             connection.Close()
 
@@ -47,7 +47,12 @@ type QueryConnection (connectionString : string) =
         printf "Update query: %s" queryStr
         executeNonQuery queryStr
 
-    member this.Delete(expr: DeleteExpr) =
+    member this.Delete (expr : DeleteExpr) =
         let queryStr = renderDelete expr
         printf "Delete query: %s" queryStr
+        executeNonQuery queryStr
+
+    member this.ApplyOperation (op : SchemaOperation) =
+        let queryStr = renderSchemaOperation op
+        printf "Schema operation query: %s" queryStr
         executeNonQuery queryStr
