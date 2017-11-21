@@ -1,12 +1,32 @@
 %{
 
+open System
+
 open FunWithFlags.FunDB.Attribute
-open FunWithFlags.FunDB.SQL.Value
-open FunWithFlags.FunDB.SQL.Parse
 open FunWithFlags.FunDB.FunQL.AST
 
 let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin(joinType, fromExpr1, fromExpr2, whereExpr)
+
+let simpleFieldValue (valType : FieldType<_>) (str : string) : FieldValue option =
+    if str = null
+    then Some(FNull)
+    else
+        try
+            match valType with
+                | FTInt -> Some(FInt(int str))
+                | FTString -> Some(FString(str))
+                | FTBool ->
+                    match str.ToLower() with
+                        | "true" -> Some(FBool(true))
+                        | "false" -> Some(FBool(false))
+                        | _ -> None
+                | FTDateTime -> Some(FDateTime(DateTime.Parse(str)))
+                | FTDate -> Some(FDate(DateTime.Parse(str)))
+                // XXX: Maybe some kind of check here.
+                | FTReference(_) -> Some(FInt(int str))
+        with
+            _ -> None
 
 %}
 
@@ -19,7 +39,6 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %token NULL
 
 // Symbols
-%token DOUBLE_COLON
 %token LEFT_BRACE
 %token RIGHT_BRACE
 %token LEFT_BRACKET
@@ -52,6 +71,8 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %token INT_TYPE
 %token STRING_TYPE
 %token BOOL_TYPE
+%token DATETIME_TYPE
+%token DATE_TYPE
 %token REFERENCE_TYPE
 
 // Misc
@@ -65,18 +86,14 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %start fieldType
 %type <ParsedFieldType> fieldType
 
-%start value
-%type <Value> value
-
-%start valueExpr
-%type <ParsedValueExpr> valueExpr
+%start fieldExpr
+%type <ParsedFieldExpr> fieldExpr
 
 %%
 
 // Entry points
 query: Query EOF { $1 }
-valueExpr : ValueExpr EOF { $1 }
-value : Value EOF { $1 }
+fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
 
 // Expressions
@@ -119,7 +136,7 @@ AttributeItems:
 
 Result:
   | FieldName { RField($1) }
-  | ValueExpr AS ID { RExpr($1, $3) }
+  | FieldExpr AS ID { RExpr($1, $3) }
 
 QuerySource:
   | LEFT_PARENS Query RIGHT_PARENS AS ID { FSubExpr($2, $5) }
@@ -134,7 +151,7 @@ JoinType:
 
 JoinChain:
   | { [] }
-  | JoinType JOIN QuerySource ON ValueExpr JoinChain { ($1, $3, $5) :: $6 }
+  | JoinType JOIN QuerySource ON FieldExpr JoinChain { ($1, $3, $5) :: $6 }
 
 FromExpr:
   | QuerySource JoinChain { List.fold applyJoin $1 $2 }
@@ -150,39 +167,29 @@ FieldName:
 
 WhereClause:
   |                 { None }
-  | WHERE ValueExpr { Some($2) }
+  | WHERE FieldExpr { Some($2) }
 
-ValueExprList:
-  |                               { [] }
-  | ValueExpr COMMA ValueExprList { $1 :: $3 }
+FieldExpr:
+  | FieldExprAnd { $1 }
 
-ValueExpr:
-  | ValueExprAnd                              { $1 }
-
-ValueExprAnd:
-  | ValueExprEq AND ValueExprAnd { WAnd($1, $3) }
-  | ValueExprEq                  { $1 }
+FieldExprAnd:
+  | FieldExprEq AND FieldExprAnd { FEAnd($1, $3) }
+  | FieldExprEq                  { $1 }
   
-ValueExprEq:
-  | ValueExprEq EQ ValueExprVal { WEq($1, $3) }
-  | ValueExprCast               { $1 }
+FieldExprEq:
+  | FieldExprEq EQ FieldExprVal { FEEq($1, $3) }
+  | FieldExprVal                { $1 }
 
-ValueExprCast:
-  | ValueExprCast DOUBLE_COLON ID { WCast($1, $3 |> parseValueType |> Option.get) }
-  | ValueExprVal                  { $1 }
-
-ValueExprVal:
-  | ID LEFT_PARENS ValueExprList RIGHT_PARENS { WFunc($1, List.toArray $3) }
-  | FieldName                                 { WColumn($1) }
-  | Value                                     { WValue($1) }
-  | LEFT_PARENS ValueExpr RIGHT_PARENS        { $2 }
+FieldExprVal:
+  | FieldName                                 { FEColumn($1) }
+  | Value                                     { FEValue($1) }
+  | LEFT_PARENS FieldExpr RIGHT_PARENS        { $2 }
 
 Value:
-  | INT                                { VInt($1) }
-  | FLOAT                              { VFloat($1) }
-  | STRING                             { VString($1) }
-  | BOOL                               { VBool($1) }
-  | NULL                               { VNull }
+  | INT                                { FInt($1) }
+  | STRING                             { FString($1) }
+  | BOOL                               { FBool($1) }
+  | NULL                               { FNull }
 
 OrderByClause:
   |                      { [ ] }
@@ -204,4 +211,6 @@ FieldType:
   | INT_TYPE                  { FTInt }
   | STRING_TYPE               { FTString }
   | BOOL_TYPE                 { FTBool }
+  | DATETIME_TYPE             { FTDateTime }
+  | DATE_TYPE                 { FTDate }
   | REFERENCE_TYPE EntityName { FTReference($2) }

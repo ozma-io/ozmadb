@@ -1,33 +1,25 @@
 module internal FunWithFlags.FunDB.SQL.Render
 
-open FunWithFlags.FunDB.SQL.AST
-open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.Utils
-
-let renderSortOrder = function
-    | Asc -> "ASC"
-    | Desc -> "DESC"
-
-let renderJoinType = function
-    | Inner -> "INNER"
-    | Left -> "LEFT"
-    | Right -> "RIGHT"
-    | Full -> "FULL"
+open FunWithFlags.FunDB.SQL.AST
 
 let renderBool = function
     | true -> "TRUE"
     | false -> "FALSE"
 
 let rec renderValueExpr = function
-    | WValue(v) -> v.ToString ()
-    | WColumn(col) -> col.ToString ()
-    | WNot(a) -> sprintf "NOT (%s)" (renderValueExpr a)
-    | WConcat(a, b) -> sprintf "(%s) || (%s)" (renderValueExpr a) (renderValueExpr b)
-    | WEq(a, b) -> sprintf "(%s) = (%s)" (renderValueExpr a) (renderValueExpr b)
-    | WIn(a, b) -> sprintf "(%s) IN (%s)" (renderValueExpr a) (renderValueExpr b)
-    | WAnd(a, b) -> sprintf "(%s) AND (%s)" (renderValueExpr a) (renderValueExpr b)
-    | WFunc(name, args) -> sprintf "%s(%s)" (renderSqlName name) (args |> Seq.map renderValueExpr |> String.concat ", ")
-    | WCast(a, typ) -> sprintf "(%s) :: %s" (renderValueExpr a) (typ.ToString ())
+    | VEValue(v) -> v.ToString ()
+    | VEColumn(col) -> col.ToString ()
+    | VENot(a) -> sprintf "NOT (%s)" (renderValueExpr a)
+    | VEConcat(a, b) -> sprintf "(%s) || (%s)" (renderValueExpr a) (renderValueExpr b)
+    | VEEq(a, b) -> sprintf "(%s) = (%s)" (renderValueExpr a) (renderValueExpr b)
+    | VEIn(a, arr) ->
+        if arr.Length = 0
+        then "FALSE" // Note: empty IN sets are forbidden, but it's the same
+        else sprintf "(%s) IN (%s)" (renderValueExpr a) (arr |> Seq.map renderValueExpr |> String.concat ", ")
+    | VEAnd(a, b) -> sprintf "(%s) AND (%s)" (renderValueExpr a) (renderValueExpr b)
+    | VEFunc(name, args) -> sprintf "%s(%s)" (renderSqlName name) (args |> Seq.map renderValueExpr |> String.concat ", ")
+    | VECast(a, typ) -> sprintf "(%s) :: %s" (renderValueExpr a) (typ.ToString ())
 
 let rec renderSelect (expr : SelectExpr) : string =
     let condExpr =
@@ -37,7 +29,7 @@ let rec renderSelect (expr : SelectExpr) : string =
     let orderExpr =
         if Array.isEmpty expr.orderBy
         then ""
-        else sprintf "ORDER BY %s" (expr.orderBy |> Seq.map (fun (fexpr, sord) -> sprintf "%s %s" (fexpr.ToString ()) (renderSortOrder sord)) |> String.concat ", ")
+        else sprintf "ORDER BY %s" (expr.orderBy |> Seq.map (fun (fexpr, sord) -> sprintf "%s %s" (fexpr.ToString ()) (sord.ToString ())) |> String.concat ", ")
     let limitExpr =
         match expr.limit with
             | Some(n) -> sprintf "LIMIT %i" n
@@ -60,7 +52,7 @@ and renderSelectedColumn = function
 
 and renderFrom = function
     | FTable(table) -> table.ToString ()
-    | FJoin(typ, a, b, on) -> sprintf "(%s %s JOIN %s ON %s)" (renderFrom a) (renderJoinType typ) (renderFrom b) (renderValueExpr on)
+    | FJoin(typ, a, b, on) -> sprintf "(%s %s JOIN %s ON %s)" (renderFrom a) (typ.ToString ()) (renderFrom b) (renderValueExpr on)
     | FSubExpr(sel, name) -> sprintf "(%s) AS %s" (renderSelect sel) (renderSqlName name)
 
 let renderInsertValue values = 
@@ -101,9 +93,9 @@ let renderSchemaOperation = function
     | SOCreateConstraint(constr, table, pars) ->
         let constraintStr =
             match pars with
-                | CMUnique(cols) -> cols |> Seq.map (fun x -> x.ToString ()) |> String.concat ", " |> sprintf "UNIQUE %s"
-                | CMPrimaryKey(cols) -> cols |> Seq.map (fun x -> x.ToString ()) |> String.concat ", " |> sprintf "PRIMARY KEY %s"
-                | CMForeignKey(col, rcol) -> sprintf "FOREIGN KEY %s REFERENCES %s" (col.ToString ()) (rcol.ToString ())
+                | CMUnique(cols) -> cols |> Seq.map (fun x -> x.ToString ()) |> String.concat ", " |> sprintf "UNIQUE (%s)"
+                | CMPrimaryKey(cols) -> cols |> Seq.map (fun x -> x.ToString ()) |> String.concat ", " |> sprintf "PRIMARY KEY (%s)"
+                | CMForeignKey(col, rcol) -> sprintf "FOREIGN KEY (%s) REFERENCES %s (%s)" (col.ToString ()) (rcol.table.ToString ()) (renderSqlName rcol.name)
         sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToString ()) (renderSqlName constr.name) constraintStr
     | SODeleteConstraint(constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToString ()) (renderSqlName constr.name)
     | SOCreateColumn(col, pars) ->

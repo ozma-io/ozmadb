@@ -1,0 +1,79 @@
+{
+
+module internal FunWithFlags.FunDB.SQL.Lexer
+
+open System
+open Microsoft.FSharp.Text.Lexing
+
+open FunWithFlags.FunDB.Parsing
+open FunWithFlags.FunDB.SQL
+
+}
+
+// Regular expressions
+let whitespace = [' ' '\t' ]
+let newline = ('\n' | "\r\n")
+let escapes = "\\" ['\\' 't' 'r' 'n']
+
+// Case-insensitive chars
+let a = ['A' 'a']
+let b = ['B' 'b']
+let c = ['C' 'c']
+let d = ['D' 'd']
+let e = ['E' 'e']
+let f = ['F' 'f']
+let g = ['G' 'g']
+let h = ['H' 'h']
+let i = ['I' 'i']
+let j = ['J' 'j']
+let k = ['K' 'k']
+let l = ['L' 'l']
+let m = ['M' 'm']
+let n = ['N' 'n']
+let o = ['O' 'o']
+let p = ['P' 'p']
+let q = ['Q' 'q']
+let r = ['R' 'r']
+let s = ['S' 's']
+let t = ['T' 't']
+let u = ['U' 'u']
+let v = ['V' 'v']
+let w = ['W' 'w']
+let x = ['X' 'x']
+let y = ['Y' 'y']
+let z = ['Z' 'z']
+
+rule tokenstream = parse
+
+// Atoms
+| ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> String |> int) }
+// FIXME: Add floats
+| "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.ID(escapedString '\"' lexbuf) }
+| "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING(escapedString '\'' lexbuf) }
+| "::" { Parser.DOUBLE_COLON }
+| "(" { Parser.LEFT_PARENS }
+| ")" { Parser.RIGHT_PARENS }
+| "," { Parser.COMMA }
+| "." { Parser.DOT }
+| "=" { Parser.EQ }
+
+// Keywords
+| t r u e { Parser.BOOL(true) }
+| f a l s e { Parser.BOOL(false) }
+| n u l l { Parser.NULL }
+| a n d { Parser.AND }
+
+// Special types
+| r e g c l a s s { Parser.REGCLASS_TYPE }
+| t e x t { Parser.TEXT_TYPE }
+
+// Unescaped ids
+| ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID((String lexbuf.Lexeme).ToLower()) }
+
+// Whitespace
+| whitespace { tokenstream lexbuf }
+| newline    { newline lexbuf; tokenstream lexbuf }
+
+// Misc
+| _    	  { failwith ("Parse error: " + LexBuffer<_>.LexemeString lexbuf) }
+| eof     { Parser.EOF }

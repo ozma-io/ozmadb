@@ -1,0 +1,102 @@
+%{
+
+open FunWithFlags.FunDB.SQL.AST
+
+%}
+
+// Atoms
+%token <int> INT
+%token <double> FLOAT
+%token <string> ID
+%token <string> STRING
+%token <bool> BOOL
+%token NULL
+
+// Symbols
+%token DOUBLE_COLON
+%token LEFT_PARENS
+%token RIGHT_PARENS
+%token COMMA
+%token DOT
+%token EQ
+
+// Keywords
+%token AND
+
+// Special types
+%token REGCLASS_TYPE
+%token TEXT_TYPE
+
+// Misc
+%token EOF
+
+%left AND
+
+%start valueExpr
+%type <PartialValueExpr> valueExpr
+
+%start objectRef
+%type <ObjectRef> objectRef
+
+%%
+
+// Entry points
+valueExpr : ValueExpr EOF { $1 }
+
+objectRef : ObjectRef EOF { $1 }
+
+// Expressions
+
+ValueExpr:
+  | ValueExprAnd { $1 }
+
+ValueExprAnd:
+  | ValueExprEq AND ValueExprAnd { VEAnd($1, $3) }
+  | ValueExprEq                  { $1 }
+  
+ValueExprEq:
+  | ValueExprEq EQ ValueExprCast { VEEq($1, $3) }
+  | ValueExprCast                { $1 }
+
+ValueExprCast:
+  // Special cases to parse how PostgreSQL outputs various types.
+  | STRING DOUBLE_COLON REGCLASS_TYPE { VEValue(VObject($1)) }
+  | STRING DOUBLE_COLON TEXT_TYPE     { VEValue(VString($1)) }
+  | ValueExprCast DOUBLE_COLON Id     { match $3 |> parseValueType with
+                                            | Some(r) -> VECast($1, r)
+                                            | None -> failwith "Unknown type"
+                                      }
+  | ValueExprVal                      { $1 }
+
+Id:
+  | ID            { $1 }
+  | REGCLASS_TYPE { "regclass" }
+  | TEXT_TYPE     { "text" }
+
+ObjectRefList:
+  | Id                   { [ $1 ] }
+  | Id DOT ObjectRefList { $1 :: $3 }
+
+ObjectRef:
+  | ObjectRefList { ObjectRef(List.toArray $1) }
+
+ValueExprVal:
+  | Id LEFT_PARENS ValueExprList RIGHT_PARENS { VEFunc($1, $3) }
+  | ObjectRef                                 { VEColumn($1 |> columnFromObjectRef |> Option.get) }
+  | Value                                     { VEValue($1) }
+  | LEFT_PARENS ValueExpr RIGHT_PARENS        { $2 }
+
+ValueExprList:
+  |                       { [| |] }
+  | ValueExprListNonempty { List.toArray $1 }
+
+ValueExprListNonempty:
+  | ValueExpr                             { [ $1 ] }
+  | ValueExpr COMMA ValueExprListNonempty { $1 :: $3 }
+
+Value:
+  | INT                                { VInt($1) }
+  | FLOAT                              { VFloat($1) }
+  | STRING                             { VString($1) }
+  | BOOL                               { VBool($1) }
+  | NULL                               { VNull }

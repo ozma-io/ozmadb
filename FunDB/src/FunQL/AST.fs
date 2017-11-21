@@ -1,13 +1,67 @@
 namespace FunWithFlags.FunDB.FunQL.AST
 
+open System
+open System.Globalization
 open System.Runtime.InteropServices
+
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Attribute
-open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.Utils
 
 type ColumnName = string
 type TableName = string
+
+type FieldType<'e> =
+    | FTInt
+    | FTString
+    | FTBool
+    | FTDateTime
+    | FTDate
+    | FTReference of 'e
+    with
+        override this.ToString () =
+            match this with
+                | FTInt -> "int"
+                | FTString -> "string"
+                | FTBool -> "bool"
+                | FTDateTime -> "datetime"
+                | FTDate -> "date"
+                | FTReference(e) -> sprintf "reference %s" (e.ToString ())
+
+type FieldValue =
+    | FInt of int
+    | FString of string
+    | FBool of bool
+    | FDateTime of DateTime
+    | FDate of DateTime
+    | FNull
+    with
+        override this.ToString () =
+            match this with
+                | FInt(i) -> i.ToString ()
+                | FString(s) -> renderSqlString s
+                | FBool(b) -> renderBool b
+                | FDateTime(dt) -> dt.ToString("O") |> renderSqlString
+                | FDate(d) -> d.ToString("d", CultureInfo.InvariantCulture) |> renderSqlString
+                | FNull -> "NULL"
+
+        member this.ToDisplayString () =
+            match this with
+                | FInt(i) -> i.ToString ()
+                | FString(s) -> s
+                | FBool(b) -> renderBool b
+                | FDateTime(dt) -> dt.ToString ()
+                | FDate(d) -> d.ToString ()
+                | FNull -> ""
+
+type FieldExpr<'c> =
+    | FEValue of FieldValue
+    | FEColumn of 'c
+    | FENot of FieldExpr<'c>
+    | FEConcat of FieldExpr<'c> * FieldExpr<'c>
+    | FEEq of FieldExpr<'c> * FieldExpr<'c>
+    | FEIn of FieldExpr<'c> * (FieldExpr<'c> array)
+    | FEAnd of FieldExpr<'c> * FieldExpr<'c>
 
 type SortOrder =
     | Asc
@@ -20,7 +74,7 @@ type SortOrder =
 
 type Result<'e, 'f> =
     | RField of 'f
-    | RExpr of ValueExpr<'f> * ColumnName
+    | RExpr of FieldExpr<'f> * ColumnName
 
 type JoinType =
     | Inner
@@ -39,7 +93,7 @@ type QueryExpr<'e, 'f> =
     { attributes: AttributeMap;
       results: (Result<'e, 'f> * AttributeMap) array;
       from: FromExpr<'e, 'f>;
-      where: ValueExpr<'f> option;
+      where: FieldExpr<'f> option;
       orderBy: ('f * SortOrder) array;
     } with
         static member Create
@@ -62,13 +116,13 @@ type QueryExpr<'e, 'f> =
           member this.MergeWhere additionalWhere =
               match this.where with
                   | None -> { this with where = Some(additionalWhere); }
-                  | Some(w1) -> { this with where = Some(WAnd(w1, additionalWhere)); }
+                  | Some(w1) -> { this with where = Some(FEAnd(w1, additionalWhere)); }
 
           member this.MergeOrderBy additionalOrderBy = { this with orderBy = Array.append this.orderBy additionalOrderBy; }
 
 and FromExpr<'e, 'f> =
     | FEntity of 'e
-    | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * ValueExpr<'f>
+    | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'f>
     | FSubExpr of QueryExpr<'e, 'f> * TableName
 
 
@@ -86,7 +140,6 @@ type EntityName =
               name = entity.Name;
             }
 
-// FIXME: allow non-qualified field names, like in SQL
 type FieldName =
     { entity: EntityName option;
       name: ColumnName;
@@ -103,12 +156,6 @@ type FieldName =
 
 type ParsedQueryExpr = QueryExpr<EntityName, FieldName>
 
-type ParsedValueExpr = ValueExpr<FieldName>
-
-type FieldType<'e> =
-    | FTInt
-    | FTString
-    | FTBool
-    | FTReference of 'e
+type ParsedFieldExpr = FieldExpr<FieldName>
 
 type ParsedFieldType = FieldType<EntityName>

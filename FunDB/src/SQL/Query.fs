@@ -4,7 +4,6 @@ open System
 open Npgsql
 
 open FunWithFlags.FunCore
-open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Render
 
@@ -26,7 +25,7 @@ type QueryConnection (connectionString : string) =
     // Make it return Values instead of strings.
     member this.Query (expr : SelectExpr) : string array array =
         let queryStr = renderSelect expr
-        printf "Select query: %s" queryStr
+        printfn "Select query: %s" queryStr
         use command = new NpgsqlCommand(queryStr, connection)
         connection.Open()
         try
@@ -39,20 +38,20 @@ type QueryConnection (connectionString : string) =
 
     member this.Insert (expr : InsertExpr) =
         let queryStr = renderInsert expr
-        printf "Insert query: %s" queryStr
+        printfn "Insert query: %s" queryStr
         executeNonQuery queryStr
 
     member this.Update (expr : UpdateExpr) =
         let queryStr = renderUpdate expr
-        printf "Update query: %s" queryStr
+        printfn "Update query: %s" queryStr
         executeNonQuery queryStr
 
     member this.Delete (expr : DeleteExpr) =
         let queryStr = renderDelete expr
-        printf "Delete query: %s" queryStr
+        printfn "Delete query: %s" queryStr
         executeNonQuery queryStr
 
     member this.ApplyOperation (op : SchemaOperation) =
         let queryStr = renderSchemaOperation op
-        printf "Schema operation query: %s" queryStr
+        printfn "Schema operation query: %s" queryStr
         executeNonQuery queryStr

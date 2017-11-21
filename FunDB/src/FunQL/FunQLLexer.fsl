@@ -2,38 +2,11 @@
 
 module internal FunWithFlags.FunDB.FunQL.Lexer
 
-open System.Text
+open System
 open Microsoft.FSharp.Text.Lexing
 
-open FunWithFlags.FunDB.SQL
+open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL
-
-let newline (lexbuf: LexBuffer<_>) =
-    lexbuf.StartPos <- lexbuf.StartPos.NextLine
-
-let parseString (quoteChar: char) (lexbuf: LexBuffer<_>) =
-    let strBuilder = new StringBuilder(lexbuf.LexemeLength)
-    let rec parseChar i =
-        if i < lexbuf.LexemeLength - 1 then
-            let c = lexbuf.LexemeChar i
-            if c = '\\' then
-                let sp = lexbuf.LexemeChar (i + 1)
-                ignore <|
-                    match sp with
-                        | '\\' -> strBuilder.Append '\\'
-                        | 't' -> strBuilder.Append '\t'
-                        | 'r' -> strBuilder.Append '\r'
-                        | 'n' -> strBuilder.Append '\n'
-                        | _ -> if sp = quoteChar
-                               then strBuilder.Append quoteChar
-                               else failwith (sprintf "Invalid escape sequence: \\%c" sp)
-                parseChar (i + 2)
-            else
-                ignore <| strBuilder.Append c
-                parseChar (i + 1)
-
-    parseChar 1 // Skip double quotes
-    strBuilder.ToString()
 
 }
 
@@ -73,11 +46,10 @@ let z = ['Z' 'z']
 rule tokenstream = parse
 
 // Atoms
-| ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> System.String |> int) }
+| ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> String |> int) }
 // FIXME: Add floats
-| "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.ID(parseString '\"' lexbuf) }
-| "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING(parseString '\'' lexbuf) }
-| "::" { Parser.DOUBLE_COLON }
+| "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.ID(escapedString '\"' lexbuf) }
+| "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING(escapedString '\'' lexbuf) }
 | "{" { Parser.LEFT_BRACE }
 | "}" { Parser.RIGHT_BRACE }
 | "[" { Parser.LEFT_BRACKET }
@@ -113,10 +85,12 @@ rule tokenstream = parse
 | i n t { Parser.INT_TYPE }
 | s t r i n g { Parser.STRING_TYPE }
 | b o o l { Parser.BOOL_TYPE }
+| d a t e t i m e { Parser.DATETIME_TYPE }
+| d a t e { Parser.DATE_TYPE }
 | r e f e r e n c e { Parser.REFERENCE_TYPE }
 
 // Unescaped ids
-| ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID((System.String lexbuf.Lexeme).ToLower()) }
+| ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID((String lexbuf.Lexeme).ToLower()) }
 
 // Whitespace
 | whitespace { tokenstream lexbuf }

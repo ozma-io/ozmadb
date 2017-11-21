@@ -6,7 +6,6 @@ open YC.PrettyPrinter.StructuredFormat
 
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.SQL.Utils
-open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.FunQL.AST
 
 let rec internal aboveTagListL tagger = function
@@ -41,7 +40,7 @@ let rec internal ppQuery query =
     let maybeWhere =
         match query.where with
             | None -> emptyL
-            | Some(whereE) -> wordL "WHERE" @@- ppValueExpr whereE
+            | Some(whereE) -> wordL "WHERE" @@- ppFieldExpr whereE
 
     let maybeOrderBy =
         if Array.isEmpty query.orderBy
@@ -61,28 +60,28 @@ let rec internal ppQuery query =
 
 and internal ppFrom = function
     | FEntity(e) -> wordL <| e.ToString ()
-    | FJoin(jt, e1, e2, where) -> ppFrom e1 @@ (wordL (jt.ToString ()) ++ wordL "JOIN") @@ ppFrom e2 @@ (wordL "ON" ++ ppValueExpr where)
+    | FJoin(jt, e1, e2, where) -> ppFrom e1 @@ (wordL (jt.ToString ()) ++ wordL "JOIN") @@ ppFrom e2 @@ (wordL "ON" ++ ppFieldExpr where)
     | FSubExpr(q, name) -> bracketL (ppQuery q) @@ (wordL "AS" ++ wordL (name.ToString ()))
 
-and internal ppValueExpr = function
-    | WValue(v) -> wordL <| v.ToString ()
-    | WColumn(c) -> wordL <| c.ToString ()
-    | WNot(a) -> wordL "NOT" ++ bracketL (ppValueExpr a)
-    | WConcat(a, b) -> bracketL (ppValueExpr a) ++ wordL "||" ++ bracketL (ppValueExpr b)
-    | WEq(a, b) -> bracketL (ppValueExpr a) ++ wordL "=" ++ bracketL (ppValueExpr b)
-    | WIn(a, b) -> bracketL (ppValueExpr a) ++ wordL "IN" ++ bracketL (ppValueExpr b)
-    | WAnd(a, b) -> bracketL (ppValueExpr a) ++ wordL "AND" ++ bracketL (ppValueExpr b)
-    | WFunc(name, args) -> wordL (renderSqlName name) >|< bracketL (args |> Array.toSeq |> Seq.map ppValueExpr |> Seq.toList |> commaListL)
-    | WCast(a, typ) -> bracketL (ppValueExpr a) ++ wordL "::" ++ wordL (typ.ToString ())
+and internal ppFieldExpr = function
+    | FEValue(v) -> wordL <| v.ToString ()
+    | FEColumn(c) -> wordL <| c.ToString ()
+    | FENot(a) -> wordL "NOT" ++ bracketL (ppFieldExpr a)
+    | FEConcat(a, b) -> bracketL (ppFieldExpr a) ++ wordL "||" ++ bracketL (ppFieldExpr b)
+    | FEEq(a, b) -> bracketL (ppFieldExpr a) ++ wordL "=" ++ bracketL (ppFieldExpr b)
+    | FEIn(a, arr) -> bracketL (ppFieldExpr a) ++ wordL "IN" ++ bracketL (arr |> Seq.map ppFieldExpr |> Seq.toList |> commaListL)
+    | FEAnd(a, b) -> bracketL (ppFieldExpr a) ++ wordL "AND" ++ bracketL (ppFieldExpr b)
 
 and internal ppResult = function
     | RField(f) -> wordL <| f.ToString ()
-    | RExpr(e, name) -> bracketL (ppValueExpr e) @@ (wordL "AS" ++ wordL (name.ToString ()))
+    | RExpr(e, name) -> bracketL (ppFieldExpr e) @@ (wordL "AS" ++ wordL (name.ToString ()))
 
 and internal ppFieldType = function
     | FTInt -> wordL "int"
     | FTString -> wordL "string"
     | FTBool -> wordL "bool"
+    | FTDateTime -> wordL "datetime"
+    | FTDate -> wordL "date"
     | FTReference(e) -> wordL "reference" ++ wordL (e.ToString ())
 
 let QueryToString width q = print width <| ppQuery q

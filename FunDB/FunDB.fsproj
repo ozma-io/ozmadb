@@ -13,29 +13,28 @@
   <ItemGroup>
     <Compile Include="src/Utils.fs" />
     <Compile Include="src/Attribute.fs" />
+    <Compile Include="src/Parsing.fs" />
 
     <Compile Include="src/SQL/Utils.fs" />
-    <Compile Include="src/SQL/Value.fs" />
     <Compile Include="src/SQL/AST.fs" />
-    <Compile Include="src/SQL/Parse.fs" />
+    <FsYacc Include="src/SQL/SQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parser --internal" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParser.fs" />
+    <FsLex Include="src/SQL/SQLLexer.fsl" OtherFlags="--unicode" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/SQLLexer.fs" />
+    <Compile Include="src/SQL/Qualifier.fs" />
     <Compile Include="src/SQL/Render.fs" />
     <Compile Include="src/SQL/Query.fs" />
     <Compile Include="src/SQL/Migration.fs" />
+    <Compile Include="src/SQL/Meta.fs" />
 
     <Compile Include="src/FunQL/AST.fs" />
-    <FsYacc Include="src/FunQL/Parser.fsy">
-      <OtherFlags>--module FunWithFlags.FunDB.FunQL.Parser --internal</OtherFlags>
-    </FsYacc>
-    <Compile Include="$(RootIntermediateOutputPath)/gen/Parser.fs" />
-    <FsLex Include="src/FunQL/Lexer.fsl">
-      <OtherFlags>--unicode</OtherFlags>
-    </FsLex>
-    <Compile Include="$(RootIntermediateOutputPath)/gen/Lexer.fs" />
+    <FsYacc Include="src/FunQL/FunQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parser --internal" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParser.fs" />
+    <FsLex Include="src/FunQL/FunQLLexer.fsl" OtherFlags="--unicode" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLexer.fs" />
     <Compile Include="src/FunQL/Qualifier.fs" />
     <Compile Include="src/FunQL/Compiler.fs" />
     <Compile Include="src/FunQL/PrettyPrinter.fs" />
-
-    <Compile Include="src/SQL/Meta.fs" />
     <Compile Include="src/FunQL/Meta.fs" />
 
     <Compile Include="src/View.fs" />

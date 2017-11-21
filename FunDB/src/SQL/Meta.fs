@@ -3,27 +3,20 @@ module internal FunWithFlags.FunDB.SQL.Meta
 open Microsoft.FSharp.Text.Lexing
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Query
-open FunWithFlags.FunDB.SQL.Parse
-// XXX: We use FunQL parser to parse value expressions
-open FunWithFlags.FunDB.FunQL
+open FunWithFlags.FunDB.SQL.Parser
+open FunWithFlags.FunDB.SQL.Qualifier
 
-let rec localizeDefaultExpr = function
-    | WValue(v) -> WValue(v)
-    | WColumn(_) -> failwith "Column references are not supported in default values"
-    | WNot(a) -> WNot(localizeDefaultExpr a)
-    | WConcat(a, b) -> WConcat(localizeDefaultExpr a, localizeDefaultExpr b)
-    | WEq(a, b) -> WEq(localizeDefaultExpr a, localizeDefaultExpr b)
-    | WIn(a, b) -> WIn(localizeDefaultExpr a, localizeDefaultExpr b)
-    | WAnd(a, b) -> WAnd(localizeDefaultExpr a, localizeDefaultExpr b)
-    | WFunc(name, args) -> WFunc(name, Array.map localizeDefaultExpr args)
-    | WCast(a, typ) -> WCast(localizeDefaultExpr a, typ)
+let parseYesNo (str : string) =
+    match str.ToLower() with
+        | "yes" -> Some(true)
+        | "no" -> Some(false)
+        | _ -> None
 
 let makeColumnMeta (dataType : string) (columnDefault : string) (isNullable : string) =
     match parseValueType dataType with
-        | None -> failwith "Unknown PostgreSQL value type"
+        | None -> failwith (sprintf "Unknown PostgreSQL value type: %s" dataType)
         | Some(typ) ->
             match parseYesNo isNullable with
                 | None -> failwith "Invalid PostgreSQL YES/NO value"
@@ -35,15 +28,16 @@ let makeColumnMeta (dataType : string) (columnDefault : string) (isNullable : st
                               None
                           else
                               let lexbuf = LexBuffer<char>.FromString columnDefault
-                              Some(Parser.valueExpr Lexer.tokenstream lexbuf |> localizeDefaultExpr)
+                              let vexpr = Parser.valueExpr Lexer.tokenstream lexbuf
+                              Some(vexpr |> qualifyValueExpr |> localizeParsedValueExpr)
                     }
 
-let makeTableFromName (schema : string) (table : string) =
+let makeTableFromName (schema : string) (table : string) : Table =
     { schema = Some(schema);
       name = table;
     }
 
-let makeColumnFromName (schema : string) (table : string) (column : string) =
+let makeColumnFromName (schema : string) (table : string) (column : string) : Column =
     { table = makeTableFromName schema table;
       name = column;
     }
@@ -59,16 +53,16 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
     let constraintColumnUsageTable = infoTable "constraint_column_usage"
     let sequencesTable = infoTable "sequences"
     let systemSchemas = set [| "pg_catalog"; "public"; "information_schema" |]
-    let systemSchemasValue = WValue(VArray(systemSchemas |> Set.toSeq |> Seq.map VString |> Seq.toArray))
+    let systemSchemasValue = systemSchemas |> Set.toSeq |> Seq.map (fun x -> VEValue(VString(x))) |> Seq.toArray
     
-    let schemasWhere = WNot(WIn(WColumn({ table = schemataTable; name = "schema_name"; }), systemSchemasValue))
+    let schemasWhere = VENot(VEIn(VEColumn({ table = schemataTable; name = "schema_name"; }), systemSchemasValue))
     let schemasRes = query.Query { simpleSelect [| "schema_name" |] schemataTable with
                                        where = Some(schemasWhere);
                                  }
     let schemas = schemasRes |> Array.toSeq |> Seq.map (fun x -> x.[0]) |> Set.ofSeq
-    let schemasValue = WValue(VArray(schemas |> Set.toSeq |> Seq.map VString |> Seq.toArray))
+    let schemasValue = schemas |> Set.toSeq |> Seq.map (fun x -> VEValue(VString(x))) |> Seq.toArray
 
-    let tablesWhere = WIn(WColumn({ table = tablesTable; name = "table_schema"; }), schemasValue)
+    let tablesWhere = VEIn(VEColumn({ table = tablesTable; name = "table_schema"; }), schemasValue)
     let tablesRes = query.Query { simpleSelect [| "table_schema"; "table_name"; "table_type" |] tablesTable with
                                       where = Some(tablesWhere);
                                 }
@@ -78,7 +72,7 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
         x.[1]
     let tables = tablesRes |> Array.toSeq |> Seq.groupBy (fun x -> x.[0]) |> Seq.map (fun (k, xs) -> (k, xs |> Seq.map tableExtract |> Set.ofSeq)) |> Map.ofSeq
 
-    let columnsWhere = WIn(WColumn({ table = columnsTable; name = "table_schema"; }), schemasValue)
+    let columnsWhere = VEIn(VEColumn({ table = columnsTable; name = "table_schema"; }), schemasValue)
     let columnsRes = query.Query { simpleSelect [| "table_schema"; "table_name"; "column_name"; "column_default"; "is_nullable"; "data_type" |] columnsTable with
                                        where = Some(columnsWhere);
                                  }
@@ -89,7 +83,9 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
 
     // NOTE: Constraint names are unique per schema.
     // NOTE: We assume that constraint_schema = table_schema always.
-    let constraintsWhere = WIn(WColumn({ table = constraintsTable; name = "constraint_schema"; }), schemasValue)
+    // XXX: We skip CHECK constraints as we don't know how to handle them yet. We can do this via check_constraints table.
+    let constraintsWhere = VEAnd(VEIn(VEColumn({ table = constraintsTable; name = "constraint_schema"; }), schemasValue),
+                                 VENot(VEEq(VEColumn({ table = constraintsTable; name = "constraint_type"; }), VEValue(VString("CHECK")))))
     let constraintsRes = query.Query { simpleSelect [| "constraint_schema"; "constraint_name"; "table_name"; "constraint_type" |] constraintsTable with
                                            where = Some(constraintsWhere);
                                      }
@@ -98,7 +94,7 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
                       |> Seq.map (fun (k, xs) -> (k, xs |> Seq.map (fun x -> (x.[1], (x.[2], x.[3] |> parseConstraintType |> Option.get))) |> Map.ofSeq))
                       |> Map.ofSeq
 
-    let keyColumnsWhere = WIn(WColumn({ table = keyColumnsTable; name = "constraint_schema"; }), schemasValue)
+    let keyColumnsWhere = VEIn(VEColumn({ table = keyColumnsTable; name = "constraint_schema"; }), schemasValue)
     let keyColumnsRes = query.Query { simpleSelect [| "constraint_schema"; "constraint_name"; "column_name" |] keyColumnsTable with
                                           where = Some(keyColumnsWhere);
                                     }
@@ -107,7 +103,7 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
                      |> Seq.map (fun (k, xs) -> (k, xs |> Seq.map (fun x -> LocalColumn(x.[2])) |> Set.ofSeq))
                      |> Map.ofSeq
 
-    let refColumnsWhere = WIn(WColumn({ table = constraintColumnUsageTable; name = "constraint_schema"; }), schemasValue)
+    let refColumnsWhere = VEIn(VEColumn({ table = constraintColumnUsageTable; name = "constraint_schema"; }), schemasValue)
     let refColumnsRes = query.Query { simpleSelect [| "constraint_schema"; "constraint_name"; "table_schema"; "table_name"; "column_name" |] constraintColumnUsageTable with
                                           where = Some(refColumnsWhere);
                                     }
@@ -116,7 +112,7 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
                      |> Seq.map (fun (k, xs) -> (k, xs |> Seq.map (fun x -> makeColumnFromName x.[2] x.[3] x.[4]) |> Set.ofSeq))
                      |> Map.ofSeq
 
-    let sequencesWhere = WIn(WColumn({ table = sequencesTable; name = "sequence_schema"; }), schemasValue)
+    let sequencesWhere = VEIn(VEColumn({ table = sequencesTable; name = "sequence_schema"; }), schemasValue)
     let sequencesRes = query.Query { simpleSelect [| "sequence_schema"; "sequence_name" |] sequencesTable with
                                          where = Some(sequencesWhere);
                                    }

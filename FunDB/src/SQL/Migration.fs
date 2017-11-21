@@ -2,7 +2,6 @@ module internal FunWithFlags.FunDB.SQL.Migration
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.AST
-open FunWithFlags.FunDB.SQL.Value
 
 type MigrationPlan = SchemaOperation seq
 
@@ -29,7 +28,7 @@ let deleteBuildSchema (schemaName : string) (schemaMeta : SchemaMeta) : Migratio
 let migrateBuildTable (table : Table) (fromMeta : TableMeta) (toMeta : TableMeta) : MigrationPlan =
     seq { for KeyValue(columnName, columnMeta) in toMeta.columns do
               let obj = columnFromLocal table columnName
-              match Map.tryFind columnName toMeta.columns with
+              match Map.tryFind columnName fromMeta.columns with
                   | None -> yield SOCreateColumn(obj, columnMeta)
                   | Some(oldColumnMeta) ->
                       if oldColumnMeta <> columnMeta then
@@ -53,7 +52,7 @@ let migrateBuildSchema (schemaName : string) (fromMeta : SchemaMeta) (toMeta : S
                   | Some(oldTableMeta) -> yield! migrateBuildTable obj oldTableMeta tableMeta
           for sequenceName in toMeta.sequences do
               let obj = { schema = Some(schemaName); name = sequenceName; }
-              if Set.contains sequenceName fromMeta.sequences then
+              if not (Set.contains sequenceName fromMeta.sequences) then
                   yield SOCreateSequence(obj)
           for KeyValue(constraintName, ((tableName, constraintType) as constraintMeta)) in toMeta.constraints do
               let obj = { schema = Some(schemaName); name = constraintName; }
@@ -103,7 +102,9 @@ let schemaOperationOrder = function
     | SOCreateTable(_) -> 6
     | SOCreateSequence(_) -> 7
     | SOCreateColumn(_, _) -> 8
-    | SOCreateConstraint(_, _, _) -> 9
+    | SOCreateConstraint(_, _, CMPrimaryKey(_)) -> 9
+    | SOCreateConstraint(_, _, CMUnique(_)) -> 10
+    | SOCreateConstraint(_, _, CMForeignKey(_, _)) -> 11
 
 let migrateDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =
     migrateBuildDatabase fromMeta toMeta |> Seq.sortBy schemaOperationOrder

@@ -5,7 +5,6 @@ open Microsoft.EntityFrameworkCore
 
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.SQL.Utils
-open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
 
@@ -124,7 +123,7 @@ type Qualifier internal (db : DatabaseContext) =
         { attributes = query.attributes;
           results = Array.map (fun (res, attr) -> (qualifyResult newMapping res, attr)) query.results;
           from = qFrom;
-          where = Option.map (qualifyValueExpr newMapping) query.where;
+          where = Option.map (qualifyFieldExpr newMapping) query.where;
           orderBy = Array.map (fun (field, ord) -> (lookupField newMapping field, ord)) query.orderBy;
         }
 
@@ -135,32 +134,32 @@ type Qualifier internal (db : DatabaseContext) =
         | FJoin(jt, e1, e2, where) ->
             let (newMapping1, newE1) = qualifyFrom mapping e1
             let (newMapping2, newE2) = qualifyFrom newMapping1 e2
-            let newValueExpr = qualifyValueExpr newMapping2 where
-            (newMapping2, FJoin(jt, newE1, newE2, newValueExpr))
+            let newFieldExpr = qualifyFieldExpr newMapping2 where
+            (newMapping2, FJoin(jt, newE1, newE2, newFieldExpr))
         | FSubExpr(q, name) ->
             let newQ = qualifyQuery mapping q
             let fields = newQ.results |> Seq.map (fun (res, attr) -> resultName res) |> Set.ofSeq
             (Map.add { schema = None; name = name; } (QMSubquery(name, fields)) mapping, FSubExpr(newQ, name))
                 
-    and qualifyValueExpr mapping = function
-        | WValue(v) -> WValue(v)
-        | WColumn(f) -> WColumn(lookupField mapping f)
-        | WNot(a) -> WNot(qualifyValueExpr mapping a)
-        | WConcat(a, b) -> WConcat(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
-        | WEq(a, b) -> WEq(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
-        | WIn(a, b) -> WIn(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
-        | WAnd(a, b) -> WAnd(qualifyValueExpr mapping a, qualifyValueExpr mapping b)
-        | WFunc(name, args) -> WFunc(name, Array.map (qualifyValueExpr mapping) args)
-        | WCast(a, typ) -> WCast(qualifyValueExpr mapping a, typ)
+    and qualifyFieldExpr mapping = function
+        | FEValue(v) -> FEValue(v)
+        | FEColumn(f) -> FEColumn(lookupField mapping f)
+        | FENot(a) -> FENot(qualifyFieldExpr mapping a)
+        | FEConcat(a, b) -> FEConcat(qualifyFieldExpr mapping a, qualifyFieldExpr mapping b)
+        | FEEq(a, b) -> FEEq(qualifyFieldExpr mapping a, qualifyFieldExpr mapping b)
+        | FEIn(a, arr) -> FEIn(qualifyFieldExpr mapping a, Array.map (qualifyFieldExpr mapping) arr)
+        | FEAnd(a, b) -> FEAnd(qualifyFieldExpr mapping a, qualifyFieldExpr mapping b)
 
     and qualifyResult mapping = function
         | RField(f) -> RField(lookupField mapping f)
-        | RExpr(e, name) -> RExpr(qualifyValueExpr mapping e, name)
+        | RExpr(e, name) -> RExpr(qualifyFieldExpr mapping e, name)
 
     and qualifyFieldType mapping = function
         | FTInt -> FTInt
         | FTString -> FTString
         | FTBool -> FTBool
+        | FTDateTime -> FTDateTime
+        | FTDate -> FTDate
         | FTReference(e) ->
             let (entity, _) = lookupDbEntity mapping e
             FTReference(QDEEntity(entity))

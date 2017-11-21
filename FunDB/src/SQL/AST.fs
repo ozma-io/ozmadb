@@ -1,7 +1,10 @@
 module internal FunWithFlags.FunDB.SQL.AST
 
+open System
+open System.Globalization
+open System.Runtime.InteropServices
+
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.Utils
 
 type ColumnName = string
@@ -10,7 +13,7 @@ type SequenceName = string
 type ConstraintName = string
 type SchemaName = string
 
-type LocalColumn = LocalColumn of string
+type LocalColumn = LocalColumn of ColumnName
     with
         override this.ToString () =
             match this with
@@ -41,23 +44,132 @@ let columnFromLocal (table : Table) (column : LocalColumn) =
     match column with
         | LocalColumn(name) -> { table = table; name = name; }
 
-type SortOrder = Asc | Desc
+type ValueType =
+    | VTInt
+    | VTFloat
+    | VTString
+    | VTBool
+    | VTDateTime
+    | VTDate
+    | VTObject
+    with
+        override this.ToString () =
+            match this with
+                | VTInt -> "bigint"
+                | VTFloat -> "double precision"
+                | VTString -> "text"
+                | VTBool -> "bool"
+                | VTDateTime -> "timestamp without timezone"
+                | VTDate -> "date"
+                | VTObject -> "regclass"
 
-type JoinType = Inner | Left | Right | Full
+let parseValueType (str : string) =
+    match str.ToLower() with
+        | "bigint" -> Some(VTInt)
+        | "double precision" -> Some(VTFloat)
+        | "text" -> Some(VTString)
+        | "boolean" -> Some(VTBool)
+        | "timestamp without timezone" -> Some(VTDateTime)
+        | "date" -> Some(VTDate)
+        | "regclass" -> Some(VTObject)
+        | _ -> None
+
+type ObjectRef = ObjectRef of string array
+    with
+        override this.ToString () =
+            match this with
+                | ObjectRef (arr) -> arr |> Array.toSeq |> Seq.map renderSqlName |> String.concat "."
+
+type ColumnRef =
+    { tableRef: Table option;
+      name: ColumnName;
+    } with
+        override this.ToString () =
+            match this.tableRef with
+                | None -> renderSqlName this.name
+                | Some(entity) -> sprintf "%s.%s" (entity.ToString ()) (renderSqlName this.name)
+
+let columnFromObjectRef = function
+    | ObjectRef [| schema; table; col |] -> Some({ tableRef = Some({ schema = Some(schema); name = table; }); name = col; })
+    | ObjectRef [| table; col |] -> Some({ tableRef = Some({ schema = None; name = table; }); name = col; })
+    | ObjectRef [| col |] -> Some({ tableRef = None; name = col; })
+    | _ -> None
+
+type Value<'o> =
+    | VInt of int
+    | VFloat of double
+    | VString of string
+    | VBool of bool
+    | VDateTime of DateTime
+    | VDate of DateTime
+    | VObject of 'o
+    | VNull
+    with
+        override this.ToString () =
+            match this with
+                | VInt(i) -> i.ToString ()
+                | VFloat(f) -> invalidOp "Not supported"
+                | VString(s) -> renderSqlString s
+                | VBool(b) -> renderBool b
+                | VDateTime(dt) -> dt.ToString("O") |> renderSqlString
+                | VDate(d) -> d.ToString("d", CultureInfo.InvariantCulture) |> renderSqlString
+                | VObject(obj) -> sprintf "%s :: regclass" (obj.ToString () |> renderSqlString)
+                | VNull -> "NULL"
+
+type ParsedValue = Value<string>
+type QualifiedValue = Value<ObjectRef>
+
+type ValueExpr<'f, 'o> =
+    | VEValue of Value<'o>
+    | VEColumn of 'f
+    | VENot of ValueExpr<'f, 'o>
+    | VEConcat of ValueExpr<'f, 'o> * ValueExpr<'f, 'o>
+    | VEEq of ValueExpr<'f, 'o> * ValueExpr<'f, 'o>
+    | VEIn of ValueExpr<'f, 'o> * (ValueExpr<'f, 'o> array)
+    | VEAnd of ValueExpr<'f, 'o> * ValueExpr<'f, 'o>
+    | VEFunc of string * (ValueExpr<'f, 'o> array)
+    | VECast of ValueExpr<'f, 'o> * ValueType
+
+type PartialValueExpr = ValueExpr<ColumnRef, string>
+type ParsedValueExpr = ValueExpr<ColumnRef, ObjectRef>
+type QualifiedValueExpr = ValueExpr<Column, ObjectRef>
+type LocalValueExpr = ValueExpr<LocalColumn, ObjectRef>
+
+type SortOrder =
+    | Asc
+    | Desc
+    with
+        override this.ToString () =
+            match this with
+                | Asc -> "ASC"
+                | Desc -> "DESC"
+
+type JoinType =
+    | Inner
+    | Left
+    | Right
+    | Full
+    with
+        override this.ToString () =
+            match this with
+                | Inner -> "INNER"
+                | Left -> "LEFT"
+                | Right -> "RIGHT"
+                | Full -> "FULL"
 
 and FromExpr =
     | FTable of Table
-    | FJoin of JoinType * FromExpr * FromExpr * ValueExpr<Column>
+    | FJoin of JoinType * FromExpr * FromExpr * QualifiedValueExpr
     | FSubExpr of SelectExpr * TableName
 
 and SelectedColumn =
     | SCColumn of Column
-    | SCExpr of ValueExpr<Column> * TableName
+    | SCExpr of QualifiedValueExpr * TableName
 
 and SelectExpr =
     { columns: SelectedColumn array;
       from: FromExpr;
-      where: ValueExpr<Column> option;
+      where: QualifiedValueExpr option;
       orderBy: (Column * SortOrder) array;
       limit: int option;
       offset: int option;
@@ -74,19 +186,19 @@ let simpleSelect (columns : string seq) (table : Table) : SelectExpr =
 
 type InsertExpr =
     { name: Table;
-      columns: string array;
-      values: ValueExpr<LocalColumn> array array;
+      columns: ColumnName array;
+      values: LocalValueExpr array array;
     }
 
 type UpdateExpr =
     { name: Table;
-      columns: (string * ValueExpr<LocalColumn>) array;
-      where: ValueExpr<LocalColumn> option;
+      columns: (ColumnName * LocalValueExpr) array;
+      where: LocalValueExpr option;
     }
 
 type DeleteExpr =
     { name: Table;
-      where: ValueExpr<LocalColumn> option;
+      where: LocalValueExpr option;
     }
 
 // Meta
@@ -94,13 +206,20 @@ type DeleteExpr =
 type ColumnMeta =
     { colType: ValueType;
       nullable: bool;
-      defaultValue: ValueExpr<LocalColumn> option;
+      defaultValue: LocalValueExpr option;
     }
 
 type ConstraintType =
     | CTUnique
     | CTPrimaryKey
     | CTForeignKey
+
+let parseConstraintType (str : string) =
+    match str.ToUpper() with
+        | "UNIQUE" -> Some(CTUnique)
+        | "PRIMARY KEY" -> Some(CTPrimaryKey)
+        | "FOREIGN KEY" -> Some(CTForeignKey)
+        | _ -> None
 
 // XXX: Simplified model: no arbitrary expressions in constraints
 type ConstraintMeta =

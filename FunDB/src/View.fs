@@ -4,12 +4,11 @@ open System.Runtime.InteropServices
 open System.Linq
 open System.Collections.Generic
 open Microsoft.FSharp.Text.Lexing
+open YC.PrettyPrinter.Pretty
 
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.FunQL
-open FunWithFlags.FunDB.SQL.Parse
-open FunWithFlags.FunDB.SQL.Value
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Meta
@@ -17,6 +16,8 @@ open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier
 open FunWithFlags.FunDB.FunQL.Meta
+open FunWithFlags.FunDB.FunQL.Compiler
+open FunWithFlags.FunDB.FunQL.PrettyPrinter
 
 type EntityId = int
 
@@ -79,13 +80,12 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
           attributes = new AttributeMap()
         }
 
-    let realizeFields (entity : Entity) (row : IDictionary<string, string>) =
+    let realizeFields (entity : Entity) (row : IDictionary<string, string>) : (ColumnName * LocalValueExpr) seq =
         db.Entry(entity).Collection("Fields").Load()
 
         let toValueType name =
             let lexbuf = LexBuffer<char>.FromString name
-            let ftype = Parser.fieldType Lexer.tokenstream lexbuf
-            Compiler.compileValueType ftype
+            Parser.fieldType Lexer.tokenstream lexbuf
             
         let types = entity.Fields |> Seq.map (fun f -> (f.Name, (f, toValueType f.Type))) |> Map.ofSeq
 
@@ -94,12 +94,12 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                 let (field, ftype) = types.[k]
                 let value =
                     if field.Nullable && v = null
-                    then VNull
+                    then FNull
                     else
-                        match parseSimpleValue ftype v with
+                        match Parser.simpleFieldValue ftype v with
                             | Some(r) -> r
                             | None -> raise <| UserViewError(sprintf "Invalid value of field %s" k)
-                (k, WValue(value))
+                (k, VEValue(compileFieldValue value))
 
         row |> Seq.map toValue
 
@@ -129,8 +129,8 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                     null
                 else
                     let lexbufDefault = LexBuffer<char>.FromString field.Default
-                    let defVal = Parser.value Lexer.tokenstream lexbufDefault
-                    defVal.ToString ()
+                    let defVal = Parser.fieldExpr Lexer.tokenstream lexbufDefault
+                    print 80 <| ppFieldExpr defVal
             { field = field;
               defaultValue = defaultValue;
             }
@@ -142,7 +142,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
 
         let (columns, values) = realizeFields entity row |> List.ofSeq |> List.unzip
 
-        dbQuery.Insert { name = Compiler.makeEntity entity;
+        dbQuery.Insert { name = makeEntity entity;
                          columns = Array.ofList columns;
                          values = [| Array.ofList values |];
                        }
@@ -151,16 +151,16 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         db.Entry(entity).Reference("Schema").Load()
 
         let values = realizeFields entity row |> Array.ofSeq
-        dbQuery.Update { name = Compiler.makeEntity entity;
+        dbQuery.Update { name = makeEntity entity;
                          columns = values;
-                         where = Some(WEq(WColumn(LocalColumn("Id")), WValue(VInt(id))));
+                         where = Some(VEEq(VEColumn(LocalColumn("Id")), VEValue(VInt(id))));
                        }
 
     member this.DeleteEntry (entity : Entity, id : int) =
         db.Entry(entity).Reference("Schema").Load()
 
-        dbQuery.Delete { name = Compiler.makeEntity entity;
-                         where = Some(WEq(WColumn(LocalColumn("Id")), WValue(VInt(id))));
+        dbQuery.Delete { name = makeEntity entity;
+                         where = Some(VEEq(VEColumn(LocalColumn("Id")), VEValue(VInt(id))));
                        }
 
     // XXX: make this atomic!
@@ -168,4 +168,6 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         let toMeta = buildFunMeta db qualifier
         let fromMeta = getDatabaseMeta dbQuery
         let plan = migrateDatabase fromMeta toMeta
+        printfn "From meta: %s" (fromMeta.ToString ())
+        printfn "To meta: %s" (toMeta.ToString ())
         Seq.iter dbQuery.ApplyOperation plan

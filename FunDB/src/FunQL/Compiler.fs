@@ -1,10 +1,9 @@
 module internal FunWithFlags.FunDB.FunQL.Compiler
 
 open FunWithFlags.FunCore
-open FunWithFlags.FunDB.SQL.Value
-open FunWithFlags.FunDB.SQL
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier.Name
+open FunWithFlags.FunDB.SQL
 
 let makeEntity (fentity : Entity) : AST.Table =
     let schema =
@@ -25,23 +24,25 @@ let compileEntity = function
 
 let compileField = function
     | QFField(field) ->
-        { AST.Column.table = makeEntity field.Entity;
+        { AST.table = makeEntity field.Entity;
           AST.Column.name = field.Name;
         }
     | QFEntityId(entity) ->
-        { AST.Column.table = makeEntity entity;
+        { AST.table = makeEntity entity;
           AST.Column.name = "Id";
         }
     | QFSubquery(entityName, fieldName) ->
-        { AST.Column.table = { schema = None; name = entityName; };
+        { AST.table = { schema = None; name = entityName; };
           AST.Column.name = fieldName;
         }
 
-let compileValueType = function
-    | FTInt -> VTInt
-    | FTString -> VTString
-    | FTBool -> VTBool
-    | FTReference(_) -> VTInt
+let compileFieldType = function
+    | FTInt -> AST.VTInt
+    | FTString -> AST.VTString
+    | FTBool -> AST.VTBool
+    | FTDateTime -> AST.VTDateTime
+    | FTDate -> AST.VTDate
+    | FTReference(_) -> AST.VTInt
 
 let compileOrder = function
     | Asc -> AST.Asc
@@ -53,21 +54,27 @@ let compileJoin = function
     | Inner -> AST.Inner
     | Outer -> AST.Full
 
-let rec compileValueExpr = function
-    | WValue(v) -> WValue(v)
-    | WColumn(c) -> WColumn(compileField c)
-    | WNot(a) -> WNot(compileValueExpr a)
-    | WConcat(a, b) -> WConcat(compileValueExpr a, compileValueExpr b)
-    | WEq(a, b) -> WEq(compileValueExpr a, compileValueExpr b)
-    | WIn(a, b) -> WIn(compileValueExpr a, compileValueExpr b)
-    | WAnd(a, b) -> WAnd(compileValueExpr a, compileValueExpr b)
-    | WFunc(name, args) -> WFunc(name, Array.map compileValueExpr args)
-    | WCast(a, typ) -> WCast(compileValueExpr a, typ)
+let compileFieldValue = function
+    | FInt(i) -> AST.VInt(i)
+    | FString(s) -> AST.VString(s)
+    | FBool(b) -> AST.VBool(b)
+    | FDateTime(dt) -> AST.VDateTime(dt)
+    | FDate(d) -> AST.VDate(d)
+    | FNull -> AST.VNull
+
+let rec compileFieldExpr = function
+    | FEValue(v) -> AST.VEValue(compileFieldValue v)
+    | FEColumn(c) -> AST.VEColumn(compileField c)
+    | FENot(a) -> AST.VENot(compileFieldExpr a)
+    | FEConcat(a, b) -> AST.VEConcat(compileFieldExpr a, compileFieldExpr b)
+    | FEEq(a, b) -> AST.VEEq(compileFieldExpr a, compileFieldExpr b)
+    | FEIn(a, arr) -> AST.VEIn(compileFieldExpr a, Array.map compileFieldExpr arr)
+    | FEAnd(a, b) -> AST.VEAnd(compileFieldExpr a, compileFieldExpr b)
 
 let rec compileQuery query =
     { AST.columns = Array.map (fun (res, attr) -> compileResult res) query.results;
       AST.from = compileFrom query.from;
-      AST.where = Option.map compileValueExpr query.where;
+      AST.where = Option.map compileFieldExpr query.where;
       AST.orderBy = Array.map (fun (field, ord) -> (compileField field, compileOrder ord)) query.orderBy;
       // FIXME: support them!
       AST.limit = None;
@@ -76,9 +83,9 @@ let rec compileQuery query =
 
 and compileFrom = function
     | FEntity(e) -> AST.FTable(compileEntity e)
-    | FJoin(jt, e1, e2, where) -> AST.FJoin(compileJoin jt, compileFrom e1, compileFrom e2, compileValueExpr where)
+    | FJoin(jt, e1, e2, where) -> AST.FJoin(compileJoin jt, compileFrom e1, compileFrom e2, compileFieldExpr where)
     | FSubExpr(q, name) -> AST.FSubExpr(compileQuery q, name)
 
 and compileResult = function
     | RField(f) -> AST.SCColumn(compileField f)
-    | RExpr(e, name) -> AST.SCExpr(compileValueExpr e, name)
+    | RExpr(e, name) -> AST.SCExpr(compileFieldExpr e, name)
