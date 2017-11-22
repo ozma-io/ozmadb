@@ -147,6 +147,9 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                          values = [| Array.ofList values |];
                        }
 
+        if not entity.SchemaId.HasValue then
+                this.Migrate ()
+
     member this.UpdateEntry (entity : Entity, id : int, row : IDictionary<string, string>) =
         db.Entry(entity).Reference("Schema").Load()
 
@@ -156,12 +159,18 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                          where = Some(VEEq(VEColumn(LocalColumn("Id")), VEValue(VInt(id))));
                        }
 
+        if not entity.SchemaId.HasValue then
+                this.Migrate ()
+
     member this.DeleteEntry (entity : Entity, id : int) =
         db.Entry(entity).Reference("Schema").Load()
 
         dbQuery.Delete { name = makeEntity entity;
                          where = Some(VEEq(VEColumn(LocalColumn("Id")), VEValue(VInt(id))));
                        }
+
+        if not entity.SchemaId.HasValue then
+                this.Migrate ()
 
     // XXX: make this atomic!
     member this.Migrate () =
