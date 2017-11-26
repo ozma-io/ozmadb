@@ -8,26 +8,6 @@ open FunWithFlags.FunDB.FunQL.AST
 let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin(joinType, fromExpr1, fromExpr2, whereExpr)
 
-let simpleFieldValue (valType : FieldType<_>) (str : string) : FieldValue option =
-    if str = null
-    then Some(FNull)
-    else
-        try
-            match valType with
-                | FTInt -> Some(FInt(int str))
-                | FTString -> Some(FString(str))
-                | FTBool ->
-                    match str.ToLower() with
-                        | "true" -> Some(FBool(true))
-                        | "false" -> Some(FBool(false))
-                        | _ -> None
-                | FTDateTime -> Some(FDateTime(DateTime.Parse(str)))
-                | FTDate -> Some(FDate(DateTime.Parse(str)))
-                // XXX: Maybe some kind of check here.
-                | FTReference(_) -> Some(FInt(int str))
-        with
-            _ -> None
-
 %}
 
 // Atoms

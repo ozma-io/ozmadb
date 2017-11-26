@@ -45,15 +45,6 @@ type FieldValue =
                 | FDate(d) -> d.ToString("d", CultureInfo.InvariantCulture) |> renderSqlString
                 | FNull -> "NULL"
 
-        member this.ToDisplayString () =
-            match this with
-                | FInt(i) -> i.ToString ()
-                | FString(s) -> s
-                | FBool(b) -> renderBool b
-                | FDateTime(dt) -> dt.ToString ()
-                | FDate(d) -> d.ToString ()
-                | FNull -> ""
-
 type FieldExpr<'c> =
     | FEValue of FieldValue
     | FEColumn of 'c

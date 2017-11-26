@@ -10,6 +10,21 @@ open FunWithFlags.FunDB.SQL.Render
 type QueryConnection (connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
 
+    let typeFromName = function
+        | unknown ->
+            printfn "Unknown type: %s" unknown
+            None
+
+    let convertValue valType value =
+        if value = null
+        then VNull
+        else
+            match valType with
+                | Some(_) ->
+                    printfn "Value type: %s" (value.GetType.ToString ())
+                    VString(value.ToString ())
+                | None -> VString(value.ToString ())
+
     let executeNonQuery queryStr =
         use command = new NpgsqlCommand(queryStr, connection)
         connection.Open()
@@ -23,16 +38,19 @@ type QueryConnection (connectionString : string) =
             connection.Dispose()
 
     // Make it return Values instead of strings.
-    member this.Query (expr : SelectExpr) : string array array =
+    member this.Query (expr : SelectExpr) : ((ValueType option) array) * (QualifiedValue array array) =
         let queryStr = renderSelect expr
         printfn "Select query: %s" queryStr
         use command = new NpgsqlCommand(queryStr, connection)
         connection.Open()
         try
             use reader = command.ExecuteReader()
-            seq { while reader.Read() do
-                      yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i].ToString ()) |> Seq.toArray
+            let types = seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.GetDataTypeName(i) |> typeFromName) |> Seq.toArray
+            let values =
+                seq { while reader.Read() do
+                      yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i] |> convertValue types.[i]) |> Seq.toArray
                 } |> Seq.toArray
+            (types, values)
         finally
             connection.Close()
 

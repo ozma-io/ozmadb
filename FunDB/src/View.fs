@@ -1,5 +1,6 @@
 namespace FunWithFlags.FunDB.View
 
+open System
 open System.Runtime.InteropServices
 open System.Linq
 open System.Collections.Generic
@@ -33,6 +34,7 @@ type ViewColumn =
     internal { name : string;
                field : Field option;
                attributes : AttributeMap;
+               valueType : ValueType option;
              } with
         member this.Name = this.name
         member this.Field =
@@ -44,7 +46,7 @@ type ViewColumn =
 type ViewResult =
     internal { attributes : AttributeMap;
                columns : ViewColumn array;
-               rows : ViewRow array;
+               rows : ViewRow seq;
              } with
         member this.Attributes = this.attributes
         member this.Columns = this.columns
@@ -67,16 +69,47 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             | QualifierError(msg) ->
                 raise <| UserViewError msg
 
-    let toViewColumn (res, attrs) =
+    let toViewColumn valueType (res, attrs) =
         { name = Name.resultName res;
           field = match res with
                       | RField(Name.QFField(f)) -> Some(f)
                       | _ -> None
           attributes = attrs;
+          valueType = valueType;
         }
 
+    let valueToDisplayString = function
+        | VInt(i) -> i.ToString ()
+        | VFloat(f) -> f.ToString ()
+        | VString(s) -> s
+        | VBool(b) -> b.ToString ()
+        | VDateTime(dt) -> dt.ToString ()
+        | VDate(d) -> d.ToString ()
+        | VObject(obj) -> obj.ToString ()
+        | VNull -> null
+
+    let simpleFieldValue (valType : FieldType<_>) (str : string) : FieldValue option =
+        if str = null
+        then Some(FNull)
+        else
+        try
+            match valType with
+                | FTInt -> Some(FInt(int str))
+                | FTString -> Some(FString(str))
+                | FTBool ->
+                    match str.ToLower() with
+                        | "true" -> Some(FBool(true))
+                        | "false" -> Some(FBool(false))
+                        | _ -> None
+                | FTDateTime -> Some(FDateTime(DateTime.Parse(str)))
+                | FTDate -> Some(FDate(DateTime.Parse(str)))
+                // XXX: Maybe some kind of check here.
+                | FTReference(_) -> Some(FInt(int str))
+        with
+            _ -> None
+
     let toViewRow row =
-        { cells = row;
+        { cells = Array.map valueToDisplayString row;
           attributes = new AttributeMap()
         }
 
@@ -96,7 +129,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                     if field.Nullable && v = null
                     then FNull
                     else
-                        match Parser.simpleFieldValue ftype v with
+                        match simpleFieldValue ftype v with
                             | Some(r) -> r
                             | None -> raise <| UserViewError(sprintf "Invalid value of field %s" k)
                 (k, VEValue(compileFieldValue value))
@@ -110,14 +143,15 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         with
             | Failure(msg) -> raise <| UserViewError msg
 
+    // Make this return an IDisposable cursor.
     member this.RunQuery (parsedQuery : ParsedQueryExpr) =
         let queryTree = qualifyQuery parsedQuery
-        let columns = queryTree.results |> Array.map toViewColumn
-        let results = Compiler.compileQuery queryTree |> dbQuery.Query
+        let (types, results) = Compiler.compileQuery queryTree |> dbQuery.Query
+        let columns = queryTree.results |> Array.map2 toViewColumn types
 
         { attributes = queryTree.attributes;
           columns = columns;
-          rows = Array.map toViewRow results;
+          rows = results |> Array.toSeq |> Seq.map toViewRow;
         }
 
     member this.GetTemplate (entity : Entity) =
