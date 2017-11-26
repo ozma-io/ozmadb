@@ -10,15 +10,28 @@ open FunWithFlags.FunDB.SQL.Render
 type QueryConnection (connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
 
-    let convertValue valType value =
-        if value = null
-        then VNull
-        else
-            match valType with
-                | Some(_) ->
-                    printfn "Value type: %s" (value.GetType.ToString ())
-                    VString(value.ToString ())
-                | None -> VString(value.ToString ())
+    let convertValue valType (rawValue : obj) =
+        match (valType, rawValue) with
+            | (_, null) -> VNull
+
+            | (VTInt, (:? byte as value)) -> VInt(int value)
+            | (VTInt, (:? sbyte as value)) -> VInt(int value)
+            | (VTInt, (:? int16 as value)) -> VInt(int value)
+            | (VTInt, (:? uint16 as value)) -> VInt(int value)
+            | (VTInt, (:? int32 as value)) -> VInt(int value)
+            | (VTInt, (:? uint32 as value)) -> VInt(int value)
+            // XXX: possible casting problem
+            | (VTInt, (:? int64 as value)) -> VInt(int value)
+            | (VTInt, (:? uint64 as value)) -> VInt(int value)
+
+            | (VTFloat, (:? single as value)) -> VFloat(double value)
+            | (VTFloat, (:? double as value)) -> VFloat(double value)
+
+            | (VTString, (:? string as value)) -> VString(value)
+            | (VTBool, (:? bool as value)) -> VBool(value)
+            | (VTDateTime, (:? DateTime as value)) -> VDateTime(value)
+            | (VTDate, (:? DateTime as value)) -> VDateTime(value)
+            | (typ, value) -> failwith <| sprintf "Unknown raw SQL value type: %s, value type: %O" (value.GetType ()).FullName typ
 
     let executeNonQuery queryStr =
         use command = new NpgsqlCommand(queryStr, connection)
@@ -33,14 +46,14 @@ type QueryConnection (connectionString : string) =
             connection.Dispose()
 
     // Make it return Values instead of strings.
-    member this.Query (expr : SelectExpr) : ((ValueType option) array) * (QualifiedValue array array) =
+    member this.Query (expr : SelectExpr) : (ValueType array) * (QualifiedValue array array) =
         let queryStr = renderSelect expr
-        printfn "Select query: %s" queryStr
+        eprintfn "Select query: %s" queryStr
         use command = new NpgsqlCommand(queryStr, connection)
         connection.Open()
         try
             use reader = command.ExecuteReader()
-            let types = seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.GetDataTypeName(i) |> parseCoerceValueType) |> Seq.toArray
+            let types = seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.GetDataTypeName(i) |> parseCoerceValueType |> Option.get) |> Seq.toArray
             let values =
                 seq { while reader.Read() do
                       yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i] |> convertValue types.[i]) |> Seq.toArray
@@ -51,20 +64,20 @@ type QueryConnection (connectionString : string) =
 
     member this.Insert (expr : InsertExpr) =
         let queryStr = renderInsert expr
-        printfn "Insert query: %s" queryStr
+        eprintfn "Insert query: %s" queryStr
         executeNonQuery queryStr
 
     member this.Update (expr : UpdateExpr) =
         let queryStr = renderUpdate expr
-        printfn "Update query: %s" queryStr
+        eprintfn "Update query: %s" queryStr
         executeNonQuery queryStr
 
     member this.Delete (expr : DeleteExpr) =
         let queryStr = renderDelete expr
-        printfn "Delete query: %s" queryStr
+        eprintfn "Delete query: %s" queryStr
         executeNonQuery queryStr
 
     member this.ApplyOperation (op : SchemaOperation) =
         let queryStr = renderSchemaOperation op
-        printfn "Schema operation query: %s" queryStr
+        eprintfn "Schema operation query: %s" queryStr
         executeNonQuery queryStr

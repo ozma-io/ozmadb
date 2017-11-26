@@ -34,7 +34,7 @@ type ViewColumn =
     internal { name : string;
                field : Field option;
                attributes : AttributeMap;
-               valueType : ValueType option;
+               valueType : ValueType;
              } with
         member this.Name = this.name
         member this.Field =
@@ -211,6 +211,6 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         let toMeta = buildFunMeta db qualifier
         let fromMeta = getDatabaseMeta dbQuery
         let plan = migrateDatabase fromMeta toMeta
-        printfn "From meta: %s" (fromMeta.ToString ())
-        printfn "To meta: %s" (toMeta.ToString ())
+        eprintfn "From meta: %s" (fromMeta.ToString ())
+        eprintfn "To meta: %s" (toMeta.ToString ())
         Seq.iter dbQuery.ApplyOperation plan

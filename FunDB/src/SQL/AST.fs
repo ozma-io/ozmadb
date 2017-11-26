@@ -38,7 +38,7 @@ type Column =
       name: ColumnName;
     }
     with
-        override this.ToString () = sprintf "%s.%s" (this.table.ToString ()) (renderSqlName this.name)
+        override this.ToString () = sprintf "%O.%s" this.table (renderSqlName this.name)
 
 let columnFromLocal (table : Table) (column : LocalColumn) =
     match column with
@@ -80,7 +80,10 @@ let parseCoerceValueType (str : string) =
         | None ->
             match str.ToLower() with
                 | "varchar" -> Some(VTString)
-                | _ -> None
+                | "int8" -> Some(VTInt)
+                | _ ->
+                    eprintfn "Unknown coerce value type: %s" str
+                    None
 
 type ObjectRef = ObjectRef of string array
     with
@@ -95,7 +98,7 @@ type ColumnRef =
         override this.ToString () =
             match this.tableRef with
                 | None -> renderSqlName this.name
-                | Some(entity) -> sprintf "%s.%s" (entity.ToString ()) (renderSqlName this.name)
+                | Some(entity) -> sprintf "%O.%s" entity (renderSqlName this.name)
 
 let columnFromObjectRef = function
     | ObjectRef [| schema; table; col |] -> Some({ tableRef = Some({ schema = Some(schema); name = table; }); name = col; })
@@ -104,6 +107,7 @@ let columnFromObjectRef = function
     | _ -> None
 
 type Value<'o> =
+    // XXX: Convert to int64! Possibly add VUInt.
     | VInt of int
     | VFloat of double
     | VString of string

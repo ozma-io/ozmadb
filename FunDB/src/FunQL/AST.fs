@@ -26,7 +26,7 @@ type FieldType<'e> =
                 | FTBool -> "bool"
                 | FTDateTime -> "datetime"
                 | FTDate -> "date"
-                | FTReference(e) -> sprintf "reference %s" (e.ToString ())
+                | FTReference(e) -> sprintf "reference %O" e
 
 type FieldValue =
     | FInt of int
@@ -138,7 +138,7 @@ type FieldName =
         override this.ToString () =
             match this.entity with
                 | None -> renderSqlName this.name
-                | Some(entity) -> sprintf "%s.%s" (entity.ToString ()) (renderSqlName this.name)
+                | Some(entity) -> sprintf "%O.%s" entity (renderSqlName this.name)
 
         static member FromField (field : Field) =
             { entity = Some <| EntityName.FromEntity field.Entity;
