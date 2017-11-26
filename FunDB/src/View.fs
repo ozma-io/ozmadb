@@ -118,7 +118,10 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
 
         let toValueType name =
             let lexbuf = LexBuffer<char>.FromString name
-            Parser.fieldType Lexer.tokenstream lexbuf
+            try
+                Parser.fieldType Lexer.tokenstream lexbuf
+            with
+                | Failure(msg) -> raise <| UserViewError msg
             
         let types = entity.Fields |> Seq.map (fun f -> (f.Name, (f, toValueType f.Type))) |> Map.ofSeq
 
@@ -136,6 +139,57 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
 
         row |> Seq.map toValue
 
+    let replaceSummary (globalAttrs : AttributeMap) (oldResults : (QualifiedResult * AttributeMap) list, oldFrom : QualifiedFromExpr) (result : QualifiedResult, attrs : AttributeMap) =
+        let toResolve =
+            if attrs.ContainsKey("ResolveSummary")
+            then attrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
+            else globalAttrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
+        if toResolve
+        then
+            let (newResult, newFrom) =
+                match result with
+                    | RField(Name.QFField(field) as column) ->
+                        // XXX: cache this
+                        let parsedFieldType =
+                            let lexbuf = LexBuffer<char>.FromString field.Type
+                            try
+                                Parser.fieldType Lexer.tokenstream lexbuf
+                            with
+                                | Failure(msg) -> raise <| UserViewError msg
+                        match qualifier.QualifyType parsedFieldType with
+                            | FTReference(Name.QDEEntity(entity)) when entity.SummaryQuery <> null ->
+                                let summaryExpr =
+                                    let lexbuf = LexBuffer<char>.FromString entity.SummaryQuery
+                                    try
+                                        Parser.fieldExpr Lexer.tokenstream lexbuf
+                                    with
+                                        | Failure(msg) -> raise <| UserViewError msg
+
+                                let rec qualifySummaryExpr = function
+                                    | FEValue(v) -> FEValue(v)
+                                    | FEColumn({ entity = None; name = cname; }) ->
+                                        let field = entity.Fields.Where(fun f -> f.Name = cname).Single()
+                                        FEColumn(Name.QFField(field))
+                                    | FEColumn(_) -> raise <| UserViewError "Summary expression cannot contain qualified column references"
+                                    | FENot(a) -> FENot(qualifySummaryExpr a)
+                                    | FEConcat(a, b) -> FEConcat(qualifySummaryExpr a, qualifySummaryExpr b)
+                                    | FEEq(a, b) -> FEEq(qualifySummaryExpr a, qualifySummaryExpr b)
+                                    | FEIn(a, bs) -> FEIn(qualifySummaryExpr a, Array.map qualifySummaryExpr bs)
+                                    | FEAnd(a, b) -> FEAnd(qualifySummaryExpr a, qualifySummaryExpr b)
+
+                                let newResult = RExpr(qualifySummaryExpr summaryExpr, entity.Name)
+                                let entityName = Name.QEEntity(entity)
+                                let newFrom =
+                                    if fromExprContains entityName oldFrom
+                                    then oldFrom
+                                    else FJoin(Left, oldFrom, FEntity(entityName), FEEq(FEColumn(column), FEColumn(Name.QFEntityId(entity))))
+                                (newResult, newFrom)
+                            | _ -> (result, oldFrom)
+                    | _ -> (result, oldFrom)
+            ((newResult, attrs) :: oldResults, newFrom)
+        else
+            ((result, attrs) :: oldResults, oldFrom)
+
     static member ParseQuery (uv : UserView) =
         let lexbuf = LexBuffer<char>.FromString uv.Query
         try
@@ -146,11 +200,11 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
     // Make this return an IDisposable cursor.
     member this.RunQuery (parsedQuery : ParsedQueryExpr) =
         let rawQueryTree = qualifyQuery parsedQuery
-        (*let queryTree = { rawQueryTree with .results |> Arr get
-          field = match res with
-                      | RField(Name.QFField(f)) -> Some(f)
-                      | _ -> None*)
-        let queryTree = rawQueryTree
+        let (newResults, newFrom) = Array.fold (replaceSummary rawQueryTree.attributes) ([], rawQueryTree.from) rawQueryTree.results
+        let queryTree = { rawQueryTree with
+                              results = newResults |> List.toArray |> Array.rev;
+                              from = newFrom;
+                        }
 
         let (types, results) = Compiler.compileQuery queryTree |> dbQuery.Query
         let columns = queryTree.results |> Array.map2 (toViewColumn queryTree.attributes) types

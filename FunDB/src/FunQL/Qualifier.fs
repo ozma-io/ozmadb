@@ -121,9 +121,15 @@ module Name =
 
 open Name
 
+type QualifiedResult = Result<QEntityName, QFieldName>
+
 type QualifiedQueryExpr = QueryExpr<QEntityName, QFieldName>
 
+type QualifiedFromExpr = FromExpr<QEntityName, QFieldName>
+
 type QualifiedFieldType = FieldType<QDbEntityName>
+
+type QualifiedFieldExpr = FieldExpr<QFieldName>
 
 type private QMappedEntity =
     | QMEntity of Entity * Map<ColumnName, Field>
@@ -146,6 +152,7 @@ type Qualifier internal (db : DatabaseContext) =
                 | None -> q.SingleOrDefault(fun ent -> ent.Schema = null)
                 | Some(schema) -> q.SingleOrDefault(fun ent -> ent.Schema.Name = schema)
         if res = null then
+            eprintfn "Entity not found: %s" e.name
             raise <| QualifierError (sprintf "Entity not found: %s" e.name)
         else
             (res, res.Fields |> Seq.map (fun f -> (f.Name, f)) |> Map.ofSeq)

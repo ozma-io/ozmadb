@@ -5,7 +5,7 @@ open System.Collections
 open System.Collections.Generic
 
 // Basically JSON without nulls.
-type AttributeMap(map : IDictionary<string, Attribute>) as this =
+type AttributeMap (map : IDictionary<string, Attribute>) as this =
     let resolvePath xs = Array.toList xs |> this.RunResolvePath
     let tryFind x =
         if map.ContainsKey x then
