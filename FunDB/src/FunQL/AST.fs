@@ -63,7 +63,7 @@ type SortOrder =
                 | Asc -> "ASC"
                 | Desc -> "DESC"
 
-type Result<'e, 'f> =
+type Result<'f> =
     | RField of 'f
     | RExpr of FieldExpr<'f> * ColumnName
 
@@ -82,10 +82,10 @@ type JoinType =
 
 type QueryExpr<'e, 'f> =
     { attributes: AttributeMap;
-      results: (Result<'e, 'f> * AttributeMap) array;
+      results: (Result<'f> * AttributeMap) array;
       from: FromExpr<'e, 'f>;
       where: FieldExpr<'f> option;
-      orderBy: ('f * SortOrder) array;
+      orderBy: (FieldExpr<'f> * SortOrder) array;
     } with
         static member Create
             (

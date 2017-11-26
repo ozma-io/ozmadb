@@ -185,7 +185,7 @@ and SelectExpr =
     { columns: SelectedColumn array;
       from: FromExpr;
       where: QualifiedValueExpr option;
-      orderBy: (Column * SortOrder) array;
+      orderBy: (QualifiedValueExpr * SortOrder) array;
       limit: int option;
       offset: int option;
     }

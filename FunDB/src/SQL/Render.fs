@@ -29,7 +29,7 @@ let rec renderSelect (expr : SelectExpr) : string =
     let orderExpr =
         if Array.isEmpty expr.orderBy
         then ""
-        else sprintf "ORDER BY %s" (expr.orderBy |> Seq.map (fun (fexpr, sord) -> sprintf "%O %O" fexpr sord) |> String.concat ", ")
+        else sprintf "ORDER BY %s" (expr.orderBy |> Seq.map (fun (fexpr, sord) -> sprintf "%s %O" (renderValueExpr fexpr) sord) |> String.concat ", ")
     let limitExpr =
         match expr.limit with
             | Some(n) -> sprintf "LIMIT %i" n

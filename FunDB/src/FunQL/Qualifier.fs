@@ -3,11 +3,13 @@ namespace FunWithFlags.FunDB.FunQL.Qualifier
 open System
 open System.Linq
 open Microsoft.EntityFrameworkCore
+open Microsoft.FSharp.Text.Lexing
 
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Lexer
 open FunWithFlags.FunDB.FunQL.Parser
 
 exception QualifierError of string
@@ -19,47 +21,6 @@ module Name =
         else
             renderSqlName e.Name
 
-    [<CustomEquality; CustomComparison>]
-    type QEntityName =
-        internal
-        | QEEntity of Entity
-        | QESubquery of TableName
-        with
-            override this.ToString () =
-                match this with
-                    | QEEntity(e) -> renderEntityName e
-                    | QESubquery(name) -> renderSqlName name
-
-            member inline private this.ConstructorId =
-                match this with
-                    | QEEntity(_) -> 0
-                    | QESubquery(_) -> 1
-
-            override x.Equals (yobj) =
-                match yobj with
-                    | :? QEntityName as y ->
-                        match (x, y) with
-                            | (QEEntity(a), QEEntity(b)) -> a.Id = b.Id
-                            | (QESubquery(a), QESubquery(b)) -> a = b
-                            | _ -> false
-                    | _ -> false
-
-            override this.GetHashCode () =
-                match this with
-                    | QEEntity(e) -> combineHash this.ConstructorId (hash e.Id)
-                    | QESubquery(name) -> combineHash this.ConstructorId (hash name)
-                   
-            interface IComparable with
-                member x.CompareTo (yobj) =
-                    match yobj with
-                        | :? QEntityName as y ->
-                            match (x, y) with
-                                | (QEEntity(a), QEEntity(b)) -> compare a.Id b.Id
-                                | (QESubquery(a), QESubquery(b)) -> compare a b
-                                | (a, b) -> compare a.ConstructorId b.ConstructorId
-                        | _ -> invalidArg "yobj" "Cannot compare values of different types"
-
-    // FIXME: allow non-qualified field names, like in SQL
     [<CustomEquality; CustomComparison>]
     type QFieldName =
         | QFField of Field
@@ -105,6 +66,46 @@ module Name =
                                 | (a, b) -> compare a.ConstructorId b.ConstructorId
                         | _ -> invalidArg "yobj" "Cannot compare values of different types"
 
+    [<CustomEquality; CustomComparison>]
+    type QEntityName =
+        internal
+        | QEEntity of Entity * Map<string, FieldExpr<QFieldName>>
+        | QESubquery of TableName
+        with
+            override this.ToString () =
+                match this with
+                    | QEEntity(e, _) -> renderEntityName e
+                    | QESubquery(name) -> renderSqlName name
+
+            member inline private this.ConstructorId =
+                match this with
+                    | QEEntity(_, _) -> 0
+                    | QESubquery(_) -> 1
+
+            override x.Equals (yobj) =
+                match yobj with
+                    | :? QEntityName as y ->
+                        match (x, y) with
+                            | (QEEntity(a, _), QEEntity(b, _)) -> a.Id = b.Id
+                            | (QESubquery(a), QESubquery(b)) -> a = b
+                            | _ -> false
+                    | _ -> false
+
+            override this.GetHashCode () =
+                match this with
+                    | QEEntity(e, _) -> combineHash this.ConstructorId (hash e.Id)
+                    | QESubquery(name) -> combineHash this.ConstructorId (hash name)
+                   
+            interface IComparable with
+                member x.CompareTo (yobj) =
+                    match yobj with
+                        | :? QEntityName as y ->
+                            match (x, y) with
+                                | (QEEntity(a, _), QEEntity(b, _)) -> compare a.Id b.Id
+                                | (QESubquery(a), QESubquery(b)) -> compare a b
+                                | (a, b) -> compare a.ConstructorId b.ConstructorId
+                        | _ -> invalidArg "yobj" "Cannot compare values of different types"
+
     let internal resultName = function
         | RField(QFField(field)) -> field.Name
         | RField(QFEntityId(entity)) -> "Id"
@@ -121,7 +122,7 @@ module Name =
 
 open Name
 
-type QualifiedResult = Result<QEntityName, QFieldName>
+type QualifiedResult = Result<QFieldName>
 
 type QualifiedQueryExpr = QueryExpr<QEntityName, QFieldName>
 
@@ -138,14 +139,41 @@ type private QMappedEntity =
 type private QMapping = Map<EntityName, QMappedEntity>
 
 type Qualifier internal (db : DatabaseContext) =
-    let mappedToName = function
-        | QMEntity(e, _) -> QEEntity(e)
-        | QMSubquery(name, _) -> QESubquery(name)
+    let qualifyComputedField (columns : Map<string, ColumnField>) (f : ComputedField) =
+        let rec qualifyComputedExpr = function
+            | FEValue(v) -> FEValue(v)
+            | FEColumn({ entity = None; name = cname; }) ->
+                match Map.tryFind cname columns with
+                    | None -> raise <| QualifierError (sprintf "Column not found in computed field: %s" cname)
+                    | Some(col) -> FEColumn(QFField(col))
+            | FEColumn(_) -> raise <| QualifierError "Computed field expression cannot contain qualified field references"
+            | FENot(a) -> FENot(qualifyComputedExpr a)
+            | FEConcat(a, b) -> FEConcat(qualifyComputedExpr a, qualifyComputedExpr b)
+            | FEEq(a, b) -> FEEq(qualifyComputedExpr a, qualifyComputedExpr b)
+            | FEIn(a, bs) -> FEIn(qualifyComputedExpr a, Array.map qualifyComputedExpr bs)
+            | FEAnd(a, b) -> FEAnd(qualifyComputedExpr a, qualifyComputedExpr b)
+
+        let computedExpr =
+            let lexbuf = LexBuffer<char>.FromString f.Expression
+            try
+                fieldExpr tokenstream lexbuf
+            with
+                | Failure(msg) -> raise <| QualifierError msg
+
+        qualifyComputedExpr computedExpr
+
+    let parseDbEntity (e : Entity) =
+        let colFields = e.ColumnFields |> Seq.map (fun f -> (f.Name, f)) |> Map.ofSeq
+        let compFields = e.ComputedFields |> Seq.map (fun f -> (f.Name, (f, qualifyComputedField colFields f))) |> Map.ofSeq
+        
+        (mapUnion (Map.map (fun _ f -> f :> Field) colFields) (Map.map (fun _ (f, _) -> f :> Field) compFields), Map.map (fun _ (_, expr) -> expr) compFields)
 
     let getDbEntity (e : EntityName) =
         let q = db.Entities
-                    .Include(fun ent -> ent.Fields)
+                    .Include(fun ent -> ent.ColumnFields)
+                    .Include(fun ent -> ent.ComputedFields)
                     .Include(fun ent -> ent.Schema)
+                    .Include(fun ent -> ent.SummaryField)
                     .Where(fun ent -> ent.Name = e.name)
         let res =
             match e.schema with
@@ -155,12 +183,8 @@ type Qualifier internal (db : DatabaseContext) =
             eprintfn "Entity not found: %s" e.name
             raise <| QualifierError (sprintf "Entity not found: %s" e.name)
         else
-            (res, res.Fields |> Seq.map (fun f -> (f.Name, f)) |> Map.ofSeq)
-
-    let lookupDbEntity mapping ename =
-        match Map.tryFind ename mapping with
-            | Some(QMEntity(entity, fields)) -> (entity, fields)
-            | _ -> getDbEntity ename
+            let (fields, compFields) = parseDbEntity res
+            (res, fields, compFields)
 
     let lookupField (mapping : QMapping) f =
         let entity =
@@ -190,29 +214,36 @@ type Qualifier internal (db : DatabaseContext) =
                     raise <| QualifierError (sprintf "Field not found: %s" f.name)
 
 
-    let rec qualifyQuery mapping query =
-        let (newMapping, qFrom) = qualifyFrom mapping query.from
+    let rec qualifyQuery query =
+        let (newMapping, qFrom) = qualifyFrom Map.empty query.from
 
         { attributes = query.attributes;
           results = Array.map (fun (res, attr) -> (qualifyResult newMapping res, attr)) query.results;
           from = qFrom;
           where = Option.map (qualifyFieldExpr newMapping) query.where;
-          orderBy = Array.map (fun (field, ord) -> (lookupField newMapping field, ord)) query.orderBy;
+          orderBy = Array.map (fun (expr, ord) -> (qualifyFieldExpr newMapping expr, ord)) query.orderBy;
         }
 
     and qualifyFrom mapping = function
         | FEntity(e) ->
-            let (entity, fields) = lookupDbEntity mapping e
-            (Map.add e (QMEntity(entity, fields)) mapping, FEntity(QEEntity(entity)))
+            let (entity, fields, compFields) = getDbEntity e
+            (mapSingleton e (QMEntity(entity, fields)), FEntity(QEEntity(entity, compFields)))
         | FJoin(jt, e1, e2, where) ->
             let (newMapping1, newE1) = qualifyFrom mapping e1
-            let (newMapping2, newE2) = qualifyFrom newMapping1 e2
-            let newFieldExpr = qualifyFieldExpr newMapping2 where
-            (newMapping2, FJoin(jt, newE1, newE2, newFieldExpr))
+            let (newMapping2, newE2) = qualifyFrom mapping e2
+
+            let newMapping =
+                try
+                    mapUnionUnique newMapping1 newMapping2
+                with
+                    | Failure(msg) -> raise <| QualifierError msg
+
+            let newFieldExpr = qualifyFieldExpr newMapping where
+            (newMapping, FJoin(jt, newE1, newE2, newFieldExpr))
         | FSubExpr(q, name) ->
-            let newQ = qualifyQuery mapping q
+            let newQ = qualifyQuery q
             let fields = newQ.results |> Seq.map (fun (res, attr) -> resultName res) |> Set.ofSeq
-            (Map.add { schema = None; name = name; } (QMSubquery(name, fields)) mapping, FSubExpr(newQ, name))
+            (mapSingleton { schema = None; name = name; } (QMSubquery(name, fields)), FSubExpr(newQ, name))
                 
     and qualifyFieldExpr mapping = function
         | FEValue(v) -> FEValue(v)
@@ -227,18 +258,27 @@ type Qualifier internal (db : DatabaseContext) =
         | RField(f) -> RField(lookupField mapping f)
         | RExpr(e, name) -> RExpr(qualifyFieldExpr mapping e, name)
 
-    and qualifyFieldType mapping = function
+    and qualifyFieldType = function
         | FTInt -> FTInt
         | FTString -> FTString
         | FTBool -> FTBool
         | FTDateTime -> FTDateTime
         | FTDate -> FTDate
         | FTReference(e) ->
-            let (entity, _) = lookupDbEntity mapping e
+            let (entity, _, _) = getDbEntity e
             FTReference(QDEEntity(entity))
 
-    member this.QualifyQuery (query: ParsedQueryExpr) : QualifiedQueryExpr =
-        qualifyQuery Map.empty query
+    member this.QualifyQuery (query : ParsedQueryExpr) : QualifiedQueryExpr =
+        qualifyQuery query
 
-    member this.QualifyType (ftype: ParsedFieldType) : QualifiedFieldType =
-        qualifyFieldType Map.empty ftype
+    member this.QualifyType (ftype : ParsedFieldType) : QualifiedFieldType =
+        qualifyFieldType ftype
+
+    member this.QualifyEntity (entity : Entity) : QEntityName =
+        db.Entry(entity).Collection("ColumnFields").Load()
+        db.Entry(entity).Collection("ComputedFields").Load()
+        db.Entry(entity).Reference("Schema").Load()
+        db.Entry(entity).Reference("SummaryField").Load()
+
+        let (_, compFields) = parseDbEntity entity
+        QEEntity(entity, compFields)

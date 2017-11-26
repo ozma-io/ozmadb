@@ -26,7 +26,7 @@ let rec qualifyDefaultExpr = function
     | FEIn(a, arr) -> FEIn(qualifyDefaultExpr a, Array.map qualifyDefaultExpr arr)
     | FEAnd(a, b) -> FEAnd(qualifyDefaultExpr a, qualifyDefaultExpr b)
 
-let makeColumnMeta (ftype : QualifiedFieldType) (field : Field) : ColumnMeta =
+let makeColumnMeta (ftype : QualifiedFieldType) (field : ColumnField) : ColumnMeta =
     { colType = compileFieldType ftype;
       nullable = field.Nullable;
       defaultValue =
@@ -38,7 +38,7 @@ let makeColumnMeta (ftype : QualifiedFieldType) (field : Field) : ColumnMeta =
               Some(expr |> qualifyDefaultExpr |> compileFieldExpr |> norefValueExpr)
     }
 
-let makeConstraintsMeta (ftype : QualifiedFieldType) (field : Field) : (ConstraintName * ConstraintMeta) seq =
+let makeConstraintsMeta (ftype : QualifiedFieldType) (field : ColumnField) : (ConstraintName * ConstraintMeta) seq =
     seq { match ftype with
               | FTReference(QDEEntity(rent)) ->
                   let rname =
@@ -78,13 +78,13 @@ let makeTableMeta (qualifier : Qualifier) (entity : Entity) : SchemaMeta =
         with
             | QualifierError(msg) -> raise <| FunMetaError msg
 
-    let types = entity.Fields |> Seq.map (fun f -> (f.Name, toFieldType f.Type)) |> Map.ofSeq
+    let types = entity.ColumnFields |> Seq.map (fun f -> (f.Name, toFieldType f.Type)) |> Map.ofSeq
 
     try
-        let entityColumns = entity.Fields |> Seq.map (fun fld -> (LocalColumn(fld.Name), makeColumnMeta types.[fld.Name] fld))
+        let entityColumns = entity.ColumnFields |> Seq.map (fun fld -> (LocalColumn(fld.Name), makeColumnMeta types.[fld.Name] fld))
         let table = { columns = Seq.append [| (LocalColumn("Id"), primaryColumn) |] entityColumns |> mapOfSeqUnique;
                     }
-        let entityConstraints = entity.Fields |> Seq.map (fun fld -> makeConstraintsMeta types.[fld.Name] fld) |> Seq.concat |> Seq.map (fun (constrName, constrMeta) -> (constrName, (entity.Name, constrMeta)))
+        let entityConstraints = entity.ColumnFields |> Seq.map (fun fld -> makeConstraintsMeta types.[fld.Name] fld) |> Seq.concat |> Seq.map (fun (constrName, constrMeta) -> (constrName, (entity.Name, constrMeta)))
         { tables = Map.ofArray [| (entity.Name, table) |];
           sequences = set [| primarySequenceName |];
           constraints = Seq.append [| (primaryName, (entity.Name, primaryConstraint)) |] entityConstraints |> mapOfSeqUnique;
@@ -98,10 +98,10 @@ let buildFunMeta (db : DatabaseContext) (qualifier : Qualifier) : DatabaseMeta =
     let q = db.Schemas
                 .Include(fun sch -> sch.Entities)
                 // XXX: Workaround https://github.com/aspnet/EntityFrameworkCore/issues/6560
-                // .ThenInclude(fun (ents : Entity) -> ents.Fields)
+                // .ThenInclude(fun (ents : Entity) -> ents.ColumnFields)
                 .ToList()
     for schema in q do
         for entity in schema.Entities do
-            db.Entry(entity).Collection("Fields").Load()
+            db.Entry(entity).Collection("ColumnFields").Load()
     
     q |> Seq.map (fun sch -> (sch.Name, makeSchemaMeta qualifier sch)) |> Map.ofSeq

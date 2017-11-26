@@ -114,7 +114,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         }
 
     let realizeFields (entity : Entity) (row : IDictionary<string, string>) : (ColumnName * LocalValueExpr) seq =
-        db.Entry(entity).Collection("Fields").Load()
+        db.Entry(entity).Collection("ColumnFields").Load()
 
         let toValueType name =
             let lexbuf = LexBuffer<char>.FromString name
@@ -123,7 +123,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             with
                 | Failure(msg) -> raise <| UserViewError msg
             
-        let types = entity.Fields |> Seq.map (fun f -> (f.Name, (f, toValueType f.Type))) |> Map.ofSeq
+        let types = entity.ColumnFields |> Seq.map (fun f -> (f.Name, (f, toValueType f.Type))) |> Map.ofSeq
 
         let toValue = function
             | KeyValue(k, v) ->
@@ -148,7 +148,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         then
             let (newResult, newFrom) =
                 match result with
-                    | RField(Name.QFField(field) as column) ->
+                    | RField(Name.QFField(:? ColumnField as field) as column) ->
                         // XXX: cache this
                         let parsedFieldType =
                             let lexbuf = LexBuffer<char>.FromString field.Type
@@ -157,28 +157,9 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                             with
                                 | Failure(msg) -> raise <| UserViewError msg
                         match qualifier.QualifyType parsedFieldType with
-                            | FTReference(Name.QDEEntity(entity)) when entity.SummaryQuery <> null ->
-                                let summaryExpr =
-                                    let lexbuf = LexBuffer<char>.FromString entity.SummaryQuery
-                                    try
-                                        Parser.fieldExpr Lexer.tokenstream lexbuf
-                                    with
-                                        | Failure(msg) -> raise <| UserViewError msg
-
-                                let rec qualifySummaryExpr = function
-                                    | FEValue(v) -> FEValue(v)
-                                    | FEColumn({ entity = None; name = cname; }) ->
-                                        let field = entity.Fields.Where(fun f -> f.Name = cname).Single()
-                                        FEColumn(Name.QFField(field))
-                                    | FEColumn(_) -> raise <| UserViewError "Summary expression cannot contain qualified column references"
-                                    | FENot(a) -> FENot(qualifySummaryExpr a)
-                                    | FEConcat(a, b) -> FEConcat(qualifySummaryExpr a, qualifySummaryExpr b)
-                                    | FEEq(a, b) -> FEEq(qualifySummaryExpr a, qualifySummaryExpr b)
-                                    | FEIn(a, bs) -> FEIn(qualifySummaryExpr a, Array.map qualifySummaryExpr bs)
-                                    | FEAnd(a, b) -> FEAnd(qualifySummaryExpr a, qualifySummaryExpr b)
-
-                                let newResult = RExpr(qualifySummaryExpr summaryExpr, entity.Name)
-                                let entityName = Name.QEEntity(entity)
+                            | FTReference(Name.QDEEntity(entity)) when entity.SummaryFieldId.HasValue ->
+                                let newResult = RField(Name.QFField(entity.SummaryField))
+                                let entityName = qualifier.QualifyEntity(entity)
                                 let newFrom =
                                     if fromExprContains entityName oldFrom
                                     then oldFrom
@@ -215,9 +196,9 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         }
 
     member this.GetTemplate (entity : Entity) =
-        db.Entry(entity).Reference("Fields").Load()
+        db.Entry(entity).Collection("ColumnFields").Load()
 
-        let templateColumn (field : Field) =
+        let templateColumn (field : ColumnField) =
             let defaultValue =
                 if field.Default = null then
                     null
@@ -229,7 +210,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
               defaultValue = defaultValue;
             }
 
-        entity.Fields.Select(templateColumn).ToArray()
+        entity.ColumnFields.Select(templateColumn).ToArray()
 
     member this.InsertEntry (entity : Entity, row : IDictionary<string, string>) =
         db.Entry(entity).Reference("Schema").Load()

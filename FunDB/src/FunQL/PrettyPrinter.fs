@@ -47,7 +47,7 @@ let rec internal ppQuery query =
         then
             emptyL
         else
-            let orderByList = query.orderBy |> Array.toSeq |> Seq.map (fun (field, ord) -> wordL (field.ToString ()) ++ wordL (ord.ToString ())) |> Seq.toList
+            let orderByList = query.orderBy |> Array.toSeq |> Seq.map (fun (expr, ord) -> ppFieldExpr expr ++ wordL (ord.ToString ())) |> Seq.toList
             wordL "ORDER BY" @@- aboveCommaListL orderByList
     
     ppMaybeAttributeMap query.attributes

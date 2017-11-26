@@ -27,8 +27,14 @@ let mapOfSeqUnique (s : seq<'K * 'V>) : Map<'K, 'V> =
 let mapUnionUnique (a : Map<'K, 'V>) (b : Map<'K, 'V>) =
     mapOfSeqUnique (Seq.append (Map.toSeq a) (Map.toSeq b))
 
+let mapUnion (a : Map<'K, 'V>) (b : Map<'K, 'V>) =
+    Map.ofSeq (Seq.append (Map.toSeq a) (Map.toSeq b))
+
 let mapDifference (a : Map<'K, 'V1>) (b : Map<'K, 'V2>) =
     Map.filter (fun k v -> not (Map.containsKey k b)) a
+
+let mapSingleton (k : 'K) (v : 'V) : Map<'K, 'V> =
+    Map.ofSeq (seq { yield (k, v) })
 
 let inline combineHash (a : int) (b : int) : int =  31 * (31 * a + 23) + b
 

@@ -180,8 +180,8 @@ OrderByList:
   | OrderByExpr COMMA OrderByList { $1 :: $3 }
 
 OrderByExpr:
-  | FieldName                  { ($1, Asc) }
-  | FieldName OrderByDirection { ($1, $2) }
+  | FieldExpr                  { ($1, Asc) }
+  | FieldExpr OrderByDirection { ($1, $2) }
 
 OrderByDirection:
   | ASC  { Asc }
