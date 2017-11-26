@@ -80,6 +80,7 @@ let internal parseCoerceValueType (str : string) =
         | None ->
             match str.ToLower() with
                 | "varchar" -> Some(VTString)
+                | "bool" -> Some(VTBool)
                 | "int2" -> Some(VTInt)
                 | "int4" -> Some(VTInt)
                 | "int8" -> Some(VTInt)
