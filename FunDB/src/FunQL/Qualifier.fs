@@ -170,8 +170,7 @@ type Qualifier internal (db : DatabaseContext) =
 
     let getDbEntity (e : EntityName) =
         let q = db.Entities
-                    .Include(fun ent -> ent.ColumnFields)
-                    .Include(fun ent -> ent.ComputedFields)
+                    .Include(fun ent -> ent.Fields)
                     .Include(fun ent -> ent.Schema)
                     .Include(fun ent -> ent.SummaryField)
                     .Where(fun ent -> ent.Name = e.name)
@@ -180,7 +179,6 @@ type Qualifier internal (db : DatabaseContext) =
                 | None -> q.SingleOrDefault(fun ent -> ent.Schema = null)
                 | Some(schema) -> q.SingleOrDefault(fun ent -> ent.Schema.Name = schema)
         if res = null then
-            eprintfn "Entity not found: %s" e.name
             raise <| QualifierError (sprintf "Entity not found: %s" e.name)
         else
             let (fields, compFields) = parseDbEntity res
@@ -196,7 +194,8 @@ type Qualifier internal (db : DatabaseContext) =
                         raise <| QualifierError (sprintf "None or more than one possible interpretation: %s" f.name)
                 | Some(ename) ->
                     match Map.tryFind ename mapping with
-                        | None -> raise <| QualifierError (sprintf "Field entity not found: %s" ename.name)
+                        | None ->
+                            raise <| QualifierError (sprintf "Field entity not found: %s" ename.name)
                         | Some(e) -> e
         match entity with
             // FIXME: improve error reporting
@@ -205,7 +204,8 @@ type Qualifier internal (db : DatabaseContext) =
                     QFEntityId(entity)
                 else
                     match Map.tryFind f.name fields with
-                        | None -> raise <| QualifierError (sprintf "Field not found: %s" f.name)
+                        | None ->
+                            raise <| QualifierError (sprintf "Field not found: %s" f.name)
                         | Some(field) -> QFField(field)
             | QMSubquery(queryName, fields) ->
                 if Set.contains f.name fields then
@@ -215,7 +215,7 @@ type Qualifier internal (db : DatabaseContext) =
 
 
     let rec qualifyQuery query =
-        let (newMapping, qFrom) = qualifyFrom Map.empty query.from
+        let (newMapping, qFrom) = qualifyFrom query.from
 
         { attributes = query.attributes;
           results = Array.map (fun (res, attr) -> (qualifyResult newMapping res, attr)) query.results;
@@ -224,13 +224,13 @@ type Qualifier internal (db : DatabaseContext) =
           orderBy = Array.map (fun (expr, ord) -> (qualifyFieldExpr newMapping expr, ord)) query.orderBy;
         }
 
-    and qualifyFrom mapping = function
+    and qualifyFrom = function
         | FEntity(e) ->
             let (entity, fields, compFields) = getDbEntity e
             (mapSingleton e (QMEntity(entity, fields)), FEntity(QEEntity(entity, compFields)))
         | FJoin(jt, e1, e2, where) ->
-            let (newMapping1, newE1) = qualifyFrom mapping e1
-            let (newMapping2, newE2) = qualifyFrom mapping e2
+            let (newMapping1, newE1) = qualifyFrom e1
+            let (newMapping2, newE2) = qualifyFrom e2
 
             let newMapping =
                 try
@@ -275,8 +275,7 @@ type Qualifier internal (db : DatabaseContext) =
         qualifyFieldType ftype
 
     member this.QualifyEntity (entity : Entity) : QEntityName =
-        db.Entry(entity).Collection("ColumnFields").Load()
-        db.Entry(entity).Collection("ComputedFields").Load()
+        db.Entry(entity).Collection("Fields").Load()
         db.Entry(entity).Reference("Schema").Load()
         db.Entry(entity).Reference("SummaryField").Load()
 

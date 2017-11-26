@@ -102,6 +102,6 @@ let buildFunMeta (db : DatabaseContext) (qualifier : Qualifier) : DatabaseMeta =
                 .ToList()
     for schema in q do
         for entity in schema.Entities do
-            db.Entry(entity).Collection("ColumnFields").Load()
+            db.Entry(entity).Collection("Fields").Load()
     
     q |> Seq.map (fun sch -> (sch.Name, makeSchemaMeta qualifier sch)) |> Map.ofSeq

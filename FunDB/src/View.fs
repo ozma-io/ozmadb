@@ -196,7 +196,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         }
 
     member this.GetTemplate (entity : Entity) =
-        db.Entry(entity).Collection("ColumnFields").Load()
+        db.Entry(entity).Collection("Fields").Load()
 
         let templateColumn (field : ColumnField) =
             let defaultValue =

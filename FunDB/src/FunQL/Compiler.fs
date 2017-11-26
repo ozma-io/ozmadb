@@ -1,5 +1,7 @@
 module internal FunWithFlags.FunDB.FunQL.Compiler
 
+open System.Linq
+
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier.Name
@@ -75,7 +77,7 @@ let rec compileQuery query =
     }
 
 and compileFrom = function
-    | FEntity(QEEntity(entity, computed)) when entity.ComputedFields.Count = 0 -> AST.FTable(makeEntity entity)
+    | FEntity(QEEntity(entity, computed)) when not (entity.ComputedFields.Any ()) -> AST.FTable(makeEntity entity)
     | FEntity(QEEntity(entity, computed)) ->
         // Add computed columns
         let entityName = makeEntity entity
