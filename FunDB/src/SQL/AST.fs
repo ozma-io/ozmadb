@@ -80,6 +80,8 @@ let parseCoerceValueType (str : string) =
         | None ->
             match str.ToLower() with
                 | "varchar" -> Some(VTString)
+                | "int2" -> Some(VTInt)
+                | "int4" -> Some(VTInt)
                 | "int8" -> Some(VTInt)
                 | _ ->
                     eprintfn "Unknown coerce value type: %s" str

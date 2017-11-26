@@ -12,7 +12,7 @@ type QueryConnection (connectionString : string) =
 
     let convertValue valType (rawValue : obj) =
         match (valType, rawValue) with
-            | (_, null) -> VNull
+            | (_, (:? DBNull as value)) -> VNull
 
             | (VTInt, (:? byte as value)) -> VInt(int value)
             | (VTInt, (:? sbyte as value)) -> VInt(int value)

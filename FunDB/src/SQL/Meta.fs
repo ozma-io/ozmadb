@@ -60,6 +60,7 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
         let (_, values) = query.Query sel
         let getValue = function
             | VString(s) -> s
+            | VNull -> ""
             | _ -> failwith "Unexpected non-string value"
         values |> Array.toSeq |> Seq.map (Array.map getValue)
     
