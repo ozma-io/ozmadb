@@ -74,6 +74,14 @@ let parseValueType (str : string) =
         | "regclass" -> Some(VTObject)
         | _ -> None
 
+let parseCoerceValueType (str : string) =
+    match parseValueType str with
+        | Some(x) -> Some(x)
+        | None ->
+            match str.ToLower() with
+                | "varchar" -> Some(VTString)
+                | _ -> None
+
 type ObjectRef = ObjectRef of string array
     with
         override this.ToString () =

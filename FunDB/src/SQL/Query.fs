@@ -10,11 +10,6 @@ open FunWithFlags.FunDB.SQL.Render
 type QueryConnection (connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
 
-    let typeFromName = function
-        | unknown ->
-            printfn "Unknown type: %s" unknown
-            None
-
     let convertValue valType value =
         if value = null
         then VNull
@@ -45,7 +40,7 @@ type QueryConnection (connectionString : string) =
         connection.Open()
         try
             use reader = command.ExecuteReader()
-            let types = seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.GetDataTypeName(i) |> typeFromName) |> Seq.toArray
+            let types = seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.GetDataTypeName(i) |> parseCoerceValueType) |> Seq.toArray
             let values =
                 seq { while reader.Read() do
                       yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i] |> convertValue types.[i]) |> Seq.toArray
