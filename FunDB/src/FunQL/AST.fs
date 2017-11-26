@@ -1,4 +1,4 @@
-namespace FunWithFlags.FunDB.FunQL.AST
+module FunWithFlags.FunDB.FunQL.AST
 
 open System
 open System.Globalization
@@ -150,3 +150,8 @@ type ParsedQueryExpr = QueryExpr<EntityName, FieldName>
 type ParsedFieldExpr = FieldExpr<FieldName>
 
 type ParsedFieldType = FieldType<EntityName>
+
+let rec internal fromExprContains (entity: 'e) = function
+    | FEntity(e) -> entity = e
+    | FJoin(_, a, b, _) -> fromExprContains entity a || fromExprContains entity b
+    | FSubExpr(_, _) -> false

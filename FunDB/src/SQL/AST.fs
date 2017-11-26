@@ -1,4 +1,4 @@
-module internal FunWithFlags.FunDB.SQL.AST
+module FunWithFlags.FunDB.SQL.AST
 
 open System
 open System.Globalization
@@ -40,7 +40,7 @@ type Column =
     with
         override this.ToString () = sprintf "%O.%s" this.table (renderSqlName this.name)
 
-let columnFromLocal (table : Table) (column : LocalColumn) =
+let internal columnFromLocal (table : Table) (column : LocalColumn) =
     match column with
         | LocalColumn(name) -> { table = table; name = name; }
 
@@ -63,7 +63,7 @@ type ValueType =
                 | VTDate -> "date"
                 | VTObject -> "regclass"
 
-let parseValueType (str : string) =
+let internal parseValueType (str : string) =
     match str.ToLower() with
         | "bigint" -> Some(VTInt)
         | "double precision" -> Some(VTFloat)
@@ -74,7 +74,7 @@ let parseValueType (str : string) =
         | "regclass" -> Some(VTObject)
         | _ -> None
 
-let parseCoerceValueType (str : string) =
+let internal parseCoerceValueType (str : string) =
     match parseValueType str with
         | Some(x) -> Some(x)
         | None ->
@@ -102,7 +102,7 @@ type ColumnRef =
                 | None -> renderSqlName this.name
                 | Some(entity) -> sprintf "%O.%s" entity (renderSqlName this.name)
 
-let columnFromObjectRef = function
+let internal columnFromObjectRef = function
     | ObjectRef [| schema; table; col |] -> Some({ tableRef = Some({ schema = Some(schema); name = table; }); name = col; })
     | ObjectRef [| table; col |] -> Some({ tableRef = Some({ schema = None; name = table; }); name = col; })
     | ObjectRef [| col |] -> Some({ tableRef = None; name = col; })
@@ -189,7 +189,7 @@ and SelectExpr =
       offset: int option;
     }
 
-let simpleSelect (columns : string seq) (table : Table) : SelectExpr =
+let internal simpleSelect (columns : string seq) (table : Table) : SelectExpr =
     { columns = columns |> Seq.map (fun x -> SCColumn({ table = table; name = x; })) |> Seq.toArray;
       from = FTable(table);
       where = None;
@@ -228,7 +228,7 @@ type ConstraintType =
     | CTPrimaryKey
     | CTForeignKey
 
-let parseConstraintType (str : string) =
+let internal parseConstraintType (str : string) =
     match str.ToUpper() with
         | "UNIQUE" -> Some(CTUnique)
         | "PRIMARY KEY" -> Some(CTPrimaryKey)
@@ -246,7 +246,7 @@ type TableMeta =
     { columns: Map<LocalColumn, ColumnMeta>;
     }
 
-let emptyTableMeta =
+let internal emptyTableMeta =
     { columns = Map.empty;
     }
 
@@ -256,13 +256,13 @@ type SchemaMeta =
       constraints: Map<ConstraintName, TableName * ConstraintMeta>;
     }
 
-let emptySchemaMeta =
+let internal emptySchemaMeta =
     { tables = Map.empty;
       sequences = Set.empty;
       constraints = Map.empty;
     }
 
-let mergeSchemaMeta (a : SchemaMeta) (b : SchemaMeta) : SchemaMeta =
+let internal mergeSchemaMeta (a : SchemaMeta) (b : SchemaMeta) : SchemaMeta =
     { tables = mapUnionUnique a.tables b.tables;
       sequences = Set.union a.sequences b.sequences;
       constraints = mapUnionUnique a.constraints b.constraints;

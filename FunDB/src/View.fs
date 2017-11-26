@@ -69,12 +69,12 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             | QualifierError(msg) ->
                 raise <| UserViewError msg
 
-    let toViewColumn valueType (res, attrs) =
+    let toViewColumn queryAttrs valueType (res, attrs) =
         { name = Name.resultName res;
           field = match res with
                       | RField(Name.QFField(f)) -> Some(f)
                       | _ -> None
-          attributes = attrs;
+          attributes = AttributeMap.Merge queryAttrs attrs;
           valueType = valueType;
         }
 
@@ -108,9 +108,9 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         with
             _ -> None
 
-    let toViewRow row =
+    let toViewRow (column : ViewColumn) row =
         { cells = Array.map valueToDisplayString row;
-          attributes = new AttributeMap()
+          attributes = column.attributes;
         }
 
     let realizeFields (entity : Entity) (row : IDictionary<string, string>) : (ColumnName * LocalValueExpr) seq =
@@ -145,13 +145,19 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
 
     // Make this return an IDisposable cursor.
     member this.RunQuery (parsedQuery : ParsedQueryExpr) =
-        let queryTree = qualifyQuery parsedQuery
+        let rawQueryTree = qualifyQuery parsedQuery
+        (*let queryTree = { rawQueryTree with .results |> Arr get
+          field = match res with
+                      | RField(Name.QFField(f)) -> Some(f)
+                      | _ -> None*)
+        let queryTree = rawQueryTree
+
         let (types, results) = Compiler.compileQuery queryTree |> dbQuery.Query
-        let columns = queryTree.results |> Array.map2 toViewColumn types
+        let columns = queryTree.results |> Array.map2 (toViewColumn queryTree.attributes) types
 
         { attributes = queryTree.attributes;
           columns = columns;
-          rows = results |> Array.toSeq |> Seq.map toViewRow;
+          rows = results |> Array.toSeq |> Seq.map2 toViewRow columns;
         }
 
     member this.GetTemplate (entity : Entity) =

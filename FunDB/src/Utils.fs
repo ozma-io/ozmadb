@@ -29,3 +29,7 @@ let mapUnionUnique (a : Map<'K, 'V>) (b : Map<'K, 'V>) =
 
 let mapDifference (a : Map<'K, 'V1>) (b : Map<'K, 'V2>) =
     Map.filter (fun k v -> not (Map.containsKey k b)) a
+
+let inline combineHash (a : int) (b : int) : int =  31 * (31 * a + 23) + b
+
+let inline combineCompare (a : int) (b : int) : int = if a <> 0 then a else b

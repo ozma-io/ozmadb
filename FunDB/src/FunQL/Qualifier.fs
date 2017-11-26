@@ -1,9 +1,11 @@
 namespace FunWithFlags.FunDB.FunQL.Qualifier
 
+open System
 open System.Linq
 open Microsoft.EntityFrameworkCore
 
 open FunWithFlags.FunCore
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
@@ -17,6 +19,7 @@ module Name =
         else
             renderSqlName e.Name
 
+    [<CustomEquality; CustomComparison>]
     type QEntityName =
         internal
         | QEEntity of Entity
@@ -27,7 +30,37 @@ module Name =
                     | QEEntity(e) -> renderEntityName e
                     | QESubquery(name) -> renderSqlName name
 
+            member inline private this.ConstructorId =
+                match this with
+                    | QEEntity(_) -> 0
+                    | QESubquery(_) -> 1
+
+            override x.Equals (yobj) =
+                match yobj with
+                    | :? QEntityName as y ->
+                        match (x, y) with
+                            | (QEEntity(a), QEEntity(b)) -> a.Id = b.Id
+                            | (QESubquery(a), QESubquery(b)) -> a = b
+                            | _ -> false
+                    | _ -> false
+
+            override this.GetHashCode () =
+                match this with
+                    | QEEntity(e) -> combineHash this.ConstructorId (hash e.Id)
+                    | QESubquery(name) -> combineHash this.ConstructorId (hash name)
+                   
+            interface IComparable with
+                member x.CompareTo (yobj) =
+                    match yobj with
+                        | :? QEntityName as y ->
+                            match (x, y) with
+                                | (QEEntity(a), QEEntity(b)) -> compare a.Id b.Id
+                                | (QESubquery(a), QESubquery(b)) -> compare a b
+                                | (a, b) -> compare a.ConstructorId b.ConstructorId
+                        | _ -> invalidArg "yobj" "Cannot compare values of different types"
+
     // FIXME: allow non-qualified field names, like in SQL
+    [<CustomEquality; CustomComparison>]
     type QFieldName =
         | QFField of Field
         | QFEntityId of Entity
@@ -38,6 +71,39 @@ module Name =
                     | QFField(f) -> sprintf "%s.%s" (renderEntityName f.Entity) (renderSqlName f.Name)
                     | QFEntityId(e) -> sprintf "%s.\"Id\"" (renderEntityName e)
                     | QFSubquery(tableName, columnName) -> sprintf "%s.%s" (renderSqlName tableName) (renderSqlName columnName)
+
+            member inline private this.ConstructorId =
+                match this with
+                    | QFField(_) -> 0
+                    | QFEntityId(_) -> 1
+                    | QFSubquery(_) -> 2
+
+            override x.Equals (yobj) =
+                match yobj with
+                    | :? QFieldName as y ->
+                        match (x, y) with
+                            | (QFField(a), QFField(b)) -> a.Id = b.Id
+                            | (QFEntityId(a), QFEntityId(b)) -> a.Id = b.Id
+                            | (QFSubquery(aTname, aCname), QFSubquery(bTname, bCname)) -> aTname = bTname && aCname = bCname
+                            | _ -> false
+                    | _ -> false
+
+            override this.GetHashCode () =
+                match this with
+                    | QFField(f) -> combineHash this.ConstructorId (hash f.Id)
+                    | QFEntityId(e) -> combineHash this.ConstructorId (hash e.Id)
+                    | QFSubquery(tname, cname) -> combineHash this.ConstructorId (combineHash (hash tname) (hash cname))
+                   
+            interface IComparable with
+                member x.CompareTo (yobj) =
+                    match yobj with
+                        | :? QFieldName as y ->
+                            match (x, y) with
+                                | (QFField(a), QFField(b)) -> compare a.Id b.Id
+                                | (QFEntityId(a), QFEntityId(b)) -> compare a.Id b.Id
+                                | (QFSubquery(aTname, aCname), QFSubquery(bTname, bCname)) -> combineCompare (compare aTname bTname) (compare aCname bCname)
+                                | (a, b) -> compare a.ConstructorId b.ConstructorId
+                        | _ -> invalidArg "yobj" "Cannot compare values of different types"
 
     let internal resultName = function
         | RField(QFField(field)) -> field.Name
