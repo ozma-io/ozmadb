@@ -19,11 +19,11 @@ let makeEntity (fentity : Entity) : AST.Table =
 
 let compileField = function
     | QFField(field) ->
-        { AST.table = makeEntity field.Entity;
-          AST.Column.name = field.Name;
+        { AST.table = makeEntity field.Field.Entity;
+          AST.Column.name = field.Field.Name;
         }
     | QFEntityId(entity) ->
-        { AST.table = makeEntity entity;
+        { AST.table = makeEntity entity.Entity;
           AST.Column.name = "Id";
         }
     | QFSubquery(entityName, fieldName) ->
@@ -66,9 +66,9 @@ let rec compileFieldExpr = function
     | FEIn(a, arr) -> AST.VEIn(compileFieldExpr a, Array.map compileFieldExpr arr)
     | FEAnd(a, b) -> AST.VEAnd(compileFieldExpr a, compileFieldExpr b)
 
-let rec compileQuery query =
+let rec compileQueryExpr (entities : QEntities) query =
     { AST.columns = Array.map (fun (res, attr) -> compileResult res) query.results;
-      AST.from = compileFrom query.from;
+      AST.from = compileFrom entities query.from;
       AST.where = Option.map compileFieldExpr query.where;
       AST.orderBy = Array.map (fun (expr, ord) -> (compileFieldExpr expr, compileOrder ord)) query.orderBy;
       // FIXME: support them!
@@ -76,28 +76,33 @@ let rec compileQuery query =
       AST.offset = None;
     }
 
-and compileFrom = function
-    | FEntity(QEEntity(entity, computed)) when not (entity.ComputedFields.Any ()) -> AST.FTable(makeEntity entity)
-    | FEntity(QEEntity(entity, computed)) ->
-        // Add computed columns
-        let entityName = makeEntity entity
-        let columnFields = entity.ColumnFields |> Seq.map (fun field -> AST.SCColumn({ AST.table = entityName; AST.Column.name = field.Name; }))
-        let computedFields = entity.ComputedFields |> Seq.map (fun field -> AST.SCExpr(compileFieldExpr computed.[field.Name], field.Name))
-        let subquery = { AST.columns = Seq.append columnFields computedFields |> Seq.toArray;
-                         AST.from = AST.FTable(entityName);
-                         AST.where = None;
-                         AST.orderBy = [||];
-                         AST.limit = None;
-                         AST.offset = None;
-                       }
-        AST.FSubExpr(subquery, entity.Name)
+and compileFrom (entities : QEntities) = function
+    | FEntity(QEEntity(rawEntity)) ->
+        let entity = entities.[rawEntity.Name]
+        let entityName = makeEntity entity.Entity
+        if Map.isEmpty entity.computedFields
+        then AST.FTable(entityName)
+        else
+            // Add computed columns
+            let columnFields = entity.columnFields |> Map.toSeq |> Seq.map (fun (_, field) -> AST.SCColumn({ AST.table = entityName; AST.Column.name = field.Field.Name; }))
+            let computedFields = entity.computedFields |> Map.toSeq |> Seq.map (fun (_, field) -> AST.SCExpr(compileFieldExpr field.expression, field.Field.Name))
+            let subquery = { AST.columns = Seq.append columnFields computedFields |> Seq.toArray;
+                            AST.from = AST.FTable(entityName);
+                            AST.where = None;
+                            AST.orderBy = [||];
+                            AST.limit = None;
+                            AST.offset = None;
+                          }
+            AST.FSubExpr(subquery, entity.Entity.Name)
     | FEntity(QESubquery(name)) ->
         AST.FTable({ AST.schema = None;
                      AST.name = name;
                    })
-    | FJoin(jt, e1, e2, where) -> AST.FJoin(compileJoin jt, compileFrom e1, compileFrom e2, compileFieldExpr where)
-    | FSubExpr(q, name) -> AST.FSubExpr(compileQuery q, name)
+    | FJoin(jt, e1, e2, where) -> AST.FJoin(compileJoin jt, compileFrom entities e1, compileFrom entities e2, compileFieldExpr where)
+    | FSubExpr(q, name) -> AST.FSubExpr(compileQueryExpr entities q, name)
 
 and compileResult = function
     | RField(f) -> AST.SCColumn(compileField f)
     | RExpr(e, name) -> AST.SCExpr(compileFieldExpr e, name)
+
+and compileQuery (query : QualifiedQuery) = compileQueryExpr query.entities query.expression

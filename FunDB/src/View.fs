@@ -30,9 +30,18 @@ type ViewRow =
         member this.Attributes = this.attributes
         member this.IDs = this.attributes
 
+type QualifiedField =
+    | QColumnField of Name.QualifiedColumnField
+    | QComputedField of Name.QualifiedComputedField
+
+    member this.Field =
+        match this with
+            | QColumnField(f) -> f.Field :> Field
+            | QComputedField(f) -> f.Field :> Field
+
 type ViewColumn =
     internal { name : string;
-               field : Field option;
+               field : QualifiedField option;
                attributes : AttributeMap;
                valueType : ValueType;
              } with
@@ -40,16 +49,18 @@ type ViewColumn =
         member this.Field =
             match this.field with
                 | Some(f) -> f
-                | None -> null
+                | None -> Unchecked.defaultof<QualifiedField>
         member this.Attributes = this.attributes
 
 type ViewResult =
     internal { attributes : AttributeMap;
                columns : ViewColumn array;
+               rawColumns : ViewColumn array;
                rows : ViewRow seq;
              } with
         member this.Attributes = this.attributes
         member this.Columns = this.columns
+        member this.RawColumns = this.rawColumns
         member this.Rows = this.rows
 
 type TemplateColumn =
@@ -69,11 +80,18 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             | QualifierError(msg) ->
                 raise <| UserViewError msg
 
-    let toViewColumn queryAttrs valueType (res, attrs) =
+    let toViewColumn (entities : Name.QEntities) (queryAttrs : AttributeMap) (valueType : ValueType) (res, attrs) =
         { name = Name.resultName res;
-          field = match res with
-                      | RField(Name.QFField(f)) -> Some(f)
-                      | _ -> None
+          field =
+              match res with
+                  | RField(Name.QFField(f)) ->
+                      let entity = entities.[f.Entity.Name]
+                      let field =
+                          match Map.tryFind f.Field.Name entity.columnFields with
+                              | Some(cf) -> QColumnField(cf)
+                              | None -> QComputedField(entity.computedFields.[f.Field.Name])
+                      Some(field)
+                  | _ -> None
           attributes = AttributeMap.Merge queryAttrs attrs;
           valueType = valueType;
         }
@@ -114,62 +132,53 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         }
 
     let realizeFields (entity : Entity) (row : IDictionary<string, string>) : (ColumnName * LocalValueExpr) seq =
-        db.Entry(entity).Collection("ColumnFields").Load()
-
-        let toValueType name =
-            let lexbuf = LexBuffer<char>.FromString name
-            try
-                Parser.fieldType Lexer.tokenstream lexbuf
-            with
-                | Failure(msg) -> raise <| UserViewError msg
-            
-        let types = entity.ColumnFields |> Seq.map (fun f -> (f.Name, (f, toValueType f.Type))) |> Map.ofSeq
+        let qEntity = qualifier.QualifyEntity entity
 
         let toValue = function
             | KeyValue(k, v) ->
-                let (field, ftype) = types.[k]
+                let field = qEntity.columnFields.[k]
                 let value =
-                    if field.Nullable && v = null
+                    if field.Field.Nullable && v = null
                     then FNull
                     else
-                        match simpleFieldValue ftype v with
+                        match simpleFieldValue field.fieldType v with
                             | Some(r) -> r
                             | None -> raise <| UserViewError(sprintf "Invalid value of field %s" k)
                 (k, VEValue(compileFieldValue value))
 
         row |> Seq.map toValue
 
-    let replaceSummary (globalAttrs : AttributeMap) (oldResults : (QualifiedResult * AttributeMap) list, oldFrom : QualifiedFromExpr) (result : QualifiedResult, attrs : AttributeMap) =
+    let replaceSummary (globalAttrs : AttributeMap) (oldResults, oldEntities : Name.QEntities, oldFrom) (result : Name.QualifiedResult, attrs : AttributeMap) =
         let toResolve =
             if attrs.ContainsKey("ResolveSummary")
             then attrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
             else globalAttrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
         if toResolve
         then
-            let (newResult, newFrom) =
+            let (newResult, newEntities, newFrom) =
                 match result with
-                    | RField(Name.QFField(:? ColumnField as field) as column) ->
-                        // XXX: cache this
-                        let parsedFieldType =
-                            let lexbuf = LexBuffer<char>.FromString field.Type
-                            try
-                                Parser.fieldType Lexer.tokenstream lexbuf
-                            with
-                                | Failure(msg) -> raise <| UserViewError msg
-                        match qualifier.QualifyType parsedFieldType with
-                            | FTReference(Name.QDEEntity(entity)) when entity.SummaryFieldId.HasValue ->
-                                let newResult = RField(Name.QFField(entity.SummaryField))
-                                let entityName = qualifier.QualifyEntity(entity)
+                    | RField(Name.QFField(WrappedField(:? ColumnField) as rawField) as column) ->
+                        let field = oldEntities.[rawField.Entity.Name].columnFields.[rawField.Field.Name]
+                        match field.fieldType with
+                            | FTReference(rawEntity) when rawEntity.Entity.SummaryFieldId.HasValue ->
+                                let (newEntities, entity) =
+                                    match Map.tryFind rawEntity.Name oldEntities with
+                                        | Some(e) -> (oldEntities, e)
+                                        | None ->
+                                            let entity = qualifier.QualifyEntity rawEntity.Entity
+                                            (Map.add rawEntity.Name entity oldEntities, entity)
+                                let entityName = Name.QEEntity(rawEntity)
+                                let newResult = RField(Name.QFField(WrappedField(entity.Entity.SummaryField)))
                                 let newFrom =
                                     if fromExprContains entityName oldFrom
                                     then oldFrom
-                                    else FJoin(Left, oldFrom, FEntity(entityName), FEEq(FEColumn(column), FEColumn(Name.QFEntityId(entity))))
-                                (newResult, newFrom)
-                            | _ -> (result, oldFrom)
-                    | _ -> (result, oldFrom)
-            ((newResult, attrs) :: oldResults, newFrom)
+                                    else FJoin(Left, oldFrom, FEntity(entityName), FEEq(FEColumn(column), FEColumn(Name.QFEntityId(rawEntity))))
+                                (newResult, newEntities, newFrom)
+                            | _ -> (result, oldEntities, oldFrom)
+                    | _ -> (result, oldEntities, oldFrom)
+            ((newResult, attrs) :: oldResults, newEntities, newFrom)
         else
-            ((result, attrs) :: oldResults, oldFrom)
+            ((result, attrs) :: oldResults, oldEntities, oldFrom)
 
     static member ParseQuery (uv : UserView) =
         let lexbuf = LexBuffer<char>.FromString uv.Query
@@ -180,18 +189,23 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
 
     // Make this return an IDisposable cursor.
     member this.RunQuery (parsedQuery : ParsedQueryExpr) =
-        let rawQueryTree = qualifyQuery parsedQuery
-        let (newResults, newFrom) = Array.fold (replaceSummary rawQueryTree.attributes) ([], rawQueryTree.from) rawQueryTree.results
-        let queryTree = { rawQueryTree with
-                              results = newResults |> List.toArray |> Array.rev;
-                              from = newFrom;
-                        }
+        let rawQuery = qualifyQuery parsedQuery
+        let (newResults, newEntities, newFrom) = Array.fold (replaceSummary rawQuery.expression.attributes) ([], rawQuery.entities, rawQuery.expression.from) rawQuery.expression.results
+        let query = { rawQuery with
+                          entities = newEntities;
+                          expression = { rawQuery.expression with
+                                             results = newResults |> List.toArray |> Array.rev;
+                                             from = newFrom;
+                                       };
+                    }
 
-        let (types, results) = Compiler.compileQuery queryTree |> dbQuery.Query
-        let columns = queryTree.results |> Array.map2 (toViewColumn queryTree.attributes) types
+        let (types, results) = Compiler.compileQuery query |> dbQuery.Query
+        let columns = query.expression.results |> Array.map2 (toViewColumn query.entities query.expression.attributes) types
+        let rawColumns = rawQuery.expression.results |> Array.map2 (toViewColumn rawQuery.entities rawQuery.expression.attributes) types
 
-        { attributes = queryTree.attributes;
+        { attributes = query.expression.attributes;
           columns = columns;
+          rawColumns = rawColumns;
           rows = results |> Array.toSeq |> Seq.map2 toViewRow columns;
         }
 
@@ -213,8 +227,6 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         entity.ColumnFields.Select(templateColumn).ToArray()
 
     member this.InsertEntry (entity : Entity, row : IDictionary<string, string>) =
-        db.Entry(entity).Reference("Schema").Load()
-
         let (columns, values) = realizeFields entity row |> List.ofSeq |> List.unzip
 
         dbQuery.Insert { name = makeEntity entity;
@@ -226,8 +238,6 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                 this.Migrate ()
 
     member this.UpdateEntry (entity : Entity, id : int, row : IDictionary<string, string>) =
-        db.Entry(entity).Reference("Schema").Load()
-
         let values = realizeFields entity row |> Array.ofSeq
         dbQuery.Update { name = makeEntity entity;
                          columns = values;

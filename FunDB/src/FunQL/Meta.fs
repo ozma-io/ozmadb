@@ -40,7 +40,7 @@ let makeColumnMeta (ftype : QualifiedFieldType) (field : ColumnField) : ColumnMe
 
 let makeConstraintsMeta (ftype : QualifiedFieldType) (field : ColumnField) : (ConstraintName * ConstraintMeta) seq =
     seq { match ftype with
-              | FTReference(QDEEntity(rent)) ->
+              | FTReference(WrappedEntity(rent)) ->
                   let rname =
                       if rent.SchemaId.HasValue then
                           sprintf "%s.%s" rent.Schema.Name rent.Name

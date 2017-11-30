@@ -7,6 +7,7 @@ open YC.PrettyPrinter.StructuredFormat
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Qualifier.Name
 
 let rec internal aboveTagListL tagger = function
     | [] -> emptyL
@@ -35,7 +36,7 @@ let internal ppMaybeAttributeMap (attrMap : AttributeMap) =
     then emptyL
     else ppAttributeMap attrMap
 
-let rec internal ppQuery query =
+let rec internal ppQueryExpr query =
     let resultsList = query.results |> Array.toSeq |> Seq.map (fun (res, attr) -> ppResult res -- ppMaybeAttributeMap attr) |> Seq.toList
     let maybeWhere =
         match query.where with
@@ -61,7 +62,7 @@ let rec internal ppQuery query =
 and internal ppFrom = function
     | FEntity(e) -> wordL <| e.ToString ()
     | FJoin(jt, e1, e2, where) -> ppFrom e1 @@ (wordL (jt.ToString ()) ++ wordL "JOIN") @@ ppFrom e2 @@ (wordL "ON" ++ ppFieldExpr where)
-    | FSubExpr(q, name) -> bracketL (ppQuery q) @@ (wordL "AS" ++ wordL (name.ToString ()))
+    | FSubExpr(q, name) -> bracketL (ppQueryExpr q) @@ (wordL "AS" ++ wordL (name.ToString ()))
 
 and internal ppFieldExpr = function
     | FEValue(v) -> wordL <| v.ToString ()
@@ -84,6 +85,6 @@ and internal ppFieldType = function
     | FTDate -> wordL "date"
     | FTReference(e) -> wordL "reference" ++ wordL (e.ToString ())
 
-let QueryToString width q = print width <| ppQuery q
+let QueryToString width (q : QualifiedQuery) = print width <| ppQueryExpr q.expression
 
 let FieldTypeToString width ft = print width <| ppFieldType ft

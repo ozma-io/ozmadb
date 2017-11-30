@@ -7,9 +7,90 @@ open System.Runtime.InteropServices
 open FunWithFlags.FunCore
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.SQL.Utils
+open FunWithFlags.FunDB.FunQL.Utils
 
 type ColumnName = string
 type TableName = string
+
+type EntityName =
+    { schema: string option;
+      name: TableName;
+    } with
+        override this.ToString () =
+            match this.schema with
+                | None -> renderSqlName this.name
+                | Some(x) -> sprintf "%s.%s" (renderSqlName x) (renderSqlName this.name)
+
+        static member FromEntity (entity : Entity) =
+            { schema = if entity.SchemaId.HasValue then Some(entity.Schema.Name) else None;
+              name = entity.Name;
+            }
+
+type FieldName =
+    { entity: EntityName option;
+      name: ColumnName;
+    } with
+        override this.ToString () =
+            match this.entity with
+                | None -> renderSqlName this.name
+                | Some(entity) -> sprintf "%O.%s" entity (renderSqlName this.name)
+
+        static member FromField (field : Field) =
+            { entity = Some <| EntityName.FromEntity field.Entity;
+              name = field.Name;
+            }
+
+[<CustomEquality; CustomComparison>]
+type WrappedEntity =
+    | WrappedEntity of Entity
+    with
+        member this.Entity =
+            match this with
+                | WrappedEntity(e) -> e
+
+        member this.Name = EntityName.FromEntity this.Entity
+
+        override this.ToString () = renderEntityName this.Entity
+
+        override x.Equals (yobj) =
+            match yobj with
+                | :? WrappedEntity as y -> x.Entity.Id = y.Entity.Id
+                | _ -> false
+
+        override this.GetHashCode () = hash this.Entity.Id
+
+        interface IComparable with
+            member x.CompareTo (yobj) =
+                match yobj with
+                    | :? WrappedEntity as y -> compare x.Entity.Id y.Entity.Id
+                    | _ -> invalidArg "yobj" "Cannot compare values of different types"
+
+[<CustomEquality; CustomComparison>]
+type WrappedField<'f> when 'f :> Field =
+    | WrappedField of 'f
+    with
+        member this.Field =
+            match this with
+                | WrappedField(f) -> f
+
+        member this.Entity = WrappedEntity(this.Field.Entity)
+
+        member this.Name = FieldName.FromField this.Field
+
+        override this.ToString () = renderFieldName this.Field
+
+        override x.Equals (yobj) =
+            match yobj with
+                | :? WrappedField<'f> as y -> x.Field.Id = y.Field.Id
+                | _ -> false
+
+        override this.GetHashCode () = hash this.Field.Id
+
+        interface IComparable with
+            member x.CompareTo (yobj) =
+                match yobj with
+                    | :? WrappedField<'f> as y -> compare x.Field.Id y.Field.Id
+                    | _ -> invalidArg "yobj" "Cannot compare values of different types"
 
 type FieldType<'e> =
     | FTInt
@@ -116,34 +197,6 @@ and FromExpr<'e, 'f> =
     | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'f>
     | FSubExpr of QueryExpr<'e, 'f> * TableName
 
-
-type EntityName =
-    { schema: string option;
-      name: TableName;
-    } with
-        override this.ToString () =
-            match this.schema with
-                | None -> renderSqlName this.name
-                | Some(x) -> sprintf "%s.%s" (renderSqlName x) (renderSqlName this.name)
-
-        static member FromEntity (entity : Entity) =
-            { schema = if entity.SchemaId.HasValue then Some(entity.Schema.Name) else None;
-              name = entity.Name;
-            }
-
-type FieldName =
-    { entity: EntityName option;
-      name: ColumnName;
-    } with
-        override this.ToString () =
-            match this.entity with
-                | None -> renderSqlName this.name
-                | Some(entity) -> sprintf "%O.%s" entity (renderSqlName this.name)
-
-        static member FromField (field : Field) =
-            { entity = Some <| EntityName.FromEntity field.Entity;
-              name = field.Name;
-            }
 
 type ParsedQueryExpr = QueryExpr<EntityName, FieldName>
 
