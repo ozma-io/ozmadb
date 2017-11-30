@@ -273,6 +273,5 @@ type Qualifier internal (db : DatabaseContext) =
     member this.QualifyEntity (entity : Entity) : QualifiedEntity =
         db.Entry(entity).Collection("Fields").Load()
         db.Entry(entity).Reference("Schema").Load()
-        db.Entry(entity).Reference("SummaryField").Load()
 
         qualifyEntity (WrappedEntity(entity))

@@ -109,6 +109,11 @@ type FieldType<'e> =
                 | FTDate -> "date"
                 | FTReference(e) -> sprintf "reference %O" e
 
+        member this.TryReference () =
+            match this with
+                | FTReference(e) -> e
+                | _ -> Unchecked.defaultof<'e>
+
 type FieldValue =
     | FInt of int
     | FString of string

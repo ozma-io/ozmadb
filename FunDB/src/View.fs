@@ -8,6 +8,7 @@ open Microsoft.FSharp.Text.Lexing
 open YC.PrettyPrinter.Pretty
 
 open FunWithFlags.FunCore
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.FunQL
 open FunWithFlags.FunDB.SQL.Query
@@ -38,6 +39,16 @@ type QualifiedField =
         match this with
             | QColumnField(f) -> f.Field :> Field
             | QComputedField(f) -> f.Field :> Field
+
+    member this.TryColumnField () =
+        match this with
+            | QColumnField(f) -> f
+            | _ -> Unchecked.defaultof<Name.QualifiedColumnField>
+
+    member this.TryComputedField () =
+        match this with
+            | QComputedField(f) -> f
+            | _ -> Unchecked.defaultof<Name.QualifiedComputedField>
 
 type ViewColumn =
     internal { name : string;
@@ -168,6 +179,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                                             let entity = qualifier.QualifyEntity rawEntity.Entity
                                             (Map.add rawEntity.Name entity oldEntities, entity)
                                 let entityName = Name.QEEntity(rawEntity)
+                                db.Entry(entity.Entity).Reference("SummaryField").Load()
                                 let newResult = RField(Name.QFField(WrappedField(entity.Entity.SummaryField)))
                                 let newFrom =
                                     if fromExprContains entityName oldFrom
@@ -180,16 +192,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         else
             ((result, attrs) :: oldResults, oldEntities, oldFrom)
 
-    static member ParseQuery (uv : UserView) =
-        let lexbuf = LexBuffer<char>.FromString uv.Query
-        try
-            Parser.query Lexer.tokenstream lexbuf
-        with
-            | Failure(msg) -> raise <| UserViewError msg
-
-    // Make this return an IDisposable cursor.
-    member this.RunQuery (parsedQuery : ParsedQueryExpr) =
-        let rawQuery = qualifyQuery parsedQuery
+    let runQuery (rawQuery : Name.QualifiedQuery) =
         let (newResults, newEntities, newFrom) = Array.fold (replaceSummary rawQuery.expression.attributes) ([], rawQuery.entities, rawQuery.expression.from) rawQuery.expression.results
         let query = { rawQuery with
                           entities = newEntities;
@@ -208,6 +211,40 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
           rawColumns = rawColumns;
           rows = results |> Array.toSeq |> Seq.map2 toViewRow columns;
         }
+
+    static member ParseQuery (uv : UserView) =
+        let lexbuf = LexBuffer<char>.FromString uv.Query
+        try
+            Parser.query Lexer.tokenstream lexbuf
+        with
+            | Failure(msg) -> raise <| UserViewError msg
+
+    // Make this return an IDisposable cursor.
+    member this.RunQuery (parsedQuery : ParsedQueryExpr) =
+        let rawQuery = qualifyQuery parsedQuery
+        runQuery rawQuery
+
+    member this.SelectSummaries (entity : Entity) =
+        let qEntity = qualifier.QualifyEntity entity
+        db.Entry(entity).Reference("SummaryField").Load()
+        let idField = Name.QFEntityId(qEntity.entity)
+        let summaryField =
+            if entity.SummaryFieldId.HasValue
+            then Name.QFField(WrappedField(entity.SummaryField))
+            else idField
+        let emptyAttrs = new AttributeMap ()
+        let queryExpr =
+            { attributes = emptyAttrs;
+              results = [| (RField(idField), emptyAttrs); (RField(summaryField), emptyAttrs) |];
+              from = FEntity(Name.QEEntity(qEntity.entity));
+              where = None;
+              orderBy = [| |];
+            }
+        let query =
+            { Name.QualifiedQuery.expression = queryExpr;
+              Name.entities = mapSingleton qEntity.entity.Name qEntity;
+            }
+        runQuery query
 
     member this.GetTemplate (entity : Entity) =
         db.Entry(entity).Collection("Fields").Load()
