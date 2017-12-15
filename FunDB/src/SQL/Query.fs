@@ -30,7 +30,7 @@ type QueryConnection (connectionString : string) =
             | (VTString, (:? string as value)) -> VString(value)
             | (VTBool, (:? bool as value)) -> VBool(value)
             | (VTDateTime, (:? DateTime as value)) -> VDateTime(value)
-            | (VTDate, (:? DateTime as value)) -> VDateTime(value)
+            | (VTDate, (:? DateTime as value)) -> VDate(value)
             | (typ, value) -> failwith <| sprintf "Unknown raw SQL value type: %s, value type: %O" (value.GetType ()).FullName typ
 
     let executeNonQuery queryStr =
