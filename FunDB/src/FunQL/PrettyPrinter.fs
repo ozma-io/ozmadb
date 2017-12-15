@@ -83,7 +83,8 @@ and internal ppFieldType = function
     | FTBool -> wordL "bool"
     | FTDateTime -> wordL "datetime"
     | FTDate -> wordL "date"
-    | FTReference(e) -> wordL "reference" ++ wordL (e.ToString ())
+    | FTReference(e) -> wordL "reference" ++ bracketL (wordL (e.ToString ()))
+    | FTEnum(vals) -> wordL "enum" ++ (Set.toSeq vals |> Seq.map (fun x -> wordL (renderSqlString x)) |> Seq.toList |> commaListL |> bracketL)
 
 let QueryToString width (q : QualifiedQuery) = print width <| ppQueryExpr q.expression
 

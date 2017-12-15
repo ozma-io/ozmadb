@@ -92,28 +92,6 @@ type WrappedField<'f> when 'f :> Field =
                     | :? WrappedField<'f> as y -> compare x.Field.Id y.Field.Id
                     | _ -> invalidArg "yobj" "Cannot compare values of different types"
 
-type FieldType<'e> =
-    | FTInt
-    | FTString
-    | FTBool
-    | FTDateTime
-    | FTDate
-    | FTReference of 'e
-    with
-        override this.ToString () =
-            match this with
-                | FTInt -> "int"
-                | FTString -> "string"
-                | FTBool -> "bool"
-                | FTDateTime -> "datetime"
-                | FTDate -> "date"
-                | FTReference(e) -> sprintf "reference %O" e
-
-        member this.TryReference () =
-            match this with
-                | FTReference(e) -> e
-                | _ -> Unchecked.defaultof<'e>
-
 type FieldValue =
     | FInt of int
     | FString of string
@@ -130,6 +108,70 @@ type FieldValue =
                 | FDateTime(dt) -> dt.ToString("O") |> renderSqlString
                 | FDate(d) -> d.ToString("d", CultureInfo.InvariantCulture) |> renderSqlString
                 | FNull -> "NULL"
+
+type FieldType<'e> =
+    | FTInt
+    | FTString
+    | FTBool
+    | FTDateTime
+    | FTDate
+    | FTReference of 'e
+    | FTEnum of Set<string>
+    with
+        override this.ToString () =
+            match this with
+                | FTInt -> "int"
+                | FTString -> "string"
+                | FTBool -> "bool"
+                | FTDateTime -> "datetime"
+                | FTDate -> "date"
+                | FTReference(e) -> sprintf "reference(%O)" e
+                | FTEnum(vals) -> sprintf "enum(%s)" (vals |> Seq.map (fun x -> sprintf "\"%s\"" (renderSqlString x)) |> String.concat ", ")
+
+        member this.IsInt =
+            match this with
+                | FTInt -> true
+                | _ -> false
+
+        member this.IsString =
+            match this with
+                | FTString -> true
+                | _ -> false
+
+        member this.IsBool =
+            match this with
+                | FTBool -> true
+                | _ -> false
+
+        member this.IsDateTime =
+            match this with
+                | FTDateTime -> true
+                | _ -> false
+
+        member this.IsDate =
+            match this with
+                | FTDate -> true
+                | _ -> false
+
+        member this.IsReference =
+            match this with
+                | FTReference(_) -> true
+                | _ -> false
+
+        member this.GetReference () =
+            match this with
+                | FTReference(e) -> e
+                | _ -> invalidOp "GetReference"
+
+        member this.IsEnum =
+            match this with
+                | FTEnum(_) -> true
+                | _ -> false
+
+        member this.GetEnum () =
+            match this with
+                | FTEnum(items) -> items
+                | _ -> invalidOp "GetEnum"
 
 type FieldExpr<'c> =
     | FEValue of FieldValue

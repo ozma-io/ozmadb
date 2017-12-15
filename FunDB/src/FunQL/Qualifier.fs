@@ -151,6 +151,7 @@ type Qualifier internal (db : DatabaseContext) =
         | FTReference(e) ->
             let entity = getDbEntity e
             FTReference(entity)
+        | FTEnum(vals) -> FTEnum(vals)
 
     and qualifyEntity (e : WrappedEntity) =
         let colFields = e.Entity.ColumnFields |> Seq.map (fun f -> (f.Name, qualifyColumnField f)) |> Map.ofSeq
@@ -275,3 +276,14 @@ type Qualifier internal (db : DatabaseContext) =
         db.Entry(entity).Reference("Schema").Load()
 
         qualifyEntity (WrappedEntity(entity))
+
+    static member QualifyDefaultExpr (entity : ParsedFieldExpr) : QualifiedFieldExpr =
+        let rec qualifyDefaultExpr = function
+            | FEValue(v) -> FEValue(v)
+            | FEColumn(c) -> raise <| QualifierError "Column references are not supported in default values"
+            | FENot(a) -> FENot(qualifyDefaultExpr a)
+            | FEConcat(a, b) -> FEConcat(qualifyDefaultExpr a, qualifyDefaultExpr b)
+            | FEEq(a, b) -> FEEq(qualifyDefaultExpr a, qualifyDefaultExpr b)
+            | FEIn(a, arr) -> FEIn(qualifyDefaultExpr a, Array.map qualifyDefaultExpr arr)
+            | FEAnd(a, b) -> FEAnd(qualifyDefaultExpr a, qualifyDefaultExpr b)
+        qualifyDefaultExpr entity

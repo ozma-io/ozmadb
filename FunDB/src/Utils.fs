@@ -21,8 +21,11 @@ let seqMapMaybe (f : 'A -> 'B option) (s : seq<'A>) : seq<'B> =
                   | None -> ()
         }
 
-let mapOfSeqUnique (s : seq<'K * 'V>) : Map<'K, 'V> =
-    Seq.fold (fun m (k, v) -> if Map.containsKey k m then failwith (sprintf "Key '%s' already exists" (k.ToString ())) else Map.add k v m) Map.empty s
+let mapOfSeqUnique (items : seq<'K * 'V>) : Map<'K, 'V> =
+    Seq.fold (fun m (k, v) -> if Map.containsKey k m then failwith (sprintf "Key '%s' already exists" (k.ToString ())) else Map.add k v m) Map.empty items
+
+let setOfSeqUnique (items : seq<'T>) : Set<'T> =
+    Seq.fold (fun s x -> if Set.contains x s then failwith (sprintf "Item '%s' already exists" (x.ToString ())) else Set.add x s) Set.empty items
 
 let mapUnionUnique (a : Map<'K, 'V>) (b : Map<'K, 'V>) =
     mapOfSeqUnique (Seq.append (Map.toSeq a) (Map.toSeq b))

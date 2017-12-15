@@ -38,6 +38,7 @@ let compileFieldType = function
     | FTDateTime -> AST.VTDateTime
     | FTDate -> AST.VTDate
     | FTReference(_) -> AST.VTInt
+    | FTEnum(_) -> AST.VTString
 
 let compileOrder = function
     | Asc -> AST.Asc

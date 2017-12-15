@@ -131,6 +131,81 @@ type Value<'o> =
                 | VObject(obj) -> sprintf "%s :: regclass" (obj.ToString () |> renderSqlString)
                 | VNull -> "NULL"
 
+        member this.IsInt =
+            match this with
+                | VInt(_) -> true
+                | _ -> false
+
+        member this.GetInt () =
+            match this with
+                | VInt(i) -> i
+                | _ -> invalidOp "GetInt"
+
+        member this.IsFloat =
+            match this with
+                | VFloat(_) -> true
+                | _ -> false
+
+        member this.GetFloat () =
+            match this with
+                | VFloat(f) -> f
+                | _ -> invalidOp "GetFloat"
+
+        member this.IsString =
+            match this with
+                | VString(_) -> true
+                | _ -> false
+
+        member this.GetString () =
+            match this with
+                | VString(s) -> s
+                | _ -> invalidOp "GetString"
+
+        member this.IsBool =
+            match this with
+                | VBool(_) -> true
+                | _ -> false
+
+        member this.GetBool () =
+            match this with
+                | VBool(b) -> b
+                | _ -> invalidOp "GetBool"
+
+        member this.IsDateTime =
+            match this with
+                | VDateTime(_) -> true
+                | _ -> false
+
+        member this.GetDateTime () =
+            match this with
+                | VDateTime(dt) -> dt
+                | _ -> invalidOp "GetDateTime"
+
+        member this.IsDate =
+            match this with
+                | VDate(_) -> true
+                | _ -> false
+
+        member this.GetDate () =
+            match this with
+                | VDate(dt) -> dt
+                | _ -> invalidOp "GetDate"
+
+        member this.IsObject =
+            match this with
+                | VObject(_) -> true
+                | _ -> false
+
+        member this.GetObject () =
+            match this with
+                | VObject(obj) -> obj
+                | _ -> invalidOp "GetObject"
+
+        member this.IsNull =
+            match this with
+                | VNull -> true
+                | _ -> false
+
 type ParsedValue = Value<string>
 type QualifiedValue = Value<ObjectRef>
 

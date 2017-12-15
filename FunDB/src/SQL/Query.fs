@@ -45,20 +45,27 @@ type QueryConnection (connectionString : string) =
         member this.Dispose () =
             connection.Dispose()
 
-    // Make it return Values instead of strings.
-    member this.Query (expr : SelectExpr) : (ValueType array) * (QualifiedValue array array) =
+    // TODO: Make a cursored version
+    member this.Query (expr : SelectExpr) : ((string * ValueType) array) * (QualifiedValue array array) =
         let queryStr = renderSelect expr
         eprintfn "Select query: %s" queryStr
         use command = new NpgsqlCommand(queryStr, connection)
         connection.Open()
         try
             use reader = command.ExecuteReader()
-            let types = seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.GetDataTypeName(i) |> parseCoerceValueType |> Option.get) |> Seq.toArray
+            let getColumn i =
+                let name = reader.GetName(i)
+                let typ = reader.GetDataTypeName(i) |> parseCoerceValueType |> Option.get
+                (name, typ)
+            let columns = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getColumn |> Seq.toArray
+            let getRow i =
+                let (_, typ) = columns.[i]
+                reader.[i] |> convertValue typ
             let values =
                 seq { while reader.Read() do
-                      yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map (fun i -> reader.[i] |> convertValue types.[i]) |> Seq.toArray
+                          yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
                 } |> Seq.toArray
-            (types, values)
+            (columns, values)
         finally
             connection.Close()
 

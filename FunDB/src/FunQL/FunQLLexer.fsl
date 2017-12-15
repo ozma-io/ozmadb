@@ -88,6 +88,7 @@ rule tokenstream = parse
 | d a t e t i m e { Parser.DATETIME_TYPE }
 | d a t e { Parser.DATE_TYPE }
 | r e f e r e n c e { Parser.REFERENCE_TYPE }
+| e n u m { Parser.ENUM_TYPE }
 
 // Unescaped ids
 | ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID((String lexbuf.Lexeme).ToLower()) }

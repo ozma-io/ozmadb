@@ -17,15 +17,6 @@ open FunWithFlags.FunDB.FunQL.Compiler
 
 exception FunMetaError of string
 
-let rec qualifyDefaultExpr = function
-    | FEValue(v) -> FEValue(v)
-    | FEColumn(c) -> raise <| FunMetaError "Column references are not supported in default values"
-    | FENot(a) -> FENot(qualifyDefaultExpr a)
-    | FEConcat(a, b) -> FEConcat(qualifyDefaultExpr a, qualifyDefaultExpr b)
-    | FEEq(a, b) -> FEEq(qualifyDefaultExpr a, qualifyDefaultExpr b)
-    | FEIn(a, arr) -> FEIn(qualifyDefaultExpr a, Array.map qualifyDefaultExpr arr)
-    | FEAnd(a, b) -> FEAnd(qualifyDefaultExpr a, qualifyDefaultExpr b)
-
 let makeColumnMeta (ftype : QualifiedFieldType) (field : ColumnField) : ColumnMeta =
     { colType = compileFieldType ftype;
       nullable = field.Nullable;
@@ -35,7 +26,7 @@ let makeColumnMeta (ftype : QualifiedFieldType) (field : ColumnField) : ColumnMe
           else
               let lexbuf = LexBuffer<char>.FromString field.Default
               let expr = Parser.fieldExpr Lexer.tokenstream lexbuf
-              Some(expr |> qualifyDefaultExpr |> compileFieldExpr |> norefValueExpr)
+              Some(expr |> Qualifier.QualifyDefaultExpr |> compileFieldExpr |> norefValueExpr)
     }
 
 let makeConstraintsMeta (ftype : QualifiedFieldType) (field : ColumnField) : (ConstraintName * ConstraintMeta) seq =

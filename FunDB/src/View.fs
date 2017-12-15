@@ -23,8 +23,54 @@ open FunWithFlags.FunDB.FunQL.PrettyPrinter
 
 type EntityId = int
 
+type ViewCell =
+    internal { value : QualifiedValue;
+               pun : string option;
+             } with
+        member this.Value = this.value
+
+        member this.IsPunned = Option.isSome this.pun
+
+        // XXX: RenderCellValue and ParseCellValue should be kept in sync.
+        static member RenderCellValue (value : QualifiedValue) : string =
+            match value with
+                | VInt(i) -> i.ToString ()
+                | VFloat(f) -> f.ToString ()
+                | VString(s) -> s
+                | VBool(b) -> b.ToString ()
+                | VDateTime(dt) -> dt.ToString ()
+                | VDate(d) -> d.ToString ()
+                | VObject(obj) -> obj.ToString ()
+                | VNull -> ""
+
+        static member internal ParseCellValue (valType : FieldType<_>) (str : string) : FieldValue option =
+            if str = ""
+            then Some(FNull)
+            else
+                try
+                    match valType with
+                        | FTInt -> Some(FInt(int str))
+                        | FTString -> Some(FString(str))
+                        | FTBool ->
+                            match str.ToLower() with
+                                | "true" -> Some(FBool(true))
+                                | "false" -> Some(FBool(false))
+                                | _ -> None
+                        | FTDateTime -> Some(FDateTime(DateTime.Parse(str)))
+                        | FTDate -> Some(FDate(DateTime.Parse(str)))
+                        // XXX: Maybe some kind of checks here.
+                        | FTReference(_) -> Some(FInt(int str))
+                        | FTEnum(_) -> Some(FString(str))
+                with
+                    _ -> None
+
+        override this.ToString () =
+            match this.pun with
+                | Some(s) -> s
+                | None -> ViewCell.RenderCellValue this.value
+
 type ViewRow =
-    internal { cells : string array;
+    internal { cells : ViewCell array;
                attributes : AttributeMap;
              } with
         member this.Cells = this.cells
@@ -66,20 +112,48 @@ type ViewColumn =
 type ViewResult =
     internal { attributes : AttributeMap;
                columns : ViewColumn array;
-               rawColumns : ViewColumn array;
                rows : ViewRow seq;
              } with
         member this.Attributes = this.attributes
         member this.Columns = this.columns
-        member this.RawColumns = this.rawColumns
         member this.Rows = this.rows
 
+type Summaries = (int * ViewCell) array
+
 type TemplateColumn =
-    internal { field : Field;
-               defaultValue : string;
+    internal { field : Name.QualifiedColumnField;
+               attributes : AttributeMap;
+               defaultValue : QualifiedValue;
+               summaries : Summaries option;
              } with
         member this.Field = this.field
         member this.Default = this.defaultValue
+        member this.Attributes = this.attributes
+        member this.Summaries =
+            match this.summaries with
+                | Some(sums) -> sums
+                | None -> null
+
+        member this.ToViewColumn () =
+            { name = this.field.Field.Name;
+              field = Some(QColumnField(this.field));
+              attributes = this.attributes;
+              valueType = compileFieldType this.field.fieldType;
+            }
+
+        member this.ToDefaultCell () =
+            { value = this.defaultValue;
+              pun = None;
+            }
+
+type TemplateResult =
+    internal { entity : Name.QualifiedEntity;
+               columns : TemplateColumn array;
+               attributes : AttributeMap;
+             } with
+        member this.Entity = this.entity.Entity
+        member this.Columns = this.columns
+        member this.Attributes = this.attributes
 
 exception UserViewError of string
 
@@ -91,7 +165,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             | QualifierError(msg) ->
                 raise <| UserViewError msg
 
-    let toViewColumn (entities : Name.QEntities) (queryAttrs : AttributeMap) (valueType : ValueType) (res, attrs) =
+    let toViewColumn (entities : Name.QEntities) (queryAttrs : AttributeMap) (valueType : ValueType) (res, attrs) : ViewColumn =
         { name = Name.resultName res;
           field =
               match res with
@@ -107,110 +181,128 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
           valueType = valueType;
         }
 
-    let valueToDisplayString = function
-        | VInt(i) -> i.ToString ()
-        | VFloat(f) -> f.ToString ()
-        | VString(s) -> s
-        | VBool(b) -> b.ToString ()
-        | VDateTime(dt) -> dt.ToString ()
-        | VDate(d) -> d.ToString ()
-        | VObject(obj) -> obj.ToString ()
-        | VNull -> null
+    let toViewColumns (query : Name.QualifiedQuery) (columns : (string * ValueType) array) : ViewColumn array =
+        let mutable i = 0
+        let processColumn result =
+            let (name, _) = columns.[i]
+            if name.StartsWith("_Pun_") then
+                i <- i + 1
+            let (_, typ) = columns.[i]
+            i <- i + 1
+            toViewColumn query.entities query.expression.attributes typ result
+        Array.map processColumn query.expression.results
 
-    let simpleFieldValue (valType : FieldType<_>) (str : string) : FieldValue option =
-        if str = null
-        then Some(FNull)
-        else
-        try
-            match valType with
-                | FTInt -> Some(FInt(int str))
-                | FTString -> Some(FString(str))
-                | FTBool ->
-                    match str.ToLower() with
-                        | "true" -> Some(FBool(true))
-                        | "false" -> Some(FBool(false))
-                        | _ -> None
-                | FTDateTime -> Some(FDateTime(DateTime.Parse(str)))
-                | FTDate -> Some(FDate(DateTime.Parse(str)))
-                // XXX: Maybe some kind of check here.
-                | FTReference(_) -> Some(FInt(int str))
-        with
-            _ -> None
-
-    let toViewRow (column : ViewColumn) row =
-        { cells = Array.map valueToDisplayString row;
-          attributes = column.attributes;
+    let toViewRow (columns : (string * ValueType) array) (row : QualifiedValue array) : ViewRow =
+        let newCells = new List<ViewCell>()
+        let mutable i = 0
+        while i < Array.length row do
+            let (name, _) = columns.[i]
+            if name.StartsWith("_Pun_") then
+                newCells.Add { value = row.[i + 1];
+                                pun = Some(ViewCell.RenderCellValue row.[i]);
+                             }
+                i <- i + 2
+            else
+                newCells.Add { value = row.[i];
+                               pun = None;
+                             }
+                i <- i + 1
+        { cells = newCells.ToArray ();
+          attributes = new AttributeMap ();
         }
 
-    let realizeFields (entity : Entity) (row : IDictionary<string, string>) : (ColumnName * LocalValueExpr) seq =
-        let qEntity = qualifier.QualifyEntity entity
+    let realizeField (field : Name.QualifiedColumnField) (row : IDictionary<string, string>) : ColumnName * LocalValueExpr =
+        let v = row.[field.Field.Name]
+        let value =
+            if field.Field.Nullable && v = null
+            then FNull
+            else
+                match ViewCell.ParseCellValue field.fieldType v with
+                    | Some(r) -> r
+                    | None -> raise <| UserViewError(sprintf "Invalid value of field %s" field.Field.Name)
+        (field.Field.Name, VEValue(compileFieldValue value))
 
-        let toValue = function
-            | KeyValue(k, v) ->
-                let field = qEntity.columnFields.[k]
-                let value =
-                    if field.Field.Nullable && v = null
-                    then FNull
-                    else
-                        match simpleFieldValue field.fieldType v with
-                            | Some(r) -> r
-                            | None -> raise <| UserViewError(sprintf "Invalid value of field %s" k)
-                (k, VEValue(compileFieldValue value))
+    let punSummary (rawQuery : Name.QualifiedQuery) =
+        let newResults = new List<Name.QualifiedResult * AttributeMap>()
+        let mutable newEntities = rawQuery.entities
+        let mutable newFrom = rawQuery.expression.from
 
-        row |> Seq.map toValue
-
-    let replaceSummary (globalAttrs : AttributeMap) (oldResults, oldEntities : Name.QEntities, oldFrom) (result : Name.QualifiedResult, attrs : AttributeMap) =
-        let toResolve =
-            if attrs.ContainsKey("ResolveSummary")
-            then attrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
-            else globalAttrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
-        if toResolve
-        then
-            let (newResult, newEntities, newFrom) =
+        for (result, attrs) in rawQuery.expression.results do
+            let toResolve =
+                if attrs.ContainsKey("ResolveSummary")
+                then attrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
+                else rawQuery.expression.attributes.GetBoolWithDefault(false, [|"ResolveSummary"|])
+            if toResolve then
                 match result with
                     | RField(Name.QFField(WrappedField(:? ColumnField) as rawField) as column) ->
-                        let field = oldEntities.[rawField.Entity.Name].columnFields.[rawField.Field.Name]
+                        let field = newEntities.[rawField.Entity.Name].columnFields.[rawField.Field.Name]
                         match field.fieldType with
                             | FTReference(rawEntity) when rawEntity.Entity.SummaryFieldId.HasValue ->
-                                let (newEntities, entity) =
-                                    match Map.tryFind rawEntity.Name oldEntities with
-                                        | Some(e) -> (oldEntities, e)
+                                let entity =
+                                    match Map.tryFind rawEntity.Name newEntities with
+                                        | Some(e) -> e
                                         | None ->
                                             let entity = qualifier.QualifyEntity rawEntity.Entity
-                                            (Map.add rawEntity.Name entity oldEntities, entity)
+                                            newEntities <- Map.add rawEntity.Name entity newEntities
+                                            entity
+
                                 let entityName = Name.QEEntity(rawEntity)
+                                newFrom <-
+                                    if fromExprContains entityName newFrom
+                                    then newFrom
+                                    else FJoin(Left, newFrom, FEntity(entityName), FEEq(FEColumn(column), FEColumn(Name.QFEntityId(rawEntity))))
+
                                 db.Entry(entity.Entity).Reference("SummaryField").Load()
-                                let newResult = RField(Name.QFField(WrappedField(entity.Entity.SummaryField)))
-                                let newFrom =
-                                    if fromExprContains entityName oldFrom
-                                    then oldFrom
-                                    else FJoin(Left, oldFrom, FEntity(entityName), FEEq(FEColumn(column), FEColumn(Name.QFEntityId(rawEntity))))
-                                (newResult, newEntities, newFrom)
-                            | _ -> (result, oldEntities, oldFrom)
-                    | _ -> (result, oldEntities, oldFrom)
-            ((newResult, attrs) :: oldResults, newEntities, newFrom)
-        else
-            ((result, attrs) :: oldResults, oldEntities, oldFrom)
+                                let newResult = RExpr(FEColumn(Name.QFField(WrappedField(entity.Entity.SummaryField))), "_Pun_" + rawField.Field.Name)
+                                newResults.Add (newResult, attrs)
+                                ()
+                            | _ -> ()
+                    | _ -> ()
+
+            newResults.Add (result, attrs)
+
+        { rawQuery with
+              entities = newEntities;
+              expression = { rawQuery.expression with
+                                 results = newResults.ToArray ();
+                                 from = newFrom;
+                           };
+        }
 
     let runQuery (rawQuery : Name.QualifiedQuery) =
-        let (newResults, newEntities, newFrom) = Array.fold (replaceSummary rawQuery.expression.attributes) ([], rawQuery.entities, rawQuery.expression.from) rawQuery.expression.results
-        let query = { rawQuery with
-                          entities = newEntities;
-                          expression = { rawQuery.expression with
-                                             results = newResults |> List.toArray |> Array.rev;
-                                             from = newFrom;
-                                       };
-                    }
+        let query = punSummary rawQuery
 
         let (types, results) = Compiler.compileQuery query |> dbQuery.Query
-        let columns = query.expression.results |> Array.map2 (toViewColumn query.entities query.expression.attributes) types
-        let rawColumns = rawQuery.expression.results |> Array.map2 (toViewColumn rawQuery.entities rawQuery.expression.attributes) types
 
         { attributes = query.expression.attributes;
-          columns = columns;
-          rawColumns = rawColumns;
-          rows = results |> Array.toSeq |> Seq.map2 toViewRow columns;
+          columns = toViewColumns rawQuery types;
+          rows = results |> Array.toSeq |> Seq.map (toViewRow types);
         }
+
+    let mainEntity (query : Name.QualifiedQuery) : Name.QualifiedEntity * (Name.QualifiedColumnField array) =
+        let entity =
+            match query.expression.from with
+                | FEntity(Name.QEEntity(e)) -> query.entities.[e.Name]
+                | _ -> invalidOp "Cannot get main entity from a complex query"
+
+        let matchField = function
+            | (RField(Name.QFField(WrappedField(:? ColumnField as f))), _) -> entity.columnFields.[f.Name]
+            | _ -> invalidOp "Cannot get column field names from a complex query"
+
+        (entity, query.expression.results |> Array.map matchField)
+
+    // XXX: make this atomic!
+    let migrate () =
+        let toMeta = buildFunMeta db qualifier
+        let fromMeta = getDatabaseMeta dbQuery
+        let plan = migrateDatabase fromMeta toMeta
+        eprintfn "From meta: %s" (fromMeta.ToString ())
+        eprintfn "To meta: %s" (toMeta.ToString ())
+        Seq.iter dbQuery.ApplyOperation plan
+
+    let postUpdate (entity : Name.QualifiedEntity) =
+        if not entity.Entity.SchemaId.HasValue then
+            migrate ()
 
     static member ParseQuery (uv : UserView) =
         let lexbuf = LexBuffer<char>.FromString uv.Query
@@ -244,61 +336,87 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             { Name.QualifiedQuery.expression = queryExpr;
               Name.entities = mapSingleton qEntity.entity.Name qEntity;
             }
-        runQuery query
+        let res = runQuery query
+        let toSummary row =
+            let id =
+                match row.cells.[0].value with
+                    | VInt(i) -> i
+                    | _ -> failwith "Id is expected to be an integer"
+            (id, row.cells.[1])
+        res.rows |> Seq.map toSummary |> Array.ofSeq
 
-    member this.GetTemplate (entity : Entity) =
-        db.Entry(entity).Collection("Fields").Load()
+    member this.GetTemplate (parsedQuery : ParsedQueryExpr) : TemplateResult =
+        let query = qualifyQuery parsedQuery
+        let (entity, fields) = mainEntity query
 
-        let templateColumn (field : ColumnField) =
+        let templateColumn (field : Name.QualifiedColumnField) (_, attrs) : TemplateColumn =
+            let summaries =
+                match field.fieldType with
+                    | FTReference(WrappedEntity(re)) -> Some(this.SelectSummaries re)
+                    | _ -> None
             let defaultValue =
-                if field.Default = null then
-                    null
+                if field.Field.Default = null then
+                    if field.Field.Nullable then
+                        VNull
+                    else
+                        match field.fieldType with
+                            | FTInt -> VInt(0)
+                            | FTString -> VString("")
+                            | FTBool -> VBool(false)
+                            | FTDateTime -> VDateTime(DateTime.Now)
+                            | FTDate -> VDate(DateTime.Today)
+                            | FTReference(_) ->
+                                let (id, _) = (Option.get summaries).[0]
+                                VInt(id)
+                            | FTEnum(vals) -> VString(vals |> Set.toSeq |> Seq.head)
                 else
-                    let lexbufDefault = LexBuffer<char>.FromString field.Default
-                    let defVal = Parser.fieldExpr Lexer.tokenstream lexbufDefault
-                    print 80 <| ppFieldExpr defVal
+                    let lexbuf = LexBuffer<char>.FromString field.Field.Default
+                    let expr = Parser.fieldExpr Lexer.tokenstream lexbuf
+                    match expr |> Qualifier.QualifyDefaultExpr |> compileFieldExpr with
+                        | VEValue(v) -> v
+                        // FIXME
+                        | _ -> raise <| new NotImplementedException("Complex default expressions in fields are not supported for insert queries")
             { field = field;
               defaultValue = defaultValue;
+              attributes = attrs;
+              summaries = summaries;
             }
 
-        entity.ColumnFields.Select(templateColumn).ToArray()
+        { entity = entity;
+          columns = Seq.map2 templateColumn fields query.expression.results |> Array.ofSeq;
+          attributes = query.expression.attributes;
+        }
 
-    member this.InsertEntry (entity : Entity, row : IDictionary<string, string>) =
-        let (columns, values) = realizeFields entity row |> List.ofSeq |> List.unzip
+    member this.InsertEntry (parsedQuery : ParsedQueryExpr, row : IDictionary<string, string>) =
+        let query = qualifyQuery parsedQuery
+        let (entity, fields) = mainEntity query
+        let (columns, values) = fields |> Seq.map (fun f -> realizeField f row) |> List.ofSeq |> List.unzip
 
-        dbQuery.Insert { name = makeEntity entity;
+        dbQuery.Insert { name = makeEntity entity.Entity;
                          columns = Array.ofList columns;
                          values = [| Array.ofList values |];
                        }
+        postUpdate entity
 
-        if not entity.SchemaId.HasValue then
-                this.Migrate ()
+    member this.UpdateEntry (parsedQuery : ParsedQueryExpr, id : int, row : IDictionary<string, string>) =
+        // TODO: Allow complex multi-entity updates.
+        let query = qualifyQuery parsedQuery
+        let (entity, fields) = mainEntity query
+        let values = fields |> Seq.map (fun f -> realizeField f row) |> Array.ofSeq
 
-    member this.UpdateEntry (entity : Entity, id : int, row : IDictionary<string, string>) =
-        let values = realizeFields entity row |> Array.ofSeq
-        dbQuery.Update { name = makeEntity entity;
+        dbQuery.Update { name = makeEntity entity.Entity;
                          columns = values;
                          where = Some(VEEq(VEColumn(LocalColumn("Id")), VEValue(VInt(id))));
                        }
+        postUpdate entity
 
-        if not entity.SchemaId.HasValue then
-                this.Migrate ()
+    member this.DeleteEntry (parsedQuery : ParsedQueryExpr, id : int) =
+        let query = qualifyQuery parsedQuery
+        let (entity, fields) = mainEntity query
 
-    member this.DeleteEntry (entity : Entity, id : int) =
-        db.Entry(entity).Reference("Schema").Load()
-
-        dbQuery.Delete { name = makeEntity entity;
+        dbQuery.Delete { name = makeEntity entity.Entity;
                          where = Some(VEEq(VEColumn(LocalColumn("Id")), VEValue(VInt(id))));
                        }
+        postUpdate entity
 
-        if not entity.SchemaId.HasValue then
-                this.Migrate ()
-
-    // XXX: make this atomic!
-    member this.Migrate () =
-        let toMeta = buildFunMeta db qualifier
-        let fromMeta = getDatabaseMeta dbQuery
-        let plan = migrateDatabase fromMeta toMeta
-        eprintfn "From meta: %s" (fromMeta.ToString ())
-        eprintfn "To meta: %s" (toMeta.ToString ())
-        Seq.iter dbQuery.ApplyOperation plan
+    member this.Migrate () = migrate ()
