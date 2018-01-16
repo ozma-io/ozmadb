@@ -53,7 +53,7 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
     let keyColumnsTable = infoTable "key_column_usage"
     let constraintColumnUsageTable = infoTable "constraint_column_usage"
     let sequencesTable = infoTable "sequences"
-    let systemSchemas = set [| "pg_catalog"; "public"; "information_schema" |]
+    let systemSchemas = set [| "public"; "information_schema" |]
     let systemSchemasValue = systemSchemas |> Set.toSeq |> Seq.map (fun x -> VEValue(VString(x))) |> Seq.toArray
 
     let stringQuery sel =
@@ -68,7 +68,8 @@ let getDatabaseMeta (query : QueryConnection) : DatabaseMeta =
     let schemasRes = stringQuery { simpleSelect [| "schema_name" |] schemataTable with
                                        where = Some(schemasWhere);
                                  }
-    let schemas = schemasRes |> Seq.map (fun x -> x.[0]) |> Set.ofSeq
+    // Further filter system schemas.
+    let schemas = schemasRes |> Seq.map (fun x -> x.[0]) |> Seq.filter (fun x -> not (x.StartsWith "pg_")) |> Set.ofSeq
     let schemasValue = schemas |> Set.toSeq |> Seq.map (fun x -> VEValue(VString(x))) |> Seq.toArray
 
     let tablesWhere = VEIn(VEColumn({ table = tablesTable; name = "table_schema"; }), schemasValue)

@@ -229,6 +229,8 @@ type QueryExpr<'e, 'f> =
                   where = where;
                   orderBy = defaultArg orderBy Array.empty;
                 }
+
+          member this.Attributes = this.attributes
                 
           member this.MergeResults additionalResults = { this with results = Array.append additionalResults this.results; }
 
