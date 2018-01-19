@@ -63,6 +63,41 @@ type ValueType =
                 | VTDate -> "date"
                 | VTObject -> "regclass"
 
+        member this.IsInt =
+            match this with
+                | VTInt -> true
+                | _ -> false
+
+        member this.IsFloat =
+            match this with
+                | VTFloat -> true
+                | _ -> false
+
+        member this.IsString =
+            match this with
+                | VTString -> true
+                | _ -> false
+
+        member this.IsBool =
+            match this with
+                | VTBool -> true
+                | _ -> false
+
+        member this.IsDateTime =
+            match this with
+                | VTDateTime -> true
+                | _ -> false
+
+        member this.IsDate =
+            match this with
+                | VTDate -> true
+                | _ -> false
+
+        member this.IsObject =
+            match this with
+                | VTObject -> true
+                | _ -> false
+
 let internal parseValueType (str : string) =
     match str.ToLower() with
         | "bigint" -> Some(VTInt)

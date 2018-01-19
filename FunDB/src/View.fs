@@ -108,6 +108,7 @@ type ViewColumn =
                 | Some(f) -> f
                 | None -> Unchecked.defaultof<QualifiedField>
         member this.Attributes = this.attributes
+        member this.ValueType = this.valueType
 
 type ViewResult =
     internal { attributes : AttributeMap;
