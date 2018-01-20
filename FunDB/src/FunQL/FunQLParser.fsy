@@ -87,8 +87,12 @@ MaybeAttributeMap:
   | AttributeMap { $1 }
 
 Results:
-  | AttributedResult COMMA Results { $1 :: $3 }
-  | AttributedResult               { [ $1 ] }
+  |                 { [] }
+  | ResultsNonEmpty { $1 }
+
+ResultsNonEmpty:
+  | AttributedResult COMMA ResultsNonEmpty { $1 :: $3 }
+  | AttributedResult                       { [ $1 ] }
 
 AttributedResult:
   | Result MaybeAttributeMap { ($1, $2) }
