@@ -212,16 +212,15 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
           attributes = new AttributeMap ();
         }
 
-    let realizeField (field : Name.QualifiedColumnField) (row : IDictionary<string, string>) : ColumnName * LocalValueExpr =
-        let v = row.[field.Field.Name]
-        let value =
-            if field.Field.Nullable && v = null
+    let realizeField (field : Name.QualifiedColumnField) (value : string) : ColumnName * LocalValueExpr =
+        let value_ =
+            if field.Field.Nullable && value = null
             then FNull
             else
-                match ViewCell.ParseCellValue field.fieldType v with
+                match ViewCell.ParseCellValue field.fieldType value with
                     | Some(r) -> r
                     | None -> raise <| UserViewError(sprintf "Invalid value of field %s" field.Field.Name)
-        (field.Field.Name, VEValue(compileFieldValue value))
+        (field.Field.Name, VEValue(compileFieldValue value_))
 
     let punSummary (rawQuery : Name.QualifiedQuery) =
         let newResults = new List<Name.QualifiedResult * AttributeMap>()
@@ -391,7 +390,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
     member this.InsertEntry (parsedQuery : ParsedQueryExpr, row : IDictionary<string, string>) =
         let query = qualifyQuery parsedQuery
         let (entity, fields) = mainEntity query
-        let (columns, values) = fields |> Seq.map (fun f -> realizeField f row) |> List.ofSeq |> List.unzip
+        let (columns, values) = fields |> Seq.map (fun f -> realizeField f row.[f.Field.Name]) |> List.ofSeq |> List.unzip
 
         dbQuery.Insert { name = makeEntity entity.Entity;
                          columns = Array.ofList columns;
@@ -403,7 +402,11 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         // TODO: Allow complex multi-entity updates.
         let query = qualifyQuery parsedQuery
         let (entity, fields) = mainEntity query
-        let values = fields |> Seq.map (fun f -> realizeField f row) |> Array.ofSeq
+        let mapValue (f : Name.QualifiedColumnField) =
+            match row.TryGetValue f.Field.Name with
+                | (true, value) -> Some(realizeField f value)
+                | _ -> None
+        let values = fields |> seqMapMaybe mapValue |> Array.ofSeq
 
         dbQuery.Update { name = makeEntity entity.Entity;
                          columns = values;
