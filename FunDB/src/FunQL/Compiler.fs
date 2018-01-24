@@ -51,15 +51,16 @@ let compileJoin = function
     | Outer -> AST.Full
 
 let compileFieldValue = function
-    | FInt(i) -> AST.VInt(i)
-    | FString(s) -> AST.VString(s)
-    | FBool(b) -> AST.VBool(b)
-    | FDateTime(dt) -> AST.VDateTime(dt)
-    | FDate(d) -> AST.VDate(d)
-    | FNull -> AST.VNull
+    | FInt(i) -> AST.VEValue(AST.VInt(i))
+    // PostgreSQL cannot deduce text's type on its own
+    | FString(s) -> AST.VECast(AST.VEValue(AST.VString(s)), AST.VTString)
+    | FBool(b) -> AST.VEValue(AST.VBool(b))
+    | FDateTime(dt) -> AST.VEValue(AST.VDateTime(dt))
+    | FDate(d) -> AST.VEValue(AST.VDate(d))
+    | FNull -> AST.VEValue(AST.VNull)
 
 let rec compileFieldExpr = function
-    | FEValue(v) -> AST.VEValue(compileFieldValue v)
+    | FEValue(v) -> compileFieldValue v
     | FEColumn(c) -> AST.VEColumn(compileField c)
     | FENot(a) -> AST.VENot(compileFieldExpr a)
     | FEConcat(a, b) -> AST.VEConcat(compileFieldExpr a, compileFieldExpr b)

@@ -220,7 +220,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                 match ViewCell.ParseCellValue field.fieldType value with
                     | Some(r) -> r
                     | None -> raise <| UserViewError(sprintf "Invalid value of field %s" field.Field.Name)
-        (field.Field.Name, VEValue(compileFieldValue value_))
+        (field.Field.Name, compileFieldValue value_)
 
     let punSummary (rawQuery : Name.QualifiedQuery) =
         let newResults = new List<Name.QualifiedResult * AttributeMap>()
