@@ -15,6 +15,7 @@ open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
+open FunWithFlags.FunDB.SQL.Evaluate
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Qualifier
 open FunWithFlags.FunDB.FunQL.Meta
@@ -286,10 +287,10 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                 | _ -> invalidOp "Cannot get main entity from a complex query"
 
         let matchField = function
-            | (RField(Name.QFField(WrappedField(:? ColumnField as f))), _) -> entity.columnFields.[f.Name]
-            | _ -> invalidOp "Cannot get column field names from a complex query"
+            | (RField(Name.QFField(WrappedField(:? ColumnField as f))), _) -> Some(entity.columnFields.[f.Name])
+            | _ -> None
 
-        (entity, query.expression.results |> Array.map matchField)
+        (entity, query.expression.results |> seqMapMaybe matchField |> Array.ofSeq)
 
     // XXX: make this atomic!
     let migrate () =
@@ -372,10 +373,13 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                 else
                     let lexbuf = LexBuffer<char>.FromString field.Field.Default
                     let expr = Parser.fieldExpr Lexer.tokenstream lexbuf
-                    match expr |> Qualifier.QualifyDefaultExpr |> compileFieldExpr with
-                        | VEValue(v) -> v
-                        // FIXME
-                        | _ -> raise <| new NotImplementedException("Complex default expressions in fields are not supported for insert queries")
+                    match expr |> Qualifier.QualifyDefaultExpr |> compileFieldExpr |> getPureValueExpr with
+                        | Some(e) ->
+                            // FIXME: cache results, as they are supposed to be pure (LRU cache would be good).
+                            match dbQuery.Evaluate { values = [| (e, "default") |] } with
+                                | [| res |] -> res.value
+                                | _ -> failwith "Default evaluation is expected to return only one item"
+                        | None -> raise <| new NotImplementedException("Non-pure default expressions in fields are not supported for insert queries")
             { field = field;
               defaultValue = defaultValue;
               attributes = attrs;
@@ -400,6 +404,8 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
 
     member this.UpdateEntry (parsedQuery : ParsedQueryExpr, id : int, row : IDictionary<string, string>) =
         // TODO: Allow complex multi-entity updates.
+        // FIXME: Check that an item with this id is visible for this query expression and lock it for update.
+        // Or possibly better, just copy WHERE from parsed expression to the update expression.
         let query = qualifyQuery parsedQuery
         let (entity, fields) = mainEntity query
         let mapValue (f : Name.QualifiedColumnField) =

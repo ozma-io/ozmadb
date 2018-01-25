@@ -1,4 +1,6 @@
-module internal FunWithFlags.FunDB.Utils
+module FunWithFlags.FunDB.Utils
+
+type Void = private Void of unit
 
 let mapGetWithDefault (k : 'K) (def : 'V) (m : Map<'K, 'V>) : 'V =
     match Map.tryFind k m with

@@ -259,6 +259,7 @@ type PartialValueExpr = ValueExpr<ColumnRef, string>
 type ParsedValueExpr = ValueExpr<ColumnRef, ObjectRef>
 type QualifiedValueExpr = ValueExpr<Column, ObjectRef>
 type LocalValueExpr = ValueExpr<LocalColumn, ObjectRef>
+type PureValueExpr = ValueExpr<Void, ObjectRef>
 
 type SortOrder =
     | Asc
@@ -298,6 +299,10 @@ and SelectExpr =
       orderBy: (QualifiedValueExpr * SortOrder) array;
       limit: int option;
       offset: int option;
+    }
+
+and EvaluateExpr =
+    { values: (PureValueExpr * TableName) array;
     }
 
 let internal simpleSelect (columns : string seq) (table : Table) : SelectExpr =

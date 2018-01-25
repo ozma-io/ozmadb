@@ -26,6 +26,7 @@
     <Compile Include="src/SQL/Query.fs" />
     <Compile Include="src/SQL/Migration.fs" />
     <Compile Include="src/SQL/Meta.fs" />
+    <Compile Include="src/SQL/Evaluate.fs" />
 
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />

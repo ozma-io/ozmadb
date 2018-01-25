@@ -7,6 +7,12 @@ open FunWithFlags.FunCore
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Render
 
+type EvaluateResult =
+    { name: string;
+      valueType: ValueType;
+      value: QualifiedValue;
+    }
+
 type QueryConnection (connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
 
@@ -41,14 +47,7 @@ type QueryConnection (connectionString : string) =
         finally
             connection.Close()
 
-    interface IDisposable with
-        member this.Dispose () =
-            connection.Dispose()
-
-    // TODO: Make a cursored version
-    member this.Query (expr : SelectExpr) : ((string * ValueType) array) * (QualifiedValue array array) =
-        let queryStr = renderSelect expr
-        eprintfn "Select query: %s" queryStr
+    let executeQuery queryStr : ((string * ValueType) array) * (QualifiedValue array array) =
         use command = new NpgsqlCommand(queryStr, connection)
         connection.Open()
         try
@@ -68,6 +67,24 @@ type QueryConnection (connectionString : string) =
             (columns, values)
         finally
             connection.Close()
+
+    interface IDisposable with
+        member this.Dispose () =
+            connection.Dispose()
+
+    // TODO: Make a cursored version
+    member this.Query (expr : SelectExpr) =
+        let queryStr = renderSelect expr
+        eprintfn "Select query: %s" queryStr
+        executeQuery queryStr
+
+    member this.Evaluate (expr : EvaluateExpr) =
+        let queryStr = renderEvaluate expr
+        eprintfn "Evaluate query: %s" queryStr
+        let (columns, results) = executeQuery queryStr
+        if Array.length results <> 1 then
+            failwith "Evaluate query is not expected to have other than one result row"
+        Seq.map2 (fun (name, typ) value -> { name = name; valueType = typ; value = value; }) columns results.[0] |> Array.ofSeq
 
     member this.Insert (expr : InsertExpr) =
         let queryStr = renderInsert expr

@@ -106,3 +106,7 @@ let renderSchemaOperation = function
                 | Some(def) -> sprintf "DEFAULT %s" (renderValueExpr def)
         sprintf "ALTER TABLE %O ADD COLUMN %s %O %s %s" col.table (renderSqlName col.name) pars.colType notNullStr defaultStr
     | SODeleteColumn(col) -> sprintf "ALTER TABLE %O DROP COLUMN %s" col.table (renderSqlName col.name)
+
+let renderEvaluate (expr : EvaluateExpr) =
+    sprintf "SELECT %s"
+        (expr.values |> Seq.map (fun (expr, name) -> sprintf "%s AS %s" (renderValueExpr expr) (renderSqlName name))  |> String.concat ", ")
