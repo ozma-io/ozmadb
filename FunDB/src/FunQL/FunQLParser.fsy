@@ -1,6 +1,7 @@
 %{
 
 open System
+open System.Globalization
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Attribute
@@ -27,6 +28,7 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %token LEFT_PARENS
 %token RIGHT_PARENS
 %token SEMICOLON
+%token DOUBLE_COLON
 %token COMMA
 %token DOT
 %token EQ
@@ -167,7 +169,14 @@ FieldExprAnd:
   
 FieldExprEq:
   | FieldExprEq EQ FieldExprVal { FEEq($1, $3) }
-  | FieldExprVal                { $1 }
+  | FieldExprCast               { $1 }
+
+FieldExprCast:
+  // Special cases to be able to use Date and DateTime constants
+  | STRING DOUBLE_COLON DATE_TYPE     { FEValue(FDate(tryDateTimeInvariant $1 |> Option.get)) }
+  | STRING DOUBLE_COLON DATETIME_TYPE { FEValue(FDateTime(tryDateTimeInvariant $1 |> Option.get)) }
+  // FIXME: Implement actual casting.
+  | FieldExprVal                      { $1 }
 
 FieldExprVal:
   | FieldName                                 { FEColumn($1) }
@@ -196,12 +205,15 @@ OrderByDirection:
   | ASC  { Asc }
   | DESC { Desc }
 
-FieldType:
+FieldExprType:
   | INT_TYPE                                           { FTInt }
   | STRING_TYPE                                        { FTString }
   | BOOL_TYPE                                          { FTBool }
   | DATETIME_TYPE                                      { FTDateTime }
   | DATE_TYPE                                          { FTDate }
+
+FieldType:
+  | FieldExprType                                      { $1 }
   | REFERENCE_TYPE LEFT_PARENS EntityName RIGHT_PARENS { FTReference($3) }
   | ENUM_TYPE LEFT_PARENS EnumList RIGHT_PARENS        { FTEnum($3 |> List.toSeq |> setOfSeqUnique) }
 

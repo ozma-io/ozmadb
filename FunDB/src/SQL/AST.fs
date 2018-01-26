@@ -59,7 +59,7 @@ type ValueType =
                 | VTFloat -> "double precision"
                 | VTString -> "text"
                 | VTBool -> "bool"
-                | VTDateTime -> "timestamp without timezone"
+                | VTDateTime -> "timestamp"
                 | VTDate -> "date"
                 | VTObject -> "regclass"
 
@@ -104,6 +104,7 @@ let internal parseValueType (str : string) =
         | "double precision" -> Some(VTFloat)
         | "text" -> Some(VTString)
         | "boolean" -> Some(VTBool)
+        | "timestamp" -> Some(VTDateTime)
         | "timestamp without timezone" -> Some(VTDateTime)
         | "date" -> Some(VTDate)
         | "regclass" -> Some(VTObject)
@@ -157,13 +158,13 @@ type Value<'o> =
     with
         override this.ToString () =
             match this with
-                | VInt(i) -> i.ToString ()
+                | VInt(i) -> i.ToString(CultureInfo.InvariantCulture)
                 | VFloat(f) -> invalidOp "Not supported"
                 | VString(s) -> renderSqlString s
                 | VBool(b) -> renderBool b
-                | VDateTime(dt) -> dt.ToString("O") |> renderSqlString
-                | VDate(d) -> d.ToString("d", CultureInfo.InvariantCulture) |> renderSqlString
-                | VObject(obj) -> sprintf "%s :: regclass" (obj.ToString () |> renderSqlString)
+                | VDateTime(dt) -> sprintf "(%s :: timestamp)" (dt.ToString("O", CultureInfo.InvariantCulture) |> renderSqlString)
+                | VDate(d) -> sprintf "(%s :: date)" (d.ToString("d", CultureInfo.InvariantCulture) |> renderSqlString)
+                | VObject(obj) -> sprintf "(%s :: regclass)" (obj.ToString () |> renderSqlString)
                 | VNull -> "NULL"
 
         member this.IsInt =

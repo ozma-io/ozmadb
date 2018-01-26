@@ -31,6 +31,7 @@ open FunWithFlags.FunDB.SQL.AST
 %token EOF
 
 %left AND
+%right DOUBLE_COLON
 
 %start valueExpr
 %type <PartialValueExpr> valueExpr
@@ -60,13 +61,19 @@ ValueExprEq:
 
 ValueExprCast:
   // Special cases to parse how PostgreSQL outputs various types.
+  // FIXME: Parse time values specially.
   | STRING DOUBLE_COLON REGCLASS_TYPE { VEValue(VObject($1)) }
   | STRING DOUBLE_COLON TEXT_TYPE     { VEValue(VString($1)) }
-  | ValueExprCast DOUBLE_COLON Id     { match $3 |> parseValueType with
+  | ValueExprCast DOUBLE_COLON LongId { let id = $3 |> Array.ofSeq |> String.concat " "
+                                        match parseValueType id with
                                             | Some(r) -> VECast($1, r)
-                                            | None -> failwith "Unknown type"
+                                            | None -> failwith <| sprintf "Unknown type: %s" id
                                       }
   | ValueExprVal                      { $1 }
+
+LongId:
+  | Id LongId { $1 :: $2 }
+  | Id        { [ $1 ]   }
 
 Id:
   | ID            { $1 }

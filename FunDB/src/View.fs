@@ -33,6 +33,14 @@ type ViewCell =
         member this.IsPunned = Option.isSome this.pun
 
         // XXX: RenderCellValue and ParseCellValue should be kept in sync.
+        (* Note on cultural matters:
+
+        * All data is stored in invariant culture in database.
+        * All data is shown to user in their local cultural format when possible.
+        * All data inputs are attempted to be parsed from local cultural format when possible.
+        * Time is stored as UTC except when we cannot convert it back and forth, but is always entered as local time.
+          * For example time in FunQL expressions is local by default.
+        *)
         static member RenderCellValue (value : QualifiedValue) : string =
             match value with
                 | VInt(i) -> i.ToString ()
@@ -48,22 +56,23 @@ type ViewCell =
             if str = ""
             then Some(FNull)
             else
-                try
-                    match valType with
-                        | FTInt -> Some(FInt(int str))
-                        | FTString -> Some(FString(str))
-                        | FTBool ->
-                            match str.ToLower() with
-                                | "true" -> Some(FBool(true))
-                                | "false" -> Some(FBool(false))
-                                | _ -> None
-                        | FTDateTime -> Some(FDateTime(DateTime.Parse(str)))
-                        | FTDate -> Some(FDate(DateTime.Parse(str)))
-                        // XXX: Maybe some kind of checks here.
-                        | FTReference(_) -> Some(FInt(int str))
-                        | FTEnum(_) -> Some(FString(str))
-                with
-                    _ -> None
+                match valType with
+                    | FTInt -> tryIntCurrent str |> Option.map FInt
+                    | FTString -> Some(FString(str))
+                    | FTBool ->
+                        match str.ToLower() with
+                            | "true" -> Some(FBool(true))
+                            | "false" -> Some(FBool(false))
+                            | _ -> None
+                    | FTDateTime -> tryDateTimeCurrent str |> Option.map FDateTime
+                    | FTDate -> tryDateTimeCurrent str |> Option.map FDate
+                    // FIXME: PostgreSQL will verify this reference. However we need to check if a user has access to the referenced field.
+                    | FTReference(_) -> tryIntCurrent str |> Option.map FInt
+                    | FTEnum(possible) ->
+                        if Set.contains str possible then
+                            Some(FString(str))
+                        else
+                            None
 
         override this.ToString () =
             match this.pun with

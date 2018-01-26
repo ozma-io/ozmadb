@@ -102,11 +102,11 @@ type FieldValue =
     with
         override this.ToString () =
             match this with
-                | FInt(i) -> i.ToString ()
+                | FInt(i) -> i.ToString(CultureInfo.InvariantCulture)
                 | FString(s) -> renderSqlString s
                 | FBool(b) -> renderBool b
-                | FDateTime(dt) -> dt.ToString("O") |> renderSqlString
-                | FDate(d) -> d.ToString("d", CultureInfo.InvariantCulture) |> renderSqlString
+                | FDateTime(dt) -> sprintf "(%s :: datetime)" (dt.ToString("O", CultureInfo.InvariantCulture) |> renderSqlString)
+                | FDate(d) -> sprintf "(%s :: date)" (d.ToString("d", CultureInfo.InvariantCulture) |> renderSqlString)
                 | FNull -> "NULL"
 
 type FieldType<'e> =

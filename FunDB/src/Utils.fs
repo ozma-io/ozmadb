@@ -1,5 +1,8 @@
 module FunWithFlags.FunDB.Utils
 
+open System
+open System.Globalization
+
 type Void = private Void of unit
 
 let mapGetWithDefault (k : 'K) (def : 'V) (m : Map<'K, 'V>) : 'V =
@@ -44,3 +47,19 @@ let mapSingleton (k : 'K) (v : 'V) : Map<'K, 'V> =
 let inline combineHash (a : int) (b : int) : int =  31 * (31 * a + 23) + b
 
 let inline combineCompare (a : int) (b : int) : int = if a <> 0 then a else b
+
+let tryInt culture str =
+    match Int32.TryParse(str, NumberStyles.Integer, culture) with
+        | (true, res) -> Some(res)
+        | _ -> None
+
+let tryIntInvariant = tryInt CultureInfo.InvariantCulture
+let tryIntCurrent = tryInt CultureInfo.CurrentCulture
+
+let tryDateTime culture dateStr =
+    match DateTime.TryParse(dateStr, culture, DateTimeStyles.AssumeLocal ||| DateTimeStyles.AdjustToUniversal) with
+        | (true, date) -> Some(date)
+        | _ -> None
+
+let tryDateTimeInvariant = tryDateTime CultureInfo.InvariantCulture
+let tryDateTimeCurrent = tryDateTime CultureInfo.CurrentCulture

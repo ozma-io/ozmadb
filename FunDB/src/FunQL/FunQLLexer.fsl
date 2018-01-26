@@ -5,6 +5,7 @@ module internal FunWithFlags.FunDB.FunQL.Lexer
 open System
 open Microsoft.FSharp.Text.Lexing
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL
 
@@ -46,7 +47,7 @@ let z = ['Z' 'z']
 rule tokenstream = parse
 
 // Atoms
-| ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> String |> int) }
+| ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
 // FIXME: Add floats
 | "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.ID(escapedString '\"' lexbuf) }
 | "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING(escapedString '\'' lexbuf) }
@@ -57,6 +58,7 @@ rule tokenstream = parse
 | "(" { Parser.LEFT_PARENS }
 | ")" { Parser.RIGHT_PARENS }
 | ";" { Parser.SEMICOLON }
+| "::" { Parser.DOUBLE_COLON }
 | "," { Parser.COMMA }
 | "." { Parser.DOT }
 | "=" { Parser.EQ }
