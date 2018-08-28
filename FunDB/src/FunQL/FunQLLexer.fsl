@@ -59,6 +59,7 @@ rule tokenstream = parse
 | ")" { Parser.RIGHT_PARENS }
 | ";" { Parser.SEMICOLON }
 | "::" { Parser.DOUBLE_COLON }
+| ":" { Parser.COLON }
 | "," { Parser.COMMA }
 | "." { Parser.DOT }
 | "=" { Parser.EQ }
