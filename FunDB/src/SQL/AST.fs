@@ -101,6 +101,7 @@ type ValueType =
 let internal parseValueType (str : string) =
     match str.ToLower() with
         | "bigint" -> Some(VTInt)
+        | "integer" -> Some(VTInt)
         | "double precision" -> Some(VTFloat)
         | "text" -> Some(VTString)
         | "boolean" -> Some(VTBool)
@@ -122,6 +123,7 @@ let internal parseCoerceValueType (str : string) =
                 | "int2" -> Some(VTInt)
                 | "int4" -> Some(VTInt)
                 | "int8" -> Some(VTInt)
+                | "integer" -> Some(VTInt)
                 | Regex @"character varying\((\d+)\)" [size] -> Some(VTString)
                 | _ ->
                     eprintfn "Unknown coerce value type: %s" str
