@@ -57,7 +57,6 @@ rule tokenstream = parse
 | "]" { Parser.RIGHT_BRACKET }
 | "(" { Parser.LEFT_PARENS }
 | ")" { Parser.RIGHT_PARENS }
-| ";" { Parser.SEMICOLON }
 | "::" { Parser.DOUBLE_COLON }
 | ":" { Parser.COLON }
 | "," { Parser.COMMA }
@@ -101,5 +100,5 @@ rule tokenstream = parse
 | newline    { newline lexbuf; tokenstream lexbuf }
 
 // Misc
-| _    	  { failwith ("Parse error: " + LexBuffer<_>.LexemeString lexbuf) }
+| _    	  { failwith ("Lexical error: " + LexBuffer<_>.LexemeString lexbuf) }
 | eof     { Parser.EOF }
