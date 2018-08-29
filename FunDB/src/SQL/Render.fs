@@ -29,7 +29,7 @@ let rec renderSelect (expr : SelectExpr) : string =
     let orderExpr =
         if Array.isEmpty expr.orderBy
         then ""
-        else sprintf "ORDER BY %s" (expr.orderBy |> Seq.map (fun (fexpr, sord) -> sprintf "%s %O" (renderValueExpr fexpr) sord) |> String.concat ", ")
+        else sprintf "ORDER BY %s" (expr.orderBy |> Seq.map (fun (sord, fexpr) -> sprintf "%s %O" (renderValueExpr fexpr) sord) |> String.concat ", ")
     let limitExpr =
         match expr.limit with
             | Some(n) -> sprintf "LIMIT %i" n
@@ -48,12 +48,12 @@ let rec renderSelect (expr : SelectExpr) : string =
 
 and renderSelectedColumn = function
     | SCColumn(col) -> col.ToString ()
-    | SCExpr(expr, name) -> sprintf "%s AS %s" (renderValueExpr expr) (renderSqlName name)
+    | SCExpr(name, expr) -> sprintf "%s AS %s" (renderValueExpr expr) (renderSqlName name)
 
 and renderFrom = function
     | FTable(table) -> table.ToString ()
     | FJoin(typ, a, b, on) -> sprintf "(%s %O JOIN %s ON %s)" (renderFrom a) typ (renderFrom b) (renderValueExpr on)
-    | FSubExpr(sel, name) -> sprintf "(%s) AS %s" (renderSelect sel) (renderSqlName name)
+    | FSubExpr(name, sel) -> sprintf "(%s) AS %s" (renderSelect sel) (renderSqlName name)
 
 let renderInsertValue values = 
     values |> Seq.map renderValueExpr |> String.concat ", " |> sprintf "(%s)"
@@ -109,4 +109,4 @@ let renderSchemaOperation = function
 
 let renderEvaluate (expr : EvaluateExpr) =
     sprintf "SELECT %s"
-        (expr.values |> Seq.map (fun (expr, name) -> sprintf "%s AS %s" (renderValueExpr expr) (renderSqlName name))  |> String.concat ", ")
+        (expr.values |> Seq.map (fun (name, expr) -> sprintf "%s AS %s" (renderValueExpr expr) (renderSqlName name))  |> String.concat ", ")

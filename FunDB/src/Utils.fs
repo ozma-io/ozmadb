@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Utils
 
 open System
 open System.Globalization
+open System.Text.RegularExpressions
 
 type Void = private Void of unit
 
@@ -48,7 +49,7 @@ let inline combineHash (a : int) (b : int) : int =  31 * (31 * a + 23) + b
 
 let inline combineCompare (a : int) (b : int) : int = if a <> 0 then a else b
 
-let tryInt culture str =
+let tryInt culture (str : string) =
     match Int32.TryParse(str, NumberStyles.Integer, culture) with
         | (true, res) -> Some(res)
         | _ -> None
@@ -56,10 +57,16 @@ let tryInt culture str =
 let tryIntInvariant = tryInt CultureInfo.InvariantCulture
 let tryIntCurrent = tryInt CultureInfo.CurrentCulture
 
-let tryDateTime culture dateStr =
+let tryDateTime culture (dateStr : string) =
     match DateTime.TryParse(dateStr, culture, DateTimeStyles.AssumeLocal ||| DateTimeStyles.AdjustToUniversal) with
         | (true, date) -> Some(date)
         | _ -> None
 
 let tryDateTimeInvariant = tryDateTime CultureInfo.InvariantCulture
 let tryDateTimeCurrent = tryDateTime CultureInfo.CurrentCulture
+
+let (|Regex|_|) regex str =
+   let m = System.Text.RegularExpressions.Regex.Match(str, regex)
+   if m.Success
+   then Some(List.tail [ for x in m.Groups -> x.Value ])
+   else None

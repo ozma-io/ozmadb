@@ -114,12 +114,15 @@ let internal parseCoerceValueType (str : string) =
     match parseValueType str with
         | Some(x) -> Some(x)
         | None ->
-            match str.ToLower() with
+            let name = str.ToLower()
+            match name with
                 | "varchar" -> Some(VTString)
+                | "character varying" -> Some(VTString)
                 | "bool" -> Some(VTBool)
                 | "int2" -> Some(VTInt)
                 | "int4" -> Some(VTInt)
                 | "int8" -> Some(VTInt)
+                | Regex @"character varying\((\d+)\)" [size] -> Some(VTString)
                 | _ ->
                     eprintfn "Unknown coerce value type: %s" str
                     None
@@ -287,23 +290,23 @@ type JoinType =
 and FromExpr =
     | FTable of Table
     | FJoin of JoinType * FromExpr * FromExpr * QualifiedValueExpr
-    | FSubExpr of SelectExpr * TableName
+    | FSubExpr of TableName * SelectExpr
 
 and SelectedColumn =
     | SCColumn of Column
-    | SCExpr of QualifiedValueExpr * TableName
+    | SCExpr of TableName * QualifiedValueExpr
 
 and SelectExpr =
     { columns: SelectedColumn array;
       from: FromExpr;
       where: QualifiedValueExpr option;
-      orderBy: (QualifiedValueExpr * SortOrder) array;
+      orderBy: (SortOrder * QualifiedValueExpr) array;
       limit: int option;
       offset: int option;
     }
 
 and EvaluateExpr =
-    { values: (PureValueExpr * TableName) array;
+    { values: (TableName * PureValueExpr) array;
     }
 
 let internal simpleSelect (columns : string seq) (table : Table) : SelectExpr =

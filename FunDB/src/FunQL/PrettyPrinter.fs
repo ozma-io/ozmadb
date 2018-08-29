@@ -37,7 +37,7 @@ let internal ppMaybeAttributeMap (attrMap : AttributeMap) =
     else ppAttributeMap attrMap
 
 let rec internal ppQueryExpr query =
-    let resultsList = query.results |> Array.toSeq |> Seq.map (fun (res, attr) -> ppResult res -- ppMaybeAttributeMap attr) |> Seq.toList
+    let resultsList = query.results |> Array.toSeq |> Seq.map (fun (attr, res) -> ppMaybeAttributeMap attr -- ppResult res) |> Seq.toList
     let maybeWhere =
         match query.where with
             | None -> emptyL
@@ -48,7 +48,7 @@ let rec internal ppQueryExpr query =
         then
             emptyL
         else
-            let orderByList = query.orderBy |> Array.toSeq |> Seq.map (fun (expr, ord) -> ppFieldExpr expr ++ wordL (ord.ToString ())) |> Seq.toList
+            let orderByList = query.orderBy |> Array.toSeq |> Seq.map (fun (ord, expr) -> ppFieldExpr expr ++ wordL (ord.ToString ())) |> Seq.toList
             wordL "ORDER BY" @@- aboveCommaListL orderByList
     
     ppMaybeAttributeMap query.attributes
@@ -62,7 +62,7 @@ let rec internal ppQueryExpr query =
 and internal ppFrom = function
     | FEntity(e) -> wordL <| e.ToString ()
     | FJoin(jt, e1, e2, where) -> ppFrom e1 @@ (wordL (jt.ToString ()) ++ wordL "JOIN") @@ ppFrom e2 @@ (wordL "ON" ++ ppFieldExpr where)
-    | FSubExpr(q, name) -> bracketL (ppQueryExpr q) @@ (wordL "AS" ++ wordL (name.ToString ()))
+    | FSubExpr(name, q) -> bracketL (ppQueryExpr q) @@ (wordL "AS" ++ wordL (name.ToString ()))
 
 and internal ppFieldExpr = function
     | FEValue(v) -> wordL <| v.ToString ()
@@ -75,7 +75,7 @@ and internal ppFieldExpr = function
 
 and internal ppResult = function
     | RField(f) -> wordL <| f.ToString ()
-    | RExpr(e, name) -> bracketL (ppFieldExpr e) @@ (wordL "AS" ++ wordL (name.ToString ()))
+    | RExpr(name, e) -> bracketL (ppFieldExpr e) @@ (wordL "AS" ++ wordL (name.ToString ()))
 
 and internal ppFieldType = function
     | FTInt -> wordL "int"

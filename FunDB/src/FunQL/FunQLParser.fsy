@@ -64,6 +64,9 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %token EOF
 
 %left AND
+%right EQ
+%left DOUBLE_COLON
+%left DOT
 
 %start query
 %type <ParsedQueryExpr> query
@@ -98,7 +101,7 @@ ResultsNonEmpty:
   | AttributedResult                       { [ $1 ] }
 
 AttributedResult:
-  | Result MaybeAttributeMap { ($1, $2) }
+  | MaybeAttributeMap Result { ($1, $2) }
 
 AttributeMap:
   | LEFT_BRACE AttributeValues RIGHT_BRACE { new AttributeMap($2 |> Map.toSeq |> dict) }
@@ -128,10 +131,10 @@ AttributeItemsNonEmpty:
 
 Result:
   | FieldName       { RField($1) }
-  | FieldExpr AS ID { RExpr($1, $3) }
+  | FieldExpr AS ID { RExpr($3, $1) }
 
 QuerySource:
-  | LEFT_PARENS Query RIGHT_PARENS AS ID { FSubExpr($2, $5) }
+  | LEFT_PARENS Query RIGHT_PARENS AS ID { FSubExpr($5, $2) }
   | EntityName                           { FEntity($1) }
 
 JoinType:
@@ -162,24 +165,12 @@ WhereClause:
   | WHERE FieldExpr { Some($2) }
 
 FieldExpr:
-  | FieldExprAnd { $1 }
-
-FieldExprAnd:
-  | FieldExprEq AND FieldExprAnd { FEAnd($1, $3) }
-  | FieldExprEq                  { $1 }
-  
-FieldExprEq:
-  | FieldExprEq EQ FieldExprVal { FEEq($1, $3) }
-  | FieldExprCast               { $1 }
-
-FieldExprCast:
+  | FieldExpr AND FieldExpr { FEAnd($1, $3) }
+  | FieldExpr EQ FieldExpr { FEEq($1, $3) }
   // Special cases to be able to use Date and DateTime constants
   | STRING DOUBLE_COLON DATE_TYPE     { FEValue(FDate(tryDateTimeInvariant $1 |> Option.get)) }
   | STRING DOUBLE_COLON DATETIME_TYPE { FEValue(FDateTime(tryDateTimeInvariant $1 |> Option.get)) }
   // FIXME: Implement actual casting.
-  | FieldExprVal                      { $1 }
-
-FieldExprVal:
   | FieldName                                 { FEColumn($1) }
   | Value                                     { FEValue($1) }
   | LEFT_PARENS FieldExpr RIGHT_PARENS        { $2 }
@@ -199,7 +190,7 @@ OrderByList:
   | OrderByExpr COMMA OrderByList { $1 :: $3 }
 
 OrderByExpr:
-  | FieldExpr OrderByDirection { ($1, $2) }
+  | FieldExpr OrderByDirection { ($2, $1) }
 
 OrderByDirection:
   |      { Asc }

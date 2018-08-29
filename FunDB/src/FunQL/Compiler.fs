@@ -69,10 +69,10 @@ let rec compileFieldExpr = function
     | FEAnd(a, b) -> AST.VEAnd(compileFieldExpr a, compileFieldExpr b)
 
 let rec compileQueryExpr (entities : QEntities) query =
-    { AST.columns = Array.map (fun (res, attr) -> compileResult res) query.results;
+    { AST.columns = Array.map (fun (attr, res) -> compileResult res) query.results;
       AST.from = compileFrom entities query.from;
       AST.where = Option.map compileFieldExpr query.where;
-      AST.orderBy = Array.map (fun (expr, ord) -> (compileFieldExpr expr, compileOrder ord)) query.orderBy;
+      AST.orderBy = Array.map (fun (ord, expr) -> (compileOrder ord, compileFieldExpr expr)) query.orderBy;
       // FIXME: support them!
       AST.limit = None;
       AST.offset = None;
@@ -87,7 +87,7 @@ and compileFrom (entities : QEntities) = function
         else
             // Add computed columns
             let columnFields = entity.columnFields |> Map.toSeq |> Seq.map (fun (_, field) -> AST.SCColumn({ AST.table = entityName; AST.Column.name = field.Field.Name; }))
-            let computedFields = entity.computedFields |> Map.toSeq |> Seq.map (fun (_, field) -> AST.SCExpr(compileFieldExpr field.expression, field.Field.Name))
+            let computedFields = entity.computedFields |> Map.toSeq |> Seq.map (fun (_, field) -> AST.SCExpr(field.Field.Name, compileFieldExpr field.expression))
             let subquery = { AST.columns = Seq.append columnFields computedFields |> Seq.toArray;
                             AST.from = AST.FTable(entityName);
                             AST.where = None;
@@ -95,16 +95,16 @@ and compileFrom (entities : QEntities) = function
                             AST.limit = None;
                             AST.offset = None;
                           }
-            AST.FSubExpr(subquery, entity.Entity.Name)
+            AST.FSubExpr(entity.Entity.Name, subquery)
     | FEntity(QESubquery(name)) ->
         AST.FTable({ AST.schema = None;
                      AST.name = name;
                    })
     | FJoin(jt, e1, e2, where) -> AST.FJoin(compileJoin jt, compileFrom entities e1, compileFrom entities e2, compileFieldExpr where)
-    | FSubExpr(q, name) -> AST.FSubExpr(compileQueryExpr entities q, name)
+    | FSubExpr(name, q) -> AST.FSubExpr(name, compileQueryExpr entities q)
 
 and compileResult = function
     | RField(f) -> AST.SCColumn(compileField f)
-    | RExpr(e, name) -> AST.SCExpr(compileFieldExpr e, name)
+    | RExpr(name, e) -> AST.SCExpr(name, compileFieldExpr e)
 
 and compileQuery (query : QualifiedQuery) = compileQueryExpr query.entities query.expression

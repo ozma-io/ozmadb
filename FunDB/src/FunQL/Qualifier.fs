@@ -77,7 +77,7 @@ module Name =
         | RField(QFField(field)) -> field.Field.Name
         | RField(QFEntityId(entity)) -> "Id"
         | RField(QFSubquery(entityName, fieldName)) -> fieldName
-        | RExpr(e, name) -> name
+        | RExpr(name, e) -> name
 
     type QualifiedResult = Result<QFieldName>
 
@@ -212,10 +212,10 @@ type Qualifier internal (db : DatabaseContext) =
 
         let newQuery =
             { attributes = query.attributes;
-              results = Array.map (fun (res, attr) -> (qualifyResult newMapping res, attr)) query.results;
+              results = Array.map (fun (attr, res) -> (attr, qualifyResult newMapping res)) query.results;
               from = qFrom;
-              where = Option.map (qualifyFieldExpr newMapping >> fst) query.where;
-              orderBy = Array.map (fun (expr, ord) -> (qualifyFieldExpr newMapping expr |> fst, ord)) query.orderBy;
+              where = Option.map (qualifyFieldExpr newMapping) query.where;
+              orderBy = Array.map (fun (ord, expr) -> (ord, qualifyFieldExpr newMapping expr)) query.orderBy;
             }
         (newQuery, newEntities)
 
@@ -242,44 +242,26 @@ type Qualifier internal (db : DatabaseContext) =
                 with
                     | Failure(msg) -> raise <| QualifierError msg
 
-            let (newFieldExpr, _) = qualifyFieldExpr newMapping where
+            let newFieldExpr = qualifyFieldExpr newMapping where
             (FJoin(jt, newE1, newE2, newFieldExpr), newMapping, newEntities2)
-        | FSubExpr(q, name) ->
+        | FSubExpr(name, q) ->
             let (newQ, newEntities) = qualifyQuery entities q
-            let fields = newQ.results |> Seq.map (fun (res, attr) -> resultName res) |> Set.ofSeq
-            (FSubExpr(newQ, name), mapSingleton { schema = None; name = name; } (QMSubquery(name, fields)), newEntities)
+            let fields = newQ.results |> Seq.map (fun (attr, res) -> resultName res) |> Set.ofSeq
+            (FSubExpr(name, newQ), mapSingleton { schema = None; name = name; } (QMSubquery(name, fields)), newEntities)
                 
-    // Returns qualified value and is the value has a deducible type.
     and qualifyFieldExpr mapping = function
-        | FEValue(FNull) -> (FEValue(FNull), false)
-        | FEValue(v) -> (FEValue(v), true)
-        | FEColumn(f) -> (FEColumn(lookupField mapping f), true)
-        | FENot(a) ->
-            let (a_, typ) = qualifyFieldExpr mapping a
-            (FENot(a_), typ)
-        | FEConcat(a, b) ->
-            let (a_, typ1) = qualifyFieldExpr mapping a
-            let (b_, typ2) = qualifyFieldExpr mapping b
-            (FEConcat(a_, b_), typ1 || typ2)
-        | FEEq(a, b) ->
-            let (a_, _) = qualifyFieldExpr mapping a
-            let (b_, _) = qualifyFieldExpr mapping b
-            (FEEq(a_, b_), true)
-        | FEIn(a, arr) -> 
-            let (a_, _) = qualifyFieldExpr mapping a
-            (FEIn(a_, Array.map (qualifyFieldExpr mapping >> fst) arr), true)
-        | FEAnd(a, b) ->
-            let (a_, _) = qualifyFieldExpr mapping a
-            let (b_, _) = qualifyFieldExpr mapping b
-            (FEAnd(a_, b_), true)
+        | FEValue(FNull) -> FEValue(FNull)
+        | FEValue(v) -> FEValue(v)
+        | FEColumn(f) -> FEColumn(lookupField mapping f)
+        | FENot(a) -> FENot(qualifyFieldExpr mapping a)
+        | FEConcat(a, b) -> FEConcat(qualifyFieldExpr mapping a, qualifyFieldExpr mapping b)
+        | FEEq(a, b) -> FEEq(qualifyFieldExpr mapping a, qualifyFieldExpr mapping b)
+        | FEIn(a, arr) -> FEIn(qualifyFieldExpr mapping a, Array.map (qualifyFieldExpr mapping) arr)
+        | FEAnd(a, b) -> FEAnd(qualifyFieldExpr mapping a, qualifyFieldExpr mapping b)
 
     and qualifyResult mapping = function
         | RField(f) -> RField(lookupField mapping f)
-        | RExpr(e, name) ->
-            let (e_, typed) = qualifyFieldExpr mapping e
-            if not typed then
-                raise <| QualifierError (sprintf "Expression with name %s is not typed" name)
-            RExpr(e_, name)
+        | RExpr(name, e) -> RExpr(name, qualifyFieldExpr mapping e)
 
     member this.QualifyQuery (query : ParsedQueryExpr) : QualifiedQuery =
         let (query, entities) = qualifyQuery Map.empty query

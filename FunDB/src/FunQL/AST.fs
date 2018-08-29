@@ -193,7 +193,7 @@ type SortOrder =
 
 type Result<'f> =
     | RField of 'f
-    | RExpr of FieldExpr<'f> * ColumnName
+    | RExpr of ColumnName * FieldExpr<'f>
 
 type JoinType =
     | Inner
@@ -210,10 +210,10 @@ type JoinType =
 
 type QueryExpr<'e, 'f> =
     { attributes: AttributeMap;
-      results: (Result<'f> * AttributeMap) array;
+      results: (AttributeMap * Result<'f>) array;
       from: FromExpr<'e, 'f>;
       where: FieldExpr<'f> option;
-      orderBy: (FieldExpr<'f> * SortOrder) array;
+      orderBy: (SortOrder * FieldExpr<'f>) array;
     } with
         static member Create
             (
@@ -244,7 +244,7 @@ type QueryExpr<'e, 'f> =
 and FromExpr<'e, 'f> =
     | FEntity of 'e
     | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'f>
-    | FSubExpr of QueryExpr<'e, 'f> * TableName
+    | FSubExpr of TableName * QueryExpr<'e, 'f>
 
 
 type ParsedQueryExpr = QueryExpr<EntityName, FieldName>

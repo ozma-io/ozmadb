@@ -176,7 +176,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
             | QualifierError(msg) ->
                 raise <| UserViewError msg
 
-    let toViewColumn (entities : Name.QEntities) (queryAttrs : AttributeMap) (valueType : ValueType) (res, attrs) : ViewColumn =
+    let toViewColumn (entities : Name.QEntities) (queryAttrs : AttributeMap) (valueType : ValueType) (attrs, res) : ViewColumn =
         { name = Name.resultName res;
           field =
               match res with
@@ -233,11 +233,11 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         (field.Field.Name, compileFieldValue value_)
 
     let punSummary (rawQuery : Name.QualifiedQuery) =
-        let newResults = new List<Name.QualifiedResult * AttributeMap>()
+        let newResults = new List<AttributeMap * Name.QualifiedResult>()
         let mutable newEntities = rawQuery.entities
         let mutable newFrom = rawQuery.expression.from
 
-        for (result, attrs) in rawQuery.expression.results do
+        for (attrs, result) in rawQuery.expression.results do
             let toResolve =
                 if attrs.ContainsKey("ResolveSummary")
                 then attrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
@@ -263,13 +263,13 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                                     else FJoin(Left, newFrom, FEntity(entityName), FEEq(FEColumn(column), FEColumn(Name.QFEntityId(rawEntity))))
 
                                 db.Entry(entity.Entity).Reference("SummaryField").Load()
-                                let newResult = RExpr(FEColumn(Name.QFField(WrappedField(entity.Entity.SummaryField))), "_Pun_" + rawField.Field.Name)
-                                newResults.Add (newResult, attrs)
+                                let newResult = RExpr("_Pun_" + rawField.Field.Name, FEColumn(Name.QFField(WrappedField(entity.Entity.SummaryField))))
+                                newResults.Add (attrs, newResult)
                                 ()
                             | _ -> ()
                     | _ -> ()
 
-            newResults.Add (result, attrs)
+            newResults.Add (attrs, result)
 
         { rawQuery with
               entities = newEntities;
@@ -296,7 +296,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                 | _ -> invalidOp "Cannot get main entity from a complex query"
 
         let matchField = function
-            | (RField(Name.QFField(WrappedField(:? ColumnField as f))), _) -> Some(entity.columnFields.[f.Name])
+            | (_, RField(Name.QFField(WrappedField(:? ColumnField as f)))) -> Some(entity.columnFields.[f.Name])
             | _ -> None
 
         (entity, query.expression.results |> seqMapMaybe matchField |> Array.ofSeq)
@@ -337,7 +337,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         let emptyAttrs = new AttributeMap ()
         let queryExpr =
             { attributes = emptyAttrs;
-              results = [| (RField(idField), emptyAttrs); (RField(summaryField), emptyAttrs) |];
+              results = [| (emptyAttrs, RField(idField)); (emptyAttrs, RField(summaryField)) |];
               from = FEntity(Name.QEEntity(qEntity.entity));
               where = None;
               orderBy = [| |];
@@ -359,7 +359,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         let query = qualifyQuery parsedQuery
         let (entity, fields) = mainEntity query
 
-        let templateColumn (field : Name.QualifiedColumnField) (_, attrs) : TemplateColumn =
+        let templateColumn (field : Name.QualifiedColumnField) (attrs, _) : TemplateColumn =
             let summaries =
                 match field.fieldType with
                     | FTReference(WrappedEntity(re)) -> Some(this.SelectSummaries re)
@@ -385,7 +385,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
                     match expr |> Qualifier.QualifyDefaultExpr |> compileFieldExpr |> getPureValueExpr with
                         | Some(e) ->
                             // FIXME: cache results, as they are supposed to be pure (LRU cache would be good).
-                            match dbQuery.Evaluate { values = [| (e, "default") |] } with
+                            match dbQuery.Evaluate { values = [| ("default", e) |] } with
                                 | [| res |] -> res.value
                                 | _ -> failwith "Default evaluation is expected to return only one item"
                         | None -> raise <| new NotImplementedException("Non-pure default expressions in fields are not supported for insert queries")
