@@ -120,6 +120,14 @@ type ViewColumn =
         member this.Attributes = this.attributes
         member this.ValueType = this.valueType
 
+        member this.DisplayName =
+            match this.attributes.GetStringOption "DisplayName" with
+                | Some(name) -> name
+                | _ ->
+                    match this.field with
+                        | Some(f) -> f.Field.DisplayName
+                        | None -> this.name
+
 type ViewResult =
     internal { attributes : AttributeMap;
                columns : ViewColumn array;
@@ -156,6 +164,11 @@ type TemplateColumn =
             { value = this.defaultValue;
               pun = None;
             }
+
+        member this.DisplayName =
+            match this.attributes.GetStringOption "DisplayName" with
+                | Some(caption) -> caption
+                | _ -> this.field.Field.DisplayName
 
 type TemplateResult =
     internal { entity : Name.QualifiedEntity;

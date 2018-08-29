@@ -6,7 +6,12 @@ open System.Collections.Generic
 
 // Basically JSON without nulls.
 type AttributeMap (map : IDictionary<string, Attribute>) as this =
-    let resolvePath xs = Array.toList xs |> this.RunResolvePath
+    let resolvePath xs extract = Array.toList xs |> this.RunResolvePath |> Option.map extract
+    let resolvePathWithDefault xs extract def =
+        match resolvePath xs extract with
+            | Some(x) -> x
+            | None -> def
+
     let tryFind x =
         if map.ContainsKey x then
             Some(map.[x])
@@ -74,30 +79,19 @@ type AttributeMap (map : IDictionary<string, Attribute>) as this =
                 | None -> None
                 | Some(v) -> v.GetAssoc().RunResolvePath(xs)
 
-    member this.GetBoolWithDefault (b : bool, [<ParamArray>] xs) =
-        match resolvePath xs with
-            | None -> b
-            | Some(attr) -> attr.GetBool ()
-    member this.GetFloatWithDefault (f : float, [<ParamArray>] xs) =
-        match resolvePath xs with
-            | None -> f
-            | Some(attr) -> attr.GetFloat ()
-    member this.GetIntWithDefault (i : int, [<ParamArray>] xs) =
-        match resolvePath xs with
-            | None -> i
-            | Some(attr) -> attr.GetInt ()
-    member this.GetStringWithDefault (str : string, [<ParamArray>] xs) =
-        match resolvePath xs with
-            | None -> str
-            | Some(attr) -> attr.GetString ()
-    member this.GetListWithDefault (list : Attribute array, [<ParamArray>] xs) =
-        match resolvePath xs with
-            | None -> list
-            | Some(attr) -> attr.GetList ()
-    member this.GetAssocWithDefault (assoc : AttributeMap, [<ParamArray>] xs) =
-        match resolvePath xs with
-            | None -> assoc
-            | Some(attr) -> attr.GetAssoc ()
+    member this.GetBoolOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetBool ())
+    member this.GetFloatOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetFloat ())
+    member this.GetIntOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetInt ())
+    member this.GetStringOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetString ())
+    member this.GetListOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetList ())
+    member this.GetAssocOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetAssoc ())
+
+    member this.GetBoolWithDefault (def : bool, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetBool ()) def
+    member this.GetFloatWithDefault (def : float, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetFloat ()) def
+    member this.GetIntWithDefault (def : int, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetInt ()) def
+    member this.GetStringWithDefault (def : string, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetString ()) def
+    member this.GetListWithDefault (def : Attribute array, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetList ()) def
+    member this.GetAssocWithDefault (def : AttributeMap, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetAssoc ()) def
 
     static member Merge (a : AttributeMap) (b : AttributeMap) : AttributeMap =
         let insertOne oldMap = function
