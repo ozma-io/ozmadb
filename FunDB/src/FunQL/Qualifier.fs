@@ -12,7 +12,8 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lexer
 open FunWithFlags.FunDB.FunQL.Parser
 
-exception QualifierError of string
+exception QualifierError of info: string with
+    override this.Message = this.info
 
 module Name =
     let internal renderEntityName (e : Entity) =

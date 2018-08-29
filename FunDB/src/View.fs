@@ -166,7 +166,9 @@ type TemplateResult =
         member this.Columns = this.columns
         member this.Attributes = this.attributes
 
-exception UserViewError of string
+// https://github.com/Microsoft/visualfsharp/issues/3327
+exception UserViewError of info: string with
+    override this.Message = this.info
 
 type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qualifier : Qualifier) =
     let qualifyQuery parsedQuery =

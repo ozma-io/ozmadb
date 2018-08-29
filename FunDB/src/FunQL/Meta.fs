@@ -15,7 +15,8 @@ open FunWithFlags.FunDB.FunQL.Qualifier
 open FunWithFlags.FunDB.FunQL.Qualifier.Name
 open FunWithFlags.FunDB.FunQL.Compiler
 
-exception FunMetaError of string
+exception FunMetaError of info: string with
+    override this.Message = this.info
 
 let makeColumnMeta (ftype : QualifiedFieldType) (field : ColumnField) : ColumnMeta =
     { colType = compileFieldType ftype;
