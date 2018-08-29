@@ -334,7 +334,7 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         try
             Parser.query Lexer.tokenstream lexbuf
         with
-            | Failure(msg) -> raise <| UserViewError msg
+            | Failure(msg) -> raise <| UserViewError(sprintf "Error while parsing %s: %s" uv.Query msg)
 
     // Make this return an IDisposable cursor.
     member this.RunQuery (parsedQuery : ParsedQueryExpr) =
