@@ -15,11 +15,10 @@ let rec internal aboveTagListL tagger = function
     | x::xs -> tagger x @@ aboveTagListL tagger xs
 
 let internal aboveCommaListL = aboveTagListL (fun prefixL -> prefixL >|< Text ",")
-let internal aboveSemicolonListL = aboveTagListL (fun prefixL -> prefixL >|< Text ";")
 
 let rec internal ppAttributeMap attrMap =
-    let values = attrMap |> Seq.map (function | KeyValue(name, attr) -> wordL (renderSqlName name) ++ wordL "=" ++ ppAttribute attr >|< wordL ";") |> Seq.toList
-    wordL "{" -- aboveListL values ^^ wordL "}"
+    let values = attrMap |> Seq.map (function | KeyValue(name, attr) -> wordL (renderSqlName name) ++ wordL ":" ++ ppAttribute attr) |> Seq.toList
+    wordL "{" -- aboveCommaListL values ^^ wordL "}"
 
 and internal ppAttribute = function
     | ABool(b) -> wordL <| renderBool b
