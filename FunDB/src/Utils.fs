@@ -6,67 +6,91 @@ open System.Text.RegularExpressions
 
 type Void = private Void of unit
 
-let mapGetWithDefault (k : 'K) (def : 'V) (m : Map<'K, 'V>) : 'V =
+let mapGetWithDefault (k : 'k) (def : 'v) (m : Map<'k, 'v>) : 'v =
     match Map.tryFind k m with
         | Some(v) -> v
         | None -> def
 
-let setToMap (f : 'K -> 'V) (s : Set<'K>) : Map<'K, 'V> =
+let setToMap (f : 'k -> 'v) (s : Set<'k>) : Map<'k, 'v> =
     s |> Set.toSeq |> Seq.map (fun k -> (k, f k)) |> Map.ofSeq
 
-let setHead (s : Set<'K>) : 'K =
-    match Set.toList s with
-        | [] -> failwith "Empty set"
-        | [k] -> k
-        | _ -> failwith "Set consists of more than one value"
+let setSingleItem (s : Set<'k>) : 'v = s |> Set.toSeq |> Seq.exactlyOne
 
-let seqMapMaybe (f : 'A -> 'B option) (s : seq<'A>) : seq<'B> =
+let seqMapMaybe (f : 'a -> 'b option) (s : 'a seq) : 'b seq =
     seq { for i in s do
               match f i with
                   | Some(r) -> yield r
                   | None -> ()
         }
 
-let mapOfSeqUnique (items : seq<'K * 'V>) : Map<'K, 'V> =
+let seqFirst (s : 'a seq) : 'a option = Seq.tryFind (fun x -> true) s
+
+let seqFold1 (func : 'a -> 'a -> 'a) (s : 'a seq) : 'a =
+    Seq.fold func (Seq.head s) (Seq.tail s)
+
+let mapOfSeqUnique (items : ('k * 'v) seq) : Map<'k, 'v> =
     Seq.fold (fun m (k, v) -> if Map.containsKey k m then failwith (sprintf "Key '%s' already exists" (k.ToString ())) else Map.add k v m) Map.empty items
 
-let setOfSeqUnique (items : seq<'T>) : Set<'T> =
+let setOfSeqUnique (items : 'a seq) : Set<'a> =
     Seq.fold (fun s x -> if Set.contains x s then failwith (sprintf "Item '%s' already exists" (x.ToString ())) else Set.add x s) Set.empty items
 
-let mapUnionUnique (a : Map<'K, 'V>) (b : Map<'K, 'V>) =
+let mapUnionUnique (a : Map<'k, 'v>) (b : Map<'k, 'v>) =
     mapOfSeqUnique (Seq.append (Map.toSeq a) (Map.toSeq b))
 
-let mapUnion (a : Map<'K, 'V>) (b : Map<'K, 'V>) =
+let mapUnion (a : Map<'k, 'v>) (b : Map<'k, 'v>) =
     Map.ofSeq (Seq.append (Map.toSeq a) (Map.toSeq b))
 
-let mapDifference (a : Map<'K, 'V1>) (b : Map<'K, 'V2>) =
+let mapDifference (a : Map<'k, 'v1>) (b : Map<'k, 'v2>) =
     Map.filter (fun k v -> not (Map.containsKey k b)) a
 
-let mapSingleton (k : 'K) (v : 'V) : Map<'K, 'V> =
+let mapSingleton (k : 'k) (v : 'v) : Map<'k, 'v> =
     Map.ofSeq (seq { yield (k, v) })
 
-let inline combineHash (a : int) (b : int) : int =  31 * (31 * a + 23) + b
+let mapKeys (a : Map<'k, 'v>) : Set<'k> =
+    Map.toSeq >> Seq.map fst >> Set.ofSeq
 
-let inline combineCompare (a : int) (b : int) : int = if a <> 0 then a else b
-
-let tryInt culture (str : string) =
+let tryInt (culture : CultureInfo) (str : string) : int option =
     match Int32.TryParse(str, NumberStyles.Integer, culture) with
         | (true, res) -> Some(res)
         | _ -> None
 
-let tryIntInvariant = tryInt CultureInfo.InvariantCulture
-let tryIntCurrent = tryInt CultureInfo.CurrentCulture
+let tryIntInvariant : string -> int option = tryInt CultureInfo.InvariantCulture
+let tryIntCurrent : string -> int option = tryInt CultureInfo.CurrentCulture
 
-let tryDateTime culture (dateStr : string) =
+let tryDateTime (culture : CultureInfo) (dateStr : string) : DateTime option =
     match DateTime.TryParse(dateStr, culture, DateTimeStyles.AssumeLocal ||| DateTimeStyles.AdjustToUniversal) with
         | (true, date) -> Some(date)
         | _ -> None
 
-let tryDateTimeInvariant = tryDateTime CultureInfo.InvariantCulture
-let tryDateTimeCurrent = tryDateTime CultureInfo.CurrentCulture
+let tryDateTimeInvariant : string -> DateTime option = tryDateTime CultureInfo.InvariantCulture
+let tryDateTimeCurrent : string -> DateTime option = tryDateTime CultureInfo.CurrentCulture
 
-let (|Regex|_|) regex str =
+let (|Regex|_|) (regex : string) (str : string) : string list =
    let m = System.Text.RegularExpressions.Regex.Match(str, regex)
    if m.Success
    then Some(List.tail [ for x in m.Groups -> x.Value ])
    else None
+
+let dictUnique (items : ('k * 'v) seq) : IDictionary<'k, 'v> = items |> mapOfSeqUnique |> dict
+
+let tryCast<'b> : 'a -> 'b option = function
+    | :? 'T as res -> Some(res)
+    | _ -> None
+
+let concatWithWhitespaces (strs : string seq) : string =
+    let filterEmpty = function
+        | "" = None
+        | str -> Some(str)
+    strs |> seqMapMaybe filterEmpty |> String.concat " "
+
+let tryBool : (str : string) : bool option =
+    match str.ToLower() with
+        | "true" -> Some true
+        | "t" -> Some true
+        | "yes" -> Some true
+        | "y" -> Some true
+        | "false" -> Some false
+        | "f" -> Some false
+        | "no" -> Some false
+        | "n" _> Some false
+        | _ -> None

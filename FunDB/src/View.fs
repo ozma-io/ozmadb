@@ -121,7 +121,7 @@ type ViewColumn =
         member this.ValueType = this.valueType
 
         member this.DisplayName =
-            match this.attributes.GetStringOption "DisplayName" with
+            match this.attributes.GetStringOption("DisplayName") with
                 | Some(name) -> name
                 | _ ->
                     match this.field with
@@ -255,11 +255,12 @@ type ViewResolver internal (dbQuery : QueryConnection, db : DatabaseContext, qua
         for (attrs, result) in rawQuery.expression.results do
             let toResolve =
                 if attrs.ContainsKey("ResolveSummary")
-                then attrs.GetBoolWithDefault(false, [|"ResolveSummary"|])
-                else rawQuery.expression.attributes.GetBoolWithDefault(false, [|"ResolveSummary"|])
+                then attrs.GetBoolWithDefault(false, "ResolveSummary")
+                else rawQuery.expression.attributes.GetBoolWithDefault(false, "ResolveSummary")
             if toResolve then
                 match result with
-                    | RField(Name.QFField(WrappedField(:? ColumnField) as rawField) as column) ->
+                      // If result is actually a column field
+                    | RField(Name.QFField(WrappedField(:? ColumnField as field)) as column) ->
                         let field = newEntities.[rawField.Entity.Name].columnFields.[rawField.Field.Name]
                         match field.fieldType with
                             | FTReference(rawEntity) when rawEntity.Entity.SummaryFieldId.HasValue ->

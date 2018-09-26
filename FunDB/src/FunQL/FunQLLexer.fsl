@@ -6,7 +6,7 @@ open System
 open Microsoft.FSharp.Text.Lexing
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Parsing
+open FunWithFlags.FunDB.Parsing.Helpers
 open FunWithFlags.FunDB.FunQL
 
 }
@@ -15,6 +15,8 @@ open FunWithFlags.FunDB.FunQL
 let whitespace = [' ' '\t' ]
 let newline = ('\n' | "\r\n")
 let escapes = "\\" ['\\' 't' 'r' 'n']
+let escapedId  = "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\""
+let unescapedId = ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']*
 
 // Case-insensitive chars
 let a = ['A' 'a']
@@ -44,61 +46,78 @@ let x = ['X' 'x']
 let y = ['Y' 'y']
 let z = ['Z' 'z']
 
-rule tokenstream = parse
+rule tokenizeFunQL = parse
 
 // Atoms
-| ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
-// FIXME: Add floats
-| "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.ID(escapedString '\"' lexbuf) }
-| "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING(escapedString '\'' lexbuf) }
-| "{" { Parser.LEFT_BRACE }
-| "}" { Parser.RIGHT_BRACE }
-| "[" { Parser.LEFT_BRACKET }
-| "]" { Parser.RIGHT_BRACKET }
-| "(" { Parser.LEFT_PARENS }
-| ")" { Parser.RIGHT_PARENS }
+| ['+' '-']? ['0'-'9'] ['0'-'9']*            { Parser.INT (lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
+| escapedId                                  { Parser.ID (escapedString '\"' 0 lexbuf) }
+| "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING (escapedString '\'' 0 lexbuf) }
+
+// Argument IDs
+| "$" escapedId   { Parser.ARGUMENT_ID (escapedString '\"' 1 lexbuf) }
+| "$" unescapedId { Parser.ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 1).ToLower()) }
+
+// Symbols
+| "{"  { Parser.LEFT_BRACE }
+| "}"  { Parser.RIGHT_BRACE }
+| "("  { Parser.LEFT_PARENS }
+| ")"  { Parser.RIGHT_PAREN }
+| "["  { Parser.LEFT_BRACKET }
+| "]"  { Parser.RIGHT_BRACKET }
 | "::" { Parser.DOUBLE_COLON }
-| ":" { Parser.COLON }
-| "," { Parser.COMMA }
-| "." { Parser.DOT }
-| "=" { Parser.EQ }
+| ","  { Parser.COMMA }
+| "."  { Parser.DOT }
+| "="  { Parser.EQ }
+| "<>" { Parser.NOT_EQ }
+| "!=" { Parser.NOT_EQ }
+| ">=" { Parser.GREATER_EQ }
+| ">"  { Parser.GREATER }
+| "<=" { Parser.LESS_EQ }
+| "<"  { Parser.LESS }
+| "@"  { Parser.AT }
 
 // Keywords
-| t r u e { Parser.BOOL(true) }
-| f a l s e { Parser.BOOL(false) }
-| n u l l { Parser.NULL }
+| t r u e     { Parser.BOOL(true) }
+| f a l s e   { Parser.BOOL(false) }
+| n u l l     { Parser.NULL }
 | s e l e c t { Parser.SELECT }
-| f r o m { Parser.FROM }
-| w h e r e { Parser.WHERE }
-| l e f t { Parser.LEFT }
-| r i g h t { Parser.RIGHT }
-| i n n e r { Parser.INNER }
-| o u t e r { Parser.OUTER }
-| j o i n { Parser.JOIN }
-| o n { Parser.ON }
-| o r d e r { Parser.ORDER }
-| b y { Parser.BY }
-| a s { Parser.AS }
-| a s c { Parser.ASC }
-| d e s c { Parser.DESC }
-| a n d { Parser.AND }
+| f r o m     { Parser.FROM }
+| w h e r e   { Parser.WHERE }
+| l e f t     { Parser.LEFT }
+| r i g h t   { Parser.RIGHT }
+| i n n e r   { Parser.INNER }
+| o u t e r   { Parser.OUTER }
+| j o i n     { Parser.JOIN }
+| o n         { Parser.ON }
+| o r d e r   { Parser.ORDER }
+| b y         { Parser.BY }
+| a s         { Parser.AS }
+| a s c       { Parser.ASC }
+| d e s c     { Parser.DESC }
+| a n d       { Parser.AND }
+| o r         { Parser.OR }
+| l i k e     { Parser.LIKE }
+| i n         { Parser.IN }
+| i s         { Parser.IS }
+| n o t       { Parser.NOT }
 
 // Types
-| i n t { Parser.INT_TYPE }
-| s t r i n g { Parser.STRING_TYPE }
-| b o o l { Parser.BOOL_TYPE }
-| d a t e t i m e { Parser.DATETIME_TYPE }
-| d a t e { Parser.DATE_TYPE }
+| i n t             { Parser.INT_TYPE }
+| s t r i n g       { Parser.STRING_TYPE }
+| b o o l           { Parser.BOOL_TYPE }
+| d a t e t i m e   { Parser.DATETIME_TYPE }
+| d a t e           { Parser.DATE_TYPE }
 | r e f e r e n c e { Parser.REFERENCE_TYPE }
-| e n u m { Parser.ENUM_TYPE }
+| a r r a y         { Parser.ARRAY_TYPE }
+| e n u m           { Parser.ENUM_TYPE }
 
 // Unescaped ids
-| ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID((String lexbuf.Lexeme).ToLower()) }
+| unescapedId { Parser.ID ((String lexbuf.Lexeme).ToLower()) }
 
 // Whitespace
-| whitespace { tokenstream lexbuf }
-| newline    { newline lexbuf; tokenstream lexbuf }
+| whitespace { tokenizeFunQL lexbuf }
+| newline    { newline lexbuf; tokenizeFunQL lexbuf }
 
 // Misc
-| _    	  { failwith ("Lexical error: " + LexBuffer<_>.LexemeString lexbuf) }
-| eof     { Parser.EOF }
+| _   { failwith <| sprintf "Lexical error: %s" (LexBuffer<_>.LexemeString lexbuf) }
+| eof { Parser.EOF }

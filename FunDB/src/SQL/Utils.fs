@@ -1,9 +1,23 @@
 module internal FunWithFlags.FunDB.SQL.Utils
 
-let renderSqlName (str : string) = sprintf "\"%s\"" (str.Replace("\"", "\\\""))
+open System.Globalization
 
-let renderSqlString (str : string) = sprintf "'%s'" (str.Replace("'", "''"))
+let escapeDoubleQuotes (str : string) = sprintf "\"%s\"" (str.Replace("\"", "\\\""))
 
-let renderBool = function
+let escapeSingleQuotes (str : string) = sprintf "'%s'" (str.Replace("'", "''"))
+
+let renderSqlName = escapeDoubleQuotes
+let renderSqlString = escapeSingleQuotes
+
+let renderSqlBool = function
     | true -> "TRUE"
     | false -> "FALSE"
+
+let renderSqlInt (i : int) = i.ToString(CultureInfo.InvariantCulture)
+
+let renderSqlDateTime (dt : DateTime) = dt.ToString("O", CultureInfo.InvariantCulture)
+
+let renderSqlDate (dt : DateTime) = dt.ToString("d", CultureInfo.InvariantCulture)
+
+type ISQLString =
+    abstract member ToSQLString : () -> string

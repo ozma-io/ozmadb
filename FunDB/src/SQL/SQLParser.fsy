@@ -2,108 +2,137 @@
 
 open FunWithFlags.FunDB.SQL.AST
 
+type ParsedValueExpr = ValueExpr<ColumnRef>
+
 %}
 
 // Atoms
 %token <int> INT
-%token <double> FLOAT
 %token <string> ID
+%token <string> QUOTED_ID
 %token <string> STRING
 %token <bool> BOOL
 %token NULL
 
 // Symbols
 %token DOUBLE_COLON
-%token LEFT_PARENS
-%token RIGHT_PARENS
+%token LEFT_PAREN
+%token RIGHT_PAREN
+%token LEFT_BRACKET
+%token RIGHT_BRACKET
 %token COMMA
 %token DOT
 %token EQ
+%token NOT_EQ
+%token AT
+%token LESS
+%token GREATER
+%token LESS_EQ
+%token GREATER_EQ
 
 // Keywords
 %token AND
-
-// Special types
-%token REGCLASS_TYPE
-%token TEXT_TYPE
+%token OR
+%token LIKE
+%token IN
+%token IS
+%token NOT
 
 // Misc
 %token EOF
 
+%left OR
 %left AND
-%right DOUBLE_COLON
+%nonassoc EQ NOT_EQ
+%nonassoc LESS GREATER LESS_EQ GREATER_EQ
+%nonassoc LIKE
+%nonassoc IN
+%nonassoc IS
+%left DOUBLE_COLON
+%left DOT
 
 %start valueExpr
-%type <PartialValueExpr> valueExpr
-
-%start objectRef
-%type <ObjectRef> objectRef
+%type <ParsedValueExpr> valueExpr
+%start schemaObject
+%type <SchemaObject> schemaObject
 
 %%
 
 // Entry points
 valueExpr : ValueExpr EOF { $1 }
-
-objectRef : ObjectRef EOF { $1 }
+schemaObject : SchemaObject EOF { $1 }
 
 // Expressions
 
 ValueExpr:
-  | ValueExprAnd { $1 }
+  | ValueExpr AND ValueExpr                       { VEAnd ($1, $3) }
+  | ValueExpr OR ValueExpr                        { VEOr ($1, $3) }
+  | ValueExpr EQ ValueExpr                        { VEEq ($1, $3) }
+  | ValueExpr NOT_EQ ValueExpr                    { VENotEq ($1, $3) }
+  | ValueExpr LIKE STRING                         { VELike ($1, $3) }
+  | ValueExpr NOT LIKE STRING                     { VENotLike ($1, $4) }
+  | ValueExpr IN InExpr                           { VEIn ($1, $3) }
+  | ValueExpr NOT IN InExpr                       { VENotIn ($1, $4) }
+  | ValueExpr IS NULL                             { VEIsNull $1 }
+  | ValueExpr IS NOT NULL                         { VEIsNotNull $1 }
+  | ValueExpr LESS ValueExpr                      { VELess ($1, $3) }
+  | ValueExpr LESS_EQ ValueExpr                   { VELessEq ($1, $3) }
+  | ValueExpr GREATER ValueExpr                   { VEGreater ($1, $3) }
+  | ValueExpr GREATER_EQ ValueExpr                { VEGreaterEq ($1, $3) }
+  | ValueExpr DOUBLE_COLON ValueType              { VECast ($1, $3) }
+  | Name LEFT_PAREN FunctionArguments RIGHT_PAREN { VEFunc ($1, $3) }
+  | ColumnRef                                     { VEColumn $1 }
+  | Value                                         { VEValue $1 }
+  | LEFT_PAREN ValueExpr RIGHT_PAREN              { $2 }
 
-ValueExprAnd:
-  | ValueExprEq AND ValueExprAnd { VEAnd($1, $3) }
-  | ValueExprEq                  { $1 }
-  
-ValueExprEq:
-  | ValueExprEq EQ ValueExprCast { VEEq($1, $3) }
-  | ValueExprCast                { $1 }
+FunctionArguments:
+  |                           { [||] }
+  | FunctionArgumentsNonEmpty { List.toArray $1 }
 
-ValueExprCast:
-  // Special cases to parse how PostgreSQL outputs various types.
-  // FIXME: Parse time values specially.
-  | STRING DOUBLE_COLON REGCLASS_TYPE { VEValue(VObject($1)) }
-  | STRING DOUBLE_COLON TEXT_TYPE     { VEValue(VString($1)) }
-  | ValueExprCast DOUBLE_COLON LongId { let id = $3 |> Array.ofSeq |> String.concat " "
-                                        match parseValueType id with
-                                            | Some(r) -> VECast($1, r)
-                                            | None -> failwith <| sprintf "Unknown type: %s" id
-                                      }
-  | ValueExprVal                      { $1 }
+FunctionArgumentsNonEmpty
+  | ValueExpr                                 { [ $1 ] }
+  | ValueExpr COMMA FunctionArgumentsNonEmpty { $1 :: $3 }
 
-LongId:
-  | Id LongId { $1 :: $2 }
-  | Id        { [ $1 ]   }
+ColumnRef:
+  | Name DOT Name DOT Name { { table = Some { schema = Some (SQLName $1); name = SQLName $3 }; name = SQLName $5 } }
+  | Name DOT Name          { { table = Some { schema = None; name = SQLName $1 }; name = SQLName $3 } }
+  | Name                   { { table = None; name = SQLName $1 } }
 
-Id:
-  | ID            { $1 }
-  | REGCLASS_TYPE { "regclass" }
-  | TEXT_TYPE     { "text" }
+Name:
+  | ID        { $1 }
+  | QUOTED_ID { $1 }
+  | AND       { "and" }
+  | OR        { "or" }
+  | LIKE      { "like" }
+  | IN        { "in" }
 
-ObjectRefList:
-  | Id                   { [ $1 ] }
-  | Id DOT ObjectRefList { $1 :: $3 }
+ArrayDim:
+  | LEFT_BRACKET RIGHT_BRACKET     { () }
+  | LEFT_BRACKET INT RIGHT_BRACKET { () }
 
-ObjectRef:
-  | ObjectRefList { ObjectRef(List.toArray $1) }
+ArrayDims:
+  | ArrayDim           { () }
+  | ArrayDim ArrayDims { () }
 
-ValueExprVal:
-  | Id LEFT_PARENS ValueExprList RIGHT_PARENS { VEFunc($1, $3) }
-  | ObjectRef                                 { VEColumn($1 |> columnFromObjectRef |> Option.get) }
-  | Value                                     { VEValue($1) }
-  | LEFT_PARENS ValueExpr RIGHT_PARENS        { $2 }
+ValueType:
+  | ScalarType ArrayDims { VTArray $1 }
+  | ScalarType           { VTScalar $1 }
 
-ValueExprList:
-  |                       { [| |] }
-  | ValueExprListNonempty { List.toArray $1 }
+ScalarType:
+  | ScalarTypeParts { SQLName (String.concat " " $1) }
+  | QUOTED_ID       { SQLName $1 }
 
-ValueExprListNonempty:
-  | ValueExpr                             { [ $1 ] }
-  | ValueExpr COMMA ValueExprListNonempty { $1 :: $3 }
+ScalarTypeParts:
+  | ID ScalarTypeParts { $1 :: $2 }
+  | ID                 { $1 }
 
 Value:
-  | INT                                { VInt($1) }
-  | FLOAT                              { VFloat($1) }
-  | STRING                             { VString($1) }
-  | BOOL                               { VBool($1) }
-  | NULL                               { VNull }
+  | INT    { VInt $1 }
+  | FLOAT  { VFloat $1 }
+  | STRING { VString $1 }
+  | BOOL   { VBool $1 }
+  | NULL   { VNull }
+
+SchemaObject:
+  | Name DOT Name { { schema = Some (SQLName $1); name = SQLName $3 } }
+  | Name          { { schema = None; name = SQLName $1 } }

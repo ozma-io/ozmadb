@@ -4,11 +4,10 @@ open System
 open System.Collections
 open System.Collections.Generic
 
-// Basically JSON without nulls.
-type AttributeMap (map : IDictionary<string, Attribute>) as this =
-    let resolvePath xs extract = Array.toList xs |> this.RunResolvePath |> Option.map extract
-    let resolvePathWithDefault xs extract def =
-        match resolvePath xs extract with
+type AttributeMap<'e> (map : IDictionary<string, Attribute>) as this =
+    let getOption name extract = tryFind name |> Option.map extract
+    let getOptionWithDefault name extract def =
+        match getOption xs extract with
             | Some(x) -> x
             | None -> def
 
@@ -71,43 +70,30 @@ type AttributeMap (map : IDictionary<string, Attribute>) as this =
         member this.Remove (k : string) = this.Remove k
         member this.TryGetValue (k, v : Attribute byref) = this.TryGetValue (k, ref v)
 
-    member private this.RunResolvePath = function
-        | [] -> None
-        | [x] -> tryFind x
-        | x :: xs ->
-            match tryFind x with
-                | None -> None
-                | Some(v) -> v.GetAssoc().RunResolvePath(xs)
+    member this.GetBoolOption name = getOption name (fun x -> x.GetBool ())
+    member this.GetFloatOption name = getOption name (fun x -> x.GetFloat ())
+    member this.GetIntOption name = getOption name (fun x -> x.GetInt ())
+    member this.GetStringOption name = getOption name (fun x -> x.GetString ())
 
-    member this.GetBoolOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetBool ())
-    member this.GetFloatOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetFloat ())
-    member this.GetIntOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetInt ())
-    member this.GetStringOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetString ())
-    member this.GetListOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetList ())
-    member this.GetAssocOption ([<ParamArray>] xs) = resolvePath xs (fun x -> x.GetAssoc ())
-
-    member this.GetBoolWithDefault (def : bool, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetBool ()) def
-    member this.GetFloatWithDefault (def : float, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetFloat ()) def
-    member this.GetIntWithDefault (def : int, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetInt ()) def
-    member this.GetStringWithDefault (def : string, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetString ()) def
-    member this.GetListWithDefault (def : Attribute array, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetList ()) def
-    member this.GetAssocWithDefault (def : AttributeMap, [<ParamArray>] xs) = resolvePathWithDefault xs (fun x -> x.GetAssoc ()) def
+    member this.GetBoolWithDefault (def, name) = getOptionWithDefault name (fun x -> x.GetBool ()) def
+    member this.GetFloatWithDefault (def, name) = getOptionWithDefault name (fun x -> x.GetFloat ()) def
+    member this.GetIntWithDefault (def, name) = getOptionWithDefault name (fun x -> x.GetInt ()) def
+    member this.GetStringWithDefault (def, name) = getOptionWithDefault name (fun x -> x.GetString ()) def
 
     static member Merge (a : AttributeMap) (b : AttributeMap) : AttributeMap =
         let insertOne oldMap = function
             | KeyValue(k, v) ->
                 match Map.tryFind k oldMap with
                     | None -> Map.add k v oldMap
-                    | Some(oldv) -> Map.add k (Attribute.Merge oldv v) oldMap
+                    | Some(oldv) -> Map.add k v oldMap
         new AttributeMap(Seq.fold insertOne (Seq.fold insertOne Map.empty a) b |> Map.toSeq |> dict)
 
-and Attribute =
+and Attribute<'e> =
     | ABool of bool
     | AFloat of float
     | AInt of int
     | AString of string
-    | AList of Attribute array
-    | AAssoc of AttributeMap
+    | AExpr of 'e
 with
     member this.GetBool () =
         match this with
@@ -125,17 +111,3 @@ with
         match this with
             | AString(s) -> s
             | _ -> invalidOp "GetString"
-    member this.GetList () =
-        match this with
-            | AList(l) -> l
-            | _ -> invalidOp "GetList"
-    member this.GetAssoc () : AttributeMap =
-        match this with
-            | AAssoc(a) -> a
-            | _ -> invalidOp "GetAssoc"
-
-    static member Merge (a : Attribute) (b : Attribute) : Attribute =
-        match (a, b) with
-            | (AList(a), AList(b)) -> AList(Array.append a b)
-            | (AAssoc(a), AAssoc(b)) -> AAssoc(AttributeMap.Merge a b)
-            | _ -> b

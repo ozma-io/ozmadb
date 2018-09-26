@@ -7,15 +7,44 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Attribute
 open FunWithFlags.FunDB.FunQL.AST
 
-let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
-    FJoin(joinType, fromExpr1, fromExpr2, whereExpr)
+let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
+    FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
 
+type ParsedFieldExpr = FieldExpr<FieldRef>
+type ResolvedFromExpr = FromExpr<EntityRef, FieldRef>
+type ParsedFromClause = FromClause<EntityRef, FieldRef>
+type ParsedQueryExpr = QueryExpr<EntityRef, FieldRef>
+type ParsedQueryResult = QueryResult<FieldRef>
+type ParsedViewExpr = ViewExpr<FieldRef>
+type ParsedAttributeMap = AttributeMap<FieldRef>
+
+type private AttributedResult =
+    | AResult of ParsedAttributeMap * Result<FieldRef>
+    | AAttribute of FunQLName * Attribute
+
+let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
+    try
+        mapOfSeqUnique vals
+    with
+        | Failure msg -> failwith <| sprintf "%s: %s" error msg
+
+let private splitResults (results : AttributedResult seq) : ParsedAttributeMap * ParsedQueryResult =
+    let getResult = function
+        | AResult (attrs, res) -> Some (attrs, res)
+        | AAttribute (name, attr) -> None
+    let getAttribute = function
+        | AResult (attrs, res) -> None
+        | AAttribute (name, attr) -> Some (name, attr)
+
+    let attributes = results |> seqMapMaybe getAttribute |> parseMap "Clashing row attribute names"    
+    let results = results |> seqMapMaybe getResult |> Seq.toArray
+    (attributes, results)
 %}
 
 // Atoms
 %token <int> INT
-%token <double> FLOAT
 %token <string> ID
+%token <string> ARGUMENT_ID
 %token <string> STRING
 %token <bool> BOOL
 %token NULL
@@ -23,15 +52,20 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 // Symbols
 %token LEFT_BRACE
 %token RIGHT_BRACE
+%token LEFT_PAREN
+%token RIGHT_PAREN
 %token LEFT_BRACKET
 %token RIGHT_BRACKET
-%token LEFT_PARENS
-%token RIGHT_PARENS
 %token DOUBLE_COLON
-%token COLON
 %token COMMA
 %token DOT
 %token EQ
+%token NOT_EQ
+%token AT
+%token LESS
+%token GREATER
+%token LESS_EQ
+%token GREATER_EQ
 
 // Keywords
 %token SELECT
@@ -49,6 +83,11 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %token ASC
 %token DESC
 %token AND
+%token OR
+%token LIKE
+%token IN
+%token IS
+%token NOT
 
 // Types
 %token INT_TYPE
@@ -57,18 +96,24 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %token DATETIME_TYPE
 %token DATE_TYPE
 %token REFERENCE_TYPE
+%token ARRAY_TYPE
 %token ENUM_TYPE
 
 // Misc
 %token EOF
 
+%left OR
 %left AND
-%right EQ
+%nonassoc EQ NOT_EQ
+%nonassoc LESS GREATER LESS_EQ GREATER_EQ
+%nonassoc LIKE
+%nonassoc IN
+%nonassoc IS
 %left DOUBLE_COLON
 %left DOT
 
-%start query
-%type <ParsedQueryExpr> query
+%start view
+%type <ParsedViewExpr> viewExpr
 
 %start fieldType
 %type <ParsedFieldType> fieldType
@@ -79,66 +124,75 @@ let applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 %%
 
 // Entry points
-query: Query EOF { $1 }
+viewExpr : ViewExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
 
 // Expressions
-Query:
-	| MaybeAttributeMap SELECT Results FROM FromExpr WhereClause OrderByClause { { attributes = $1; results = List.toArray $3; from = $5; where = $6; orderBy = List.toArray $7; } }
 
-MaybeAttributeMap:
-  |              { new AttributeMap() }
-  | AttributeMap { $1 }
+ViewExpr:
+  | MaybeArguments SELECT AttributedResults FromClause {
+      let (attributes, results) = splitResults $3
+      { arguments = $1; attributes = attributes; results = results; clause = $4 }
+  }
+
+MaybeArguments:
+  |                                            { [] }
+  | LEFT_PAREN ArgumentsList RIGHT_PAREN COLON { $2 }
+
+ArgumentsList:
+  |                       { Map.empty }
+  | ArgumentsListNonEmpty { parseMap "Clashing argument names" $1 }
+
+ArgumentsListNonEmpty:
+  | Argument COMMA ArgumentsListNonEmpty { $1 :: $3 }
+  | Argument                             { [ $1 ] }
+
+Argument:
+  | FieldRef ArgumentFieldType { ($2, $1) }
+
+FromClause:
+  | FROM FromExpr WhereClause OrderByClause { { from = $2; where = $3; orderBy = $4 } }
+
+Query:
+	| SELECT Results FromClause { { results = $2; clause = $3 } }
 
 Results:
-  |                 { [] }
-  | ResultsNonEmpty { $1 }
+  |                 { [||] }
+  | ResultsNonEmpty { List.toArray $1 }
 
 ResultsNonEmpty:
-  | AttributedResult COMMA ResultsNonEmpty { $1 :: $3 }
-  | AttributedResult                       { [ $1 ] }
+  | Result COMMA ResultsNonEmpty { $1 :: $3 }
+  | Result                       { [ $1 ] }
+
+AttributedResults:
+  |                           { [] }
+  | AttributedResultsNonEmpty { $1 }
+
+AttributedResultsNonEmpty:
+  | AttributedResult COMMA AttributedResultsNonEmpty { $1 :: $3 }
+  | AttributedResult                                 { [ $1 ] }
 
 AttributedResult:
-  | MaybeAttributeMap Result { ($1, $2) }
+  | MaybeAttributeMap Result { AResult ($1, $2) }
+  | AT ID EQ FieldExpr       { AAttribute ($2, $4) }
 
-AttributeMap:
-  | LEFT_BRACE AttributeValues RIGHT_BRACE { new AttributeMap($2 |> Map.toSeq |> dict) }
-
-AttributeValues:
-  |                         { Map.empty }
-  | AttributeValuesNonEmpty { $1 }
+MaybeAttributeMap:
+  |                                                { Map.empty }
+  | LEFT_BRACE RIGHT_BRACE                         { Map.empty }
+  | LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
 
 AttributeValuesNonEmpty:
-  | ID COLON Attribute                               { Map.add $1 $3 Map.empty }
-  | ID COLON Attribute COMMA AttributeValuesNonEmpty { Map.add $1 $3 $5 }
-
-Attribute:
-  | BOOL          { ABool($1) }
-  | FLOAT         { AFloat($1) }
-  | INT           { AInt($1) }
-  | STRING        { AString($1) }
-  | AttributeList { AList($1) }
-  | AttributeMap  { AAssoc($1) }
-
-AttributeList:
-  | LEFT_BRACKET AttributeItems RIGHT_BRACKET { List.toArray $2 }
-
-AttributeItems:
-  |                        { [] }
-  | AttributeItemsNonEmpty { $1 }
-
-AttributeItemsNonEmpty:
-  | Attribute                              { [ $1 ] }
-  | Attribute COMMA AttributeItemsNonEmpty { $1 :: $3 }
+  | ID EQ FieldExpr                               { [($1, $3)] }
+  | ID EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
 
 Result:
-  | FieldName       { RField($1) }
-  | FieldExpr AS ID { RExpr($3, $1) }
+  | FieldRef        { { name = $1.name; expr = FEColumn $1 } }
+  | FieldExpr AS ID { { name = $3; expr = $1 } }
 
 QuerySource:
-  | LEFT_PARENS Query RIGHT_PARENS AS ID { FSubExpr($5, $2) }
-  | EntityName                           { FEntity($1) }
+  | LEFT_PAREN Query RIGHT_PAREN AS ID { FSubExpr ($5, $2) }
+  | EntityRef                          { FEntity ($1) }
 
 JoinType:
   |       { Inner }
@@ -154,39 +208,80 @@ JoinChain:
 FromExpr:
   | QuerySource JoinChain { List.fold applyJoin $1 $2 }
 
-EntityName:
-  | ID DOT ID { { schema = Some($1); name = $3; } }
+EntityRef:
+  | ID DOT ID { { schema = Some (FunQLName $1); name = FunQLName $3; } }
   | ID        { { schema = None; name = $1; } }
 
-FieldName:
-  | ID DOT ID DOT ID { { entity = Some({ schema = Some($1); name = $3; }); name = $5; } }
-  | ID DOT ID        { { entity = Some({ schema = None; name = $1; }); name = $3; } }
-  | ID               { { entity = None; name = $1; } }
+FieldRef:
+  | ID DOT ID DOT ID { { entity = Some { schema = Some (FunQLName $1); name = FunQLName $3 }; name = FunQLName $5 } }
+  | ID DOT ID        { { entity = Some { schema = None; name = FunQLName $1 }; name = FunQLName $3 } }
+  | ID               { { entity = None; name = FunQLName $1 } }
 
 WhereClause:
   |                 { None }
-  | WHERE FieldExpr { Some($2) }
+  | WHERE FieldExpr { Some $2 }
+
+InList:
+  | FieldExpr              { [ $1 ] }
+  | FieldExpr COMMA InList { $1 :: $3 }
+
+InExpr:
+  | LEFT_PAREN InList RIGHT_PAREN { List.toArray $2 }
 
 FieldExpr:
-  | FieldExpr AND FieldExpr { FEAnd($1, $3) }
-  | FieldExpr EQ FieldExpr { FEEq($1, $3) }
-  // Special cases to be able to use Date and DateTime constants
-  | STRING DOUBLE_COLON DATE_TYPE     { FEValue(FDate(tryDateTimeInvariant $1 |> Option.get)) }
-  | STRING DOUBLE_COLON DATETIME_TYPE { FEValue(FDateTime(tryDateTimeInvariant $1 |> Option.get)) }
-  // FIXME: Implement actual casting.
-  | FieldName                                 { FEColumn($1) }
-  | Value                                     { FEValue($1) }
-  | LEFT_PARENS FieldExpr RIGHT_PARENS        { $2 }
+  | FieldExpr AND FieldExpr              { FEAnd ($1, $3) }
+  | FieldExpr OR FieldExpr               { FEOr ($1, $3) }
+  | FieldExpr EQ FieldExpr               { FEEq ($1, $3) }
+  | FieldExpr NOT_EQ FieldExpr           { FENotEq ($1, $3) }
+  | FieldExpr LIKE STRING                { FELike ($1, $3) }
+  | FieldExpr NOT LIKE STRING            { FENotLike ($1, $4) }
+  | FieldExpr IN InExpr                  { FEIn ($1, $3) }
+  | FieldExpr NOT IN InExpr              { FENotIn ($1, $4) }
+  | FieldExpr LESS FieldExpr             { FELess ($1, $3) }
+  | FieldExpr LESS_EQ FieldExpr          { FELessEq ($1, $3) }
+  | FieldExpr GREATER FieldExpr          { FEGreater ($1, $3) }
+  | FieldExpr GREATER_EQ FieldExpr       { FEGreaterEq ($1, $3) }
+  | FieldRef                             { FEColumn $1 }
+  | ARGUMENT_ID                          { FEPlaceholder $1 }
+  | Value                                { FEValue $1 }
+  | LEFT_PAREN FieldExpr RIGHT_PAREN     { $2 }
+
+IntArray:
+  |                  { [||] }
+  | IntArrayNonEmpty { List.toArray $1 }
+
+IntArrayNonEmpty:
+  | INT                        { [ $1 ] }
+  | INT COMMA IntArrayNonEmpty { $1 :: $3 }
+
+StringArray:
+  |                     { [||] }
+  | StringArrayNonEmpty { List.toArray $1 }
+
+StringArrayNonEmpty:
+  | STRING                           { [ $1 ] }
+  | STRING COMMA StringArrayNonEmpty { $1 :: $3 }
+
+BoolArray:
+  |                   { [||] }
+  | BoolArrayNonEmpty { List.toArray $1 }
+
+BoolArrayNonEmpty:
+  | BOOL                         { [ $1 ] }
+  | BOOL COMMA BoolArrayNonEmpty { $1 :: $3 }
 
 Value:
-  | INT                                { FInt($1) }
-  | STRING                             { FString($1) }
-  | BOOL                               { FBool($1) }
-  | NULL                               { FNull }
+  | INT                                    { FInt $1 }
+  | STRING                                 { FString $1 }
+  | BOOL                                   { FBool $1 }
+  | LEFT_BRACKET IntArray    RIGHT_BRACKET { FIntArray $2 }
+  | LEFT_BRACKET StringArray RIGHT_BRACKET { FStringArray $2 }
+  | LEFT_BRACKET BoolArray   RIGHT_BRACKET { FBoolArray $2 }
+  | NULL                                   { FNull }
 
 OrderByClause:
-  |                      { [ ] }
-  | ORDER BY OrderByList { $3 }
+  |                      { [||] }
+  | ORDER BY OrderByList { List.toArray $3 }
 
 OrderByList:
   | OrderByExpr                   { [$1] }
@@ -200,17 +295,27 @@ OrderByDirection:
   | ASC  { Asc }
   | DESC { Desc }
 
+ScalarType:
+  | INT_TYPE      { SFTInt }
+  | STRING_TYPE   { SFTString }
+  | BOOL_TYPE     { SFTBool }
+  | DATETIME_TYPE { SFTDateTime }
+  | DATE_TYPE     { SFTDate }
+
 FieldExprType:
-  | INT_TYPE                                           { FTInt }
-  | STRING_TYPE                                        { FTString }
-  | BOOL_TYPE                                          { FTBool }
-  | DATETIME_TYPE                                      { FTDateTime }
-  | DATE_TYPE                                          { FTDate }
+  | ScalarType                                    { FETScalar $1 }
+  | ARRAY_TYPE LEFT_PAREN ScalarType RIGHT_PAREN  { FETArray $3 }
 
 FieldType:
-  | FieldExprType                                      { $1 }
-  | REFERENCE_TYPE LEFT_PARENS EntityName RIGHT_PARENS { FTReference($3) }
-  | ENUM_TYPE LEFT_PARENS EnumList RIGHT_PARENS        { FTEnum($3 |> List.toSeq |> setOfSeqUnique) }
+  | FieldExprType                                                   { FTType $1 }
+  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference $3 None }
+  | REFERENCE_TYPE LEFT_PAREN EntityRef COMMA FieldExpr RIGHT_PAREN { FTReference $3 (Some $5) }
+  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> setOfSeqUnique) }
+
+ArgumentFieldType:
+  | FieldExprType                                                   { FTType $1 }
+  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference $3 None }
+  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> setOfSeqUnique) }
 
 EnumList:
   | STRING                { [$1] }

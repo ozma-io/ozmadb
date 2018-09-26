@@ -21,6 +21,10 @@
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParser.fs" />
     <FsLex Include="src/SQL/SQLLexer.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLLexer.fs" />
+    <FsYacc Include="src/SQL/ArrayParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Array.Parser --internal" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayParser.fs" />
+    <FsLex Include="src/SQL/ArrayLexer.fsl" OtherFlags="--unicode" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayLexer.fs" />
     <Compile Include="src/SQL/Qualifier.fs" />
     <Compile Include="src/SQL/Render.fs" />
     <Compile Include="src/SQL/Query.fs" />
@@ -48,8 +52,9 @@
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="FsLexYacc" Version="7.0.*" />
     <PackageReference Include="YC.PrettyPrinter" Version="0.0.5" />
-
-    <ProjectReference Include="../FunCore/FunCore.csproj" />
+    <PackageReference Include="Npgsql" Version="4.0.*" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.1.*" />
+    <PackageReference Include="BCrypt.Net-Next" Version="3.1.*" />
   </ItemGroup>
 
 </Project>

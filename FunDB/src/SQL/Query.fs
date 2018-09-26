@@ -1,107 +1,110 @@
-module internal FunWithFlags.FunDB.SQL.Query
+module FunWithFlags.FunDB.SQL.Query
 
 open System
 open Npgsql
+open Npgsql.NpgsqlTypes
 
-open FunWithFlags.FunCore
 open FunWithFlags.FunDB.SQL.AST
-open FunWithFlags.FunDB.SQL.Render
 
-type EvaluateResult =
-    { name: string;
-      valueType: ValueType;
-      value: QualifiedValue;
+exception QueryError of info : string with
+    override this.Message = this.info
+
+type ExprParameters = Map<int, ValueType * Value>
+
+type QueryResult =
+    { columns : (SQLName * ValueType) array
+      values : Value array array
     }
 
 type QueryConnection (connectionString : string) =
-    let connection = new NpgsqlConnection(connectionString)
+    let connection = NpgsqlConnection connectionString
 
     let convertValue valType (rawValue : obj) =
         match (valType, rawValue) with
             | (_, (:? DBNull as value)) -> VNull
 
-            | (VTInt, (:? byte as value)) -> VInt(int value)
-            | (VTInt, (:? sbyte as value)) -> VInt(int value)
-            | (VTInt, (:? int16 as value)) -> VInt(int value)
-            | (VTInt, (:? uint16 as value)) -> VInt(int value)
-            | (VTInt, (:? int32 as value)) -> VInt(int value)
-            | (VTInt, (:? uint32 as value)) -> VInt(int value)
+            | (VTInt, (:? byte as value)) -> VInt (int value)
+            | (VTInt, (:? sbyte as value)) -> VInt (int value)
+            | (VTInt, (:? int16 as value)) -> VInt (int value)
+            | (VTInt, (:? uint16 as value)) -> VInt (int value)
+            | (VTInt, (:? int32 as value)) -> VInt (int value)
+            | (VTInt, (:? uint32 as value)) -> VInt (int value)
             // XXX: possible casting problem
-            | (VTInt, (:? int64 as value)) -> VInt(int value)
-            | (VTInt, (:? uint64 as value)) -> VInt(int value)
+            | (VTInt, (:? int64 as value)) -> VInt (int value)
+            | (VTInt, (:? uint64 as value)) -> VInt (int value)
+            | (VTString, (:? string as value)) -> VString (value)
+            | (VTBool, (:? bool as value)) -> VBool (value)
+            | (VTDateTime, (:? DateTime as value)) -> VDateTime (value)
+            | (VTDate, (:? DateTime as value)) -> VDate (value)
+            | (typ, value) -> raise <| QueryError <| sprintf "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLName()) (value.GetType().FullName)
 
-            | (VTFloat, (:? single as value)) -> VFloat(double value)
-            | (VTFloat, (:? double as value)) -> VFloat(double value)
+    let npgsqlSimpleType : SimpleType -> NpgsqlDbType = function
+        | STInt -> NpgsqlDbType.Integer
+        | STString -> NpgsqlDbType.Text
+        | STBool -> NpgsqlDbType.Boolean
+        | STDateTime -> NpgsqlDbType.Timestamp
+        | STDate -> NpgsqlDbType.Date
 
-            | (VTString, (:? string as value)) -> VString(value)
-            | (VTBool, (:? bool as value)) -> VBool(value)
-            | (VTDateTime, (:? DateTime as value)) -> VDateTime(value)
-            | (VTDate, (:? DateTime as value)) -> VDate(value)
-            | (typ, value) -> failwith <| sprintf "Unknown raw SQL value type: %s, value type: %O" (value.GetType ()).FullName typ
+    let npgsqlType : ValueType -> NpgsqlDbType = function
+        | VTScalar s -> npsqlSimpleType s
+        | VTArray s -> npgsqlSimpleType s ||| NpgsqlDbType.Array
 
-    let executeNonQuery queryStr =
-        use command = new NpgsqlCommand(queryStr, connection)
+    let rec npgsqlArrayValue (vals : ArrayValue<_> array) : object =
+        let convertValue : ArrayValue<_> -> object = function
+            | AVValue v -> v
+            | AVArray vals -> npgsqlArrayValue vals
+            | AVNull -> DBNull.Value
+        Array.map convertValue vals
+
+    let npgsqlValue : Value -> object = function
+        | VInt i -> i
+        | VString s -> s
+        | VBool b -> b
+        | VDateTime dt -> dt
+        | VDate dt -> dt
+        | VIntArray vals -> npgsqlArrayValue vals
+        | VStringArray vals -> npgsqlArrayValue vals
+        | VBoolArray vals -> npgsqlArrayValue vals
+        | VDateTimeArray vals -> npgsqlArrayValue vals
+        | VDateArray vals -> npgsqlArrayValue vals
+        | VNull -> DBNull.Value
+
+    let withCommand (queryStr : string) (params : ExprParameters) (runFunc : NpgsqlCommand -> 'r) =
+        use command = NpgsqlCommand (queryStr, connection)
+        for (name, (valueType, value)) in params do
+            command.Parameters.AddWithValue(name.ToString(), npgsqlType valueType, npgsqlValue value)
+        command.Prepare()
         connection.Open()
         try
-            ignore <| command.ExecuteNonQuery()
+            runFunc command
         finally
             connection.Close()
 
-    let executeQuery queryStr : ((string * ValueType) array) * (QualifiedValue array array) =
-        use command = new NpgsqlCommand(queryStr, connection)
-        connection.Open()
-        try
+    member this.ExecuteNonQuery (queryStr : string) (params : ExprParameters) =
+        withCommand queryStr params <| fun command ->
+            ignore <| command.ExecuteNonQuery()
+
+    member this.ExecuteQuery (queryStr : string) (params : ExprParameters) : QueryResult =
+        withCommand queryStr params <| fun command ->
             use reader = command.ExecuteReader()
             let getColumn i =
                 let name = reader.GetName(i)
-                let typ = reader.GetDataTypeName(i) |> parseCoerceValueType |> Option.get
-                (name, typ)
+                let typ =
+                    match reader.GetDataTypeName(i) |> findSimpleType with
+                        | Some t -> t
+                        | None -> raise <| QueryError <| sprintf "Unknown result type: %s" (reader.GetDataTypeName(i))
+                (SQLName name, typ)
             let columns = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getColumn |> Seq.toArray
             let getRow i =
                 let (_, typ) = columns.[i]
                 reader.[i] |> convertValue typ
             let values =
-                seq { while reader.Read() do
-                          yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
+                seq {
+                    while reader.Read() do
+                        yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
                 } |> Seq.toArray
-            (columns, values)
-        finally
-            connection.Close()
+            { columns = columns; values = values }
 
     interface IDisposable with
         member this.Dispose () =
             connection.Dispose()
-
-    // TODO: Make a cursored version
-    member this.Query (expr : SelectExpr) =
-        let queryStr = renderSelect expr
-        eprintfn "Select query: %s" queryStr
-        executeQuery queryStr
-
-    member this.Evaluate (expr : EvaluateExpr) =
-        let queryStr = renderEvaluate expr
-        eprintfn "Evaluate query: %s" queryStr
-        let (columns, results) = executeQuery queryStr
-        if Array.length results <> 1 then
-            failwith "Evaluate query is not expected to have other than one result row"
-        Seq.map2 (fun (name, typ) value -> { name = name; valueType = typ; value = value; }) columns results.[0] |> Array.ofSeq
-
-    member this.Insert (expr : InsertExpr) =
-        let queryStr = renderInsert expr
-        eprintfn "Insert query: %s" queryStr
-        executeNonQuery queryStr
-
-    member this.Update (expr : UpdateExpr) =
-        let queryStr = renderUpdate expr
-        eprintfn "Update query: %s" queryStr
-        executeNonQuery queryStr
-
-    member this.Delete (expr : DeleteExpr) =
-        let queryStr = renderDelete expr
-        eprintfn "Delete query: %s" queryStr
-        executeNonQuery queryStr
-
-    member this.ApplyOperation (op : SchemaOperation) =
-        let queryStr = renderSchemaOperation op
-        eprintfn "Schema operation query: %s" queryStr
-        executeNonQuery queryStr
