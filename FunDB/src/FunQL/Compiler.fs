@@ -9,15 +9,15 @@ type CompiledArgument =
     { placeholder : int
       fieldType : ArgumentFieldType
       valueType : ValueType
-    } with
-        member this.Execute (conn : QueryConnection) : 
+    }
 
 type CompiledViewExpr =
-    { attributesStr : string
+    { // Evaluation of column-wise or global attributes
+      attributesStr : string
       query : SelectExpr
       arguments : Map<FunQLName, CompiledArgument>
     } with
-        override this.ToString () = sprintf "%s; %s" attributesStr query.ToString()
+        override this.ToString () = sprintf "%s; %s" attributesStr (query.ToString())
 
 let private compileScalarType : ScalarType -> AST.SimpleType = function
     | SFTInt -> AST.STInt
@@ -62,7 +62,7 @@ let private compileFieldName : ResolvedFieldRef -> ResolvedColumnRef = function
     | RFEntityId entityRef -> { AST.table = compileEntityRef entityRef; AST.name = compileName funId }
     | RFSubquery (entityName, fieldName) -> { AST.table = { AST.schema = None; AST.name = compileName entityName }; AST.name = compileName fieldName }
 
-let private compileArray (vals : 'a array) -> AST.ValueArray<'a> = Array.map AST.AVValue vals
+let compileArray (vals : 'a array) : AST.ValueArray<'a> = Array.map AST.AVValue vals
 
 let private compileFieldValue : FieldValue -> AST.ValueExpr = function
     | FInt i -> AST.VEValue (AST.VInt i)
@@ -71,11 +71,11 @@ let private compileFieldValue : FieldValue -> AST.ValueExpr = function
     | FBool b -> AST.VEValue (AST.VBool b)
     | FDateTime dt -> AST.VEValue (AST.VDateTime dt)
     | FDate d -> AST.VEValue (AST.VDate d)
-    | FIntArray vals -> AST.VIntArray (compileArray vals)
-    | FStringArray vals -> AST.VStringArray (compileArray vals)
-    | FBoolArray vals -> AST.VBoolArray (compileArray vals)
-    | FDateTimeArray vals -> AST.VDateTimeArray (compileArray vals)
-    | FDateArray vals -> AST.VDateArray (compileArray vals)
+    | FIntArray vals -> AST.VEValue (AST.VIntArray (compileArray vals))
+    | FStringArray vals -> AST.VEValue (AST.VStringArray (compileArray vals))
+    | FBoolArray vals -> AST.VEValue (AST.VBoolArray (compileArray vals))
+    | FDateTimeArray vals -> AST.VEValue (AST.VDateTimeArray (compileArray vals))
+    | FDateArray vals -> AST.VEValue (AST.VDateArray (compileArray vals))
     | FNull -> AST.VEValue AST.VNull
 
 let genericCompileFieldExpr (columnFunc : ResolvedFieldRef -> 'f) (placeholderFunc : string -> int) (expr : ParsedFieldExpr) : FieldExpr<'f> =
@@ -101,13 +101,8 @@ let genericCompileFieldExpr (columnFunc : ResolvedFieldRef -> 'f) (placeholderFu
         | FEIsNotNull a -> AST.VEIsNotNull (traverse a)
     traverse
 
-type private EntityAncestor =
-    { tableRef : AST.ResolvedTableRef
-      columns : SelectedColumn seq
-    }
-
-type private QueryCompiler (layout : Layout) (placeholders : Map<FunQLName, int>) =
-    let compileFieldExpr = genericCompileFieldExpr compileFieldName (fun name -> Map.find name placeholders)
+type private QueryCompiler (layout : Layout, placeholders : Map<FunQLName, int>) =
+    let compileFieldExpr = genericCompileFieldExpr compileFieldName (fun name -> placeholders.[name])
     let compileLocalFieldExpr tableRef =
         let makeFullName name = { AST.table = tableRef; AST.name = AST.SQLName (name.ToString()) }
         let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
@@ -117,41 +112,22 @@ type private QueryCompiler (layout : Layout) (placeholders : Map<FunQLName, int>
 
     let compileResult result = AST.SCExpr (compileName result.name, compileFieldExpr result.expr)
 
-    let rec findEntityAncestor entityRef =
-        let Some entity = layout.FindEntity entityRef
-
-        let ancestor =
-            match entity.ancestor with
-                | None ->
-                    let tableRef = compileEntityRef entityRef
-                    let idColumn = AST.SCColumn { AST.table = tableRef; AST.name = SQLName "Id" }
-                    { tableRef = tableRef
-                      columns = Seq.singleton idColumn
-                    }
-            | Some ancestorName -> findEntityAncestor { entityRef with name = ancestorName }
-
-        let columnFields = entity.columnFields |> Map.toSeq |> Seq.map (fun (name, field) -> AST.SCColumn { AST.table = ancestor.tableRef; AST.name = compileName name })
-        let computedFields = entity.computedFields |> Map.toSeq |> Seq.map (fun (name, field) -> AST.SCExpr (compileName name, compileLocalFieldExpr ancestor.tableRef field.expression))
-        let fields = Seq.append columnFields computedFields
-
-        { ancestor with columns = Seq.append ancestor.columns fields }
-
     let rec compileFrom = function
         | FEntity entityRef ->
             let Some entity = layout.FindEntity entityRef
-            let ancestor = findEntityAncestor entityRef
-            let where =
-                if Option.isNone entity.ancestor and Set.isEmpty entity.descendants
-                then None
-                else
-                    let checkSubEntity name =
-                        AST.VEEq (AST.VEColumn { AST.table = ancestor.tableRef; AST.name = SQLName (funSubEntity.ToString()) }) (AST.VEValue (AST.STString (name.ToString())))
-                    Some (entity.possibleSubEntities |> Set.toSeq |> Seq.map checkSubEntity |> Seq.fold1 AST.VEOr)
+            let tableRef = compileEntityRef entityRef
+            let idColumn = AST.SCColumn { AST.table = tableRef; AST.name = SQLName "Id" }
+            { tableRef = tableRef
+              columns = Seq.singleton idColumn
+            }
+
+            let columnFields = entity.columnFields |> Map.toSeq |> Seq.map (fun (name, field) -> AST.SCColumn { AST.table = tableRef; AST.name = compileName name })
+            let computedFields = entity.computedFields |> Map.toSeq |> Seq.map (fun (name, field) -> AST.SCExpr (compileName name, compileLocalFieldExpr tableRef field.expression))
             let subquery = {
-                AST.columns = ancestor.results |> Seq.toArray
+                AST.columns = Seq.append columnFields computedFields |> Seq.toArray
                 AST.clause = {
-                    AST.from = AST.FTable ancestor.name
-                    AST.where = where
+                    AST.from = AST.FTable entity.name
+                    AST.where = None
                     AST.orderBy = [||]
                     AST.limit = None
                     AST.offset = None
@@ -161,7 +137,7 @@ type private QueryCompiler (layout : Layout) (placeholders : Map<FunQLName, int>
         | FJoin (jt, e1, e2, where) -> AST.FJoin (compileJoin jt, compileFrom e1, compileFrom e2, compileFieldExpr where)
         | FSubExpr (name, q) -> AST.FSubExpr (name, compileQueryExpr q)
 
-    and rec compileFromClause clause =
+    and compileFromClause clause =
         { AST.from = compileFrom clause.from
           AST.where = Option.map compileFieldExpr query.where
           AST.orderBy = Array.map (fun (ord, expr) -> (compileOrder ord, compileFieldExpr expr)) query.orderBy
@@ -170,7 +146,7 @@ type private QueryCompiler (layout : Layout) (placeholders : Map<FunQLName, int>
           AST.offset = None
         }
 
-    and rec compileQueryExpr query =
+    and compileQueryExpr query =
         { AST.columns = Array.map (fun (attr, res) -> compileResult res) query.results
           AST.clause = Some (compileFrom query.from)
         }

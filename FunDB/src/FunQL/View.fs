@@ -50,7 +50,7 @@ type ResolvedQueryExpr = QueryExpr<EntityRef, ResolvedFieldRef>
 type ResolvedFromExpr = FromExpr<EntityRef, ResolvedFieldRef>
 type ResolvedFromClause = FromClause<EntityRef, ResolvedFieldRef>
 
-let private checkName (name : string) : () =
+let private checkName (name : string) : unit =
     if name = "" then
         raise <| ViewError "Empty names are not allowed"
     if name.IndexOf("__") <> -1 then
@@ -85,7 +85,7 @@ let private lookupField (mapping : QMapping) (f : FieldName) : ResolvedFieldRef 
             else
                 raise <| ViewError <| sprintf "Field not found: %s" f.name
 
-type private QueryResolver (layout : Layout) (placeholders : QPlaceholders) =
+type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
     let resolveFieldExpr (mapping : QMapping) : ParsedFieldExpr -> ResolvedFieldExpr =
         let resolvePlaceholder name =
             if Set.contains name placeholders

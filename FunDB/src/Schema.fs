@@ -1,11 +1,11 @@
 module FunWithFlags.FunDB.Schema
 
-open System
 open System.Collections.Generic
+open Microsoft.EntityFrameworkCore
 open System.ComponentModel.DataAnnotations.Schema
 open BCrypt.Net
 
-open FunWithFlags.FunDB.SystemLayout
+open FunWithFlags.FunDB.Layout.System
 
 type DatabaseContext (options : DbContextOptions<DatabaseContext>) =
     inherit DbContext (options)
@@ -18,16 +18,15 @@ type DatabaseContext (options : DbContextOptions<DatabaseContext>) =
     [<Entity>]
     [<UniqueConstraint("Name", [|"\"SchemaId\"", "\"Name\""|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> ''")>]
-    [<CheckConstraint("NotRecursive", "\"AncestorId\" <> \"Id\"")>]
     member val Entities = null : DbSet<Entity> with get, set
 
-    [<Entity(Abstract=True)>]
+    [<Entity>]
     [<UniqueConstraint("Name", [|"\"EntityId\"", "\"Name\""|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
-    member val Fields = null : DbSet<Field> with get, set
-    [<Entity(Ancestor=Some("Fields"))>]
     member val ColumnFields = null : DbSet<ColumnField> with get, set
-    [<Entity(Ancestor=Some("Fields"))>]
+    [<Entity>]
+    [<UniqueConstraint("Name", [|"\"EntityId\"", "\"Name\""|])>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
     member val ComputedFields = null : DbSet<ComputedField> with get, set
 
     [<Entity>]
@@ -92,33 +91,19 @@ and Entity () =
     [<ColumnField("reference(\"Schemas\")", Nullable=true)>]
     member val SchemaId = null : Nullable<int> with get, set
     member val Schema = null : Schema with get, set
-    [<ColumnField("bool", Default=Some("FALSE"))>]
-    member val Abstract = false with get, set
-    [<ColumnField("reference(\"Entities\", ref.\"SchemaId\" = this.\"SchemaId\")", Nullable=true)>]
-    member val AncestorId = null : Nullable<int> with get, set
-    member val Ancestor = null : Entity with get, set
     
-    member val Fields = null : List<Field> with get, set
+    member val ColumnFields = null : List<ColumnField> with get, set
+    member val ComputedFields = null : List<ComputedField> with get, set
     member val UniqueConstraints = null : List<UniqueConstraint> with get, set
     member val CheckConstraints = null : List<CheckConstraint> with get, set
 
-    member this.ColumnFields =
-        seqMapMaybe tryCast<ColumnField> this.Fields
-
-    member this.ComputedFields =
-        seqMapMaybe tryCast<ComputedField> this.Fields
-
-and Field () =
+and ColumnField () =
     member val Id = 0 with get, set
     [<ColumnField("string")>]
     member val Name = "" with get, set
     [<ColumnField("reference(\"Entities\")")>]
     member val EntityId = 0 with get, set
     member val Entity = null : Entity with get, set
-
-and ColumnField () =
-    inherit Field ()
-
     [<ColumnField("string")>]
     member val Type = "" with get, set
     [<ColumnField("string", Nullable=true)>]
@@ -127,8 +112,12 @@ and ColumnField () =
     member val Nullable = false with get, set
 
 and ComputedField () =
-    inherit Field ()
-
+    member val Id = 0 with get, set
+    [<ColumnField("string")>]
+    member val Name = "" with get, set
+    [<ColumnField("reference(\"Entities\")")>]
+    member val EntityId = 0 with get, set
+    member val Entity = null : Entity with get, set
     [<ColumnField("string")>]
     member val Expression = "" with get, set
 
@@ -169,8 +158,9 @@ and User () =
     member this.CheckPassword (password) =
         BCrypt.Verify(password, this.PasswordHash)
 
-    member this.Password with set (value) =
-        this.PasswordHash <- BCrypt.HashPassword(value)
+    member this.Password
+        with set (value) =
+            this.PasswordHash <- BCrypt.HashPassword(value)
 
 and Role () =
     member val Id = 0 with get, set

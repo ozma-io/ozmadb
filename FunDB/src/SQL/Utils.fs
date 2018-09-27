@@ -1,5 +1,6 @@
-module internal FunWithFlags.FunDB.SQL.Utils
+module FunWithFlags.FunDB.SQL.Utils
 
+open System
 open System.Globalization
 
 let escapeDoubleQuotes (str : string) = sprintf "\"%s\"" (str.Replace("\"", "\\\""))
@@ -20,4 +21,4 @@ let renderSqlDateTime (dt : DateTime) = dt.ToString("O", CultureInfo.InvariantCu
 let renderSqlDate (dt : DateTime) = dt.ToString("d", CultureInfo.InvariantCulture)
 
 type ISQLString =
-    abstract member ToSQLString : () -> string
+    abstract member ToSQLString : unit -> string

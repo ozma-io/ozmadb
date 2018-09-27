@@ -35,44 +35,14 @@ let private makeColumnFieldMeta (columnName : AST.ResolvedColumnRef) (field : Re
             | FTReference (entityRef, restriction) ->
                 // FIXME: support restrictions!
                 let tableRef = compileEntityRef entityRef
-                Some (AST.SQLName <| sprintf "%O__Foreign__%O" columnName.table.name columnName.name, AST.CMForeignKey [| (columnName.name, tableRef) |])
+                Some (AST.SQLName <| sprintf "%O__Foreign__%O" columnName.table.name columnName.name, AST.CMForeignKey tableRef [| (columnName.name, AST.SQLName "Id") |])
             | _ -> None
     (res, constr)
 
-let private makeEntityObjects (entityName : EntityName) (entity : ResolvedEntity) : Map<AST.ColumnName, AST.ColumnMeta> * Map<AST.ConstraintName, AST.ConstraintMeta> =
-    let tableName = AST.SQLName (entityName.ToString())
-
-    let makeColumn (name, field) =
-        let columnName = AST.SQLName (name.ToString())
-        (columnName, makeColumnFieldMeta { AST.table = tableName; AST.name = columnName } field)
-    let makeUniqueConstraint (name, constr) = (AST.SQLName <| sprintf "%O__Unique__%O" entityName name), makeUniqueConstraintMeta constr)
-    let makeCheckConstraint (name, constr) = (AST.SQLName <| sprintf "%O__Check__%O" entityName name), makeCheckConstraintMeta constr)
-
-    let columnObjects = entity.columnFields |> Map.toSeq |> Seq.map makeColumn |> Seq.cache
-    let columns = columnObjects |> Seq.map (fun (name, (column, constr)) -> (name, column)) |> Map.ofSeq
-    let columnConstraints = columnObjects |> seqMapMaybe (fun (name, (column, constr)) -> constr)
-    let uniqueConstraints = entity.uniqueConstraints |> Map.toSeq |> Seq.map makeUniqueConstraint
-    let checkConstraints = entity.checkConstraints |> Map.toSeq |> Seq.map makeCheckConstraint
-
-    let constraints = Seq.append columnConstraints (Seq.append uniqueConstraints checkConstraints) |> Map.ofSeq
-    (columns, constraints)
-
-let private makeChildEntityObjects (entityName : EntityName) (entity : ResolvedEntity) : Map<AST.ColumnName, AST.ColumnMeta> * Map<AST.ConstraintName, AST.ConstraintMeta> =
-    assert Option.isSome <| entity.ancestor
-    let (rawColumns, rawConstraints) = makeEntityObjects entityName entity
-    let columns = Map.map (fun name column -> { column with isNullable = true }) rawColumns
-
-    let filterConstraint = function
-        | AST.CMForeignKey _ -> true
-        | AST.CMUnique _ -> true
-        | AST.CMCheck _ -> false
-    (columns, Map.map (fun (name, constr) -> filterConstraint constr) constraints)
-    // FIXME: add CHECK constraints
-
-let private makeUnderlyingEntityMeta (entities : Map<EntityName, ResolvedEntity>) (schema : AST.SchemaName option) (rootEntityName : EntityName) (rootEntity : ResolvedEntity) : AST.SchemaMeta =
-    let idSeq = { AST.schema = schema; AST.name = AST.SQLName <| sprintf "%O__Seq__Id" rootEntityName }
+let private makeEntityMeta (tableName : AST.TableRef) (entity : ResolvedEntity) : AST.ObjectMeta seq =
+    let idSeq = { AST.schema = tableName.schema; AST.name = AST.SQLName <| sprintf "%O__Seq__Id" tableName.name }
     let idConstraints =
-        let name = AST.SQLName <| sprintf "%O__Primary__Id" rootEntityName
+        let name = AST.SQLName <| sprintf "%O__Primary__Id" tableName.name
         let constr = AST.CMPrimaryKey [| AST.SQLName "Id" |]
         seqSingleton (name, constr)
         
@@ -80,40 +50,36 @@ let private makeUnderlyingEntityMeta (entities : Map<EntityName, ResolvedEntity>
         let col =
             { AST.colType = AST.VTInt
               AST.nullable = false
-              AST.defaultValue = Some (AST.VEFunc ("nextval", [| AST.VEValue (AST.VObject idSeq) |]))
+              AST.defaultValue = Some <| AST.VEFunc ("nextval", [| AST.VEValue (AST.VObject idSeq) |])
             }
         Seq.singleton (AST.SQLName (funId.ToString()), col)
-    // CHECK that discriminator has only allowed values.
-    let subEntityColumns =
-        if Set.isEmpty rootEntity.descendants
-        then Seq.empty
-        else
-            let col =
-                { AST.colType = AST.VTString
-                  AST.nullable = false
-                  AST.defaultValue = None
-                }
-            Seq.singleton (AST.SQLName (funSubEntity.ToString()), col)
 
-    let rootObjects = makeEntityObjects rootEntityName rootEntity
-    let childObjects = entity.descendantsClosure |> Set.toSeq |> Seq.map (fun name -> makeChildEntityObjects name (Map.find entities name))
-    let columnObjects = entitiesClosure 
-        (entity.descendants |> entity.columnFields |> Map.toSeq |> Seq.map makeColumn |> Seq.cache
-    let userColumns = columnObjects |> Seq.map (fun (name, (column, constrs)) -> (name, column))
+    let makeColumn (name, field) =
+        let columnName = AST.SQLName (name.ToString())
+        (columnName, makeColumnFieldMeta { AST.table = tableName; AST.name = columnName } field)
+    let makeUniqueConstraint (name, constr) = (AST.SQLName <| sprintf "%O__Unique__%O" tableName.name name, makeUniqueConstraintMeta constr)
+    let makeCheckConstraint (name, constr) = (AST.SQLName <| sprintf "%O__Check__%O" tableName.name name, makeCheckConstraintMeta constr)
 
-    let res = { AST.columns = Seq.append (Seq.append idColumns subEntityColumns) userColumns |> Map.ofSeq }
-    let constraints = Seq.append (Seq.append (Seq.append idConstraints uniqueConstraints) checkConstraints) foreignConstraints
-    (res, constraints)
+    let columnObjects = entity.columnFields |> Map.toSeq |> Seq.map makeColumn |> Seq.cache
+    let userColumns = columnObjects |> Seq.map (fun (name, (column, maybeConstr)) -> (name, column))
+    let columnConstraints = columnObjects |> seqMapMaybe (fun (name, (column, maybeConstr)) -> maybeConstr)
+    let uniqueConstraints = entity.uniqueConstraints |> Map.toSeq |> Seq.map makeUniqueConstraint
+    let checkConstraints = entity.checkConstraints |> Map.toSeq |> Seq.map makeCheckConstraint
 
-let private makeEntitiesMeta (schema : AST.SchemaName option) (entities : Map<EntityName, ResolvedEntity>) : AST.SchemaMeta =
-    entities
-    |> Map.toSeq
-    |> Seq.filter (fun (name, entity) -> Option.isNone entity.ancestor)
-    |> Seq.map (fun (name, entity) -> makeUnderlyingEntityMeta entities schema name entity)
-    |> Seq.fold schemaUnion emptySchema
+    let res = { AST.columns = Seq.append idColumns userColumns |> Map.ofSeq }
+    let constraints = Seq.append (Seq.append (Seq.append idConstraints uniqueConstraints) checkConstraints) columnConstraints
+    let objects = [ (tableName, OMTable res); (idSeq, OMSequence) ]
+    Seq.append objects (Seq.map (fun (name, constr) -> (name, OMConstraint (tableName, constr))) constraints)
 
-let private makeSchemaMeta (name : AST.SchemaName) (schema : ResolvedSchema) : AST.SchemaMeta =
-    makeEntitiesMeta (Some name) schema.entities
+let private makeEntitiesMeta (schemaName : AST.SchemaName option) (entities : Map<EntityName, ResolvedEntity>) : AST.SchemaMeta =
+    let makeEntity (name, entity) =
+        let tableName = { schema = schemaName; name = SQLName <| name.ToString() }
+        makeEntityMeta tableName entity
+    let objects = entities |> Map.toSeq |> Seq.map makeEntity |> Seq.concat |> Map.ofSeq
+    { objects = objects }
+
+let private makeSchemaMeta (schemaName : AST.SchemaName) (schema : ResolvedSchema) : AST.SchemaMeta =
+    makeEntitiesMeta (Some schemaName) schema.entities
 
 let buildFunMeta (layout : Layout) : AST.DatabaseMeta =
     let makeSchema (name, schema) =

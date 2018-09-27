@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Utils
 
 open System
+open System.Collections.Generic
 open System.Globalization
 open System.Text.RegularExpressions
 
@@ -8,19 +9,28 @@ type Void = private Void of unit
 
 let mapGetWithDefault (k : 'k) (def : 'v) (m : Map<'k, 'v>) : 'v =
     match Map.tryFind k m with
-        | Some(v) -> v
+        | Some v -> v
         | None -> def
 
 let setToMap (f : 'k -> 'v) (s : Set<'k>) : Map<'k, 'v> =
     s |> Set.toSeq |> Seq.map (fun k -> (k, f k)) |> Map.ofSeq
 
-let setSingleItem (s : Set<'k>) : 'v = s |> Set.toSeq |> Seq.exactlyOne
+let setSingleItem (s : Set<'k>) : 'k = s |> Set.toSeq |> Seq.exactlyOne
 
 let seqMapMaybe (f : 'a -> 'b option) (s : 'a seq) : 'b seq =
     seq { for i in s do
               match f i with
-                  | Some(r) -> yield r
+                  | Some r -> yield r
                   | None -> ()
+        }
+
+let seqMapiMaybe (f : int -> 'a -> 'b option) (s : 'a seq) : 'b seq =
+    seq { let mutable n = 0
+          for i in s do
+              match f n i with
+                  | Some r -> yield r
+                  | None -> ()
+              n <- n + 1
         }
 
 let seqFirst (s : 'a seq) : 'a option = Seq.tryFind (fun x -> true) s
@@ -46,12 +56,12 @@ let mapDifference (a : Map<'k, 'v1>) (b : Map<'k, 'v2>) =
 let mapSingleton (k : 'k) (v : 'v) : Map<'k, 'v> =
     Map.ofSeq (seq { yield (k, v) })
 
-let mapKeys (a : Map<'k, 'v>) : Set<'k> =
-    Map.toSeq >> Seq.map fst >> Set.ofSeq
+let mapKeys (map : Map<'k, 'v>) : Set<'k> =
+    map |> Map.toSeq |> Seq.map fst |> Set.ofSeq
 
 let tryInt (culture : CultureInfo) (str : string) : int option =
     match Int32.TryParse(str, NumberStyles.Integer, culture) with
-        | (true, res) -> Some(res)
+        | (true, res) -> Some res
         | _ -> None
 
 let tryIntInvariant : string -> int option = tryInt CultureInfo.InvariantCulture
@@ -59,31 +69,32 @@ let tryIntCurrent : string -> int option = tryInt CultureInfo.CurrentCulture
 
 let tryDateTime (culture : CultureInfo) (dateStr : string) : DateTime option =
     match DateTime.TryParse(dateStr, culture, DateTimeStyles.AssumeLocal ||| DateTimeStyles.AdjustToUniversal) with
-        | (true, date) -> Some(date)
+        | (true, date) -> Some date
         | _ -> None
 
 let tryDateTimeInvariant : string -> DateTime option = tryDateTime CultureInfo.InvariantCulture
 let tryDateTimeCurrent : string -> DateTime option = tryDateTime CultureInfo.CurrentCulture
 
-let (|Regex|_|) (regex : string) (str : string) : string list =
+let (|Regex|_|) (regex : string) (str : string) : (string list) option =
    let m = System.Text.RegularExpressions.Regex.Match(str, regex)
    if m.Success
-   then Some(List.tail [ for x in m.Groups -> x.Value ])
+   then Some <| List.tail [ for x in m.Groups -> x.Value ]
    else None
 
-let dictUnique (items : ('k * 'v) seq) : IDictionary<'k, 'v> = items |> mapOfSeqUnique |> dict
+let dictUnique (items : ('k * 'v) seq) : IDictionary<'k, 'v> = items |> mapOfSeqUnique |> Map.toSeq |> dict
 
-let tryCast<'b> : 'a -> 'b option = function
-    | :? 'T as res -> Some(res)
-    | _ -> None
+let tryCast<'b> (value : obj) : 'b option =
+    match value with
+        | :? 'b as res -> Some res
+        | _ -> None
 
 let concatWithWhitespaces (strs : string seq) : string =
     let filterEmpty = function
-        | "" = None
-        | str -> Some(str)
+        | "" -> None
+        | str -> Some str
     strs |> seqMapMaybe filterEmpty |> String.concat " "
 
-let tryBool : (str : string) : bool option =
+let tryBool (str : string) : bool option =
     match str.ToLower() with
         | "true" -> Some true
         | "t" -> Some true
@@ -92,5 +103,5 @@ let tryBool : (str : string) : bool option =
         | "false" -> Some false
         | "f" -> Some false
         | "no" -> Some false
-        | "n" _> Some false
+        | "n" -> Some false
         | _ -> None

@@ -5,14 +5,13 @@ open FunWithFlags.FunDB.SQL.AST
 
 type MigrationPlan = SchemaOperation seq
 
-let deleteBuildTable (table : Table) (tableMeta : TableMeta) : MigrationPlan =
+let private deleteBuildTable (table : TableRef) (tableMeta : TableMeta) : MigrationPlan =
     seq { for KeyValue (columnName, columnMeta) in tableMeta.columns do
-              let obj = columnFromLocal table columnName
-              yield SODeleteColumn obj
+              yield SODeleteColumn { table = table; name = columnName }
           yield SODeleteTable table
         }
 
-let deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta) : MigrationPlan =
+let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta) : MigrationPlan =
     seq { for KeyValue (objectName, obj) in schemaMeta.objects do
               let objRef = { schema = Some schemaName; name = objectName }
               match obj with
@@ -25,24 +24,23 @@ let deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta) : Migr
           yield SODeleteSchema schemaName
         }
 
-let migrateBuildTable (table : Table) (fromMeta : TableMeta) (toMeta : TableMeta) : MigrationPlan =
+let private migrateBuildTable (table : TableRef) (fromMeta : TableMeta) (toMeta : TableMeta) : MigrationPlan =
     seq { for KeyValue (columnName, columnMeta) in toMeta.columns do
-              let obj = columnFromLocal table columnName
+              let objRef = { table = table; name = columnName }
               match Map.tryFind columnName fromMeta.columns with
-                  | None -> yield SOCreateColumn (obj, columnMeta)
+                  | None -> yield SOCreateColumn (objRef, columnMeta)
                   | Some oldColumnMeta ->
                       if oldColumnMeta <> columnMeta then
                           // XXX: Support altering columns instead of recreating them.
-                          yield SODeleteColumn obj
-                          yield SOCreateColumn (obj, columnMeta)
+                          yield SODeleteColumn objRef
+                          yield SOCreateColumn (objRef, columnMeta)
 
           for KeyValue (columnName, columnMeta) in fromMeta.columns do
               if not (Map.containsKey columnName toMeta.columns) then
-                  let obj = columnFromLocal table columnName
-                  yield SODeleteColumn obj
+                  yield SODeleteColumn { table = table; name = columnName }
         }
 
-let migrateBuildSchema (schema : SchemaName option) (fromMeta : SchemaMeta) (toMeta : SchemaMeta) : MigrationPlan =
+let private migrateBuildSchema (schema : SchemaName option) (fromMeta : SchemaMeta) (toMeta : SchemaMeta) : MigrationPlan =
     seq { for KeyValue (objectName, obj) in toMeta.objects do
               let objRef = { schema = schema; name = objectName }
               match obj with
@@ -55,52 +53,53 @@ let migrateBuildSchema (schema : SchemaName option) (fromMeta : SchemaMeta) (toM
                   | OMSequence ->
                       match Map.tryFind objectName fromMeta.objects with
                           | Some OMSequence -> ()
-                          | _ ->
-                              yield SOCreateSequence objRef
-                  | OMConstraint ((tableName, constraintType) as constraintMeta) ->
+                          | _ -> yield SOCreateSequence objRef
+                  | OMConstraint (tableName, constraintType) ->
                       match Map.tryFind objectName fromMeta.objects with
-                          | Some (OMConstraint oldConstraintMeta) ->
-                              if oldConstraintMeta <> constraintMeta then
-                                  yield SODeleteConstraint (objRef, tableName)
+                          | Some (OMConstraint (oldTableName, oldConstraintType)) ->
+                              if tableName <> oldTableName || constraintType <> oldConstraintType then
+                                  yield SODeleteConstraint (objRef, oldTableName)
                                   yield SOCreateConstraint (objRef, tableName, constraintType)
-                          | _ ->
-                              yield SOCreateConstraint (objRef, tableName, constraintType)
+                          | _ -> yield SOCreateConstraint (objRef, tableName, constraintType)
 
-          for KeyValue (objectName, tableMeta) in fromMeta.objects do
+          for KeyValue (objectName, obj) in fromMeta.objects do
               let objRef = { schema = schema; name = objectName }
               match obj with
                   | OMTable tableMeta ->
                       match Map.tryFind objectName toMeta.objects with
                           | Some (OMTable _) -> ()
-                          | _ ->
-                              yield! deleteBuildTable objRef tableMeta
+                          | _ -> yield! deleteBuildTable objRef tableMeta
                   | OMSequence ->
                       match Map.tryFind objectName toMeta.objects with
                           | Some OMSequence -> ()
-                          | _ ->
-                              yield SODeleteSequence objRef
+                          | _ -> yield SODeleteSequence objRef
                   | OMConstraint (tableName, _) ->
                       match Map.tryFind objectName toMeta.objects with
                           | Some (OMConstraint _) -> ()
-                          | _ ->
-                              yield SODeleteConstraint (objRef, tableName)
+                          | _ -> yield SODeleteConstraint (objRef, tableName)
         }
 
-let migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =
+let private resolveSchema : SchemaName option -> SchemaName = function
+    | None -> publicSchema
+    | Some schema -> schema
+
+let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =
     seq { for KeyValue (schemaName, schemaMeta) in toMeta.schemas do
+              let resolvedName = resolveSchema schemaName
               match Map.tryFind schemaName fromMeta.schemas with
                   | None ->
-                      yield SOCreateSchema schemaName
+                      yield SOCreateSchema resolvedName
                       yield! migrateBuildSchema schemaName emptySchemaMeta schemaMeta
                   | Some oldSchemaMeta -> yield! migrateBuildSchema schemaName oldSchemaMeta schemaMeta
 
           for KeyValue (schemaName, schemaMeta) in fromMeta.schemas do
+              let resolvedName = resolveSchema schemaName
               if not (Map.containsKey schemaName toMeta.schemas) then
-                  yield! deleteBuildSchema schemaName schemaMeta
+                  yield! deleteBuildSchema resolvedName schemaMeta
         }
 
 // Order for database operations so that dependencies are not violated.
-let schemaOperationOrder = function
+let private schemaOperationOrder = function
     | SODeleteConstraint (_, _) -> 0
     | SODeleteColumn _ -> 1
     | SODeleteTable _ -> 2
@@ -113,6 +112,7 @@ let schemaOperationOrder = function
     | SOCreateConstraint (_, _, CMPrimaryKey _) -> 9
     | SOCreateConstraint (_, _, CMUnique _) -> 10
     | SOCreateConstraint (_, _, CMForeignKey (_, _)) -> 11
+    | SOCreateConstraint (_, _, CMCheck _) -> 12
 
 let migrateDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =
     migrateBuildDatabase fromMeta toMeta |> Seq.sortBy schemaOperationOrder

@@ -12,7 +12,6 @@
 
   <ItemGroup>
     <Compile Include="src/Utils.fs" />
-    <Compile Include="src/Attribute.fs" />
     <Compile Include="src/Parsing.fs" />
 
     <Compile Include="src/SQL/Utils.fs" />
@@ -25,33 +24,36 @@
     <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayParser.fs" />
     <FsLex Include="src/SQL/ArrayLexer.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayLexer.fs" />
-    <Compile Include="src/SQL/Qualifier.fs" />
-    <Compile Include="src/SQL/Render.fs" />
     <Compile Include="src/SQL/Query.fs" />
     <Compile Include="src/SQL/Migration.fs" />
     <Compile Include="src/SQL/Meta.fs" />
-    <Compile Include="src/SQL/Evaluate.fs" />
 
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />
+
+    <Compile Include="src/Layout/Source.fs" />
+    <Compile Include="src/Layout/Types.fs" />
+    <Compile Include="src/Layout/Resolve.fs" />
+
+    <Compile Include="src/Layout/System.fs" />
+    <Compile Include="src/Schema.fs" />
+    <Compile Include="src/Layout/Schema.fs" />
+
     <FsYacc Include="src/FunQL/FunQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parser --internal" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParser.fs" />
     <FsLex Include="src/FunQL/FunQLLexer.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLexer.fs" />
-    <Compile Include="src/FunQL/Qualifier.fs" />
+    <Compile Include="src/FunQL/View.fs" />
     <Compile Include="src/FunQL/Compiler.fs" />
-    <Compile Include="src/FunQL/PrettyPrinter.fs" />
     <Compile Include="src/FunQL/Meta.fs" />
+    <Compile Include="src/FunQL/Query.fs" />
 
-    <Compile Include="src/View.fs" />
-
-    <Compile Include="src/Context.fs" />
+    <Compile Include="src/Program.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="FsLexYacc" Version="7.0.*" />
-    <PackageReference Include="YC.PrettyPrinter" Version="0.0.5" />
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.1.*" />
     <PackageReference Include="BCrypt.Net-Next" Version="3.1.*" />

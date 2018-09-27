@@ -4,4 +4,4 @@ open FunWithFlags.FunCore
 open FunWithFlags.FunDB.SQL.Utils
 
 type IFunQLString =
-    abstract member ToFunQLString : () -> string
+    abstract member ToFunQLString : unit -> string

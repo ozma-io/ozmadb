@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.SystemLayout
+module FunWithFlags.FunDB.Layout.System
 
 open System
 open System.Reflection

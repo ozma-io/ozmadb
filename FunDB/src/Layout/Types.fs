@@ -47,27 +47,18 @@ type ResolvedField =
     | RComputedField of ResolvedComputedField
 
 type ResolvedEntity =
-    { isAbstract : bool
-      // Ancestors sequence, starting with the immediate ancestor
-      ancestors : EntityName array
-      // Immediate descendants
-      descendants : Set<EntityName>
-      // Descendants closure
-      descendantsClosure : Set<EntityName>
-      // All non-abstract descendants, including the entity itself
-      possibleSubEntities : Set<EntityName>
-      columnFields : Map<FieldName, ResolvedColumnField>
+    { columnFields : Map<FieldName, ResolvedColumnField>
       computedFields : Map<FieldName, ResolvedComputedField>
       uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
       checkConstraints : Map<ConstraintName, ResolvedCheckConstraint>
     } with
         member this.FindField (name : FieldName) =
             match Map.tryFind name columnFields with
-                Some col -> Some (RColumnField col)
-                None ->
+                | Some col -> Some <| RColumnField col
+                | None ->
                     match Map.tryFind name computedFields with
-                        Some comp -> Some <| RComputedField comp
-                        None -> None
+                        | Some comp -> Some <| RComputedField comp
+                        | None -> None
 
 type ResolvedSchema =
     { entities : Map<EntityName, ResolvedEntity>

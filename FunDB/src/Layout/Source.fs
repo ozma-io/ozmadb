@@ -36,11 +36,11 @@ type SourceEntity =
     } with
         member this.FindField (name : FieldName) =
             match Map.tryFind name this.columnFields with
-                Some col -> Some (SColumnField col)
-                None ->
+                | Some col -> Some <| SColumnField col
+                | None ->
                     match Map.tryFind name this.computedFields with
-                        Some comp -> Some <| SComputedField comp
-                        None -> None
+                        | Some comp -> Some <| SComputedField comp
+                        | None -> None
 
 type SourceSchema =
     { entities : Map<EntityName, ResolvedEntity>

@@ -10,12 +10,12 @@ open FunWithFlags.FunDB.Layout.Source
 exception ResolveLayoutError of info : string with
     override this.Message = this.info
 
-let private checkName : FunQLName -> () = function
+let private checkName : FunQLName -> unit = function
     | FunQLName name when name.Contains("__") -> raise <| ResolveLayoutError <| sprintf "Name contains double underscore: %s" name
     | FunQLName "" -> raise <| ResolveLayoutError <| sprintf "Name is empty"
     | _ -> ()
 
-let private checkFieldName (name : FunQLName) : () =
+let private checkFieldName (name : FunQLName) : unit =
     if name = funId or name = funSubEntity
     then raise <| ResolveLayoutError <| sprintf "Name is forbidden: %O" name
     else checkName name
@@ -58,6 +58,9 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
     mapFieldExpr resolveColumn voidPlaceholder
 
 let private resolveUniqueConstraint (entity : SourceEntity) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
+    if Array.isEmpty constr.columns then
+        raise <| ResolveLayoutError "Empty unique constraint"
+    
     let checkColumn name =
         match entity.FindField(name) with
             | Some _ -> name
@@ -72,17 +75,6 @@ let private resolveCheckConstraint (entity : SourceEntity) (constr : SourceCheck
             | Error msg -> raise <| ResolveLayoutError <| sprintf "Error parsing check constraint expression: %s" msg
     { expression = resolveLocalExpr entity checkExpr }
 
-let private resolveFieldType (layout : SourceLayout) (entity : SourceEntity) : ParsedFieldType -> ResolvedFieldType = function
-    | FTType ft -> FTType ft
-    | FTReference (entityName, where) ->
-        let refEntity =
-            match layout.FindField(entityName) with
-                | None -> raise <| ResolveLayoutError <| sprintf "Cannot find entity %O from reference type" entityName
-                | Some refEntity -> refEntity
-        let resolvedWhere = Option.map (resolveReferenceExpr entity refEntity) where
-        FTReference (entityName, resolvedWhere)
-    | FTEnum vals -> FTEnum vals
-
 let private resolveComputedField (entity : SourceEntity) (comp : SourceComputedField) : ResolvedComputedField =
     let computedExpr =
         match parse tokenizeFunQL fieldExpr comp.expression with
@@ -92,18 +84,18 @@ let private resolveComputedField (entity : SourceEntity) (comp : SourceComputedF
     { expression = resolveLocalExpr entity computedExpr
     }
 
-let private checkUniqueDescendantFields (entitiesMap : Map<EntityName, ResolvedEntity>) (entityName : EntityName) : () =
-    let Same entity = Map.find entityName entitiesMap
-    let descendants = entity.descendantsClosure |> Set.toSeq |> Seq.map (fun name -> Map.find name entitiesMap)
-    Seq.append (Seq.singleton entity) descendants |> Seq.map (fun entity -> Set.union (mapKeys entity.columnFields) (mapKeys entity.computedFields)) |> Seq.fold setUnionUnique Set.empty
-
-type private EntityContext =
-    { ancestors : EntityName array
-      descendants : Set<EntityName>
-      descendantsClosure : Set<EntityName>
-    }
-
 type private LayoutResolver (layout : Layout) =
+    let resolveFieldType (entity : SourceEntity) : ParsedFieldType -> ResolvedFieldType = function
+        | FTType ft -> FTType ft
+        | FTReference (entityName, where) ->
+            let refEntity =
+                match layout.FindField(entityName) with
+                    | None -> raise <| ResolveLayoutError <| sprintf "Cannot find entity %O from reference type" entityName
+                    | Some refEntity -> refEntity
+            let resolvedWhere = Option.map (resolveReferenceExpr entity refEntity) where
+            FTReference (entityName, resolvedWhere)
+        | FTEnum vals -> FTEnum vals
+
     let resolveColumnField (col : SourceColumnField) : ResolvedComputedField =
         let fieldType =
             match parse tokenizeFunQL fieldType col.fieldType with
@@ -117,76 +109,30 @@ type private LayoutResolver (layout : Layout) =
                         | Ok r -> Some r
                         | Error msg -> raise <| ResolveLayoutError <| sprintf "Error parsing column field default expression: %s" msg
 
-        { fieldType = resolveFieldType layout fieldType
+        { fieldType = resolveFieldType fieldType
           defaultExpr = Option.map ensurePureFieldExpr defaultExpr
           isNullable = comp.Nullable
         }
 
-    let resolveEntity (entitiesMap : Map<EntityName, SourceEntity>) (context : EntityContext) (entity : SourceEntity) : ResolvedEntity =
+    let resolveEntity (entity : SourceEntity) : ResolvedEntity =
         let columnFields = Map.map (fun name field -> checkFieldName name; resolveColumnField schemasMap field) entity.columnFields
         let computedFields = Map.map (fun name field -> checkFieldName name; resolveComputedField schemasMap field) entity.computedFields
         let uniqueConstraints = Map.map (fun name constr -> checkName name; resolveUniqueConstraint fieldsMap constr) entity.uniqueConstraints
         let checkConstraints = Map.map (fun name constr -> checkName name; resolveCheckConstraint fieldsMap constr) entity.checkConstraints
 
-        // Check uniqueness of field names
-        ignore <| setOfSeqUnique <| Seq.append (Map.toSeq columnFields |> Seq.map fst) (Map.toSeq computedFields |> Seq.map fst)
+        try
+            ignore <| setOfSeqUnique <| Seq.append (Map.toSeq columnFields |> Seq.map fst) (Map.toSeq computedFields |> Seq.map fst)
+        with
+            | Failure msg -> raise <| ResolveLayoutError <| sprintf "Clashing field names: %s" msg
 
-        { isAbstract = entity.isAbstract
-          ancestors = context.ancestors
-          descendants = context.descendants
-          descendantsClosure = context.descendantsClosure
-          possibleSubEntities = Set.add entityName context.descendantsClosure |> Set.filter (fun currName -> not (Map.find currName entitiesMap).isAbstract)
-          columnFields = columnFields
+        { columnFields = columnFields
           computedFields = computedFields
           uniqueConstraints = uniqueConstraints
           checkConstraints = checkConstraints
         }
 
     let resolveEntities (entitiesMap : Map<EntityName, SourceEntity>) : Map<EntityName, ResolvedEntity> =
-        // Build immediate descendants
-        let addImmediateDescendant descs (name, entity) =
-            match entity.ancestor with
-                | Some ancestorName ->
-                    if not <| Map.contains ancestorName entitiesMap then
-                        raise <| ResolveLayoutError <| sprintf "Ancestor not found: %O" ancestorName
-                    let newNames =
-                        match Map.tryFind ancestorName descs with
-                            | Some names -> Set.insert name names
-                            | None -> Set.singleton name
-                    Map.add ancestorName newNames descs
-                | None -> descs
-
-        let descendants = entitiesMap |> Map.toSeq |> Seq.fold addImmediateDescendant Map.empty
-
-        // Build descendants closure
-        let reachDescendants stack newDescs name =
-            let (descendants, descendantsClosure, newDescs_) =
-                match Map.tryFind name descendants with
-                    | None -> (Set.empty, Set.empty, newDescs)
-                    | Some descs ->
-                        let newStack = name :: stack
-                        let newDescs_ = reachDescendantsFor newStack newDescs (Set.toSeq descs)
-                        let addDescendants currSet descName = Set.union currSet (Map.find descName newDescs_).descendantsClosure
-                        let closure = Set.toSeq descs |> Seq.fold addDesccendants descs
-                        (descs, closure, newDescs_)
-            let res =
-                { descendants = descendants
-                  descendantsClosure = descendantsClosure
-                  ancestors = stack |> List.toArray |> Array.reverse
-                }
-            Map.insert name res newDescs_
-        and reachDescendantsFor stack newDescs descs =
-            Seq.fold (reachDescendants stack) newDescs descs
-       
-        let rootEntities = entitiesMap |> Map.toSeq |> Seq.filter (fun (name, entity) -> Option.none entity.ancestor) |> Seq.map fst |> Seq.cache
-        let contexts = reachDescendantsFor [] Map.empty rootEntities
-
-        let unreachable = Set.difference (mapKeys entitiesMap) (mapKeys contexts)
-        if not <| Set.isEmpty unreachable then
-            raise <| ResolveLayoutError <| sprintf "Unreachable entities found: %O" unreachable
-
-        let res = entitiesMap |> Map.map (fun entityName entity -> checkName entityName; resolveEntity entitiesMap (Map.find entityName contexts) entity)
-        Seq.foreach (checkUniqueDescendantFields res) rootEntities
+        entitiesMap |> Map.map (fun entityName entity -> checkName entityName; resolveEntity entity)
 
     let resolveSchema (schema : SourceSchema) : ResolvedSchema =
         { entities = resolveEntities entitiesMap }

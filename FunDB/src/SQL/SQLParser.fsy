@@ -43,16 +43,20 @@ type ParsedValueExpr = ValueExpr<ColumnRef>
 
 %left OR
 %left AND
-%nonassoc EQ NOT_EQ
-%nonassoc LESS GREATER LESS_EQ GREATER_EQ
+%right NOT
+%right EQ NOT_EQ
+%nonassoc LESS GREATER
 %nonassoc LIKE
 %nonassoc IN
+%left LESS_EQ GREATER_EQ
 %nonassoc IS
 %left DOUBLE_COLON
 %left DOT
 
 %start valueExpr
 %type <ParsedValueExpr> valueExpr
+%start valueType
+%type <DBValueType> valueType
 %start schemaObject
 %type <SchemaObject> schemaObject
 
@@ -60,6 +64,7 @@ type ParsedValueExpr = ValueExpr<ColumnRef>
 
 // Entry points
 valueExpr : ValueExpr EOF { $1 }
+valueType : ValueType EOF { $1 }
 schemaObject : SchemaObject EOF { $1 }
 
 // Expressions
@@ -69,8 +74,8 @@ ValueExpr:
   | ValueExpr OR ValueExpr                        { VEOr ($1, $3) }
   | ValueExpr EQ ValueExpr                        { VEEq ($1, $3) }
   | ValueExpr NOT_EQ ValueExpr                    { VENotEq ($1, $3) }
-  | ValueExpr LIKE STRING                         { VELike ($1, $3) }
-  | ValueExpr NOT LIKE STRING                     { VENotLike ($1, $4) }
+  | ValueExpr LIKE ValueExpr                      { VELike ($1, $3) }
+  | ValueExpr NOT LIKE ValueExpr                  { VENotLike ($1, $4) }
   | ValueExpr IN InExpr                           { VEIn ($1, $3) }
   | ValueExpr NOT IN InExpr                       { VENotIn ($1, $4) }
   | ValueExpr IS NULL                             { VEIsNull $1 }
@@ -85,26 +90,36 @@ ValueExpr:
   | Value                                         { VEValue $1 }
   | LEFT_PAREN ValueExpr RIGHT_PAREN              { $2 }
 
+InList:
+  | ValueExpr              { [ $1 ] }
+  | ValueExpr COMMA InList { $1 :: $3 }
+
+InExpr:
+  | LEFT_PAREN InList RIGHT_PAREN { List.toArray $2 }
+
 FunctionArguments:
   |                           { [||] }
   | FunctionArgumentsNonEmpty { List.toArray $1 }
 
-FunctionArgumentsNonEmpty
+FunctionArgumentsNonEmpty:
   | ValueExpr                                 { [ $1 ] }
   | ValueExpr COMMA FunctionArgumentsNonEmpty { $1 :: $3 }
 
 ColumnRef:
-  | Name DOT Name DOT Name { { table = Some { schema = Some (SQLName $1); name = SQLName $3 }; name = SQLName $5 } }
-  | Name DOT Name          { { table = Some { schema = None; name = SQLName $1 }; name = SQLName $3 } }
-  | Name                   { { table = None; name = SQLName $1 } }
+  | Name DOT Name DOT Name { { maybeTable = Some { schema = Some $1; name = $3 }; name = $5 } }
+  | Name DOT Name          { { maybeTable = Some { schema = None; name = $1 }; name = $3 } }
+  | Name                   { { maybeTable = None; name = $1 } }
 
-Name:
+NameString:
   | ID        { $1 }
   | QUOTED_ID { $1 }
   | AND       { "and" }
   | OR        { "or" }
   | LIKE      { "like" }
   | IN        { "in" }
+
+Name:
+  | NameString { SQLName $1 }
 
 ArrayDim:
   | LEFT_BRACKET RIGHT_BRACKET     { () }
@@ -124,15 +139,14 @@ ScalarType:
 
 ScalarTypeParts:
   | ID ScalarTypeParts { $1 :: $2 }
-  | ID                 { $1 }
+  | ID                 { [ $1 ] }
 
 Value:
   | INT    { VInt $1 }
-  | FLOAT  { VFloat $1 }
   | STRING { VString $1 }
   | BOOL   { VBool $1 }
   | NULL   { VNull }
 
 SchemaObject:
-  | Name DOT Name { { schema = Some (SQLName $1); name = SQLName $3 } }
-  | Name          { { schema = None; name = SQLName $1 } }
+  | Name DOT Name { { schema = Some $1; name = $3 } }
+  | Name          { { schema = None; name = $1 } }

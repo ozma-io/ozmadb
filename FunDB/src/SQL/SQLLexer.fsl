@@ -1,6 +1,6 @@
 {
 
-module FunWithFlags.FunDB.SQL.Lexer
+module internal FunWithFlags.FunDB.SQL.Lexer
 
 open System
 open Microsoft.FSharp.Text.Lexing
@@ -44,42 +44,40 @@ let y = ['Y' 'y']
 let z = ['Z' 'z']
 
 rule tokenizeSQL = parse
-
-// Atoms
-| ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT(lexbuf.Lexeme |> String |> int) }
-// FIXME: Add floats
-| "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.QUOTED_ID(escapedString '\"' lexbuf) }
-| "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING(escapedString '\'' lexbuf) }
-| "::" { Parser.DOUBLE_COLON }
-| "(" { Parser.LEFT_PAREN }
-| ")" { Parser.RIGHT_PAREN }
-| "[" { Parser.LEFT_BRACKET }
-| "]" { Parser.RIGHT_BRACKET }
-| "," { Parser.COMMA }
-| "." { Parser.DOT }
-| "=" { Parser.EQ }
-| "<>" { Parser.NOT_EQ }
-| "!=" { Parser.NOT_EQ }
-| ">=" { Parser.GREATER_EQ }
-| ">"  { Parser.GREATER }
-| "<=" { Parser.LESS_EQ }
-| "<"  { Parser.LESS }
-
-// Keywords
-| t r u e   { Parser.BOOL(true) }
-| f a l s e { Parser.BOOL(false) }
-| n u l l   { Parser.NULL }
-| a n d     { Parser.AND }
-| i s       { Parser.IS }
-| n o t     { Parser.NOT }
-
-// Unescaped ids
-| ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID((String lexbuf.Lexeme).ToLower()) }
-
-// Whitespace
-| whitespace { tokenizeSQL lexbuf }
-| newline    { newline lexbuf; tokenizeSQL lexbuf }
-
-// Misc
-| _    	  { failwith ("Parse error: " + LexBuffer<_>.LexemeString lexbuf) }
-| eof     { Parser.EOF }
+    // Atoms
+    | ['+' '-']? ['0'-'9'] ['0'-'9']* { Parser.INT (lexbuf.Lexeme |> String |> int) }
+    | "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.QUOTED_ID (escapedString '\"' lexbuf) }
+    | "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING (escapedString '\'' lexbuf) }
+    | "::" { Parser.DOUBLE_COLON }
+    | "(" { Parser.LEFT_PAREN }
+    | ")" { Parser.RIGHT_PAREN }
+    | "[" { Parser.LEFT_BRACKET }
+    | "]" { Parser.RIGHT_BRACKET }
+    | "," { Parser.COMMA }
+    | "." { Parser.DOT }
+    | "=" { Parser.EQ }
+    | "<>" { Parser.NOT_EQ }
+    | "!=" { Parser.NOT_EQ }
+    | ">=" { Parser.GREATER_EQ }
+    | ">"  { Parser.GREATER }
+    | "<=" { Parser.LESS_EQ }
+    | "<"  { Parser.LESS }
+    
+    // Keywords
+    | t r u e   { Parser.BOOL true }
+    | f a l s e { Parser.BOOL false }
+    | n u l l   { Parser.NULL }
+    | a n d     { Parser.AND }
+    | i s       { Parser.IS }
+    | n o t     { Parser.NOT }
+    
+    // Unescaped ids
+    | ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID ((String lexbuf.Lexeme).ToLower()) }
+    
+    // Whitespace
+    | whitespace { tokenizeSQL lexbuf }
+    | newline    { newline lexbuf; tokenizeSQL lexbuf }
+    
+    // Misc
+    | _    	  { failwith <| sprintf "Parse error: %s" (LexBuffer<_>.LexemeString lexbuf) }
+    | eof     { Parser.EOF }
