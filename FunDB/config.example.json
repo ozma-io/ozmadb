@@ -1,5 +1,0 @@
-{
-  "connectionString": "Host=localhost",
-  "serverCert": "example.pfx",
-  "expirationTime": 86400
-}
