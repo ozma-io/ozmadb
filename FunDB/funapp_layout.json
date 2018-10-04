@@ -1,0 +1,53 @@
+{
+  "schemas": {
+    "funapp": {
+      "entities": {
+
+        "MainMenuCategories": {
+          "columnFields": {
+            "Name": { "fieldType": "string" },
+            "OrdinalPosition": { "fieldType": "int" }
+          },
+          "uniqueConstraints": {
+            "UniqueName": { "columns": [ "Name" ] }
+          },
+          "checkConstraints": {
+            "NonEmptyName": { "expression": "\"Name\" <> ''" }
+          },
+          "mainField": "Name"
+        },
+
+        "MainMenuButtons": {
+          "columnFields": {
+            "CategoryId": { "fieldType": "reference(\"funapp\".\"MainMenuCategories\")" },
+            "UserViewId": { "fieldType": "reference(\"UserViews\")" },
+            "OrdinalPosition": { "fieldType": "int" }
+          },
+          "uniqueConstraints": {
+            "UniqueButton": { "columns": [ "CategoryId", "UserViewId" ] }
+          },
+          "mainField": "Id"
+        },
+
+        "Translations": {
+          "columnFields": {
+            "String": { "fieldType": "string" },
+            "Language": { "fieldType": "string" },
+            "Translation": { "fieldType": "string" }
+          },
+          "computedFields": {
+            //"Name": { "expression": "\"String\" || ' (' || \"Language\" || ')'" }
+            "Name": { "expression": "\"String\"" }
+          },
+          "uniqueConstraints": {
+            "UniqueString": { "columns": [ "String", "Language" ] }
+          },
+          "checkConstraints": {
+            "NonEmptyString": { "expression": "\"String\" <> '' AND \"Language\" <> ''" }
+          },
+          "mainField": "Name"
+        }
+      }
+    }
+  }
+}

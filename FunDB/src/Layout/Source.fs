@@ -1,38 +1,44 @@
 module FunWithFlags.FunDB.Layout.Source
 
+open Newtonsoft.Json
+
 open FunWithFlags.FunDB.FunQL.AST
 
 // Source Layout; various layout sources, like database or system layout, are converted into this.
 
 type SourceUniqueConstraint =
-    { columns : FunQLName array
+    { [<JsonProperty(Required=Required.Always)>]
+      columns : FunQLName array
     }
 
 type SourceCheckConstraint =
-    { expression : string
+    { [<JsonProperty(Required=Required.Always)>]
+      expression : string
     }
 
 type SourceColumnField =
-    { fieldType : string
+    { [<JsonProperty(Required=Required.Always)>]
+      fieldType : string
       defaultExpr : string option
       isNullable : bool
     }
 
 type SourceComputedField =
-    { expression : string
+    { [<JsonProperty(Required=Required.Always)>]
+      expression : string
     }
 
-type private SourceField =
+type SourceField =
     | SColumnField of SourceColumnField
     | SComputedField of SourceComputedField
 
 type SourceEntity =
-    { isAbstract : bool
-      ancestor : EntityName option
-      columnFields : Map<FieldName, SourceColumnField>
+    { columnFields : Map<FieldName, SourceColumnField>
       computedFields : Map<FieldName, SourceComputedField>
       uniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
       checkConstraints : Map<ConstraintName, SourceCheckConstraint>
+      [<JsonProperty(Required=Required.Always)>]
+      mainField : FieldName
     } with
         member this.FindField (name : FieldName) =
             match Map.tryFind name this.columnFields with
@@ -43,20 +49,20 @@ type SourceEntity =
                         | None -> None
 
 type SourceSchema =
-    { entities : Map<EntityName, ResolvedEntity>
+    { entities : Map<EntityName, SourceEntity>
     }
 
 type SourceLayout =
-    { schemas : Map<SchemaName, ResolvedSchema>
-      systemEntities : Map<EntityName, ResolvedEntity>
+    { schemas : Map<SchemaName, SourceSchema>
+      systemEntities : Map<EntityName, SourceEntity>
     } with
         member this.FindEntity (entity : EntityRef) =
             match entity.schema with
-                | None -> Map.tryFind entity.name systemEntities
+                | None -> Map.tryFind entity.name this.systemEntities
                 | Some schemaName ->
-                    match Map.tryFind schemaName schemas with
+                    match Map.tryFind schemaName this.schemas with
                         | None -> None
                         | Some schema -> Map.tryFind entity.name schema.entities
 
         member this.FindField (entity : EntityRef) (field : FieldName) =
-            this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(name))
+            this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))

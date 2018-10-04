@@ -1,8 +1,8 @@
 module FunWithFlags.FunDB.SQL.Meta
 
 open Microsoft.EntityFrameworkCore
-open System.ComponentModel.DataAnnotations.Schema
-open System.Collections.Generic
+open Microsoft.Extensions.Logging
+open System.Linq
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
@@ -15,185 +15,214 @@ open FunWithFlags.FunDB.SQL.Array.Parser
 exception SQLMetaError of info : string with
     override this.Message = this.info
 
-type private InformationSchemaContext (options : DbContextOptions<InformationSchemaContext>) =
-    inherit DbContext (options)
+module InformationSchema =
+    open System.ComponentModel.DataAnnotations.Schema
 
-    member val Schemata = null : DbSet<Schema> with get, set
-    member val Tables = null : DbSet<Table> with get, set
-    member val Columns = null : DbSet<Column> with get, set
-    member val TableConstraints = null : DbSet<TableConstraint> with get, set
-    member val KeyColumnUsage = null : DbSet<KeyColumn> with get, set
-    member val ConstraintColumnUsage = null : DbSet<ConstraintColumn> with get, set
-    member val Sequences = null : DbSet<Sequence> with get, set
+    type InformationSchemaContext (options : DbContextOptions<InformationSchemaContext>) =
+        inherit DbContext (options)
 
-    override this.OnModelCreating (modelBuilder : ModelBuilder) =
-        ignore <| modelBuilder.Entity<Schema>()
-            .HasKey([| "SchemaCatalog"; "SchemaName" |])
-        ignore <| modelBuilder.Entity<Table>()
-            .HasKey([| "TableCatalog"; "TableSchema"; "TableName" |])
-        ignore <| modelBuilder.Entity<Table>()
-            .HasOne(fun table -> table.Schema)
-            .WithMany(fun (schema : Schema) -> schema.Tables)
-            .HasForeignKey([| "TableCatalog"; "TableSchema" |])
-        ignore <| modelBuilder.Entity<Column>()
-            .HasOne(fun column -> column.Table)
-            .WithMany(fun (table : Table) -> table.Columns)
-            .HasForeignKey([| "TableCatalog"; "TableSchema"; "TableName" |])
-        ignore <| modelBuilder.Entity<TableConstraint>()
-            .HasKey([| "ConstraintCatalog"; "ConstraintSchema"; "ConstraintName" |])
-        ignore <| modelBuilder.Entity<TableConstraint>()
-            .HasOne(fun constr -> constr.Table)
-            .WithMany(fun (table : Table) -> table.TableConstraints)
-            .HasForeignKey([| "TableCatalog"; "TableSchema"; "TableName" |])
-        ignore <| modelBuilder.Entity<KeyColumn>()
-            .HasOne(fun key -> key.TableConstraint)
-            .WithMany(fun (constr : TableConstraint) -> constr.KeyColumnUsage)
-            .HasForeignKey([| "ConstraintCatalog"; "ConstraintSchema"; "ConstraintName" |])
-        ignore <| modelBuilder.Entity<ConstraintColumn>()
-            .HasOne(fun col -> col.TableConstraint)
-            .WithMany(fun (constr : TableConstraint) -> constr.ConstraintColumnUsage)
-            .HasForeignKey([| "ConstraintCatalog"; "ConstraintSchema"; "ConstraintName" |])
-        ignore <| modelBuilder.Entity<Sequence>()
-            .HasOne(fun seq -> seq.Schema)
-            .WithMany(fun (schema : Schema) -> schema.Sequences)
-            .HasForeignKey([| "SequenceCatalog"; "SequenceSchema" |])
+        // All of this shit is because of how EF Core works.
+        [<DefaultValue>]
+        val mutable schemata : DbSet<Schema>
+        member this.Schemata 
+            with get () = this.schemata 
+            and set value = this.schemata <- value
 
-and
-    [<Table("schemata", Schema="information_schema")>]
-    [<AllowNullLiteral>]
-    private Schema () =
-        [<Column("schema_catalog")>]
-        member val SchemaCatalog = "" with get, set
-        [<Column("schema_name")>]
-        member val SchemaName = "" with get, set
+        [<DefaultValue>]
+        val mutable tables : DbSet<Table>
+        member this.Tables 
+            with get () = this.tables 
+            and set value = this.tables <- value
+ 
+        [<DefaultValue>]
+        val mutable columns : DbSet<Column>
+        member this.Columns
+            with get () = this.columns
+            and set value = this.columns <- value
+
+        [<DefaultValue>]
+        val mutable tableConstraints : DbSet<TableConstraint>
+        member this.TableConstraints
+            with get () = this.tableConstraints 
+            and set value = this.tableConstraints <- value
+
+        [<DefaultValue>]
+        val mutable keyColumnUsage : DbSet<KeyColumn>
+        member this.key_column_usage
+            with get () = this.keyColumnUsage
+            and set value = this.keyColumnUsage <- value
+
+        [<DefaultValue>]
+        val mutable constraintColumnUsage : DbSet<ConstraintColumn>
+        member this.ConstraintColumnUsage
+            with get () = this.constraintColumnUsage
+            and set value = this.constraintColumnUsage <- value
+
+        [<DefaultValue>]
+        val mutable sequences : DbSet<Sequence>
+        member this.Sequences
+            with get () = this.sequences
+            and set value = this.sequences <- value
+
+        override this.OnModelCreating (modelBuilder : ModelBuilder) =
+            ignore <| modelBuilder.Entity<Schema>()
+                .HasKey([| "catalog_name"; "schema_name" |])
+            ignore <| modelBuilder.Entity<Table>()
+                .HasKey([| "table_catalog"; "table_schema"; "table_name" |])
+            ignore <| modelBuilder.Entity<Table>()
+                .HasOne(fun table -> table.schema)
+                .WithMany(fun (schema : Schema) -> schema.tables)
+                .HasForeignKey([| "table_catalog"; "table_schema" |])
+            ignore <| modelBuilder.Entity<Column>()
+                .HasKey([| "table_catalog"; "table_schema"; "table_name"; "column_name" |])
+            ignore <| modelBuilder.Entity<Column>()
+                .HasOne(fun column -> column.table)
+                .WithMany(fun (table : Table) -> table.columns)
+                .HasForeignKey([| "table_catalog"; "table_schema"; "table_name" |])
+            ignore <| modelBuilder.Entity<TableConstraint>()
+                .HasKey([| "constraint_catalog"; "constraint_schema"; "constraint_name" |])
+            ignore <| modelBuilder.Entity<TableConstraint>()
+                .HasOne(fun constr -> constr.table)
+                .WithMany(fun (table : Table) -> table.table_constraints)
+                .HasForeignKey([| "table_catalog"; "table_schema"; "table_name" |])
+            ignore <| modelBuilder.Entity<KeyColumn>()
+                .HasKey([| "constraint_catalog"; "constraint_schema"; "constraint_name"; "column_name" |])
+            ignore <| modelBuilder.Entity<KeyColumn>()
+                .HasOne(fun key -> key.table_constraint)
+                .WithMany(fun (constr : TableConstraint) -> constr.key_column_usage)
+                .HasForeignKey([| "constraint_catalog"; "constraint_schema"; "constraint_name" |])
+            ignore <| modelBuilder.Entity<ConstraintColumn>()
+                .HasKey([| "constraint_catalog"; "constraint_schema"; "constraint_name"; "table_catalog"; "table_schema"; "table_name"; "column_name" |])
+            ignore <| modelBuilder.Entity<ConstraintColumn>()
+                .HasOne(fun col -> col.table_constraint)
+                .WithMany(fun (constr : TableConstraint) -> constr.constraint_column_usage)
+                .HasForeignKey([| "constraint_catalog"; "constraint_schema"; "constraint_name" |])
+            ignore <| modelBuilder.Entity<Sequence>()
+                .HasKey([| "sequence_catalog"; "sequence_schema"; "sequence_name" |])
+            ignore <| modelBuilder.Entity<Sequence>()
+                .HasOne(fun seq -> seq.schema)
+                .WithMany(fun (schema : Schema) -> schema.sequences)
+                .HasForeignKey([| "sequence_catalog"; "sequence_schema" |])
+
+    and
+        [<Table("schemata", Schema="information_schema")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        Schema =
+            { catalog_name : string
+              schema_name : string
+              tables : Table seq
+              sequences : Sequence seq
+            }
+
+    and
+        [<Table("tables", Schema="information_schema")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        Table =
+            { table_catalog : string
+              table_schema : string
+              table_name : string
+              table_type : string
+
+              schema : Schema
         
-        member val Tables = null : IEnumerable<Table> with get, set
-        member val Sequences = null : IEnumerable<Sequence> with get, set
+              columns : Column seq
+              table_constraints : TableConstraint seq
+        }
 
-and
-    [<Table("tables", Schema="information_schema")>]
-    [<AllowNullLiteral>]
-    private Table () =
-        [<Column("table_catalog")>]
-        member val TableCatalog = "" with get, set
-        [<Column("table_schema")>]
-        member val TableSchema = "" with get, set
-        [<Column("table_name")>]
-        member val TableName = "" with get, set
-        [<Column("table_type")>]
-        member val TableType = "" with get, set
+    and
+        [<Table("columns", Schema="information_schema")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        Column =
+            { table_catalog : string
+              table_schema : string
+              table_name : string
+              column_name : string
+              column_default : string
+              is_nullable : string
+              udt_catalog : string
+              udt_schema : string
+              udt_name : string
 
-        member val Schema = null : Schema with get, set
-        
-        member val Columns = null : IEnumerable<Column> with get, set
-        member val TableConstraints = null : IEnumerable<TableConstraint> with get, set
+              table : Table
+           }
 
-and
-    [<Table("columns", Schema="information_schema")>]
-    [<AllowNullLiteral>]
-    private Column () =
-        [<Column("table_catalog")>]
-        member val TableCatalog = "" with get, set
-        [<Column("table_schema")>]
-        member val TableSchema = "" with get, set
-        [<Column("table_name")>]
-        member val TableName = "" with get, set
-        [<Column("column_name")>]
-        member val ColumnName = "" with get, set
-        [<Column("column_default")>]
-        member val ColumnDefault = null : string with get, set
-        [<Column("is_nullable")>]
-        member val IsNullable = "" with get, set
-        [<Column("udt_catalog")>]
-        member val UdtCatalog = "" with get, set
-        [<Column("udt_schema")>]
-        member val UdtSchema = "" with get, set
-        [<Column("udt_name")>]
-        member val UdtName = "" with get, set
+    and
+        [<Table("table_constraints", Schema="information_schema")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        TableConstraint =
+            { constraint_catalog : string
+              constraint_schema : string
+              constraint_name : string
+              table_catalog : string
+              table_schema : string
+              table_name : string
+              constraint_type : string
 
-        member val Table = null : Table with get, set
+              table : Table
 
-and
-    [<Table("table_constraints", Schema="information_schema")>]
-    [<AllowNullLiteral>]
-    private TableConstraint () =
-        [<Column("constraint_catalog")>]
-        member val ConstraintCatalog = "" with get, set
-        [<Column("constraint_schema")>]
-        member val ConstraintSchema = "" with get, set
-        [<Column("constraint_name")>]
-        member val ConstraintName = "" with get, set
-        [<Column("table_catalog")>]
-        member val TableCatalog = "" with get, set
-        [<Column("table_schema")>]
-        member val TableName = "" with get, set
-        [<Column("table_name")>]
-        member val TableName = "" with get, set
-        [<Column("constraint_type")>]
-        member val ConstraintType = "" with get, set
-        
-        member val Table = null : Table with get, set
-        
-        member val KeyColumnUsage = null : IEnumerable<KeyColumn> with get, set
-        member val ConstraintColumnUsage = null : IEnumerable<ConstraintColumn> with get, set
+              key_column_usage : KeyColumn seq
+              constraint_column_usage : ConstraintColumn seq
+            }
 
-and
-    [<Table("key_column_usage", Schema="information_schema")>]
-    [<AllowNullLiteral>]
-    private KeyColumn () =
-        [<Column("constraint_catalog")>]
-        member val ConstraintCatalog = "" with get, set
-        [<Column("constraint_schema")>]
-        member val ConstraintSchema = "" with get, set
-        [<Column("constraint_name")>]
-        member val ConstraintName = "" with get, set
-        [<Column("table_catalog")>]
-        member val TableCatalog = "" with get, set
-        [<Column("table_schema")>]
-        member val TableSchema = "" with get, set
-        [<Column("table_name")>]
-        member val TableName = "" with get, set
-        [<Column("column_name")>]
-        member val ColumnName = "" with get, set
-        [<Column("ordinal_position")>]
-        member val OrdinalPosition = 0 with get, set
+    and
+        [<Table("key_column_usage", Schema="information_schema")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        KeyColumn =
+            { constraint_catalog : string
+              constraint_schema : string
+              constraint_name : string
+              table_catalog : string
+              table_schema : string
+              table_name : string
+              column_name : string
+              ordinal_position : int
 
-        member val TableConstraint = null : TableConstraint with get, set
+              table_constraint : TableConstraint
+            }
 
-and
-    [<Table("constraint_column_usage", Schema="information_schema")>]
-    [<AllowNullLiteral>]
-    private ConstraintColumn () =
-        [<Column("constraint_catalog")>]
-        member val ConstraintCatalog = "" with get, set
-        [<Column("constraint_schema")>]
-        member val ConstraintSchema = "" with get, set
-        [<Column("constraint_name")>]
-        member val ConstraintName = "" with get, set
-        [<Column("table_catalog")>]
-        member val TableCatalog = "" with get, set
-        [<Column("table_schema")>]
-        member val TableSchema = "" with get, set
-        [<Column("table_name")>]
-        member val TableName = "" with get, set
-        [<Column("column_name")>]
-        member val ColumnName = "" with get, set
+    and
+        [<Table("constraint_column_usage", Schema="information_schema")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        ConstraintColumn =
+            { constraint_catalog : string
+              constraint_schema : string
+              constraint_name : string
+              table_catalog : string
+              table_schema : string
+              table_name : string
+              column_name : string
 
-        member val TableConstraint = null : TableConstraint with get, set
+              table_constraint : TableConstraint
+            }
 
-and
-    [<Table("sequences", Schema="information_schema")>]
-    [<AllowNullLiteral>]
-    private Sequence () =
-        [<Column("sequence_catalog")>]
-        member val SequenceCatalog = "" with get, set
-        [<Column("sequence_schema")>]
-        member val SequenceSchema = "" with get, set
-        [<Column("sequence_name")>]
-        member val SequenceName = "" with get, set
-        
-        member val Schema = null : Schema with get, set
-    
+    and
+        [<Table("sequences", Schema="information_schema")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        Sequence =
+            { sequence_catalog : string
+              sequence_schema : string
+              sequence_name : string
+
+              schema : Schema
+            }
+
+ open InformationSchema
+ open Npgsql
+
 let private parseConstraintType (str : string) : ConstraintType option =
     match str.ToUpper() with
         | "UNIQUE" -> Some CTUnique
@@ -240,8 +269,8 @@ let private normalizeDefaultExpr : ParsedValueExpr -> PureValueExpr =
                                 | Some STString -> VEValue <| VStringArray array
                                 | Some STInt -> VEValue (VIntArray <| runArrayCast tryIntInvariant)
                                 | Some STBool -> VEValue (VBoolArray <| runArrayCast tryBool)
-                                | Some STDateTime -> VEValue (VDateTimeArray <| runArrayCast tryDateTimeInvariant)
-                                | Some STDate -> VEValue (VDateArray <| runArrayCast tryDateTimeInvariant)
+                                | Some STDateTime -> VEValue (VDateTimeArray <| runArrayCast tryDateTimeOffsetInvariant)
+                                | Some STDate -> VEValue (VDateArray <| runArrayCast tryDateInvariant)
                                 | Some STRegclass -> VEValue (VRegclassArray <| runArrayCast tryRegclass)
                 | VTScalar scalarType ->
                     let runCast castFunc =
@@ -254,8 +283,8 @@ let private normalizeDefaultExpr : ParsedValueExpr -> PureValueExpr =
                         | Some STString -> castExpr ()
                         | Some STInt -> VEValue (VInt <| runCast tryIntInvariant)
                         | Some STBool -> VEValue (VBool <| runCast tryBool)
-                        | Some STDateTime -> VEValue (VDateTime <| runCast tryDateTimeInvariant)
-                        | Some STDate -> VEValue (VDate <| runCast tryDateTimeInvariant)
+                        | Some STDateTime -> VEValue (VDateTime <| runCast tryDateTimeOffsetInvariant)
+                        | Some STDate -> VEValue (VDate <| runCast tryDateInvariant)
                         | Some STRegclass -> VEValue (VRegclass <| runCast tryRegclass)
         | VEValue value -> VEValue value
         | VEColumn c -> raise (SQLMetaError <| sprintf "Invalid reference in default expression: %O" c)
@@ -288,85 +317,93 @@ let parseUdtName (str : string) =
 
 let private makeColumnMeta (column : Column) : ColumnName * ColumnMeta =
     let columnType =
-        if column.UdtSchema <> "pg_catalog" then
-            raise (SQLMetaError <| sprintf "Unsupported user-defined data type: %s.%s" column.UdtSchema column.UdtName)
-        parseUdtName column.UdtName
+        if column.udt_schema <> "pg_catalog" then
+            raise (SQLMetaError <| sprintf "Unsupported user-defined data type: %s.%s" column.udt_schema column.udt_name)
+        parseUdtName column.udt_name
     let defaultExpr =
-        if column.ColumnDefault = null
+        if column.column_default = null
         then None
         else
-            match parse tokenizeSQL valueExpr column.ColumnDefault with
+            match parse tokenizeSQL valueExpr column.column_default with
                 | Ok expr -> Some <| normalizeDefaultExpr expr
                 | Error msg -> raise (SQLMetaError <| sprintf "Cannot parse column default value: %s" msg)
     let isNullable =
-        match tryBool column.IsNullable with
+        match tryBool column.is_nullable with
             | Some v -> v
-            | None -> raise (SQLMetaError <| sprintf "Invalid is_nullable value: %s" column.IsNullable)
+            | None -> raise (SQLMetaError <| sprintf "Invalid is_nullable value: %s" column.is_nullable)
     let res =
         { columnType = columnType
           isNullable = isNullable
           defaultExpr = defaultExpr
         }
-    (SQLName column.ColumnName, res)
+    (SQLName column.column_name, res)
 
 let private makeConstraintMeta (constr : TableConstraint) : ConstraintName * ConstraintMeta =
     let keyColumns () =
-        constr.KeyColumnUsage |> Seq.sortBy (fun key -> key.OrdinalPosition) |> Seq.map (fun key -> SQLName key.ColumnName) |> Seq.toArray
+        constr.key_column_usage |> Seq.sortBy (fun key -> key.ordinal_position) |> Seq.map (fun key -> SQLName key.column_name) |> Seq.toArray
     let constraintColumns () =
         // We don't have any key to sort on so we pray that PostgreSQL's result order is good. Re: move to pg_catalog.
-        constr.ConstraintColumnUsage |> Seq.map (fun col -> makeColumnFromName col.TableSchema col.TableName col.ColumnName) |> Seq.toArray
+        constr.constraint_column_usage |> Seq.map (fun col -> makeColumnFromName col.table_schema col.table_name col.column_name) |> Seq.toArray
     let res =
-        match parseConstraintType constr.ConstraintType with
-            | None -> raise (SQLMetaError <| sprintf "Unknown constraint type: %s" constr.ConstraintType)
+        match parseConstraintType constr.constraint_type with
+            | None -> raise (SQLMetaError <| sprintf "Unknown constraint type: %s" constr.constraint_type)
             | Some CTUnique -> CMUnique (keyColumns ())
             | Some CTPrimaryKey -> CMPrimaryKey (keyColumns ())
             | Some CTCheck -> failwith "Not implemented yet"
             | Some CTForeignKey ->
                 let cols = constraintColumns ()
-                ignore <| seqFold1 (fun a b -> if a.table <> b.table then raise (SQLMetaError <| sprintf "Different column tables in a foreign key: %O vs %O" a.table b.table) else b) cols
+                let checkTable (a : ResolvedColumnRef) (b : ResolvedColumnRef) =
+                    if a.table <> b.table then
+                        raise (SQLMetaError <| sprintf "Different column tables in a foreign key: %O vs %O" a.table b.table)
+                    else b
+                ignore <| Seq.fold1 checkTable cols
                 let ref = cols.[0].table
-                CMForeignKey (ref, Array.zip (keyColumns ()) (Array.map (fun a -> a.name) cols))
-    (SQLName constr.ConstraintName, res)
+                CMForeignKey (ref, Array.zip (keyColumns ()) (Array.map (fun (a : ResolvedColumnRef) -> a.name) cols))
+    (SQLName constr.constraint_name, res)
 
 let private makeTableMeta (table : Table) : TableName * TableMeta * (ConstraintName * ConstraintMeta) seq =
-    if table.TableType.ToUpper() <> "BASE TABLE" then
-        raise (SQLMetaError <| sprintf "Unsupported table type: %s" table.TableType)
-    let constraints = table.TableConstraints |> Seq.map makeConstraintMeta
-    let res = { columns = table.Columns |> Seq.map makeColumnMeta |> mapOfSeqUnique }
-    (SQLName table.TableName, res, constraints)
+    if table.table_type.ToUpper() <> "BASE TABLE" then
+        raise (SQLMetaError <| sprintf "Unsupported table type: %s" table.table_type)
+    // FIXME: filtering CHECK constraints as we cannot handle them yet
+    let constraints = table.table_constraints |> Seq.filter (fun x -> x.constraint_type <> "CHECK") |> Seq.map makeConstraintMeta
+    let res = { columns = table.columns |> Seq.map makeColumnMeta |> Map.ofSeqUnique }
+    (SQLName table.table_name, res, constraints)
+
+let private makeSequenceMeta (sequence : Sequence) : TableName =
+    SQLName sequence.sequence_name
 
 let private makeSchemaMeta (schema : Schema) : SchemaName option * SchemaMeta =
-    let tableObjects = schema.Tables |> Seq.map makeTableMeta |> Seq.cache
-    let tables = tableObjects |> Seq.map (fun (name, table, constraints) -> (name, OMTable table)) |> mapOfSeqUnique
+    let tableObjects = schema.tables |> Seq.map makeTableMeta |> Seq.cache
+    let tables = tableObjects |> Seq.map (fun (name, table, constraints) -> (name, OMTable table)) |> Map.ofSeqUnique
     let constraints =
         tableObjects
-        |> Seq.map (fun (name, table, constraints) -> Seq.map (fun (constrName, constr) -> (constrName, OMConstraint constr)) constraints)
+        |> Seq.map (fun (name, table, constraints) -> Seq.map (fun (constrName, constr) -> (constrName, OMConstraint (name, constr))) constraints)
         |> Seq.concat
-        |> mapOfSeqUnique
-    let sequences = schema.Sequences |> Seq.map makeSequenceMeta |> Seq.map (fun name -> (name, Sequence)) |> mapOfSeqUnique
-    let name = if schema.SchemaName = "public" then None else Some (SQLName schema.SchemaName)
-    let res = { objects = mapUnionUnique (mapUnionUnique tables constraints) sequences }
+        |> Map.ofSeqUnique
+    let sequences = schema.sequences |> Seq.map makeSequenceMeta |> Seq.map (fun name -> (name, OMSequence)) |> Map.ofSeqUnique
+    let name = if schema.schema_name = "public" then None else Some (SQLName schema.schema_name)
+    let res = { objects = Map.unionUnique (Map.unionUnique tables constraints) sequences }
     (name, res)
 
-let buildDatabaseMeta (loggerFactory : ILoggerFactory) (connectionString : string) : DatabaseMeta =
+let buildDatabaseMeta (transaction : NpgsqlTransaction) : DatabaseMeta =
     let dbOptions =
         (DbContextOptionsBuilder<InformationSchemaContext> ())
-            .UseNpgsql(connectionString)
-            .UseLoggerFactory(loggerFactory)
+            .UseNpgsql(transaction.Connection)
     use db = new InformationSchemaContext(dbOptions.Options)
+    ignore <| db.Database.UseTransaction(transaction)
 
-    let systemSchemas = set [| "information_schema" "pg_catalog" |]
+    let systemSchemas = [| "information_schema"; "pg_catalog" |]
     let schemas =
-        db.Schemata.Where(fun schema -> not Set.contains schema.SchemaName systemSchemas)
-            .Include(fun schema -> schema.Tables)
-                .ThenInclude(fun table -> table.Columns)
-            .Include(fun schema -> schema.Tables)
-                .ThenInclude(fun table -> table.TableConstraints)
-                    .ThenInclude(fun constr -> constr.KeyColumnUsage)
-            .Include(fun schema -> schema.Tables)
-                .ThenInclude(fun table -> table.TableConstraints)
-                    .ThenInclude(fun constr -> constr.ConstraintColumnUsage)
-            .Include(fun schema -> schema.Sequences)
+        db.Schemata.Where(fun schema -> not (systemSchemas.Contains(schema.schema_name)))
+            .Include(fun schema -> schema.tables)
+                .ThenInclude(fun (table : Table) -> table.columns)
+            .Include(fun schema -> schema.tables)
+                .ThenInclude(fun (table : Table)-> table.table_constraints)
+                    .ThenInclude(fun (constr : TableConstraint) -> constr.key_column_usage)
+            .Include(fun schema -> schema.tables)
+                .ThenInclude(fun (table : Table) -> table.table_constraints)
+                    .ThenInclude(fun (constr : TableConstraint) -> constr.constraint_column_usage)
+            .Include(fun schema -> schema.sequences)
 
     // We ignore catalog, assuming a database is constant -- it should be so according to PostgreSQL.
-    { schemas = schemas |> Seq.map getSchemaMeta |> mapOfSeqUnique }
+    { schemas = schemas |> Seq.map makeSchemaMeta |> Map.ofSeqUnique }

@@ -1,14 +1,14 @@
 module FunWithFlags.FunDB.FunQL.AST
 
 open System
-open System.Globalization
-open System.Runtime.InteropServices
+open System.ComponentModel
 
-open FunWithFlags.FunCore
+open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 
-type FunQLName = FunQLName of string
+type [<TypeConverter(typeof<ToNewtypeConverter<string>>)>] FunQLName = FunQLName of string
     with
         override this.ToString () =
             match this with
@@ -25,6 +25,7 @@ type SchemaName = FunQLName
 type EntityName = FunQLName
 type FieldName = FunQLName
 type ConstraintName = FunQLName
+type AttributeName = FunQLName
 
 type EntityRef =
     { schema : SchemaName option
@@ -58,23 +59,28 @@ type FieldValue =
     | FInt of int
     | FString of string
     | FBool of bool
-    | FDateTime of DateTime
-    | FDate of DateTime
+    | FDateTime of DateTimeOffset
+    | FDate of DateTimeOffset
     | FIntArray of int array
     | FStringArray of string array
     | FBoolArray of bool array
-    | FDateTimeArray of DateTime array
-    | FDateArray of DateTime array
+    | FDateTimeArray of DateTimeOffset array
+    | FDateArray of DateTimeOffset array
     | FNull
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            let renderArray func typeName vals = sprintf "%s :: array(%s)" (vals |> Seq.map func |> String.concat ", " |> sprintf "{%s}" |> renderSqlString) typeName
+            let renderArray func typeName vals =
+                let arrStr = sprintf "[%s]" (vals |> Seq.map func |> String.concat ", ")
+                if Array.isEmpty vals && typeName <> "string" then
+                    sprintf "%s :: array(%s)" arrStr typeName
+                else
+                    arrStr
             match this with
                 | FInt i -> renderSqlInt i
                 | FString s -> renderSqlString s
-                | FBool b -> renderBool b
+                | FBool b -> renderSqlBool b
                 | FDateTime dt -> sprintf "%s :: datetime" (dt |> renderSqlDateTime |> renderSqlString)
                 | FDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
                 | FIntArray vals -> renderArray renderSqlInt "int" vals
@@ -121,7 +127,7 @@ type FieldExprType =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type FieldType<'e, 'f> =
+type FieldType<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FTType of FieldExprType
     | FTReference of 'e * FieldExpr<'f> option
     | FTEnum of Set<string>
@@ -131,33 +137,34 @@ type FieldType<'e, 'f> =
         member this.ToFunQLString () =
             match this with
                 | FTType t -> t.ToFunQLString()
-                | FTReference e None -> sprintf "reference(%s)" (e.ToFunQLString())
-                | FTReference e (Some check) -> sprintf "reference(%s, %s)" (e.ToFunQLString()) (check.ToFunQLString())
+                | FTReference (e, None) -> sprintf "reference(%s)" (e.ToFunQLString())
+                | FTReference (e, Some check) -> sprintf "reference(%s, %s)" (e.ToFunQLString()) (check.ToFunQLString())
                 | FTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map (fun x -> sprintf "\"%s\"" (renderSqlString x)) |> String.concat ", ")
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type FieldExpr<'c> =
+and FieldExpr<'f> when 'f :> IFunQLString =
     | FEValue of FieldValue
-    | FEColumn of 'c
+    | FEColumn of 'f
     | FEPlaceholder of string
-    | FENot of FieldExpr<'c>
-    | FEAnd of FieldExpr<'c> * FieldExpr<'c>
-    | FEOr of FieldExpr<'c> * FieldExpr<'c>
-    | FEConcat of FieldExpr<'c> * FieldExpr<'c>
-    | FEEq of FieldExpr<'c> * FieldExpr<'c>
-    | FENotEq of FieldExpr<'c> * FieldExpr<'c>
-    | FELike of FieldExpr<'c> * FieldExpr<'c>
-    | FENotLike of FieldExpr<'c> * FieldExpr<'c>
-    | FELess of FieldExpr<'c> * FieldExpr<'c>
-    | FELessEq of FieldExpr<'c> * FieldExpr<'c>
-    | FEGreater of FieldExpr<'c> * FieldExpr<'c>
-    | FEGreaterEq of FieldExpr<'c> * FieldExpr<'c>
-    | FEIn of FieldExpr<'c> * (FieldExpr<'c> array)
-    | FENotIn of FieldExpr<'c> * (FieldExpr<'c> array)
-    | FEIsNull of FieldExpr<'c>
-    | FEIsNotNull of FieldExpr<'c>
+    | FENot of FieldExpr<'f>
+    | FEAnd of FieldExpr<'f> * FieldExpr<'f>
+    | FEOr of FieldExpr<'f> * FieldExpr<'f>
+    | FEConcat of FieldExpr<'f> * FieldExpr<'f>
+    | FEEq of FieldExpr<'f> * FieldExpr<'f>
+    | FENotEq of FieldExpr<'f> * FieldExpr<'f>
+    | FELike of FieldExpr<'f> * FieldExpr<'f>
+    | FENotLike of FieldExpr<'f> * FieldExpr<'f>
+    | FELess of FieldExpr<'f> * FieldExpr<'f>
+    | FELessEq of FieldExpr<'f> * FieldExpr<'f>
+    | FEGreater of FieldExpr<'f> * FieldExpr<'f>
+    | FEGreaterEq of FieldExpr<'f> * FieldExpr<'f>
+    | FEIn of FieldExpr<'f> * (FieldExpr<'f> array)
+    | FENotIn of FieldExpr<'f> * (FieldExpr<'f> array)
+    | FECast of FieldExpr<'f> * FieldExprType
+    | FEIsNull of FieldExpr<'f>
+    | FEIsNotNull of FieldExpr<'f>
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -184,13 +191,14 @@ type FieldExpr<'c> =
                 | FENotIn (e, vals) ->
                     assert (not <| Array.isEmpty vals)
                     sprintf "(%s) NOT IN (%s)" (e.ToFunQLString()) (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
+                | FECast (e, typ) -> sprintf "(%s) :: %s" (e.ToFunQLString()) (typ.ToFunQLString())
                 | FEIsNull e -> sprintf "(%s) IS NULL" (e.ToFunQLString())
                 | FEIsNotNull e -> sprintf "(%s) IS NOT NULL" (e.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-let mapFieldExpr (colFunc : 'a -> 'b) (placeholderFunc : string -> string) : FieldExpr<'a> -> FieldExpr<'b> =
+let mapFieldExpr (columnFunc : 'a -> 'b) (placeholderFunc : string -> string) : FieldExpr<'a> -> FieldExpr<'b> =
     let rec traverse = function
         | FEValue value -> FEValue value
         | FEColumn c -> FEColumn (columnFunc c)
@@ -209,6 +217,7 @@ let mapFieldExpr (colFunc : 'a -> 'b) (placeholderFunc : string -> string) : Fie
         | FEGreaterEq (a, b) -> FEGreaterEq (traverse a, traverse b)
         | FEIn (e, vals) -> FEIn (traverse e, Array.map traverse vals)
         | FENotIn (e, vals) -> FENotIn (traverse e, Array.map traverse vals)
+        | FECast (e, typ) -> FECast (traverse e, typ)
         | FEIsNull e -> FEIsNull (traverse e)
         | FEIsNotNull e -> FEIsNotNull (traverse e)
     traverse
@@ -232,6 +241,7 @@ let iterFieldExpr (colFunc : 'a -> unit) (placeholderFunc : string -> unit) : Fi
         | FEGreaterEq (a, b) -> traverse a; traverse b
         | FEIn (e, vals) -> traverse e; Array.iter traverse vals
         | FENotIn (e, vals) -> traverse e; Array.iter traverse vals
+        | FECast (e, typ) -> traverse e
         | FEIsNull e -> traverse e
         | FEIsNotNull e -> traverse e
     traverse
@@ -250,14 +260,14 @@ type SortOrder =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type QueryResult<'f> =
+type QueryResult<'f> when 'f :> IFunQLString =
     { name : FunQLName
-      expr : FieldExpr<'f>
+      expression : FieldExpr<'f>
     }
     with
         override this.ToString () = this.ToFunQLString()
 
-        member this.ToFunQLString () = sprintf "%s AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
+        member this.ToFunQLString () = sprintf "%s AS %s" (this.expression.ToFunQLString()) (this.name.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -280,7 +290,7 @@ type JoinType =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type FromClause<'e, 'f> =
+type FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     { from: FromExpr<'e, 'f>
       where: FieldExpr<'f> option
       orderBy: (SortOrder * FieldExpr<'f>) array
@@ -293,15 +303,15 @@ type FromClause<'e, 'f> =
                     | None -> ""
                     | Some cond -> sprintf "WHERE %s" (cond.ToFunQLString())
             let orderByStr =
-                if this.orderBy.Count = 0
+                if Array.isEmpty this.orderBy
                 then ""
                 else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (ord.ToFunQLString()) (expr.ToFunQLString())) |> String.concat ", ")
-            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToFunQLString(), whereStr, orderByStr])
+            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToFunQLString(); whereStr; orderByStr])
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and QueryExpr<'e, 'f> =
+and QueryExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     { results: QueryResult<'f> array
       clause: FromClause<'e, 'f>
     } with
@@ -309,12 +319,12 @@ and QueryExpr<'e, 'f> =
 
         member this.ToFunQLString () =
             let resultsStr = this.results |> Seq.map (fun res -> res.ToFunQLString()) |> String.concat ", "
-            sprintf "SELECT %s" (concatWithWhitespaces [resultsStr, clause.ToFunQLString()])
+            sprintf "SELECT %s" (concatWithWhitespaces [resultsStr; this.clause.ToFunQLString()])
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-and FromExpr<'e, 'f> =
+and FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FEntity of 'e
     | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'f>
     | FSubExpr of EntityName * QueryExpr<'e, 'f>
@@ -328,18 +338,20 @@ and FromExpr<'e, 'f> =
                 | FSubExpr (name, expr) -> sprintf "(%s) AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
 
         interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString ()
+            member this.ToFunQLString () = this.ToFunQLString()
 
-type AttributeMap<'f> = Map<FunQLName, FieldExpr<'f>>
+type AttributeMap<'f> when 'f :> IFunQLString = Map<AttributeName, FieldExpr<'f>>
 
 type ParsedFieldType = FieldType<EntityRef, FieldRef>
 
-type ViewExpr<'f> =
-    { arguments : Map<FunQLName, ParsedFieldType>
-      attributes : AttributeMap<'f>
-      results : (AttributeMap<'f> * QueryResult<'f>) array
-      clause : FromClause<EntityRef, 'f>
-    }
+type LocalFieldExpr = FieldExpr<FieldName>
+
+type FunQLVoid = private FunQLVoid of unit with
+    interface IFunQLString with
+        member this.ToFunQLString () = failwith "impossible"
+
+type PureFieldExpr = FieldExpr<FunQLVoid>
+
+type ViewResults<'f> when 'f :> IFunQLString = (AttributeMap<'f> * QueryResult<'f>) array
 
 let funId = FunQLName "Id"
-let funSubEntity = FunQLName "SubEntity"

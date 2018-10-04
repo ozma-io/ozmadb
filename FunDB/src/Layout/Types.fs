@@ -4,23 +4,21 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Utils
 
-type LocalFieldExpr = FieldExpr<FieldName>
-
-type PureFieldExpr = FieldExpr<Void>
-
 type ReferenceRef =
     | RThis of FieldName
     | RRef of FieldName
     with
-        override this.ToString () = this.ToFunQLName ()
+        override this.ToString () = this.ToFunQLString()
 
-        interface IFunQLName with
-            member this.ToFunQLName () =
-                match this with
-                    | RThis name -> sprintf "%s.%s" (renderSqlName "this") (name.ToFunQLName())
-                    | RRef name -> sprintf "%s.%s" (renderSqlName "ref") (name.ToFunQLName())
+        member this.ToFunQLString () =
+            match this with
+                | RThis name -> sprintf "%s.%s" (renderSqlName "this") (name.ToFunQLString())
+                | RRef name -> sprintf "%s.%s" (renderSqlName "ref") (name.ToFunQLString())
 
-type ResolvedFieldType = FieldExpr<ReferenceRef>
+        interface IFunQLString with
+            member this.ToFunQLString() = this.ToFunQLString()
+
+type ResolvedFieldType = FieldType<EntityRef, ReferenceRef>
 
 type ResolvedReferenceFieldExpr = FieldExpr<ReferenceRef>
 
@@ -51,12 +49,13 @@ type ResolvedEntity =
       computedFields : Map<FieldName, ResolvedComputedField>
       uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
       checkConstraints : Map<ConstraintName, ResolvedCheckConstraint>
+      mainField : FieldName
     } with
         member this.FindField (name : FieldName) =
-            match Map.tryFind name columnFields with
+            match Map.tryFind name this.columnFields with
                 | Some col -> Some <| RColumnField col
                 | None ->
-                    match Map.tryFind name computedFields with
+                    match Map.tryFind name this.computedFields with
                         | Some comp -> Some <| RComputedField comp
                         | None -> None
 
@@ -70,11 +69,11 @@ type Layout =
     } with
         member this.FindEntity (entity : EntityRef) =
             match entity.schema with
-                | None -> Map.tryFind entity.name systemEntities
+                | None -> Map.tryFind entity.name this.systemEntities
                 | Some schemaName ->
-                    match Map.tryFind schemaName schemas with
+                    match Map.tryFind schemaName this.schemas with
                         | None -> None
                         | Some schema -> Map.tryFind entity.name schema.entities
 
         member this.FindField (entity : EntityRef) (field : FieldName) =
-            this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(name))
+            this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))

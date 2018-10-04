@@ -1,6 +1,6 @@
 {
 
-module internal FunWithFlags.FunDB.FunQL.Lexer
+module FunWithFlags.FunDB.FunQL.Lexer
 
 open System
 open Microsoft.FSharp.Text.Lexing
@@ -59,7 +59,7 @@ rule tokenizeFunQL = parse
     // Symbols
     | "{"  { Parser.LEFT_BRACE }
     | "}"  { Parser.RIGHT_BRACE }
-    | "("  { Parser.LEFT_PARENS }
+    | "("  { Parser.LEFT_PAREN }
     | ")"  { Parser.RIGHT_PAREN }
     | "["  { Parser.LEFT_BRACKET }
     | "]"  { Parser.RIGHT_BRACKET }
@@ -100,6 +100,9 @@ rule tokenizeFunQL = parse
     | i n         { Parser.IN }
     | i s         { Parser.IS }
     | n o t       { Parser.NOT }
+    | f o r       { Parser.FOR }
+    | u p d a t e { Parser.UPDATE }
+    | o f         { Parser.OF }
                             
     // Types
     | i n t             { Parser.INT_TYPE }

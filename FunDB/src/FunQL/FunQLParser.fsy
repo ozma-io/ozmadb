@@ -7,24 +7,30 @@ let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
 
 type ParsedFieldExpr = FieldExpr<FieldRef>
-type ResolvedFromExpr = FromExpr<EntityRef, FieldRef>
+type ParsedFromExpr = FromExpr<EntityRef, FieldRef>
 type ParsedFromClause = FromClause<EntityRef, FieldRef>
 type ParsedQueryExpr = QueryExpr<EntityRef, FieldRef>
-type ParsedQueryResult = QueryResult<FieldRef>
-type ParsedViewExpr = ViewExpr<FieldRef>
-type ParsedAttributeMap = AttributeMap<FieldRef>
+type ParsedQueryResult = QueryResult<FieldRef>type ParsedAttributeMap = AttributeMap<FieldRef>
+
+type ParsedViewExpr =
+    { arguments : Map<string, ParsedFieldType>
+      attributes : ParsedAttributeMap
+      results : ViewResults<FieldRef>
+      clause : ParsedFromClause
+      updateName : EntityRef option
+    }
 
 type private AttributedResult =
-    | AResult of ParsedAttributeMap * Result<FieldRef>
-    | AAttribute of FunQLName * Attribute
+    | AResult of ParsedAttributeMap * QueryResult<FieldRef>
+    | AAttribute of FunQLName * ParsedFieldExpr
 
 let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
     try
-        mapOfSeqUnique vals
+        Map.ofSeqUnique vals
     with
         | Failure msg -> failwith <| sprintf "%s: %s" error msg
 
-let private splitResults (results : AttributedResult seq) : ParsedAttributeMap * ParsedQueryResult =
+let private splitResults (results : AttributedResult seq) : ParsedAttributeMap * ViewResults<FieldRef> =
     let getResult = function
         | AResult (attrs, res) -> Some (attrs, res)
         | AAttribute (name, attr) -> None
@@ -32,9 +38,22 @@ let private splitResults (results : AttributedResult seq) : ParsedAttributeMap *
         | AResult (attrs, res) -> None
         | AAttribute (name, attr) -> Some (name, attr)
 
-    let attributes = results |> seqMapMaybe getAttribute |> parseMap "Clashing row attribute names"    
-    let results = results |> seqMapMaybe getResult |> Seq.toArray
+    let attributes = results |> Seq.mapMaybe getAttribute |> parseMap "Clashing row attribute names"    
+    let results = results |> Seq.mapMaybe getResult |> Seq.toArray
     (attributes, results)
+
+// We restrict casts to work only on values to clarify their types. This is becaise arbitrary casting breaks abstractionmatch
+let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : unit =
+    match expr with
+        | FEValue v ->
+            match (v, exprType) with
+                | (FStringArray _, FETArray _) -> ()
+                | (FString _, FETScalar _) -> ()
+                | (FInt _, FETScalar _) -> ()
+                | (FBool _, FETScalar _) -> ()
+                | (FNull, _) -> ()
+                | _ -> failwith "Casting cannot be performed between arrays and scalars"
+        | _ -> failwith <| sprintf "Casting can only be performed on values: %O :: %O" expr exprType
 
 %}
 
@@ -86,6 +105,9 @@ let private splitResults (results : AttributedResult seq) : ParsedAttributeMap *
 %token IN
 %token IS
 %token NOT
+%token FOR
+%token UPDATE
+%token OF
 
 // Types
 %token INT_TYPE
@@ -103,8 +125,8 @@ let private splitResults (results : AttributedResult seq) : ParsedAttributeMap *
 %left OR
 %left AND
 %right NOT
-%right EQ NOT_EQ
-%left LESS GREATER LESS_EQ GREATER_EQ
+%nonassoc EQ NOT_EQ
+%nonassoc LESS GREATER LESS_EQ GREATER_EQ
 %nonassoc LIKE
 %nonassoc IN
 %nonassoc IS
@@ -130,13 +152,17 @@ fieldType : FieldType EOF { $1 }
 // Expressions
 
 ViewExpr:
-  | MaybeArguments SELECT AttributedResults FromClause {
+  | MaybeArguments SELECT AttributedResults FromClause UpdateClause {
       let (attributes, results) = splitResults $3
-      { arguments = $1; attributes = attributes; results = results; clause = $4 }
+      { arguments = $1; attributes = attributes; results = results; clause = $4; updateName = $5 }
   }
 
+UpdateClause:
+  |                         { None }
+  | FOR UPDATE OF EntityRef { Some $4 }
+
 MaybeArguments:
-  |                                            { [] }
+  |                                            { Map.empty }
   | LEFT_PAREN ArgumentsList RIGHT_PAREN ARROW { $2 }
 
 ArgumentsList:
@@ -148,7 +174,7 @@ ArgumentsListNonEmpty:
   | Argument                             { [ $1 ] }
 
 Argument:
-  | FieldRef ArgumentFieldType { ($2, $1) }
+  | ARGUMENT_ID ArgumentFieldType { ($1, $2) }
 
 FromClause:
   | FROM FromExpr WhereClause OrderByClause { { from = $2; where = $3; orderBy = $4 } }
@@ -174,7 +200,7 @@ AttributedResultsNonEmpty:
 
 AttributedResult:
   | MaybeAttributeMap Result { AResult ($1, $2) }
-  | AT ID EQ FieldExpr       { AAttribute ($2, $4) }
+  | AT ID EQ FieldExpr       { AAttribute (FunQLName $2, $4) }
 
 MaybeAttributeMap:
   |                                                { Map.empty }
@@ -182,15 +208,18 @@ MaybeAttributeMap:
   | LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
 
 AttributeValuesNonEmpty:
-  | ID EQ FieldExpr                               { [($1, $3)] }
-  | ID EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
+  | ID EQ FieldExpr                               { [(FunQLName $1, $3)] }
+  | ID EQ FieldExpr COMMA AttributeValuesNonEmpty { (FunQLName $1, $3) :: $5 }
 
 Result:
-  | FieldRef        { { name = $1.name; expr = FEColumn $1 } }
-  | FieldExpr AS ID { { name = $3; expr = $1 } }
+  | FieldRef {
+      let fieldRef = $1 : FieldRef
+      { name = fieldRef.name; expression = FEColumn fieldRef }
+  }
+  | FieldExpr AS ID { { name = FunQLName $3; expression = $1 } }
 
 QuerySource:
-  | LEFT_PAREN Query RIGHT_PAREN AS ID { FSubExpr ($5, $2) }
+  | LEFT_PAREN Query RIGHT_PAREN AS ID { FSubExpr (FunQLName $5, $2) }
   | EntityRef                          { FEntity ($1) }
 
 JoinType:
@@ -201,7 +230,7 @@ JoinType:
   | RIGHT { Right }
 
 JoinChain:
-  | { [] }
+  |                                                  { [] }
   | JoinType JOIN QuerySource ON FieldExpr JoinChain { ($1, $3, $5) :: $6 }
 
 FromExpr:
@@ -209,7 +238,7 @@ FromExpr:
 
 EntityRef:
   | ID DOT ID { { schema = Some (FunQLName $1); name = FunQLName $3; } }
-  | ID        { { schema = None; name = $1; } }
+  | ID        { { schema = None; name = FunQLName $1; } }
 
 FieldRef:
   | ID DOT ID DOT ID { { entity = Some { schema = Some (FunQLName $1); name = FunQLName $3 }; name = FunQLName $5 } }
@@ -228,55 +257,61 @@ InExpr:
   | LEFT_PAREN InList RIGHT_PAREN { List.toArray $2 }
 
 FieldExpr:
-  | FieldExpr AND FieldExpr              { FEAnd ($1, $3) }
-  | FieldExpr OR FieldExpr               { FEOr ($1, $3) }
-  | FieldExpr EQ FieldExpr               { FEEq ($1, $3) }
-  | FieldExpr NOT_EQ FieldExpr           { FENotEq ($1, $3) }
-  | FieldExpr LIKE STRING                { FELike ($1, $3) }
-  | FieldExpr NOT LIKE STRING            { FENotLike ($1, $4) }
-  | FieldExpr IN InExpr                  { FEIn ($1, $3) }
-  | FieldExpr NOT IN InExpr              { FENotIn ($1, $4) }
-  | FieldExpr LESS FieldExpr             { FELess ($1, $3) }
-  | FieldExpr LESS_EQ FieldExpr          { FELessEq ($1, $3) }
-  | FieldExpr GREATER FieldExpr          { FEGreater ($1, $3) }
-  | FieldExpr GREATER_EQ FieldExpr       { FEGreaterEq ($1, $3) }
-  | FieldRef                             { FEColumn $1 }
-  | ARGUMENT_ID                          { FEPlaceholder $1 }
-  | Value                                { FEValue $1 }
-  | LEFT_PAREN FieldExpr RIGHT_PAREN     { $2 }
+  | FieldExpr OR FieldExpr  { FEOr ($1, $3) }
+  | FieldExpr AND FieldExpr { FEAnd ($1, $3) }
+  | NOT FieldExpr           { FENot $2 }
+  | FieldExprEq             { $1 }
 
-IntArray:
-  |                  { [||] }
-  | IntArrayNonEmpty { List.toArray $1 }
+FieldExprEq:
+  | FieldExprVal EQ FieldExprVal         { FEEq ($1, $3) }
+  | FieldExprVal NOT_EQ FieldExprVal     { FENotEq ($1, $3) }
+  | FieldExprVal LESS FieldExprVal       { FELess ($1, $3) }
+  | FieldExprVal LESS_EQ FieldExprVal    { FELessEq ($1, $3) }
+  | FieldExprVal GREATER FieldExprVal    { FEGreater ($1, $3) }
+  | FieldExprVal GREATER_EQ FieldExprVal { FEGreaterEq ($1, $3) }
+  | FieldExprVal LIKE FieldExprVal       { FELike ($1, $3) }
+  | FieldExprVal NOT LIKE FieldExprVal   { FENotLike ($1, $4) }
+  | FieldExprVal IN InExpr               { FEIn ($1, $3) }
+  | FieldExprVal NOT IN InExpr           { FENotIn ($1, $4) }
+  | FieldExprVal                         { $1 }
+
+FieldExprVal:
+  | FieldExprVal DOUBLE_COLON FieldExprType { restrictCast $1 $3; FECast ($1, $3) }
+  | FieldRef                                { FEColumn $1 }
+  | ARGUMENT_ID                             { FEPlaceholder $1 }
+  | Value                                   { FEValue $1 }
+  | LEFT_PAREN FieldExpr RIGHT_PAREN        { $2 }
+
+IntArrayList:
+  | INT                    { [ $1 ] }
+  | INT COMMA IntArrayList { $1 :: $3 }
 
 IntArrayNonEmpty:
-  | INT                        { [ $1 ] }
-  | INT COMMA IntArrayNonEmpty { $1 :: $3 }
+  | IntArrayList { List.toArray $1 }
 
-StringArray:
-  |                     { [||] }
-  | StringArrayNonEmpty { List.toArray $1 }
+StringArrayList:
+  | STRING                       { [ $1 ] }
+  | STRING COMMA StringArrayList { $1 :: $3 }
 
 StringArrayNonEmpty:
-  | STRING                           { [ $1 ] }
-  | STRING COMMA StringArrayNonEmpty { $1 :: $3 }
+  | StringArrayList { List.toArray $1 }
 
-BoolArray:
-  |                   { [||] }
-  | BoolArrayNonEmpty { List.toArray $1 }
+BoolArrayList:
+  | BOOL                     { [ $1 ] }
+  | BOOL COMMA BoolArrayList { $1 :: $3 }
 
 BoolArrayNonEmpty:
-  | BOOL                         { [ $1 ] }
-  | BOOL COMMA BoolArrayNonEmpty { $1 :: $3 }
+  | BoolArrayList { List.toArray $1 }
 
 Value:
-  | INT                                    { FInt $1 }
-  | STRING                                 { FString $1 }
-  | BOOL                                   { FBool $1 }
-  | LEFT_BRACKET IntArray    RIGHT_BRACKET { FIntArray $2 }
-  | LEFT_BRACKET StringArray RIGHT_BRACKET { FStringArray $2 }
-  | LEFT_BRACKET BoolArray   RIGHT_BRACKET { FBoolArray $2 }
-  | NULL                                   { FNull }
+  | INT                                            { FInt $1 }
+  | STRING                                         { FString $1 }
+  | BOOL                                           { FBool $1 }
+  | LEFT_BRACKET RIGHT_BRACKET                     { FStringArray [||] }
+  | LEFT_BRACKET StringArrayNonEmpty RIGHT_BRACKET { FStringArray $2 }
+  | LEFT_BRACKET IntArrayNonEmpty    RIGHT_BRACKET { FIntArray $2 }
+  | LEFT_BRACKET BoolArrayNonEmpty   RIGHT_BRACKET { FBoolArray $2 }
+  | NULL                                           { FNull }
 
 OrderByClause:
   |                      { [||] }
@@ -307,14 +342,14 @@ FieldExprType:
 
 FieldType:
   | FieldExprType                                                   { FTType $1 }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference $3 None }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef COMMA FieldExpr RIGHT_PAREN { FTReference $3 (Some $5) }
-  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> setOfSeqUnique) }
+  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference ($3, None) }
+  | REFERENCE_TYPE LEFT_PAREN EntityRef COMMA FieldExpr RIGHT_PAREN { FTReference ($3, Some $5) }
+  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 ArgumentFieldType:
   | FieldExprType                                                   { FTType $1 }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference $3 None }
-  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> setOfSeqUnique) }
+  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference ($3, None) }
+  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 EnumList:
   | STRING                { [ $1 ] }

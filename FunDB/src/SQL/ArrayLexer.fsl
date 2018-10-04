@@ -1,6 +1,6 @@
 {
 
-module internal FunWithFlags.FunDB.SQL.Array.Lexer
+module FunWithFlags.FunDB.SQL.Array.Lexer
 
 open System
 open Microsoft.FSharp.Text.Lexing
@@ -14,7 +14,7 @@ open FunWithFlags.FunDB.SQL.Array
 let escapes = "\\" ['\\' 't' 'r' 'n']
 
 rule tokenizeArray = parse
-    | "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.STRING (escapedString '\"' lexbuf) }
+    | "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\"" { Parser.STRING (escapedString '\"' 0 lexbuf) }
     | "{"              { Parser.LEFT_BRACE }
     | "}"              { Parser.RIGHT_BRACE }
     | ","              { Parser.COMMA }

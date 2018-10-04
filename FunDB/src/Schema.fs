@@ -1,208 +1,319 @@
 module FunWithFlags.FunDB.Schema
 
-open System.Collections.Generic
+open System
+open System.Linq
 open Microsoft.EntityFrameworkCore
-open System.ComponentModel.DataAnnotations.Schema
 open BCrypt.Net
 
 open FunWithFlags.FunDB.Layout.System
 
-type DatabaseContext (options : DbContextOptions<DatabaseContext>) =
+type SystemContext (options : DbContextOptions<SystemContext>) =
     inherit DbContext (options)
 
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"Name\""|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> ''")>]
-    member val Schemas = null : DbSet<Schema> with get, set
+    // All of this shit is because of how EF Core works.
+    [<DefaultValue>]
+    val mutable state : DbSet<StateValue>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"Name"|])>]
+    [<CheckConstraint("NotEmpty", "\"Name\" <> ''")>]
+    member this.State
+        with get () = this.state
+        and set value = this.state <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"SchemaId\"", "\"Name\""|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> ''")>]
-    member val Entities = null : DbSet<Entity> with get, set
+    [<DefaultValue>]
+    val mutable schemas : DbSet<Schema>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"Name"|])>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%__%' AND \"Name\" <> ''")>]
+    member this.Schemas
+        with get () = this.schemas
+        and set value = this.schemas <- value
+    
+    [<DefaultValue>]
+    val mutable entities : DbSet<Entity>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"SchemaId"; "Name"|])>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%__%' AND \"Name\" <> ''")>]
+    [<CheckConstraint("CorrectMainField", "\"MainField\" <> '' AND \"MainField\" <> 'Id'")>]
+    member this.Entities
+        with get () = this.entities
+        and set value = this.entities <- value
+    
+    [<DefaultValue>]
+    val mutable columnFields : DbSet<ColumnField>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
+    member this.ColumnFields
+        with get () = this.columnFields
+        and set value = this.columnFields <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"EntityId\"", "\"Name\""|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
-    member val ColumnFields = null : DbSet<ColumnField> with get, set
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"EntityId\"", "\"Name\""|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
-    member val ComputedFields = null : DbSet<ComputedField> with get, set
+    [<DefaultValue>]
+    val mutable computedFields : DbSet<ComputedField>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
+    member this.ComputedFields
+        with get () = this.computedFields
+        and set value = this.computedFields <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"EntityId\"", "\"Name\""|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> ''")>]
-    [<CheckConstraint("NotEmpty", "\"Expressions\" <> '{}'")>]
-    member val UniqueConstraints = null : DbSet<UniqueConstraint> with get, set
+    [<DefaultValue>]
+    val mutable uniqueConstraints : DbSet<UniqueConstraint>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
+    [<CheckConstraint("NotEmpty", "\"Columns\" <> ([] :: array(string))")>]
+    member this.UniqueConstraints
+        with get () = this.uniqueConstraints
+        and set value = this.uniqueConstraints <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"EntityId\"", "\"Name\""|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\_\\_%' AND \"Name\" <> ''")>]
-    member val CheckConstraints = null : DbSet<CheckConstraint> with get, set
+    [<DefaultValue>]
+    val mutable checkConstraints : DbSet<CheckConstraint>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
+    member this.CheckConstraints
+        with get () = this.checkConstraints
+        and set value = this.checkConstraints <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"Name\""|])>]
+    [<DefaultValue>]
+    val mutable userViews : DbSet<UserView>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" <> ''")>]
-    member val UserViews = null : DbSet<UserView> with get, set
+    member this.UserViews
+        with get () = this.userViews
+        and set value = this.userViews <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"Name\""|])>]
+    [<DefaultValue>]
+    val mutable users : DbSet<User>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" <> ''")>]
-    member val Users = null : DbSet<User> with get, set
+    member this.Users
+        with get () = this.users
+        and set value = this.users <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Name", [|"\"Name\""|])>]
+    [<DefaultValue>]
+    val mutable roles : DbSet<Role>
+    [<Entity("Name")>]
+    [<UniqueConstraint("Name", [|"Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" <> ''")>]
-    member val Roles = null : DbSet<Role> with get, set
+    member this.Roles
+        with get () = this.roles
+        and set value = this.roles <- value
 
-    [<Entity>]
+    [<DefaultValue>]
+    val mutable roleParents : DbSet<RoleParent>
+    [<Entity("Id")>]
     [<CheckConstraint("NotRecursive", "\"ParentId\" <> \"Id\"")>]
-    member val RoleParents = null : DbSet<RoleParent> with get, set
+    member this.RoleParents
+        with get () = this.roleParents
+        and set value = this.roleParents <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Entry", [|"\"RoleId\"", "\"EntityId\""|])>]
-    member val RoleEntities = null : DbSet<RoleEntity> with get, set
+    [<DefaultValue>]
+    val mutable roleEntities : DbSet<RoleEntity>
+    [<Entity("Id")>]
+    [<UniqueConstraint("Entry", [|"RoleId"; "EntityId"|])>]
+    member this.RoleEntities
+        with get () = this.roleEntities
+        and set value = this.roleEntities <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Entry", [|"\"RoleId\"", "\"FieldId\""|])>]
-    member val RoleFields = null : DbSet<RoleField> with get, set
+    [<DefaultValue>]
+    val mutable roleColumnFields : DbSet<RoleColumnField>
+    [<Entity("Id")>]
+    [<UniqueConstraint("Entry", [|"RoleId"; "ColumnFieldId"|])>]
+    member this.RoleColumnFields
+        with get () = this.roleColumnFields
+        and set value = this.roleColumnFields <- value
 
-    [<Entity>]
-    [<UniqueConstraint("Entry", [|"\"UserId\"", "\"RoleId\""|])>]
-    member val UserRoles = null : DbSet<UserRole> with get, set
+    [<DefaultValue>]
+    val mutable userRoles : DbSet<UserRole>
+    [<Entity("Id")>]
+    [<UniqueConstraint("Entry", [|"UserId"; "RoleId"|])>]
+    member this.UserRoles
+        with get () = this.userRoles
+        and set value = this.userRoles <- value
 
-    override this.OnModelCreating (modelBuilder : ModelBuilder) =
-        modelBuilder.Entity<Field>()
-            .HasDiscriminator<string>("SubEntity")
-            .HasValue<ColumnField>("ColumnField")
-            .HasValue<ComputedField>("ComputedField")
+and
+    [<AllowNullLiteral>]
+    StateValue () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
+        [<ColumnField("string")>]
+        member val Value = "" with get, set
 
-and Schema () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
+and
+    [<AllowNullLiteral>]
+    Schema () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
 
-    member val Entities = null : List<Entity> with get, set
+        member val Entities = ResizeArray<Entity>() with get, set
 
-and Entity () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
-    [<ColumnField("reference(\"Schemas\")", Nullable=true)>]
-    member val SchemaId = null : Nullable<int> with get, set
-    member val Schema = null : Schema with get, set
+and
+    [<AllowNullLiteral>]
+    Entity () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
+        [<ColumnField("reference(\"Schemas\")", Nullable=true)>]
+        member val SchemaId = Nullable () : Nullable<int> with get, set
+        member val Schema = null : Schema with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val MainField = "" with get, set
     
-    member val ColumnFields = null : List<ColumnField> with get, set
-    member val ComputedFields = null : List<ComputedField> with get, set
-    member val UniqueConstraints = null : List<UniqueConstraint> with get, set
-    member val CheckConstraints = null : List<CheckConstraint> with get, set
+        member val ColumnFields = ResizeArray<ColumnField>() with get, set
+        member val ComputedFields = ResizeArray<ComputedField>() with get, set
+        member val UniqueConstraints = ResizeArray<UniqueConstraint>() with get, set
+        member val CheckConstraints = ResizeArray<CheckConstraint>() with get, set
 
-and ColumnField () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
-    [<ColumnField("reference(\"Entities\")")>]
-    member val EntityId = 0 with get, set
-    member val Entity = null : Entity with get, set
-    [<ColumnField("string")>]
-    member val Type = "" with get, set
-    [<ColumnField("string", Nullable=true)>]
-    member val Default = null : string with get, set
-    [<ColumnField("bool", Default=Some("FALSE"))>]
-    member val Nullable = false with get, set
+and
+    [<AllowNullLiteral>]
+    ColumnField () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
+        [<ColumnField("reference(\"Entities\")")>]
+        member val EntityId = 0 with get, set
+        member val Entity = null : Entity with get, set
+        [<ColumnField("string")>]
+        member val Type = "" with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val Default = null : string with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val Nullable = false with get, set
 
-and ComputedField () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
-    [<ColumnField("reference(\"Entities\")")>]
-    member val EntityId = 0 with get, set
-    member val Entity = null : Entity with get, set
-    [<ColumnField("string")>]
-    member val Expression = "" with get, set
+and
+    [<AllowNullLiteral>]
+    ComputedField () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
+        [<ColumnField("reference(\"Entities\")")>]
+        member val EntityId = 0 with get, set
+        member val Entity = null : Entity with get, set
+        [<ColumnField("string")>]
+        member val Expression = "" with get, set
 
-and UniqueConstraint () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
-    [<ColumnField("reference(\"Entities\")")>]
-    member val EntityId = 0 with get, set
-    member val Entity = null : Entity with get, set
-    [<ColumnField("array(string)")>]
-    member val Columns = [||] : string array with get, set
+and
+    [<AllowNullLiteral>]
+    UniqueConstraint () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
+        [<ColumnField("reference(\"Entities\")")>]
+        member val EntityId = 0 with get, set
+        member val Entity = null : Entity with get, set
+        [<ColumnField("array(string)")>]
+        member val Columns = [||] : string array with get, set
 
-and CheckConstraint () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
-    [<ColumnField("reference(\"Entities\")")>]
-    member val EntityId = 0 with get, set
-    member val Entity = null : Entity with get, set
-    [<ColumnField("string")>]
-    member val Expression = "" with get, set
+and
+    [<AllowNullLiteral>]
+    CheckConstraint () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
+        [<ColumnField("reference(\"Entities\")")>]
+        member val EntityId = 0 with get, set
+        member val Entity = null : Entity with get, set
+        [<ColumnField("string")>]
+        member val Expression = "" with get, set
 
-and UserView () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
-    [<ColumnField("string")>]
-    member val Query = "" with get, set
+and
+    [<AllowNullLiteral>]
+    UserView () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
+        [<ColumnField("string")>]
+        member val Query = "" with get, set
 
-and User () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
-    [<ColumnField("string")>]
-    member val PasswordHash = "" with get, set
+and
+    [<AllowNullLiteral>]
+    User () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
+        [<ColumnField("string")>]
+        member val PasswordHash = "" with get, set
     
-    member this.CheckPassword (password) =
-        BCrypt.Verify(password, this.PasswordHash)
+        member this.CheckPassword (password) =
+            BCrypt.Verify(password, this.PasswordHash)
 
-    member this.Password
-        with set (value) =
-            this.PasswordHash <- BCrypt.HashPassword(value)
+        member this.Password
+            with set (value) =
+                this.PasswordHash <- BCrypt.HashPassword(value)
 
-and Role () =
-    member val Id = 0 with get, set
-    [<ColumnField("string")>]
-    member val Name = "" with get, set
+and
+    [<AllowNullLiteral>]
+    Role () =
+        member val Id = 0 with get, set
+        [<ColumnField("string")>]
+        member val Name = "" with get, set
 
-    member val Parents = null : List<Role> with get, set
-    member val Entities = null : List<RoleEntity> with get, set
+        member val Parents = ResizeArray<Role>() with get, set
+        member val Entities = ResizeArray<RoleEntity>() with get, set
 
-and RoleParent () =
-    member val Id = 0 with get, set
-    [<ColumnField("reference(\"Roles\")")>]
-    member val ParentId = 0 with get, set
-    member val Parent = null : Role with get, set
+and
+    [<AllowNullLiteral>]
+    RoleParent () =
+        member val Id = 0 with get, set
+        [<ColumnField("reference(\"Roles\")")>]
+        member val ParentId = 0 with get, set
+        member val Parent = null : Role with get, set
 
-and RoleEntity () =
-    member val Id = 0 with get, set
-    [<ColumnField("reference(\"Roles\")")>]
-    member val RoleId = 0 with get, set
-    member val Role = null : Role with get, set
-    [<ColumnField("reference(\"Entities\")")>]
-    member val EntityId = 0 with get, set
-    member val Entity = null : Entity with get, set
-    [<ColumnField("bool", Default=Some("TRUE"))>]
-    member val ReadOnly = true with get, set
-    [<ColumnField("string", Nullable=true)>]
-    member val Where = null : string with get, set
+and
+    [<AllowNullLiteral>]
+    RoleEntity () =
+        member val Id = 0 with get, set
+        [<ColumnField("reference(\"Roles\")")>]
+        member val RoleId = 0 with get, set
+        member val Role = null : Role with get, set
+        [<ColumnField("reference(\"Entities\")")>]
+        member val EntityId = 0 with get, set
+        member val Entity = null : Entity with get, set
+        [<ColumnField("bool", Default="TRUE")>]
+        member val ReadOnly = true with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val Where = null : string with get, set
 
-and RoleField () =
-    member val Id = 0 with get, set
-    [<ColumnField("reference(\"Roles\")")>]
-    member val RoleId = 0 with get, set
-    member val Role = null : Role with get, set
-    [<ColumnField("reference(\"Fields\")")>]
-    member val FieldId = 0 with get, set
-    member val Field = null : Field with get, set
+and
+    [<AllowNullLiteral>]
+    RoleColumnField () =
+        member val Id = 0 with get, set
+        [<ColumnField("reference(\"Roles\")")>]
+        member val RoleId = 0 with get, set
+        member val Role = null : Role with get, set
+        [<ColumnField("reference(\"ColumnFields\")")>]
+        member val ColumnFieldId = 0 with get, set
+        member val ColumnField = null : ColumnField with get, set
+    
+and
+    [<AllowNullLiteral>]
+    UserRole () =
+        member val Id = 0 with get, set
+        [<ColumnField("reference(\"Users\")")>]
+        member val UserId = 0 with get, set
+        member val User = null : User with get, set
+        [<ColumnField("reference(\"Roles\")")>]
+        member val RoleId = 0 with get, set
+        member val Role = null : Role with get, set
 
-and UserRole () =
-    member val Id = 0 with get, set
-    [<ColumnField("reference(\"Users\")")>]
-    member val UserId = 0 with get, set
-    member val User = null : User with get, set
-    [<ColumnField("reference(\"Role\")")>]
-    member val RoleId = 0 with get, set
-    member val Role = null : Role with get, set
+let getLayoutObjects (db : SystemContext) : Schema seq * Entity seq =
+    let schemas =
+        db.Schemas
+            .Include(fun sch -> sch.Entities)
+            .Include("Entities.ColumnFields")
+            .Include("Entities.ComputedFields")
+            .Include("Entities.UniqueConstraints")
+            .Include("Entities.CheckConstraints")
+    let systemEntities =
+        db.Entities.Where(fun ent -> not ent.SchemaId.HasValue)
+            .Include(fun ent -> ent.ColumnFields)
+            .Include(fun ent -> ent.ComputedFields)
+            .Include(fun ent -> ent.UniqueConstraints)
+            .Include(fun ent -> ent.CheckConstraints)
+    (upcast schemas, upcast systemEntities)

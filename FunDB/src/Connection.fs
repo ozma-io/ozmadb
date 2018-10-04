@@ -1,0 +1,36 @@
+module FunWithFlags.FunDB.Connection
+
+open System
+open Microsoft.EntityFrameworkCore
+open Npgsql
+
+open FunWithFlags.FunDB.Schema
+open FunWithFlags.FunDB.SQL.Query
+
+type DatabaseConnection (connectionString : string) =
+    let connection = new NpgsqlConnection(connectionString)
+    do
+        connection.Open()
+    let query = new QueryConnection(connection)
+    let system =
+        let systemOptions =
+            (DbContextOptionsBuilder<SystemContext> ())
+                .UseNpgsql(connection)
+        new SystemContext(systemOptions.Options)
+    let transaction = connection.BeginTransaction()
+    do
+        ignore <| system.Database.UseTransaction(transaction)
+    
+    interface IDisposable with
+        member this.Dispose () =
+            transaction.Dispose()
+            system.Dispose()
+            connection.Dispose()
+
+    member this.Commit () =
+        transaction.Commit()
+    
+    member this.Query = query
+    member this.System = system
+    member this.Connection = connection
+    member this.Transaction = transaction

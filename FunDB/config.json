@@ -1,0 +1,6 @@
+{
+  "connectionString": "Host=localhost; Username=app",
+  "serverCert": "example.pfx",
+  "preloadLayout": "funapp_layout.json",
+  "expirationTime": 86400
+}

@@ -1,26 +1,33 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputName>FunWithFlags.FunDB</OutputName>
+    <OutputName>FunDB</OutputName>
     <TargetFramework>netcoreapp2.1</TargetFramework>
 
     <!-- Store generated parsers in intermediate build directory -->
     <RootIntermediateOutputPath>obj</RootIntermediateOutputPath>
     <FsLexOutputFolder>$(RootIntermediateOutputPath)/gen/</FsLexOutputFolder>
     <FsYaccOutputFolder>$(RootIntermediateOutputPath)/gen/</FsYaccOutputFolder>
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
-  <ItemGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <WarningLevel>5</WarningLevel>
+    <NoWarn>FS0052</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>    
     <Compile Include="src/Utils.fs" />
+    <Compile Include="src/Json.fs" />
     <Compile Include="src/Parsing.fs" />
 
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/AST.fs" />
-    <FsYacc Include="src/SQL/SQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parser --internal" />
+    <FsYacc Include="src/SQL/SQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parser" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParser.fs" />
     <FsLex Include="src/SQL/SQLLexer.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLLexer.fs" />
-    <FsYacc Include="src/SQL/ArrayParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Array.Parser --internal" />
+    <FsYacc Include="src/SQL/ArrayParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Array.Parser" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayParser.fs" />
     <FsLex Include="src/SQL/ArrayLexer.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayLexer.fs" />
@@ -30,24 +37,39 @@
 
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />
-
-    <Compile Include="src/Layout/Source.fs" />
-    <Compile Include="src/Layout/Types.fs" />
-    <Compile Include="src/Layout/Resolve.fs" />
-
-    <Compile Include="src/Layout/System.fs" />
-    <Compile Include="src/Schema.fs" />
-    <Compile Include="src/Layout/Schema.fs" />
-
-    <FsYacc Include="src/FunQL/FunQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parser --internal" />
+    <FsYacc Include="src/FunQL/FunQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parser" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParser.fs" />
     <FsLex Include="src/FunQL/FunQLLexer.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLexer.fs" />
+    
+    <Compile Include="src/Layout/Types.fs" />
+    
+    <Compile Include="src/Permissions/Types.fs" />
+
     <Compile Include="src/FunQL/View.fs" />
     <Compile Include="src/FunQL/Compiler.fs" />
-    <Compile Include="src/FunQL/Meta.fs" />
     <Compile Include="src/FunQL/Query.fs" />
+    <Compile Include="src/FunQL/Result.fs" />
 
+    <Compile Include="src/Layout/Source.fs" />
+    <Compile Include="src/Layout/Resolve.fs" />
+    <Compile Include="src/Layout/System.fs" />
+    <Compile Include="src/Schema.fs" />
+    <Compile Include="src/Layout/Schema.fs" />
+    <Compile Include="src/Layout/Render.fs" />
+    <Compile Include="src/Layout/Update.fs" />
+    <Compile Include="src/Layout/Meta.fs" />
+    <Compile Include="src/Layout/Json.fs" />
+
+    <Compile Include="src/Permissions/Schema.fs" />
+
+    <Compile Include="src/Connection.fs" />
+    <Compile Include="src/Context.fs" />
+
+    <Compile Include="src/API/Utils.fs" />
+    <Compile Include="src/API/Auth.fs" />
+    <Compile Include="src/API/View.fs" />
+    
     <Compile Include="src/Program.fs" />
   </ItemGroup>
 
@@ -57,6 +79,10 @@
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.1.*" />
     <PackageReference Include="BCrypt.Net-Next" Version="3.1.*" />
+    <PackageReference Include="Suave" Version="2.5.*" />
+    <PackageReference Include="jose-jwt" Version="2.4.*" />
+
+    <ProjectReference Include="../3rdparty/Newtonsoft.Json/Src/Newtonsoft.Json/Newtonsoft.Json.csproj" />
   </ItemGroup>
 
 </Project>

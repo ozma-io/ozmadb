@@ -26,7 +26,7 @@ let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta
 
 let private migrateBuildTable (table : TableRef) (fromMeta : TableMeta) (toMeta : TableMeta) : MigrationPlan =
     seq { for KeyValue (columnName, columnMeta) in toMeta.columns do
-              let objRef = { table = table; name = columnName }
+              let objRef = { table = table; name = columnName } : ResolvedColumnRef
               match Map.tryFind columnName fromMeta.columns with
                   | None -> yield SOCreateColumn (objRef, columnMeta)
                   | Some oldColumnMeta ->
@@ -37,7 +37,8 @@ let private migrateBuildTable (table : TableRef) (fromMeta : TableMeta) (toMeta 
 
           for KeyValue (columnName, columnMeta) in fromMeta.columns do
               if not (Map.containsKey columnName toMeta.columns) then
-                  yield SODeleteColumn { table = table; name = columnName }
+                  let objRef = { table = table; name = columnName } : ResolvedColumnRef
+                  yield SODeleteColumn objRef
         }
 
 let private migrateBuildSchema (schema : SchemaName option) (fromMeta : SchemaMeta) (toMeta : SchemaMeta) : MigrationPlan =

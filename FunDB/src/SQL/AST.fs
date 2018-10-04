@@ -3,10 +3,10 @@ module FunWithFlags.FunDB.SQL.AST
 // SQL module does not attempt to restrict SQL in any way apart from type safety for values (explicit strings, integers etc.).
 
 open System
-open System.Globalization
-open System.Runtime.InteropServices
+open Newtonsoft.Json
 
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.SQL.Utils
 
 type SQLName = SQLName of string
@@ -59,13 +59,13 @@ type ResolvedColumnRef =
             member this.ToSQLString () = this.ToSQLString ()
 
 type ColumnRef =
-    { maybeTable : TableRef option
+    { table : TableRef option
       name : ColumnName
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            match this.maybeTable with
+            match this.table with
                 | None -> this.name.ToSQLString()
                 | Some entity -> sprintf "%s.%s" (entity.ToSQLString()) (this.name.ToSQLString())
 
@@ -87,18 +87,18 @@ let rec mapArrayValue (func : 'a -> 'b) : ArrayValue<'a> -> ArrayValue<'b> = fun
 and mapValueArray (func : 'a -> 'b) (vals : ValueArray<'a>) : ValueArray<'b> =
     Array.map (mapArrayValue func) vals
 
-type Value =
+type [<JsonConverter(typeof<ValueConverter>)>] Value =
     | VInt of int
     | VString of string
     | VRegclass of SchemaObject
     | VBool of bool
-    | VDateTime of DateTime
-    | VDate of DateTime
+    | VDateTime of DateTimeOffset
+    | VDate of DateTimeOffset
     | VIntArray of ValueArray<int>
     | VStringArray of ValueArray<string>
     | VBoolArray of ValueArray<bool>
-    | VDateTimeArray of ValueArray<DateTime>
-    | VDateArray of ValueArray<DateTime>
+    | VDateTimeArray of ValueArray<DateTimeOffset>
+    | VDateArray of ValueArray<DateTimeOffset>
     | VRegclassArray of ValueArray<SchemaObject>
     | VNull
     with
@@ -119,18 +119,53 @@ type Value =
                 | VString s -> sprintf "E%s" (renderSqlString s)
                 | VRegclass rc -> sprintf "E%s :: regclass" (rc.ToSQLString() |> renderSqlString)
                 | VBool b -> renderSqlBool b
-                | VDateTime dt -> sprintf "%s :: timestamp" (dt |> renderSqlDateTime |> renderSqlString)
+                | VDateTime dt -> sprintf "%s :: timestamp with time zone" (dt |> renderSqlDateTime |> renderSqlString)
                 | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
                 | VIntArray vals -> renderArray renderSqlInt "int4" vals
                 | VStringArray vals -> renderArray escapeDoubleQuotes "text" vals
                 | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-                | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeDoubleQuotes) "timestamp" vals
+                | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeDoubleQuotes) "timestamp with time zone" vals
                 | VDateArray vals -> renderArray (renderSqlDate >> escapeDoubleQuotes) "date" vals
                 | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
                 | VNull -> "NULL"
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
+
+and ValueConverter () =
+    inherit JsonConverter<Value> ()
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : Value =
+        raise <| new NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, value : Value, serializer : JsonSerializer) : unit =
+        let serialize value = serializer.Serialize(writer, value)
+
+        let rec convertValueArray (convertFunc : 'a -> 'b) (vals : ValueArray<'a>) : obj array =
+            let convertValue = function
+                | AVArray vals -> convertValueArray convertFunc vals :> obj
+                | AVValue v -> convertFunc v :> obj
+                | AVNull -> null
+            Array.map convertValue vals
+        let serializeArray (convertFunc : 'a -> 'b) (vals : ValueArray<'a>) : unit =
+            serialize <| convertValueArray convertFunc vals
+
+        match value with
+            | VInt i -> serialize i
+            | VString s -> serialize s
+            | VBool b -> serialize b
+            | VDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
+            | VDate dt -> serialize <| dt.ToUnixTimeSeconds()
+            | VRegclass rc -> serialize <| string rc
+            | VIntArray vals -> serializeArray id vals
+            | VStringArray vals -> serializeArray id vals
+            | VBoolArray vals -> serializeArray id vals
+            | VDateTimeArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+            | VDateArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+            | VRegclassArray vals -> serializeArray string vals
+            | VNull -> serialize null
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
 // Used when interpreting query results and for compiling FunQL.
@@ -149,7 +184,7 @@ type SimpleType =
                 | STInt -> "int4"
                 | STString -> "text"
                 | STBool -> "bool"
-                | STDateTime -> "timestamp"
+                | STDateTime -> "timestamp with time zone"
                 | STDate -> "date"
                 | STRegclass -> "regclass"
 
@@ -173,7 +208,7 @@ let findSimpleType (str : SQLName) : SimpleType option =
         | "regclass" -> Some STRegclass
         | _ -> None
 
-type ValueType<'t> when 't :> ISQLString =
+type [<JsonConverter(typeof<UnionConverter>)>] ValueType<'t> when 't :> ISQLString =
     | VTScalar of 't
     | VTArray of 't
     with
@@ -361,7 +396,7 @@ type FromExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and SelectedColumn =
-    | SCColumn of ColumnName
+    | SCColumn of ColumnRef
     | SCExpr of ColumnName * FullValueExpr
     with
         override this.ToString () = this.ToSQLString()
@@ -391,7 +426,7 @@ and FromClause =
             let orderByStr =
                 if Array.isEmpty this.orderBy
                 then ""
-                else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (ord.ToSQLString()) (expr.ToSQLString())) |> String.concat ", ")
+                else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToSQLString()) (ord.ToSQLString())) |> String.concat ", ")
             let limitStr =
                 match this.limit with
                     | Some n -> sprintf "LIMIT %i" n
@@ -560,7 +595,7 @@ type SchemaOperation =
                                 let myCols = cols |> Seq.map (fun (name, refName) -> name.ToSQLString()) |> String.concat ", "
                                 let refCols = cols |> Seq.map (fun (name, refName) -> refName.ToSQLString()) |> String.concat ", "
                                 sprintf "FOREIGN KEY (%s) REFERENCES %s (%s)" myCols (ref.ToSQLString()) refCols
-                            | CMCheck expr -> sprintf "CHECK %s" (expr.ToSQLString())
+                            | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
                     sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) constraintStr
                 | SODeleteConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
                 | SOCreateColumn (col, pars) ->

@@ -1,35 +1,88 @@
 module FunWithFlags.FunDB.FunQL.Query
 
+open System
+open Newtonsoft.Json
+
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Compiler
-open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.SQL
 open FunWithFlags.FunDB.SQL.Query
 
-type ExecutedAttributeMap = AttributeMap<ValueType * Value>
+type CombinedAttributeMap = Map<AttributeName, AST.SimpleValueType * AST.Value>
+type ExecutedAttributeMap = Map<AttributeName, AST.Value>
+type ExecutedAttributeTypes = Map<AttributeName, AST.SimpleValueType>
 
 exception ViewExecutionError of info : string with
     override this.Message = this.info
 
 type ExecutedColumn =
-    { attributes : ExecutedAttributeMap
-      valueType : AST.ValueType
+    { name : FunQLName
+      attributes : CombinedAttributeMap
+      cellAttributeTypes : ExecutedAttributeTypes
+      valueType : AST.SimpleValueType
+      punType : AST.SimpleValueType option
     }
 
-type ExecutedValue =
+type [<JsonConverter(typeof<ExecutedValueConverter>)>] ExecutedValue =
     { attributes : ExecutedAttributeMap
       value : AST.Value
+      pun : AST.Value option
     }
+// Implemented by hand to make output smaller when there are no attributes.
+and ExecutedValueConverter () =
+    inherit JsonConverter<ExecutedValue> ()
 
-type ExecutedRow =
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : ExecutedValue =
+        raise <| new NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, res : ExecutedValue, serializer : JsonSerializer) : unit =
+        let vals1 = Map.singleton "value" (res.value :> obj)
+        let vals2 =
+            if not <| Map.isEmpty res.attributes then
+                Map.add "attributes" (res.attributes :> obj) vals1
+            else
+                vals1
+        let vals3 =
+            match res.pun with
+                | None -> vals2
+                | Some p -> Map.add "pun" (p :> obj) vals2
+        serializer.Serialize(writer, vals3)
+
+type [<JsonConverter(typeof<ExecutedRowConverter>)>] ExecutedRow =
     { attributes : ExecutedAttributeMap
       values : ExecutedValue array
+      entityId : int option
     }
+and ExecutedRowConverter () =
+    inherit JsonConverter<ExecutedRow> ()
 
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ExecutedRow =
+        raise <| new NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, res : ExecutedRow, serializer : JsonSerializer) : unit =
+        let vals1 = Map.singleton "values" (res.values :> obj)
+        let vals2 =
+            if not <| Map.isEmpty res.attributes then
+                Map.add "attributes" (res.attributes :> obj) vals1
+            else
+                vals1
+        let vals3 =
+            match res.entityId with
+                | None -> vals2
+                | Some id -> Map.add "id" (id :> obj) vals2
+        serializer.Serialize(writer, vals3)
+
+[<NoComparison>]
 type ExecutedViewExpr =
-    { attributes : ExecutedAttributeMap
-      columns : (FunQLName * ExecutedColumn) array
-      rows : ExecutedRow array
+    { attributes : CombinedAttributeMap
+      rowAttributeTypes : ExecutedAttributeTypes
+      columns : ExecutedColumn array
+      rows : ExecutedRow seq
     }
 
 let private typecheckArgument (fieldType : ParsedFieldType) (value : FieldValue) : unit =
@@ -37,7 +90,7 @@ let private typecheckArgument (fieldType : ParsedFieldType) (value : FieldValue)
         | FTEnum vals ->
             match value with
                 | FString str when Set.contains str vals -> ()
-                | _ -> raise <| ViewExecutionError <| sprintf "Argument is not from allowed values of a enum: %O" value
+                | _ -> raise (ViewExecutionError <| sprintf "Argument is not from allowed values of a enum: %O" value)
         // Most casting/typechecking will be done by database or Npgsql
         | _ -> ()
 
@@ -59,18 +112,21 @@ let private compileArgument : FieldValue -> AST.Value = function
 type private ColumnType =
     | RowAttribute of AttributeName
     | CellAttribute of FieldName * AttributeName
+    | PunAttribute of FieldName
     | Column of FunQLName
+    | MainEntityId
 
-let private parseColumnName (name : SQLName) =
+let private parseColumnName (name : AST.SQLName) =
     match name.ToString().Split("__") with
-        | [|"", "Row", name|] -> RowAttribute (FunQLName name)
-        | [|"", "Cell", columnName, name|] -> CellAttribute (FunQLName columnName, FunQLName name)
+        | [|""; "Row"; name|] -> RowAttribute (FunQLName name)
+        | [|""; "Cell"; columnName; name|] -> CellAttribute (FunQLName columnName, FunQLName name)
+        | [|""; "Name"; name|] -> PunAttribute (FunQLName name)
+        | [|""; "Id"|] -> MainEntityId
         | [|name|] -> Column (FunQLName name)
-        | _ -> raise <| ViewExecutionError <| sprintf "Cannot parse column name: %O" name
+        | _ -> raise (ViewExecutionError <| sprintf "Cannot parse column name: %O" name)
 
-let private parseAttributesResult (result : QueryResult) : ExecutedAttributeMap * Map<FieldName, ExecutedAttributeMap> =
-    assert Array.length result.rows = 1
-    let values = result.rows.[0]
+let private parseAttributesResult (result : QueryResult) : CombinedAttributeMap * Map<FieldName, CombinedAttributeMap> =
+    let values = Seq.exactlyOne result.rows
 
     let allColumns = result.columns |> Array.map (fun (name, typ) -> (parseColumnName name, typ))
 
@@ -78,19 +134,20 @@ let private parseAttributesResult (result : QueryResult) : ExecutedAttributeMap 
         match colType with
             | RowAttribute name -> Some (name, (valType, values.[i]))
             | _ -> None
-    let viewAttributes = allColumns |> seqMapiMaybe takeViewAttribute |> Map.ofSeq
+    let viewAttributes = allColumns |> Seq.mapiMaybe takeViewAttribute |> Map.ofSeq
+
     let takeColumnAttribute i (colType, valType) =
         match colType with
             | CellAttribute (fieldName, name) -> Some (fieldName, (name, (valType, values.[i])))
             | _ -> None
     let colAttributes =
         allColumns
-        |> seqMapiMaybe takeColumnAttribute
+        |> Seq.mapiMaybe takeColumnAttribute
         |> Seq.groupBy fst
-        |> Seq.map (fun (fieldName, attrs) -> (fieldName, Map.ofSeq attrs))
+        |> Seq.map (fun (fieldName, attrs) -> (fieldName, attrs |> Seq.map snd |> Map.ofSeq))
         |> Map.ofSeq
 
-    (rowAttributes, cellAttributes)
+    (viewAttributes, colAttributes)
 
 let private parseResult (result : QueryResult) : ExecutedViewExpr =
     let allColumns = result.columns |> Array.map (fun (name, typ) -> (parseColumnName name, typ))
@@ -99,89 +156,104 @@ let private parseResult (result : QueryResult) : ExecutedViewExpr =
         match colType with
             | RowAttribute name -> Some (name, (valType, i))
             | _ -> None
-    let rowAttributes = allColumns |> seqMapiMaybe takeRowAttribute |> Map.ofSeq
+    let rowAttributes = allColumns |> Seq.mapiMaybe takeRowAttribute |> Map.ofSeq
+
     let takeCellAttribute i (colType, valType) =
         match colType with
             | CellAttribute (fieldName, name) -> Some (fieldName, (name, (valType, i)))
             | _ -> None
-    let cellAttributes =
+    let allCellAttributes =
         allColumns
-        |> seqMapiMaybe takeCellAttribute
+        |> Seq.mapiMaybe takeCellAttribute
         |> Seq.groupBy fst
-        |> Seq.map (fun (fieldName, attrs) -> (fieldName, Map.ofSeq attrs))
+        |> Seq.map (fun (fieldName, attrs) -> (fieldName, attrs |> Seq.map snd |> Map.ofSeq))
         |> Map.ofSeq
+
+    let takePunAttribute i (colType, valType) =
+        match colType with
+            | PunAttribute name -> Some (name, (valType, i))
+            | _ -> None
+    let punAttributes = allColumns |> Seq.mapiMaybe takePunAttribute |> Map.ofSeq
+
+    let takeMainEntityId i (colType, valType) =
+        match colType with
+            | MainEntityId -> Some i
+            | _ -> None
+    let entityIdPos = allColumns |> Seq.mapiMaybe takeMainEntityId |> Seq.first
+
     let takeColumn i (colType, valType) =
         match colType with
             | Column name ->
-                let attributes =
-                    match Map.tryFind name cellAttributes with
+                let cellAttributes =
+                    match Map.tryFind name allCellAttributes with
                         | None -> Map.empty
                         | Some a -> a
-                Some (name, attributes, valType, i)
+                let punType = Option.map (fun (valType, i) -> valType) <| Map.tryFind name punAttributes
+                let column =
+                    { name = name
+                      attributes = Map.empty
+                      cellAttributeTypes = Map.map (fun name (valType, i) -> valType) cellAttributes
+                      valueType = valType
+                      punType = punType
+                    }
+                Some (cellAttributes, i, column)
             | _ -> None
-    let columns = allColumns |> seqMapiMaybe takeColumn |> Seq.toArray
+    let columnsMeta = allColumns |> Seq.mapiMaybe takeColumn |> Seq.toArray
 
-    let parseRow values =
-        let getAttribute name (valType, i) =
-            let value = values.[i]
-            (valType, value)
-        let getCell (name, attributes, valType, i) =
-            let attrs = Map.map getAttribute attributes
+    let parseRow (values : AST.Value array) =
+        let getCell (cellAttributes, i, column) =
+            let attrs = Map.map (fun name (valType, i) -> values.[i]) cellAttributes
+            let pun = Option.map (fun (valType, i) -> values.[i]) <| Map.tryFind column.name punAttributes
             let value = values.[i]
             { attributes = attrs
               value = value
+              pun = pun
             }
 
-        let rowAttrs = Map.map getAttribute rowAttributes
-        let values = Array.map getCell columns
+        let getEntityId i =
+            match values.[i] with
+                | AST.VInt id -> id
+                | _ -> failwith "Main entity id is not an integer"
+
+        let rowAttrs = Map.map (fun name (valType, i) -> values.[i]) rowAttributes
+        let values = Array.map getCell columnsMeta
+
         { attributes = rowAttrs
           values = values
+          entityId = Option.map getEntityId entityIdPos
         }
 
-    let rows = Array.map parseRow result.rows
+    let columns = Array.map (fun (attributes, i, column) -> column) columnsMeta
+    let rows = Seq.map parseRow result.rows
 
     { attributes = Map.empty
-      columns = columns |> Array.map (fun (name, attributes, valType, i) -> (name, { attributes = Map.empty; valueType = valType }))
+      rowAttributeTypes = Map.map (fun name (valType, i) -> valType) rowAttributes
+      columns = columns
       rows = rows
     }
 
-type ExecutedColumn =
-    { attributes : ExecutedAttributeMap
-      valueType : AST.ValueType
-    }
-
-type ExecutedValue =
-    { attributes : ExecutedAttributeMap
-      value : AST.Value
-    }
-
-type ExecutedRow =
-    { attributes : ExecutedAttributeMap
-      values : ExecutedValue array
-    }
-
-type ExecutedViewExpr =
-    { attributes : ExecutedAttributeMap
-      columns : (FunQLName * ExecutedColumn) array
-      rows : ExecutedRow array
-    }
-
-
-
 // XXX: Add user access rights enforcing there later.
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : Map<FunQLName, FieldValue>) : ExecutedViewExpr =
-    let makeParameter (name, mapping) =
+let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : Map<string, FieldValue>) (resultFunc : ExecutedViewExpr -> 'a) : 'a =
+    let makeParameter (name : string, mapping : CompiledArgument) =
         let value =
             match Map.tryFind name arguments with
-                | None -> raise <| ViewExecutionError <| sprintf "Argument not found: %s" name
+                | None -> raise (ViewExecutionError <| sprintf "Argument not found: %s" name)
                 | Some value -> value
         typecheckArgument mapping.fieldType value
         (mapping.placeholder, (mapping.valueType, compileArgument value))
         
-    let parameters = viewExpr.arguments |> Map.toSeq |> makeParameter |> Map.ofSeq
-    let (viewAttrs, colAttrs) = connection.ExecuteQuery viewExpr.attributesStr parameters |> parseAttributesResult
-    let result = connection.ExecuteQuery (viewExpr.query.ToString()) parameters |> parseResult
-    { attributes = viewAttrs
-      columns = Array.map (fun (name, col) -> (name, { col with attributes = colAttrs.[name] }))
-      rows = result.rows
-    }
+    let parameters = viewExpr.arguments |> Map.toSeq |> Seq.map makeParameter |> Map.ofSeq
+    let (viewAttrs, colAttrs) = connection.ExecuteQuery viewExpr.attributesStr parameters parseAttributesResult
+    connection.ExecuteQuery (viewExpr.query.ToString()) parameters <| fun rawResult ->
+        let result = parseResult rawResult
+        let getColumn (col : ExecutedColumn) : ExecutedColumn =
+            let attributes =
+                match Map.tryFind col.name colAttrs with
+                    | None -> Map.empty
+                    | Some attrs -> attrs
+            { col with attributes = attributes }
+        resultFunc { attributes = viewAttrs
+                     rowAttributeTypes = result.rowAttributeTypes
+                     columns = Array.map getColumn result.columns
+                     rows = result.rows
+                   }

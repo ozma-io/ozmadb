@@ -2,35 +2,38 @@ module FunWithFlags.FunDB.Layout.System
 
 open System
 open System.Reflection
-open System.ComponentModel.DataAnnotations.Schema
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Layout.Source
+open FunWithFlags.FunDB.FunQL.AST
 
-[<AttributeUsage(AttributeTargets.Field)>]
-type EntityAttribute () =
+[<AllowNullLiteral>]
+[<AttributeUsage(AttributeTargets.Property)>]
+type EntityAttribute (mainField : string) =
     inherit Attribute ()
-    member val Abstract = false with get, set
-    member val Ancestor = None : string option with get, set
+    member this.MainField = mainField
 
-[<AttributeUsage(AttributeTargets.Field, AllowMultiple=true)>]
+[<AllowNullLiteral>]
+[<AttributeUsage(AttributeTargets.Property, AllowMultiple=true)>]
 type UniqueConstraintAttribute (name : string, columns : string array) =
     inherit Attribute ()
     member this.Name = name
     member this.Columns = columns
 
-[<AttributeUsage(AttributeTargets.Field, AllowMultiple=true)>]
+[<AllowNullLiteral>]
+[<AttributeUsage(AttributeTargets.Property, AllowMultiple=true)>]
 type CheckConstraintAttribute (name : string, expression : string) =
     inherit Attribute ()
     member this.Name = name
     member this.Expression = expression
 
-[<AttributeUsage(AttributeTargets.Field)>]
+[<AllowNullLiteral>]
+[<AttributeUsage(AttributeTargets.Property)>]
 type ColumnFieldAttribute (colType : string) =
     inherit Attribute ()
     member this.Type = colType
     member val Nullable = false with get, set
-    member val Default = None : string option with get, set
+    member val Default = null : string with get, set
 
 let private makeSourceField (property : PropertyInfo) : (FunQLName * SourceColumnField) option =
     let field = Attribute.GetCustomAttribute(property, typeof<ColumnFieldAttribute>) :?> ColumnFieldAttribute
@@ -39,17 +42,20 @@ let private makeSourceField (property : PropertyInfo) : (FunQLName * SourceColum
     else
         let res =
             { fieldType = field.Type
-              defaultExpr = field.Default
+              defaultExpr =
+                  if field.Default = null
+                  then None
+                  else Some field.Default
               isNullable = field.Nullable
             }
-        Some (FunQLName name, res)
+        Some (FunQLName property.Name, res)
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraintAttribute) : FunQLName * SourceUniqueConstraint =
     let res = { columns = Array.map FunQLName constr.Columns }
     (FunQLName constr.Name, res)
 
 let private makeSourceCheckConstraint (constr : CheckConstraintAttribute) : FunQLName * SourceCheckConstraint =
-    let res = { expression = constr.Expression }
+    let res = { expression = constr.Expression } : SourceCheckConstraint
     (FunQLName constr.Name, res)
 
 let private makeSourceEntity (property : PropertyInfo) : (FunQLName * SourceEntity) option =
@@ -59,20 +65,21 @@ let private makeSourceEntity (property : PropertyInfo) : (FunQLName * SourceEnti
     else
         // Should be DbSet<Foo>
         let entityClass = property.PropertyType.GetGenericArguments().[0]
-        let fields = entityClass.GetProperties() |> seqMapMaybe makeSourceField |> Map.ofSeq
-        let uniqueConstraints = Attribute.GetCustomAttributes(property, typeof<UniqueConstraintAttribute>) :?> UniqueConstraintAttribute array
-        let checkConstraints = Attribute.GetCustomAttributes(property, typeof<CheckConstraintAttribute>) :?> CheckConstraintAttribute array
+        let fields = entityClass.GetProperties() |> Seq.mapMaybe makeSourceField |> Map.ofSeq
+        let uniqueConstraints = Attribute.GetCustomAttributes(property, typeof<UniqueConstraintAttribute>) |> Array.map (fun x -> x :?> UniqueConstraintAttribute)
+        let checkConstraints = Attribute.GetCustomAttributes(property, typeof<CheckConstraintAttribute>) |> Array.map (fun x -> x :?> CheckConstraintAttribute)
 
         let res =
             { columnFields = fields
               computedFields = Map.empty
               uniqueConstraints = uniqueConstraints |> Seq.map makeSourceUniqueConstraint |> Map.ofSeq
               checkConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
+              mainField = FunQLName entityAttr.MainField
             }
         Some (FunQLName property.Name, res)
 
 // Build entities map for public schema using mish-mash of our custom attributes and Entity Framework Core declarations.
 let buildSystemLayout (contextClass : Type) : SourceLayout = 
     { schemas = Map.empty
-      systemEntities = contextClass.GetProperties() |> seqMapMaybe buildEntityMeta |> Map.ofSeq
+      systemEntities = contextClass.GetProperties() |> Seq.mapMaybe makeSourceEntity |> Map.ofSeq
     }
