@@ -19,7 +19,7 @@ type SourceCheckConstraint =
 type SourceColumnField =
     { [<JsonProperty(Required=Required.Always)>]
       fieldType : string
-      defaultExpr : string option
+      defaultValue : string option
       isNullable : bool
     }
 

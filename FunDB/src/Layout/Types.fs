@@ -32,7 +32,7 @@ type ResolvedCheckConstraint =
 
 type ResolvedColumnField =
     { fieldType : ResolvedFieldType
-      defaultExpr : PureFieldExpr option
+      defaultValue : FieldValue option
       isNullable : bool
     }
 

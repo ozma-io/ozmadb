@@ -8,48 +8,20 @@ open Suave.Filters
 open Suave.Operators
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Parsing
-open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Lexer
-open FunWithFlags.FunDB.FunQL.Parser
-open FunWithFlags.FunDB.FunQL.View
-open FunWithFlags.FunDB.FunQL.Query
-open FunWithFlags.FunDB.FunQL.Result
-open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.API.Utils
-open FunWithFlags.FunDB.Schema
-open FunWithFlags.FunDB.SQL
 open FunWithFlags.FunDB.Context
+open FunWithFlags.FunDB.FunQL.Info
+open FunWithFlags.FunDB.FunQL.Query
 
-let private parseExprArgument (fieldExprType : FieldExprType) (str : string) : FieldValue option =
-    let decodeArray constrFunc convertFunc =
-            let res = str.Split(',') |> Array.map convertFunc
-            if Array.forall Option.isSome res then
-                Some <| constrFunc (Array.map Option.get res)
-            else
-                None
-    match fieldExprType with
-        // FIXME: breaks strings with commas!
-        | FETArray SFTString -> failwith "Not supported yet"
-        | FETArray SFTInt -> decodeArray FIntArray tryIntInvariant
-        | FETArray SFTBool -> decodeArray FBoolArray tryBool
-        | FETArray SFTDateTime -> decodeArray FDateTimeArray tryDateTimeOffsetInvariant
-        | FETArray SFTDate -> decodeArray FDateArray tryDateInvariant
-        | FETScalar SFTString -> Some <| FString str
-        | FETScalar SFTInt -> Option.map FInt <| tryIntInvariant str
-        | FETScalar SFTBool -> Option.map FBool <| tryBool str
-        | FETScalar SFTDateTime -> Option.map FDateTime <| tryDateTimeOffsetInvariant str
-        | FETScalar SFTDate -> Option.map FDate <| tryDateInvariant str
-
-let private convertArgument (fieldType : ParsedFieldType) (str : string) : FieldValue option =
-    match fieldType with
-        | FTType feType -> parseExprArgument feType str
-        | FTReference (entityRef, where) -> Option.map FInt <| tryIntInvariant str
-        | FTEnum values -> Some <| FString str
+[<NoComparison>]
+type ViewEntriesGetResponse =
+    { info : MergedViewInfo
+      result : ExecutedViewExpr
+    }
 
 let viewsApi (rctx : RequestContext) : WebPart =
     fun ctx -> async {
-        let runSelect (view : ResolvedViewExpr) : WebPart =
+       (*let selectView (view : UserViewRef) : WebPart =
             fun ctx -> async {
                 let rawArgs = ctx.request.query |> Map.ofList
                 let findArgument name (fieldType : ParsedFieldType) =
@@ -81,49 +53,67 @@ let viewsApi (rctx : RequestContext) : WebPart =
                 Writers.setHeader "Allow" "GET" >=> RequestErrors.METHOD_NOT_ALLOWED ""
             else
                 choose
-                    [ POST >=> Successful.OK "ahaha"
-                      PUT >=> Successful.OK "oh wow"
-                      DELETE >=> Successful.OK "omg"
-                    ]
+                    [ POST >=> insertToView view
+                      PUT >=> updateView view
+                      DELETE >=> deleteView view
+                    ]*)
 
-        let viewApi (view : ResolvedViewExpr) : WebPart =
-            choose
-                [ GET >=> runSelect view
-                  updatingViewApi view
-                ]
+        let returnError : UserViewErrorInfo -> WebPart = function
+            | UVEArguments msg -> RequestErrors.BAD_REQUEST <| sprintf "Invalid arguments: %s" msg
+            | UVEAccessDenied -> RequestErrors.FORBIDDEN ""
+            | UVENotFound -> RequestErrors.NOT_FOUND ""
+            | UVENotUpdating -> Writers.setHeader "Allow" "GET" >=> RequestErrors.METHOD_NOT_ALLOWED ""
+            | UVEParse msg -> RequestErrors.BAD_REQUEST <| sprintf "Parse error: %s" msg
+            | UVEResolve msg -> RequestErrors.BAD_REQUEST <| sprintf "Resolution error: %s" msg
+            | UVExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
 
-        let withRawView (rawView : string) : WebPart =
-            match parse tokenizeFunQL viewExpr rawView with
-                | Result.Error msg -> RequestErrors.BAD_REQUEST <| sprintf "Cannot parse FunQL view expression: %s" msg
-                | Ok rawExpr ->
-                    let maybeExpr =
-                        try
-                            Ok <| resolveViewExpr rctx.Layout rawExpr
-                        with
-                            | ViewError err -> Result.Error err
-                    match maybeExpr with
-                        | Result.Error err -> RequestErrors.UNPROCESSABLE_ENTITY <| sprintf "Cannot resolve FunQL view expression: %s" err
-                        | Ok expr -> viewApi expr
+        let selectFromView (viewRef : UserViewRef) : WebPart =
+            request <| fun req ->
+                let rawArgs = req.query |> Seq.mapMaybe (fun (name, maybeArg) -> Option.map (fun arg -> (name, arg)) maybeArg) |> Map.ofSeq
+                match rctx.GetUserView(viewRef, rawArgs) with
+                    | Ok (cached, res) -> jsonResponse { info = cached.info
+                                                         result = res
+                                                       }
+                    | Result.Error err -> returnError err
 
-        let anonymousView : WebPart =
+
+        let insertToView (viewRef : UserViewRef) : WebPart =
+            RequestErrors.METHOD_NOT_ALLOWED "Not implemented"
+
+        let updateInView (viewRef : UserViewRef) : WebPart =
+            RequestErrors.METHOD_NOT_ALLOWED "Not implemented"
+
+        let deleteFromView (viewRef : UserViewRef) : WebPart =
+            RequestErrors.METHOD_NOT_ALLOWED "Not implemented"
+
+        let infoView (viewRef : UserViewRef) : WebPart =
+            match rctx.GetUserViewInfo(viewRef) with
+                | Ok cached -> jsonResponse cached.info
+                | Result.Error err -> returnError err
+
+        let viewApi (method : string) (viewRef : UserViewRef) : WebPart =
+            match method with
+                | "entries" ->
+                    choose
+                        [ GET >=> selectFromView viewRef
+                          POST >=> insertToView viewRef
+                          PUT >=> updateInView viewRef
+                          DELETE >=> deleteFromView viewRef
+                        ]
+                | "info" -> GET >=> infoView viewRef
+                | _ -> succeed
+
+        let anonymousView method =
             request <| fun req ->
                 match req.queryParam "__query" with
-                    | Choice1Of2 rawView -> withRawView rawView
+                    | Choice1Of2 rawView -> viewApi method <| UVAnonymous rawView
                     | Choice2Of2 _ -> RequestErrors.BAD_REQUEST "Query not specified"
-        
-        let namedView (name : string) : WebPart =
-            fun ctx ->
-                async {
-                    let! maybeUv = rctx.Connection.System.UserViews.Where(fun uv -> uv.Name = name).FirstOrDefaultAsync()
-                    match maybeUv : UserView with
-                        | null -> return! RequestErrors.NOT_FOUND "" ctx
-                        | uv -> return! withRawView uv.Query ctx
-                }
+        let namedView (name, method) = viewApi method <| UVNamed name
 
         return!
             choose
-                [ path "/layout" >=> GET >=> jsonResponse rctx.AllowedDatabase
-                  path "/views/anonymous" >=> anonymousView
-                  pathScan "/views/by_name/%s" (fun viewName -> namedView viewName)
+                [ path "/layout" >=> GET >=> jsonResponse rctx.Cache.allowedDatabae
+                  pathScan "/views/anonymous/%s" anonymousView
+                  pathScan "/views/by_name/%s/%s" namedView
                 ] ctx
     }

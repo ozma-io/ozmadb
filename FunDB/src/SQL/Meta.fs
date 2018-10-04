@@ -248,7 +248,7 @@ let private makeColumnFromName (schema : string) (table : string) (column : stri
 
 // Convert string-cast patterns into actual types so that we reverse lost type information.
 // Don't reduce the expressions beyond that!
-let private normalizeDefaultExpr : ParsedValueExpr -> PureValueExpr =
+let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
     let rec traverse = function
         | VECast (VEValue (VString str), typ) ->
             let castExpr () = VECast (VEValue (VString str), typ)
@@ -305,6 +305,8 @@ let private normalizeDefaultExpr : ParsedValueExpr -> PureValueExpr =
         | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
         | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
         | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
+        | VEInQuery (e, query) -> raise (SQLMetaError <| sprintf "Invalid subquery in default expression: %O" query)
+        | VENotInQuery (e, query) -> raise (SQLMetaError <| sprintf "Invalid subquery in default expression: %O" query)
         | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
         | VECast (e, typ) -> VECast (traverse e, typ)
     traverse

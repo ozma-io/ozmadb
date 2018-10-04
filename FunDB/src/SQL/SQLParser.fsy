@@ -2,8 +2,6 @@
 
 open FunWithFlags.FunDB.SQL.AST
 
-type ParsedValueExpr = ValueExpr<ColumnRef>
-
 %}
 
 // Atoms
@@ -54,7 +52,7 @@ type ParsedValueExpr = ValueExpr<ColumnRef>
 %left DOT
 
 %start valueExpr
-%type <ParsedValueExpr> valueExpr
+%type <ValueExpr> valueExpr
 %start valueType
 %type <DBValueType> valueType
 %start schemaObject

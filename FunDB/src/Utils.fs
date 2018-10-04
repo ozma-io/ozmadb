@@ -6,6 +6,23 @@ open System.Globalization
 
 type Void = private Void of unit
 
+module Result =
+    let isOk : Result<'a, 'e> -> bool = function
+        | Ok _ -> true
+        | Error _ -> false
+
+    let isError : Result<'a, 'e> -> bool = function
+        | Ok _ -> false
+        | Error _ -> true
+
+    let get : Result<'a, 'e> -> 'a = function
+        | Ok v -> v
+        | Error _ -> failwith "Result.get"
+
+    let getError : Result<'a, 'e> -> 'e = function
+        | Ok _ -> failwith "Result.getError"
+        | Error v -> v
+
 module Seq =
     let mapMaybe (f : 'a -> 'b option) (s : 'a seq) : 'b seq =
         seq { for i in s do
@@ -27,6 +44,13 @@ module Seq =
 
     let fold1 (func : 'a -> 'a -> 'a) (s : 'a seq) : 'a =
         Seq.fold func (Seq.head s) (Seq.tail s)
+
+    let traverseOption (func : 'a -> 'b option) (vals : 'a seq) : 'b seq option =
+        let res = vals |> Seq.map func |> Seq.cache
+        if Seq.forall Option.isSome res then
+            Some (Seq.map Option.get res)
+        else
+            None
 
 module Map =
     let ofSeqUnique (items : ('k * 'v) seq) : Map<'k, 'v> =
@@ -57,6 +81,20 @@ module Map =
 
     let mapWithKeys (func : 'k1 -> 'a -> ('k2 * 'b)) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
         map |> Map.toSeq |> Seq.map (fun (k, a) -> func k a) |> Map.ofSeq
+    
+    // FIXME: make those stop on first failure
+    let traverseOption (func : 'k -> 'a -> 'b option) (vals : Map<'k, 'a>) : Map<'k, 'b> option =
+        let res = vals |> Map.map func
+        if Map.forall (fun key -> Option.isSome) res then
+            Some (Map.map (fun key -> Option.get) res)
+        else
+            None
+
+    let traverseResult (func : 'k -> 'a -> Result<'b, 'e>) (vals : Map<'k, 'a>) : Result<Map<'k, 'b>, 'e> =
+        let res = vals |> Map.map func
+        match res |> Map.toSeq |> Seq.filter (fun (_, r) -> Result.isError r) |> Seq.first with
+            | Some (_, err) -> Error <| Result.getError err
+            | None -> Ok <| Map.map (fun key -> Result.get) res
 
 module Set =
     let toMap (f : 'k -> 'v) (s : Set<'k>) : Map<'k, 'v> =

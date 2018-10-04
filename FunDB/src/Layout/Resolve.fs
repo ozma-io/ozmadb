@@ -11,9 +11,10 @@ open FunWithFlags.FunDB.Layout.Source
 exception ResolveLayoutError of info : string with
     override this.Message = this.info
 
+let goodLayoutName (name : string) : bool = not (name.Contains("__") || name = "" || name.Contains(' ') || name.Contains('/'))
+
 let private checkName : FunQLName -> unit = function
-    | FunQLName name when name.Contains("__") -> raise (ResolveLayoutError <| sprintf "Name contains double underscore: %s" name)
-    | FunQLName "" -> raise (ResolveLayoutError <| sprintf "Name is empty")
+    | FunQLName name when not (goodLayoutName name) -> raise (ResolveLayoutError <| sprintf "Invalid name: %s" name)
     | _ -> ()
 
 let private checkFieldName (name : FunQLName) : unit =
@@ -21,12 +22,16 @@ let private checkFieldName (name : FunQLName) : unit =
     then raise (ResolveLayoutError <| sprintf "Name is forbidden: %O" name)
     else checkName name
 
-let private ensurePureFieldExpr : ParsedFieldExpr -> PureFieldExpr =
-    let voidReference colName =
-        raise (ResolveLayoutError <| sprintf "Column references are not supported in pure values: %O" colName)
-    let voidPlaceholder name =
-        raise (ResolveLayoutError <| sprintf "Placeholders are not allowed in pure values: %s" name)
-    mapFieldExpr voidReference voidPlaceholder
+let private reduceDefaultExpr : ParsedFieldExpr -> FieldValue option = function
+    | FEValue value -> Some value
+    | FECast (FEValue value, typ) ->
+        match (value, typ) with
+            | (FString s, FETScalar SFTDate) -> Option.map FDate <| tryDateInvariant s
+            | (FString s, FETScalar SFTDateTime) -> Option.map FDateTime <| tryDateTimeOffsetInvariant s
+            | (FStringArray vals, FETArray SFTDate) -> Option.map (FDateArray << Array.ofSeq) (Seq.traverseOption tryDateInvariant vals)
+            | (FStringArray vals, FETArray SFTDateTime) -> Option.map (FDateTimeArray << Array.ofSeq) (Seq.traverseOption tryDateTimeOffsetInvariant vals)
+            | _ -> None
+    | _ -> None
 
 let private resolveLocalExpr (entity : SourceEntity) : ParsedFieldExpr -> LocalFieldExpr =
     let resolveColumn = function
@@ -95,23 +100,29 @@ type private LayoutResolver (layout : SourceLayout) =
                     | Some refEntity -> refEntity
             let resolvedWhere = Option.map (resolveReferenceExpr entity refEntity) where
             FTReference (entityName, resolvedWhere)
-        | FTEnum vals -> FTEnum vals
+        | FTEnum vals ->
+            if Set.isEmpty vals then
+                raise (ResolveLayoutError "Enums must not be empty")
+            FTEnum vals
 
     let resolveColumnField (entity : SourceEntity) (col : SourceColumnField) : ResolvedColumnField =
         let fieldType =
             match parse tokenizeFunQL fieldType col.fieldType with
                 | Ok r -> r
                 | Error msg -> raise (ResolveLayoutError <| sprintf "Error parsing column field type: %s" msg)
-        let defaultExpr =
-            match col.defaultExpr with
+        let defaultValue =
+            match col.defaultValue with
                 | None -> None
                 | Some def ->
                     match parse tokenizeFunQL fieldExpr def with
-                        | Ok r -> Some r
+                        | Ok r ->
+                            match reduceDefaultExpr r with
+                                | Some v -> Some v
+                                | None -> raise (ResolveLayoutError <| sprintf "Default expression is not trivial: %s" def)
                         | Error msg -> raise (ResolveLayoutError <| sprintf "Error parsing column field default expression: %s" msg)
 
         { fieldType = resolveFieldType entity fieldType
-          defaultExpr = Option.map ensurePureFieldExpr defaultExpr
+          defaultValue = defaultValue
           isNullable = col.isNullable
         }
 

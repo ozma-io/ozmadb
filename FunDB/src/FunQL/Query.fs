@@ -6,28 +6,19 @@ open Newtonsoft.Json
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Compiler
-open FunWithFlags.FunDB.SQL
 open FunWithFlags.FunDB.SQL.Query
+module SQL = FunWithFlags.FunDB.SQL.AST
 
-type CombinedAttributeMap = Map<AttributeName, AST.SimpleValueType * AST.Value>
-type ExecutedAttributeMap = Map<AttributeName, AST.Value>
-type ExecutedAttributeTypes = Map<AttributeName, AST.SimpleValueType>
+type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
+type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
 
 exception ViewExecutionError of info : string with
     override this.Message = this.info
 
-type ExecutedColumn =
-    { name : FunQLName
-      attributes : CombinedAttributeMap
-      cellAttributeTypes : ExecutedAttributeTypes
-      valueType : AST.SimpleValueType
-      punType : AST.SimpleValueType option
-    }
-
 type [<JsonConverter(typeof<ExecutedValueConverter>)>] ExecutedValue =
     { attributes : ExecutedAttributeMap
-      value : AST.Value
-      pun : AST.Value option
+      value : SQL.Value
+      pun : SQL.Value option
     }
 // Implemented by hand to make output smaller when there are no attributes.
 and ExecutedValueConverter () =
@@ -76,12 +67,25 @@ and ExecutedRowConverter () =
                 | None -> vals2
                 | Some id -> Map.add "id" (id :> obj) vals2
         serializer.Serialize(writer, vals3)
+    
+type ExecutedColumnInfo =
+    { name : FunQLName
+      attributeTypes : ExecutedAttributeTypes
+      cellAttributeTypes : ExecutedAttributeTypes
+      valueType : SQL.SimpleValueType
+      punType : SQL.SimpleValueType option
+    }
+
+type ExecutedViewInfo =
+    { attributeTypes : ExecutedAttributeTypes
+      rowAttributeTypes : ExecutedAttributeTypes
+      columns : ExecutedColumnInfo array
+    }
 
 [<NoComparison>]
 type ExecutedViewExpr =
-    { attributes : CombinedAttributeMap
-      rowAttributeTypes : ExecutedAttributeTypes
-      columns : ExecutedColumn array
+    { attributes : ExecutedAttributeMap
+      columnAttributes : ExecutedAttributeMap array
       rows : ExecutedRow seq
     }
 
@@ -94,21 +98,6 @@ let private typecheckArgument (fieldType : ParsedFieldType) (value : FieldValue)
         // Most casting/typechecking will be done by database or Npgsql
         | _ -> ()
 
-// Differs from compileFieldValue in that it doesn't emit value expressions.
-let private compileArgument : FieldValue -> AST.Value = function
-    | FInt i -> AST.VInt i
-    // PostgreSQL cannot deduce text's type on its own
-    | FString s -> AST.VString s
-    | FBool b -> AST.VBool b
-    | FDateTime dt -> AST.VDateTime dt
-    | FDate d -> AST.VDate d
-    | FIntArray vals -> AST.VIntArray (compileArray vals)
-    | FStringArray vals -> AST.VStringArray (compileArray vals)
-    | FBoolArray vals -> AST.VBoolArray (compileArray vals)
-    | FDateTimeArray vals -> AST.VDateTimeArray (compileArray vals)
-    | FDateArray vals -> AST.VDateArray (compileArray vals)
-    | FNull -> AST.VNull
-
 type private ColumnType =
     | RowAttribute of AttributeName
     | CellAttribute of FieldName * AttributeName
@@ -116,7 +105,7 @@ type private ColumnType =
     | Column of FunQLName
     | MainEntityId
 
-let private parseColumnName (name : AST.SQLName) =
+let private parseColumnName (name : SQL.SQLName) =
     match name.ToString().Split("__") with
         | [|""; "Row"; name|] -> RowAttribute (FunQLName name)
         | [|""; "Cell"; columnName; name|] -> CellAttribute (FunQLName columnName, FunQLName name)
@@ -125,7 +114,13 @@ let private parseColumnName (name : AST.SQLName) =
         | [|name|] -> Column (FunQLName name)
         | _ -> raise (ViewExecutionError <| sprintf "Cannot parse column name: %O" name)
 
-let private parseAttributesResult (result : QueryResult) : CombinedAttributeMap * Map<FieldName, CombinedAttributeMap> =
+type private AttributesResult =
+    { attributes : ExecutedAttributeMap
+      attributeTypes : ExecutedAttributeTypes
+      columnAttributes : Map<FieldName, Map<AttributeName, SQL.SimpleValueType * SQL.Value>>
+    }
+
+let private parseAttributesResult (result : QueryResult) : AttributesResult =
     let values = Seq.exactlyOne result.rows
 
     let allColumns = result.columns |> Array.map (fun (name, typ) -> (parseColumnName name, typ))
@@ -147,9 +142,12 @@ let private parseAttributesResult (result : QueryResult) : CombinedAttributeMap 
         |> Seq.map (fun (fieldName, attrs) -> (fieldName, attrs |> Seq.map snd |> Map.ofSeq))
         |> Map.ofSeq
 
-    (viewAttributes, colAttributes)
+    { attributes = Map.map (fun name -> snd) viewAttributes
+      attributeTypes = Map.map (fun name -> fst) viewAttributes
+      columnAttributes = colAttributes
+    }
 
-let private parseResult (result : QueryResult) : ExecutedViewExpr =
+let private parseResult (result : QueryResult) : (ExecutedViewInfo * ExecutedRow seq) =
     let allColumns = result.columns |> Array.map (fun (name, typ) -> (parseColumnName name, typ))
 
     let takeRowAttribute i (colType, valType) =
@@ -189,18 +187,18 @@ let private parseResult (result : QueryResult) : ExecutedViewExpr =
                         | None -> Map.empty
                         | Some a -> a
                 let punType = Option.map (fun (valType, i) -> valType) <| Map.tryFind name punAttributes
-                let column =
+                let columnInfo =
                     { name = name
-                      attributes = Map.empty
+                      attributeTypes = Map.empty
                       cellAttributeTypes = Map.map (fun name (valType, i) -> valType) cellAttributes
                       valueType = valType
                       punType = punType
                     }
-                Some (cellAttributes, i, column)
+                Some (cellAttributes, i, columnInfo)
             | _ -> None
     let columnsMeta = allColumns |> Seq.mapiMaybe takeColumn |> Seq.toArray
 
-    let parseRow (values : AST.Value array) =
+    let parseRow (values : SQL.Value array) =
         let getCell (cellAttributes, i, column) =
             let attrs = Map.map (fun name (valType, i) -> values.[i]) cellAttributes
             let pun = Option.map (fun (valType, i) -> values.[i]) <| Map.tryFind column.name punAttributes
@@ -212,7 +210,7 @@ let private parseResult (result : QueryResult) : ExecutedViewExpr =
 
         let getEntityId i =
             match values.[i] with
-                | AST.VInt id -> id
+                | SQL.VInt id -> id
                 | _ -> failwith "Main entity id is not an integer"
 
         let rowAttrs = Map.map (fun name (valType, i) -> values.[i]) rowAttributes
@@ -226,15 +224,18 @@ let private parseResult (result : QueryResult) : ExecutedViewExpr =
     let columns = Array.map (fun (attributes, i, column) -> column) columnsMeta
     let rows = Seq.map parseRow result.rows
 
-    { attributes = Map.empty
-      rowAttributeTypes = Map.map (fun name (valType, i) -> valType) rowAttributes
-      columns = columns
-      rows = rows
-    }
+    let viewInfo =
+        { columns = columns
+          attributeTypes = Map.empty
+          rowAttributeTypes = Map.map (fun name (valType, i) -> valType) rowAttributes
+        }
+    (viewInfo, rows)
+
+type ViewArguments = Map<string, FieldValue>
 
 // XXX: Add user access rights enforcing there later.
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : Map<string, FieldValue>) (resultFunc : ExecutedViewExpr -> 'a) : 'a =
-    let makeParameter (name : string, mapping : CompiledArgument) =
+let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ViewArguments) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> 'a) : 'a =
+    let makeParameter (name : string) (mapping : CompiledArgument) =
         let value =
             match Map.tryFind name arguments with
                 | None -> raise (ViewExecutionError <| sprintf "Argument not found: %s" name)
@@ -242,18 +243,39 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
         typecheckArgument mapping.fieldType value
         (mapping.placeholder, (mapping.valueType, compileArgument value))
         
-    let parameters = viewExpr.arguments |> Map.toSeq |> Seq.map makeParameter |> Map.ofSeq
-    let (viewAttrs, colAttrs) = connection.ExecuteQuery viewExpr.attributesStr parameters parseAttributesResult
+    let parameters = viewExpr.arguments |> Map.mapWithKeys makeParameter
+    let attrsResult =
+        match viewExpr.attributesStr with
+            | Some attributesQuery -> connection.ExecuteQuery attributesQuery parameters parseAttributesResult
+            | None ->
+                { attributes = Map.empty
+                  attributeTypes = Map.empty
+                  columnAttributes = Map.empty
+                }
+
+    let getColumnInfo (col : ExecutedColumnInfo) =
+        let attributeTypes =
+            match Map.tryFind col.name attrsResult.columnAttributes with
+                | None -> Map.empty
+                | Some attrs -> Map.map (fun name -> fst) attrs
+        { col with attributeTypes = attributeTypes }
+
+    let getColumnAttributes (col : ExecutedColumnInfo) =
+        match Map.tryFind col.name attrsResult.columnAttributes with
+            | None -> Map.empty
+            | Some attrs -> Map.map (fun name -> snd) attrs
+
     connection.ExecuteQuery (viewExpr.query.ToString()) parameters <| fun rawResult ->
-        let result = parseResult rawResult
-        let getColumn (col : ExecutedColumn) : ExecutedColumn =
-            let attributes =
-                match Map.tryFind col.name colAttrs with
-                    | None -> Map.empty
-                    | Some attrs -> attrs
-            { col with attributes = attributes }
-        resultFunc { attributes = viewAttrs
-                     rowAttributeTypes = result.rowAttributeTypes
-                     columns = Array.map getColumn result.columns
-                     rows = result.rows
-                   }
+        let (info, rows) = parseResult rawResult
+
+        let mergedInfo =
+            { info with
+                  attributeTypes = attrsResult.attributeTypes
+                  columns = Array.map getColumnInfo info.columns
+            }
+        let result =
+            { attributes = attrsResult.attributes
+              columnAttributes = Array.map getColumnAttributes info.columns
+              rows = rows
+            }
+        resultFunc mergedInfo result

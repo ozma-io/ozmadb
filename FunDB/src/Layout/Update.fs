@@ -22,7 +22,7 @@ let private updateDifference (db : SystemContext) (updateFunc : 'nobj -> 'eobj -
 let private updateColumnFields (db : SystemContext) (entity : Entity) : Map<FieldName, SourceColumnField> -> Map<FieldName, ColumnField> -> unit =
     let updateColumnFunc (newColumn : SourceColumnField) (oldColumn : ColumnField) =
         let def =
-            match newColumn.defaultExpr with
+            match newColumn.defaultValue with
                 | None -> null
                 | Some def -> def
         if oldColumn.Nullable <> newColumn.isNullable then

@@ -42,7 +42,7 @@ let private makeSourceField (property : PropertyInfo) : (FunQLName * SourceColum
     else
         let res =
             { fieldType = field.Type
-              defaultExpr =
+              defaultValue =
                   if field.Default = null
                   then None
                   else Some field.Default

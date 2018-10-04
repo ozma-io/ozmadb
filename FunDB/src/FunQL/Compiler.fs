@@ -1,50 +1,73 @@
 module FunWithFlags.FunDB.FunQL.Compiler
 
+open System
+
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.View
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.SQL
+module SQL = FunWithFlags.FunDB.SQL.AST
 
 type CompiledArgument =
     { placeholder : int
       fieldType : ParsedFieldType
-      valueType : AST.SimpleValueType
+      valueType : SQL.SimpleValueType
     }
+
+let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
+    | FETArray SFTString -> FStringArray [||]
+    | FETArray SFTInt -> FStringArray [||]
+    | FETArray SFTBool -> FStringArray [||]
+    | FETArray SFTDateTime -> FStringArray [||]
+    | FETArray SFTDate -> FStringArray [||]
+    | FETScalar SFTString -> FString ""
+    | FETScalar SFTInt -> FInt 0
+    | FETScalar SFTBool -> FBool false
+    | FETScalar SFTDateTime -> FDateTime DateTimeOffset.UnixEpoch
+    | FETScalar SFTDate -> FDateTime DateTimeOffset.UnixEpoch
+
+let defaultCompiledArgument : ParsedFieldType -> FieldValue = function
+    | FTType feType -> defaultCompiledExprArgument feType
+    | FTReference (entityRef, None) -> FInt 0
+    | FTReference (entityRef, Some where) -> failwith "Reference with a condition in an argument"
+    | FTEnum values -> values |> Set.toSeq |> Seq.first |> Option.get |> FString
 
 type CompiledViewExpr =
     { // Evaluation of column-wise or global attributes
-      attributesStr : string
-      query : AST.SelectExpr
+      attributesStr : string option
+      query : SQL.SelectExpr
       arguments : Map<string, CompiledArgument>
     } with
-        override this.ToString () = sprintf "%s; %s" this.attributesStr (this.query.ToString())
+        override this.ToString () =
+            match this.attributesStr with
+                | None -> this.query.ToString()
+                | Some attrQuery -> sprintf "%s; %s" attrQuery (this.query.ToString())
 
-let private compileScalarType : ScalarFieldType -> AST.SimpleType = function
-    | SFTInt -> AST.STInt
-    | SFTString -> AST.STString
-    | SFTBool -> AST.STBool
-    | SFTDateTime -> AST.STDateTime
-    | SFTDate -> AST.STDate
+let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
+    | SFTInt -> SQL.STInt
+    | SFTString -> SQL.STString
+    | SFTBool -> SQL.STBool
+    | SFTDateTime -> SQL.STDateTime
+    | SFTDate -> SQL.STDate
 
-let private compileFieldExprType : FieldExprType -> AST.SimpleValueType = function
-    | FETScalar stype -> AST.VTScalar <| compileScalarType stype
-    | FETArray stype -> AST.VTArray <| compileScalarType stype
+let private compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
+    | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
+    | FETArray stype -> SQL.VTArray <| compileScalarType stype
 
-let compileFieldType : FieldType<EntityRef, _> -> AST.SimpleValueType = function
+let compileFieldType : FieldType<EntityRef, _> -> SQL.SimpleValueType = function
     | FTType fetype -> compileFieldExprType fetype
-    | FTReference (ent, restriction) -> AST.VTScalar AST.STInt
-    | FTEnum vals -> AST.VTScalar AST.STString
+    | FTReference (ent, restriction) -> SQL.VTScalar SQL.STInt
+    | FTEnum vals -> SQL.VTScalar SQL.STString
 
-let private compileOrder : SortOrder -> AST.SortOrder = function
-    | Asc -> AST.Asc
-    | Desc -> AST.Desc
+let private compileOrder : SortOrder -> SQL.SortOrder = function
+    | Asc -> SQL.Asc
+    | Desc -> SQL.Desc
 
-let private compileJoin : JoinType -> AST.JoinType = function
-    | Left -> AST.Left
-    | Right -> AST.Right
-    | Inner -> AST.Inner
-    | Outer -> AST.Full
+let private compileJoin : JoinType -> SQL.JoinType = function
+    | Left -> SQL.Left
+    | Right -> SQL.Right
+    | Inner -> SQL.Inner
+    | Outer -> SQL.Full
 
 let private checkPureExpr (expr : FieldExpr<_>) : bool =
     let mutable noReferences = true
@@ -53,79 +76,94 @@ let private checkPureExpr (expr : FieldExpr<_>) : bool =
     iterFieldExpr foundReference ignore expr
     noReferences
 
-let private compileName : FunQLName -> AST.SQLName = function
-    | FunQLName name -> AST.SQLName name
+let compileName : FunQLName -> SQL.SQLName = function
+    | FunQLName name -> SQL.SQLName name
 
-let private compileEntityPun (entityRef : EntityRef) : AST.TableName =
+let private compileEntityPun (entityRef : EntityRef) : SQL.TableName =
     match entityRef.schema with
         | None -> compileName entityRef.name
-        | Some schemaName -> AST.SQLName <| sprintf "%O__%O" schemaName entityRef.name
+        | Some schemaName -> SQL.SQLName <| sprintf "%O__%O" schemaName entityRef.name
 
-let private compileEntityTablePun (entityRef : EntityRef) : AST.TableRef =
+let private compileEntityTablePun (entityRef : EntityRef) : SQL.TableRef =
     { schema = None; name = compileEntityPun entityRef }
 
-let compileEntityRef (entityRef : EntityRef) : AST.TableRef = { schema = Option.map compileName entityRef.schema; name = compileName entityRef.name }
+let compileEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema = Option.map compileName entityRef.schema; name = compileName entityRef.name }
 
-let compileFieldRef (fieldRef : ResolvedFieldRef) : AST.ColumnRef =
+let compileFieldRef (fieldRef : ResolvedFieldRef) : SQL.ColumnRef =
     { table = Some <| compileEntityRef fieldRef.entity; name = compileName fieldRef.name }
 
-let private compileFieldName : ResolvedFieldName -> AST.ColumnRef = function
+let private compileFieldName : ResolvedFieldName -> SQL.ColumnRef = function
     | RFField fieldRef -> { table = Some <| compileEntityTablePun fieldRef.entity; name = compileName fieldRef.name }
     | RFSubquery (entityName, fieldName, boundField) -> { table = Some { schema = None; name = compileName entityName }; name = compileName fieldName }
 
-let compileArray (vals : 'a array) : AST.ValueArray<'a> = Array.map AST.AVValue vals
+let compileArray (vals : 'a array) : SQL.ValueArray<'a> = Array.map SQL.AVValue vals
 
-let private compileFieldValue : FieldValue -> AST.ValueExpr<_> = function
-    | FInt i -> AST.VEValue (AST.VInt i)
+let compileFieldValue : FieldValue -> SQL.ValueExpr = function
+    | FInt i -> SQL.VEValue (SQL.VInt i)
     // PostgreSQL cannot deduce text's type on its own
-    | FString s -> AST.VECast (AST.VEValue (AST.VString s), AST.VTScalar (AST.STString.ToSQLName()))
-    | FBool b -> AST.VEValue (AST.VBool b)
-    | FDateTime dt -> AST.VEValue (AST.VDateTime dt)
-    | FDate d -> AST.VEValue (AST.VDate d)
-    | FIntArray vals -> AST.VEValue (AST.VIntArray (compileArray vals))
-    | FStringArray vals -> AST.VEValue (AST.VStringArray (compileArray vals))
-    | FBoolArray vals -> AST.VEValue (AST.VBoolArray (compileArray vals))
-    | FDateTimeArray vals -> AST.VEValue (AST.VDateTimeArray (compileArray vals))
-    | FDateArray vals -> AST.VEValue (AST.VDateArray (compileArray vals))
-    | FNull -> AST.VEValue AST.VNull
+    | FString s -> SQL.VECast (SQL.VEValue (SQL.VString s), SQL.VTScalar (SQL.STString.ToSQLName()))
+    | FBool b -> SQL.VEValue (SQL.VBool b)
+    | FDateTime dt -> SQL.VEValue (SQL.VDateTime dt)
+    | FDate d -> SQL.VEValue (SQL.VDate d)
+    | FIntArray vals -> SQL.VEValue (SQL.VIntArray (compileArray vals))
+    | FStringArray vals -> SQL.VEValue (SQL.VStringArray (compileArray vals))
+    | FBoolArray vals -> SQL.VEValue (SQL.VBoolArray (compileArray vals))
+    | FDateTimeArray vals -> SQL.VEValue (SQL.VDateTimeArray (compileArray vals))
+    | FDateArray vals -> SQL.VEValue (SQL.VDateArray (compileArray vals))
+    | FNull -> SQL.VEValue SQL.VNull
 
-let genericCompileFieldExpr (columnFunc : 'c -> 'f) (placeholderFunc : string -> int) : FieldExpr<'c> -> AST.ValueExpr<'f> =
+let genericCompileFieldExpr (columnFunc : 'c -> SQL.ColumnRef) (placeholderFunc : string -> int) : FieldExpr<'c> -> SQL.ValueExpr =
     let rec traverse = function
         | FEValue v -> compileFieldValue v
-        | FEColumn c -> AST.VEColumn (columnFunc c)
-        | FEPlaceholder name -> AST.VEPlaceholder (placeholderFunc name)
-        | FENot a -> AST.VENot (traverse a)
-        | FEAnd (a, b) -> AST.VEAnd (traverse a, traverse b)
-        | FEOr (a, b) -> AST.VEOr (traverse a, traverse b)
-        | FEConcat (a, b) -> AST.VEConcat (traverse a, traverse b)
-        | FEEq (a, b) -> AST.VEEq (traverse a, traverse b)
-        | FENotEq (a, b) -> AST.VENotEq (traverse a, traverse b)
-        | FELike (e, pat) -> AST.VELike (traverse e, traverse pat)
-        | FENotLike (e, pat) -> AST.VENotLike (traverse e, traverse pat)
-        | FELess (a, b) -> AST.VELess (traverse a, traverse b)
-        | FELessEq (a, b) -> AST.VELessEq (traverse a, traverse b)
-        | FEGreater (a, b) -> AST.VEGreater (traverse a, traverse b)
-        | FEGreaterEq (a, b) -> AST.VEGreaterEq (traverse a, traverse b)
-        | FEIn (a, arr) -> AST.VEIn (traverse a, Array.map traverse arr)
-        | FENotIn (a, arr) -> AST.VENotIn (traverse a, Array.map traverse arr)
-        | FECast (e, typ) -> AST.VECast (traverse e, AST.mapValueType (fun (x : AST.SimpleType) -> x.ToSQLName()) (compileFieldExprType typ))
-        | FEIsNull a -> AST.VEIsNull (traverse a)
-        | FEIsNotNull a -> AST.VEIsNotNull (traverse a)
+        | FEColumn c -> SQL.VEColumn (columnFunc c)
+        | FEPlaceholder name -> SQL.VEPlaceholder (placeholderFunc name)
+        | FENot a -> SQL.VENot (traverse a)
+        | FEAnd (a, b) -> SQL.VEAnd (traverse a, traverse b)
+        | FEOr (a, b) -> SQL.VEOr (traverse a, traverse b)
+        | FEConcat (a, b) -> SQL.VEConcat (traverse a, traverse b)
+        | FEEq (a, b) -> SQL.VEEq (traverse a, traverse b)
+        | FENotEq (a, b) -> SQL.VENotEq (traverse a, traverse b)
+        | FELike (e, pat) -> SQL.VELike (traverse e, traverse pat)
+        | FENotLike (e, pat) -> SQL.VENotLike (traverse e, traverse pat)
+        | FELess (a, b) -> SQL.VELess (traverse a, traverse b)
+        | FELessEq (a, b) -> SQL.VELessEq (traverse a, traverse b)
+        | FEGreater (a, b) -> SQL.VEGreater (traverse a, traverse b)
+        | FEGreaterEq (a, b) -> SQL.VEGreaterEq (traverse a, traverse b)
+        | FEIn (a, arr) -> SQL.VEIn (traverse a, Array.map traverse arr)
+        | FENotIn (a, arr) -> SQL.VENotIn (traverse a, Array.map traverse arr)
+        | FECast (e, typ) -> SQL.VECast (traverse e, SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLName()) (compileFieldExprType typ))
+        | FEIsNull a -> SQL.VEIsNull (traverse a)
+        | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
     traverse
+
+// Differs from compileFieldValue in that it doesn't emit value expressions.
+let compileArgument : FieldValue -> SQL.Value = function
+    | FInt i -> SQL.VInt i
+    // PostgreSQL cannot deduce text's type on its own
+    | FString s -> SQL.VString s
+    | FBool b -> SQL.VBool b
+    | FDateTime dt -> SQL.VDateTime dt
+    | FDate d -> SQL.VDate d
+    | FIntArray vals -> SQL.VIntArray (compileArray vals)
+    | FStringArray vals -> SQL.VStringArray (compileArray vals)
+    | FBoolArray vals -> SQL.VBoolArray (compileArray vals)
+    | FDateTimeArray vals -> SQL.VDateTimeArray (compileArray vals)
+    | FDateArray vals -> SQL.VDateArray (compileArray vals)
+    | FNull -> SQL.VNull
 
 type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
     let compileFieldExpr = genericCompileFieldExpr compileFieldName (fun name -> placeholders.[name])
-    let compileLocalFieldExpr (tableRef : AST.TableRef option) : LocalFieldExpr -> AST.FullValueExpr =
-        let makeFullName name = { table = tableRef; name = compileName name } : AST.ColumnRef
+    let compileLocalFieldExpr (tableRef : SQL.TableRef option) : LocalFieldExpr -> SQL.ValueExpr =
+        let makeFullName name = { table = tableRef; name = compileName name } : SQL.ColumnRef
         let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
         genericCompileFieldExpr makeFullName voidPlaceholder
 
-    let compileAttribute prefix (FunQLName name) expr = AST.SCExpr (AST.SQLName <| sprintf "__%s__%s" prefix name, compileFieldExpr expr)
+    let compileAttribute prefix (FunQLName name) expr = SQL.SCExpr (SQL.SQLName <| sprintf "__%s__%s" prefix name, compileFieldExpr expr)
 
     let compileResult (result : ResolvedQueryResult) =
         match result.expression with
-            | FEColumn c -> AST.SCColumn (compileFieldName c)
-            | _ -> AST.SCExpr (compileName result.name, compileFieldExpr result.expression)
+            | FEColumn c -> SQL.SCColumn (compileFieldName c)
+            | _ -> SQL.SCExpr (compileName result.name, compileFieldExpr result.expression)
 
     let findReference (name : FieldName) (field : ResolvedColumnField) : ResolvedFieldRef option =
         match field.fieldType with
@@ -134,25 +172,25 @@ type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
                 Some { entity = entityRef; name = entity.mainField }
             | _ -> None
 
-    let rec compileFrom : ResolvedFromExpr -> AST.FromExpr = function
+    let rec compileFrom : ResolvedFromExpr -> SQL.FromExpr = function
         | FEntity entityRef ->
             let entity = Option.get <| layout.FindEntity(entityRef)
             let tableRef = compileEntityRef entityRef
-            let idColumn = AST.SCColumn { table = Some tableRef; name = AST.SQLName "Id" }
+            let idColumn = SQL.SCColumn { table = Some tableRef; name = SQL.SQLName "Id" }
 
-            let columnFields = entity.columnFields |> Map.toSeq |> Seq.map (fun (name, field) -> AST.SCColumn { table = Some tableRef; name = compileName name })
-            let computedFields = entity.computedFields |> Map.toSeq |> Seq.map (fun (name, field) -> AST.SCExpr (compileName name, compileLocalFieldExpr (Some tableRef) field.expression))
+            let columnFields = entity.columnFields |> Map.toSeq |> Seq.map (fun (name, field) -> SQL.SCColumn { table = Some tableRef; name = compileName name })
+            let computedFields = entity.computedFields |> Map.toSeq |> Seq.map (fun (name, field) -> SQL.SCExpr (compileName name, compileLocalFieldExpr (Some tableRef) field.expression))
             let references = Map.update findReference entity.columnFields
 
-            let buildReferences (from : AST.FromExpr) (fieldName : FieldName) (referenceRef : ResolvedFieldRef) =
+            let buildReferences (from : SQL.FromExpr) (fieldName : FieldName) (referenceRef : ResolvedFieldRef) =
                 let columnName = compileName fieldName
                 let table = compileEntityRef referenceRef.entity
-                let where = AST.VEEq (AST.VEColumn { table = Some tableRef; name = columnName }, AST.VEColumn { table = Some table; name = AST.SQLName "Id" }) : AST.FullValueExpr
-                AST.FJoin (AST.Left, from, AST.FTable table, where)
-            let from = Map.fold buildReferences (AST.FTable tableRef) references
+                let where = SQL.VEEq (SQL.VEColumn { table = Some tableRef; name = columnName }, SQL.VEColumn { table = Some table; name = SQL.SQLName "Id" }) : SQL.ValueExpr
+                SQL.FJoin (SQL.Left, from, SQL.FTable table, where)
+            let from = Map.fold buildReferences (SQL.FTable tableRef) references
 
             let makeReferenceName (fieldName : FieldName, referenceRef : ResolvedFieldRef) =
-                AST.SCExpr (AST.SQLName <| sprintf "__Name__%O" fieldName, AST.VEColumn <| compileFieldRef referenceRef)
+                SQL.SCExpr (SQL.SQLName <| sprintf "__Name__%O" fieldName, SQL.VEColumn <| compileFieldRef referenceRef)
             let referenceNames = references |> Map.toSeq |> Seq.map makeReferenceName
 
             let subquery =
@@ -164,14 +202,14 @@ type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
                              limit = None
                              offset = None
                            }
-                } : AST.SelectExpr
+                } : SQL.SelectExpr
             
-            AST.FSubExpr (compileEntityPun entityRef, subquery)
-        | FJoin (jt, e1, e2, where) -> AST.FJoin (compileJoin jt, compileFrom e1, compileFrom e2, compileFieldExpr where)
+            SQL.FSubExpr (compileEntityPun entityRef, subquery)
+        | FJoin (jt, e1, e2, where) -> SQL.FJoin (compileJoin jt, compileFrom e1, compileFrom e2, compileFieldExpr where)
         // FIXME: track field names across subexpressions
-        | FSubExpr (name, q) -> AST.FSubExpr (compileName name, compileQueryExpr q)
+        | FSubExpr (name, q) -> SQL.FSubExpr (compileName name, compileQueryExpr q)
 
-    and compileFromClause (clause : ResolvedFromClause) : AST.FromClause =
+    and compileFromClause (clause : ResolvedFromClause) : SQL.FromClause =
         { from = compileFrom clause.from
           where = Option.map compileFieldExpr clause.where
           orderBy = Array.map (fun (ord, expr) -> (compileOrder ord, compileFieldExpr expr)) clause.orderBy
@@ -180,7 +218,7 @@ type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
           offset = None
         }
 
-    and compileQueryExpr (query : ResolvedQueryExpr) : AST.SelectExpr =
+    and compileQueryExpr (query : ResolvedQueryExpr) : SQL.SelectExpr =
         { columns = Array.map compileResult query.results
           clause = Some <| compileFromClause query.clause
         }
@@ -208,11 +246,17 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
             |> Array.map (fun (attrs, result) -> attrs |> Map.toArray |> Array.map (fun (name, expr) -> (expr, compiler.CompileAttribute (sprintf "Cell__%O" result.name) name expr)))
             |> Array.concat
             |> Array.partition (fun (expr, col) -> checkPureExpr expr)
-        
-    let attributesQuery =
-        { columns = Array.append (Array.map snd queryAttributes) (Array.map snd columnAttributes)
-          clause = None
-        } : AST.SelectExpr
+
+    let attributeColumns = Array.append (Array.map snd queryAttributes) (Array.map snd columnAttributes)
+    let attributesStr =
+        if Array.isEmpty attributeColumns
+        then None
+        else
+            let attributesQuery =
+                { columns = attributeColumns
+                  clause = None
+                } : SQL.SelectExpr
+            Some <| attributesQuery.ToSQLString()
 
     let resultColumns = Array.map (fun (attr, res) -> compiler.CompileResult res) viewExpr.results
     let getNameAttribute (attributes, result : ResolvedQueryResult) =
@@ -221,8 +265,8 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
                 let field = Option.get <| layout.FindField fieldRef.entity fieldRef.name
                 match field with
                     | RColumnField { fieldType = FTReference (entityRef, where) } ->
-                        let nameColumn = { table = Some <| compileEntityTablePun fieldRef.entity; name = AST.SQLName <| sprintf "__Name__%O" fieldRef.name } : AST.ColumnRef
-                        Some <| AST.SCExpr (AST.SQLName <| sprintf "__Name__%O" result.name, AST.VEColumn nameColumn)
+                        let nameColumn = { table = Some <| compileEntityTablePun fieldRef.entity; name = SQL.SQLName <| sprintf "__Name__%O" fieldRef.name } : SQL.ColumnRef
+                        Some <| SQL.SCExpr (SQL.SQLName <| sprintf "__Name__%O" result.name, SQL.VEColumn nameColumn)
                     | _ -> None
             | _ -> None
     let nameAttributes =
@@ -234,15 +278,15 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
         match viewExpr.update with
             | None -> [||]
             | Some updateExpr ->
-                [| AST.SCExpr (AST.SQLName "__Id", AST.VEColumn { table = Some <| compileEntityTablePun updateExpr.entity; name = AST.SQLName "Id" }) |]
+                [| SQL.SCExpr (SQL.SQLName "__Id", SQL.VEColumn { table = Some <| compileEntityTablePun updateExpr.entity; name = SQL.SQLName "Id" }) |]
 
     let queryClause = compiler.CompileFromClause viewExpr.clause
     let query =
         { columns = Array.concat [ idColumn; Array.map snd rowAttributes; Array.map snd cellAttributes; resultColumns; nameAttributes ]
           clause = Some queryClause
-        } : AST.SelectExpr
+        } : SQL.SelectExpr
 
-    { attributesStr = attributesQuery.ToSQLString()
+    { attributesStr = attributesStr
       query = query
       arguments = arguments
     }

@@ -229,123 +229,6 @@ let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
 type DBValueType = ValueType<SQLName>
 type SimpleValueType = ValueType<SimpleType>
 
-// Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
-type ValueExpr<'f> when 'f :> ISQLString =
-    | VEValue of Value
-    | VEColumn of 'f
-    | VEPlaceholder of int
-    | VENot of ValueExpr<'f>
-    | VEAnd of ValueExpr<'f> * ValueExpr<'f>
-    | VEOr of ValueExpr<'f> * ValueExpr<'f>
-    | VEConcat of ValueExpr<'f> * ValueExpr<'f>
-    | VEEq of ValueExpr<'f> * ValueExpr<'f>
-    | VENotEq of ValueExpr<'f> * ValueExpr<'f>
-    | VELike of ValueExpr<'f> * ValueExpr<'f>
-    | VENotLike of ValueExpr<'f> * ValueExpr<'f>
-    | VELess of ValueExpr<'f> * ValueExpr<'f>
-    | VELessEq of ValueExpr<'f> * ValueExpr<'f>
-    | VEGreater of ValueExpr<'f> * ValueExpr<'f>
-    | VEGreaterEq of ValueExpr<'f> * ValueExpr<'f>
-    | VEIn of ValueExpr<'f> * (ValueExpr<'f> array)
-    | VENotIn of ValueExpr<'f> * (ValueExpr<'f> array)
-    | VEIsNull of ValueExpr<'f>
-    | VEIsNotNull of ValueExpr<'f>
-    | VEFunc of SQLName * (ValueExpr<'f> array)
-    | VECast of ValueExpr<'f> * DBValueType
-    with
-        override this.ToString () = this.ToSQLString()
-        
-        member this.ToSQLString () =
-            match this with
-                | VEValue v -> v.ToSQLString()
-                | VEColumn col -> (col :> ISQLString).ToSQLString()
-                // Npgsql uses @name to denote parameters. We use integers
-                // because Npgsql's parser is not robust enough to handle arbitrary
-                // FunQL argument names.
-                | VEPlaceholder i -> sprintf "@%s" (renderSqlInt i)
-                | VENot a -> sprintf "NOT (%s)" (a.ToSQLString())
-                | VEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
-                | VENotLike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
-                | VELess (a, b) -> sprintf "(%s) < (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VELessEq (a, b) -> sprintf "(%s) <= (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEGreater (a, b) -> sprintf "(%s) > (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEGreaterEq (a, b) -> sprintf "(%s) >= (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEIn (e, vals) ->
-                    assert (not <| Array.isEmpty vals)
-                    sprintf "(%s) IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
-                | VENotIn (e, vals) ->
-                    assert (not <| Array.isEmpty vals)
-                    sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
-                | VEIsNull a -> sprintf "(%s) IS NULL" (a.ToSQLString())
-                | VEIsNotNull a -> sprintf "(%s) IS NOT NULL" (a.ToSQLString())
-                | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
-                | VECast (e, typ) -> sprintf "(%s) :: %s" (e.ToSQLString()) (typ.ToSQLString())
-
-        interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString ()
-
-let mapValueExpr (colFunc : 'a -> 'b) (placeholderFunc : int -> int) : ValueExpr<'a> -> ValueExpr<'b> =
-    let rec traverse = function
-        | VEValue value -> VEValue value
-        | VEColumn c -> VEColumn (colFunc c)
-        | VEPlaceholder i -> VEPlaceholder (placeholderFunc i)
-        | VENot e -> VENot (traverse e)
-        | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
-        | VEOr (a, b) -> VEOr (traverse a, traverse b)
-        | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
-        | VEEq (a, b) -> VEEq (traverse a, traverse b)
-        | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
-        | VELike (e, pat) -> VELike (traverse e, traverse pat)
-        | VENotLike (e, pat) -> VENotLike (traverse e, traverse pat)
-        | VELess (a, b) -> VELess (traverse a, traverse b)
-        | VELessEq (a, b) -> VELessEq (traverse a, traverse b)
-        | VEGreater (a, b) -> VEGreater (traverse a, traverse b)
-        | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
-        | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
-        | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
-        | VEIsNull e -> VEIsNull (traverse e)
-        | VEIsNotNull e -> VEIsNotNull (traverse e)
-        | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
-        | VECast (e, typ) -> VECast (traverse e, typ)
-    traverse
-
-let iterValueExpr (colFunc : 'a -> unit) (placeholderFunc : int -> unit) : ValueExpr<'a> -> unit =
-    let rec traverse = function
-        | VEValue value -> ()
-        | VEColumn c -> colFunc c
-        | VEPlaceholder i -> placeholderFunc i
-        | VENot e -> traverse e
-        | VEAnd (a, b) -> traverse a; traverse b
-        | VEOr (a, b) -> traverse a; traverse b
-        | VEConcat (a, b) -> traverse a; traverse b
-        | VEEq (a, b) -> traverse a; traverse b
-        | VENotEq (a, b) -> traverse a; traverse b
-        | VELike (e, pat) -> traverse e; traverse pat
-        | VENotLike (e, pat) -> traverse e; traverse pat
-        | VELess (a, b) -> traverse a; traverse b
-        | VELessEq (a, b) -> traverse a; traverse b
-        | VEGreater (a, b) -> traverse a; traverse b
-        | VEGreaterEq (a, b) -> traverse a; traverse b
-        | VEIn (e, vals) -> traverse e; Array.iter traverse vals
-        | VENotIn (e, vals) -> traverse e; Array.iter traverse vals
-        | VEIsNull e -> traverse e
-        | VEIsNotNull e -> traverse e
-        | VEFunc (name,  args) -> Array.iter traverse args
-        | VECast (e, typ) -> traverse e
-    traverse
-
-type SQLVoid = private SQLVoid of unit with
-    interface ISQLString with
-        member this.ToSQLString () = failwith "impossible"
-
-type PureValueExpr = ValueExpr<SQLVoid>
-type FullValueExpr = ValueExpr<ColumnRef>
-type LocalValueExpr = ValueExpr<ColumnName>
 
 type SortOrder =
     | Asc
@@ -379,9 +262,73 @@ type JoinType =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-type FromExpr =
+// Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
+type ValueExpr =
+    | VEValue of Value
+    | VEColumn of ColumnRef
+    | VEPlaceholder of int
+    | VENot of ValueExpr
+    | VEAnd of ValueExpr * ValueExpr
+    | VEOr of ValueExpr * ValueExpr
+    | VEConcat of ValueExpr * ValueExpr
+    | VEEq of ValueExpr * ValueExpr
+    | VENotEq of ValueExpr * ValueExpr
+    | VELike of ValueExpr * ValueExpr
+    | VENotLike of ValueExpr * ValueExpr
+    | VELess of ValueExpr * ValueExpr
+    | VELessEq of ValueExpr * ValueExpr
+    | VEGreater of ValueExpr * ValueExpr
+    | VEGreaterEq of ValueExpr * ValueExpr
+    | VEIn of ValueExpr * (ValueExpr array)
+    | VENotIn of ValueExpr * (ValueExpr array)
+    | VEInQuery of ValueExpr * SelectExpr
+    | VENotInQuery of ValueExpr * SelectExpr
+    | VEIsNull of ValueExpr
+    | VEIsNotNull of ValueExpr
+    | VEFunc of SQLName * (ValueExpr array)
+    | VECast of ValueExpr * DBValueType
+    with
+        override this.ToString () = this.ToSQLString()
+        
+        member this.ToSQLString () =
+            match this with
+                | VEValue v -> v.ToSQLString()
+                | VEColumn col -> (col :> ISQLString).ToSQLString()
+                // Npgsql uses @name to denote parameters. We use integers
+                // because Npgsql's parser is not robust enough to handle arbitrary
+                // FunQL argument names.
+                | VEPlaceholder i -> sprintf "@%s" (renderSqlInt i)
+                | VENot a -> sprintf "NOT (%s)" (a.ToSQLString())
+                | VEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
+                | VENotLike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
+                | VELess (a, b) -> sprintf "(%s) < (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VELessEq (a, b) -> sprintf "(%s) <= (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VEGreater (a, b) -> sprintf "(%s) > (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VEGreaterEq (a, b) -> sprintf "(%s) >= (%s)" (a.ToSQLString()) (b.ToSQLString())
+                | VEIn (e, vals) ->
+                    assert (not <| Array.isEmpty vals)
+                    sprintf "(%s) IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+                | VENotIn (e, vals) ->
+                    assert (not <| Array.isEmpty vals)
+                    sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+                | VEInQuery (e, query) -> sprintf "(%s) IN (%s)" (e.ToSQLString()) (query.ToSQLString())
+                | VENotInQuery (e, query) -> sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (query.ToSQLString())
+                | VEIsNull a -> sprintf "(%s) IS NULL" (a.ToSQLString())
+                | VEIsNotNull a -> sprintf "(%s) IS NOT NULL" (a.ToSQLString())
+                | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
+                | VECast (e, typ) -> sprintf "(%s) :: %s" (e.ToSQLString()) (typ.ToSQLString())
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString ()
+
+and FromExpr =
     | FTable of TableRef
-    | FJoin of JoinType * FromExpr * FromExpr * FullValueExpr
+    | FJoin of JoinType * FromExpr * FromExpr * ValueExpr
     | FSubExpr of SQLName * SelectExpr
     with
         override this.ToString () = this.ToSQLString()
@@ -397,7 +344,7 @@ type FromExpr =
 
 and SelectedColumn =
     | SCColumn of ColumnRef
-    | SCExpr of ColumnName * FullValueExpr
+    | SCExpr of ColumnName * ValueExpr
     with
         override this.ToString () = this.ToSQLString()
 
@@ -411,8 +358,8 @@ and SelectedColumn =
 
 and FromClause =
     { from : FromExpr
-      where : FullValueExpr option
-      orderBy : (SortOrder * FullValueExpr) array
+      where : ValueExpr option
+      orderBy : (SortOrder * ValueExpr) array
       limit : int option
       offset : int option
     } with
@@ -459,15 +406,42 @@ and SelectExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) (queryFunc : SelectExpr -> unit) : ValueExpr -> unit =
+    let rec traverse = function
+        | VEValue value -> ()
+        | VEColumn c -> colFunc c
+        | VEPlaceholder i -> placeholderFunc i
+        | VENot e -> traverse e
+        | VEAnd (a, b) -> traverse a; traverse b
+        | VEOr (a, b) -> traverse a; traverse b
+        | VEConcat (a, b) -> traverse a; traverse b
+        | VEEq (a, b) -> traverse a; traverse b
+        | VENotEq (a, b) -> traverse a; traverse b
+        | VELike (e, pat) -> traverse e; traverse pat
+        | VENotLike (e, pat) -> traverse e; traverse pat
+        | VELess (a, b) -> traverse a; traverse b
+        | VELessEq (a, b) -> traverse a; traverse b
+        | VEGreater (a, b) -> traverse a; traverse b
+        | VEGreaterEq (a, b) -> traverse a; traverse b
+        | VEIn (e, vals) -> traverse e; Array.iter traverse vals
+        | VENotIn (e, vals) -> traverse e; Array.iter traverse vals
+        | VEInQuery (e, query) -> traverse e; queryFunc query
+        | VENotInQuery (e, query) -> traverse e; queryFunc query
+        | VEIsNull e -> traverse e
+        | VEIsNotNull e -> traverse e
+        | VEFunc (name,  args) -> Array.iter traverse args
+        | VECast (e, typ) -> traverse e
+    traverse
+
 type InsertExpr =
     { name : TableRef
       columns : ColumnName array
-      values : (PureValueExpr array) array
+      values : (ValueExpr array) array
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            let renderInsertValue (values : PureValueExpr array) = 
+            let renderInsertValue (values : ValueExpr array) = 
                 values |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
 
             assert (not <| Array.isEmpty this.values)
@@ -481,8 +455,8 @@ type InsertExpr =
 
 type UpdateExpr =
     { name : TableRef
-      columns : Map<ColumnName, LocalValueExpr>
-      where : FullValueExpr option
+      columns : Map<ColumnName, ValueExpr>
+      where : ValueExpr option
     } with
         override this.ToString () = this.ToSQLString()
 
@@ -501,7 +475,7 @@ type UpdateExpr =
 
 type DeleteExpr =
     { name : TableRef
-      where : FullValueExpr option
+      where : ValueExpr option
     } with
         override this.ToString () = this.ToSQLString()
 
@@ -520,7 +494,7 @@ type DeleteExpr =
 type ColumnMeta =
     { columnType : DBValueType
       isNullable : bool
-      defaultExpr : PureValueExpr option
+      defaultExpr : ValueExpr option
     }
 
 type ConstraintType =
@@ -531,7 +505,7 @@ type ConstraintType =
 
 type ConstraintMeta =
     | CMUnique of ColumnName array
-    | CMCheck of LocalValueExpr
+    | CMCheck of ValueExpr
     | CMPrimaryKey of ColumnName array
     | CMForeignKey of TableRef * ((ColumnName * ColumnName) array)
 

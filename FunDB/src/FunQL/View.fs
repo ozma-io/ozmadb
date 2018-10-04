@@ -5,10 +5,11 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Layout.Resolve
 
 // Validates all fields and expressions. Further processing can skip all the checks.
 
-exception ViewError of info : string with
+exception ViewResolveError of info : string with
     override this.Message = this.info
 
 type ResolvedFieldRef =
@@ -79,10 +80,8 @@ let rec private findMainEntity : ResolvedFromExpr -> MainEntity option = functio
     | FSubExpr (name, query) -> findMainEntity query.clause.from
 
 let private checkName (name : string) : unit =
-    if name = "" then
-        raise (ViewError "Empty names are not allowed")
-    if name.IndexOf("__") <> -1 then
-        raise (ViewError <| sprintf "Names should not contain '__': %s" name)
+    if not (goodLayoutName name) then
+        raise (ViewResolveError <| sprintf "Invalid name: %s" name)
 
 let resultBoundField (result : ResolvedQueryResult) : ResolvedFieldRef option =
     match result.expression with
@@ -97,7 +96,7 @@ let private lookupField (mapping : QMapping) (f : FieldRef) : ResolvedFieldName 
                 if mapping.Count = 1 then
                     Map.toSeq mapping |> Seq.map snd |> Seq.head
                 else
-                    raise (ViewError <| sprintf "None or more than one possible interpretation: %O" f.name)
+                    raise (ViewResolveError <| sprintf "None or more than one possible interpretation: %O" f.name)
             | Some ename ->
                 match Map.tryFind ename.name mapping with
                     | Some ref ->
@@ -106,9 +105,9 @@ let private lookupField (mapping : QMapping) (f : FieldRef) : ResolvedFieldName 
                             | Some sch ->
                                 match ref with
                                     | QMEntity ({ schema = Some entitySchema; name = name }, _) when entitySchema = sch -> ref
-                                    | _ -> raise (ViewError <| sprintf "Invalid entity schema: %O" sch)
+                                    | _ -> raise (ViewResolveError <| sprintf "Invalid entity schema: %O" sch)
                     | None ->
-                        raise (ViewError <| sprintf "Field entity not found: %O" ename.name)
+                        raise (ViewResolveError <| sprintf "Field entity not found: %O" ename.name)
     match mappedEntity with
         // FIXME: improve error reporting
         | QMEntity (entityRef, entity) ->
@@ -117,19 +116,19 @@ let private lookupField (mapping : QMapping) (f : FieldRef) : ResolvedFieldName 
             else
                 match entity.FindField(f.name) with
                     | None ->
-                        raise (ViewError <| sprintf "Field not found: %O" f.name)
+                        raise (ViewResolveError <| sprintf "Field not found: %O" f.name)
                     | Some field -> RFField { entity = entityRef; name = f.name }
         | QMSubquery (queryName, fields) ->
             match Map.tryFind f.name fields with
                 | Some boundField -> RFSubquery (queryName, f.name, boundField)
-                | None -> raise (ViewError <| sprintf "Field not found: %O" f.name)
+                | None -> raise (ViewResolveError <| sprintf "Field not found: %O" f.name)
 
 type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
     let resolveFieldExpr (mapping : QMapping) : ParsedFieldExpr -> ResolvedFieldExpr =
         let resolvePlaceholder name =
             if Set.contains name placeholders
             then name
-            else raise (ViewError <| sprintf "Undefined placeholder: %O" name)
+            else raise (ViewResolveError <| sprintf "Undefined placeholder: %O" name)
         mapFieldExpr (lookupField mapping) resolvePlaceholder
  
     let resolveResult (mapping : QMapping) (result : ParsedQueryResult) : ResolvedQueryResult =
@@ -141,7 +140,7 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
         try
             query.results |> Seq.map (fun res -> res.name) |> Set.ofSeqUnique |> ignore
         with
-            | Failure msg -> raise (ViewError <| sprintf "Clashing result names: %s" msg)
+            | Failure msg -> raise (ViewResolveError <| sprintf "Clashing result names: %s" msg)
         let newQuery = {
             results = Array.map (resolveResult newMapping) query.results
             clause = qClause
@@ -159,7 +158,7 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
     and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
         | FEntity name ->
             match layout.FindEntity(name) with
-                | None -> raise (ViewError <| sprintf "Entity not found: %O" name)
+                | None -> raise (ViewResolveError <| sprintf "Entity not found: %O" name)
                 | Some entity -> (Map.singleton name.name (QMEntity (name, entity)), FEntity name)
         | FJoin (jt, e1, e2, where) ->
             let (newMapping1, newE1) = resolveFromExpr e1
@@ -169,7 +168,7 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
                 try
                     Map.unionUnique newMapping1 newMapping2
                 with
-                    | Failure msg -> raise (ViewError <| sprintf "Clashing entity names in a join: %s" msg)
+                    | Failure msg -> raise (ViewResolveError <| sprintf "Clashing entity names in a join: %s" msg)
 
             let newFieldExpr = resolveFieldExpr newMapping where
             (newMapping, FJoin (jt, newE1, newE2, newFieldExpr))
@@ -185,11 +184,11 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
     let resolveUpdate (query : ResolvedQueryExpr) (updateEntity : EntityRef) : ResolvedUpdateExpr =
         let entity =
             match layout.FindEntity(updateEntity) with
-                | None -> raise (ViewError <| sprintf "Entity not found: %O" updateEntity)
+                | None -> raise (ViewResolveError <| sprintf "Entity not found: %O" updateEntity)
                 | Some e -> e
         match findMainEntity query.clause.from with
             | Some mainEntity when mainEntity.entity = updateEntity -> ()
-            | someMain -> raise (ViewError <| sprintf "Cannot map updated entity to the expression: %O, possible value: %O" updateEntity someMain)
+            | someMain -> raise (ViewResolveError <| sprintf "Cannot map updated entity to the expression: %O, possible value: %O" updateEntity someMain)
         let getField (result : ResolvedQueryResult) : (FieldName * FieldName) option =
             match resultBoundField result with
                 | Some fieldRef when fieldRef.entity = updateEntity && fieldRef.name <> funId -> Some (fieldRef.name, result.name)
@@ -198,12 +197,12 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
             try
                 query.results |> Seq.mapMaybe getField |> Map.ofSeqUnique
             with
-                | Failure msg -> raise (ViewError <| sprintf "Repeating updated entity fields in results: %s" msg)
+                | Failure msg -> raise (ViewResolveError <| sprintf "Repeating updated entity fields in results: %s" msg)
 
         let checkField fieldName (field : ResolvedColumnField) =
-            if Option.isNone field.defaultExpr then
+            if Option.isNone field.defaultValue then
                 if not <| Map.containsKey fieldName mappedResults then
-                    raise (ViewError <| sprintf "Required updated entity field is not in the view expression: %O" fieldName)
+                    raise (ViewResolveError <| sprintf "Required updated entity field is not in the view expression: %O" fieldName)
         entity.columnFields |> Map.iter checkField
 
         { entity = updateEntity
@@ -220,7 +219,10 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let checkArgument name = function
         | FTReference (entityRef, where) ->
             if Option.isNone <| layout.FindEntity(entityRef) then
-                raise (ViewError <| sprintf "Unknown entity in reference: %O" name)
+                raise (ViewResolveError <| sprintf "Unknown entity in reference: %O" entityRef)
+        | FTEnum vals ->
+            if Set.isEmpty vals then
+                raise (ViewResolveError "Enums must not be empty")
         | _ -> ()
     Map.iter checkArgument viewExpr.arguments
 

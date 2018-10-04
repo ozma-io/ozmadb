@@ -7,7 +7,7 @@ open FunWithFlags.FunDB.FunQL.AST
 
 let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
     { fieldType = field.Type
-      defaultExpr =
+      defaultValue =
           if field.Default = null
           then None
           else Some field.Default

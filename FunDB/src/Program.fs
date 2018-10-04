@@ -99,11 +99,11 @@ let main (args : string array) : int =
  
         conn.Commit()
         
-    let contextCache = ContextCache (config.connectionString)
+    let cacheStore = ContextCacheStore config.connectionString
 
     let protectedApi (userName : string) =
         fun ctx -> async {
-            use rctx = new RequestContext(contextCache, userName)
+            use rctx = new RequestContext(cacheStore, userName)
             return! viewsApi rctx ctx
         }
 
@@ -115,6 +115,7 @@ let main (args : string array) : int =
         // FIXME: invalid use of OPTIONS
         OPTIONS >=> corsApi
         corsApi >=> authApi config.connectionString (cert.GetECDsaPrivateKey()) expirationTime protectedApi
+        RequestErrors.NOT_FOUND ""
     ]
     startWebServer suaveCfg funApi
 
