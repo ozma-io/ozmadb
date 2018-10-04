@@ -84,7 +84,7 @@
     <PackageReference Include="jose-jwt" Version="2.4.*" />
 
     <Reference Include="Newtonsoft.Json.Custom">
-      <HintPath>../3rdparty/Newtonsoft.Json/Src/Newtonsoft.Json/bin/Debug/netstandard2.0/Newtonsoft.Json.dll</HintPath>
+      <HintPath>../3rdparty/Newtonsoft.Json.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <!--<ProjectReference Include="../3rdparty/Newtonsoft.Json/Src/Newtonsoft.Json/Newtonsoft.Json.csproj" />-->
