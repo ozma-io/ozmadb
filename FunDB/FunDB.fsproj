@@ -41,19 +41,14 @@
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParser.fs" />
     <FsLex Include="src/FunQL/FunQLLexer.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLexer.fs" />
-    
-    <Compile Include="src/Layout/Types.fs" />
-    
-    <Compile Include="src/Permissions/Types.fs" />
 
-    <Compile Include="src/Layout/Source.fs" />
-    <Compile Include="src/Layout/Resolve.fs" />
+    <Compile Include="src/Layout/Types.fs" />
 
     <Compile Include="src/FunQL/View.fs" />
     <Compile Include="src/FunQL/Compiler.fs" />
     <Compile Include="src/FunQL/Query.fs" />
-    <Compile Include="src/FunQL/Info.fs" />
-
+    <Compile Include="src/FunQL/Info.fs" />    <Compile Include="src/Layout/Source.fs" />
+    <Compile Include="src/Layout/Resolve.fs" />
     <Compile Include="src/Layout/System.fs" />
     <Compile Include="src/Schema.fs" />
     <Compile Include="src/Layout/Schema.fs" />
@@ -62,14 +57,19 @@
     <Compile Include="src/Layout/Meta.fs" />
     <Compile Include="src/Layout/Json.fs" />
 
+    <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Schema.fs" />
 
     <Compile Include="src/Connection.fs" />
+    <Compile Include="src/Entity.fs" />
+    <Compile Include="src/ContextCache.fs" />
     <Compile Include="src/Context.fs" />
 
     <Compile Include="src/API/Utils.fs" />
     <Compile Include="src/API/Auth.fs" />
     <Compile Include="src/API/View.fs" />
+    <Compile Include="src/API/Permissions.fs" />
+    <Compile Include="src/API/Entity.fs" />
     
     <Compile Include="src/Program.fs" />
   </ItemGroup>

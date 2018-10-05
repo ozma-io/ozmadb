@@ -10,21 +10,15 @@ open Suave.Filters
 
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Schema
-open FunWithFlags.FunDB.Layout.Source
-open FunWithFlags.FunDB.Layout.System
-open FunWithFlags.FunDB.Layout.Schema
 open FunWithFlags.FunDB.Layout.Json
-open FunWithFlags.FunDB.Layout.Resolve
-open FunWithFlags.FunDB.Layout.Render
-open FunWithFlags.FunDB.Layout.Update
-open FunWithFlags.FunDB.SQL.Meta
-open FunWithFlags.FunDB.SQL.Migration
-open FunWithFlags.FunDB.Layout.Meta
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Context
 open FunWithFlags.FunDB.API.Auth
 open FunWithFlags.FunDB.API.View
+open FunWithFlags.FunDB.API.Permissions
+open FunWithFlags.FunDB.API.Entity
+open FunWithFlags.FunDB.ContextCache
 
 type Config =
     { [<JsonProperty(Required=Required.Always)>]
@@ -62,36 +56,9 @@ let main (args : string array) : int =
     let expirationTime = TimeSpan(0, 0, config.expirationTime)
     let preloadLayout = Option.map (fun path -> parseJsonLayout <| File.ReadAllText(path)) config.preloadLayout
 
-    using (new DatabaseConnection(config.connectionString)) <| fun conn ->
-        eprintfn "Building system schema"
-        let internalLayoutSource = buildSystemLayout typeof<SystemContext>
-        let systemLayoutSource =
-            match preloadLayout with
-                | Some layout ->
-                    // We ignore system entities modifications.
-                    assert (Map.isEmpty layout.systemEntities)
-                    { internalLayoutSource with schemas = layout.schemas }
-                | None -> internalLayoutSource
-        let systemLayout = resolveLayout systemLayoutSource
-        let systemRenderedLayout = renderLayout systemLayout
-        assert ((resolveLayout systemRenderedLayout).systemEntities = systemLayout.systemEntities)
-        let systemMeta = buildLayoutMeta systemLayout
-
-        eprintfn "Migrating system entities to the current version"
-        let currentMeta = buildDatabaseMeta conn.Transaction
-
-        let systemMigration = migrateDatabase { currentMeta with schemas = Map.filter (fun name schema -> Map.containsKey name systemMeta.schemas) currentMeta.schemas } systemMeta
-        for action in systemMigration do
-            eprintfn "Migration step: %O" action
-            conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
-
-        updateLayout conn.System systemRenderedLayout
-
-        eprintfn "Sanity checking current layout"
-        let currentLayoutSource = buildSchemaLayout conn.System
-        let currentLayout = resolveLayout currentLayoutSource
-        assert (currentLayout.systemEntities = systemLayout.systemEntities)
+    let cacheStore = ContextCacheStore(config.connectionString, preloadLayout)
         
+    using (new DatabaseConnection(config.connectionString)) <| fun conn ->
         // Create admin user
         match conn.System.Users.Where(fun x -> x.Name = rootUserName) |> Seq.first with
             | None ->
@@ -103,13 +70,15 @@ let main (args : string array) : int =
             | Some user -> ()
  
         conn.Commit()
-        
-    let cacheStore = ContextCacheStore config.connectionString
 
     let protectedApi (userName : string) =
         fun ctx -> async {
             use rctx = new RequestContext(cacheStore, userName)
-            return! viewsApi rctx ctx
+            return! choose
+                [ viewsApi rctx
+                  permissionsApi rctx
+                  entitiesApi rctx
+                ] ctx
         }
 
     let suaveCfg =

@@ -5,7 +5,6 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.Layout.Resolve
 
 // Validates all fields and expressions. Further processing can skip all the checks.
 
@@ -80,7 +79,7 @@ let rec private findMainEntity : ResolvedFromExpr -> MainEntity option = functio
     | FSubExpr (name, query) -> findMainEntity query.clause.from
 
 let private checkName (name : string) : unit =
-    if not (goodLayoutName name) then
+    if not (goodName name) then
         raise (ViewResolveError <| sprintf "Invalid name: %s" name)
 
 let resultBoundField (result : ResolvedQueryResult) : ResolvedFieldRef option =

@@ -118,8 +118,9 @@ type QueryConnection (connection : NpgsqlConnection) =
         use command = new NpgsqlCommand(queryStr, connection)
         for KeyValue (name, (valueType, value)) in pars do
             ignore <| command.Parameters.AddWithValue(name.ToString(), npgsqlType valueType, npgsqlValue value)
-        command.Prepare()
         eprintfn "Executing query: %s" queryStr
+        eprintfn "Parameters: %O" pars
+        command.Prepare()
         try
             runFunc command
         with

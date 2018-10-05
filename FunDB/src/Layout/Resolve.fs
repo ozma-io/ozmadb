@@ -2,19 +2,19 @@ module FunWithFlags.FunDB.Layout.Resolve
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
+open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lexer
 open FunWithFlags.FunDB.FunQL.Parser
+open FunWithFlags.FunDB.FunQL.Compiler
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Source
 
 exception ResolveLayoutError of info : string with
     override this.Message = this.info
 
-let goodLayoutName (name : string) : bool = not (name.Contains("__") || name = "" || name.Contains(' ') || name.Contains('/'))
-
 let private checkName : FunQLName -> unit = function
-    | FunQLName name when not (goodLayoutName name) -> raise (ResolveLayoutError <| sprintf "Invalid name: %s" name)
+    | FunQLName name when not (goodName name) -> raise (ResolveLayoutError <| sprintf "Invalid name: %s" name)
     | _ -> ()
 
 let private checkFieldName (name : FunQLName) : unit =
@@ -120,8 +120,10 @@ type private LayoutResolver (layout : SourceLayout) =
                                 | Some v -> Some v
                                 | None -> raise (ResolveLayoutError <| sprintf "Default expression is not trivial: %s" def)
                         | Error msg -> raise (ResolveLayoutError <| sprintf "Error parsing column field default expression: %s" msg)
+        let fieldType = resolveFieldType entity fieldType
 
-        { fieldType = resolveFieldType entity fieldType
+        { fieldType = fieldType
+          valueType = compileFieldType fieldType
           defaultValue = defaultValue
           isNullable = col.isNullable
         }

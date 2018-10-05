@@ -45,12 +45,19 @@ module Seq =
     let fold1 (func : 'a -> 'a -> 'a) (s : 'a seq) : 'a =
         Seq.fold func (Seq.head s) (Seq.tail s)
 
+    // FIXME: make those stop on first failure
     let traverseOption (func : 'a -> 'b option) (vals : 'a seq) : 'b seq option =
         let res = vals |> Seq.map func |> Seq.cache
         if Seq.forall Option.isSome res then
             Some (Seq.map Option.get res)
         else
             None
+
+    let traverseResult (func : 'a -> Result<'b, 'e>) (vals : 'a seq) : Result<'b seq, 'e> =
+        let res = vals |> Seq.map func |> Seq.cache
+        match res |> Seq.filter Result.isError |> Seq.first with
+            | Some err -> Error <| Result.getError err
+            | None -> Ok (Seq.map (Result.get) res)
 
 module Map =
     let ofSeqUnique (items : ('k * 'v) seq) : Map<'k, 'v> =
@@ -82,7 +89,6 @@ module Map =
     let mapWithKeys (func : 'k1 -> 'a -> ('k2 * 'b)) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
         map |> Map.toSeq |> Seq.map (fun (k, a) -> func k a) |> Map.ofSeq
     
-    // FIXME: make those stop on first failure
     let traverseOption (func : 'k -> 'a -> 'b option) (vals : Map<'k, 'a>) : Map<'k, 'b> option =
         let res = vals |> Map.map func
         if Map.forall (fun key -> Option.isSome) res then
@@ -95,6 +101,11 @@ module Map =
         match res |> Map.toSeq |> Seq.filter (fun (_, r) -> Result.isError r) |> Seq.first with
             | Some (_, err) -> Error <| Result.getError err
             | None -> Ok <| Map.map (fun key -> Result.get) res
+
+    let findWithDefault (k : 'k) (def : unit -> 'v) (vals : Map<'k, 'a>) : 'a =
+        match Map.tryFind k vals with
+            | None -> def ()
+            | Some v -> v
 
 module Set =
     let toMap (f : 'k -> 'v) (s : Set<'k>) : Map<'k, 'v> =

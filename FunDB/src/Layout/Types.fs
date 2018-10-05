@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Utils
+module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ReferenceRef =
     | RThis of FieldName
@@ -32,6 +33,7 @@ type ResolvedCheckConstraint =
 
 type ResolvedColumnField =
     { fieldType : ResolvedFieldType
+      valueType : SQL.SimpleValueType
       defaultValue : FieldValue option
       isNullable : bool
     }

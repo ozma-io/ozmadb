@@ -4,8 +4,8 @@ open System
 open System.Reflection
 open System.ComponentModel
 open System.Globalization
-open Newtonsoft.Json
 open Microsoft.FSharp.Reflection
+open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils

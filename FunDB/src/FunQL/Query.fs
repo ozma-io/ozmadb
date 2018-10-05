@@ -89,15 +89,6 @@ type ExecutedViewExpr =
       rows : ExecutedRow seq
     }
 
-let private typecheckArgument (fieldType : ParsedFieldType) (value : FieldValue) : unit =
-    match fieldType with
-        | FTEnum vals ->
-            match value with
-                | FString str when Set.contains str vals -> ()
-                | _ -> raise (ViewExecutionError <| sprintf "Argument is not from allowed values of a enum: %O" value)
-        // Most casting/typechecking will be done by database or Npgsql
-        | _ -> ()
-
 type private ColumnType =
     | RowAttribute of AttributeName
     | CellAttribute of FieldName * AttributeName
@@ -240,13 +231,15 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             match Map.tryFind name arguments with
                 | None -> raise (ViewExecutionError <| sprintf "Argument not found: %s" name)
                 | Some value -> value
-        typecheckArgument mapping.fieldType value
+        match typecheckArgument mapping.fieldType value with
+            | Ok () -> ()
+            | Error msg -> raise (ViewExecutionError msg)
         (mapping.placeholder, (mapping.valueType, compileArgument value))
-        
     let parameters = viewExpr.arguments |> Map.mapWithKeys makeParameter
+
     let attrsResult =
-        match viewExpr.attributesStr with
-            | Some attributesQuery -> connection.ExecuteQuery attributesQuery parameters parseAttributesResult
+        match viewExpr.attributesExpr with
+            | Some attributesExpr -> connection.ExecuteQuery attributesExpr.query parameters parseAttributesResult
             | None ->
                 { attributes = Map.empty
                   attributeTypes = Map.empty
