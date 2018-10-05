@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.Entity
+﻿module FunWithFlags.FunDB.Entity
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST

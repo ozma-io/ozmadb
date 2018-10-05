@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.API.Entity
+﻿module FunWithFlags.FunDB.API.Entity
 
 open Suave
 open Suave.Filters

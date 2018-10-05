@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.API.Permissions
+﻿module FunWithFlags.FunDB.API.Permissions
 
 open Suave
 open Suave.Filters

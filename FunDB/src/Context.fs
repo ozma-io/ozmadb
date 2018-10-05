@@ -132,6 +132,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                 | Some entity ->
                     match convertEntityArguments rawArgs entity with
                         | Error str -> Error <| EEArguments str
+                        | Ok args when Map.isEmpty args -> Ok ()
                         | Ok args ->
                             try
                                 updateEntity conn.Query entityRef entity id args

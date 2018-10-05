@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.ContextCache
+﻿module FunWithFlags.FunDB.ContextCache
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
