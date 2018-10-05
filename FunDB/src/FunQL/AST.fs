@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.FunQL.AST
 
 open System
 open System.ComponentModel
+open Newtonsoft.Json
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
@@ -55,7 +56,7 @@ type FieldRef =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type FieldValue =
+type [<JsonConverter(typeof<FieldValueConverter>)>] FieldValue =
     | FInt of int
     | FString of string
     | FBool of bool
@@ -92,6 +93,30 @@ type FieldValue =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
+
+and FieldValueConverter () =
+    inherit JsonConverter<FieldValue> ()
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : FieldValue =
+        raise <| new NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, value : FieldValue, serializer : JsonSerializer) : unit =
+        let serialize value = serializer.Serialize(writer, value)
+
+        match value with
+            | FInt i -> serialize i
+            | FString s -> serialize s
+            | FBool b -> serialize b
+            | FDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
+            | FDate dt -> serialize <| dt.ToUnixTimeSeconds()
+            | FIntArray vals -> serialize vals
+            | FStringArray vals -> serialize vals
+            | FBoolArray vals -> serialize vals
+            | FDateTimeArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+            | FDateArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+            | FNull -> serialize null
 
 type ScalarFieldType =
     | SFTInt
