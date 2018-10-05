@@ -33,6 +33,11 @@ type Config =
       serverCert : string
       [<JsonProperty(Required=Required.Always)>]
       expirationTime : int
+      [<JsonProperty(Required=Required.Always)>]
+      host : string
+      [<JsonProperty(Required=Required.Always)>]
+      port : int
+      [<JsonProperty(Required=Required.Always)>]
       preloadLayout : string option
     }
 
@@ -107,7 +112,10 @@ let main (args : string array) : int =
             return! viewsApi rctx ctx
         }
 
-    let suaveCfg = defaultConfig
+    let suaveCfg =
+        { defaultConfig with
+            bindings = [ HttpBinding.createSimple HTTP config.host config.port ]
+        }
     let corsCfg = defaultCORSConfig
     let corsApi = cors corsCfg
 
