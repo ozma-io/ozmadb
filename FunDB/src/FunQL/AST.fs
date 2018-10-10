@@ -118,7 +118,7 @@ and FieldValueConverter () =
             | FDateArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
             | FNull -> serialize null
 
-type ScalarFieldType =
+type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
     | SFTInt
     | SFTString
     | SFTBool
@@ -137,6 +137,17 @@ type ScalarFieldType =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
+
+and ScalarFieldTypeConverter () =
+    inherit JsonConverter<ScalarFieldType> ()
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ScalarFieldType =
+        raise <| new NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, value : ScalarFieldType, serializer : JsonSerializer) : unit =
+        let serialize value = serializer.Serialize(writer, value.ToString())
 
 type FieldExprType =
     | FETScalar of ScalarFieldType
