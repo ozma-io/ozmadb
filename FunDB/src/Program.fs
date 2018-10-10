@@ -42,7 +42,7 @@ let randomPassword (passwordLength : int) : string =
 
 [<EntryPoint>]
 let main (args : string array) : int =
-    // Register a global converter to have nicer native J# types JSON conversion
+    // Register a global converter to have nicer native F# types JSON conversion
     JsonConvert.DefaultSettings <- fun () ->
         new JsonSerializerSettings(
             Converters = [| new UnionConverter() |]

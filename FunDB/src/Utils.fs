@@ -102,7 +102,7 @@ module Map =
             | Some (_, err) -> Error <| Result.getError err
             | None -> Ok <| Map.map (fun key -> Result.get) res
 
-    let findWithDefault (k : 'k) (def : unit -> 'v) (vals : Map<'k, 'a>) : 'a =
+    let findWithDefault (k : 'k) (def : unit -> 'v) (vals : Map<'k, 'v>) : 'v =
         match Map.tryFind k vals with
             | None -> def ()
             | Some v -> v

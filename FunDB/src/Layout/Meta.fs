@@ -7,12 +7,12 @@ open FunWithFlags.FunDB.FunQL.AST
 
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-exception LayoutMetaError of info : string with
+exception LayoutMetaException of info : string with
     override this.Message = this.info
 
 let private compileCheckExpr : LocalFieldExpr -> SQL.ValueExpr =
     let compileColumn c = { table = None; name = compileName c } : SQL.ColumnRef
-    let voidPlaceholder c = raise (LayoutMetaError <| sprintf "Unexpected placeholder in check expression: %O" c)
+    let voidPlaceholder c = raise (LayoutMetaException <| sprintf "Unexpected placeholder in check expression: %O" c)
     genericCompileFieldExpr compileColumn voidPlaceholder
 
 let private makeUniqueConstraintMeta (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
@@ -74,7 +74,7 @@ let private makeEntitiesMeta (schemaName : SQL.SchemaName option) (entities : Ma
     let makeEntity (name, entity) =
         let tableName = { schema = schemaName; name = SQL.SQLName <| name.ToString() } : SQL.TableRef
         makeEntityMeta tableName entity
-    let objects = entities |> Map.toSeq |> Seq.map makeEntity |> Seq.concat |> Map.ofSeq
+    let objects = entities |> Map.toSeq |> Seq.collect makeEntity |> Map.ofSeq
     { objects = objects }
 
 let private makeSchemaMeta (schemaName : SQL.SchemaName) (schema : ResolvedSchema) : SQL.SchemaMeta =

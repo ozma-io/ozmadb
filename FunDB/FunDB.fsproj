@@ -47,7 +47,8 @@
     <Compile Include="src/FunQL/View.fs" />
     <Compile Include="src/FunQL/Compiler.fs" />
     <Compile Include="src/FunQL/Query.fs" />
-    <Compile Include="src/FunQL/Info.fs" />    <Compile Include="src/Layout/Source.fs" />
+    <Compile Include="src/FunQL/Info.fs" />
+    <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Resolve.fs" />
     <Compile Include="src/Layout/System.fs" />
     <Compile Include="src/Schema.fs" />

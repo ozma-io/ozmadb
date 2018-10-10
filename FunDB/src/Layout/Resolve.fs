@@ -10,16 +10,16 @@ open FunWithFlags.FunDB.FunQL.Compiler
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Source
 
-exception ResolveLayoutError of info : string with
+exception ResolveLayoutException of info : string with
     override this.Message = this.info
 
 let private checkName : FunQLName -> unit = function
-    | FunQLName name when not (goodName name) -> raise (ResolveLayoutError <| sprintf "Invalid name: %s" name)
+    | FunQLName name when not (goodName name) -> raise (ResolveLayoutException <| sprintf "Invalid name: %s" name)
     | _ -> ()
 
 let private checkFieldName (name : FunQLName) : unit =
     if name = funId
-    then raise (ResolveLayoutError <| sprintf "Name is forbidden: %O" name)
+    then raise (ResolveLayoutException <| sprintf "Name is forbidden: %O" name)
     else checkName name
 
 let private reduceDefaultExpr : ParsedFieldExpr -> FieldValue option = function
@@ -40,10 +40,10 @@ let private resolveLocalExpr (entity : SourceEntity) : ParsedFieldExpr -> LocalF
             match entity.FindField(fieldName) with
                 | Some _ -> fieldName
                 | None when fieldName = funId -> fieldName
-                | None -> raise (ResolveLayoutError <| sprintf "Column not found in local expression: %s" (fieldName.ToFunQLString()))
-        | ref -> raise (ResolveLayoutError <| sprintf "Local expression cannot contain qualified field references: %O" ref)
+                | None -> raise (ResolveLayoutException <| sprintf "Column not found in local expression: %s" (fieldName.ToFunQLString()))
+        | ref -> raise (ResolveLayoutException <| sprintf "Local expression cannot contain qualified field references: %O" ref)
     let voidPlaceholder name =
-        raise (ResolveLayoutError <| sprintf "Placeholders are not allowed in local expressions: %s" name)
+        raise (ResolveLayoutException <| sprintf "Placeholders are not allowed in local expressions: %s" name)
     mapFieldExpr resolveColumn voidPlaceholder
 
 let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : SourceEntity) : ParsedFieldExpr -> ResolvedReferenceFieldExpr =
@@ -52,25 +52,25 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
             match thisEntity.FindField(thisName) with
                 | Some _ -> RThis thisName
                 | None when thisName = funId -> RThis thisName
-                | None -> raise (ResolveLayoutError <| sprintf "Local column not found in reference condition: %s" (thisName.ToFunQLString()))
+                | None -> raise (ResolveLayoutException <| sprintf "Local column not found in reference condition: %s" (thisName.ToFunQLString()))
         | { entity = Some { schema = None; name = FunQLName "ref" }; name = refName } ->
             match refEntity.FindField(refName) with
                 | Some _ -> RRef refName
                 | None when refName = funId -> RRef refName
-                | None -> raise (ResolveLayoutError <| sprintf "Referenced column not found in reference condition: %s" (refName.ToFunQLString()))
-        | ref -> raise (ResolveLayoutError <| sprintf "Invalid column reference in reference condition: %O" ref)
+                | None -> raise (ResolveLayoutException <| sprintf "Referenced column not found in reference condition: %s" (refName.ToFunQLString()))
+        | ref -> raise (ResolveLayoutException <| sprintf "Invalid column reference in reference condition: %O" ref)
     let voidPlaceholder name =
-        raise (ResolveLayoutError <| sprintf "Placeholders are not allowed in reference conditions: %s" name)
+        raise (ResolveLayoutException <| sprintf "Placeholders are not allowed in reference conditions: %s" name)
     mapFieldExpr resolveColumn voidPlaceholder
 
 let private resolveUniqueConstraint (entity : SourceEntity) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.columns then
-        raise <| ResolveLayoutError "Empty unique constraint"
+        raise <| ResolveLayoutException "Empty unique constraint"
     
     let checkColumn name =
         match entity.FindField(name) with
             | Some _ -> name
-            | None -> raise (ResolveLayoutError <| sprintf "Unknown column in unique constraint: %O" name)
+            | None -> raise (ResolveLayoutException <| sprintf "Unknown column in unique constraint: %O" name)
 
     { columns = Array.map checkColumn constr.columns }
 
@@ -78,14 +78,14 @@ let private resolveCheckConstraint (entity : SourceEntity) (constr : SourceCheck
     let checkExpr =
         match parse tokenizeFunQL fieldExpr constr.expression with
             | Ok r -> r
-            | Error msg -> raise (ResolveLayoutError <| sprintf "Error parsing check constraint expression: %s" msg)
+            | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing check constraint expression: %s" msg)
     { expression = resolveLocalExpr entity checkExpr }
 
 let private resolveComputedField (entity : SourceEntity) (comp : SourceComputedField) : ResolvedComputedField =
     let computedExpr =
         match parse tokenizeFunQL fieldExpr comp.expression with
             | Ok r -> r
-            | Error msg -> raise (ResolveLayoutError <| sprintf "Error parsing computed field expression: %s" msg)
+            | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing computed field expression: %s" msg)
 
     { expression = resolveLocalExpr entity computedExpr
     }
@@ -96,20 +96,20 @@ type private LayoutResolver (layout : SourceLayout) =
         | FTReference (entityName, where) ->
             let refEntity =
                 match layout.FindEntity(entityName) with
-                    | None -> raise (ResolveLayoutError <| sprintf "Cannot find entity %O from reference type" entityName)
+                    | None -> raise (ResolveLayoutException <| sprintf "Cannot find entity %O from reference type" entityName)
                     | Some refEntity -> refEntity
             let resolvedWhere = Option.map (resolveReferenceExpr entity refEntity) where
             FTReference (entityName, resolvedWhere)
         | FTEnum vals ->
             if Set.isEmpty vals then
-                raise (ResolveLayoutError "Enums must not be empty")
+                raise (ResolveLayoutException "Enums must not be empty")
             FTEnum vals
 
     let resolveColumnField (entity : SourceEntity) (col : SourceColumnField) : ResolvedColumnField =
         let fieldType =
             match parse tokenizeFunQL fieldType col.fieldType with
                 | Ok r -> r
-                | Error msg -> raise (ResolveLayoutError <| sprintf "Error parsing column field type: %s" msg)
+                | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing column field type: %s" msg)
         let defaultValue =
             match col.defaultValue with
                 | None -> None
@@ -118,8 +118,8 @@ type private LayoutResolver (layout : SourceLayout) =
                         | Ok r ->
                             match reduceDefaultExpr r with
                                 | Some v -> Some v
-                                | None -> raise (ResolveLayoutError <| sprintf "Default expression is not trivial: %s" def)
-                        | Error msg -> raise (ResolveLayoutError <| sprintf "Error parsing column field default expression: %s" msg)
+                                | None -> raise (ResolveLayoutException <| sprintf "Default expression is not trivial: %s" def)
+                        | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing column field default expression: %s" msg)
         let fieldType = resolveFieldType entity fieldType
 
         { fieldType = fieldType
@@ -138,10 +138,10 @@ type private LayoutResolver (layout : SourceLayout) =
             try
                 Set.ofSeqUnique <| Seq.append (Map.toSeq columnFields |> Seq.map fst) (Map.toSeq computedFields |> Seq.map fst)
             with
-                | Failure msg -> raise (ResolveLayoutError <| sprintf "Clashing field names: %s" msg)
+                | Failure msg -> raise (ResolveLayoutException <| sprintf "Clashing field names: %s" msg)
         if entity.mainField <> funId then
             if not <| Set.contains entity.mainField fields then
-                raise (ResolveLayoutError <| sprintf "Nonexistent main field: %O" entity.mainField)
+                raise (ResolveLayoutException <| sprintf "Nonexistent main field: %O" entity.mainField)
 
         { columnFields = columnFields
           computedFields = computedFields

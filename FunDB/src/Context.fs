@@ -121,7 +121,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                                 conn.Commit()
                                 Ok ()
                             with
-                                | EntityExecutionError msg -> Error <| EEExecute msg
+                                | EntityExecutionException msg -> Error <| EEExecute msg
 
     member this.UpdateEntity (entityRef : EntityRef) (id : int) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
         if userName <> rootUserName && Option.isNone entityRef.schema then
@@ -141,7 +141,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                                 conn.Commit()
                                 Ok ()
                             with
-                                | EntityExecutionError msg -> Error <| EEExecute msg
+                                | EntityExecutionException msg -> Error <| EEExecute msg
 
     member this.DeleteEntity (entityRef : EntityRef) (id : int) : Result<unit, EntityErrorInfo> =
         if userName <> rootUserName then
@@ -157,4 +157,4 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                         conn.Commit()
                         Ok ()
                     with
-                        | EntityExecutionError msg -> Error <| EEExecute msg
+                        | EntityExecutionException msg -> Error <| EEExecute msg

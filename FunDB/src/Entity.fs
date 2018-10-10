@@ -7,7 +7,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-exception EntityExecutionError of info : string with
+exception EntityExecutionException of info : string with
     override this.Message = this.info
 
 type EntityId = int
@@ -17,7 +17,7 @@ let insertEntity (connection : QueryConnection) (entityRef : EntityRef) (entity 
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind fieldName args with
             | None when Option.isSome field.defaultValue -> None
-            | None -> raise (EntityExecutionError <| sprintf "Required field not provided: %O" fieldName)
+            | None -> raise (EntityExecutionException <| sprintf "Required field not provided: %O" fieldName)
             | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
     let parameters = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
     let columns = parameters |> Seq.map fst |> Array.ofSeq

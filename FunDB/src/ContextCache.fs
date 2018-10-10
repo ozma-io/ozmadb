@@ -46,7 +46,7 @@ type ContextBuildErrorInfo =
     | CBEUserView of UserViewErrorInfo
     | CBEUserViewName of string
 
-exception ContextError of info : ContextBuildErrorInfo with
+exception ContextException of info : ContextBuildErrorInfo with
     override this.Message = this.info.ToString()
 
 type CachedUserView =
@@ -64,7 +64,7 @@ let buildUserView (layout : Layout) (expr : string) : Result<ResolvedViewExpr, U
                 try
                     Ok <| resolveViewExpr layout rawExpr
                 with
-                    | ViewResolveError err -> Error err
+                    | ViewResolveException err -> Error err
             Result.mapError UVEResolve maybeExpr
 
 let buildCachedUserView
@@ -95,11 +95,11 @@ let buildCachedUserView
 let private rebuildUserViews (conn : DatabaseConnection) (layout : Layout) : Map<string, CachedUserView> =
     let buildOne (uv : UserView) =
         if not (goodName uv.Name) then
-            raise (ContextError <| CBEUserViewName uv.Name)
+            raise (ContextException <| CBEUserViewName uv.Name)
         let getArguments viewExpr = viewExpr.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
         match buildCachedUserView conn.Query layout uv.Query getArguments (fun info res -> info) with
             | Ok cachedUv -> (uv.Name, cachedUv)
-            | Error err -> raise (ContextError <| CBEUserView err)
+            | Error err -> raise (ContextException <| CBEUserView err)
     conn.System.UserViews |> Seq.toArray |> Seq.map buildOne |> Map.ofSeq
 
 let private rebuildLayout (conn : DatabaseConnection) =
@@ -107,7 +107,7 @@ let private rebuildLayout (conn : DatabaseConnection) =
     try
         resolveLayout layoutSource
     with
-        | ResolveLayoutError msg -> raise (ContextError <| CBELayout msg)
+        | ResolveLayoutException msg -> raise (ContextException <| CBELayout msg)
 
 type CachedRequestContext =
     { layout : Layout
