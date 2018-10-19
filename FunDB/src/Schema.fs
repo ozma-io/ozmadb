@@ -311,9 +311,10 @@ let getLayoutObjects (db : SystemContext) : IQueryable<Schema> * IQueryable<Enti
             .Include("Entities.UniqueConstraints")
             .Include("Entities.CheckConstraints")
     let systemEntities =
-        db.Entities.Where(fun ent -> not ent.SchemaId.HasValue)
+        db.Entities
             .Include(fun ent -> ent.ColumnFields)
             .Include(fun ent -> ent.ComputedFields)
             .Include(fun ent -> ent.UniqueConstraints)
             .Include(fun ent -> ent.CheckConstraints)
+            .Where(fun ent -> not ent.SchemaId.HasValue)
     (schemas, systemEntities)
