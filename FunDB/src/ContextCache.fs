@@ -170,6 +170,7 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
         rebuildAll conn
 
     member this.Migrate (conn : DatabaseConnection) =
+        eprintfn "Starting migration"
         // Cache this too
         // Careful here not to evaluate user views before we do migration
         let layout = rebuildLayout conn
