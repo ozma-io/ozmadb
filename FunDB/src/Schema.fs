@@ -302,7 +302,7 @@ and
         member val RoleId = 0 with get, set
         member val Role = null : Role with get, set
 
-let getLayoutObjects (db : SystemContext) : Schema seq * Entity seq =
+let getLayoutObjects (db : SystemContext) : IQueryable<Schema> * IQueryable<Entity> =
     let schemas =
         db.Schemas
             .Include(fun sch -> sch.Entities)
@@ -316,4 +316,4 @@ let getLayoutObjects (db : SystemContext) : Schema seq * Entity seq =
             .Include(fun ent -> ent.ComputedFields)
             .Include(fun ent -> ent.UniqueConstraints)
             .Include(fun ent -> ent.CheckConstraints)
-    (upcast schemas, upcast systemEntities)
+    (schemas, systemEntities)

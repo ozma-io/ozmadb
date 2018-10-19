@@ -20,6 +20,7 @@ type DatabaseConnection (connectionString : string) =
     let transaction = connection.BeginTransaction()
     do
         ignore <| system.Database.UseTransaction(transaction)
+        system.ChangeTracker.QueryTrackingBehavior <- QueryTrackingBehavior.NoTracking
     
     interface IDisposable with
         member this.Dispose () =

@@ -131,10 +131,10 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) : unit =
     // We don't touch in any way schemas not in layout.
     let wantedSchemas = layout.schemas |> Map.toSeq |> Seq.map (fun (name, schema) -> name.ToString()) |> Seq.toArray
     let schemasMap =
-        schemas.Where(fun schema -> wantedSchemas.Contains(schema.Name))
+        schemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name))
         |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
         |> Map.ofSeq
-    let systemEntitiesMap = systemEntities |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
+    let systemEntitiesMap = systemEntities.AsTracking() |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
    
     updateEntities db None layout.systemEntities systemEntitiesMap
     for KeyValue (name, schema) in layout.schemas do
