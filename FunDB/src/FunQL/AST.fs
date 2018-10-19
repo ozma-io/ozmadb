@@ -147,7 +147,7 @@ and ScalarFieldTypeConverter () =
         raise <| new NotImplementedException()
  
     override this.WriteJson (writer : JsonWriter, value : ScalarFieldType, serializer : JsonSerializer) : unit =
-        let serialize value = serializer.Serialize(writer, value.ToString())
+        serializer.Serialize(writer, value.ToString())
 
 type FieldExprType =
     | FETScalar of ScalarFieldType
