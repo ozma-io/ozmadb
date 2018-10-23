@@ -3,6 +3,20 @@
     "funapp": {
       "entities": {
 
+        "Settings": {
+          "columnFields": {
+            "Name": { "fieldType": "string" },
+            "Value": { "fieldType": "string" }
+          },
+          "uniqueConstraints": {
+            "UniqueName": { "columns": [ "Name" ] }
+          },
+          "checkConstraints": {
+            "NonEmptyName": { "expression": "\"Name\" <> ''" }
+          },
+          "mainField": "Name"
+        },
+
         "MainMenuCategories": {
           "columnFields": {
             "Name": { "fieldType": "string" },
