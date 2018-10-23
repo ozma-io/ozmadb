@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Connection
 
 open System
+open System.Data
 open Microsoft.EntityFrameworkCore
 open Npgsql
 
@@ -17,7 +18,8 @@ type DatabaseConnection (connectionString : string) =
             (DbContextOptionsBuilder<SystemContext> ())
                 .UseNpgsql(connection)
         new SystemContext(systemOptions.Options)
-    let transaction = connection.BeginTransaction()
+    // Introduce better locking
+    let transaction = connection.BeginTransaction(IsolationLevel.Serializable)
     do
         ignore <| system.Database.UseTransaction(transaction)
         system.ChangeTracker.QueryTrackingBehavior <- QueryTrackingBehavior.NoTracking
