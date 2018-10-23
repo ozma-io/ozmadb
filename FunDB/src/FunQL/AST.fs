@@ -125,7 +125,7 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
     | SFTDateTime
     | SFTDate
     with
-        override this.ToString () = this.ToFunQLString()
+        override this.ToString () = this.ToJSONString()
 
         member this.ToFunQLString () =
             match this with
@@ -134,6 +134,8 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
                 | SFTBool -> "bool"
                 | SFTDateTime -> "datetime"
                 | SFTDate -> "date"
+        
+        member this.ToJSONString () = this.ToFunQLString()
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -144,12 +146,12 @@ and ScalarFieldTypeConverter () =
     override this.CanRead = false
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ScalarFieldType =
-        raise <| new NotImplementedException()
+        raise <| NotImplementedException()
  
     override this.WriteJson (writer : JsonWriter, value : ScalarFieldType, serializer : JsonSerializer) : unit =
-        serializer.Serialize(writer, value.ToString())
+        serializer.Serialize(writer, value.ToJSONString())
 
-type FieldExprType =
+type [<JsonConverter(typeof<FieldExprTypeConverter>)>] FieldExprType =
     | FETScalar of ScalarFieldType
     | FETArray of ScalarFieldType
     with
@@ -157,13 +159,28 @@ type FieldExprType =
 
         member this.ToFunQLString () =
             match this with
-                | FETScalar s -> s.ToFunQLString()
+                | FETScalar s -> s.ToJSONString()
                 | FETArray valType -> sprintf "array(%s)" (valType.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type FieldType<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and FieldExprTypeConverter () =
+    inherit JsonConverter<FieldExprType> ()
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : FieldExprType =
+        raise <| NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, value : FieldExprType, serializer : JsonSerializer) : unit =
+        let dict =
+            match value with
+                | FETScalar st -> [("type", st :> obj)]
+                | FETArray st -> [("type", "array" :> obj); ("subtype", st.ToJSONString() :> obj)]
+        serializer.Serialize(writer, Map.ofList dict)
+
+type [<JsonConverter(typeof<FieldTypeConverter>)>] FieldType<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FTType of FieldExprType
     | FTReference of 'e * FieldExpr<'f> option
     | FTEnum of Set<string>
@@ -175,10 +192,35 @@ type FieldType<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
                 | FTType t -> t.ToFunQLString()
                 | FTReference (e, None) -> sprintf "reference(%s)" (e.ToFunQLString())
                 | FTReference (e, Some check) -> sprintf "reference(%s, %s)" (e.ToFunQLString()) (check.ToFunQLString())
-                | FTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map (fun x -> sprintf "\"%s\"" (renderSqlString x)) |> String.concat ", ")
+                | FTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map (sprintf "\"%s\"" << renderSqlString) |> String.concat ", ")
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
+
+and FieldTypeConverter () =
+    inherit JsonConverter ()
+
+    override this.CanConvert (objectType : Type) =
+        objectType.GetGenericTypeDefinition() = typeof<FieldType<_, _>>
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
+        raise <| NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
+        let serialize value = serializer.Serialize(writer, value)
+        match castUnion<FieldType<IFunQLString, IFunQLString>> value with
+            | Some (FTType st) -> serialize st
+            | Some (FTReference (ref, where)) ->
+                let cond =
+                    match where with
+                        | None -> null
+                        | Some cond -> cond.ToString()
+                [("type", "reference":> obj); ("entity", ref :> obj); ("where", cond :> obj)] |> Map.ofList |> serialize
+            | Some (FTEnum vals) ->
+                [("type", "enum" :> obj); ("values", vals :> obj)] |> Map.ofList |> serialize
+            | None -> failwith "impossible"
 
 and FieldExpr<'f> when 'f :> IFunQLString =
     | FEValue of FieldValue

@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Utils
 open System
 open System.Collections.Generic
 open System.Globalization
+open Microsoft.FSharp.Reflection
 
 type Void = private Void of unit
 
@@ -180,3 +181,16 @@ let tryBool (str : string) : bool option =
         | "no" -> Some false
         | "n" -> Some false
         | _ -> None
+
+// Runtime cast for discriminated unions
+let castUnion<'a> (value : obj) : 'a option =
+    let cases = FSharpType.GetUnionCases(typeof<'a>)
+    let gotType = value.GetType()
+    let (gotCase, args) = FSharpValue.GetUnionFields(value, gotType)
+    if gotCase.DeclaringType.GetGenericTypeDefinition() = typedefof<'a> then
+        try
+            Some (FSharpValue.MakeUnion(cases.[gotCase.Tag], args) :?> 'a)
+        with
+            | :? InvalidOperationException -> None
+    else
+        None

@@ -169,7 +169,7 @@ and ValueConverter () =
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
 // Used when interpreting query results and for compiling FunQL.
-type SimpleType =
+type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
     | STInt
     | STString
     | STBool
@@ -177,7 +177,7 @@ type SimpleType =
     | STDate
     | STRegclass
     with
-        override this.ToString () = this.ToSQLString()
+        override this.ToString () = this.ToJSONString()
 
         member this.ToSQLString () =
             match this with
@@ -188,10 +188,30 @@ type SimpleType =
                 | STDate -> "date"
                 | STRegclass -> "regclass"
 
+        member this.ToJSONString () =
+            match this with
+                | STInt -> "int"
+                | STString -> "string"
+                | STBool -> "bool"
+                | STDateTime -> "datetime"
+                | STDate -> "date"
+                | STRegclass -> "regclass"
+                
         member this.ToSQLName () = SQLName (this.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
+
+and SimpleTypeConverter () =
+    inherit JsonConverter<SimpleType> ()
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : SimpleType =
+        raise <| new NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, value : SimpleType, serializer : JsonSerializer) : unit =
+        serializer.Serialize(writer, value.ToJSONString())
 
 // Find the closest simple type to a given.
 let findSimpleType (str : SQLName) : SimpleType option =
@@ -208,7 +228,7 @@ let findSimpleType (str : SQLName) : SimpleType option =
         | "regclass" -> Some STRegclass
         | _ -> None
 
-type [<JsonConverter(typeof<UnionConverter>)>] ValueType<'t> when 't :> ISQLString =
+type [<JsonConverter(typeof<ValueTypeConverter>)>] ValueType<'t> when 't :> ISQLString =
     | VTScalar of 't
     | VTArray of 't
     with
@@ -222,13 +242,31 @@ type [<JsonConverter(typeof<UnionConverter>)>] ValueType<'t> when 't :> ISQLStri
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+and ValueTypeConverter () =
+    inherit JsonConverter ()
+
+    override this.CanConvert (objectType : Type) =
+        objectType.GetGenericTypeDefinition() = typeof<ValueType<_>>
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
+        raise <| new NotImplementedException()
+ 
+    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
+        let dict =
+            match castUnion<ValueType<ISQLString>> value with
+                | Some (VTScalar st) -> [("type", st :> obj)]
+                | Some (VTArray st) -> [("type", "array" :> obj); ("subtype", st :> obj)]
+                | None -> failwith "impossible"
+        serializer.Serialize(writer, Map.ofList dict)
+
 let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
     | VTScalar a -> VTScalar (func a)
     | VTArray a -> VTArray (func a)
 
 type DBValueType = ValueType<SQLName>
 type SimpleValueType = ValueType<SimpleType>
-
 
 type SortOrder =
     | Asc
