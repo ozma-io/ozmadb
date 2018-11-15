@@ -159,8 +159,8 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
-        [<ColumnField("reference(\"Schemas\")", Nullable=true)>]
-        member val SchemaId = Nullable () : Nullable<int> with get, set
+        [<ColumnField("reference(\"Schemas\")")>]
+        member val SchemaId = int with get, set
         member val Schema = null : Schema with get, set
         [<ColumnField("string", Nullable=true)>]
         member val MainField = "" with get, set
@@ -302,19 +302,10 @@ and
         member val RoleId = 0 with get, set
         member val Role = null : Role with get, set
 
-let getLayoutObjects (db : SystemContext) : IQueryable<Schema> * IQueryable<Entity> =
-    let schemas =
-        db.Schemas
-            .Include(fun sch -> sch.Entities)
-            .Include("Entities.ColumnFields")
-            .Include("Entities.ComputedFields")
-            .Include("Entities.UniqueConstraints")
-            .Include("Entities.CheckConstraints")
-    let systemEntities =
-        db.Entities
-            .Include(fun ent -> ent.ColumnFields)
-            .Include(fun ent -> ent.ComputedFields)
-            .Include(fun ent -> ent.UniqueConstraints)
-            .Include(fun ent -> ent.CheckConstraints)
-            .Where(fun ent -> not ent.SchemaId.HasValue)
-    (schemas, systemEntities)
+let getLayoutObjects (db : SystemContext) : IQueryable<Schema> =
+    db.Schemas
+        .Include(fun sch -> sch.Entities)
+        .Include("Entities.ColumnFields")
+        .Include("Entities.ComputedFields")
+        .Include("Entities.UniqueConstraints")
+        .Include("Entities.CheckConstraints")

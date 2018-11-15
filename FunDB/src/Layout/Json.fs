@@ -38,10 +38,6 @@ let private sanitizeSourceLayout (layout : SourceLayout) : SourceLayout =
         if obj.ReferenceEquals(layout.schemas, null) then
             Map.empty
         else Map.map (fun name -> sanitizeSourceSchema) layout.schemas
-      systemEntities =
-        if obj.ReferenceEquals(layout.systemEntities, null) then
-            Map.empty
-        else Map.map (fun name -> sanitizeSourceEntity) layout.systemEntities
     }
 
 let parseJsonLayout (str : string) : SourceLayout =

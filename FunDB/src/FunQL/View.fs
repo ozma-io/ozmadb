@@ -5,6 +5,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
 open FunWithFlags.FunDB.Layout.Types
+open System.Net.Mail
 
 // Validates all fields and expressions. Further processing can skip all the checks.
 
@@ -12,7 +13,7 @@ exception ViewResolveException of info : string with
     override this.Message = this.info
 
 type ResolvedFieldRef =
-    { entity : EntityRef
+    { entity : ResolvedEntityRef
       name : FieldName
     } with
         override this.ToString () = this.ToFunQLString()
@@ -37,7 +38,7 @@ type ResolvedFieldName =
             member this.ToFunQLString () = this.ToFunQLString()
 
 type private QMappedEntity =
-    | QMEntity of EntityRef * ResolvedEntity
+    | QMEntity of ResolvedEntityRef * ResolvedEntity
     | QMSubquery of EntityName * Map<FieldName, ResolvedFieldRef option>
 
 type private QMapping = Map<EntityName, QMappedEntity>
@@ -45,14 +46,14 @@ type private QMapping = Map<EntityName, QMappedEntity>
 type private QPlaceholders = Set<string>
 
 type ResolvedFieldExpr = FieldExpr<ResolvedFieldName>
-type ResolvedQueryExpr = QueryExpr<EntityRef, ResolvedFieldName>
+type ResolvedQueryExpr = QueryExpr<ResolvedEntityRef, ResolvedFieldName>
 type ResolvedQueryResult = QueryResult<ResolvedFieldName>
-type ResolvedFromExpr = FromExpr<EntityRef, ResolvedFieldName>
-type ResolvedFromClause = FromClause<EntityRef, ResolvedFieldName>
+type ResolvedFromExpr = FromExpr<ResolvedEntityRef, ResolvedFieldName>
+type ResolvedFromClause = FromClause<ResolvedEntityRef, ResolvedFieldName>
 type ResolvedAttributeMap = AttributeMap<ResolvedFieldName>
 
 type ResolvedUpdateExpr =
-    { entity : EntityRef
+    { entity : ResolvedEntityRef
       namesToFields : Map<FieldName, FieldName>
       fieldsToNames : Map<FieldName, FieldName>
     }
@@ -66,7 +67,7 @@ type ResolvedViewExpr =
     }
 
 type private MainEntity =
-    { entity : EntityRef
+    { entity : ResolvedEntityRef
     }
 
 let rec private findMainEntity : ResolvedFromExpr -> MainEntity option = function
@@ -88,6 +89,11 @@ let resultBoundField (result : ResolvedQueryResult) : ResolvedFieldRef option =
         | FEColumn (RFSubquery (queryName, fieldName, Some boundField)) -> Some boundField
         | _ -> None
 
+let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
+    match name.schema with
+        | Some schema -> { schema = schema; name = name.name }
+        | None -> raise (ViewResolveException <| sprintf "Unspecified schema in name: %O" name)
+
 let private lookupField (mapping : QMapping) (f : FieldRef) : ResolvedFieldName =
     let mappedEntity =
         match f.entity with
@@ -103,7 +109,7 @@ let private lookupField (mapping : QMapping) (f : FieldRef) : ResolvedFieldName 
                             | None -> ref
                             | Some sch ->
                                 match ref with
-                                    | QMEntity ({ schema = Some entitySchema; name = name }, _) when entitySchema = sch -> ref
+                                    | QMEntity ({ schema = entitySchema; name = name }, _) when entitySchema = sch -> ref
                                     | _ -> raise (ViewResolveException <| sprintf "Invalid entity schema: %O" sch)
                     | None ->
                         raise (ViewResolveException <| sprintf "Field entity not found: %O" ename.name)
@@ -156,9 +162,10 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
 
     and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
         | FEntity name ->
-            match layout.FindEntity(name) with
+            let resName = resolveEntityRef name
+            match layout.FindEntity(resName) with
                 | None -> raise (ViewResolveException <| sprintf "Entity not found: %O" name)
-                | Some entity -> (Map.singleton name.name (QMEntity (name, entity)), FEntity name)
+                | Some entity -> (Map.singleton name.name (QMEntity (resName, entity)), FEntity resName)
         | FJoin (jt, e1, e2, where) ->
             let (newMapping1, newE1) = resolveFromExpr e1
             let (newMapping2, newE2) = resolveFromExpr e2
@@ -180,7 +187,7 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
     let resolveAttributes (mapping : QMapping) (attributes : ParsedAttributeMap) : ResolvedAttributeMap =
         Map.map (fun name expr -> resolveFieldExpr mapping expr) attributes
     
-    let resolveUpdate (query : ResolvedQueryExpr) (updateEntity : EntityRef) : ResolvedUpdateExpr =
+    let resolveUpdate (query : ResolvedQueryExpr) (updateEntity : ResolvedEntityRef) : ResolvedUpdateExpr =
         let entity =
             match layout.FindEntity(updateEntity) with
                 | None -> raise (ViewResolveException <| sprintf "Entity not found: %O" updateEntity)
@@ -217,7 +224,7 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
 let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
     let checkArgument name = function
         | FTReference (entityRef, where) ->
-            if Option.isNone <| layout.FindEntity(entityRef) then
+            if Option.isNone <| layout.FindEntity(resolveEntityRef entityRef) then
                 raise (ViewResolveException <| sprintf "Unknown entity in reference: %O" entityRef)
         | FTEnum vals ->
             if Set.isEmpty vals then
@@ -234,7 +241,7 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let attributes = qualifier.ResolveAttributes newMapping viewExpr.attributes
     let results = Array.map2 (fun (attrs, oldResult) result -> (qualifier.ResolveAttributes newMapping attrs, result)) viewExpr.results qQuery.results
     Map.iter (fun name argType -> checkName name) viewExpr.arguments
-    let update = Option.map (qualifier.ResolveUpdate qQuery) viewExpr.updateName
+    let update = Option.map (qualifier.ResolveUpdate qQuery << resolveEntityRef) viewExpr.updateName
 
     { arguments = viewExpr.arguments
       attributes = attributes

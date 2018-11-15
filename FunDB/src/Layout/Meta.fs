@@ -86,5 +86,4 @@ let buildLayoutMeta (layout : Layout) : SQL.DatabaseMeta =
         (Some schemaName, makeSchemaMeta schemaName schema)
         
     let schemas = layout.schemas |> Map.toSeq |> Seq.map makeSchema |> Map.ofSeq
-    let systemEntities = makeEntitiesMeta None layout.systemEntities
-    { SQL.schemas = Map.add None systemEntities schemas }
+    { SQL.schemas = schemas }

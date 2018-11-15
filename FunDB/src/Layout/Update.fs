@@ -126,7 +126,7 @@ let private updateSchema (db : SystemContext) (name : SchemaName) (schema : Sour
     updateEntities db (Some newSchema) schema.entities entitiesMap
 
 let updateLayout (db : SystemContext) (layout : SourceLayout) : unit =
-    let (schemas, systemEntities) = getLayoutObjects db
+    let schemas = getLayoutObjects db
 
     // We don't touch in any way schemas not in layout.
     let wantedSchemas = layout.schemas |> Map.toSeq |> Seq.map (fun (name, schema) -> name.ToString()) |> Seq.toArray
@@ -134,9 +134,7 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) : unit =
         schemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name))
         |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
         |> Map.ofSeq
-    let systemEntitiesMap = systemEntities.AsTracking() |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
    
-    updateEntities db None layout.systemEntities systemEntitiesMap
     for KeyValue (name, schema) in layout.schemas do
         updateSchema db name schema (Map.tryFind name schemasMap)
     ignore <| db.SaveChanges()

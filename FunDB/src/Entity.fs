@@ -13,7 +13,7 @@ exception EntityExecutionException of info : string with
 type EntityId = int
 type EntityArguments = Map<FieldName, FieldValue>
 
-let insertEntity (connection : QueryConnection) (entityRef : EntityRef) (entity : ResolvedEntity) (args : EntityArguments) : unit =
+let insertEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) : unit =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind fieldName args with
             | None when Option.isSome field.defaultValue -> None
@@ -24,13 +24,13 @@ let insertEntity (connection : QueryConnection) (entityRef : EntityRef) (entity 
     let placeholders = parameters |> Seq.mapi (fun i (name, valueWithType) -> (i, valueWithType)) |> Map.ofSeq
     let values = parameters |> Seq.mapi (fun i (name, arg) -> SQL.VEPlaceholder i) |> Array.ofSeq
     let query =
-        { name = compileEntityRef entityRef
+        { name = compileResolvedEntityRef entityRef
           columns = columns
           values = [| values |]
         } : SQL.InsertExpr
     connection.ExecuteNonQuery (query.ToSQLString()) placeholders
 
-let updateEntity (connection : QueryConnection) (entityRef : EntityRef) (entity : ResolvedEntity) (id : EntityId) (args : EntityArguments) : unit =
+let updateEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) (args : EntityArguments) : unit =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind fieldName args with
             | None -> None
@@ -42,17 +42,17 @@ let updateEntity (connection : QueryConnection) (entityRef : EntityRef) (entity 
     let where = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder 0)
     let placeholders = Map.add 0 (SQL.VTScalar SQL.STInt, SQL.VInt id) columnPlaceholders
     let query =
-        { name = compileEntityRef entityRef
+        { name = compileResolvedEntityRef entityRef
           columns = columns
           where = Some where
         } : SQL.UpdateExpr
     connection.ExecuteNonQuery (query.ToSQLString()) placeholders
 
-let deleteEntity (connection : QueryConnection) (entityRef : EntityRef) (entity : ResolvedEntity) (id : EntityId) : unit =
+let deleteEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) : unit =
     let where = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder 0)
     let placeholders = Map.singleton 0 (SQL.VTScalar SQL.STInt, SQL.VInt id)
     let query =
-        { name = compileEntityRef entityRef
+        { name = compileResolvedEntityRef entityRef
           where = Some where
         } : SQL.DeleteExpr
     connection.ExecuteNonQuery (query.ToSQLString()) placeholders

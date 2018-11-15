@@ -14,5 +14,4 @@ let private makeAllowedSchema (schema : ResolvedSchema) : AllowedSchema =
 
 let buildAllowedDatabase (layout : Layout) : AllowedDatabase =
     { schemas = Map.map (fun name -> makeAllowedSchema) layout.schemas
-      systemEntities = Map.map (fun name -> makeAllowedEntity) layout.systemEntities
     }

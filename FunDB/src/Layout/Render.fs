@@ -36,5 +36,4 @@ let private renderSchema (schema : ResolvedSchema) : SourceSchema =
 
 let renderLayout (layout : Layout) : SourceLayout =
     { schemas = Map.map (fun name schema -> renderSchema schema) layout.schemas
-      systemEntities = Map.map (fun name entity -> renderEntity entity) layout.systemEntities
     }

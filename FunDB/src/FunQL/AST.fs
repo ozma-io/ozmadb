@@ -42,6 +42,17 @@ type EntityRef =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+type ResolvedEntityRef =
+    { schema : SchemaName
+      name : EntityName
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () = sprintf "%s.%s" (this.schema.ToFunQLString()) (this.name.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 type FieldRef =
     { entity : EntityRef option
       name : FieldName
@@ -433,3 +444,4 @@ type PureFieldExpr = FieldExpr<FunQLVoid>
 type ViewResults<'f> when 'f :> IFunQLString = (AttributeMap<'f> * QueryResult<'f>) array
 
 let funId = FunQLName "Id"
+let funSchema = FunQLName "public"

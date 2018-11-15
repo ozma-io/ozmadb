@@ -240,6 +240,9 @@ EntityRef:
   | ID DOT ID { { schema = Some (FunQLName $1); name = FunQLName $3; } }
   | ID        { { schema = None; name = FunQLName $1; } }
 
+ResolvedEntityRef:
+  | ID DOT ID { { schema = FunQLName $1; name = FunQLName $3; } }
+
 FieldRef:
   | ID DOT ID DOT ID { { entity = Some { schema = Some (FunQLName $1); name = FunQLName $3 }; name = FunQLName $5 } }
   | ID DOT ID        { { entity = Some { schema = None; name = FunQLName $1 }; name = FunQLName $3 } }
@@ -341,15 +344,15 @@ FieldExprType:
   | ARRAY_TYPE LEFT_PAREN ScalarType RIGHT_PAREN  { FETArray $3 }
 
 FieldType:
-  | FieldExprType                                                   { FTType $1 }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference ($3, None) }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef COMMA FieldExpr RIGHT_PAREN { FTReference ($3, Some $5) }
-  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
+  | FieldExprType                                                           { FTType $1 }
+  | REFERENCE_TYPE LEFT_PAREN ResolvedEntityRef RIGHT_PAREN                 { FTReference ($3, None) }
+  | REFERENCE_TYPE LEFT_PAREN ResolvedEntityRef COMMA FieldExpr RIGHT_PAREN { FTReference ($3, Some $5) }
+  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                               { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 ArgumentFieldType:
-  | FieldExprType                                                   { FTType $1 }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference ($3, None) }
-  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
+  | FieldExprType                                   { FTType $1 }
+  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { FTReference ($3, None) }
+  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 EnumList:
   | STRING                { [ $1 ] }

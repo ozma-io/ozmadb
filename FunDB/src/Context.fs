@@ -103,8 +103,9 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                                 with
                                     | ViewExecutionError err -> Error <| UVExecute err
 
-    member this.InsertEntity (entityRef : EntityRef) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
-        if userName <> rootUserName && Option.isNone entityRef.schema then
+    member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
+        // FIXME
+        if userName <> rootUserName && entityRef.schema <> FunQLName "user" then
             Error <| EEAccessDenied
         else
             match cache.layout.FindEntity(entityRef) with
@@ -116,15 +117,15 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                             try
                                 insertEntity conn.Query entityRef entity args
                                 // Optimize
-                                if Option.isNone entityRef.schema then
+                                if entityRef.schema = FunQLName "public" then
                                     cacheStore.Migrate(conn)
                                 conn.Commit()
                                 Ok ()
                             with
                                 | EntityExecutionException msg -> Error <| EEExecute msg
 
-    member this.UpdateEntity (entityRef : EntityRef) (id : int) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
-        if userName <> rootUserName && Option.isNone entityRef.schema then
+    member this.UpdateEntity (entityRef : ResolvedEntityRef) (id : int) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
+        if userName <> rootUserName && entityRef.schema <> FunQLName "user" then
             Error <| EEAccessDenied
         else
             match cache.layout.FindEntity(entityRef) with
@@ -136,14 +137,14 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                         | Ok args ->
                             try
                                 updateEntity conn.Query entityRef entity id args
-                                if Option.isNone entityRef.schema then
+                                if entityRef.schema = funSchema then
                                     cacheStore.Migrate(conn)
                                 conn.Commit()
                                 Ok ()
                             with
                                 | EntityExecutionException msg -> Error <| EEExecute msg
 
-    member this.DeleteEntity (entityRef : EntityRef) (id : int) : Result<unit, EntityErrorInfo> =
+    member this.DeleteEntity (entityRef : ResolvedEntityRef) (id : int) : Result<unit, EntityErrorInfo> =
         if userName <> rootUserName then
             Error <| EEAccessDenied
         else
@@ -152,7 +153,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                 | Some entity ->
                     try
                         deleteEntity conn.Query entityRef entity id
-                        if Option.isNone entityRef.schema then
+                        if entityRef.schema = funSchema then
                             cacheStore.Migrate(conn)
                         conn.Commit()
                         Ok ()

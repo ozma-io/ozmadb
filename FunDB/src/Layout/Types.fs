@@ -19,7 +19,7 @@ type ReferenceRef =
         interface IFunQLString with
             member this.ToFunQLString() = this.ToFunQLString()
 
-type ResolvedFieldType = FieldType<EntityRef, ReferenceRef>
+type ResolvedFieldType = FieldType<ResolvedEntityRef, ReferenceRef>
 
 type ResolvedReferenceFieldExpr = FieldExpr<ReferenceRef>
 
@@ -67,15 +67,12 @@ type ResolvedSchema =
 
 type Layout =
     { schemas : Map<SchemaName, ResolvedSchema>
-      systemEntities : Map<EntityName, ResolvedEntity>
     } with
-        member this.FindEntity (entity : EntityRef) =
-            match entity.schema with
-                | None -> Map.tryFind entity.name this.systemEntities
-                | Some schemaName ->
-                    match Map.tryFind schemaName this.schemas with
-                        | None -> None
-                        | Some schema -> Map.tryFind entity.name schema.entities
 
-        member this.FindField (entity : EntityRef) (field : FieldName) =
+        member this.FindEntity (entity : ResolvedEntityRef) =
+            match Map.tryFind entity.schema this.schemas with
+            | None -> None
+            | Some schema -> Map.tryFind entity.name schema.entities
+
+        member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))

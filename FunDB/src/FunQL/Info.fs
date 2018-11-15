@@ -29,7 +29,7 @@ type MergedColumnInfo =
 type MergedViewInfo =
     { attributeTypes : ExecutedAttributeTypes
       rowAttributeTypes : ExecutedAttributeTypes
-      updateEntity : EntityRef option
+      updateEntity : ResolvedEntityRef option
       columns : MergedColumnInfo array
     }
 

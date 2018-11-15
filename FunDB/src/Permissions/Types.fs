@@ -16,12 +16,8 @@ type AllowedSchema =
 
 type AllowedDatabase =
     { schemas : Map<SchemaName, AllowedSchema>
-      systemEntities : Map<EntityName, AllowedEntity>
     } with
         member this.FindEntity (entity : EntityRef) =
-            match entity.schema with
-                | None -> Map.tryFind entity.name this.systemEntities
-                | Some schemaName ->
-                    match Map.tryFind schemaName this.schemas with
-                        | None -> None
-                        | Some schema -> Map.tryFind entity.name schema.entities
+            match Map.tryFind entity.schema this.schemas with
+                | None -> None
+                | Some schema -> Map.tryFind entity.name schema.entities

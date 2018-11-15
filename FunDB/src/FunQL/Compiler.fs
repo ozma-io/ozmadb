@@ -102,18 +102,17 @@ let private checkArgumentPureExpr (expr : FieldExpr<_>) : bool =
 let compileName : FunQLName -> SQL.SQLName = function
     | FunQLName name -> SQL.SQLName name
 
-let private compileEntityPun (entityRef : EntityRef) : SQL.TableName =
-    match entityRef.schema with
-        | None -> compileName entityRef.name
-        | Some schemaName -> SQL.SQLName <| sprintf "%O__%O" schemaName entityRef.name
+let private compileEntityPun (entityRef : ResolvedEntityRef) : SQL.TableName = SQL.SQLName <| sprintf "%O__%O" entityRef.schema entityRef.name
 
-let private compileEntityTablePun (entityRef : EntityRef) : SQL.TableRef =
+let private compileEntityTablePun (entityRef : ResolvedEntityRef) : SQL.TableRef =
     { schema = None; name = compileEntityPun entityRef }
 
 let compileEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema = Option.map compileName entityRef.schema; name = compileName entityRef.name }
 
+let compileResolvedEntityRef (entityRef : ResolvedEntityRef) : SQL.TableRef = { schema = Some (compileName entityRef.schema); name = compileName entityRef.name }
+
 let compileFieldRef (fieldRef : ResolvedFieldRef) : SQL.ColumnRef =
-    { table = Some <| compileEntityRef fieldRef.entity; name = compileName fieldRef.name }
+    { table = Some <| compileResolvedEntityRef fieldRef.entity; name = compileName fieldRef.name }
 
 let private compileFieldName : ResolvedFieldName -> SQL.ColumnRef = function
     | RFField fieldRef -> { table = Some <| compileEntityTablePun fieldRef.entity; name = compileName fieldRef.name }
@@ -198,7 +197,7 @@ type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
     let rec compileFrom : ResolvedFromExpr -> SQL.FromExpr = function
         | FEntity entityRef ->
             let entity = Option.get <| layout.FindEntity(entityRef)
-            let tableRef = compileEntityRef entityRef
+            let tableRef = compileResolvedEntityRef entityRef
             let idColumn = SQL.SCColumn { table = Some tableRef; name = sqlFunId }
 
             let columnFields = entity.columnFields |> Map.toSeq |> Seq.map (fun (name, field) -> SQL.SCColumn { table = Some tableRef; name = compileName name })
@@ -207,7 +206,7 @@ type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
 
             let buildReferences (from : SQL.FromExpr) (fieldName : FieldName) (referenceRef : ResolvedFieldRef) =
                 let columnName = compileName fieldName
-                let table = compileEntityRef referenceRef.entity
+                let table = compileResolvedEntityRef referenceRef.entity
                 let where = SQL.VEEq (SQL.VEColumn { table = Some tableRef; name = columnName }, SQL.VEColumn { table = Some table; name = sqlFunId }) : SQL.ValueExpr
                 SQL.FJoin (SQL.Left, from, SQL.FTable table, where)
             let from = Map.fold buildReferences (SQL.FTable tableRef) references

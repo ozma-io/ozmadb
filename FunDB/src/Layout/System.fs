@@ -79,7 +79,7 @@ let private makeSourceEntity (property : PropertyInfo) : (FunQLName * SourceEnti
         Some (FunQLName property.Name, res)
 
 // Build entities map for public schema using mish-mash of our custom attributes and Entity Framework Core declarations.
-let buildSystemLayout (contextClass : Type) : SourceLayout = 
-    { schemas = Map.empty
-      systemEntities = contextClass.GetProperties() |> Seq.mapMaybe makeSourceEntity |> Map.ofSeq
+let buildSystemLayout (contextClass : Type) : SourceLayout =
+    let entities = contextClass.GetProperties() |> Seq.mapMaybe makeSourceEntity |> Map.ofSeq
+    { schemas = Map.singleton funSchema { entities = entities }
     }

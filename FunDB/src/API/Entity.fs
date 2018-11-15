@@ -17,29 +17,28 @@ let entitiesApi (rctx : RequestContext) : WebPart =
         | EEExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
 
     let getEntityRef (schema : string, name : string) =
-        // FIXME: make system schema explicit in FunQL AST; no `SchemaName option`!
-        { schema = if schema = "public" then None else Some (FunQLName schema)
+        { schema = FunQLName schema
           name = FunQLName name
         }
 
     let getRecordRef (schema : string, name : string, id : int) =
         (getEntityRef (schema, name), id)
     
-    let insertEntity (entityRef : EntityRef) =
+    let insertEntity (entityRef : ResolvedEntityRef) =
         request <| fun req ->
             let rawArgs = req.form |> Seq.mapMaybe (fun (name, maybeArg) -> Option.map (fun arg -> (name, arg)) maybeArg) |> Map.ofSeq
             match rctx.InsertEntity entityRef rawArgs with
                 | Ok () -> Successful.OK ""
                 | Result.Error err -> returnError err
 
-    let updateEntity (entityRef : EntityRef, id : int) =
+    let updateEntity (entityRef : ResolvedEntityRef, id : int) =
         request <| fun req ->
             let rawArgs = req.form |> Seq.mapMaybe (fun (name, maybeArg) -> Option.map (fun arg -> (name, arg)) maybeArg) |> Map.ofSeq
             match rctx.UpdateEntity entityRef id rawArgs with
                 | Ok () -> Successful.OK ""
                 | Result.Error err -> returnError err
 
-    let deleteEntity (entityRef : EntityRef, id : int) =
+    let deleteEntity (entityRef : ResolvedEntityRef, id : int) =
         match rctx.DeleteEntity entityRef id with
             | Ok () -> Successful.OK ""
             | Result.Error err -> returnError err

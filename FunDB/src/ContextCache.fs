@@ -130,8 +130,8 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
             match preloadLayout with
                 | Some layout ->
                     // We ignore system entities modifications.
-                    assert (Map.isEmpty layout.systemEntities)
-                    { internalLayoutSource with schemas = layout.schemas }
+                    assert (not <| Map.containsKey funSchema layout.schemas)
+                    { internalLayoutSource with schemas = Map.union internalLayoutSource.schemas layout.schemas }
                 | None -> internalLayoutSource
         resolveLayout systemLayoutSource
     let systemMeta = buildLayoutMeta systemLayout
@@ -142,10 +142,12 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
     let filterNonSystemMigrations (meta : SQL.DatabaseMeta) =
         { meta with schemas = Map.filter (fun name schema -> not <| Map.containsKey name systemMeta.schemas) meta.schemas }
 
+    let filterSystemSchemas (layout: Layout) = Map.filter (fun name schema -> Map.containsKey name systemLayout.schemas) layout.schemas
+
     do
         using (new DatabaseConnection(connectionString)) <| fun conn ->
             let systemRenderedLayout = renderLayout systemLayout
-            assert ((resolveLayout systemRenderedLayout).systemEntities = systemLayout.systemEntities)
+            assert (resolveLayout systemRenderedLayout = systemLayout)
             
             eprintfn "Migrating system entities to the current version"
             let currentMeta = buildDatabaseMeta conn.Transaction
@@ -159,7 +161,7 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
 
             eprintfn "Sanity checking current state"
             let state = rebuildAll conn
-            assert (state.layout.systemEntities = systemLayout.systemEntities)
+            assert (filterSystemSchemas state.layout = systemLayout.schemas)
 
             conn.Commit()
 

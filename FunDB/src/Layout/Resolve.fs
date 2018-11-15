@@ -162,5 +162,4 @@ type private LayoutResolver (layout : SourceLayout) =
 let resolveLayout (layout : SourceLayout) : Layout =
     let resolver = LayoutResolver layout
     { schemas = Map.map (fun schemaName schema -> resolver.ResolveSchema(schema)) layout.schemas
-      systemEntities = resolver.ResolveEntities(layout.systemEntities)
     }

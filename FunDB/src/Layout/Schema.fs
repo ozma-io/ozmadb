@@ -41,8 +41,7 @@ let private makeSourceSchema (schema : Schema) : SourceSchema =
     { entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique }
 
 let buildSchemaLayout (db : SystemContext) : SourceLayout =
-    let (schemas, systemEntities) = getLayoutObjects db
+    let schemas = getLayoutObjects db
 
     { schemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
-      systemEntities = systemEntities |> Seq.map (fun ent -> (FunQLName ent.Name, makeSourceEntity ent)) |> Map.ofSeqUnique
     }
