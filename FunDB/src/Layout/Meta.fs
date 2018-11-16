@@ -31,7 +31,7 @@ let private makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (field : Re
         match field.fieldType with
             | FTReference (entityRef, restriction) ->
                 // FIXME: support restrictions!
-                let tableRef = compileEntityRef entityRef
+                let tableRef = compileResolvedEntityRef entityRef
                 Some (SQL.SQLName <| sprintf "%O__Foreign__%O" columnName.table.name columnName.name, SQL.CMForeignKey (tableRef, [| (columnName.name, SQL.SQLName "Id") |]))
             | _ -> None
     (res, constr)
@@ -83,7 +83,7 @@ let private makeSchemaMeta (schemaName : SQL.SchemaName) (schema : ResolvedSchem
 let buildLayoutMeta (layout : Layout) : SQL.DatabaseMeta =
     let makeSchema (name, schema) =
         let schemaName = SQL.SQLName (name.ToString())
-        (Some schemaName, makeSchemaMeta schemaName schema)
+        (schemaName, makeSchemaMeta schemaName schema)
         
     let schemas = layout.schemas |> Map.toSeq |> Seq.map makeSchema |> Map.ofSeq
     { SQL.schemas = schemas }

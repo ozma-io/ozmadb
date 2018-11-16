@@ -90,16 +90,21 @@ let private resolveComputedField (entity : SourceEntity) (comp : SourceComputedF
     { expression = resolveLocalExpr entity computedExpr
     }
 
+let private resolveEntityRef : EntityRef -> ResolvedEntityRef = function
+    | { schema = Some schema; name = name } -> { schema = schema; name = name }
+    | ref -> raise (ResolveLayoutException <| sprintf "Unspecified schema for entity %O" ref.name)
+
 type private LayoutResolver (layout : SourceLayout) =
     let resolveFieldType (entity : SourceEntity) : ParsedFieldType -> ResolvedFieldType = function
         | FTType ft -> FTType ft
-        | FTReference (entityName, where) ->
+        | FTReference (entityRef, where) ->
+            let resolvedRef = resolveEntityRef entityRef
             let refEntity =
-                match layout.FindEntity(entityName) with
-                    | None -> raise (ResolveLayoutException <| sprintf "Cannot find entity %O from reference type" entityName)
+                match layout.FindEntity(resolvedRef) with
+                    | None -> raise (ResolveLayoutException <| sprintf "Cannot find entity %O from reference type" resolvedRef)
                     | Some refEntity -> refEntity
             let resolvedWhere = Option.map (resolveReferenceExpr entity refEntity) where
-            FTReference (entityName, resolvedWhere)
+            FTReference (resolvedRef, resolvedWhere)
         | FTEnum vals ->
             if Set.isEmpty vals then
                 raise (ResolveLayoutException "Enums must not be empty")

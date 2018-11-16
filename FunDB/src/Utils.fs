@@ -84,8 +84,13 @@ module Map =
     let update (func : 'k -> 'a -> 'b option) (map : Map<'k, 'a>) : Map<'k, 'b> =
         map |> Map.toSeq |> Seq.mapMaybe (fun (k, a) -> Option.map (fun b -> (k, b)) <| func k a) |> Map.ofSeq
 
+    let keys (map : Map<'k, 'v>) : 'k seq =
+        map |> Map.toSeq |> Seq.map fst
+
+    let values (map : Map<'k, 'v>) : 'v seq =
+        map |> Map.toSeq |> Seq.map snd
     let keysSet (map : Map<'k, 'v>) : Set<'k> =
-        map |> Map.toSeq |> Seq.map fst |> Set.ofSeq
+        map |> keys |> Set.ofSeq
 
     let mapWithKeys (func : 'k1 -> 'a -> ('k2 * 'b)) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
         map |> Map.toSeq |> Seq.map (fun (k, a) -> func k a) |> Map.ofSeq

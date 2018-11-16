@@ -10,7 +10,7 @@
             "request": "launch",
             "preLaunchTask": "build",
             "program": "${workspaceFolder}/bin/Debug/netcoreapp2.1/FunDB.dll",
-            "args": ["config.my.json"],
+            "args": ["config.test.json"],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopAtEntry": false,

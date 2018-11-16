@@ -34,7 +34,7 @@
         "MainMenuButtons": {
           "columnFields": {
             "CategoryId": { "fieldType": "reference(\"funapp\".\"MainMenuCategories\")" },
-            "UserViewId": { "fieldType": "reference(\"UserViews\")" },
+            "UserViewId": { "fieldType": "reference(\"public\".\"UserViews\")" },
             "OrdinalPosition": { "fieldType": "int" }
           },
           "uniqueConstraints": {

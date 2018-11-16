@@ -223,6 +223,8 @@ module InformationSchema =
  open InformationSchema
  open Npgsql
 
+let private publicSchema = SQLName "public"
+
 let private parseConstraintType (str : string) : ConstraintType option =
     match str.ToUpper() with
         | "UNIQUE" -> Some CTUnique
@@ -233,11 +235,18 @@ let private parseConstraintType (str : string) : ConstraintType option =
 
 let private tryRegclass (str : string) : SchemaObject option =
     match parse tokenizeSQL schemaObject str with
-        | Ok obj -> Some obj
+        | Ok obj ->
+            // "public" schema gets special handling because its mentions are omitted in PostgreSQL.
+            let normalizedObj =
+                if Option.isNone obj.schema then
+                    { schema = Some publicSchema; name = obj.name }
+                else
+                    obj
+            Some normalizedObj
         | Error msg -> None
 
 let private makeTableFromName (schema : string) (table : string) : TableRef =
-    { schema = if schema = publicSchema.ToString() then None else Some (SQLName schema)
+    { schema = Some (SQLName schema)
       name = SQLName table
     }
 
@@ -374,7 +383,7 @@ let private makeTableMeta (table : Table) : TableName * TableMeta * (ConstraintN
 let private makeSequenceMeta (sequence : Sequence) : TableName =
     SQLName sequence.sequence_name
 
-let private makeSchemaMeta (schema : Schema) : SchemaName option * SchemaMeta =
+let private makeSchemaMeta (schema : Schema) : SchemaName * SchemaMeta =
     let tableObjects = schema.tables |> Seq.map makeTableMeta |> Seq.cache
     let tables = tableObjects |> Seq.map (fun (name, table, constraints) -> (name, OMTable table)) |> Map.ofSeqUnique
     let constraints =
@@ -383,7 +392,7 @@ let private makeSchemaMeta (schema : Schema) : SchemaName option * SchemaMeta =
         |> Seq.concat
         |> Map.ofSeqUnique
     let sequences = schema.sequences |> Seq.map makeSequenceMeta |> Seq.map (fun name -> (name, OMSequence)) |> Map.ofSeqUnique
-    let name = if schema.schema_name = "public" then None else Some (SQLName schema.schema_name)
+    let name = SQLName schema.schema_name
     let res = { objects = Map.unionUnique (Map.unionUnique tables constraints) sequences }
     (name, res)
 

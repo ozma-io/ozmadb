@@ -569,8 +569,34 @@ let emptySchemaMeta =
     }
 
 type DatabaseMeta =
-    { schemas : Map<SchemaName option, SchemaMeta>
+    { schemas : Map<SchemaName, SchemaMeta>
     }
+
+type TableOperation =
+    | TOCreateColumn of ColumnName * ColumnMeta
+    | TODeleteColumn of ColumnName
+    | TOAlterColumnType of ColumnName * DBValueType
+    | TOAlterColumnNull of ColumnName * bool
+    | TOAlterColumnDefault of ColumnName * ValueExpr option
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+                | TOCreateColumn (col, pars) ->
+                    let notNullStr = if pars.isNullable then "NULL" else "NOT NULL"
+                    let defaultStr =
+                        match pars.defaultExpr with
+                            | None -> ""
+                            | Some def -> sprintf "DEFAULT %s" (def.ToSQLString())
+                    sprintf "ADD COLUMN %s %s %s %s" (col.ToSQLString()) (pars.columnType.ToSQLString()) notNullStr defaultStr
+                | TODeleteColumn col -> sprintf "DROP COLUMN %s" (col.ToSQLString())
+                | TOAlterColumnType (col, typ) -> sprintf "ALTER COLUMN %s SET TYPE %s" (col.ToSQLString()) (typ.ToSQLString())
+                | TOAlterColumnNull (col, isNullable) -> sprintf "ALTER COLUMN %s %s NOT NULL" (col.ToSQLString()) (if isNullable then "DROP" else "SET")
+                | TOAlterColumnDefault (col, None) -> sprintf "ALTER COLUMN %s DROP DEFAULT" (col.ToSQLString())
+                | TOAlterColumnDefault (col, Some def) -> sprintf "ALTER COLUMN %s SET DEFAULT %s" (col.ToSQLString()) (def.ToSQLString())
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
 
 type SchemaOperation =
     | SOCreateSchema of SchemaName
@@ -579,10 +605,10 @@ type SchemaOperation =
     | SODeleteTable of TableRef
     | SOCreateSequence of SchemaObject
     | SODeleteSequence of SchemaObject
+    // Constraint operations are not plain ALTER TABLE operations because they create new objects at schema namespace.
     | SOCreateConstraint of SchemaObject * TableName * ConstraintMeta
     | SODeleteConstraint of SchemaObject * TableName
-    | SOCreateColumn of ResolvedColumnRef * ColumnMeta
-    | SODeleteColumn of ResolvedColumnRef
+    | SOAlterTable of TableRef * TableOperation array
     with
         override this.ToString () = this.ToSQLString()
 
@@ -610,16 +636,7 @@ type SchemaOperation =
                             | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
                     sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) constraintStr
                 | SODeleteConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
-                | SOCreateColumn (col, pars) ->
-                    let notNullStr = if pars.isNullable then "NULL" else "NOT NULL"
-                    let defaultStr =
-                        match pars.defaultExpr with
-                            | None -> ""
-                            | Some def -> sprintf "DEFAULT %s" (def.ToSQLString())
-                    sprintf "ALTER TABLE %s ADD COLUMN %s %s %s %s" (col.table.ToSQLString()) (col.name.ToSQLString()) (pars.columnType.ToSQLString()) notNullStr defaultStr
-                | SODeleteColumn col -> sprintf "ALTER TABLE %s DROP COLUMN %s" (col.table.ToSQLString()) (col.name.ToSQLString())
+                | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
-
-let publicSchema = SQLName "public"

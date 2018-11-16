@@ -5,7 +5,6 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parser
 open FunWithFlags.FunDB.Layout.Types
-open System.Net.Mail
 
 // Validates all fields and expressions. Further processing can skip all the checks.
 

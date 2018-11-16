@@ -68,7 +68,7 @@ let private compileFieldExprType : FieldExprType -> SQL.SimpleValueType = functi
     | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
     | FETArray stype -> SQL.VTArray <| compileScalarType stype
 
-let compileFieldType : FieldType<EntityRef, _> -> SQL.SimpleValueType = function
+let compileFieldType : FieldType<_, _> -> SQL.SimpleValueType = function
     | FTType fetype -> compileFieldExprType fetype
     | FTReference (ent, restriction) -> SQL.VTScalar SQL.STInt
     | FTEnum vals -> SQL.VTScalar SQL.STString

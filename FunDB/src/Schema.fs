@@ -159,8 +159,8 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
-        [<ColumnField("reference(\"Schemas\")")>]
-        member val SchemaId = int with get, set
+        [<ColumnField("reference(\"public\".\"Schemas\")")>]
+        member val SchemaId = 0 with get, set
         member val Schema = null : Schema with get, set
         [<ColumnField("string", Nullable=true)>]
         member val MainField = "" with get, set
@@ -176,7 +176,7 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
-        [<ColumnField("reference(\"Entities\")")>]
+        [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("string")>]
@@ -192,7 +192,7 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
-        [<ColumnField("reference(\"Entities\")")>]
+        [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("string")>]
@@ -204,7 +204,7 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
-        [<ColumnField("reference(\"Entities\")")>]
+        [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("array(string)")>]
@@ -216,7 +216,7 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
-        [<ColumnField("reference(\"Entities\")")>]
+        [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("string")>]
@@ -261,7 +261,7 @@ and
     [<AllowNullLiteral>]
     RoleParent () =
         member val Id = 0 with get, set
-        [<ColumnField("reference(\"Roles\")")>]
+        [<ColumnField("reference(\"public\".\"Roles\")")>]
         member val ParentId = 0 with get, set
         member val Parent = null : Role with get, set
 
@@ -269,10 +269,10 @@ and
     [<AllowNullLiteral>]
     RoleEntity () =
         member val Id = 0 with get, set
-        [<ColumnField("reference(\"Roles\")")>]
+        [<ColumnField("reference(\"public\".\"Roles\")")>]
         member val RoleId = 0 with get, set
         member val Role = null : Role with get, set
-        [<ColumnField("reference(\"Entities\")")>]
+        [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("bool", Default="TRUE")>]
@@ -284,10 +284,10 @@ and
     [<AllowNullLiteral>]
     RoleColumnField () =
         member val Id = 0 with get, set
-        [<ColumnField("reference(\"Roles\")")>]
+        [<ColumnField("reference(\"public\".\"Roles\")")>]
         member val RoleId = 0 with get, set
         member val Role = null : Role with get, set
-        [<ColumnField("reference(\"ColumnFields\")")>]
+        [<ColumnField("reference(\"public\".\"ColumnFields\")")>]
         member val ColumnFieldId = 0 with get, set
         member val ColumnField = null : ColumnField with get, set
     
@@ -295,10 +295,10 @@ and
     [<AllowNullLiteral>]
     UserRole () =
         member val Id = 0 with get, set
-        [<ColumnField("reference(\"Users\")")>]
+        [<ColumnField("reference(\"public\".\"Users\")")>]
         member val UserId = 0 with get, set
         member val User = null : User with get, set
-        [<ColumnField("reference(\"Roles\")")>]
+        [<ColumnField("reference(\"public\".\"Roles\")")>]
         member val RoleId = 0 with get, set
         member val Role = null : Role with get, set
 
