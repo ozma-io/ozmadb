@@ -96,10 +96,10 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] FieldValue =
                 | FDateTime dt -> sprintf "%s :: datetime" (dt |> renderSqlDateTime |> renderSqlString)
                 | FDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
                 | FIntArray vals -> renderArray renderSqlInt "int" vals
-                | FStringArray vals -> renderArray escapeDoubleQuotes "string" vals
+                | FStringArray vals -> renderArray escapeSqlDoubleQuotes "string" vals
                 | FBoolArray vals -> renderArray renderSqlBool "bool" vals
-                | FDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeDoubleQuotes) "datetime" vals
-                | FDateArray vals -> renderArray (renderSqlDate >> escapeDoubleQuotes) "date" vals
+                | FDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "datetime" vals
+                | FDateArray vals -> renderArray (renderSqlDate >> escapeSqlDoubleQuotes) "date" vals
                 | FNull -> "NULL"
 
         interface IFunQLString with

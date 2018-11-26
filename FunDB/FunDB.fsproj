@@ -61,6 +61,10 @@
     <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Schema.fs" />
 
+    <Compile Include="src/JavaScript/Utils.fs" />
+    <Compile Include="src/JavaScript/AST.fs" />
+    <Compile Include="src/JavaScript/FunQL.fs" />
+
     <Compile Include="src/Connection.fs" />
     <Compile Include="src/Entity.fs" />
     <Compile Include="src/ContextCache.fs" />

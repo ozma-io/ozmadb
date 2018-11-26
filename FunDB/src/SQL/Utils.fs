@@ -3,14 +3,14 @@ module FunWithFlags.FunDB.SQL.Utils
 open System
 open System.Globalization
 
-let escapeSymbols (str : string) : string = str.Replace("\\", "\\\\")
+let escapeSqlSymbols (str : string) : string = str.Replace("\\", "\\\\")
 
-let escapeDoubleQuotes (str : string) : string = sprintf "\"%s\"" ((escapeSymbols str).Replace("\"", "\\\""))
+let escapeSqlDoubleQuotes (str : string) : string = sprintf "\"%s\"" ((escapeSqlSymbols str).Replace("\"", "\\\""))
 
-let escapeSingleQuotes (str : string) : string = sprintf "'%s'" ((escapeSymbols str).Replace("'", "''"))
+let escapeSqlSingleQuotes (str : string) : string = sprintf "'%s'" ((escapeSqlSymbols str).Replace("'", "''"))
 
-let renderSqlName = escapeDoubleQuotes
-let renderSqlString = escapeSingleQuotes
+let renderSqlName = escapeSqlDoubleQuotes
+let renderSqlString = escapeSqlSingleQuotes
 
 let renderSqlBool : bool -> string = function
     | true -> "TRUE"

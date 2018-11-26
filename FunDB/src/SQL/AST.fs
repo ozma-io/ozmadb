@@ -122,10 +122,10 @@ type [<JsonConverter(typeof<ValueConverter>)>] Value =
                 | VDateTime dt -> sprintf "%s :: timestamp with time zone" (dt |> renderSqlDateTime |> renderSqlString)
                 | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
                 | VIntArray vals -> renderArray renderSqlInt "int4" vals
-                | VStringArray vals -> renderArray escapeDoubleQuotes "text" vals
+                | VStringArray vals -> renderArray escapeSqlDoubleQuotes "text" vals
                 | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-                | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeDoubleQuotes) "timestamp with time zone" vals
-                | VDateArray vals -> renderArray (renderSqlDate >> escapeDoubleQuotes) "date" vals
+                | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "timestamp with time zone" vals
+                | VDateArray vals -> renderArray (renderSqlDate >> escapeSqlDoubleQuotes) "date" vals
                 | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
                 | VNull -> "NULL"
 
