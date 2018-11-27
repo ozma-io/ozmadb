@@ -35,9 +35,9 @@ type LoginResponse =
 type AuthToken =
     { [<JsonProperty(Required=Required.Always)>]
       sub : UserName
-      [<JsonProperty(Required=Required.Always, ItemConverterType = typeof<UnixDateTimeOffsetConverter>)>]
+      [<JsonProperty(Required=Required.Always, ItemConverterType=typeof<UnixDateTimeOffsetConverter>)>]
       iat : DateTimeOffset
-      [<JsonProperty(Required=Required.Always, ItemConverterType = typeof<UnixDateTimeOffsetConverter>)>]
+      [<JsonProperty(Required=Required.Always, ItemConverterType=typeof<UnixDateTimeOffsetConverter>)>]
       exp : DateTimeOffset
     }
 

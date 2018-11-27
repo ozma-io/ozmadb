@@ -35,10 +35,14 @@ let private parseExprArgument (fieldExprType : FieldExprType) (str : string) : F
 type RawArguments = Map<string, string>
 
 let private convertArgument (fieldType : FieldType<_, _>) (str : string) : FieldValue option =
-    match fieldType with
-        | FTType feType -> parseExprArgument feType str
-        | FTReference (_, _) -> Option.map FInt <| tryIntInvariant str
-        | FTEnum values -> Some <| FString str
+    // Magic value that means NULL
+    if str = "\x00" then
+        Some FNull
+    else
+        match fieldType with
+            | FTType feType -> parseExprArgument feType str
+            | FTReference (_, _) -> Option.map FInt <| tryIntInvariant str
+            | FTEnum values -> Some <| FString str
 
 let private convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ViewArguments, string> =
     let findArgument name (arg : CompiledArgument) =

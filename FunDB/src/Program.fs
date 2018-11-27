@@ -85,7 +85,10 @@ let main (args : string array) : int =
         { defaultConfig with
             bindings = [ HttpBinding.createSimple HTTP config.host config.port ]
         }
-    let corsCfg = defaultCORSConfig
+    let corsCfg =
+        { defaultCORSConfig with
+            allowedMethods = InclusiveOption.Some [ HttpMethod.GET; HttpMethod.PUT; HttpMethod.POST; HttpMethod.OPTIONS ]
+        }
     let corsApi = cors corsCfg
 
     let funApi = choose [
