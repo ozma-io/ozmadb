@@ -254,6 +254,7 @@ and FieldExpr<'f> when 'f :> IFunQLString =
     | FECast of FieldExpr<'f> * FieldExprType
     | FEIsNull of FieldExpr<'f>
     | FEIsNotNull of FieldExpr<'f>
+    | FECase of ((FieldExpr<'f> * FieldExpr<'f>) array) * (FieldExpr<'f> option)
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -283,6 +284,13 @@ and FieldExpr<'f> when 'f :> IFunQLString =
                 | FECast (e, typ) -> sprintf "(%s) :: %s" (e.ToFunQLString()) (typ.ToFunQLString())
                 | FEIsNull e -> sprintf "(%s) IS NULL" (e.ToFunQLString())
                 | FEIsNotNull e -> sprintf "(%s) IS NOT NULL" (e.ToFunQLString())
+                | FECase (es, els) ->
+                    let esStr = es |> Seq.map (fun (cond, e) -> sprintf "WHEN %s THEN %s" (cond.ToFunQLString()) (e.ToFunQLString())) |> String.concat " "
+                    let elsStr =
+                        match els with
+                            | None -> ""
+                            | Some e -> sprintf "ELSE %s" (e.ToFunQLString())
+                    concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -309,6 +317,7 @@ let mapFieldExpr (columnFunc : 'a -> 'b) (placeholderFunc : string -> string) : 
         | FECast (e, typ) -> FECast (traverse e, typ)
         | FEIsNull e -> FEIsNull (traverse e)
         | FEIsNotNull e -> FEIsNotNull (traverse e)
+        | FECase (es, els) -> FECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
     traverse
 
 let iterFieldExpr (colFunc : 'a -> unit) (placeholderFunc : string -> unit) : FieldExpr<'a> -> unit =
@@ -333,6 +342,9 @@ let iterFieldExpr (colFunc : 'a -> unit) (placeholderFunc : string -> unit) : Fi
         | FECast (e, typ) -> traverse e
         | FEIsNull e -> traverse e
         | FEIsNotNull e -> traverse e
+        | FECase (es, els) ->
+            Array.iter (fun (cond, e) -> traverse cond; traverse e) es
+            Option.iter traverse els
     traverse
 
 type SortOrder =

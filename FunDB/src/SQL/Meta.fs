@@ -318,6 +318,7 @@ let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
         | VENotInQuery (e, query) -> raise (SQLMetaError <| sprintf "Invalid subquery in default expression: %O" query)
         | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
         | VECast (e, typ) -> VECast (traverse e, typ)
+        | VECase (es, els) -> VECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
     traverse
 
 let parseUdtName (str : string) =

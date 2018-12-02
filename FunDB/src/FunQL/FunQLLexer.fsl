@@ -103,6 +103,11 @@ rule tokenizeFunQL = parse
     | f o r       { Parser.FOR }
     | u p d a t e { Parser.UPDATE }
     | o f         { Parser.OF }
+    | c a s e     { Parser.CASE }
+    | w h e n     { Parser.WHEN }
+    | t h e n     { Parser.THEN }
+    | e l s e     { Parser.ELSE }
+    | e n d       { Parser.END }
                             
     // Types
     | i n t             { Parser.INT_TYPE }

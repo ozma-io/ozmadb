@@ -108,6 +108,11 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %token FOR
 %token UPDATE
 %token OF
+%token CASE
+%token WHEN
+%token THEN
+%token ELSE
+%token END
 
 // Types
 %token INT_TYPE
@@ -277,10 +282,22 @@ FieldExprEq:
 
 FieldExprVal:
   | FieldExprVal DOUBLE_COLON FieldExprType { restrictCast $1 $3; FECast ($1, $3) }
+  | CaseExpr                                { $1 }
   | FieldRef                                { FEColumn $1 }
   | ARGUMENT_ID                             { FEPlaceholder $1 }
   | Value                                   { FEValue $1 }
   | LEFT_PAREN FieldExpr RIGHT_PAREN        { $2 }
+
+CaseExpr:
+  | CASE CaseWhenList CaseElse END { FECase (List.toArray $2, $3) }
+
+CaseWhenList:
+  | WHEN FieldExpr THEN FieldExpr CaseWhenList { ($2, $4) :: $5 }
+  | WHEN FieldExpr THEN FieldExpr              { [($2, $4)] }
+
+CaseElse:
+  |                { None }
+  | ELSE FieldExpr { Some $2 }
 
 IntArrayList:
   | INT                    { [ $1 ] }

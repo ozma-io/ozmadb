@@ -325,6 +325,7 @@ type ValueExpr =
     | VEIsNotNull of ValueExpr
     | VEFunc of SQLName * (ValueExpr array)
     | VECast of ValueExpr * DBValueType
+    | VECase of ((ValueExpr * ValueExpr) array) * (ValueExpr option)
     with
         override this.ToString () = this.ToSQLString()
         
@@ -360,6 +361,13 @@ type ValueExpr =
                 | VEIsNotNull a -> sprintf "(%s) IS NOT NULL" (a.ToSQLString())
                 | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
                 | VECast (e, typ) -> sprintf "(%s) :: %s" (e.ToSQLString()) (typ.ToSQLString())
+                | VECase (es, els) ->
+                    let esStr = es |> Seq.map (fun (cond, e) -> sprintf "WHEN %s THEN %s" (cond.ToSQLString()) (e.ToSQLString())) |> String.concat " "
+                    let elsStr =
+                        match els with
+                            | None -> ""
+                            | Some e -> sprintf "ELSE %s" (e.ToSQLString())
+                    concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -468,7 +476,9 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
         | VEIsNull e -> traverse e
         | VEIsNotNull e -> traverse e
         | VEFunc (name,  args) -> Array.iter traverse args
-        | VECast (e, typ) -> traverse e
+        | VECase (es, els) ->
+            Array.iter (fun (cond, e) -> traverse cond; traverse e) es
+            Option.iter traverse els
     traverse
 
 type InsertExpr =

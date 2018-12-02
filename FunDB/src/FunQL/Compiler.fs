@@ -156,6 +156,7 @@ let genericCompileFieldExpr (columnFunc : 'c -> SQL.ColumnRef) (placeholderFunc 
         | FECast (e, typ) -> SQL.VECast (traverse e, SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLName()) (compileFieldExprType typ))
         | FEIsNull a -> SQL.VEIsNull (traverse a)
         | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
+        | FECase (es, els) -> SQL.VECase (Array.map (fun (cond, expr) -> (traverse cond, traverse expr)) es, Option.map traverse els)
     traverse
 
 // Differs from compileFieldValue in that it doesn't emit value expressions.
