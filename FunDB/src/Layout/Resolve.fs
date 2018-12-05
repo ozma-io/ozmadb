@@ -17,6 +17,10 @@ let private checkName : FunQLName -> unit = function
     | FunQLName name when not (goodName name) -> raise (ResolveLayoutException <| sprintf "Invalid name: %s" name)
     | _ -> ()
 
+let private checkSchemaName : FunQLName -> unit = function
+    | FunQLName name when name.StartsWith("pg_") || name = "information_schema" -> raise (ResolveLayoutException <| sprintf "Invalid schema name: %s" name)
+    | fname -> checkName fname
+
 let private checkFieldName (name : FunQLName) : unit =
     if name = funId
     then raise (ResolveLayoutException <| sprintf "Name is forbidden: %O" name)
@@ -166,5 +170,5 @@ type private LayoutResolver (layout : SourceLayout) =
 
 let resolveLayout (layout : SourceLayout) : Layout =
     let resolver = LayoutResolver layout
-    { schemas = Map.map (fun schemaName schema -> resolver.ResolveSchema(schema)) layout.schemas
+    { schemas = Map.map (fun schemaName schema -> checkSchemaName schemaName; resolver.ResolveSchema(schema)) layout.schemas
     }

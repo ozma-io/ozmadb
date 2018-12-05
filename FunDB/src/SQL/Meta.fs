@@ -404,9 +404,8 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) : DatabaseMeta =
     use db = new InformationSchemaContext(dbOptions.Options)
     ignore <| db.Database.UseTransaction(transaction)
 
-    let systemSchemas = [| "information_schema"; "pg_catalog" |]
     let schemas =
-        db.Schemata.Where(fun schema -> not (systemSchemas.Contains(schema.schema_name)))
+        db.Schemata.Where(fun schema -> not (schema.schema_name.StartsWith("pg_")) && schema.schema_name <> "information_schema")
             .Include(fun schema -> schema.tables)
                 .ThenInclude(fun (table : Table) -> table.columns)
             .Include(fun schema -> schema.tables)
