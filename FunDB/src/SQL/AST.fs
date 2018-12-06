@@ -476,6 +476,7 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
         | VEIsNull e -> traverse e
         | VEIsNotNull e -> traverse e
         | VEFunc (name,  args) -> Array.iter traverse args
+        | VECast (e, typ) -> traverse e
         | VECase (es, els) ->
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
             Option.iter traverse els
