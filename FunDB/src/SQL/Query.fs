@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.SQL.Query
 
 open System
+open System.Linq
 open Npgsql
 open NpgsqlTypes
 
@@ -59,16 +60,16 @@ let private convertValue valType (rawValue : obj) =
         | (VTScalar STBool, (:? bool as value)) -> VBool (value)
         | (VTScalar STDateTime, (:? DateTimeOffset as value)) -> VDateTime (value)
         | (VTScalar STDate, (:? DateTime as value)) -> VDate (DateTimeOffset value)
-        | (VTArray scalarType, (:? (obj array) as rootVals)) ->
-            let rec convertArray (convFunc : obj -> 'a option) (vals : obj array) : ValueArray<'a> =
+        | (VTArray scalarType, (:? Array as rootVals)) ->
+            let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
                 let convertOne : obj -> ArrayValue<'a> = function
                     | :? DBNull as value -> AVNull
-                    | :? (obj array) as subVals -> AVArray (convertArray convFunc subVals)
+                    | :? Array as subVals -> AVArray (convertArray convFunc subVals)
                     | value ->
                         match convFunc value with
                             | Some v -> AVValue v
                             | None -> raise (QueryError <| sprintf "Cannot convert array value: %O" value)
-                Array.map convertOne vals
+                Seq.map convertOne (vals.Cast<obj>()) |> Array.ofSeq
 
             match scalarType with
                 | STInt -> VIntArray (convertArray convertInt rootVals)
