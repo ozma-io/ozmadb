@@ -49,7 +49,6 @@ let private checkLogin (connectionString : string) (req : LoginRequest) : Async<
                 eprintfn "Couldn't find user %s" req.username
                 return None
             | user ->
-                eprintfn "User: '%s', hash: '%s', password: '%s', result: %O" (user : User).Name user.PasswordHash req.password (user.CheckPassword(req.password))
                 return
                     if (user : User).CheckPassword(req.password)
                     then Some user.Name
