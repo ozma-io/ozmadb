@@ -17,6 +17,8 @@ open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.API.Utils
 
+open BCrypt.Net
+
 type UserName = string
 
 let private signAlgorithm = Jose.JwsAlgorithm.ES512
@@ -49,7 +51,10 @@ let private checkLogin (connectionString : string) (req : LoginRequest) : Async<
                 eprintfn "Couldn't find user %s" req.username
                 return None
             | user ->
-                eprintfn "User: '%s', hash: '%s', password: '%s', result: %O" (user : User).Name user.PasswordHash req.password (user.CheckPassword(req.password))
+                let newpw = "$2a$11$QyLpYkKKG9oNIl2rbZ9X0OgxxbWYZjPZUFN/kuJ4DDywo20WgK3iu"
+                eprintfn "Password: %s, verify: %O" newpw (BCrypt.Verify("root", newpw))
+                eprintfn "Password: %s, verify: %O" req.password (BCrypt.Verify(req.password, newpw))
+                eprintfn "User: '%s', hash: '%s', password: '%s', result: %O %O" (user : User).Name user.PasswordHash req.password (BCrypt.Verify(req.password, user.PasswordHash)) (user.CheckPassword(req.password))
                 return
                     if (user : User).CheckPassword(req.password)
                     then Some user.Name
