@@ -87,7 +87,7 @@ let main (args : string array) : int =
         }
     let corsCfg =
         { defaultCORSConfig with
-            allowedMethods = InclusiveOption.Some [ HttpMethod.GET; HttpMethod.PUT; HttpMethod.POST; HttpMethod.OPTIONS ]
+            allowedMethods = InclusiveOption.Some [ HttpMethod.GET; HttpMethod.PUT; HttpMethod.POST; HttpMethod.DELETE; HttpMethod.OPTIONS ]
         }
     let corsApi = cors corsCfg
 
