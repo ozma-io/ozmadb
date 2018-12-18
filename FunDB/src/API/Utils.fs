@@ -25,5 +25,5 @@ let jsonResponse (payload : 'a) : WebPart =
 #if DEBUG
             Formatting = Formatting.Indented
 #endif
-        )
+         )
     JsonConvert.SerializeObject(payload, settings) |> Successful.OK >=> Writers.setMimeType "application/json"
