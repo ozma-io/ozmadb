@@ -8,6 +8,7 @@ let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
 
 type ParsedFieldExpr = FieldExpr<FieldRef>
 type ParsedFromExpr = FromExpr<EntityRef, FieldRef>
+type ParsedConditionClause = ConditionClause<EntityRef, FieldRef>
 type ParsedFromClause = FromClause<EntityRef, FieldRef>
 type ParsedQueryExpr = QueryExpr<EntityRef, FieldRef>
 type ParsedQueryResult = QueryResult<FieldRef>type ParsedAttributeMap = AttributeMap<FieldRef>
@@ -147,12 +148,16 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %start fieldExpr
 %type <ParsedFieldExpr> fieldExpr
 
+%start conditionClause
+%type <ParsedConditionClause> conditionClause
+
 %%
 
 // Entry points
 viewExpr : ViewExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
+conditionClause : ConditionClause EOF { $1 }
 
 // Expressions
 
@@ -181,8 +186,11 @@ ArgumentsListNonEmpty:
 Argument:
   | ARGUMENT_ID ArgumentFieldType { ($1, $2) }
 
+ConditionClause:
+  | WhereClause OrderByClause { { where = $1; orderBy = $2 } }
+
 FromClause:
-  | FROM FromExpr WhereClause OrderByClause { { from = $2; where = $3; orderBy = $4 } }
+  | FROM FromExpr ConditionClause { { from = $2; condition = $3 } }
 
 Query:
 	| SELECT Results FromClause { { results = $2; clause = $3 } }

@@ -9,13 +9,19 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.SQL.Meta
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-let sqlFunId = SQL.SQLName "Id"
+let compileName : FunQLName -> SQL.SQLName = function
+    | FunQLName name -> SQL.SQLName name
+
+let sqlFunId = compileName funId
+let sqlFunView = compileName funView
 
 type CompiledArgument =
     { placeholder : int
       fieldType : ParsedFieldType
       valueType : SQL.SimpleValueType
     }
+
+type private ArgumentsMap = Map<string, CompiledArgument>
 
 let typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : Result<unit, string> =
     match fieldType with
@@ -99,9 +105,6 @@ let private checkArgumentPureExpr (expr : FieldExpr<_>) : bool =
     iterFieldExpr foundReference foundPlaceholder expr
     noReferences
 
-let compileName : FunQLName -> SQL.SQLName = function
-    | FunQLName name -> SQL.SQLName name
-
 let private compileEntityPun (entityRef : ResolvedEntityRef) : SQL.TableName = SQL.SQLName <| sprintf "%O__%O" entityRef.schema entityRef.name
 
 let private compileEntityTablePun (entityRef : ResolvedEntityRef) : SQL.TableRef =
@@ -174,8 +177,17 @@ let compileArgument : FieldValue -> SQL.Value = function
     | FDateArray vals -> SQL.VDateArray (compileArray vals)
     | FNull -> SQL.VNull
 
-type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
-    let compileFieldExpr = genericCompileFieldExpr compileFieldName (fun name -> placeholders.[name])
+let private compileConditionClauseGeneric (arguments : ArgumentsMap) (clause : ResolvedConditionClause) : SQL.ConditionClause =
+    let compileFieldExpr = genericCompileFieldExpr compileFieldName (fun name -> arguments.[name].placeholder)
+    { where = Option.map compileFieldExpr clause.where
+      orderBy = Array.map (fun (ord, expr) -> (compileOrder ord, compileFieldExpr expr)) clause.orderBy
+      // FIXME: support them!
+      limit = None
+      offset = None
+    }
+
+type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
+    let compileFieldExpr = genericCompileFieldExpr compileFieldName (fun name -> arguments.[name].placeholder)
     let compileLocalFieldExpr (tableRef : SQL.TableRef option) : LocalFieldExpr -> SQL.ValueExpr =
         let makeFullName name = { table = tableRef; name = compileName name } : SQL.ColumnRef
         let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
@@ -220,10 +232,11 @@ type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
                 { columns = Seq.append (Seq.append (Seq.singleton idColumn) (Seq.append columnFields computedFields)) referenceNames |> Seq.toArray 
                   clause =
                       Some { from = from
-                             where = None
-                             orderBy = [||]
-                             limit = None
-                             offset = None
+                             condition = { where = None
+                                           orderBy = [||]
+                                           limit = None
+                                           offset = None
+                                         }
                            }
                 } : SQL.SelectExpr
             
@@ -232,13 +245,11 @@ type private QueryCompiler (layout : Layout, placeholders : Map<string, int>) =
         // FIXME: track field names across subexpressions
         | FSubExpr (name, q) -> SQL.FSubExpr (compileName name, compileQueryExpr q)
 
+    and compileConditionClause = compileConditionClauseGeneric arguments
+
     and compileFromClause (clause : ResolvedFromClause) : SQL.FromClause =
         { from = compileFrom clause.from
-          where = Option.map compileFieldExpr clause.where
-          orderBy = Array.map (fun (ord, expr) -> (compileOrder ord, compileFieldExpr expr)) clause.orderBy
-          // FIXME: support them!
-          limit = None
-          offset = None
+          condition = compileConditionClause clause.condition
         }
 
     and compileQueryExpr (query : ResolvedQueryExpr) : SQL.SelectExpr =
@@ -256,8 +267,7 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
             |> Map.toSeq
             |> Seq.mapi (fun i (name, fieldType) -> (name, ({ placeholder = i; fieldType = fieldType; valueType = compileFieldType fieldType })))
             |> Map.ofSeq
-    let placeholders = Map.map (fun name arg -> arg.placeholder) arguments
-    let compiler = QueryCompiler (layout, placeholders)
+    let compiler = QueryCompiler (layout, arguments)
 
     let mapColumnAttribute (columnName : FieldName) (name : AttributeName) (expr : ResolvedFieldExpr) =
         (expr, compiler.CompileAttribute (sprintf "Cell__%O" columnName) name expr)
@@ -325,4 +335,17 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
     { attributesExpr = attributesExpr
       query = query
       arguments = arguments
+    }
+
+let compileAddedCondition (viewExpr : CompiledViewExpr) (condClause : ResolvedConditionClause) : CompiledViewExpr =
+    let newClause =
+        { from = SQL.FSubExpr (sqlFunView, viewExpr.query)
+          condition = compileConditionClauseGeneric viewExpr.arguments condClause
+        } : SQL.FromClause
+    let newQuery =
+        { columns = [| SQL.SCAll |]
+          clause = Some newClause
+        } : SQL.SelectExpr
+    { viewExpr with
+          query = newQuery
     }

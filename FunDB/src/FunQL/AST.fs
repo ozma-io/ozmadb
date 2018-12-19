@@ -390,10 +390,9 @@ type JoinType =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
-
-type FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
-    { from: FromExpr<'e, 'f>
-      where: FieldExpr<'f> option
+           
+type ConditionClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    { where: FieldExpr<'f> option
       orderBy: (SortOrder * FieldExpr<'f>) array
     } with
         override this.ToString () = this.ToFunQLString()
@@ -407,7 +406,19 @@ type FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
                 if Array.isEmpty this.orderBy
                 then ""
                 else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (ord.ToFunQLString()) (expr.ToFunQLString())) |> String.concat ", ")
-            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToFunQLString(); whereStr; orderByStr])
+            concatWithWhitespaces [whereStr; orderByStr]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+type FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    { from: FromExpr<'e, 'f>
+      condition: ConditionClause<'e, 'f>
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+             sprintf "FROM %s" (concatWithWhitespaces [this.from.ToFunQLString(); this.condition.ToFunQLString()])
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -457,3 +468,5 @@ type ViewResults<'f> when 'f :> IFunQLString = (AttributeMap<'f> * QueryResult<'
 
 let funId = FunQLName "Id"
 let funSchema = FunQLName "public"
+
+let funView = FunQLName "view"

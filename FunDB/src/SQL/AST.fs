@@ -389,6 +389,7 @@ and FromExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and SelectedColumn =
+    | SCAll
     | SCColumn of ColumnRef
     | SCExpr of ColumnName * ValueExpr
     with
@@ -396,15 +397,15 @@ and SelectedColumn =
 
         member this.ToSQLString () =
             match this with
+                | SCAll -> "*"
                 | SCColumn c -> c.ToSQLString()
                 | SCExpr (name, expr) -> sprintf "%s AS %s" (expr.ToSQLString()) (name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and FromClause =
-    { from : FromExpr
-      where : ValueExpr option
+and ConditionClause =
+    { where : ValueExpr option
       orderBy : (SortOrder * ValueExpr) array
       limit : int option
       offset : int option
@@ -429,7 +430,19 @@ and FromClause =
                     | Some n -> sprintf "OFFSET %i" n
                     | None -> ""
 
-            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToSQLString(); whereStr; orderByStr; limitStr; offsetStr])
+            concatWithWhitespaces [whereStr; orderByStr; limitStr; offsetStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and FromClause =
+    { from : FromExpr
+      condition : ConditionClause
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToSQLString(); this.condition.ToSQLString()])
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

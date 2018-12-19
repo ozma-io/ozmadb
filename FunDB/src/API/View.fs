@@ -30,12 +30,17 @@ let viewsApi (rctx : RequestContext) : WebPart =
         | UVENotFound -> RequestErrors.NOT_FOUND ""
         | UVEParse msg -> RequestErrors.BAD_REQUEST <| sprintf "Parse error: %s" msg
         | UVEResolve msg -> RequestErrors.BAD_REQUEST <| sprintf "Resolution error: %s" msg
-        | UVExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
+        | UVEExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
+        | UVEFixup msg -> RequestErrors.BAD_REQUEST <| sprintf "Condition compilation error: %s" msg
 
     let selectFromView (viewRef : UserViewRef) =
         request <| fun req ->
+            let condition =
+                match req.queryParam "__condition" with
+                    | Choice1Of2 rawCondition -> Some rawCondition
+                    | Choice2Of2 _ -> None
             let rawArgs = req.query |> Seq.mapMaybe (fun (name, maybeArg) -> Option.map (fun arg -> (name, arg)) maybeArg) |> Map.ofSeq
-            match rctx.GetUserView viewRef rawArgs with
+            match rctx.GetUserView viewRef condition rawArgs with
                 | Ok (cached, res) -> jsonResponse { info = cached.info
                                                      result = res
                                                    }

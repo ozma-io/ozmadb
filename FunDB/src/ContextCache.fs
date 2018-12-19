@@ -33,7 +33,8 @@ type UserViewErrorInfo =
     | UVEArguments of string
     | UVEParse of string
     | UVEResolve of string
-    | UVExecute of string
+    | UVEExecute of string
+    | UVEFixup of string
 
 type EntityErrorInfo =
     | EENotFound
@@ -71,33 +72,38 @@ let buildCachedUserView
         (conn : QueryConnection)
         (layout : Layout)
         (expr : string)
-        (argumentsFunc : CompiledViewExpr -> Result<Map<string, FieldValue>, string>)
+        (fixupCompiledFunc : ResolvedViewExpr -> CompiledViewExpr -> Result<CompiledViewExpr, string>)
+        (argumentsFunc : ResolvedViewExpr -> CompiledViewExpr -> Result<Map<string, FieldValue>, string>)
         (func : CachedUserView -> ExecutedViewExpr -> 'a)
         : Result<'a, UserViewErrorInfo> =
     match buildUserView layout expr with
         | Error err -> Error err
-        | Ok expr ->
-            let compiled = compileViewExpr layout expr
-            match argumentsFunc compiled with
-                | Error msg -> Error <| UVEArguments msg
-                | Ok arguments ->
-                    try
-                        runViewExpr conn compiled arguments <| fun info res ->
-                            let cached = { compiled = compiled
-                                           resolved = expr
-                                           info = mergeViewInfo layout expr info
-                                           pureAttributes = getPureAttributes expr compiled res
-                                         }
-                            Ok <| func cached res
-                    with
-                        | ViewExecutionError err -> Error <| UVExecute err
+        | Ok resolved ->
+            let compiledRaw = compileViewExpr layout resolved
+            match fixupCompiledFunc resolved compiledRaw with
+                | Error err -> Error <| UVEFixup err
+                | Ok compiled ->
+                    match argumentsFunc resolved compiled with
+                        | Error msg -> Error <| UVEArguments msg
+                        | Ok arguments ->
+                            try
+                                runViewExpr conn compiled arguments <| fun info res ->
+                                    let cached = { compiled = compiled
+                                                   resolved = resolved
+                                                   info = mergeViewInfo layout resolved info
+                                                   pureAttributes = getPureAttributes resolved compiled res
+                                                 }
+                                    Ok <| func cached res
+                            with
+                                | ViewExecutionError err -> Error <| UVEExecute err
 
 let private rebuildUserViews (conn : DatabaseConnection) (layout : Layout) : Map<string, CachedUserView> =
     let buildOne (uv : UserView) =
         if not (goodName uv.Name) then
             raise (ContextException <| CBEUserViewName uv.Name)
-        let getArguments viewExpr = viewExpr.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
-        match buildCachedUserView conn.Query layout uv.Query getArguments (fun info res -> info) with
+        let noFixup resolved compiled = Ok compiled
+        let getArguments resolved compiled = compiled.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
+        match buildCachedUserView conn.Query layout uv.Query noFixup getArguments (fun info res -> info) with
             | Ok cachedUv -> (uv.Name, cachedUv)
             | Error err -> raise (ContextException <| CBEUserView err)
     conn.System.UserViews |> Seq.toArray |> Seq.map buildOne |> Map.ofSeq

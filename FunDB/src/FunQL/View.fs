@@ -36,18 +36,20 @@ type ResolvedFieldName =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+type private QSubqueryFields = Map<FieldName, ResolvedFieldRef option>
+
 type private QMappedEntity =
     | QMEntity of ResolvedEntityRef * ResolvedEntity
-    | QMSubquery of EntityName * Map<FieldName, ResolvedFieldRef option>
+    | QMSubquery of EntityName * QSubqueryFields
 
 type private QMapping = Map<EntityName, QMappedEntity>
-
-type private QPlaceholders = Set<string>
+type private ArgumentsMap = Map<string, ParsedFieldType>
 
 type ResolvedFieldExpr = FieldExpr<ResolvedFieldName>
 type ResolvedQueryExpr = QueryExpr<ResolvedEntityRef, ResolvedFieldName>
 type ResolvedQueryResult = QueryResult<ResolvedFieldName>
 type ResolvedFromExpr = FromExpr<ResolvedEntityRef, ResolvedFieldName>
+type ResolvedConditionClause = ConditionClause<ResolvedEntityRef, ResolvedFieldName>
 type ResolvedFromClause = FromClause<ResolvedEntityRef, ResolvedFieldName>
 type ResolvedAttributeMap = AttributeMap<ResolvedFieldName>
 
@@ -58,11 +60,12 @@ type ResolvedUpdateExpr =
     }
 
 type ResolvedViewExpr =
-    { arguments : Map<string, ParsedFieldType>
+    { arguments : ArgumentsMap
       attributes : ResolvedAttributeMap
       results : ViewResults<ResolvedFieldName>
       clause : ResolvedFromClause
       update : ResolvedUpdateExpr option
+      fields : QSubqueryFields
     }
 
 type private MainEntity =
@@ -127,13 +130,20 @@ let private lookupField (mapping : QMapping) (f : FieldRef) : ResolvedFieldName 
                 | Some boundField -> RFSubquery (queryName, f.name, boundField)
                 | None -> raise (ViewResolveException <| sprintf "Field not found: %O" f.name)
 
-type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
-    let resolveFieldExpr (mapping : QMapping) : ParsedFieldExpr -> ResolvedFieldExpr =
-        let resolvePlaceholder name =
-            if Set.contains name placeholders
-            then name
-            else raise (ViewResolveException <| sprintf "Undefined placeholder: %O" name)
-        mapFieldExpr (lookupField mapping) resolvePlaceholder
+let private resolveFieldExprGeneric (arguments: Map<string, _>) (mapping : QMapping) : ParsedFieldExpr -> ResolvedFieldExpr =
+    let resolvePlaceholder name =
+        if Map.containsKey name arguments
+        then name
+        else raise (ViewResolveException <| sprintf "Undefined placeholder: %O" name)
+    mapFieldExpr (lookupField mapping) resolvePlaceholder
+
+let private resolveConditionClauseGeneric (arguments: Map<string, _>) (mapping : QMapping) (clause : ParsedConditionClause) : ResolvedConditionClause =
+    { where = Option.map (resolveFieldExprGeneric arguments mapping) clause.where
+      orderBy = Array.map (fun (ord, expr) -> (ord, resolveFieldExprGeneric arguments mapping expr)) clause.orderBy
+    }
+
+type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
+    let resolveFieldExpr = resolveFieldExprGeneric arguments
  
     let resolveResult (mapping : QMapping) (result : ParsedQueryResult) : ResolvedQueryResult =
         checkName (result.name.ToString())
@@ -154,10 +164,11 @@ type private QueryResolver (layout : Layout, placeholders : QPlaceholders) =
     and resolveFromClause (clause : ParsedFromClause) : QMapping * ResolvedFromClause =
         let (newMapping, qFrom) = resolveFromExpr clause.from
         let res = { from = qFrom
-                    where = Option.map (resolveFieldExpr newMapping) clause.where
-                    orderBy = Array.map (fun (ord, expr) -> (ord, resolveFieldExpr newMapping expr)) clause.orderBy
+                    condition = resolveConditionClause newMapping clause.condition
                   }
         (newMapping, res)
+
+    and resolveConditionClause = resolveConditionClauseGeneric arguments
 
     and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
         | FEntity name ->
@@ -231,7 +242,7 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
         | _ -> ()
     Map.iter checkArgument viewExpr.arguments
 
-    let qualifier = QueryResolver (layout, Map.keysSet viewExpr.arguments)
+    let qualifier = QueryResolver (layout, viewExpr.arguments)
     let topQuery =
         { results = Array.map snd viewExpr.results
           clause = viewExpr.clause
@@ -241,10 +252,16 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let results = Array.map2 (fun (attrs, oldResult) result -> (qualifier.ResolveAttributes newMapping attrs, result)) viewExpr.results qQuery.results
     Map.iter (fun name argType -> checkName name) viewExpr.arguments
     let update = Option.map (qualifier.ResolveUpdate qQuery << resolveEntityRef) viewExpr.updateName
+    let fields = results |> Seq.map (fun (attrs, res) -> (res.name, resultBoundField res)) |> Map.ofSeq
 
     { arguments = viewExpr.arguments
       attributes = attributes
       results = results
       clause = qQuery.clause
       update = update
+      fields = fields
     }
+
+let resolveAddedCondition (viewExpr : ResolvedViewExpr) (clause : ParsedConditionClause) : ResolvedConditionClause =
+    let mapping = Map.singleton funView (QMSubquery (funView, viewExpr.fields))
+    resolveConditionClauseGeneric viewExpr.arguments mapping clause

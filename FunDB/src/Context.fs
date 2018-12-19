@@ -3,11 +3,14 @@ module FunWithFlags.FunDB.Context
 open System
 
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Lexer
 open FunWithFlags.FunDB.FunQL.Parser
+open FunWithFlags.FunDB.FunQL.View
 open FunWithFlags.FunDB.FunQL.Compiler
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.Entity
@@ -44,7 +47,7 @@ let private convertArgument (fieldType : FieldType<_, _>) (str : string) : Field
             | FTReference (_, _) -> Option.map FInt <| tryIntInvariant str
             | FTEnum values -> Some <| FString str
 
-let private convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ViewArguments, string> =
+let private convertViewArguments (rawArgs : RawArguments) (resolved : ResolvedViewExpr) (compiled : CompiledViewExpr) : Result<ViewArguments, string> =
     let findArgument name (arg : CompiledArgument) =
         match Map.tryFind (name.ToString()) rawArgs with
             | Some argStr ->
@@ -53,6 +56,16 @@ let private convertViewArguments (rawArgs : RawArguments) (compiled : CompiledVi
                     | Some arg -> Ok arg
             | _ -> Error <| sprintf "Argument not found: %O" name
     compiled.arguments |> Map.traverseResult findArgument
+let private addCondition (expr : string) (resolved : ResolvedViewExpr) (compiled : CompiledViewExpr) : Result<CompiledViewExpr, string> =
+    match parse tokenizeFunQL conditionClause expr with
+        | Error msg -> Error msg
+        | Ok rawExpr ->
+            let maybeResolved =
+                try
+                    Ok <| resolveAddedCondition resolved rawExpr
+                with
+                    | ViewResolveException err -> Error err
+            Result.map (compileAddedCondition compiled) maybeResolved
 
 let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<EntityArguments, string> =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
@@ -84,28 +97,43 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
     member this.CacheStore = cacheStore
 
     member this.GetUserViewInfo (uv : UserViewRef) : Result<CachedUserView, UserViewErrorInfo> =
-        let getArguments viewExpr = viewExpr.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
+        let getArguments resolved compiled = compiled.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
+        let noFixup resolved compiled = Ok compiled
         match uv with
-            | UVAnonymous query -> buildCachedUserView conn.Query cache.layout query getArguments (fun info res -> info)
+            | UVAnonymous query -> buildCachedUserView conn.Query cache.layout query noFixup getArguments (fun info res -> info)
             | UVNamed name ->
                 match Map.tryFind name cache.userViews with
                     | None -> Error UVENotFound
                     | Some cached -> Ok cached
 
-    member this.GetUserView (uv : UserViewRef) (rawArgs : RawArguments) : Result<CachedUserView * ExecutedViewExpr, UserViewErrorInfo> =
+    member this.GetUserView (uv : UserViewRef) (rawCondition : string option) (rawArgs : RawArguments) : Result<CachedUserView * ExecutedViewExpr, UserViewErrorInfo> =
         match uv with
-            | UVAnonymous query -> buildCachedUserView conn.Query cache.layout query (convertViewArguments rawArgs) (fun info res -> (info, { res with rows = Array.ofSeq res.rows }))
+            | UVAnonymous query ->
+                let maybeAddCondition =
+                    match rawCondition with
+                        | None -> fun resolved compiled -> Ok compiled
+                        | Some expr -> addCondition expr
+                let getResult cached res = (cached, { res with rows = Array.ofSeq res.rows })
+                buildCachedUserView conn.Query cache.layout query maybeAddCondition (convertViewArguments rawArgs) getResult
             | UVNamed name ->
                 match Map.tryFind name cache.userViews with
                     | None -> Error UVENotFound
                     | Some cached ->
-                        match convertViewArguments rawArgs cached.compiled with
+                        match convertViewArguments rawArgs cached.resolved cached.compiled with
                             | Error msg -> Error <| UVEArguments msg
                             | Ok arguments ->
-                                try
-                                    Ok <| runViewExpr conn.Query cached.compiled arguments (fun info res -> (cached, { res with rows = Array.ofSeq res.rows }))
-                                with
-                                    | ViewExecutionError err -> Error <| UVExecute err
+                                let newCompiledRes =
+                                    match rawCondition with
+                                        | None -> Ok cached.compiled
+                                        | Some expr -> addCondition expr cached.resolved cached.compiled
+                                match newCompiledRes with
+                                    | Error msg -> Error <| UVEFixup msg
+                                    | Ok newCompiled ->
+                                        try
+                                            let getResult info res = (cached, { res with rows = Array.ofSeq res.rows })
+                                            Ok <| runViewExpr conn.Query newCompiled arguments getResult
+                                        with
+                                            | ViewExecutionError err -> Error <| UVEExecute err
 
     member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
         // FIXME
