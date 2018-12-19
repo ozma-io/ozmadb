@@ -1,5 +1,8 @@
 ﻿module FunWithFlags.FunDB.ContextCache
 
+open System.Linq
+open Microsoft.EntityFrameworkCore
+
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.Connection
@@ -119,16 +122,25 @@ type CachedRequestContext =
     { layout : Layout
       userViews : Map<string, CachedUserView>
       allowedDatabase : AllowedDatabase
+      meta : SQL.AST.DatabaseMeta
     }
 
 type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout option) =
-    let rebuildAll (conn : DatabaseConnection) =
-        let layout = rebuildLayout conn
+    let versionField = "StateVersion"
+    let fallbackVersion = 0
+
+    let rebuildWithLayoutAndMeta (conn : DatabaseConnection) (layout : Layout) (meta : SQL.AST.DatabaseMeta) =
         let uvs = rebuildUserViews conn layout
         { layout = layout
           userViews = uvs
           allowedDatabase = buildAllowedDatabase layout
+          meta = meta
         }
+
+    let rebuildAll (conn : DatabaseConnection) =
+        let layout = rebuildLayout conn
+        let meta = buildDatabaseMeta conn.Transaction
+        rebuildWithLayoutAndMeta conn layout meta
 
     let systemLayout =
         let internalLayoutSource = buildSystemLayout typeof<SystemContext>
@@ -150,7 +162,34 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
 
     let filterSystemSchemas (layout: Layout) = Map.filter (fun name schema -> Map.containsKey name systemLayout.schemas) layout.schemas
 
-    do
+    // Returns a version and whether a rebuild should be force-performed.
+    let getCurrentVersion (conn : DatabaseConnection) (bump : bool) =
+        match conn.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstOrDefault() with
+            | null ->
+                let newEntry =
+                    new StateValue (
+                        Name = versionField,
+                        Value = string fallbackVersion
+                    )
+                ignore <| conn.System.State.Add(newEntry)
+                ignore <| conn.System.SaveChanges()
+                (true, fallbackVersion)
+            | entry ->
+                match tryIntInvariant entry.Value with
+                    | Some v ->
+                        if bump then
+                            let newVersion = v + 1
+                            entry.Value <- string newVersion
+                            ignore <| conn.System.SaveChanges()
+                            (true, newVersion)
+                        else
+                            (false, v)
+                    | None ->
+                        entry.Value <- string fallbackVersion
+                        ignore <| conn.System.SaveChanges()
+                        (true, fallbackVersion)
+
+    let mutable cachedState =
         using (new DatabaseConnection(connectionString)) <| fun conn ->
             let systemRenderedLayout = renderLayout systemLayout
             assert (resolveLayout systemRenderedLayout = systemLayout)
@@ -163,30 +202,50 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
                 eprintfn "Migration step: %O" action
                 conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
 
-            updateLayout conn.System systemRenderedLayout
+            let layoutChanged = updateLayout conn.System systemRenderedLayout
 
-            eprintfn "Sanity checking current state"
+            let (_, currentVersion) = getCurrentVersion conn layoutChanged
+
+            eprintfn "Building current state"
             let state = rebuildAll conn
             assert (filterSystemSchemas state.layout = systemLayout.schemas)
 
             conn.Commit()
 
+            (currentVersion, state)
+
     member this.ConnectionString = connectionString
 
     member this.GetCache (conn : DatabaseConnection) =
-        // FIXME: actually cache
-        rebuildAll conn
+        let (oldVersion, oldState) = cachedState
+        let (forceRebuild, currentVersion) = getCurrentVersion conn false
+        if forceRebuild || oldVersion <> currentVersion then
+            let newState = rebuildAll conn
+            cachedState <- (currentVersion, newState)
+            newState
+        else
+            oldState
 
+    // After this no more operations with this connection should be performed as it may commit.
     member this.Migrate (conn : DatabaseConnection) =
         eprintfn "Starting migration"
-        // Cache this too
+        // We can do this because migration could be performed only after GetCache in the same transaction.
+        let (oldVersion, oldState) = cachedState
         // Careful here not to evaluate user views before we do migration
         let layout = rebuildLayout conn
         let wantedMeta = buildLayoutMeta layout
-        let currentMeta = buildDatabaseMeta conn.Transaction
-        let migration = migrateDatabase (filterNonSystemMigrations currentMeta) (filterNonSystemMigrations wantedMeta)
+        let migration = migrateDatabase (filterNonSystemMigrations oldState.meta) (filterNonSystemMigrations wantedMeta)
         for action in migration do
             eprintfn "Migration step: %O" action
             conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
-        let state = rebuildAll conn
-        ()
+        let newState = rebuildWithLayoutAndMeta conn layout wantedMeta
+        if oldState = newState then
+            eprintfn "No state change is observed"
+        else
+            // At this point we are sure there is a valid versionEntry because GetCache should have been called.
+            let newVersion = oldVersion + 1
+            let versionEntry = conn.System.State.AsTracking().Where(fun x -> x.Name = versionField).First()
+            versionEntry.Value <- string newVersion
+            ignore <| conn.System.SaveChanges()
+            conn.Commit()
+            cachedState <- (newVersion, newState)

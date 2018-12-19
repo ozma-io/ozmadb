@@ -614,7 +614,7 @@ type TableOperation =
                             | Some def -> sprintf "DEFAULT %s" (def.ToSQLString())
                     sprintf "ADD COLUMN %s %s %s %s" (col.ToSQLString()) (pars.columnType.ToSQLString()) notNullStr defaultStr
                 | TODeleteColumn col -> sprintf "DROP COLUMN %s" (col.ToSQLString())
-                | TOAlterColumnType (col, typ) -> sprintf "ALTER COLUMN %s SET TYPE %s" (col.ToSQLString()) (typ.ToSQLString())
+                | TOAlterColumnType (col, typ) -> sprintf "ALTER COLUMN %s SET DATA TYPE %s" (col.ToSQLString()) (typ.ToSQLString())
                 | TOAlterColumnNull (col, isNullable) -> sprintf "ALTER COLUMN %s %s NOT NULL" (col.ToSQLString()) (if isNullable then "DROP" else "SET")
                 | TOAlterColumnDefault (col, None) -> sprintf "ALTER COLUMN %s DROP DEFAULT" (col.ToSQLString())
                 | TOAlterColumnDefault (col, Some def) -> sprintf "ALTER COLUMN %s SET DEFAULT %s" (col.ToSQLString()) (def.ToSQLString())

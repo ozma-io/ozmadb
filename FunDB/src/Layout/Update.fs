@@ -125,7 +125,7 @@ let private updateSchema (db : SystemContext) (name : SchemaName) (schema : Sour
     let entitiesMap = newSchema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
     updateEntities db (Some newSchema) schema.entities entitiesMap
 
-let updateLayout (db : SystemContext) (layout : SourceLayout) : unit =
+let updateLayout (db : SystemContext) (layout : SourceLayout) : bool =
     let schemas = getLayoutObjects db
 
     // We don't touch in any way schemas not in layout.
@@ -137,4 +137,5 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) : unit =
    
     for KeyValue (name, schema) in layout.schemas do
         updateSchema db name schema (Map.tryFind name schemasMap)
-    ignore <| db.SaveChanges()
+    let changedEntries = db.SaveChanges()
+    changedEntries > 0

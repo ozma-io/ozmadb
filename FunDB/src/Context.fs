@@ -151,7 +151,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                                 // Optimize
                                 if entityRef.schema = FunQLName "public" then
                                     cacheStore.Migrate(conn)
-                                conn.Commit()
+                                conn.EnsureCommit()
                                 Ok ()
                             with
                                 | EntityExecutionException msg -> Error <| EEExecute msg
@@ -171,7 +171,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                                 updateEntity conn.Query entityRef entity id args
                                 if entityRef.schema = funSchema then
                                     cacheStore.Migrate(conn)
-                                conn.Commit()
+                                conn.EnsureCommit()
                                 Ok ()
                             with
                                 | EntityExecutionException msg -> Error <| EEExecute msg
@@ -187,7 +187,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName) =
                         deleteEntity conn.Query entityRef entity id
                         if entityRef.schema = funSchema then
                             cacheStore.Migrate(conn)
-                        conn.Commit()
+                        conn.EnsureCommit()
                         Ok ()
                     with
                         | EntityExecutionException msg -> Error <| EEExecute msg

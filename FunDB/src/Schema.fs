@@ -141,7 +141,7 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
-        [<ColumnField("int")>]
+        [<ColumnField("string")>]
         member val Value = "" with get, set
 
 and

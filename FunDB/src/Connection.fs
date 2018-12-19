@@ -32,6 +32,10 @@ type DatabaseConnection (connectionString : string) =
 
     member this.Commit () =
         transaction.Commit()
+
+    member this.EnsureCommit () =
+        if not transaction.IsCompleted then
+            transaction.Commit()
     
     member this.Query = query
     member this.System = system
