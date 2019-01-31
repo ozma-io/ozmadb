@@ -3,6 +3,8 @@ open System.IO
 open System.Security.Cryptography.X509Certificates
 open System.Linq
 open Newtonsoft.Json
+open Arachne.Http
+open Arachne.Language
 open Suave
 open Suave.CORS
 open Suave.Operators
@@ -37,16 +39,14 @@ type Config =
 
 let randomPassword (passwordLength : int) : string =
     let allowedChars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ0123456789!@$?_-"
-    let rd = new Random()
+    let rd = Random()
     Seq.init passwordLength (fun _ -> allowedChars.[rd.Next(0, String.length allowedChars)]) |> Seq.toArray |> System.String
 
 [<EntryPoint>]
 let main (args : string array) : int =
     // Register a global converter to have nicer native F# types JSON conversion
     JsonConvert.DefaultSettings <- fun () ->
-        new JsonSerializerSettings(
-            Converters = [| new UnionConverter() |]
-        )
+        JsonSerializerSettings(Converters = [| UnionConverter () |])
 
     let configPath = args.[0]
     let rawConfig = File.ReadAllText(configPath)
@@ -54,26 +54,34 @@ let main (args : string array) : int =
 
     use cert = new X509Certificate2(config.serverCert)
     let expirationTime = TimeSpan(0, 0, config.expirationTime)
-    let preloadLayout = Option.map (fun path -> parseJsonLayout <| File.ReadAllText(path)) config.preloadLayout
+    let preloadLayout = Option.map (parseJsonLayout << File.ReadAllText) config.preloadLayout
 
     let cacheStore = ContextCacheStore(config.connectionString, preloadLayout)
         
     using (new DatabaseConnection(config.connectionString)) <| fun conn ->
         // Create admin user
         match conn.System.Users.Where(fun x -> x.Name = rootUserName) |> Seq.first with
-            | None ->
-                let password = randomPassword 16
-                let newUser = new User(Name=rootUserName, Password=password)
-                ignore <| conn.System.Users.Add(newUser)
-                ignore <| conn.System.SaveChanges()
-                eprintfn "Created root user with password '%s'. Please change the password as soon as possible!" password
-            | Some user -> ()
+        | None ->
+            let password = randomPassword 16
+            let newUser = User(Name=rootUserName, Password=password)
+            ignore <| conn.System.Users.Add(newUser)
+            ignore <| conn.System.SaveChanges()
+            eprintfn "Created root user with password '%s'. Please change the password as soon as possible!" password
+        | Some user -> ()
  
         conn.Commit()
 
     let protectedApi (userName : string) =
         fun ctx -> async {
-            use rctx = new RequestContext(cacheStore, userName)
+            let getFirstLang = function
+                | AcceptLanguage ((AcceptableLanguage (Range range, _))::_) -> Choice1Of2 (String.Join ("-", range))
+                | _ -> Choice2Of2 ""
+            let lang =            
+                match ctx.request.header "Accept-Language" |> Choice.bind AcceptLanguage.tryParse |> Choice.bind getFirstLang with
+                | Choice1Of2 lang -> lang
+                | _ -> "en-US"
+
+            use rctx = new RequestContext(cacheStore, userName, lang)
             return! choose
                 [ viewsApi rctx
                   permissionsApi rctx

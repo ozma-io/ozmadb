@@ -319,6 +319,7 @@ let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
         | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
         | VECast (e, typ) -> VECast (traverse e, typ)
         | VECase (es, els) -> VECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
+        | VECoalesce vals -> VECoalesce (Array.map traverse vals)
     traverse
 
 let parseUdtName (str : string) =

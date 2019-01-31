@@ -53,8 +53,10 @@ rule tokenizeFunQL = parse
     | "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING (escapedString '\'' 0 lexbuf) }
 
     // Argument IDs
-    | "$" escapedId   { Parser.ARGUMENT_ID (escapedString '\"' 1 lexbuf) }
-    | "$" unescapedId { Parser.ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 1).ToLower()) }
+    | "$$" escapedId   { Parser.GLOBAL_ARGUMENT_ID (escapedString '\"' 2 lexbuf) }
+    | "$$" unescapedId { Parser.GLOBAL_ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 2).ToLower()) }
+    | "$" escapedId    { Parser.ARGUMENT_ID (escapedString '\"' 1 lexbuf) }
+    | "$" unescapedId  { Parser.ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 1).ToLower()) }
 
     // Symbols
     | "{"  { Parser.LEFT_BRACE }
@@ -77,37 +79,38 @@ rule tokenizeFunQL = parse
     | "=>" { Parser.ARROW }
     
     // Keywords
-    | t r u e     { Parser.BOOL true }
-    | f a l s e   { Parser.BOOL false }
-    | n u l l     { Parser.NULL }
-    | s e l e c t { Parser.SELECT }
-    | f r o m     { Parser.FROM }
-    | w h e r e   { Parser.WHERE }
-    | l e f t     { Parser.LEFT }
-    | r i g h t   { Parser.RIGHT }
-    | i n n e r   { Parser.INNER }
-    | o u t e r   { Parser.OUTER }
-    | j o i n     { Parser.JOIN }
-    | o n         { Parser.ON }
-    | o r d e r   { Parser.ORDER }
-    | b y         { Parser.BY }
-    | a s         { Parser.AS }
-    | a s c       { Parser.ASC }
-    | d e s c     { Parser.DESC }
-    | a n d       { Parser.AND }
-    | o r         { Parser.OR }
-    | l i k e     { Parser.LIKE }
-    | i n         { Parser.IN }
-    | i s         { Parser.IS }
-    | n o t       { Parser.NOT }
-    | f o r       { Parser.FOR }
-    | u p d a t e { Parser.UPDATE }
-    | o f         { Parser.OF }
-    | c a s e     { Parser.CASE }
-    | w h e n     { Parser.WHEN }
-    | t h e n     { Parser.THEN }
-    | e l s e     { Parser.ELSE }
-    | e n d       { Parser.END }
+    | t r u e         { Parser.BOOL true }
+    | f a l s e       { Parser.BOOL false }
+    | n u l l         { Parser.NULL }
+    | s e l e c t     { Parser.SELECT }
+    | f r o m         { Parser.FROM }
+    | w h e r e       { Parser.WHERE }
+    | l e f t         { Parser.LEFT }
+    | r i g h t       { Parser.RIGHT }
+    | i n n e r       { Parser.INNER }
+    | o u t e r       { Parser.OUTER }
+    | j o i n         { Parser.JOIN }
+    | o n             { Parser.ON }
+    | o r d e r       { Parser.ORDER }
+    | b y             { Parser.BY }
+    | a s             { Parser.AS }
+    | a s c           { Parser.ASC }
+    | d e s c         { Parser.DESC }
+    | a n d           { Parser.AND }
+    | o r             { Parser.OR }
+    | l i k e         { Parser.LIKE }
+    | i n             { Parser.IN }
+    | i s             { Parser.IS }
+    | n o t           { Parser.NOT }
+    | f o r           { Parser.FOR }
+    | u p d a t e     { Parser.UPDATE }
+    | o f             { Parser.OF }
+    | c a s e         { Parser.CASE }
+    | w h e n         { Parser.WHEN }
+    | t h e n         { Parser.THEN }
+    | e l s e         { Parser.ELSE }
+    | e n d           { Parser.END }
+    | c o a l e s c e { Parser.COALESCE }
                             
     // Types
     | i n t             { Parser.INT_TYPE }

@@ -15,7 +15,7 @@ let private tableOperationOrder = function
 
 // Order for database operations so that dependencies are not violated.
 let private schemaOperationOrder = function
-    | SODeleteConstraint (_, _) -> 0
+    | SODeleteConstraint (_, _) -> 1
     | SODeleteTable _ -> 2
     | SODeleteSequence _ -> 3
     | SODeleteSchema _ -> 4
@@ -29,9 +29,7 @@ let private schemaOperationOrder = function
     | SOCreateConstraint (_, _, CMCheck _) -> 12
 
 let private deleteBuildTable (table : TableRef) (tableMeta : TableMeta) : MigrationPlan =
-    seq { // FIXME: DROP CASCADE instead
-          yield SOAlterTable (table, tableMeta.columns |> Map.keys |> Seq.map TODeleteColumn |> Array.ofSeq)
-          yield SODeleteTable table
+    seq { yield SODeleteTable table
         }
 
 let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta) : MigrationPlan =

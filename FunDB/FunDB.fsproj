@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputName>FunDB</OutputName>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFramework>netcoreapp2.2</TargetFramework>
 
     <!-- Store generated parsers in intermediate build directory -->
     <RootIntermediateOutputPath>obj</RootIntermediateOutputPath>
@@ -83,10 +83,11 @@
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="FsLexYacc" Version="7.0.*" />
     <PackageReference Include="Npgsql" Version="4.0.*" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.1.*" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.2.*" />
     <!-- https://github.com/BcryptNet/bcrypt.net/issues/22 -->
     <PackageReference Include="BCrypt.Net-Next" Version="3.1.0" />
     <PackageReference Include="Suave" Version="2.5.*" />
+    <PackageReference Include="Arachne.Http" Version="3.0.*" />
     <PackageReference Include="jose-jwt" Version="2.4.*" />
 
     <Reference Include="Newtonsoft.Json.Custom">

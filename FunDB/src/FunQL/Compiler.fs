@@ -21,16 +21,16 @@ type CompiledArgument =
       valueType : SQL.SimpleValueType
     }
 
-type private ArgumentsMap = Map<string, CompiledArgument>
+type private ArgumentsMap = Map<Placeholder, CompiledArgument>
 
 let typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : Result<unit, string> =
     match fieldType with
-        | FTEnum vals ->
-            match value with
-                | FString str when Set.contains str vals -> Ok ()
-                | _ -> Error <| sprintf "Argument is not from allowed values of a enum: %O" value
-        // Most casting/typechecking will be done by database or Npgsql
-        | _ -> Ok ()
+    | FTEnum vals ->
+        match value with
+        | FString str when Set.contains str vals -> Ok ()
+        | _ -> Error <| sprintf "Argument is not from allowed values of a enum: %O" value
+    // Most casting/typechecking will be done by database or Npgsql
+    | _ -> Ok ()
 
 let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETArray SFTString -> FStringArray [||]
@@ -60,7 +60,7 @@ type CompiledAttributesExpr =
 type CompiledViewExpr =
     { attributesExpr : CompiledAttributesExpr option
       query : SQL.SelectExpr
-      arguments : Map<string, CompiledArgument>
+      arguments : ArgumentsMap
     }
 
 let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
@@ -137,7 +137,7 @@ let compileFieldValue : FieldValue -> SQL.ValueExpr = function
     | FDateArray vals -> SQL.VEValue (SQL.VDateArray (compileArray vals))
     | FNull -> SQL.VEValue SQL.VNull
 
-let genericCompileFieldExpr (columnFunc : 'c -> SQL.ColumnRef) (placeholderFunc : string -> int) : FieldExpr<'c> -> SQL.ValueExpr =
+let genericCompileFieldExpr (columnFunc : 'c -> SQL.ColumnRef) (placeholderFunc : Placeholder -> int) : FieldExpr<'c> -> SQL.ValueExpr =
     let rec traverse = function
         | FEValue v -> compileFieldValue v
         | FEColumn c -> SQL.VEColumn (columnFunc c)
@@ -160,6 +160,7 @@ let genericCompileFieldExpr (columnFunc : 'c -> SQL.ColumnRef) (placeholderFunc 
         | FEIsNull a -> SQL.VEIsNull (traverse a)
         | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
         | FECase (es, els) -> SQL.VECase (Array.map (fun (cond, expr) -> (traverse cond, traverse expr)) es, Option.map traverse els)
+        | FECoalesce arr -> SQL.VECoalesce (Array.map traverse arr)
     traverse
 
 // Differs from compileFieldValue in that it doesn't emit value expressions.
@@ -197,15 +198,15 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
 
     let compileResult (result : ResolvedQueryResult) =
         match result.expression with
-            | FEColumn c -> SQL.SCColumn (compileFieldName c)
-            | _ -> SQL.SCExpr (compileName result.name, compileFieldExpr result.expression)
+        | FEColumn c -> SQL.SCColumn (compileFieldName c)
+        | _ -> SQL.SCExpr (compileName result.name, compileFieldExpr result.expression)
 
     let findReference (name : FieldName) (field : ResolvedColumnField) : ResolvedFieldRef option =
         match field.fieldType with
-            | FTReference (entityRef, where) ->
-                let entity = Option.get <| layout.FindEntity(entityRef)
-                Some { entity = entityRef; name = entity.mainField }
-            | _ -> None
+        | FTReference (entityRef, where) ->
+            let entity = Option.get <| layout.FindEntity(entityRef)
+            Some { entity = entityRef; name = entity.mainField }
+        | _ -> None
 
     let rec compileFrom : ResolvedFromExpr -> SQL.FromExpr = function
         | FEntity entityRef ->
@@ -262,11 +263,20 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
     member this.CompileResult = compileResult
 
 let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
+    let convertArgument i (name, fieldType) =
+        let info = {
+            placeholder = i
+            fieldType = fieldType
+            valueType = compileFieldType fieldType
+        }
+        (name, info)
+
     let arguments =
         viewExpr.arguments
             |> Map.toSeq
-            |> Seq.mapi (fun i (name, fieldType) -> (name, ({ placeholder = i; fieldType = fieldType; valueType = compileFieldType fieldType })))
+            |> Seq.mapi convertArgument
             |> Map.ofSeq
+
     let compiler = QueryCompiler (layout, arguments)
 
     let mapColumnAttribute (columnName : FieldName) (name : AttributeName) (expr : ResolvedFieldExpr) =
@@ -308,23 +318,23 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
     let resultColumns = Seq.map (fun (attr, res) -> compiler.CompileResult res) viewExpr.results
     let getNameAttribute (attributes, result : ResolvedQueryResult) =
         match result.expression with
-            | FEColumn (RFField fieldRef) when fieldRef.name <> funId ->
-                let field = Option.get <| layout.FindField fieldRef.entity fieldRef.name
-                match field with
-                    | RColumnField { fieldType = FTReference (entityRef, where) } ->
-                        let nameColumn = { table = Some <| compileEntityTablePun fieldRef.entity; name = SQL.SQLName <| sprintf "__Name__%O" fieldRef.name } : SQL.ColumnRef
-                        Some <| SQL.SCExpr (SQL.SQLName <| sprintf "__Name__%O" result.name, SQL.VEColumn nameColumn)
-                    | _ -> None
+        | FEColumn (RFField fieldRef) when fieldRef.name <> funId ->
+            let field = Option.get <| layout.FindField fieldRef.entity fieldRef.name
+            match field with
+            | RColumnField { fieldType = FTReference (entityRef, where) } ->
+                let nameColumn = { table = Some <| compileEntityTablePun fieldRef.entity; name = SQL.SQLName <| sprintf "__Name__%O" fieldRef.name } : SQL.ColumnRef
+                Some <| SQL.SCExpr (SQL.SQLName <| sprintf "__Name__%O" result.name, SQL.VEColumn nameColumn)
             | _ -> None
+        | _ -> None
     let nameAttributes =
         viewExpr.results
         |> Seq.mapMaybe getNameAttribute
 
     let idColumn =
         match viewExpr.update with
-            | None -> Seq.empty
-            | Some updateExpr ->
-                Seq.singleton <| SQL.SCExpr (SQL.SQLName "__Id", SQL.VEColumn { table = Some <| compileEntityTablePun updateExpr.entity; name = sqlFunId })
+        | None -> Seq.empty
+        | Some updateExpr ->
+            Seq.singleton <| SQL.SCExpr (SQL.SQLName "__Id", SQL.VEColumn { table = Some <| compileEntityTablePun updateExpr.entity; name = sqlFunId })
 
     let queryClause = compiler.CompileFromClause viewExpr.clause
     let query =

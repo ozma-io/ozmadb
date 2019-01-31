@@ -23,10 +23,6 @@ stringArray : StringArray EOF { $1 }
 
 // Expressions
 
-//
-// StringArray
-//
-
 StringArrayValue:
   | STRING        { AVValue $1 }
   | NULL          { AVNull }

@@ -222,41 +222,41 @@ let private parseResult (result : QueryResult) : (ExecutedViewInfo * ExecutedRow
         }
     (viewInfo, rows)
 
-type ViewArguments = Map<string, FieldValue>
+type ViewArguments = Map<Placeholder, FieldValue>
 
 // XXX: Add user access rights enforcing there later.
 let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ViewArguments) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> 'a) : 'a =
-    let makeParameter (name : string) (mapping : CompiledArgument) =
+    let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
         let value =
             match Map.tryFind name arguments with
-                | None -> raise (ViewExecutionError <| sprintf "Argument not found: %s" name)
-                | Some value -> value
+            | None -> raise (ViewExecutionError <| sprintf "Argument not found: %O" name)
+            | Some value -> value
         match typecheckArgument mapping.fieldType value with
-            | Ok () -> ()
-            | Error msg -> raise (ViewExecutionError msg)
+        | Ok () -> ()
+        | Error msg -> raise (ViewExecutionError msg)
         (mapping.placeholder, (mapping.valueType, compileArgument value))
     let parameters = viewExpr.arguments |> Map.mapWithKeys makeParameter
 
     let attrsResult =
         match viewExpr.attributesExpr with
-            | Some attributesExpr -> connection.ExecuteQuery attributesExpr.query parameters parseAttributesResult
-            | None ->
-                { attributes = Map.empty
-                  attributeTypes = Map.empty
-                  columnAttributes = Map.empty
-                }
+        | Some attributesExpr -> connection.ExecuteQuery attributesExpr.query parameters parseAttributesResult
+        | None ->
+            { attributes = Map.empty
+              attributeTypes = Map.empty
+              columnAttributes = Map.empty
+            }
 
     let getColumnInfo (col : ExecutedColumnInfo) =
         let attributeTypes =
             match Map.tryFind col.name attrsResult.columnAttributes with
-                | None -> Map.empty
-                | Some attrs -> Map.map (fun name -> fst) attrs
+            | None -> Map.empty
+            | Some attrs -> Map.map (fun name -> fst) attrs
         { col with attributeTypes = attributeTypes }
 
     let getColumnAttributes (col : ExecutedColumnInfo) =
         match Map.tryFind col.name attrsResult.columnAttributes with
-            | None -> Map.empty
-            | Some attrs -> Map.map (fun name -> snd) attrs
+        | None -> Map.empty
+        | Some attrs -> Map.map (fun name -> snd) attrs
 
     connection.ExecuteQuery (viewExpr.query.ToString()) parameters <| fun rawResult ->
         let (info, rows) = parseResult rawResult

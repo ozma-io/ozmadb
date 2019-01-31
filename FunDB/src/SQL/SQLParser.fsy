@@ -35,6 +35,12 @@ open FunWithFlags.FunDB.SQL.AST
 %token IN
 %token IS
 %token NOT
+%token CASE
+%token WHEN
+%token THEN
+%token ELSE
+%token END
+%token COALESCE
 
 // Misc
 %token EOF
@@ -75,40 +81,49 @@ ValueExpr:
   | ValueExprLess           { $1 }
 
 ValueExprLess:
-  | ValueExprMisc LESS ValueExprMisc     { VELess ($1, $3) }
-  | ValueExprMisc GREATER ValueExprMisc  { VEGreater ($1, $3) }
-  | ValueExprMisc LIKE ValueExprMisc     { VELike ($1, $3) }
-  | ValueExprMisc NOT LIKE ValueExprMisc { VENotLike ($1, $4) }
-  | ValueExprMisc IN InExpr              { VEIn ($1, $3) }
-  | ValueExprMisc NOT IN InExpr          { VENotIn ($1, $4) }
-  | ValueExprMisc                        { $1 }
+  | ValueExprMisc LESS ValueExprMisc      { VELess ($1, $3) }
+  | ValueExprMisc GREATER ValueExprMisc   { VEGreater ($1, $3) }
+  | ValueExprMisc LIKE ValueExprMisc      { VELike ($1, $3) }
+  | ValueExprMisc NOT LIKE ValueExprMisc  { VENotLike ($1, $4) }
+  | ValueExprMisc IN NonEmptyExprList     { VEIn ($1, $3) }
+  | ValueExprMisc NOT IN NonEmptyExprList { VENotIn ($1, $4) }
+  | ValueExprMisc                         { $1 }
 
 ValueExprMisc:
-  | ValueExprMisc NOT_EQ ValueExprMisc            { VENotEq ($1, $3) }
-  | ValueExprMisc LESS_EQ ValueExprMisc           { VELessEq ($1, $3) }
-  | ValueExprMisc GREATER_EQ ValueExprMisc        { VEGreaterEq ($1, $3) }
-  | ValueExprMisc IS NULL                         { VEIsNull $1 }
-  | ValueExprMisc IS NOT NULL                     { VEIsNotNull $1 }
-  | ValueExprMisc DOUBLE_COLON ValueType          { VECast ($1, $3) }
-  | Name LEFT_PAREN FunctionArguments RIGHT_PAREN { VEFunc ($1, $3) }
-  | ColumnRef                                     { VEColumn $1 }
-  | Value                                         { VEValue $1 }
-  | LEFT_PAREN ValueExpr RIGHT_PAREN              { $2 }
+  | ValueExprMisc NOT_EQ ValueExprMisc     { VENotEq ($1, $3) }
+  | ValueExprMisc LESS_EQ ValueExprMisc    { VELessEq ($1, $3) }
+  | ValueExprMisc GREATER_EQ ValueExprMisc { VEGreaterEq ($1, $3) }
+  | ValueExprMisc IS NULL                  { VEIsNull $1 }
+  | ValueExprMisc IS NOT NULL              { VEIsNotNull $1 }
+  | ValueExprMisc DOUBLE_COLON ValueType   { VECast ($1, $3) }
+  | COALESCE NonEmptyExprList              { VECoalesce $2 }
+  | CaseExpr                               { $1 }
+  | Name ExprList                          { VEFunc ($1, $2) }
+  | ColumnRef                              { VEColumn $1 }
+  | Value                                  { VEValue $1 }
+  | LEFT_PAREN ValueExpr RIGHT_PAREN       { $2 }
 
-InList:
-  | ValueExpr              { [ $1 ] }
-  | ValueExpr COMMA InList { $1 :: $3 }
+NonEmptyExprs:
+  | ValueExpr                     { [ $1 ] }
+  | ValueExpr COMMA NonEmptyExprs { $1 :: $3 }
 
-InExpr:
-  | LEFT_PAREN InList RIGHT_PAREN { List.toArray $2 }
+NonEmptyExprList:
+  | LEFT_PAREN NonEmptyExprs RIGHT_PAREN { List.toArray $2 }
 
-FunctionArguments:
-  |                           { [||] }
-  | FunctionArgumentsNonEmpty { List.toArray $1 }
+ExprList:
+  | LEFT_PAREN RIGHT_PAREN               { [||] }
+  | LEFT_PAREN NonEmptyExprs RIGHT_PAREN { List.toArray $2 }
 
-FunctionArgumentsNonEmpty:
-  | ValueExpr                                 { [ $1 ] }
-  | ValueExpr COMMA FunctionArgumentsNonEmpty { $1 :: $3 }
+CaseExpr:
+  | CASE CaseWhenList CaseElse END { VECase (List.toArray $2, $3) }
+
+CaseWhenList:
+  | WHEN ValueExpr THEN ValueExpr CaseWhenList { ($2, $4) :: $5 }
+  | WHEN ValueExpr THEN ValueExpr              { [($2, $4)] }
+
+CaseElse:
+  |                { None }
+  | ELSE ValueExpr { Some $2 }
 
 ColumnRef:
   | Name DOT Name DOT Name { { table = Some { schema = Some $1; name = $3 }; name = $5 } }

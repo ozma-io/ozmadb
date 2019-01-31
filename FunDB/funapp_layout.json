@@ -43,21 +43,20 @@
           "mainField": "Id"
         },
 
-        "Translations": {
+        "UserViewTranslations": {
           "columnFields": {
-            "String": { "fieldType": "string" },
+            "UserViewId": { "fieldType": "reference(\"public\".\"UserViews\")" },
             "Language": { "fieldType": "string" },
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            //"Name": { "expression": "\"String\" || ' (' || \"Language\" || ')'" }
-            "Name": { "expression": "\"String\"" }
+            "Name": { "expression": "\"UserViewId\"" }
           },
           "uniqueConstraints": {
-            "UniqueString": { "columns": [ "String", "Language" ] }
+            "UserViewId": { "columns": [ "UserViewId", "Language" ] }
           },
           "checkConstraints": {
-            "NonEmptyString": { "expression": "\"String\" <> '' AND \"Language\" <> ''" }
+            "NonEmptyString": { "expression": "\"Language\" <> ''" }
           },
           "mainField": "Name"
         }

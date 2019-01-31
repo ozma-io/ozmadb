@@ -326,6 +326,7 @@ type ValueExpr =
     | VEFunc of SQLName * (ValueExpr array)
     | VECast of ValueExpr * DBValueType
     | VECase of ((ValueExpr * ValueExpr) array) * (ValueExpr option)
+    | VECoalesce of ValueExpr array
     with
         override this.ToString () = this.ToSQLString()
         
@@ -368,6 +369,9 @@ type ValueExpr =
                             | None -> ""
                             | Some e -> sprintf "ELSE %s" (e.ToSQLString())
                     concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
+                | VECoalesce vals ->
+                    assert (not <| Array.isEmpty vals)
+                    sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -493,6 +497,7 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
         | VECase (es, els) ->
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
             Option.iter traverse els
+        | VECoalesce vals -> Array.iter traverse vals
     traverse
 
 type InsertExpr =

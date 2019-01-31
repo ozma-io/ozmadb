@@ -60,45 +60,52 @@ type CachedUserView =
       pureAttributes : PureAttributes
     }
 
+// Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
+let globalArgumentTypes =
+    Map.ofSeq
+        [ ("lang", FTType <| FETScalar SFTString)
+          ("user", FTType <| FETScalar SFTString)
+        ]
+
 let buildUserView (layout : Layout) (expr : string) : Result<ResolvedViewExpr, UserViewErrorInfo> =
     match parse tokenizeFunQL viewExpr expr with
-        | Error msg -> Error <| UVEParse msg
-        | Ok rawExpr ->
-            let maybeExpr =
-                try
-                    Ok <| resolveViewExpr layout rawExpr
-                with
-                    | ViewResolveException err -> Error err
-            Result.mapError UVEResolve maybeExpr
+    | Error msg -> Error <| UVEParse msg
+    | Ok rawExpr ->
+        let maybeExpr =
+            try
+                Ok <| resolveViewExpr layout globalArgumentTypes rawExpr
+            with
+            | ViewResolveException err -> Error err
+        Result.mapError UVEResolve maybeExpr
 
 let buildCachedUserView
         (conn : QueryConnection)
         (layout : Layout)
         (expr : string)
         (fixupCompiledFunc : ResolvedViewExpr -> CompiledViewExpr -> Result<CompiledViewExpr, string>)
-        (argumentsFunc : ResolvedViewExpr -> CompiledViewExpr -> Result<Map<string, FieldValue>, string>)
+        (argumentsFunc : ResolvedViewExpr -> CompiledViewExpr -> Result<ViewArguments, string>)
         (func : CachedUserView -> ExecutedViewExpr -> 'a)
         : Result<'a, UserViewErrorInfo> =
     match buildUserView layout expr with
-        | Error err -> Error err
-        | Ok resolved ->
-            let compiledRaw = compileViewExpr layout resolved
-            match fixupCompiledFunc resolved compiledRaw with
-                | Error err -> Error <| UVEFixup err
-                | Ok compiled ->
-                    match argumentsFunc resolved compiled with
-                        | Error msg -> Error <| UVEArguments msg
-                        | Ok arguments ->
-                            try
-                                runViewExpr conn compiled arguments <| fun info res ->
-                                    let cached = { compiled = compiled
-                                                   resolved = resolved
-                                                   info = mergeViewInfo layout resolved info
-                                                   pureAttributes = getPureAttributes resolved compiled res
-                                                 }
-                                    Ok <| func cached res
-                            with
-                                | ViewExecutionError err -> Error <| UVEExecute err
+    | Error err -> Error err
+    | Ok resolved ->
+        let compiledRaw = compileViewExpr layout resolved
+        match fixupCompiledFunc resolved compiledRaw with
+        | Error err -> Error <| UVEFixup err
+        | Ok compiled ->
+            match argumentsFunc resolved compiled with
+            | Error msg -> Error <| UVEArguments msg
+            | Ok arguments ->
+                try
+                    runViewExpr conn compiled arguments <| fun info res ->
+                        let cached = { compiled = compiled
+                                       resolved = resolved
+                                       info = mergeViewInfo layout resolved info
+                                       pureAttributes = getPureAttributes resolved compiled res
+                                     }
+                        Ok <| func cached res
+                with
+                | ViewExecutionError err -> Error <| UVEExecute err
 
 let private rebuildUserViews (conn : DatabaseConnection) (layout : Layout) : Map<string, CachedUserView> =
     let buildOne (uv : UserView) =
@@ -107,8 +114,8 @@ let private rebuildUserViews (conn : DatabaseConnection) (layout : Layout) : Map
         let noFixup resolved compiled = Ok compiled
         let getArguments resolved compiled = compiled.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
         match buildCachedUserView conn.Query layout uv.Query noFixup getArguments (fun info res -> info) with
-            | Ok cachedUv -> (uv.Name, cachedUv)
-            | Error err -> raise (ContextException <| CBEUserView err)
+        | Ok cachedUv -> (uv.Name, cachedUv)
+        | Error err -> raise (ContextException <| CBEUserView err)
     conn.System.UserViews |> Seq.toArray |> Seq.map buildOne |> Map.ofSeq
 
 let private rebuildLayout (conn : DatabaseConnection) =
@@ -116,7 +123,7 @@ let private rebuildLayout (conn : DatabaseConnection) =
     try
         resolveLayout layoutSource
     with
-        | ResolveLayoutException msg -> raise (ContextException <| CBELayout msg)
+    | ResolveLayoutException msg -> raise (ContextException <| CBELayout msg)
 
 type CachedRequestContext =
     { layout : Layout
@@ -146,11 +153,11 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
         let internalLayoutSource = buildSystemLayout typeof<SystemContext>
         let systemLayoutSource =
             match preloadLayout with
-                | Some layout ->
-                    // We ignore system entities modifications.
-                    assert (not <| Map.containsKey funSchema layout.schemas)
-                    { internalLayoutSource with schemas = Map.union internalLayoutSource.schemas layout.schemas }
-                | None -> internalLayoutSource
+            | Some layout ->
+                // We ignore system entities modifications.
+                assert (not <| Map.containsKey funSchema layout.schemas)
+                { internalLayoutSource with schemas = Map.union internalLayoutSource.schemas layout.schemas }
+            | None -> internalLayoutSource
         resolveLayout systemLayoutSource
     let systemMeta = buildLayoutMeta systemLayout
 
@@ -165,29 +172,25 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
     // Returns a version and whether a rebuild should be force-performed.
     let getCurrentVersion (conn : DatabaseConnection) (bump : bool) =
         match conn.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstOrDefault() with
-            | null ->
-                let newEntry =
-                    new StateValue (
-                        Name = versionField,
-                        Value = string fallbackVersion
-                    )
-                ignore <| conn.System.State.Add(newEntry)
+        | null ->
+            let newEntry = StateValue (Name = versionField, Value = string fallbackVersion)
+            ignore <| conn.System.State.Add(newEntry)
+            ignore <| conn.System.SaveChanges()
+            (true, fallbackVersion)
+        | entry ->
+            match tryIntInvariant entry.Value with
+            | Some v ->
+                if bump then
+                    let newVersion = v + 1
+                    entry.Value <- string newVersion
+                    ignore <| conn.System.SaveChanges()
+                    (true, newVersion)
+                else
+                    (false, v)
+            | None ->
+                entry.Value <- string fallbackVersion
                 ignore <| conn.System.SaveChanges()
                 (true, fallbackVersion)
-            | entry ->
-                match tryIntInvariant entry.Value with
-                    | Some v ->
-                        if bump then
-                            let newVersion = v + 1
-                            entry.Value <- string newVersion
-                            ignore <| conn.System.SaveChanges()
-                            (true, newVersion)
-                        else
-                            (false, v)
-                    | None ->
-                        entry.Value <- string fallbackVersion
-                        ignore <| conn.System.SaveChanges()
-                        (true, fallbackVersion)
 
     let mutable cachedState =
         using (new DatabaseConnection(connectionString)) <| fun conn ->

@@ -30,7 +30,7 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
     let rec go = function
         | FEValue v -> jsFieldValue v
         | FEColumn col -> JSCall (JSObjectAccess (JSVar "context", "getColumn"), [| JSValue (JSString (col.ToString())) |])
-        | FEPlaceholder p -> raise (JSCompileException <| sprintf "Unexpected placeholder in local expression: %s" p)
+        | FEPlaceholder p -> raise (JSCompileException <| sprintf "Unexpected placeholder in local expression: %O" p)
         | FENot e -> JSNot <| go e
         | FEAnd (a, b) -> JSAnd (go a, go b)
         | FEOr (a, b) -> JSOr (go a, go b)
@@ -48,10 +48,11 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
         | FECast (e, typ) ->
             let (isArray, scalarName) =
                 match typ with
-                    | FETScalar st -> (false, st)
-                    | FETArray st -> (true, st)
+                | FETScalar st -> (false, st)
+                | FETArray st -> (true, st)
             JSCall (JSObjectAccess (JSVar "context", "cast"), [| go e; JSValue (JSBool isArray); JSValue (JSString (scalarName.ToFunQLString())) |])
         | FEIsNull e -> JSStrictEq (go e, JSValue JSNull)
         | FEIsNotNull e -> JSStrictNotEq (go e, JSValue JSNull)
         | FECase (es, els) -> failwith "Not implemented"
+        | FECoalesce (items) -> JSCall (JSObjectAccess (JSVar "context", "coalesce"), Array.map go items )
     go
