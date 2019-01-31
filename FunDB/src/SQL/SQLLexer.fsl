@@ -62,6 +62,7 @@ rule tokenizeSQL = parse
     | ">"  { Parser.GREATER }
     | "<=" { Parser.LESS_EQ }
     | "<"  { Parser.LESS }
+    | "||" { Parser.CONCAT }
     
     // Keywords
     | t r u e         { Parser.BOOL true }

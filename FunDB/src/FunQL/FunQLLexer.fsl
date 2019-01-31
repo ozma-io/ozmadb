@@ -77,6 +77,7 @@ rule tokenizeFunQL = parse
     | "<"  { Parser.LESS }
     | "@"  { Parser.AT }
     | "=>" { Parser.ARROW }
+    | "||" { Parser.CONCAT }
     
     // Keywords
     | t r u e         { Parser.BOOL true }
