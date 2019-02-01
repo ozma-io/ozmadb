@@ -11,26 +11,26 @@ open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Lexer
 open FunWithFlags.FunDB.SQL.Parser
 
-exception QueryError of info : string with
+exception QueryException of info : string with
     override this.Message = this.info
 
 type ExprParameters = Map<int, SimpleValueType * Value>
 
 [<NoComparison>]
 type QueryResult =
-    { columns : (SQLName * SimpleValueType) array
-      rows : Value array seq
+    { columns : (SQLName * SimpleValueType)[]
+      rows : seq<Value[]>
     }
 
 let private parseType typeStr =
     match parse tokenizeSQL valueType typeStr with
-        | Ok valType ->
-            let coerceType typeName =
-                match findSimpleType typeName with
-                    | None -> raise (QueryError <| sprintf "Unknown database type: %O" typeName)
-                    | Some t -> t
-            mapValueType coerceType valType
-        | Error msg -> raise (QueryError <| sprintf "Cannot parse database type: %s" msg)
+    | Ok valType ->
+        let coerceType typeName =
+            match findSimpleType typeName with
+            | None -> raise (QueryException <| sprintf "Unknown database type: %O" typeName)
+            | Some t -> t
+        mapValueType coerceType valType
+    | Error msg -> raise (QueryException <| sprintf "Cannot parse database type: %s" msg)
 
 let private convertInt : obj -> int option = function
     | :? byte as value -> Some <| int value
@@ -46,47 +46,50 @@ let private convertInt : obj -> int option = function
 
 let private convertDate (rawDt : obj) =
     match rawDt with
-        | :? DateTime as dt -> Some (DateTimeOffset dt)
-        | _ -> None
+    | :? DateTime as dt -> Some (DateTimeOffset dt)
+    | _ -> None
 
 let private convertValue valType (rawValue : obj) =
     match (valType, rawValue) with
-        | (_, (:? DBNull as value)) -> VNull
-        | (VTScalar STInt, value) ->
-            match convertInt value with
-                | Some i -> VInt i
-                | None -> raise (QueryError <| sprintf "Unknown integer type: %s" (value.GetType().FullName))
-        | (VTScalar STString, (:? string as value)) -> VString (value)
-        | (VTScalar STBool, (:? bool as value)) -> VBool (value)
-        | (VTScalar STDateTime, (:? DateTimeOffset as value)) -> VDateTime (value)
-        | (VTScalar STDate, (:? DateTime as value)) -> VDate (DateTimeOffset value)
-        | (VTArray scalarType, (:? Array as rootVals)) ->
-            let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
-                let convertOne : obj -> ArrayValue<'a> = function
-                    | :? DBNull as value -> AVNull
-                    | :? Array as subVals -> AVArray (convertArray convFunc subVals)
-                    | value ->
-                        match convFunc value with
-                            | Some v -> AVValue v
-                            | None -> raise (QueryError <| sprintf "Cannot convert array value: %O" value)
-                Seq.map convertOne (vals.Cast<obj>()) |> Array.ofSeq
+    | (_, (:? DBNull as value)) -> VNull
+    | (VTScalar STInt, value) ->
+        match convertInt value with
+        | Some i -> VInt i
+        | None -> raise (QueryException <| sprintf "Unknown integer type: %s" (value.GetType().FullName))
+    | (VTScalar STDecimal, (:? decimal as value)) -> VDecimal value
+    | (VTScalar STString, (:? string as value)) -> VString value
+    | (VTScalar STBool, (:? bool as value)) -> VBool value
+    | (VTScalar STDateTime, (:? DateTimeOffset as value)) -> VDateTime value
+    | (VTScalar STDate, (:? DateTime as value)) -> VDate (DateTimeOffset value)
+    | (VTArray scalarType, (:? Array as rootVals)) ->
+        let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
+            let convertOne : obj -> ArrayValue<'a> = function
+                | :? DBNull -> AVNull
+                | :? Array as subVals -> AVArray (convertArray convFunc subVals)
+                | value ->
+                    match convFunc value with
+                    | Some v -> AVValue v
+                    | None -> raise (QueryException <| sprintf "Cannot convert array value: %O" value)
+            Seq.map convertOne (vals.Cast<obj>()) |> Array.ofSeq
 
-            match scalarType with
-                | STInt -> VIntArray (convertArray convertInt rootVals)
-                | STString -> VStringArray (convertArray tryCast<string> rootVals)
-                | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
-                | STDateTime -> VDateTimeArray (convertArray tryCast<DateTimeOffset> rootVals)
-                | STDate -> VDateArray (convertArray convertDate rootVals)
-                | STRegclass -> raise (QueryError <| sprintf "Regclass arrays are not supported: %O" rootVals)
-        | (typ, value) -> raise (QueryError <| sprintf "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName))
+        match scalarType with
+        | STInt -> VIntArray (convertArray convertInt rootVals)
+        | STDecimal -> VDecimalArray (convertArray tryCast<decimal> rootVals)
+        | STString -> VStringArray (convertArray tryCast<string> rootVals)
+        | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
+        | STDateTime -> VDateTimeArray (convertArray tryCast<DateTimeOffset> rootVals)
+        | STDate -> VDateArray (convertArray convertDate rootVals)
+        | STRegclass -> raise (QueryException <| sprintf "Regclass arrays are not supported: %O" rootVals)
+    | (typ, value) -> raise (QueryException <| sprintf "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName))
 
 let private npgsqlSimpleType : SimpleType -> NpgsqlDbType = function
     | STInt -> NpgsqlDbType.Integer
+    | STDecimal -> NpgsqlDbType.Numeric
     | STString -> NpgsqlDbType.Text
     | STBool -> NpgsqlDbType.Boolean
     | STDateTime -> NpgsqlDbType.TimestampTz
     | STDate -> NpgsqlDbType.Date
-    | STRegclass -> raise <| QueryError "Regclass type is not supported"
+    | STRegclass -> raise <| QueryException "Regclass type is not supported"
 
 let private npgsqlType : SimpleValueType -> NpgsqlDbType = function
     | VTScalar s -> npgsqlSimpleType s
@@ -101,17 +104,19 @@ let rec private npgsqlArrayValue (vals : ArrayValue<'a> array) : obj =
 
 let private npgsqlValue : Value -> obj = function
     | VInt i -> upcast i
+    | VDecimal d -> upcast d
     | VString s -> upcast s
-    | VRegclass name -> raise (QueryError <| sprintf "Regclass arguments are not supported: %O" name)
+    | VRegclass name -> raise (QueryException <| sprintf "Regclass arguments are not supported: %O" name)
     | VBool b -> upcast b
     | VDateTime dt -> upcast dt
     | VDate dt -> upcast dt
     | VIntArray vals -> npgsqlArrayValue vals
+    | VDecimalArray vals -> npgsqlArrayValue vals
     | VStringArray vals -> npgsqlArrayValue vals
     | VBoolArray vals -> npgsqlArrayValue vals
     | VDateTimeArray vals -> npgsqlArrayValue vals
     | VDateArray vals -> npgsqlArrayValue vals
-    | VRegclassArray vals -> raise (QueryError <| sprintf "Regclass arguments are not supported: %O" vals)
+    | VRegclassArray vals -> raise (QueryException <| sprintf "Regclass arguments are not supported: %O" vals)
     | VNull -> upcast DBNull.Value
 
 type QueryConnection (connection : NpgsqlConnection) =
@@ -125,7 +130,7 @@ type QueryConnection (connection : NpgsqlConnection) =
         try
             runFunc command
         with
-            | :? PostgresException as ex -> raise (QueryError <| sprintf "PostgreSQL exception: %s" ex.Message)
+        | :? PostgresException as ex -> raise (QueryException <| sprintf "PostgreSQL exception: %s" ex.Message)
 
     member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) : unit =
         withCommand queryStr pars <| fun command ->

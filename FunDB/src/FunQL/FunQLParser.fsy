@@ -60,6 +60,7 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 
 // Atoms
 %token <int> INT
+%token <decimal> DECIMAL
 %token <string> ID
 %token <string> ARGUMENT_ID
 %token <string> GLOBAL_ARGUMENT_ID
@@ -120,6 +121,7 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 
 // Types
 %token INT_TYPE
+%token DECIMAL_TYPE
 %token STRING_TYPE
 %token BOOL_TYPE
 %token DATETIME_TYPE
@@ -338,15 +340,24 @@ BoolArrayList:
 BoolArrayNonEmpty:
   | BoolArrayList { List.toArray $1 }
 
+DecimalArrayList:
+  | DECIMAL                        { [ $1 ] }
+  | DECIMAL COMMA DecimalArrayList { $1 :: $3 }
+
+DecimalArrayNonEmpty:
+  | DecimalArrayList { List.toArray $1 }
+
 Value:
-  | INT                                            { FInt $1 }
-  | STRING                                         { FString $1 }
-  | BOOL                                           { FBool $1 }
-  | LEFT_BRACKET RIGHT_BRACKET                     { FStringArray [||] }
-  | LEFT_BRACKET StringArrayNonEmpty RIGHT_BRACKET { FStringArray $2 }
-  | LEFT_BRACKET IntArrayNonEmpty    RIGHT_BRACKET { FIntArray $2 }
-  | LEFT_BRACKET BoolArrayNonEmpty   RIGHT_BRACKET { FBoolArray $2 }
-  | NULL                                           { FNull }
+  | INT                                             { FInt $1 }
+  | DECIMAL                                         { FDecimal $1 }
+  | STRING                                          { FString $1 }
+  | BOOL                                            { FBool $1 }
+  | LEFT_BRACKET RIGHT_BRACKET                      { FStringArray [||] }
+  | LEFT_BRACKET StringArrayNonEmpty  RIGHT_BRACKET { FStringArray $2 }
+  | LEFT_BRACKET IntArrayNonEmpty     RIGHT_BRACKET { FIntArray $2 }
+  | LEFT_BRACKET BoolArrayNonEmpty    RIGHT_BRACKET { FBoolArray $2 }
+  | LEFT_BRACKET DecimalArrayNonEmpty RIGHT_BRACKET { FDecimalArray $2 }
+  | NULL                                            { FNull }
 
 OrderByClause:
   |                      { [||] }
@@ -366,6 +377,7 @@ OrderByDirection:
 
 ScalarType:
   | INT_TYPE      { SFTInt }
+  | DECIMAL_TYPE  { SFTDecimal }
   | STRING_TYPE   { SFTString }
   | BOOL_TYPE     { SFTBool }
   | DATETIME_TYPE { SFTDateTime }

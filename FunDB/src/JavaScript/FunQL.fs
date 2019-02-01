@@ -8,17 +8,19 @@ exception JSCompileException of info : string with
     override this.Message = this.info
 
 // FIXME: may not take offset into consideration
-let jsDateTime (dt : DateTimeOffset) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour; dt.Minute; dt.Second; dt.Millisecond |] |> Array.map (JSInt >> JSValue))
+let jsDateTime (dt : DateTimeOffset) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour; dt.Minute; dt.Second; dt.Millisecond |] |> Array.map (double >> JSNumber >> JSValue))
 
-let jsDate (dt : DateTimeOffset) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour |] |> Array.map (JSInt >> JSValue))
+let jsDate (dt : DateTimeOffset) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour |] |> Array.map (double >> JSNumber >> JSValue))
 
 let jsFieldValue : FieldValue -> JSExpr = function
-    | FInt i -> JSValue <| JSInt i
+    | FInt i -> JSValue <| JSNumber (double i)
+    | FDecimal d -> JSValue <| JSNumber (double d)
     | FString s -> JSValue <| JSString s
     | FBool b -> JSValue <| JSBool b
     | FDateTime dt -> jsDateTime dt
     | FDate dt -> jsDate dt
-    | FIntArray ints -> JSArray <| Array.map (JSInt >> JSValue) ints
+    | FIntArray ints -> JSArray <| Array.map (double >> JSNumber >> JSValue) ints
+    | FDecimalArray decs -> JSArray <| Array.map (double >> JSNumber >> JSValue) decs
     | FStringArray strings -> JSArray <| Array.map (JSString >> JSValue) strings
     | FBoolArray bools -> JSArray <| Array.map (JSBool >> JSValue) bools
     | FDateTimeArray dts -> JSArray <| Array.map jsDateTime dts

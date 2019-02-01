@@ -26,11 +26,13 @@ let private parseExprArgument (fieldExprType : FieldExprType) (str : string) : F
     // FIXME: breaks strings with commas!
     | FETArray SFTString -> failwith "Not supported yet"
     | FETArray SFTInt -> decodeArray FIntArray tryIntInvariant
+    | FETArray SFTDecimal -> decodeArray FDecimalArray tryDecimalInvariant
     | FETArray SFTBool -> decodeArray FBoolArray tryBool
     | FETArray SFTDateTime -> decodeArray FDateTimeArray tryDateTimeOffsetInvariant
     | FETArray SFTDate -> decodeArray FDateArray tryDateInvariant
     | FETScalar SFTString -> Some <| FString str
     | FETScalar SFTInt -> Option.map FInt <| tryIntInvariant str
+    | FETScalar SFTDecimal -> Option.map FDecimal <| tryDecimalInvariant str
     | FETScalar SFTBool -> Option.map FBool <| tryBool str
     | FETScalar SFTDateTime -> Option.map FDateTime <| tryDateTimeOffsetInvariant str
     | FETScalar SFTDate -> Option.map FDate <| tryDateInvariant str

@@ -69,11 +69,13 @@ type FieldRef =
 
 type [<JsonConverter(typeof<FieldValueConverter>)>] FieldValue =
     | FInt of int
+    | FDecimal of decimal
     | FString of string
     | FBool of bool
     | FDateTime of DateTimeOffset
     | FDate of DateTimeOffset
     | FIntArray of int array
+    | FDecimalArray of decimal array
     | FStringArray of string array
     | FBoolArray of bool array
     | FDateTimeArray of DateTimeOffset array
@@ -91,11 +93,13 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] FieldValue =
                     arrStr
             match this with
             | FInt i -> renderSqlInt i
+            | FDecimal d -> renderSqlDecimal d
             | FString s -> renderSqlString s
             | FBool b -> renderSqlBool b
             | FDateTime dt -> sprintf "%s :: datetime" (dt |> renderSqlDateTime |> renderSqlString)
             | FDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
             | FIntArray vals -> renderArray renderSqlInt "int" vals
+            | FDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | FStringArray vals -> renderArray escapeSqlDoubleQuotes "string" vals
             | FBoolArray vals -> renderArray renderSqlBool "bool" vals
             | FDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "datetime" vals
@@ -118,11 +122,13 @@ and FieldValueConverter () =
 
         match value with
         | FInt i -> serialize i
+        | FDecimal d -> serialize d
         | FString s -> serialize s
         | FBool b -> serialize b
         | FDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
         | FDate dt -> serialize <| dt.ToUnixTimeSeconds()
         | FIntArray vals -> serialize vals
+        | FDecimalArray vals -> serialize vals
         | FStringArray vals -> serialize vals
         | FBoolArray vals -> serialize vals
         | FDateTimeArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
@@ -131,6 +137,7 @@ and FieldValueConverter () =
 
 type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
     | SFTInt
+    | SFTDecimal
     | SFTString
     | SFTBool
     | SFTDateTime
@@ -141,6 +148,7 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
         member this.ToFunQLString () =
             match this with
             | SFTInt -> "int"
+            | SFTDecimal -> "decimal"
             | SFTString -> "string"
             | SFTBool -> "bool"
             | SFTDateTime -> "datetime"
@@ -157,7 +165,7 @@ and ScalarFieldTypeConverter () =
     override this.CanRead = false
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ScalarFieldType =
-        raise <| NotImplementedException()
+        raise <| NotImplementedException ()
  
     override this.WriteJson (writer : JsonWriter, value : ScalarFieldType, serializer : JsonSerializer) : unit =
         serializer.Serialize(writer, value.ToJSONString())
@@ -182,7 +190,7 @@ and FieldExprTypeConverter () =
     override this.CanRead = false
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : FieldExprType =
-        raise <| NotImplementedException()
+        raise <| NotImplementedException ()
  
     override this.WriteJson (writer : JsonWriter, value : FieldExprType, serializer : JsonSerializer) : unit =
         let dict =

@@ -12,7 +12,7 @@ open FunWithFlags.FunDB.SQL.Parser
 open FunWithFlags.FunDB.SQL.Array.Lexer
 open FunWithFlags.FunDB.SQL.Array.Parser
 
-exception SQLMetaError of info : string with
+exception SQLMetaException of info : string with
     override this.Message = this.info
 
 module InformationSchema =
@@ -112,8 +112,8 @@ module InformationSchema =
         Schema =
             { catalog_name : string
               schema_name : string
-              tables : Table seq
-              sequences : Sequence seq
+              tables : seq<Table>
+              sequences : seq<Sequence>
             }
 
     and
@@ -129,8 +129,8 @@ module InformationSchema =
 
               schema : Schema
         
-              columns : Column seq
-              table_constraints : TableConstraint seq
+              columns : seq<Column>
+              table_constraints : seq<TableConstraint>
         }
 
     and
@@ -168,8 +168,8 @@ module InformationSchema =
 
               table : Table
 
-              key_column_usage : KeyColumn seq
-              constraint_column_usage : ConstraintColumn seq
+              key_column_usage : seq<KeyColumn>
+              constraint_column_usage : seq<ConstraintColumn>
             }
 
     and
@@ -227,23 +227,23 @@ let private publicSchema = SQLName "public"
 
 let private parseConstraintType (str : string) : ConstraintType option =
     match str.ToUpper() with
-        | "UNIQUE" -> Some CTUnique
-        | "CHECK" -> Some CTCheck
-        | "PRIMARY KEY" -> Some CTPrimaryKey
-        | "FOREIGN KEY" -> Some CTForeignKey
-        | _ -> None
+    | "UNIQUE" -> Some CTUnique
+    | "CHECK" -> Some CTCheck
+    | "PRIMARY KEY" -> Some CTPrimaryKey
+    | "FOREIGN KEY" -> Some CTForeignKey
+    | _ -> None
 
 let private tryRegclass (str : string) : SchemaObject option =
     match parse tokenizeSQL schemaObject str with
-        | Ok obj ->
-            // "public" schema gets special handling because its mentions are omitted in PostgreSQL.
-            let normalizedObj =
-                if Option.isNone obj.schema then
-                    { schema = Some publicSchema; name = obj.name }
-                else
-                    obj
-            Some normalizedObj
-        | Error msg -> None
+    | Ok obj ->
+        // "public" schema gets special handling because its mentions are omitted in PostgreSQL.
+        let normalizedObj =
+            if Option.isNone obj.schema then
+                { schema = Some publicSchema; name = obj.name }
+            else
+                obj
+        Some normalizedObj
+    | Error msg -> None
 
 let private makeTableFromName (schema : string) (table : string) : TableRef =
     { schema = Some (SQLName schema)
@@ -262,42 +262,44 @@ let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
         | VECast (VEValue (VString str), typ) ->
             let castExpr () = VECast (VEValue (VString str), typ)
             match typ with
-                | VTArray scalarType ->
-                    match parse tokenizeArray stringArray str with
-                        | Error msg -> raise (SQLMetaError <| sprintf "Cannot parse array: %s" msg)
-                        | Ok array ->
-                            let runArrayCast (castFunc : string -> 'a option) : ValueArray<'a> =
-                                let runCast (str : string) =
-                                    match castFunc str with
-                                        | Some v -> v
-                                        | None -> raise (SQLMetaError <| sprintf "Cannot cast array value to type %O: %s" scalarType str)
-                                mapValueArray runCast array
-                                
-                            match findSimpleType scalarType with
-                                | None -> castExpr ()
-                                | Some STString -> VEValue <| VStringArray array
-                                | Some STInt -> VEValue (VIntArray <| runArrayCast tryIntInvariant)
-                                | Some STBool -> VEValue (VBoolArray <| runArrayCast tryBool)
-                                | Some STDateTime -> VEValue (VDateTimeArray <| runArrayCast tryDateTimeOffsetInvariant)
-                                | Some STDate -> VEValue (VDateArray <| runArrayCast tryDateInvariant)
-                                | Some STRegclass -> VEValue (VRegclassArray <| runArrayCast tryRegclass)
-                | VTScalar scalarType ->
-                    let runCast castFunc =
-                        match castFunc str with
+            | VTArray scalarType ->
+                match parse tokenizeArray stringArray str with
+                | Error msg -> raise (SQLMetaException <| sprintf "Cannot parse array: %s" msg)
+                | Ok array ->
+                    let runArrayCast (castFunc : string -> 'a option) : ValueArray<'a> =
+                        let runCast (str : string) =
+                            match castFunc str with
                             | Some v -> v
-                            | None -> raise (SQLMetaError <| sprintf "Cannot cast scalar value to type %O: %s" scalarType str)
-
+                            | None -> raise (SQLMetaException <| sprintf "Cannot cast array value to type %O: %s" scalarType str)
+                        mapValueArray runCast array
+                        
                     match findSimpleType scalarType with
-                        | None -> castExpr ()
-                        | Some STString -> castExpr ()
-                        | Some STInt -> VEValue (VInt <| runCast tryIntInvariant)
-                        | Some STBool -> VEValue (VBool <| runCast tryBool)
-                        | Some STDateTime -> VEValue (VDateTime <| runCast tryDateTimeOffsetInvariant)
-                        | Some STDate -> VEValue (VDate <| runCast tryDateInvariant)
-                        | Some STRegclass -> VEValue (VRegclass <| runCast tryRegclass)
+                    | None -> castExpr ()
+                    | Some STString -> VEValue <| VStringArray array
+                    | Some STInt -> VEValue (VIntArray <| runArrayCast tryIntInvariant)
+                    | Some STDecimal -> VEValue (VDecimalArray <| runArrayCast tryDecimalInvariant)
+                    | Some STBool -> VEValue (VBoolArray <| runArrayCast tryBool)
+                    | Some STDateTime -> VEValue (VDateTimeArray <| runArrayCast tryDateTimeOffsetInvariant)
+                    | Some STDate -> VEValue (VDateArray <| runArrayCast tryDateInvariant)
+                    | Some STRegclass -> VEValue (VRegclassArray <| runArrayCast tryRegclass)
+            | VTScalar scalarType ->
+                let runCast castFunc =
+                    match castFunc str with
+                    | Some v -> v
+                    | None -> raise (SQLMetaException <| sprintf "Cannot cast scalar value to type %O: %s" scalarType str)
+
+                match findSimpleType scalarType with
+                | None -> castExpr ()
+                | Some STString -> castExpr ()
+                | Some STInt -> VEValue (VInt <| runCast tryIntInvariant)
+                | Some STDecimal -> VEValue (VDecimal <| runCast tryDecimalInvariant)
+                | Some STBool -> VEValue (VBool <| runCast tryBool)
+                | Some STDateTime -> VEValue (VDateTime <| runCast tryDateTimeOffsetInvariant)
+                | Some STDate -> VEValue (VDate <| runCast tryDateInvariant)
+                | Some STRegclass -> VEValue (VRegclass <| runCast tryRegclass)
         | VEValue value -> VEValue value
-        | VEColumn c -> raise (SQLMetaError <| sprintf "Invalid reference in default expression: %O" c)
-        | VEPlaceholder i -> raise (SQLMetaError <| sprintf "Invalid placeholder in default expression: %i" i)
+        | VEColumn c -> raise (SQLMetaException <| sprintf "Invalid reference in default expression: %O" c)
+        | VEPlaceholder i -> raise (SQLMetaException <| sprintf "Invalid placeholder in default expression: %i" i)
         | VENot e -> VENot (traverse e)
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
@@ -314,8 +316,8 @@ let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
         | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
         | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
         | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
-        | VEInQuery (e, query) -> raise (SQLMetaError <| sprintf "Invalid subquery in default expression: %O" query)
-        | VENotInQuery (e, query) -> raise (SQLMetaError <| sprintf "Invalid subquery in default expression: %O" query)
+        | VEInQuery (e, query) -> raise (SQLMetaException <| sprintf "Invalid subquery in default expression: %O" query)
+        | VENotInQuery (e, query) -> raise (SQLMetaException <| sprintf "Invalid subquery in default expression: %O" query)
         | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
         | VECast (e, typ) -> VECast (traverse e, typ)
         | VECase (es, els) -> VECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
@@ -331,19 +333,19 @@ let parseUdtName (str : string) =
 let private makeColumnMeta (column : Column) : ColumnName * ColumnMeta =
     let columnType =
         if column.udt_schema <> "pg_catalog" then
-            raise (SQLMetaError <| sprintf "Unsupported user-defined data type: %s.%s" column.udt_schema column.udt_name)
+            raise (SQLMetaException <| sprintf "Unsupported user-defined data type: %s.%s" column.udt_schema column.udt_name)
         parseUdtName column.udt_name
     let defaultExpr =
-        if column.column_default = null
+        if isNull column.column_default
         then None
         else
             match parse tokenizeSQL valueExpr column.column_default with
-                | Ok expr -> Some <| normalizeDefaultExpr expr
-                | Error msg -> raise (SQLMetaError <| sprintf "Cannot parse column default value: %s" msg)
+            | Ok expr -> Some <| normalizeDefaultExpr expr
+            | Error msg -> raise (SQLMetaException <| sprintf "Cannot parse column default value: %s" msg)
     let isNullable =
         match tryBool column.is_nullable with
-            | Some v -> v
-            | None -> raise (SQLMetaError <| sprintf "Invalid is_nullable value: %s" column.is_nullable)
+        | Some v -> v
+        | None -> raise (SQLMetaException <| sprintf "Invalid is_nullable value: %s" column.is_nullable)
     let res =
         { columnType = columnType
           isNullable = isNullable
@@ -359,24 +361,24 @@ let private makeConstraintMeta (constr : TableConstraint) : ConstraintName * Con
         constr.constraint_column_usage |> Seq.map (fun col -> makeColumnFromName col.table_schema col.table_name col.column_name) |> Seq.toArray
     let res =
         match parseConstraintType constr.constraint_type with
-            | None -> raise (SQLMetaError <| sprintf "Unknown constraint type: %s" constr.constraint_type)
-            | Some CTUnique -> CMUnique (keyColumns ())
-            | Some CTPrimaryKey -> CMPrimaryKey (keyColumns ())
-            | Some CTCheck -> failwith "Not implemented yet"
-            | Some CTForeignKey ->
-                let cols = constraintColumns ()
-                let checkTable (a : ResolvedColumnRef) (b : ResolvedColumnRef) =
-                    if a.table <> b.table then
-                        raise (SQLMetaError <| sprintf "Different column tables in a foreign key: %O vs %O" a.table b.table)
-                    else b
-                ignore <| Seq.fold1 checkTable cols
-                let ref = cols.[0].table
-                CMForeignKey (ref, Array.zip (keyColumns ()) (Array.map (fun (a : ResolvedColumnRef) -> a.name) cols))
+        | None -> raise (SQLMetaException <| sprintf "Unknown constraint type: %s" constr.constraint_type)
+        | Some CTUnique -> CMUnique (keyColumns ())
+        | Some CTPrimaryKey -> CMPrimaryKey (keyColumns ())
+        | Some CTCheck -> failwith "Not implemented yet"
+        | Some CTForeignKey ->
+            let cols = constraintColumns ()
+            let checkTable (a : ResolvedColumnRef) (b : ResolvedColumnRef) =
+                if a.table <> b.table then
+                    raise (SQLMetaException <| sprintf "Different column tables in a foreign key: %O vs %O" a.table b.table)
+                else b
+            ignore <| Seq.fold1 checkTable cols
+            let ref = cols.[0].table
+            CMForeignKey (ref, Array.zip (keyColumns ()) (Array.map (fun (a : ResolvedColumnRef) -> a.name) cols))
     (SQLName constr.constraint_name, res)
 
 let private makeTableMeta (table : Table) : TableName * TableMeta * (ConstraintName * ConstraintMeta) seq =
     if table.table_type.ToUpper() <> "BASE TABLE" then
-        raise (SQLMetaError <| sprintf "Unsupported table type: %s" table.table_type)
+        raise (SQLMetaException <| sprintf "Unsupported table type: %s" table.table_type)
     // FIXME: filtering CHECK constraints as we cannot handle them yet
     let constraints = table.table_constraints |> Seq.filter (fun x -> x.constraint_type <> "CHECK") |> Seq.map makeConstraintMeta
     let res = { columns = table.columns |> Seq.map makeColumnMeta |> Map.ofSeqUnique }
@@ -390,8 +392,7 @@ let private makeSchemaMeta (schema : Schema) : SchemaName * SchemaMeta =
     let tables = tableObjects |> Seq.map (fun (name, table, constraints) -> (name, OMTable table)) |> Map.ofSeqUnique
     let constraints =
         tableObjects
-        |> Seq.map (fun (name, table, constraints) -> Seq.map (fun (constrName, constr) -> (constrName, OMConstraint (name, constr))) constraints)
-        |> Seq.concat
+        |> Seq.collect (fun (name, table, constraints) -> Seq.map (fun (constrName, constr) -> (constrName, OMConstraint (name, constr))) constraints)
         |> Map.ofSeqUnique
     let sequences = schema.sequences |> Seq.map makeSequenceMeta |> Seq.map (fun name -> (name, OMSequence)) |> Map.ofSeqUnique
     let name = SQLName schema.schema_name

@@ -6,18 +6,17 @@ open System
 open Newtonsoft.Json
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.SQL.Utils
 
 type SQLName = SQLName of string
     with
         override this.ToString () =
             match this with
-                | SQLName name -> name
+            | SQLName name -> name
 
         member this.ToSQLString () =
             match this with
-                | SQLName c -> renderSqlName c
+            | SQLName c -> renderSqlName c
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -38,8 +37,8 @@ type SchemaObject =
 
         member this.ToSQLString () = 
             match this.schema with
-                | None -> this.name.ToSQLString()
-                | Some schema -> sprintf "%s.%s" (schema.ToSQLString()) (this.name.ToSQLString())
+            | None -> this.name.ToSQLString()
+            | Some schema -> sprintf "%s.%s" (schema.ToSQLString()) (this.name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -66,8 +65,8 @@ type ColumnRef =
 
         member this.ToSQLString () =
             match this.table with
-                | None -> this.name.ToSQLString()
-                | Some entity -> sprintf "%s.%s" (entity.ToSQLString()) (this.name.ToSQLString())
+            | None -> this.name.ToSQLString()
+            | Some entity -> sprintf "%s.%s" (entity.ToSQLString()) (this.name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -89,12 +88,14 @@ and mapValueArray (func : 'a -> 'b) (vals : ValueArray<'a>) : ValueArray<'b> =
 
 type [<JsonConverter(typeof<ValueConverter>)>] Value =
     | VInt of int
+    | VDecimal of decimal
     | VString of string
     | VRegclass of SchemaObject
     | VBool of bool
     | VDateTime of DateTimeOffset
     | VDate of DateTimeOffset
     | VIntArray of ValueArray<int>
+    | VDecimalArray of ValueArray<decimal>
     | VStringArray of ValueArray<string>
     | VBoolArray of ValueArray<bool>
     | VDateTimeArray of ValueArray<DateTimeOffset>
@@ -115,19 +116,21 @@ type [<JsonConverter(typeof<ValueConverter>)>] Value =
                 sprintf "E%s :: %s[]" (renderArrayInsides arr |> renderSqlString) typeName
 
             match this with
-                | VInt i -> renderSqlInt i
-                | VString s -> sprintf "E%s" (renderSqlString s)
-                | VRegclass rc -> sprintf "E%s :: regclass" (rc.ToSQLString() |> renderSqlString)
-                | VBool b -> renderSqlBool b
-                | VDateTime dt -> sprintf "%s :: timestamp with time zone" (dt |> renderSqlDateTime |> renderSqlString)
-                | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
-                | VIntArray vals -> renderArray renderSqlInt "int4" vals
-                | VStringArray vals -> renderArray escapeSqlDoubleQuotes "text" vals
-                | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-                | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "timestamp with time zone" vals
-                | VDateArray vals -> renderArray (renderSqlDate >> escapeSqlDoubleQuotes) "date" vals
-                | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
-                | VNull -> "NULL"
+            | VInt i -> renderSqlInt i
+            | VDecimal d -> renderSqlDecimal d
+            | VString s -> sprintf "E%s" (renderSqlString s)
+            | VRegclass rc -> sprintf "E%s :: regclass" (rc.ToSQLString() |> renderSqlString)
+            | VBool b -> renderSqlBool b
+            | VDateTime dt -> sprintf "%s :: timestamp with time zone" (dt |> renderSqlDateTime |> renderSqlString)
+            | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
+            | VIntArray vals -> renderArray renderSqlInt "int4" vals
+            | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
+            | VStringArray vals -> renderArray escapeSqlDoubleQuotes "text" vals
+            | VBoolArray vals -> renderArray renderSqlBool "bool" vals
+            | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "timestamp with time zone" vals
+            | VDateArray vals -> renderArray (renderSqlDate >> escapeSqlDoubleQuotes) "date" vals
+            | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
+            | VNull -> "NULL"
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -138,7 +141,7 @@ and ValueConverter () =
     override this.CanRead = false
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : Value =
-        raise <| new NotImplementedException()
+        raise <| NotImplementedException ()
  
     override this.WriteJson (writer : JsonWriter, value : Value, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
@@ -153,25 +156,28 @@ and ValueConverter () =
             serialize <| convertValueArray convertFunc vals
 
         match value with
-            | VInt i -> serialize i
-            | VString s -> serialize s
-            | VBool b -> serialize b
-            | VDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
-            | VDate dt -> serialize <| dt.ToUnixTimeSeconds()
-            | VRegclass rc -> serialize <| string rc
-            | VIntArray vals -> serializeArray id vals
-            | VStringArray vals -> serializeArray id vals
-            | VBoolArray vals -> serializeArray id vals
-            | VDateTimeArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
-            | VDateArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
-            | VRegclassArray vals -> serializeArray string vals
-            | VNull -> serialize null
+        | VInt i -> serialize i
+        | VDecimal d -> serialize d
+        | VString s -> serialize s
+        | VBool b -> serialize b
+        | VDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
+        | VDate dt -> serialize <| dt.ToUnixTimeSeconds()
+        | VRegclass rc -> serialize <| string rc
+        | VIntArray vals -> serializeArray id vals
+        | VDecimalArray vals -> serializeArray id vals
+        | VStringArray vals -> serializeArray id vals
+        | VBoolArray vals -> serializeArray id vals
+        | VDateTimeArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+        | VDateArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+        | VRegclassArray vals -> serializeArray string vals
+        | VNull -> serialize null
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
 // Used when interpreting query results and for compiling FunQL.
 type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
     | STInt
     | STString
+    | STDecimal
     | STBool
     | STDateTime
     | STDate
@@ -181,21 +187,23 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
 
         member this.ToSQLString () =
             match this with
-                | STInt -> "int4"
-                | STString -> "text"
-                | STBool -> "bool"
-                | STDateTime -> "timestamp with time zone"
-                | STDate -> "date"
-                | STRegclass -> "regclass"
+            | STInt -> "int4"
+            | STString -> "text"
+            | STDecimal -> "numeric"
+            | STBool -> "bool"
+            | STDateTime -> "timestamp with time zone"
+            | STDate -> "date"
+            | STRegclass -> "regclass"
 
         member this.ToJSONString () =
             match this with
-                | STInt -> "int"
-                | STString -> "string"
-                | STBool -> "bool"
-                | STDateTime -> "datetime"
-                | STDate -> "date"
-                | STRegclass -> "regclass"
+            | STInt -> "int"
+            | STString -> "string"
+            | STDecimal -> "numeric"
+            | STBool -> "bool"
+            | STDateTime -> "datetime"
+            | STDate -> "date"
+            | STRegclass -> "regclass"
                 
         member this.ToSQLName () = SQLName (this.ToSQLString())
 
@@ -208,7 +216,7 @@ and SimpleTypeConverter () =
     override this.CanRead = false
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : SimpleType =
-        raise <| new NotImplementedException()
+        raise <| NotImplementedException ()
  
     override this.WriteJson (writer : JsonWriter, value : SimpleType, serializer : JsonSerializer) : unit =
         serializer.Serialize(writer, value.ToJSONString())
@@ -216,17 +224,19 @@ and SimpleTypeConverter () =
 // Find the closest simple type to a given.
 let findSimpleType (str : SQLName) : SimpleType option =
     match str.ToString() with
-        | "int4" -> Some STInt
-        | "integer" -> Some STInt
-        | "text" -> Some STString
-        | "varchar" -> Some STString
-        | "character varying" -> Some STString
-        | "bool" -> Some STBool
-        | "boolean" -> Some STBool
-        | "timestamp" -> Some STDateTime
-        | "date" -> Some STDate
-        | "regclass" -> Some STRegclass
-        | _ -> None
+    | "int4" -> Some STInt
+    | "integer" -> Some STInt
+    | "text" -> Some STString
+    | "decimal" -> Some STDecimal
+    | "numeric" -> Some STDecimal
+    | "varchar" -> Some STString
+    | "character varying" -> Some STString
+    | "bool" -> Some STBool
+    | "boolean" -> Some STBool
+    | "timestamp" -> Some STDateTime
+    | "date" -> Some STDate
+    | "regclass" -> Some STRegclass
+    | _ -> None
 
 type [<JsonConverter(typeof<ValueTypeConverter>)>] ValueType<'t> when 't :> ISQLString =
     | VTScalar of 't
@@ -236,8 +246,8 @@ type [<JsonConverter(typeof<ValueTypeConverter>)>] ValueType<'t> when 't :> ISQL
 
         member this.ToSQLString () =
             match this with
-                | VTScalar scalar -> scalar.ToSQLString()
-                | VTArray scalar -> sprintf "%s[]" (scalar.ToSQLString())
+            | VTScalar scalar -> scalar.ToSQLString()
+            | VTArray scalar -> sprintf "%s[]" (scalar.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -251,14 +261,14 @@ and ValueTypeConverter () =
     override this.CanRead = false
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
-        raise <| new NotImplementedException()
+        raise <| NotImplementedException ()
  
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
         let dict =
             match castUnion<ValueType<ISQLString>> value with
-                | Some (VTScalar st) -> [("type", st :> obj)]
-                | Some (VTArray st) -> [("type", "array" :> obj); ("subtype", st :> obj)]
-                | None -> failwith "impossible"
+            | Some (VTScalar st) -> [("type", st :> obj)]
+            | Some (VTArray st) -> [("type", "array" :> obj); ("subtype", st :> obj)]
+            | None -> failwith "impossible"
         serializer.Serialize(writer, Map.ofList dict)
 
 let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
@@ -276,8 +286,8 @@ type SortOrder =
         
         member this.ToSQLString () =
             match this with
-                | Asc -> "ASC"
-                | Desc -> "DESC"
+            | Asc -> "ASC"
+            | Desc -> "DESC"
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -292,10 +302,10 @@ type JoinType =
 
         member this.ToSQLString () =
             match this with
-                | Inner -> "INNER"
-                | Left -> "LEFT"
-                | Right -> "RIGHT"
-                | Full -> "FULL"
+            | Inner -> "INNER"
+            | Left -> "LEFT"
+            | Right -> "RIGHT"
+            | Full -> "FULL"
         
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -332,46 +342,46 @@ type ValueExpr =
         
         member this.ToSQLString () =
             match this with
-                | VEValue v -> v.ToSQLString()
-                | VEColumn col -> (col :> ISQLString).ToSQLString()
-                // Npgsql uses @name to denote parameters. We use integers
-                // because Npgsql's parser is not robust enough to handle arbitrary
-                // FunQL argument names.
-                | VEPlaceholder i -> sprintf "@%s" (renderSqlInt i)
-                | VENot a -> sprintf "NOT (%s)" (a.ToSQLString())
-                | VEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
-                | VENotLike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
-                | VELess (a, b) -> sprintf "(%s) < (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VELessEq (a, b) -> sprintf "(%s) <= (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEGreater (a, b) -> sprintf "(%s) > (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEGreaterEq (a, b) -> sprintf "(%s) >= (%s)" (a.ToSQLString()) (b.ToSQLString())
-                | VEIn (e, vals) ->
-                    assert (not <| Array.isEmpty vals)
-                    sprintf "(%s) IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
-                | VENotIn (e, vals) ->
-                    assert (not <| Array.isEmpty vals)
-                    sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
-                | VEInQuery (e, query) -> sprintf "(%s) IN (%s)" (e.ToSQLString()) (query.ToSQLString())
-                | VENotInQuery (e, query) -> sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (query.ToSQLString())
-                | VEIsNull a -> sprintf "(%s) IS NULL" (a.ToSQLString())
-                | VEIsNotNull a -> sprintf "(%s) IS NOT NULL" (a.ToSQLString())
-                | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
-                | VECast (e, typ) -> sprintf "(%s) :: %s" (e.ToSQLString()) (typ.ToSQLString())
-                | VECase (es, els) ->
-                    let esStr = es |> Seq.map (fun (cond, e) -> sprintf "WHEN %s THEN %s" (cond.ToSQLString()) (e.ToSQLString())) |> String.concat " "
-                    let elsStr =
-                        match els with
-                            | None -> ""
-                            | Some e -> sprintf "ELSE %s" (e.ToSQLString())
-                    concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
-                | VECoalesce vals ->
-                    assert (not <| Array.isEmpty vals)
-                    sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+            | VEValue v -> v.ToSQLString()
+            | VEColumn col -> (col :> ISQLString).ToSQLString()
+            // Npgsql uses @name to denote parameters. We use integers
+            // because Npgsql's parser is not robust enough to handle arbitrary
+            // FunQL argument names.
+            | VEPlaceholder i -> sprintf "@%s" (renderSqlInt i)
+            | VENot a -> sprintf "NOT (%s)" (a.ToSQLString())
+            | VEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
+            | VENotLike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
+            | VELess (a, b) -> sprintf "(%s) < (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VELessEq (a, b) -> sprintf "(%s) <= (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEGreater (a, b) -> sprintf "(%s) > (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEGreaterEq (a, b) -> sprintf "(%s) >= (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEIn (e, vals) ->
+                assert (not <| Array.isEmpty vals)
+                sprintf "(%s) IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+            | VENotIn (e, vals) ->
+                assert (not <| Array.isEmpty vals)
+                sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+            | VEInQuery (e, query) -> sprintf "(%s) IN (%s)" (e.ToSQLString()) (query.ToSQLString())
+            | VENotInQuery (e, query) -> sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (query.ToSQLString())
+            | VEIsNull a -> sprintf "(%s) IS NULL" (a.ToSQLString())
+            | VEIsNotNull a -> sprintf "(%s) IS NOT NULL" (a.ToSQLString())
+            | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
+            | VECast (e, typ) -> sprintf "(%s) :: %s" (e.ToSQLString()) (typ.ToSQLString())
+            | VECase (es, els) ->
+                let esStr = es |> Seq.map (fun (cond, e) -> sprintf "WHEN %s THEN %s" (cond.ToSQLString()) (e.ToSQLString())) |> String.concat " "
+                let elsStr =
+                    match els with
+                        | None -> ""
+                        | Some e -> sprintf "ELSE %s" (e.ToSQLString())
+                concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
+            | VECoalesce vals ->
+                assert (not <| Array.isEmpty vals)
+                sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -385,9 +395,9 @@ and FromExpr =
 
         member this.ToSQLString () =
             match this with
-                | FTable t -> t.ToSQLString()
-                | FJoin (joinType, a, b, cond) -> sprintf "%s %s JOIN %s ON %s" (a.ToSQLString()) (joinType.ToSQLString()) (b.ToSQLString()) (cond.ToSQLString())
-                | FSubExpr (name, expr) -> sprintf "(%s) AS %s" (expr.ToSQLString()) (name.ToSQLString())
+            | FTable t -> t.ToSQLString()
+            | FJoin (joinType, a, b, cond) -> sprintf "%s %s JOIN %s ON %s" (a.ToSQLString()) (joinType.ToSQLString()) (b.ToSQLString()) (cond.ToSQLString())
+            | FSubExpr (name, expr) -> sprintf "(%s) AS %s" (expr.ToSQLString()) (name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -401,9 +411,9 @@ and SelectedColumn =
 
         member this.ToSQLString () =
             match this with
-                | SCAll -> "*"
-                | SCColumn c -> c.ToSQLString()
-                | SCExpr (name, expr) -> sprintf "%s AS %s" (expr.ToSQLString()) (name.ToSQLString())
+            | SCAll -> "*"
+            | SCColumn c -> c.ToSQLString()
+            | SCExpr (name, expr) -> sprintf "%s AS %s" (expr.ToSQLString()) (name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -419,20 +429,20 @@ and ConditionClause =
         member this.ToSQLString () =
             let whereStr =
                 match this.where with
-                    | None -> ""
-                    | Some cond -> sprintf "WHERE %s" (cond.ToSQLString())
+                | None -> ""
+                | Some cond -> sprintf "WHERE %s" (cond.ToSQLString())
             let orderByStr =
                 if Array.isEmpty this.orderBy
                 then ""
                 else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToSQLString()) (ord.ToSQLString())) |> String.concat ", ")
             let limitStr =
                 match this.limit with
-                    | Some n -> sprintf "LIMIT %i" n
-                    | None -> ""
+                | Some n -> sprintf "LIMIT %i" n
+                | None -> ""
             let offsetStr =
                 match this.offset with
-                    | Some n -> sprintf "OFFSET %i" n
-                    | None -> ""
+                | Some n -> sprintf "OFFSET %i" n
+                | None -> ""
 
             concatWithWhitespaces [whereStr; orderByStr; limitStr; offsetStr]
 
@@ -461,8 +471,8 @@ and SelectExpr =
             let resultsStr = this.columns |> Seq.map (fun res -> res.ToSQLString()) |> String.concat ", "
             let fromStr =
                 match this.clause with
-                    | None -> ""
-                    | Some clause -> clause.ToSQLString()
+                | None -> ""
+                | Some clause -> clause.ToSQLString()
 
             sprintf "SELECT %s" (concatWithWhitespaces [resultsStr; fromStr])
 
@@ -533,8 +543,8 @@ type UpdateExpr =
             let valuesExpr = this.columns |> Map.toSeq |> Seq.map (fun (name, expr) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())) |> String.concat ", "
             let condExpr =
                 match this.where with
-                    | Some c -> sprintf "WHERE %s" (c.ToSQLString())
-                    | None -> ""
+                | Some c -> sprintf "WHERE %s" (c.ToSQLString())
+                | None -> ""
             sprintf "UPDATE %s SET %s" (this.name.ToSQLString()) (concatWithWhitespaces [valuesExpr; condExpr])
 
         interface ISQLString with
@@ -549,8 +559,8 @@ type DeleteExpr =
         member this.ToSQLString () =
             let condExpr =
                 match this.where with
-                    | Some c -> sprintf "WHERE %s" (c.ToSQLString())
-                    | None -> ""
+                | Some c -> sprintf "WHERE %s" (c.ToSQLString())
+                | None -> ""
             sprintf "DELETE FROM %s" (concatWithWhitespaces [this.name.ToSQLString(); condExpr])
 
         interface ISQLString with
@@ -611,18 +621,18 @@ type TableOperation =
 
         member this.ToSQLString () =
             match this with
-                | TOCreateColumn (col, pars) ->
-                    let notNullStr = if pars.isNullable then "NULL" else "NOT NULL"
-                    let defaultStr =
-                        match pars.defaultExpr with
-                            | None -> ""
-                            | Some def -> sprintf "DEFAULT %s" (def.ToSQLString())
-                    sprintf "ADD COLUMN %s %s %s %s" (col.ToSQLString()) (pars.columnType.ToSQLString()) notNullStr defaultStr
-                | TODeleteColumn col -> sprintf "DROP COLUMN %s" (col.ToSQLString())
-                | TOAlterColumnType (col, typ) -> sprintf "ALTER COLUMN %s SET DATA TYPE %s" (col.ToSQLString()) (typ.ToSQLString())
-                | TOAlterColumnNull (col, isNullable) -> sprintf "ALTER COLUMN %s %s NOT NULL" (col.ToSQLString()) (if isNullable then "DROP" else "SET")
-                | TOAlterColumnDefault (col, None) -> sprintf "ALTER COLUMN %s DROP DEFAULT" (col.ToSQLString())
-                | TOAlterColumnDefault (col, Some def) -> sprintf "ALTER COLUMN %s SET DEFAULT %s" (col.ToSQLString()) (def.ToSQLString())
+            | TOCreateColumn (col, pars) ->
+                let notNullStr = if pars.isNullable then "NULL" else "NOT NULL"
+                let defaultStr =
+                    match pars.defaultExpr with
+                    | None -> ""
+                    | Some def -> sprintf "DEFAULT %s" (def.ToSQLString())
+                sprintf "ADD COLUMN %s %s %s %s" (col.ToSQLString()) (pars.columnType.ToSQLString()) notNullStr defaultStr
+            | TODeleteColumn col -> sprintf "DROP COLUMN %s" (col.ToSQLString())
+            | TOAlterColumnType (col, typ) -> sprintf "ALTER COLUMN %s SET DATA TYPE %s" (col.ToSQLString()) (typ.ToSQLString())
+            | TOAlterColumnNull (col, isNullable) -> sprintf "ALTER COLUMN %s %s NOT NULL" (col.ToSQLString()) (if isNullable then "DROP" else "SET")
+            | TOAlterColumnDefault (col, None) -> sprintf "ALTER COLUMN %s DROP DEFAULT" (col.ToSQLString())
+            | TOAlterColumnDefault (col, Some def) -> sprintf "ALTER COLUMN %s SET DEFAULT %s" (col.ToSQLString()) (def.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -643,29 +653,29 @@ type SchemaOperation =
 
         member this.ToSQLString () =
             match this with
-                | SOCreateSchema schema -> sprintf "CREATE SCHEMA %s" (schema.ToSQLString())
-                | SODeleteSchema schema -> sprintf "DROP SCHEMA %s" (schema.ToSQLString())
-                | SOCreateTable table -> sprintf "CREATE TABLE %s ()" (table.ToSQLString())
-                | SODeleteTable table -> sprintf "DROP TABLE %s" (table.ToSQLString())
-                | SOCreateSequence seq -> sprintf "CREATE SEQUENCE %s" (seq.ToSQLString())
-                | SODeleteSequence seq -> sprintf "DROP SEQUENCE %s" (seq.ToSQLString())
-                | SOCreateConstraint (constr, table, pars) ->
-                    let constraintStr =
-                        match pars with
-                            | CMUnique exprs ->
-                                assert (not <| Array.isEmpty exprs)
-                                exprs |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "UNIQUE (%s)"
-                            | CMPrimaryKey cols ->
-                                assert (not <| Array.isEmpty cols)
-                                cols |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "PRIMARY KEY (%s)"
-                            | CMForeignKey (ref, cols) ->
-                                let myCols = cols |> Seq.map (fun (name, refName) -> name.ToSQLString()) |> String.concat ", "
-                                let refCols = cols |> Seq.map (fun (name, refName) -> refName.ToSQLString()) |> String.concat ", "
-                                sprintf "FOREIGN KEY (%s) REFERENCES %s (%s)" myCols (ref.ToSQLString()) refCols
-                            | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
-                    sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) constraintStr
-                | SODeleteConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
-                | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+            | SOCreateSchema schema -> sprintf "CREATE SCHEMA %s" (schema.ToSQLString())
+            | SODeleteSchema schema -> sprintf "DROP SCHEMA %s" (schema.ToSQLString())
+            | SOCreateTable table -> sprintf "CREATE TABLE %s ()" (table.ToSQLString())
+            | SODeleteTable table -> sprintf "DROP TABLE %s" (table.ToSQLString())
+            | SOCreateSequence seq -> sprintf "CREATE SEQUENCE %s" (seq.ToSQLString())
+            | SODeleteSequence seq -> sprintf "DROP SEQUENCE %s" (seq.ToSQLString())
+            | SOCreateConstraint (constr, table, pars) ->
+                let constraintStr =
+                    match pars with
+                    | CMUnique exprs ->
+                        assert (not <| Array.isEmpty exprs)
+                        exprs |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "UNIQUE (%s)"
+                    | CMPrimaryKey cols ->
+                        assert (not <| Array.isEmpty cols)
+                        cols |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "PRIMARY KEY (%s)"
+                    | CMForeignKey (ref, cols) ->
+                        let myCols = cols |> Seq.map (fun (name, refName) -> name.ToSQLString()) |> String.concat ", "
+                        let refCols = cols |> Seq.map (fun (name, refName) -> refName.ToSQLString()) |> String.concat ", "
+                        sprintf "FOREIGN KEY (%s) REFERENCES %s (%s)" myCols (ref.ToSQLString()) refCols
+                    | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
+                sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) constraintStr
+            | SODeleteConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
+            | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

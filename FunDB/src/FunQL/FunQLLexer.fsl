@@ -48,9 +48,10 @@ let z = ['Z' 'z']
 
 rule tokenizeFunQL = parse
     // Atoms
-    | ['+' '-']? ['0'-'9'] ['0'-'9']*            { Parser.INT (lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
-    | escapedId                                  { Parser.ID (escapedString '\"' 0 lexbuf) }
-    | "'" ([^ '\\' '\''] | "\\'" | escapes)* "'" { Parser.STRING (escapedString '\'' 0 lexbuf) }
+    | ['+' '-']? ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parser.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
+    | ['+' '-']? ['0'-'9'] ['0'-'9']*                { Parser.INT (lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
+    | escapedId                                      { Parser.ID (escapedString '\"' 0 lexbuf) }
+    | "'" ([^ '\\' '\''] | "\\'" | escapes)* "'"     { Parser.STRING (escapedString '\'' 0 lexbuf) }
 
     // Argument IDs
     | "$$" escapedId   { Parser.GLOBAL_ARGUMENT_ID (escapedString '\"' 2 lexbuf) }
@@ -115,6 +116,7 @@ rule tokenizeFunQL = parse
                             
     // Types
     | i n t             { Parser.INT_TYPE }
+    | d e c i m a l     { Parser.DECIMAL_TYPE }
     | s t r i n g       { Parser.STRING_TYPE }
     | b o o l           { Parser.BOOL_TYPE }
     | d a t e t i m e   { Parser.DATETIME_TYPE }

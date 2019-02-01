@@ -35,11 +35,13 @@ let typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : Resul
 let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETArray SFTString -> FStringArray [||]
     | FETArray SFTInt -> FStringArray [||]
+    | FETArray SFTDecimal -> FStringArray [||]
     | FETArray SFTBool -> FStringArray [||]
     | FETArray SFTDateTime -> FStringArray [||]
     | FETArray SFTDate -> FStringArray [||]
     | FETScalar SFTString -> FString ""
     | FETScalar SFTInt -> FInt 0
+    | FETScalar SFTDecimal -> FDecimal 0m
     | FETScalar SFTBool -> FBool false
     | FETScalar SFTDateTime -> FDateTime DateTimeOffset.UnixEpoch
     | FETScalar SFTDate -> FDateTime DateTimeOffset.UnixEpoch
@@ -65,6 +67,7 @@ type CompiledViewExpr =
 
 let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
     | SFTInt -> SQL.STInt
+    | SFTDecimal -> SQL.STDecimal
     | SFTString -> SQL.STString
     | SFTBool -> SQL.STBool
     | SFTDateTime -> SQL.STDateTime
@@ -125,12 +128,14 @@ let compileArray (vals : 'a array) : SQL.ValueArray<'a> = Array.map SQL.AVValue 
 
 let compileFieldValue : FieldValue -> SQL.ValueExpr = function
     | FInt i -> SQL.VEValue (SQL.VInt i)
+    | FDecimal d -> SQL.VEValue (SQL.VDecimal d)
     // PostgreSQL cannot deduce text's type on its own
     | FString s -> SQL.VECast (SQL.VEValue (SQL.VString s), SQL.VTScalar (SQL.STString.ToSQLName()))
     | FBool b -> SQL.VEValue (SQL.VBool b)
     | FDateTime dt -> SQL.VEValue (SQL.VDateTime dt)
     | FDate d -> SQL.VEValue (SQL.VDate d)
     | FIntArray vals -> SQL.VEValue (SQL.VIntArray (compileArray vals))
+    | FDecimalArray vals -> SQL.VEValue (SQL.VDecimalArray (compileArray vals))
     | FStringArray vals -> SQL.VEValue (SQL.VStringArray (compileArray vals))
     | FBoolArray vals -> SQL.VEValue (SQL.VBoolArray (compileArray vals))
     | FDateTimeArray vals -> SQL.VEValue (SQL.VDateTimeArray (compileArray vals))
@@ -166,12 +171,13 @@ let genericCompileFieldExpr (columnFunc : 'c -> SQL.ColumnRef) (placeholderFunc 
 // Differs from compileFieldValue in that it doesn't emit value expressions.
 let compileArgument : FieldValue -> SQL.Value = function
     | FInt i -> SQL.VInt i
-    // PostgreSQL cannot deduce text's type on its own
+    | FDecimal d -> SQL.VDecimal d
     | FString s -> SQL.VString s
     | FBool b -> SQL.VBool b
     | FDateTime dt -> SQL.VDateTime dt
     | FDate d -> SQL.VDate d
     | FIntArray vals -> SQL.VIntArray (compileArray vals)
+    | FDecimalArray vals -> SQL.VDecimalArray (compileArray vals)
     | FStringArray vals -> SQL.VStringArray (compileArray vals)
     | FBoolArray vals -> SQL.VBoolArray (compileArray vals)
     | FDateTimeArray vals -> SQL.VDateTimeArray (compileArray vals)

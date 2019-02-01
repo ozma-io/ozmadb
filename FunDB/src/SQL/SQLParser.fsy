@@ -6,6 +6,7 @@ open FunWithFlags.FunDB.SQL.AST
 
 // Atoms
 %token <int> INT
+%token <decimal> DECIMAL
 %token <string> ID
 %token <string> QUOTED_ID
 %token <string> STRING
@@ -164,10 +165,11 @@ ScalarTypeParts:
   | ID                 { [ $1 ] }
 
 Value:
-  | INT    { VInt $1 }
-  | STRING { VString $1 }
-  | BOOL   { VBool $1 }
-  | NULL   { VNull }
+  | INT     { VInt $1 }
+  | DECIMAL { VDecimal $1 }
+  | STRING  { VString $1 }
+  | BOOL    { VBool $1 }
+  | NULL    { VNull }
 
 SchemaObject:
   | Name DOT Name { { schema = Some $1; name = $3 } }

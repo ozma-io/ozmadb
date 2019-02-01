@@ -124,12 +124,20 @@ module Set =
         Seq.fold (fun s x -> if Set.contains x s then failwith (sprintf "Item '%s' already exists" (x.ToString ())) else Set.add x s) Set.empty items
 
 let tryInt (culture : CultureInfo) (str : string) : int option =
-    match Int32.TryParse(str, NumberStyles.Integer, culture) with
+    match Int32.TryParse(str, NumberStyles.Integer ||| NumberStyles.AllowDecimalPoint, culture) with
     | (true, res) -> Some res
     | _ -> None
 
 let tryIntInvariant : string -> int option = tryInt CultureInfo.InvariantCulture
 let tryIntCurrent : string -> int option = tryInt CultureInfo.CurrentCulture
+
+let tryDecimal (culture : CultureInfo) (str : string) : decimal option =
+    match Decimal.TryParse(str, NumberStyles.Currency, culture) with
+    | (true, res) -> Some res
+    | _ -> None
+
+let tryDecimalInvariant : string -> decimal option = tryDecimal CultureInfo.InvariantCulture
+let tryDecimalCurrent : string -> decimal option = tryDecimal CultureInfo.CurrentCulture
 
 let tryDateTime (culture : CultureInfo) (dateTimeStr : string) : DateTime option =
     match DateTime.TryParse(dateTimeStr, culture, DateTimeStyles.AssumeLocal ||| DateTimeStyles.AdjustToUniversal) with

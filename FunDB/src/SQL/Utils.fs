@@ -16,6 +16,8 @@ let renderSqlBool : bool -> string = function
     | true -> "TRUE"
     | false -> "FALSE"
 
+let renderSqlDecimal (f : decimal) = f.ToString(CultureInfo.InvariantCulture)
+
 let renderSqlInt (i : int) : string = i.ToString(CultureInfo.InvariantCulture)
 
 let renderSqlDateTime (dt : DateTimeOffset) : string = dt.ToString("O", CultureInfo.InvariantCulture)
