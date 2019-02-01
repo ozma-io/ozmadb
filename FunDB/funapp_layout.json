@@ -53,13 +53,50 @@
             "Name": { "expression": "\"UserViewId\"" }
           },
           "uniqueConstraints": {
-            "UserViewId": { "columns": [ "UserViewId", "Language" ] }
+            "UniqueTranslation": { "columns": [ "UserViewId", "Language" ] }
           },
           "checkConstraints": {
-            "NonEmptyString": { "expression": "\"Language\" <> ''" }
+            "NonEmptyLanguage": { "expression": "\"Language\" <> ''" }
+          },
+          "mainField": "Name"
+        },
+
+        "ColumnFieldTranslations": {
+          "columnFields": {
+            "ColumnFieldId": { "fieldType": "reference(\"public\".\"ColumnFields\")" },
+            "Language": { "fieldType": "string" },
+            "Translation": { "fieldType": "string" }
+          },
+          "computedFields": {
+            "Name": { "expression": "\"ColumnFieldId\"" }
+          },
+          "uniqueConstraints": {
+            "UniqueTranslation": { "columns": [ "ColumnFieldId", "Language" ] }
+          },
+          "checkConstraints": {
+            "NonEmptyLanguage": { "expression": "\"Language\" <> ''" }
+          },
+          "mainField": "Name"
+        },
+
+        "ComputedFieldTranslations": {
+          "columnFields": {
+            "ComputedFieldId": { "fieldType": "reference(\"public\".\"ComputedFields\")" },
+            "Language": { "fieldType": "string" },
+            "Translation": { "fieldType": "string" }
+          },
+          "computedFields": {
+            "Name": { "expression": "\"ComputedFieldId\"" }
+          },
+          "uniqueConstraints": {
+            "UniqueTranslation": { "columns": [ "ComputedFieldId", "Language" ] }
+          },
+          "checkConstraints": {
+            "NonEmptyLanguage": { "expression": "\"Language\" <> ''" }
           },
           "mainField": "Name"
         }
+
       }
     }
   }
