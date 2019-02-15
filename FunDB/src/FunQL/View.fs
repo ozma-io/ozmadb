@@ -30,8 +30,8 @@ type ResolvedFieldName =
 
         member this.ToFunQLString () =
             match this with
-                | RFField fieldRef -> fieldRef.ToFunQLString()
-                | RFSubquery (tableName, columnName, boundField) -> sprintf "%s.%s" (tableName.ToFunQLString()) (columnName.ToFunQLString())
+            | RFField fieldRef -> fieldRef.ToFunQLString()
+            | RFSubquery (tableName, columnName, boundField) -> sprintf "%s.%s" (tableName.ToFunQLString()) (columnName.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -77,9 +77,9 @@ let rec private findMainEntity : ResolvedFromExpr -> MainEntity option = functio
     | FEntity ent -> Some { entity = ent }
     | FJoin (ftype, a, b, where) ->
         match ftype with
-            | Left -> findMainEntity a
-            | Right -> findMainEntity b
-            | _ -> None
+        | Left -> findMainEntity a
+        | Right -> findMainEntity b
+        | _ -> None
     | FSubExpr (name, query) -> findMainEntity query.clause.from
 
 let private checkName (name : string) : unit =
@@ -88,48 +88,50 @@ let private checkName (name : string) : unit =
 
 let resultBoundField (result : ResolvedQueryResult) : ResolvedFieldRef option =
     match result.expression with
-        | FEColumn (RFField fieldRef) -> Some fieldRef
-        | FEColumn (RFSubquery (queryName, fieldName, Some boundField)) -> Some boundField
-        | _ -> None
+    | FEColumn (RFField fieldRef) -> Some fieldRef
+    | FEColumn (RFSubquery (queryName, fieldName, Some boundField)) -> Some boundField
+    | _ -> None
 
 let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
     match name.schema with
-        | Some schema -> { schema = schema; name = name.name }
-        | None -> raise (ViewResolveException <| sprintf "Unspecified schema in name: %O" name)
+    | Some schema -> { schema = schema; name = name.name }
+    | None -> raise (ViewResolveException <| sprintf "Unspecified schema in name: %O" name)
 
 let private lookupField (mapping : QMapping) (f : FieldRef) : ResolvedFieldName =
     let mappedEntity =
         match f.entity with
-            | None ->
-                if mapping.Count = 1 then
-                    Map.toSeq mapping |> Seq.map snd |> Seq.head
-                else
-                    raise (ViewResolveException <| sprintf "None or more than one possible interpretation: %O" f.name)
-            | Some ename ->
-                match Map.tryFind ename.name mapping with
-                    | Some ref ->
-                        match ename.schema with
-                            | None -> ref
-                            | Some sch ->
-                                match ref with
-                                    | QMEntity ({ schema = entitySchema; name = name }, _) when entitySchema = sch -> ref
-                                    | _ -> raise (ViewResolveException <| sprintf "Invalid entity schema: %O" sch)
-                    | None ->
-                        raise (ViewResolveException <| sprintf "Field entity not found: %O" ename.name)
-    match mappedEntity with
-        // FIXME: improve error reporting
-        | QMEntity (entityRef, entity) ->
-            if f.name = funId then
-                RFField { entity = entityRef; name = funId }
+        | None ->
+            if mapping.Count = 1 then
+                Map.toSeq mapping |> Seq.map snd |> Seq.head
             else
-                match entity.FindField(f.name) with
-                    | None ->
-                        raise (ViewResolveException <| sprintf "Field not found: %O" f.name)
-                    | Some field -> RFField { entity = entityRef; name = f.name }
-        | QMSubquery (queryName, fields) ->
-            match Map.tryFind f.name fields with
-                | Some boundField -> RFSubquery (queryName, f.name, boundField)
-                | None -> raise (ViewResolveException <| sprintf "Field not found: %O" f.name)
+                raise (ViewResolveException <| sprintf "None or more than one possible interpretation: %O" f.name)
+        | Some ename ->
+            match Map.tryFind ename.name mapping with
+            | Some ref ->
+                match ename.schema with
+                | None -> ref
+                | Some sch ->
+                    match ref with
+                    | QMEntity ({ schema = entitySchema; name = name }, _) when entitySchema = sch -> ref
+                    | _ -> raise (ViewResolveException <| sprintf "Invalid entity schema: %O" sch)
+            | None ->
+                raise (ViewResolveException <| sprintf "Field entity not found: %O" ename.name)
+    match mappedEntity with
+    // FIXME: improve error reporting
+    | QMEntity (entityRef, entity) ->
+        if f.name = funId then
+            RFField { entity = entityRef; name = funId }
+        elif f.name = funMain then
+            RFField { entity = entityRef; name = entity.mainField }
+        else
+            match entity.FindField(f.name) with
+            | None ->
+                raise (ViewResolveException <| sprintf "Field not found: %O" f.name)
+            | Some field -> RFField { entity = entityRef; name = f.name }
+    | QMSubquery (queryName, fields) ->
+        match Map.tryFind f.name fields with
+        | Some boundField -> RFSubquery (queryName, f.name, boundField)
+        | None -> raise (ViewResolveException <| sprintf "Field not found: %O" f.name)
 
 let private resolveFieldExprGeneric (arguments: ArgumentsMap) (mapping : QMapping) : ParsedFieldExpr -> ResolvedFieldExpr =
     let resolvePlaceholder name =

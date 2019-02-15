@@ -487,5 +487,5 @@ type ViewResults<'f> when 'f :> IFunQLString = (AttributeMap<'f> * QueryResult<'
 
 let funId = FunQLName "Id"
 let funSchema = FunQLName "public"
-
 let funView = FunQLName "view"
+let funMain = FunQLName "__main__"
