@@ -199,23 +199,17 @@ FromClause:
   | FROM FromExpr ConditionClause { { from = $2; condition = $3 } }
 
 Query:
-	| SELECT Results FromClause { { results = $2; clause = $3 } }
+	| SELECT Results FromClause { { results = List.toArray $2; clause = $3 } }
 
 Results:
-  |                 { [||] }
-  | ResultsNonEmpty { List.toArray $1 }
-
-ResultsNonEmpty:
-  | Result COMMA ResultsNonEmpty { $1 :: $3 }
-  | Result                       { [ $1 ] }
+  | Result COMMA Results { $1 :: $3 }
+  | Result               { [ $1 ] }
+  |                      { [] }
 
 AttributedResults:
-  |                           { [] }
-  | AttributedResultsNonEmpty { $1 }
-
-AttributedResultsNonEmpty:
-  | AttributedResult COMMA AttributedResultsNonEmpty { $1 :: $3 }
-  | AttributedResult                                 { [ $1 ] }
+  | AttributedResult COMMA AttributedResults { $1 :: $3 }
+  | AttributedResult                         { [ $1 ] }
+  |                                          { [] }
 
 AttributedResult:
   | MaybeAttributeMap Result { AResult ($1, $2) }
