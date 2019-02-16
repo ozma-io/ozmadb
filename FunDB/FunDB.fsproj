@@ -56,7 +56,6 @@
     <Compile Include="src/Layout/Render.fs" />
     <Compile Include="src/Layout/Update.fs" />
     <Compile Include="src/Layout/Meta.fs" />
-    <Compile Include="src/Layout/Json.fs" />
 
     <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Schema.fs" />
@@ -84,17 +83,12 @@
     <PackageReference Include="FsLexYacc" Version="7.0.*" />
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.2.*" />
-    <!-- https://github.com/BcryptNet/bcrypt.net/issues/22 -->
-    <PackageReference Include="BCrypt.Net-Next" Version="3.1.0" />
+    <PackageReference Include="BCrypt.Net-Next" Version="3.1.*" />
     <PackageReference Include="Suave" Version="2.5.*" />
     <PackageReference Include="Arachne.Http" Version="3.0.*" />
     <PackageReference Include="jose-jwt" Version="2.4.*" />
-
-    <Reference Include="Newtonsoft.Json.Custom">
-      <HintPath>../3rdparty/Newtonsoft.Json.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <!--<ProjectReference Include="../3rdparty/Newtonsoft.Json/Src/Newtonsoft.Json/Newtonsoft.Json.csproj" />-->
+    <PackageReference Include="Jint" Version="3.0.0-beta-*" />
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.*" />
   </ItemGroup>
 
 </Project>

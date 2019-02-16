@@ -1,7 +1,12 @@
 ﻿module FunWithFlags.FunDB.ContextCache
 
 open System.Linq
+open System.Globalization
 open Microsoft.EntityFrameworkCore
+open Newtonsoft.Json
+open Jint.Native
+open Jint.Runtime.Descriptors
+open Jint.Runtime.Interop
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
@@ -25,9 +30,11 @@ open FunWithFlags.FunDB.Layout.System
 open FunWithFlags.FunDB.Layout.Render
 open FunWithFlags.FunDB.Layout.Meta
 open FunWithFlags.FunDB.Layout.Update
+open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
+open FunWithFlags.FunDB.JavaScript.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type UserViewErrorInfo =
@@ -49,6 +56,7 @@ type ContextBuildErrorInfo =
     | CBELayout of string
     | CBEUserView of UserViewErrorInfo
     | CBEUserViewName of string
+    | CBEValidation of string
 
 exception ContextException of info : ContextBuildErrorInfo with
     override this.Message = this.info.ToString()
@@ -109,7 +117,7 @@ let buildCachedUserView
 
 let private rebuildUserViews (conn : DatabaseConnection) (layout : Layout) : Map<string, CachedUserView> =
     let buildOne (uv : UserView) =
-        if not (goodName uv.Name) then
+        if not (goodSystemName uv.Name) then
             raise (ContextException <| CBEUserViewName uv.Name)
         let noFixup resolved compiled = Ok compiled
         let getArguments resolved compiled = compiled.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
@@ -125,39 +133,90 @@ let private rebuildLayout (conn : DatabaseConnection) =
     with
     | ResolveLayoutException msg -> raise (ContextException <| CBELayout msg)
 
+type private SystemViews = Map<string, string>
+
 type CachedRequestContext =
     { layout : Layout
       userViews : Map<string, CachedUserView>
       allowedDatabase : AllowedDatabase
       meta : SQL.AST.DatabaseMeta
+      systemViews : SystemViews // Used to verify that they didn't change
     }
 
-type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout option) =
+type PreloadedSettings =
+    { layout : SourceLayout
+      migration : string // JS code
+    }
+
+type ContextCacheStore (connectionString : string, preloadedSettings : PreloadedSettings) =
     let versionField = "StateVersion"
     let fallbackVersion = 0
 
-    let rebuildWithLayoutAndMeta (conn : DatabaseConnection) (layout : Layout) (meta : SQL.AST.DatabaseMeta) =
+    let systemUserViewsFunction = "GetSystemUserViews"
+
+    let migrationEngine =
+        let engine = Jint.Engine(fun cfg -> ignore <| cfg.Culture(CultureInfo.InvariantCulture)).Execute(preloadedSettings.migration)
+    
+        // XXX: reimplement this in JavaScript for performance if we switch to V8
+        let jsRenderSqlName (this : JsValue) (args : JsValue[]) =
+            args.[0] |> Jint.Runtime.TypeConverter.ToString |> renderSqlName |> JsString :> JsValue
+        // Strange that this is needed...       
+        let jsRenderSqlNameF = System.Func<JsValue, JsValue[], JsValue>(jsRenderSqlName)
+        engine.Global.FastAddProperty("renderSqlName", ClrFunctionInstance(engine, "renderSqlName", jsRenderSqlNameF, 1), true, false, true)
+
+        engine
+
+    let getCurrentSystemUserViews (conn : DatabaseConnection) : SystemViews =
+        conn.System.UserViews.Where(fun uv -> uv.Name.StartsWith("__")) |> Seq.map (fun uv -> (uv.Name, uv.Query)) |> Map.ofSeq
+
+    let buildSystemUserViews (layout : Layout) : SystemViews =
+        let newViews =
+            lock migrationEngine <| fun () ->
+                if migrationEngine.Global.HasProperty(systemUserViewsFunction) then
+                    // Better way?
+                    let jsonParser = Jint.Native.Json.JsonParser(migrationEngine)
+                    let jsLayout = layout |> renderLayout |> JsonConvert.SerializeObject |> jsonParser.Parse
+                    Some (migrationEngine.Invoke(systemUserViewsFunction, jsLayout))
+                else
+                    None
+        match newViews with
+        | None -> Map.empty
+        | Some ret ->
+            let convertPair (KeyValue (k, v : PropertyDescriptor)) =
+                let name = sprintf "__%s" k
+                if not (goodSystemName name) then
+                    failwith (sprintf "Invalid system user view name: %s" k)
+                let query = Jint.Runtime.TypeConverter.ToString(v.Value)
+                eprintfn "%s" query
+                (name, query)
+            ret.AsObject().GetOwnProperties() |> Seq.map convertPair |> Map.ofSeq
+
+    let migrateSystemUserViews (conn : DatabaseConnection) (views : SystemViews) =
+        conn.System.UserViews.RemoveRange(conn.System.UserViews.AsTracking().Where(fun x -> x.Name.StartsWith("__")))
+        views |> Map.toSeq |> Seq.map (fun (name, query) -> UserView(Name = name, Query = query)) |> conn.System.UserViews.AddRange
+        ignore <| conn.System.SaveChanges()
+    
+    let rebuildWithArgs (conn : DatabaseConnection) (layout : Layout) (meta : SQL.AST.DatabaseMeta) (systemViews : SystemViews) =
         let uvs = rebuildUserViews conn layout
         { layout = layout
           userViews = uvs
           allowedDatabase = buildAllowedDatabase layout
           meta = meta
+          systemViews = systemViews
         }
 
     let rebuildAll (conn : DatabaseConnection) =
         let layout = rebuildLayout conn
         let meta = buildDatabaseMeta conn.Transaction
-        rebuildWithLayoutAndMeta conn layout meta
+        let systemViews = buildSystemUserViews layout
+        rebuildWithArgs conn layout meta systemViews
 
     let systemLayout =
         let internalLayoutSource = buildSystemLayout typeof<SystemContext>
+        assert (not <| Map.containsKey funSchema preloadedSettings.layout.schemas)
+        // We ignore system entities modifications.
         let systemLayoutSource =
-            match preloadLayout with
-            | Some layout ->
-                // We ignore system entities modifications.
-                assert (not <| Map.containsKey funSchema layout.schemas)
-                { internalLayoutSource with schemas = Map.union internalLayoutSource.schemas layout.schemas }
-            | None -> internalLayoutSource
+            { internalLayoutSource with schemas = Map.union internalLayoutSource.schemas preloadedSettings.layout.schemas }
         resolveLayout systemLayoutSource
     let systemMeta = buildLayoutMeta systemLayout
 
@@ -209,9 +268,15 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
 
             let (_, currentVersion) = getCurrentVersion conn layoutChanged
 
+            eprintfn "Building current layout"
+            let layout = rebuildLayout conn
+            assert (filterSystemSchemas layout = systemLayout.schemas)
+            let meta = buildDatabaseMeta conn.Transaction
+            eprintfn "Updating system user views"
+            let systemViews = buildSystemUserViews layout
+            migrateSystemUserViews conn systemViews
             eprintfn "Building current state"
-            let state = rebuildAll conn
-            assert (filterSystemSchemas state.layout = systemLayout.schemas)
+            let state = rebuildWithArgs conn layout meta systemViews
 
             conn.Commit()
 
@@ -235,13 +300,28 @@ type ContextCacheStore (connectionString : string, preloadLayout : SourceLayout 
         // We can do this because migration could be performed only after GetCache in the same transaction.
         let (oldVersion, oldState) = cachedState
         // Careful here not to evaluate user views before we do migration
+    
         let layout = rebuildLayout conn
+    
+        // Validate system entries
+        let newSystemLayout = { layout with schemas = layout.schemas |> Map.filter (fun name _ -> Map.containsKey name systemLayout.schemas) }
+        if newSystemLayout <> systemLayout then
+            raise <| ContextException (CBEValidation "Cannot modify system layout")
+        let oldSystemViews = getCurrentSystemUserViews conn
+        if oldSystemViews <> oldState.systemViews then
+            raise <| ContextException (CBEValidation "Cannot modify system user views")
+    
+        // Actually migrate
         let wantedMeta = buildLayoutMeta layout
         let migration = migrateDatabase (filterNonSystemMigrations oldState.meta) (filterNonSystemMigrations wantedMeta)
         for action in migration do
             eprintfn "Migration step: %O" action
             conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
-        let newState = rebuildWithLayoutAndMeta conn layout wantedMeta
+        let newSystemViews = buildSystemUserViews layout
+        migrateSystemUserViews conn newSystemViews
+
+        // Create and push new state
+        let newState = rebuildWithArgs conn layout wantedMeta newSystemViews
         if oldState = newState then
             eprintfn "No state change is observed"
         else

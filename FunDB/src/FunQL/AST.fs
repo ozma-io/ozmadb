@@ -9,7 +9,7 @@ open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 
-type [<TypeConverter(typeof<ToNewtypeConverter<string>>)>] FunQLName = FunQLName of string
+type [<TypeConverter(typeof<NewtypeConverter<FunQLName>>)>] FunQLName = FunQLName of string
     with
         override this.ToString () =
             match this with
@@ -488,4 +488,4 @@ type ViewResults<'f> when 'f :> IFunQLString = (AttributeMap<'f> * QueryResult<'
 let funId = FunQLName "Id"
 let funSchema = FunQLName "public"
 let funView = FunQLName "view"
-let funMain = FunQLName "__main__"
+let funMain = FunQLName "__main"

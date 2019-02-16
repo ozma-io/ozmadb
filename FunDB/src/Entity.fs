@@ -16,9 +16,9 @@ type EntityArguments = Map<FieldName, FieldValue>
 let insertEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) : unit =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind fieldName args with
-            | None when Option.isSome field.defaultValue -> None
-            | None -> raise (EntityExecutionException <| sprintf "Required field not provided: %O" fieldName)
-            | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
+        | None when Option.isSome field.defaultValue -> None
+        | None -> raise (EntityExecutionException <| sprintf "Required field not provided: %O" fieldName)
+        | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
     let parameters = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
     let columns = parameters |> Seq.map fst |> Array.ofSeq
     let placeholders = parameters |> Seq.mapi (fun i (name, valueWithType) -> (i, valueWithType)) |> Map.ofSeq
@@ -33,8 +33,8 @@ let insertEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) 
 let updateEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) (args : EntityArguments) : unit =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind fieldName args with
-            | None -> None
-            | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
+        | None -> None
+        | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
     let parameters = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
     // We reserve placeholder 0 for id
     let columns = parameters |> Seq.mapi (fun i (name, arg) -> (name, SQL.VEPlaceholder (i + 1))) |> Map.ofSeq

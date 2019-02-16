@@ -80,7 +80,7 @@ rule tokenizeSQL = parse
     | c o a l e s c e { Parser.COALESCE }
     
     // Unescaped ids
-    | ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']* { Parser.ID ((String lexbuf.Lexeme).ToLower()) }
+    | ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']* { Parser.ID ((String lexbuf.Lexeme).ToLower()) }
     
     // Whitespace
     | whitespace { tokenizeSQL lexbuf }

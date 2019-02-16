@@ -12,7 +12,6 @@ open Suave.Operators
 open Suave.Writers
 open Suave.Response
 
-open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.API.Utils
@@ -22,9 +21,7 @@ type UserName = string
 let private signAlgorithm = Jose.JwsAlgorithm.ES512
 
 type LoginRequest =
-    { [<JsonProperty(Required=Required.Always)>]
-      username : string
-      [<JsonProperty(Required=Required.Always)>]
+    { username : string
       password : string
     }
 
@@ -33,11 +30,8 @@ type LoginResponse =
     }
 
 type AuthToken =
-    { [<JsonProperty(Required=Required.Always)>]
-      sub : UserName
-      [<JsonProperty(Required=Required.Always, ItemConverterType=typeof<UnixDateTimeOffsetConverter>)>]
+    { sub : UserName
       iat : DateTimeOffset
-      [<JsonProperty(Required=Required.Always, ItemConverterType=typeof<UnixDateTimeOffsetConverter>)>]
       exp : DateTimeOffset
     }
 

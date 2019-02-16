@@ -17,7 +17,7 @@ let newline = ('\n' | "\r\n")
 let escapes = "\\" ['\\' 't' 'r' 'n']
 let string = "'" ([^ '\\' '\''] | "\\'" | escapes)* "'"
 let escapedId  = "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\""
-let unescapedId = ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']*
+let unescapedId = ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 // Case-insensitive chars
 let a = ['A' 'a']
