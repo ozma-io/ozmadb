@@ -216,7 +216,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
 
     let rec compileFrom : ResolvedFromExpr -> SQL.FromExpr = function
         | FEntity entityRef ->
-            let entity = Option.get <| layout.FindEntity(entityRef)
+            let entity = Option.get <| layout.FindEntity entityRef
             let tableRef = compileResolvedEntityRef entityRef
             let idColumn = SQL.SCColumn { table = Some tableRef; name = sqlFunId }
 
@@ -232,7 +232,12 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
             let from = Map.fold buildReferences (SQL.FTable tableRef) references
 
             let makeReferenceName (fieldName : FieldName, referenceRef : ResolvedFieldRef) =
-                SQL.SCExpr (SQL.SQLName <| sprintf "__Name__%O" fieldName, SQL.VEColumn <| compileFieldRef referenceRef)
+                let refField = Option.get <| layout.FindField referenceRef.entity referenceRef.name
+                let expr =
+                    match refField with
+                    | RColumnField field -> SQL.VEColumn <| compileFieldRef referenceRef
+                    | RComputedField field -> compileLocalFieldExpr (Some (compileResolvedEntityRef referenceRef.entity)) field.expression
+                SQL.SCExpr (SQL.SQLName <| sprintf "__Name__%O" fieldName, expr)
             let referenceNames = references |> Map.toSeq |> Seq.map makeReferenceName
 
             let subquery =

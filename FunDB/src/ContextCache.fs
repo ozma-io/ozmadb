@@ -183,12 +183,10 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
         | None -> Map.empty
         | Some ret ->
             let convertPair (KeyValue (k, v : PropertyDescriptor)) =
-                let name = sprintf "__%s" k
-                if not (goodSystemName name) then
+                if not (goodSystemName k) || not (k.StartsWith("__")) then
                     failwith (sprintf "Invalid system user view name: %s" k)
                 let query = Jint.Runtime.TypeConverter.ToString(v.Value)
-                eprintfn "%s" query
-                (name, query)
+                (k, query)
             ret.AsObject().GetOwnProperties() |> Seq.map convertPair |> Map.ofSeq
 
     let migrateSystemUserViews (conn : DatabaseConnection) (views : SystemViews) =

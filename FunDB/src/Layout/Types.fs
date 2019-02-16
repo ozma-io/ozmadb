@@ -13,8 +13,8 @@ type ReferenceRef =
 
         member this.ToFunQLString () =
             match this with
-                | RThis name -> sprintf "%s.%s" (renderSqlName "this") (name.ToFunQLString())
-                | RRef name -> sprintf "%s.%s" (renderSqlName "ref") (name.ToFunQLString())
+            | RThis name -> sprintf "%s.%s" (renderSqlName "this") (name.ToFunQLString())
+            | RRef name -> sprintf "%s.%s" (renderSqlName "ref") (name.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString() = this.ToFunQLString()
@@ -55,11 +55,11 @@ type ResolvedEntity =
     } with
         member this.FindField (name : FieldName) =
             match Map.tryFind name this.columnFields with
-                | Some col -> Some <| RColumnField col
-                | None ->
-                    match Map.tryFind name this.computedFields with
-                        | Some comp -> Some <| RComputedField comp
-                        | None -> None
+            | Some col -> Some <| RColumnField col
+            | None ->
+                match Map.tryFind name this.computedFields with
+                | Some comp -> Some <| RComputedField comp
+                | None -> None
 
 type ResolvedSchema =
     { entities : Map<EntityName, ResolvedEntity>

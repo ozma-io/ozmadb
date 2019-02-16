@@ -114,6 +114,9 @@ module Map =
         | None -> def ()
         | Some v -> v
 
+    let reverse (map : Map<'k, 'v>): Map<'v, 'k> =
+        map |> Map.toSeq |> Seq.map (fun (a, b) -> (b, a)) |> Map.ofSeq    
+
 module Set =
     let toMap (f : 'k -> 'v) (s : Set<'k>) : Map<'k, 'v> =
         s |> Set.toSeq |> Seq.map (fun k -> (k, f k)) |> Map.ofSeq

@@ -1,6 +1,5 @@
 module FunWithFlags.FunDB.Schema
 
-open System
 open System.Linq
 open Microsoft.EntityFrameworkCore
 open BCrypt.Net
@@ -31,7 +30,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     
     [<DefaultValue>]
     val mutable entities : DbSet<Entity>
-    [<Entity("Name")>]
+    [<Entity("FullName")>]
+    [<ComputedField("FullName", "\"SchemaId\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"SchemaId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%__%' AND \"Name\" <> ''")>]
     [<CheckConstraint("CorrectMainField", "\"MainField\" <> '' AND \"MainField\" <> 'Id'")>]
@@ -41,7 +41,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     
     [<DefaultValue>]
     val mutable columnFields : DbSet<ColumnField>
-    [<Entity("Name")>]
+    [<Entity("FullName")>]
+    [<ComputedField("FullName", "\"EntityId\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
     member this.ColumnFields
@@ -50,7 +51,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable computedFields : DbSet<ComputedField>
-    [<Entity("Name")>]
+    [<Entity("FullName")>]
+    [<ComputedField("FullName", "\"EntityId\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
     member this.ComputedFields
@@ -59,7 +61,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable uniqueConstraints : DbSet<UniqueConstraint>
-    [<Entity("Name")>]
+    [<Entity("FullName")>]
+    [<ComputedField("FullName", "\"EntityId\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     [<CheckConstraint("NotEmpty", "\"Columns\" <> ([] :: array(string))")>]
@@ -69,7 +72,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable checkConstraints : DbSet<CheckConstraint>
-    [<Entity("Name")>]
+    [<Entity("FullName")>]
+    [<ComputedField("FullName", "\"EntityId\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     member this.CheckConstraints
@@ -208,7 +212,7 @@ and
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("array(string)")>]
-        member val Columns = [||] : string array with get, set
+        member val Columns = [||] : string[] with get, set
 
 and
     [<AllowNullLiteral>]

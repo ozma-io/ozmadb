@@ -226,7 +226,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
 
         { entity = updateEntity
           fieldsToNames = mappedResults
-          namesToFields = mappedResults |> Map.toSeq |> Seq.map (fun (a, b) -> (b, a)) |> Map.ofSeq
+          namesToFields = Map.reverse mappedResults
         }
 
     member this.ResolveQueryExpr = resolveQueryExpr

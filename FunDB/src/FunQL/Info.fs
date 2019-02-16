@@ -30,53 +30,56 @@ type MergedViewInfo =
     { attributeTypes : ExecutedAttributeTypes
       rowAttributeTypes : ExecutedAttributeTypes
       updateEntity : ResolvedEntityRef option
-      columns : MergedColumnInfo array
+      columns : MergedColumnInfo[]
     }
 
 type PureAttributes =
     { attributes : ExecutedAttributeMap
-      columnAttributes : ExecutedAttributeMap array
+      columnAttributes : ExecutedAttributeMap[]
     }
 
 let getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (res : ExecutedViewExpr) : PureAttributes =
     match compiled.attributesExpr with
-        | None -> { attributes = Map.empty
-                    columnAttributes = Array.map (fun _ -> Map.empty) res.columnAttributes
-                  }
-        | Some attrInfo ->
-            let filterPure (_, result : ResolvedQueryResult) attrs =
-                match Map.tryFind result.name attrInfo.pureColumnAttributes with
-                    | None -> Map.empty
-                    | Some pureAttrs -> attrs |> Map.filter (fun name _ -> Set.contains name pureAttrs)
-            { attributes = res.attributes |> Map.filter (fun name _ -> Set.contains name attrInfo.pureAttributes)
-              columnAttributes = Array.map2 filterPure viewExpr.results res.columnAttributes
-            }
+    | None ->
+        { attributes = Map.empty
+          columnAttributes = Array.map (fun _ -> Map.empty) res.columnAttributes
+        }
+    | Some attrInfo ->
+        let filterPure (_, result : ResolvedQueryResult) attrs =
+            match Map.tryFind result.name attrInfo.pureColumnAttributes with
+            | None -> Map.empty
+            | Some pureAttrs -> attrs |> Map.filter (fun name _ -> Set.contains name pureAttrs)
+        { attributes = res.attributes |> Map.filter (fun name _ -> Set.contains name attrInfo.pureAttributes)
+          columnAttributes = Array.map2 filterPure viewExpr.results res.columnAttributes
+        }
 
 let mergeViewInfo (layout : Layout) (viewExpr : ResolvedViewExpr) (viewInfo : ExecutedViewInfo) : MergedViewInfo =
     let updateEntity = Option.map (fun upd -> (layout.FindEntity(upd.entity) |> Option.get, upd)) viewExpr.update
-
     let getResultColumn (attributeExprs, queryResult : ResolvedQueryResult) (column : ExecutedColumnInfo) : MergedColumnInfo =
         let boundField = resultBoundField queryResult
         let fieldType =
             match boundField with
+            | None -> None
+            | Some ref ->
+                match Map.tryFind ref.name (layout.FindEntity(ref.entity) |> Option.get).columnFields with
                 | None -> None
-                | Some ref ->
-                    match Map.tryFind ref.name (layout.FindEntity(ref.entity) |> Option.get).columnFields with
-                        | None -> None
-                        | Some field -> Some field.fieldType
+                | Some field -> Some field.fieldType
         let updateField =
             match updateEntity with
+            | None -> None
+            | Some (entity, updateInfo) ->
+                match boundField with
                 | None -> None
-                | Some (entity, updateInfo) ->
-                    match boundField with
+                | Some ref ->
+                    if Map.containsKey ref.name updateInfo.fieldsToNames then
+                        match Map.tryFind ref.name entity.columnFields with
                         | None -> None
-                        | Some ref ->
-                            if Map.containsKey ref.name updateInfo.fieldsToNames then
-                                Some { name = ref.name
-                                       field = Map.find ref.name entity.columnFields
-                                     }
-                            else
-                                None
+                        | Some field ->
+                            Some { name = ref.name
+                                   field = field
+                                 }
+                    else
+                        None
 
         { name = column.name
           attributeTypes = column.attributeTypes
