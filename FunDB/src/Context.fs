@@ -30,7 +30,9 @@ let private parseExprArgument (fieldExprType : FieldExprType) (str : string) : F
     | FETArray SFTBool -> decodeArray FBoolArray tryBool
     | FETArray SFTDateTime -> decodeArray FDateTimeArray tryDateTimeOffsetInvariant
     | FETArray SFTDate -> decodeArray FDateArray tryDateInvariant
-    | FETScalar SFTString -> Some <| FString str
+    | FETScalar SFTString ->
+        // FIXME: lossy!
+        if str = "" then Some <| FNull else Some <| FString str
     | FETScalar SFTInt -> Option.map FInt <| tryIntInvariant str
     | FETScalar SFTDecimal -> Option.map FDecimal <| tryDecimalInvariant str
     | FETScalar SFTBool -> Option.map FBool <| tryBool str

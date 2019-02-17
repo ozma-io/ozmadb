@@ -222,12 +222,8 @@ type ConverterContractResolver () =
                     (false, false)                                          
 
         if prop.Required = Required.Default then
-            if hasDefault then
-                prop.Required <- Required.DisallowNull
-            else if isOption then
-                prop.Required <- Required.Default
-            else
-                prop.Required <- Required.Always            
+            if not isOption then
+                prop.Required <- Required.Always
     
         prop      
 
