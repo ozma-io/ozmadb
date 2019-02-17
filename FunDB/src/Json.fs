@@ -8,6 +8,7 @@ open Microsoft.FSharp.Reflection
 open Newtonsoft.Json
 open Newtonsoft.Json.Serialization
 open Newtonsoft.Json.Linq
+open Microsoft.FSharp.Collections
 
 open FunWithFlags.FunDB.Utils
 
@@ -159,20 +160,6 @@ type UnionConverter () =
     override this.ConvertFrom (context : ITypeDescriptorContext, culture : CultureInfo, value : obj) : obj =
         FSharpValue.MakeUnion(case, [|value|])
 
-type DefaultValueProvider (innerProvider : IValueProvider, value : obj) =
-    interface IValueProvider with
-        member this.GetValue (target : obj) : obj =
-            match innerProvider.GetValue target with
-            | null -> value
-            | v -> v
-
-        member this.SetValue (target : obj, value : obj) =
-            let newValue =
-                match value with
-                | null -> value
-                | v -> v
-            innerProvider.SetValue (target, newValue)
-
 // Default converters for several types
 type ConverterContractResolver () =
     inherit DefaultContractResolver ()
@@ -193,38 +180,59 @@ type ConverterContractResolver () =
     override this.CreateProperty (memberInfo : MemberInfo, serialization : MemberSerialization) : JsonProperty =
         let prop = base.CreateProperty (memberInfo, serialization)
 
-        let isRequired = not (prop.PropertyType.IsGenericType && prop.PropertyType.GetGenericTypeDefinition() = typedefof<_ option>)
-        if isRequired then
-            prop.Required <- Required.Always
-    
-        prop
-
-    override this.CreateMemberValueProvider (memberInfo : MemberInfo) : IValueProvider =
-        let provider = base.CreateMemberValueProvider memberInfo
-
         let fieldType =
             match memberInfo.MemberType with
             | MemberTypes.Property -> Some (memberInfo :?> PropertyInfo).PropertyType
             | MemberTypes.Field -> Some (memberInfo :?> FieldInfo).FieldType
             | _ -> None
 
-        match fieldType with
-        | None -> provider
-        | Some ftype ->
-            let defValProvider v = DefaultValueProvider (provider, v) :> IValueProvider
-            if ftype.IsArray then
-                defValProvider <| Array.CreateInstance(ftype.GetElementType(), 0)
-            else if ftype.IsGenericType then
-                let genType = ftype.GetGenericTypeDefinition ()
-                if genType = typedefof<Map<_, _>> then
-                    defValProvider Map.empty
-                else if genType = typedefof<Set<_>> then
-                    defValProvider Set.empty
-                else if genType = typedefof<_ list> then
-                    defValProvider []
+        let setDefault v =
+            if isNull prop.DefaultValue then
+                prop.DefaultValue <- v
+        let (hasDefault, isOption) =
+            match fieldType with
+            | None -> (false, false)
+            | Some ftype ->
+                if ftype.IsArray then
+                    setDefault (Array.CreateInstance(ftype.GetElementType(), 0))
+                    (true, false)
+                else if ftype.IsGenericType then
+                    let genType = ftype.GetGenericTypeDefinition ()
+                    if genType = typedefof<Map<_, _>> then
+                        let typePars = ftype.GetGenericArguments()
+                        let tupleType = FSharpType.MakeTupleType typePars
+                        let emptyArray = Array.CreateInstance(tupleType, 0)
+                        let emptyMap = Activator.CreateInstance(ftype, emptyArray)
+                        setDefault emptyMap
+                        (true, false)
+                    else if genType = typedefof<Set<_>> then
+                        let typePars = ftype.GetGenericArguments()
+                        let emptyArray = Array.CreateInstance(typePars.[0], 0)
+                        let emptySet = Activator.CreateInstance(ftype, emptyArray)
+                        setDefault emptySet
+                        (true, false)
+                    else if genType = typedefof<_ list> then
+                        let emptyCase = FSharpType.GetUnionCases(ftype) |> Array.find (fun case -> case.Name = "Empty")
+                        let emptyList = FSharpValue.MakeUnion(emptyCase, [||])
+                        setDefault emptyList
+                        (true, false)
+                    else
+                        (false, genType = typedefof<_ option>) 
                 else
-                    provider
-            else
-                provider                
+                    (false, false)                                          
 
-let defaultSerializerSettings = JsonSerializerSettings(ContractResolver = ConverterContractResolver ())    
+        if prop.Required = Required.Default then
+            if hasDefault then
+                prop.Required <- Required.DisallowNull
+            else if isOption then
+                prop.Required <- Required.Default
+            else
+                prop.Required <- Required.Always            
+    
+        prop      
+
+let defaultSerializerSettings =
+    JsonSerializerSettings(
+        ContractResolver = ConverterContractResolver (),
+        DefaultValueHandling = DefaultValueHandling.Populate
+    )

@@ -2,7 +2,6 @@
   "schemas": {
     "funapp": {
       "entities": {
-
         "Settings": {
           "columnFields": {
             "Name": { "fieldType": "string" },
@@ -37,10 +36,13 @@
             "UserViewId": { "fieldType": "reference(\"public\".\"UserViews\")" },
             "OrdinalPosition": { "fieldType": "int" }
           },
+          "computedFields": {
+            "Name": { "expression": "\"CategoryId\" || '.' || \"UserViewId\"" }
+          },
           "uniqueConstraints": {
             "UniqueButton": { "columns": [ "CategoryId", "UserViewId" ] }
           },
-          "mainField": "Id"
+          "mainField": "Name"
         },
 
         "UserViewTranslations": {
@@ -50,7 +52,7 @@
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            "Name": { "expression": "\"UserViewId\"" }
+            "Name": { "expression": "\"Language\" || '.' || \"UserViewId\"" }
           },
           "uniqueConstraints": {
             "UniqueTranslation": { "columns": [ "UserViewId", "Language" ] }
@@ -68,7 +70,7 @@
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            "Name": { "expression": "\"ColumnFieldId\"" }
+            "Name": { "expression": "\"Language\" || '.' || \"ColumnFieldId\"" }
           },
           "uniqueConstraints": {
             "UniqueTranslation": { "columns": [ "ColumnFieldId", "Language" ] }
@@ -86,7 +88,7 @@
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            "Name": { "expression": "\"ComputedFieldId\"" }
+            "Name": { "expression": "\"Language\" || '.' || \"ComputedFieldId\"" }
           },
           "uniqueConstraints": {
             "UniqueTranslation": { "columns": [ "ComputedFieldId", "Language" ] }

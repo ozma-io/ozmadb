@@ -59,7 +59,7 @@ let main (args : string[]) : int =
     let preloadedSettings =
         { layout = preloadedLayout
           migration = migration
-        }    
+        }
 
     let cacheStore = ContextCacheStore(config.connectionString, preloadedSettings)
         

@@ -17,6 +17,7 @@ type SourceCheckConstraint =
 type SourceColumnField =
     { fieldType : string
       defaultValue : string option
+      [<JsonProperty(Required=Required.DisallowNull)>]
       isNullable : bool
     }
 
@@ -29,13 +30,13 @@ type SourceField =
     | SComputedField of SourceComputedField
 
 type SourceEntity =
-    { [<JsonProperty(Required=Required.Default)>]
+    { [<JsonProperty(Required=Required.DisallowNull)>]
       columnFields : Map<FieldName, SourceColumnField>
-      [<JsonProperty(Required=Required.Default)>]
+      [<JsonProperty(Required=Required.DisallowNull)>]
       computedFields : Map<FieldName, SourceComputedField>
-      [<JsonProperty(Required=Required.Default)>]
+      [<JsonProperty(Required=Required.DisallowNull)>]
       uniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
-      [<JsonProperty(Required=Required.Default)>]
+      [<JsonProperty(Required=Required.DisallowNull)>]
       checkConstraints : Map<ConstraintName, SourceCheckConstraint>
       mainField : FieldName
     } with
@@ -48,12 +49,12 @@ type SourceEntity =
                 | None -> None
 
 type SourceSchema =
-    { [<JsonProperty(Required=Required.Default)>]
+    { [<JsonProperty(Required=Required.DisallowNull)>]
       entities : Map<EntityName, SourceEntity>
     }
 
 type SourceLayout =
-    { [<JsonProperty(Required=Required.Default)>]
+    { [<JsonProperty(Required=Required.DisallowNull)>]
       schemas : Map<SchemaName, SourceSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
