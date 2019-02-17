@@ -2,10 +2,36 @@
 
 var commonViews = {
     // Internal APIs
-    "__Settings": "select\n  \"Name\",\n  \"Value\"\nfrom \n  \"funapp\".\"Settings\"",
-    "__FieldTranslations": "select\n  \"Schemas\".\"Name\" as \"SchemaName\",\n  \"Entities\".\"Name\" as \"EntityName\",\n  \"ColumnFields\".\"Name\" as \"FieldName\",\n  \"ColumnFieldTranslations\".\"Translation\"\nfrom \n  \"funapp\".\"ColumnFieldTranslations\"\n  left join \"public\".\"ColumnFields\" on \"ColumnFields\".\"Id\" = \"ColumnFieldTranslations\".\"ColumnFieldId\"\n  left join \"public\".\"Entities\" on \"Entities\".\"Id\" = \"ColumnFields\".\"EntityId\"\n  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n  where $$Lang LIKE \"ColumnFieldTranslations\".\"Language\" || '%'",
+    "__Settings":
+        "select\n" +
+        "  \"Name\",\n" +
+        "  \"Value\"\n" +
+        "from\n" +
+        "  \"funapp\".\"Settings\"",
+    "__FieldTranslations":
+        "select\n" +
+        "  \"Schemas\".\"Name\" as \"SchemaName\",\n" +
+        "  \"Entities\".\"Name\" as \"EntityName\",\n" +
+        "  \"ColumnFields\".\"Name\" as \"FieldName\",\n" +
+        "  \"ColumnFieldTranslations\".\"Translation\"\n" +
+        "from\n" +
+        "  \"funapp\".\"ColumnFieldTranslations\"" +
+        "  left join \"public\".\"ColumnFields\" on \"ColumnFields\".\"Id\" = \"ColumnFieldTranslations\".\"ColumnFieldId\"\n" +
+        "  left join \"public\".\"Entities\" on \"Entities\".\"Id\" = \"ColumnFields\".\"EntityId\"\n" +
+        "  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
+        "where $$Lang LIKE \"ColumnFieldTranslations\".\"Language\" || '%'",
     // Public APIs
-    "__TranslatedMenu": "select\n    @\"Type\" = 'Menu',\n    \"MainMenuCategories\".\"Name\" as \"CategoryName\",\n    { \"LinkedView\" = \"UserViews\".\"Name\" } COALESCE(\"Translations\".\"Translation\", \"UserViews\".\"Name\") as \"Name\"\n    from\n    \"funapp\".\"MainMenuButtons\"\n    left join \"funapp\".\"MainMenuCategories\" on \"MainMenuCategories\".\"Id\" = \"MainMenuButtons\".\"CategoryId\"\n    left join \"public\".\"UserViews\" on \"UserViews\".\"Id\" = \"MainMenuButtons\".\"UserViewId\"\n    left join (select \"UserViewId\", \"Translation\" from \"funapp\".\"UserViewTranslations\" where $$Lang LIKE \"Language\" || '%') as \"Translations\" on \"Translations\".\"UserViewId\" = \"MainMenuButtons\".\"UserViewId\"\n    order by \"MainMenuCategories\".\"OrdinalPosition\", \"MainMenuButtons\".\"OrdinalPosition\""
+    "__TranslatedMenu":
+        "select\n" +
+        "  @\"Type\" = 'Menu',\n" +
+        "  \"MainMenuCategories\".\"Name\" as \"CategoryName\",\n" +
+        "  { \"LinkedView\" = \"UserViews\".\"Name\" } COALESCE(\"Translations\".\"Translation\", \"UserViews\".\"Name\") as \"Name\"\n" +
+        "from\n" +
+        "  \"funapp\".\"MainMenuButtons\"\n" +
+        "  left join \"funapp\".\"MainMenuCategories\" on \"MainMenuCategories\".\"Id\" = \"MainMenuButtons\".\"CategoryId\"\n" +
+        "  left join \"public\".\"UserViews\" on \"UserViews\".\"Id\" = \"MainMenuButtons\".\"UserViewId\"\n" +
+        "  left join (select \"UserViewId\", \"Translation\" from \"funapp\".\"UserViewTranslations\" where $$Lang LIKE \"Language\" || '%') as \"Translations\" on \"Translations\".\"UserViewId\" = \"MainMenuButtons\".\"UserViewId\"\n" +
+        "order by \"MainMenuCategories\".\"OrdinalPosition\", \"MainMenuButtons\".\"OrdinalPosition\""
 }
 
 function addSummaryViews(views, layout) {
