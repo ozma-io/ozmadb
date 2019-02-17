@@ -31,17 +31,16 @@ var commonViews = {
         "  left join \"funapp\".\"MainMenuCategories\" on \"MainMenuCategories\".\"Id\" = \"MainMenuButtons\".\"CategoryId\"\n" +
         "  left join \"public\".\"UserViews\" on \"UserViews\".\"Id\" = \"MainMenuButtons\".\"UserViewId\"\n" +
         "  left join (select \"UserViewId\", \"Translation\" from \"funapp\".\"UserViewTranslations\" where $$Lang LIKE \"Language\" || '%') as \"Translations\" on \"Translations\".\"UserViewId\" = \"MainMenuButtons\".\"UserViewId\"\n" +
-        "order by \"MainMenuCategories\".\"OrdinalPosition\", \"MainMenuButtons\".\"OrdinalPosition\""/*,
+        "order by \"MainMenuCategories\".\"OrdinalPosition\", \"MainMenuButtons\".\"OrdinalPosition\"",
     "__SystemMenu":
         "select\n" +
         "  @\"Type\" = 'Menu',\n" +
-        "  'All' as \"CategoryName\",\n" +
-        "  { \"LinkedView\" = \"UserViews\".\"Name\" } COALESCE(\"Translations\".\"Translation\", \"UserViews\".\"Name\") as \"Name\"\n" +
+        "  \"Schemas\".\"Name\" as \"CategoryName\",\n" +
+        "  { \"LinkedView\" = '__Table__' || \"Schemas\".\"Name\" || '__' || \"Entities\".\"Name\" } \"Entities\".\"Name\" as \"Name\"\n" +
         "from\n" +
-        "  \"public\".\"UserViews\"\n" +
-        "  left join (select \"UserViewId\", \"Translation\" from \"funapp\".\"UserViewTranslations\" where $$Lang LIKE \"Language\" || '%') as \"Translations\" on \"Translations\".\"UserViewId\" = \"MainMenuButtons\".\"UserViewId\"\n" +
-        "where \"UserViews\".\"Name\" LIKE '__Table__%'\n" +
-        "order by \"MainMenuCategories\".\"OrdinalPosition\", \"MainMenuButtons\".\"OrdinalPosition\""*/
+        "  \"public\".\"Entities\"\n" +
+        "  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
+        "order by \"Entities\".\"Id\""
 }
 
 function addSummaryViews(views, layout) {
