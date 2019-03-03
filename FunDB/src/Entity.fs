@@ -17,6 +17,7 @@ let insertEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) 
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind fieldName args with
         | None when Option.isSome field.defaultValue -> None
+        | None when field.isNullable -> None
         | None -> raise (EntityExecutionException <| sprintf "Required field not provided: %O" fieldName)
         | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
     let parameters = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache

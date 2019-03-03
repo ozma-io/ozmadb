@@ -45,21 +45,45 @@ type UserViewErrorInfo =
     | UVEResolve of string
     | UVEExecute of string
     | UVEFixup of string
+    with
+        member this.Message =
+            match this with
+            | UVENotFound -> "User view not found"
+            | UVEAccessDenied -> "User view access denied"
+            | UVEArguments msg -> msg
+            | UVEParse msg -> msg
+            | UVEResolve msg -> msg
+            | UVEExecute msg -> msg
+            | UVEFixup msg -> msg
 
 type EntityErrorInfo =
     | EENotFound
     | EEAccessDenied
     | EEArguments of string
     | EEExecute of string
+    with
+        member this.Message =
+            match this with
+            | EENotFound -> "Entity not found"
+            | EEAccessDenied -> "Entity access denied"
+            | EEArguments msg -> msg
+            | EEExecute msg -> msg
 
 type ContextBuildErrorInfo =
     | CBELayout of string
-    | CBEUserView of UserViewErrorInfo
+    | CBEUserView of string * UserViewErrorInfo
     | CBEUserViewName of string
     | CBEValidation of string
+    with
+        member this.Message =
+            match this with
+            | CBELayout msg -> msg
+            | CBEUserView (name, info) -> sprintf "Error in user view %s: %s" name info.Message
+            | CBEUserViewName name -> sprintf "Invalid name: %s" name
+            | CBEValidation msg -> msg
 
 exception ContextException of info : ContextBuildErrorInfo with
-    override this.Message = this.info.ToString()
+    override this.Message = this.info.Message
 
 type CachedUserView =
     { resolved : ResolvedViewExpr
@@ -123,7 +147,7 @@ let private rebuildUserViews (conn : DatabaseConnection) (layout : Layout) : Map
         let getArguments resolved compiled = compiled.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
         match buildCachedUserView conn.Query layout uv.Query noFixup getArguments (fun info res -> info) with
         | Ok cachedUv -> (uv.Name, cachedUv)
-        | Error err -> raise (ContextException <| CBEUserView err)
+        | Error err -> raise (ContextException <| CBEUserView (uv.Name, err))
     conn.System.UserViews |> Seq.toArray |> Seq.map buildOne |> Map.ofSeq
 
 let private rebuildLayout (conn : DatabaseConnection) =

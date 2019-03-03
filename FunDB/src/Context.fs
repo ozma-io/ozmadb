@@ -169,7 +169,12 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
                         conn.EnsureCommit()
                         Ok ()
                     with
-                    | EntityExecutionException msg -> Error <| EEExecute msg
+                    | EntityExecutionException msg ->
+                        eprintfn "Entity execution exception: %s" msg
+                        Error <| EEExecute msg
+                    | ContextException e ->
+                        eprintfn "Context exception: %O" e
+                        Error <| EEExecute e.Message
 
     member this.UpdateEntity (entityRef : ResolvedEntityRef) (id : int) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
         if userName <> rootUserName && entityRef.schema <> FunQLName "user" then
@@ -189,7 +194,12 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
                         conn.EnsureCommit()
                         Ok ()
                     with
-                    | EntityExecutionException msg -> Error <| EEExecute msg
+                    | EntityExecutionException msg ->
+                        eprintfn "Entity execution exception: %s" msg
+                        Error <| EEExecute msg
+                    | ContextException e ->
+                        eprintfn "Context exception: %O" e
+                        Error <| EEExecute e.Message
 
     member this.DeleteEntity (entityRef : ResolvedEntityRef) (id : int) : Result<unit, EntityErrorInfo> =
         if userName <> rootUserName then
@@ -205,4 +215,9 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
                     conn.EnsureCommit()
                     Ok ()
                 with
-                | EntityExecutionException msg -> Error <| EEExecute msg
+                | EntityExecutionException msg ->
+                    eprintfn "Entity execution exception: %s" msg
+                    Error <| EEExecute msg
+                | ContextException e ->
+                    eprintfn "Context exception: %O" e
+                    Error <| EEExecute e.Message
