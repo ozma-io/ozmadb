@@ -7,6 +7,12 @@ open Microsoft.FSharp.Reflection
 
 type Void = private Void of unit
 
+module Option =
+    let getOrFailwith (errorFunc : unit -> string) (a : 'a option) : 'a =
+        match a with
+        | Some r -> r
+        | None -> failwith (errorFunc ())
+
 module Result =
     let isOk : Result<'a, 'e> -> bool = function
         | Ok _ -> true

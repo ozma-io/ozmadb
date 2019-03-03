@@ -210,13 +210,13 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
     let findReference (name : FieldName) (field : ResolvedColumnField) : ResolvedFieldRef option =
         match field.fieldType with
         | FTReference (entityRef, where) ->
-            let entity = Option.get <| layout.FindEntity(entityRef)
+            let entity = Option.getOrFailwith (fun () -> sprintf "Can't find entity %O" entityRef) <| layout.FindEntity entityRef
             Some { entity = entityRef; name = entity.mainField }
         | _ -> None
 
     let rec compileFrom : ResolvedFromExpr -> SQL.FromExpr = function
         | FEntity entityRef ->
-            let entity = Option.get <| layout.FindEntity entityRef
+            let entity = Option.getOrFailwith (fun () -> sprintf "Can't find entity %O" entityRef) <| layout.FindEntity entityRef
             let tableRef = compileResolvedEntityRef entityRef
             let idColumn = SQL.SCColumn { table = Some tableRef; name = sqlFunId }
 
@@ -232,7 +232,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
             let from = Map.fold buildReferences (SQL.FTable tableRef) references
 
             let makeReferenceName (fieldName : FieldName, referenceRef : ResolvedFieldRef) =
-                let refField = Option.get <| layout.FindField referenceRef.entity referenceRef.name
+                let refField = Option.getOrFailwith (fun () -> sprintf "Can't find field: %O" referenceRef) <| layout.FindField referenceRef.entity referenceRef.name
                 let expr =
                     match refField with
                     | RColumnField field -> SQL.VEColumn <| compileFieldRef referenceRef
@@ -330,7 +330,7 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
     let getNameAttribute (attributes, result : ResolvedQueryResult) =
         match result.expression with
         | FEColumn (RFField fieldRef) when fieldRef.name <> funId ->
-            let field = Option.get <| layout.FindField fieldRef.entity fieldRef.name
+            let field = Option.getOrFailwith (fun () -> sprintf "Can't find field: %O" fieldRef) <| layout.FindField fieldRef.entity fieldRef.name
             match field with
             | RColumnField { fieldType = FTReference (entityRef, where) } ->
                 let nameColumn = { table = Some <| compileEntityTablePun fieldRef.entity; name = SQL.SQLName <| sprintf "__Name__%O" fieldRef.name } : SQL.ColumnRef
