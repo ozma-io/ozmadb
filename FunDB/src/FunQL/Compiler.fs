@@ -231,12 +231,17 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
                 SQL.FJoin (SQL.Left, from, SQL.FTable table, where)
             let from = Map.fold buildReferences (SQL.FTable tableRef) references
 
+            // Add columns with names of referenced entries
             let makeReferenceName (fieldName : FieldName, referenceRef : ResolvedFieldRef) =
-                let refField = Option.getOrFailwith (fun () -> sprintf "Can't find field: %O" referenceRef) <| layout.FindField referenceRef.entity referenceRef.name
+                let refEntity = Option.getOrFailwith (fun () -> sprintf "Can't find entity: %O" referenceRef.entity) <| layout.FindEntity referenceRef.entity
                 let expr =
-                    match refField with
-                    | RColumnField field -> SQL.VEColumn <| compileFieldRef referenceRef
-                    | RComputedField field -> compileLocalFieldExpr (Some (compileResolvedEntityRef referenceRef.entity)) field.expression
+                    if referenceRef.name = funId then
+                        SQL.VEColumn <| compileFieldRef referenceRef
+                    else
+                        let refField = Option.getOrFailwith (fun () -> sprintf "Can't find field: %O" referenceRef) <| refEntity.FindField referenceRef.name
+                        match refField with
+                        | RColumnField field -> SQL.VEColumn <| compileFieldRef referenceRef
+                        | RComputedField field -> compileLocalFieldExpr (Some (compileResolvedEntityRef referenceRef.entity)) field.expression
                 SQL.SCExpr (SQL.SQLName <| sprintf "__Name__%O" fieldName, expr)
             let referenceNames = references |> Map.toSeq |> Seq.map makeReferenceName
 
