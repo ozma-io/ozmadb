@@ -130,7 +130,7 @@ let compileFieldValue : FieldValue -> SQL.ValueExpr = function
     | FInt i -> SQL.VEValue (SQL.VInt i)
     | FDecimal d -> SQL.VEValue (SQL.VDecimal d)
     // PostgreSQL cannot deduce text's type on its own
-    | FString s -> SQL.VECast (SQL.VEValue (SQL.VString s), SQL.VTScalar (SQL.STString.ToSQLName()))
+    | FString s -> SQL.VECast (SQL.VEValue (SQL.VString s), SQL.VTScalar (SQL.STString.ToSQLRawString()))
     | FBool b -> SQL.VEValue (SQL.VBool b)
     | FDateTime dt -> SQL.VEValue (SQL.VDateTime dt)
     | FDate d -> SQL.VEValue (SQL.VDate d)
@@ -161,7 +161,7 @@ let genericCompileFieldExpr (columnFunc : 'c -> SQL.ColumnRef) (placeholderFunc 
         | FEGreaterEq (a, b) -> SQL.VEGreaterEq (traverse a, traverse b)
         | FEIn (a, arr) -> SQL.VEIn (traverse a, Array.map traverse arr)
         | FENotIn (a, arr) -> SQL.VENotIn (traverse a, Array.map traverse arr)
-        | FECast (e, typ) -> SQL.VECast (traverse e, SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLName()) (compileFieldExprType typ))
+        | FECast (e, typ) -> SQL.VECast (traverse e, SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldExprType typ))
         | FEIsNull a -> SQL.VEIsNull (traverse a)
         | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
         | FECase (es, els) -> SQL.VECase (Array.map (fun (cond, expr) -> (traverse cond, traverse expr)) es, Option.map traverse els)

@@ -22,22 +22,24 @@ let private parseExprArgument (fieldExprType : FieldExprType) (str : string) : F
     let decodeArray constrFunc convertFunc =
             str.Split(',') |> Seq.traverseOption convertFunc |> Option.map (Array.ofSeq >> constrFunc)
 
+    let decodeDateTime = tryIntInvariant >> Option.map (int64 >> DateTimeOffset.FromUnixTimeSeconds)
+
     match fieldExprType with
     // FIXME: breaks strings with commas!
     | FETArray SFTString -> failwith "Not supported yet"
     | FETArray SFTInt -> decodeArray FIntArray tryIntInvariant
     | FETArray SFTDecimal -> decodeArray FDecimalArray tryDecimalInvariant
     | FETArray SFTBool -> decodeArray FBoolArray tryBool
-    | FETArray SFTDateTime -> decodeArray FDateTimeArray tryDateTimeOffsetInvariant
-    | FETArray SFTDate -> decodeArray FDateArray tryDateInvariant
+    | FETArray SFTDateTime -> decodeArray FDateTimeArray decodeDateTime
+    | FETArray SFTDate -> decodeArray FDateArray decodeDateTime
     | FETScalar SFTString ->
         // FIXME: lossy!
         if str = "" then Some <| FNull else Some <| FString str
     | FETScalar SFTInt -> Option.map FInt <| tryIntInvariant str
     | FETScalar SFTDecimal -> Option.map FDecimal <| tryDecimalInvariant str
     | FETScalar SFTBool -> Option.map FBool <| tryBool str
-    | FETScalar SFTDateTime -> Option.map FDateTime <| tryDateTimeOffsetInvariant str
-    | FETScalar SFTDate -> Option.map FDate <| tryDateInvariant str
+    | FETScalar SFTDateTime -> Option.map FDateTime <| decodeDateTime str
+    | FETScalar SFTDate -> Option.map FDate <| decodeDateTime str
 
 type RawArguments = Map<string, string>
 

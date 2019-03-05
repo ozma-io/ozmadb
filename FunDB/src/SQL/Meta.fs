@@ -326,9 +326,9 @@ let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
 
 let parseUdtName (str : string) =
     if str.StartsWith("_") then
-        VTArray <| SQLName (str.Substring(1))
+        VTArray <| SQLRawString (str.Substring(1))
     else
-        VTScalar <| SQLName str
+        VTScalar <| SQLRawString str
 
 let private makeColumnMeta (column : Column) : ColumnName * ColumnMeta =
     let columnType =

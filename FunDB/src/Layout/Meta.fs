@@ -23,7 +23,7 @@ let private makeCheckConstraintMeta (constr : ResolvedCheckConstraint) : SQL.Con
 
 let private makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.ConstraintName * SQL.ConstraintMeta) option =
     let res =
-        { columnType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLName()) (compileFieldType field.fieldType)
+        { columnType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType field.fieldType)
           isNullable = field.isNullable
           defaultExpr = Option.map compileFieldValue field.defaultValue
         } : SQL.ColumnMeta
@@ -45,7 +45,7 @@ let private makeEntityMeta (tableName : SQL.TableRef) (entity : ResolvedEntity) 
         
     let idColumns =
         let col =
-            { columnType = SQL.VTScalar (SQL.STInt.ToSQLName())
+            { columnType = SQL.VTScalar (SQL.STInt.ToSQLRawString())
               isNullable = false
               defaultExpr = Some <| SQL.VEFunc (SQL.SQLName "nextval", [| SQL.VEValue (SQL.VRegclass { schema = tableName.schema; name = idSeq }) |])
             } : SQL.ColumnMeta

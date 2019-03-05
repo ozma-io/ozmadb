@@ -157,8 +157,8 @@ ValueType:
   | ScalarType           { VTScalar $1 }
 
 ScalarType:
-  | ScalarTypeParts { SQLName (String.concat " " $1) }
-  | QUOTED_ID       { SQLName $1 }
+  | ScalarTypeParts { SQLRawString (String.concat " " $1) }
+  | QUOTED_ID       { SQLRawString $1 }
 
 ScalarTypeParts:
   | ID ScalarTypeParts { $1 :: $2 }

@@ -16,7 +16,20 @@ type SQLName = SQLName of string
 
         member this.ToSQLString () =
             match this with
-            | SQLName c -> renderSqlName c
+            | SQLName name -> renderSqlName name
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString ()
+
+type SQLRawString = SQLRawString of string
+    with
+        override this.ToString () =
+            match this with
+            | SQLRawString s -> s
+
+        member this.ToSQLString () =
+            match this with
+            | SQLRawString s -> s     
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -121,13 +134,13 @@ type [<JsonConverter(typeof<ValueConverter>)>] Value =
             | VString s -> sprintf "E%s" (renderSqlString s)
             | VRegclass rc -> sprintf "E%s :: regclass" (rc.ToSQLString() |> renderSqlString)
             | VBool b -> renderSqlBool b
-            | VDateTime dt -> sprintf "%s :: timestamp with time zone" (dt |> renderSqlDateTime |> renderSqlString)
+            | VDateTime dt -> sprintf "%s :: timestamp" (dt |> renderSqlDateTime |> renderSqlString)
             | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | VStringArray vals -> renderArray escapeSqlDoubleQuotes "text" vals
             | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-            | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "timestamp with time zone" vals
+            | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "timestamp" vals
             | VDateArray vals -> renderArray (renderSqlDate >> escapeSqlDoubleQuotes) "date" vals
             | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
             | VNull -> "NULL"
@@ -191,7 +204,7 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
             | STString -> "text"
             | STDecimal -> "numeric"
             | STBool -> "bool"
-            | STDateTime -> "timestamp with time zone"
+            | STDateTime -> "timestamp"
             | STDate -> "date"
             | STRegclass -> "regclass"
 
@@ -203,10 +216,10 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
             | STBool -> "bool"
             | STDateTime -> "datetime"
             | STDate -> "date"
-            | STRegclass -> "regclass"
-                
-        member this.ToSQLName () = SQLName (this.ToSQLString())
+            | STRegclass -> "regclass"  
 
+        member this.ToSQLRawString () = SQLRawString (this.ToSQLString ())
+        
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
@@ -222,7 +235,7 @@ and SimpleTypeConverter () =
         serializer.Serialize(writer, value.ToJSONString())
 
 // Find the closest simple type to a given.
-let findSimpleType (str : SQLName) : SimpleType option =
+let findSimpleType (str : SQLRawString) : SimpleType option =
     match str.ToString() with
     | "int4" -> Some STInt
     | "integer" -> Some STInt
@@ -233,6 +246,8 @@ let findSimpleType (str : SQLName) : SimpleType option =
     | "character varying" -> Some STString
     | "bool" -> Some STBool
     | "boolean" -> Some STBool
+    | "timestamp with time zone" -> Some STDateTime
+    | "timestamp without time zone" -> Some STDateTime
     | "timestamp" -> Some STDateTime
     | "date" -> Some STDate
     | "regclass" -> Some STRegclass
@@ -275,7 +290,7 @@ let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
     | VTScalar a -> VTScalar (func a)
     | VTArray a -> VTArray (func a)
 
-type DBValueType = ValueType<SQLName>
+type DBValueType = ValueType<SQLRawString>
 type SimpleValueType = ValueType<SimpleType>
 
 type SortOrder =

@@ -60,7 +60,8 @@ let private convertValue valType (rawValue : obj) =
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
     | (VTScalar STDateTime, (:? DateTimeOffset as value)) -> VDateTime value
-    | (VTScalar STDate, (:? DateTime as value)) -> VDate (DateTimeOffset value)
+    | (VTScalar STDateTime, (:? DateTime as value)) -> VDateTime (DateTimeOffset (value, TimeSpan.Zero))
+    | (VTScalar STDate, (:? DateTime as value)) -> VDate (DateTimeOffset (value, TimeSpan.Zero))
     | (VTArray scalarType, (:? Array as rootVals)) ->
         let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
             let convertOne : obj -> ArrayValue<'a> = function
@@ -87,7 +88,7 @@ let private npgsqlSimpleType : SimpleType -> NpgsqlDbType = function
     | STDecimal -> NpgsqlDbType.Numeric
     | STString -> NpgsqlDbType.Text
     | STBool -> NpgsqlDbType.Boolean
-    | STDateTime -> NpgsqlDbType.TimestampTz
+    | STDateTime -> NpgsqlDbType.Timestamp
     | STDate -> NpgsqlDbType.Date
     | STRegclass -> raise <| QueryException "Regclass type is not supported"
 
@@ -108,8 +109,8 @@ let private npgsqlValue : Value -> obj = function
     | VString s -> upcast s
     | VRegclass name -> raise (QueryException <| sprintf "Regclass arguments are not supported: %O" name)
     | VBool b -> upcast b
-    | VDateTime dt -> upcast dt
-    | VDate dt -> upcast dt
+    | VDateTime dt -> upcast dt.UtcDateTime
+    | VDate dt -> upcast dt.UtcDateTime
     | VIntArray vals -> npgsqlArrayValue vals
     | VDecimalArray vals -> npgsqlArrayValue vals
     | VStringArray vals -> npgsqlArrayValue vals
