@@ -40,7 +40,17 @@ var commonViews = {
         "from\n" +
         "  \"public\".\"Entities\"\n" +
         "  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
-        "order by \"Entities\".\"Id\""
+        "order by \"Entities\".\"Id\"",
+    "__UserViewByName":
+        "( $name string ) =>\n" +
+        "select\n" +
+        "  @\"Type\" = 'Form',\n" +
+        "  \"Name\",\n" +
+        "  { \"TextType\" = 'codeeditor' } \"Query\"\n" +
+        "from\n" +
+        "  \"public\".\"UserViews\"\n" +
+        "where \"Name\" = $name\n" +
+        "for update of \"public\".\"UserViews\""
 }
 
 function addSummaryViews(views, layout) {
@@ -73,20 +83,20 @@ function addDefaultViews(views, layout) {
             var formName = "__Form__" + schemaName + "__" + entityName
             var formQuery =
                 "( $id reference(" + sqlName + ") ) =>\n" +
-                "select " +
-                ["@\"Type\" = 'Form'"].concat(fields).join(", ") +
-                "from " + sqlName + " " +
+                "select\n  " +
+                ["@\"Type\" = 'Form'"].concat(fields).join(",") +
+                "\nfrom " + sqlName + " " +
                 "where \"Id\" = $id for update of " + sqlName
             views[formName] = formQuery
 
             var tableName = "__Table__" + schemaName + "__" + entityName
             var tableQuery =
-                "select " +
+                "select\n  " +
                 [ "@\"CreateView\" = '" + formName + "'",
                   "@\"LinkedView\" = '" + formName + "'",
                   "\"Id\""
                 ].concat(fields).join(", ") +
-                "from " + sqlName + " " +
+                "\nfrom " + sqlName + " " +
                 "for update of " + sqlName
             views[tableName] = tableQuery
         }
