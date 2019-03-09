@@ -355,11 +355,17 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
         // Actually migrate
         let wantedMeta = buildLayoutMeta layout
         let migration = migrateDatabase (filterNonSystemMigrations oldState.meta) (filterNonSystemMigrations wantedMeta)
-        for action in migration do
-            eprintfn "Migration step: %O" action
-            conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+        try
+            for action in migration do
+                eprintfn "Migration step: %O" action
+                conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+        with
+        | QueryException msg -> raise <| ContextException (CBEValidation msg)
         let newSystemViews = buildSystemUserViews layout
-        migrateSystemUserViews conn newSystemViews
+        try
+            migrateSystemUserViews conn newSystemViews
+        with
+        | :? DbUpdateException as e -> raise <| ContextException (CBEValidation e.InnerException.Message)
 
         // Create and push new state
         let newState = rebuildWithArgs conn layout wantedMeta newSystemViews
