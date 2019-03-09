@@ -376,6 +376,10 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
             let newVersion = oldVersion + 1
             let versionEntry = conn.System.State.AsTracking().Where(fun x -> x.Name = versionField).First()
             versionEntry.Value <- string newVersion
-            ignore <| conn.System.SaveChanges()
+            // Serialized access error: 40001, may need to process it differently later (retry with fallback?)
+            try
+                ignore <| conn.System.SaveChanges()
+            with
+            | :? DbUpdateException as e -> raise <| ContextException (CBEValidation e.InnerException.Message)
             conn.Commit()
             cachedState <- (newVersion, newState)
