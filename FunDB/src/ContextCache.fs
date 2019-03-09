@@ -214,8 +214,27 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
             ret.AsObject().GetOwnProperties() |> Seq.map convertPair |> Map.ofSeq
 
     let migrateSystemUserViews (conn : DatabaseConnection) (views : SystemViews) =
-        conn.System.UserViews.RemoveRange(conn.System.UserViews.AsTracking().Where(fun x -> x.Name.StartsWith("__")))
-        views |> Map.toSeq |> Seq.map (fun (name, query) -> UserView(Name = name, Query = query)) |> conn.System.UserViews.AddRange
+        let existingViews =
+            conn.System.UserViews.AsTracking().Where(fun x -> x.Name.StartsWith("__"))
+            |> Seq.map (fun uv -> (uv.Name, uv))
+            |> Map.ofSeq
+
+        for KeyValue (viewName, viewQuery) in views do
+            match Map.tryFind viewName existingViews with
+                | None ->
+                    let newView =
+                        UserView (
+                            Name = viewName,
+                            Query = viewQuery
+                        )
+                    ignore <| conn.System.UserViews.Add(newView)
+                | Some oldUv ->
+                    oldUv.Query <- viewQuery
+
+        for KeyValue (viewName, view) in existingViews do
+            if not (Map.containsKey viewName views) then
+                ignore <| conn.System.UserViews.Remove(view)
+
         ignore <| conn.System.SaveChanges()
     
     let rebuildWithArgs (conn : DatabaseConnection) (layout : Layout) (meta : SQL.AST.DatabaseMeta) (systemViews : SystemViews) =
