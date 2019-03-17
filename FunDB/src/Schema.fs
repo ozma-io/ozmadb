@@ -1,10 +1,14 @@
 module FunWithFlags.FunDB.Schema
 
+open System
 open System.Linq
 open Microsoft.EntityFrameworkCore
 open BCrypt.Net
 
 open FunWithFlags.FunDB.Layout.System
+open Suave.Logging
+open System
+open System
 
 type SystemContext (options : DbContextOptions<SystemContext>) =
     inherit DbContext (options)
@@ -138,6 +142,13 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     member this.UserRoles
         with get () = this.userRoles
         and set value = this.userRoles <- value
+
+    [<DefaultValue>]
+    val mutable events : DbSet<EventEntry>
+    [<Entity("Id")>]
+    member this.Events
+        with get () = this.events
+        and set value = this.events <- value    
 
 and
     [<AllowNullLiteral>]
@@ -305,6 +316,27 @@ and
         [<ColumnField("reference(\"public\".\"Roles\")")>]
         member val RoleId = 0 with get, set
         member val Role = null : Role with get, set
+
+and
+    [<AllowNullLiteral>]
+    EventEntry () =
+        member val Id = 0 with get, set
+        [<ColumnField("datetime")>]
+        member val TransactionTimestamp = DateTimeOffset.MinValue with get, set
+        [<ColumnField("datetime")>]
+        member val Timestamp = DateTimeOffset.MinValue with get, set
+        [<ColumnField("string")>]
+        member val Type = "" with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val UserName = null : string with get, set    
+        [<ColumnField("string")>]
+        member val SchemaName = "" with get, set
+        [<ColumnField("string")>]
+        member val EntityName = "" with get, set
+        [<ColumnField("int", Nullable=true)>]
+        member val EntityId = Nullable<int>() with get, set
+        [<ColumnField("string")>]
+        member val Details = "" with get, set
 
 let getLayoutObjects (db : SystemContext) : IQueryable<Schema> =
     db.Schemas

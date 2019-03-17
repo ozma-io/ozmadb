@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.FunQL.Parser
 open FunWithFlags.FunDB.FunQL.View
 open FunWithFlags.FunDB.FunQL.Compiler
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Entity
 open FunWithFlags.FunDB.ContextCache
 
@@ -83,9 +84,11 @@ type UserViewRef =
 type RequestContext (cacheStore : ContextCacheStore, userName : UserName, language : string) =
     let conn = new DatabaseConnection(cacheStore.ConnectionString)
     let cache = cacheStore.GetCache(conn)
+    let transactionTime = DateTimeOffset.UtcNow
     let globalArguments =
         [ ("lang", FString language)
           ("user", FString userName)
+          ("transaction_time", FDateTime transactionTime)
         ] |> Map.ofSeq
     do
         assert (globalArgumentTypes |> Map.toSeq |> Seq.forall (fun (name, _) -> Map.containsKey name globalArguments))
@@ -156,6 +159,8 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
         // FIXME
         if userName <> rootUserName && entityRef.schema <> FunQLName "user" then
             Error <| EEAccessDenied
+        else if entityRef.schema = funSchema && entityRef.name = funEvents then
+            Error <| EEAccessDenied
         else
             match cache.layout.FindEntity(entityRef) with
             | None -> Error EENotFound
@@ -165,9 +170,22 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
                 | Ok args ->
                     try
                         insertEntity conn.Query entityRef entity args
-                        // Optimize
-                        if entityRef.schema = FunQLName "public" then
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "insert",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable(), // FIXME: set id
+                                Details = args.ToString()
+                            )
+                        ignore <| conn.System.Events.Add(event)
+                        // FIXME: better handling of this
+                        if entityRef.schema = funSchema then
                             cacheStore.Migrate(conn)
+                        ignore <| conn.System.SaveChanges()
                         conn.EnsureCommit()
                         Ok ()
                     with
@@ -181,6 +199,8 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
     member this.UpdateEntity (entityRef : ResolvedEntityRef) (id : int) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
         if userName <> rootUserName && entityRef.schema <> FunQLName "user" then
             Error <| EEAccessDenied
+        else if entityRef.schema = funSchema && entityRef.name = funEvents then
+            Error <| EEAccessDenied        
         else
             match cache.layout.FindEntity(entityRef) with
             | None -> Error EENotFound
@@ -191,8 +211,21 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
                 | Ok args ->
                     try
                         updateEntity conn.Query entityRef entity id args
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "update",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable id,
+                                Details = args.ToString()
+                            )
+                        ignore <| conn.System.Events.Add(event)
                         if entityRef.schema = funSchema then
                             cacheStore.Migrate(conn)
+                        ignore <| conn.System.SaveChanges()
                         conn.EnsureCommit()
                         Ok ()
                     with
@@ -206,14 +239,29 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
     member this.DeleteEntity (entityRef : ResolvedEntityRef) (id : int) : Result<unit, EntityErrorInfo> =
         if userName <> rootUserName then
             Error <| EEAccessDenied
+        else if entityRef.schema = funSchema && entityRef.name = funEvents then
+            Error <| EEAccessDenied        
         else
             match cache.layout.FindEntity(entityRef) with
             | None -> Error EENotFound
             | Some entity ->
                 try
                     deleteEntity conn.Query entityRef entity id
+                    let event =
+                        EventEntry (
+                            TransactionTimestamp = transactionTime,
+                            Timestamp = DateTimeOffset.UtcNow,
+                            Type = "delete",
+                            UserName = userName,
+                            SchemaName = entityRef.schema.ToString(),
+                            EntityName = entityRef.name.ToString(),
+                            EntityId = Nullable id,
+                            Details = ""
+                        )
+                    ignore <| conn.System.Events.Add(event)            
                     if entityRef.schema = funSchema then
                         cacheStore.Migrate(conn)
+                    ignore <| conn.System.SaveChanges()                    
                     conn.EnsureCommit()
                     Ok ()
                 with
