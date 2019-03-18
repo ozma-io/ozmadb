@@ -8,10 +8,13 @@ open Microsoft.FSharp.Reflection
 type Void = private Void of unit
 
 module Option =
-    let getOrFailwith (errorFunc : unit -> string) (a : 'a option) : 'a =
-        match a with
+    let getOrFailWith (errorFunc : unit -> string) : 'a option -> 'a = function
         | Some r -> r
         | None -> failwith (errorFunc ())
+
+    let toSeq : 'a option -> 'a seq = function
+        | Some r -> Seq.singleton r
+        | None -> Seq.empty
 
 module Result =
     let isOk : Result<'a, 'e> -> bool = function
@@ -52,6 +55,9 @@ module Seq =
     let fold1 (func : 'a -> 'a -> 'a) (s : seq<'a>) : 'a =
         Seq.fold func (Seq.head s) (Seq.tail s)
 
+    let areEqual (a : seq<'a>) (b : seq<'a>) : bool =
+        Seq.compareWith (fun e1 e2 -> if e1 = e2 then 0 else -1) a b = 0
+
     // FIXME: make those stop on first failure
     let traverseOption (func : 'a -> 'b option) (vals : seq<'a>) : seq<'b> option =
         let res = vals |> Seq.map func |> Seq.cache
@@ -67,19 +73,54 @@ module Seq =
         | None -> Ok (Seq.map (Result.get) res)
 
 module Map =
+    let ofSeqWith (resolve : 'k -> 'v -> 'v -> 'v) (items : seq<'k * 'v>) : Map<'k, 'v> =
+        let addOrResolve m (k, v) =
+            let newValue =
+                match Map.tryFind k m with
+                | Some v' -> resolve k v' v
+                | None -> v
+            Map.add k newValue m
+        Seq.fold addOrResolve Map.empty items
+
     let ofSeqUnique (items : seq<'k * 'v>) : Map<'k, 'v> =
-        Seq.fold (fun m (k, v) -> if Map.containsKey k m then failwith (sprintf "Key '%s' already exists" (k.ToString ())) else Map.add k v m) Map.empty items
+        ofSeqWith (fun k v1 v2 -> failwith (sprintf "Key '%s' already exists" (k.ToString ()))) items
 
     let getWithDefault (k : 'k) (def : 'v) (m : Map<'k, 'v>) : 'v =
         match Map.tryFind k m with
         | Some v -> v
         | None -> def
 
+    let mapMaybe (f : 'k -> 'a -> 'b option) (m : Map<'k, 'a>) : Map<'k, 'b> =
+        m |> Map.toSeq |> Seq.mapMaybe (fun (k, v) -> Option.map (fun v' -> (k, v')) (f k v)) |> Map.ofSeq
+
+    let unionWith (resolve : 'k -> 'v -> 'v -> 'v) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
+        ofSeqWith resolve (Seq.append (Map.toSeq a) (Map.toSeq b))
+
     let unionUnique (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
         ofSeqUnique (Seq.append (Map.toSeq a) (Map.toSeq b))
 
     let union (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
         Map.ofSeq (Seq.append (Map.toSeq a) (Map.toSeq b))
+
+    let intersectWithMaybe (resolve : 'k -> 'v -> 'v -> 'v1 option) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v1> =
+        let intersectResolve m (k, v) =
+            match Map.tryFind k b with
+            | None -> m
+            | Some v' ->
+                match resolve k v v' with
+                | None -> m
+                | Some res -> Map.add k res m
+        Seq.fold intersectResolve Map.empty (Map.toSeq a)
+
+    let intersectWith (resolve : 'k -> 'v -> 'v -> 'v1) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v1> =
+        let intersectResolve m (k, v) =
+            match Map.tryFind k b with
+            | None -> m
+            | Some v' -> Map.add k (resolve k v v') m
+        Seq.fold intersectResolve Map.empty (Map.toSeq a)
+
+    let intersect (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
+        intersectWith (fun k v1 v2 -> v2) a b
 
     let difference (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
         Map.filter (fun k v -> not (Map.containsKey k b)) a
@@ -94,6 +135,7 @@ module Map =
 
     let values (map : Map<'k, 'v>) : seq<'v> =
         map |> Map.toSeq |> Seq.map snd
+    
     let keysSet (map : Map<'k, 'v>) : Set<'k> =
         map |> keys |> Set.ofSeq
 
@@ -122,6 +164,11 @@ module Map =
 
     let reverse (map : Map<'k, 'v>): Map<'v, 'k> =
         map |> Map.toSeq |> Seq.map (fun (a, b) -> (b, a)) |> Map.ofSeq
+
+    let findOrFailWith (errorFunc : unit -> string) (k : 'k) (m : Map<'k, 'v>) : 'v =
+        match Map.tryFind k m with
+        | Some r -> r
+        | None -> failwith (errorFunc ())
 
 module Set =
     let toMap (f : 'k -> 'v) (s : Set<'k>) : Map<'k, 'v> =

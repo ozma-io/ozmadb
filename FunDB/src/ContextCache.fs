@@ -132,12 +132,12 @@ let buildCachedUserView
                     runViewExpr conn compiled arguments <| fun info res ->
                         let cached = { compiled = compiled
                                        resolved = resolved
-                                       info = mergeViewInfo layout resolved info
+                                       info = mergeViewInfo layout resolved compiled info
                                        pureAttributes = getPureAttributes resolved compiled res
                                      }
                         Ok <| func cached res
                 with
-                | ViewExecutionError err -> Error <| UVEExecute err
+                | ViewExecutionException err -> Error <| UVEExecute err
 
 let private rebuildUserViews (conn : DatabaseConnection) (layout : Layout) : Map<string, CachedUserView> =
     let buildOne (uv : UserView) =

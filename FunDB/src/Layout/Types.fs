@@ -21,7 +21,7 @@ type ReferenceRef =
 
 type ResolvedFieldType = FieldType<ResolvedEntityRef, ReferenceRef>
 
-type ResolvedReferenceFieldExpr = FieldExpr<ReferenceRef>
+type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>
 
 type ResolvedUniqueConstraint =
     { columns : FunQLName array

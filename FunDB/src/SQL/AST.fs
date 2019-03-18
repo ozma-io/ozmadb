@@ -86,7 +86,7 @@ type ColumnRef =
 
 type ArrayValue<'t> =
     | AVValue of 't
-    | AVArray of ArrayValue<'t> array
+    | AVArray of ArrayValue<'t>[]
     | AVNull
 
 and ValueArray<'t> = ArrayValue<'t> array
@@ -325,6 +325,22 @@ type JoinType =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+type SetOperation =
+    | Union
+    | Intersect
+    | Except
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | Union -> "UNION"
+            | Intersect -> "INTERSECT"
+            | Except -> "EXCEPT"
+        
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
 type ValueExpr =
     | VEValue of Value
@@ -342,16 +358,16 @@ type ValueExpr =
     | VELessEq of ValueExpr * ValueExpr
     | VEGreater of ValueExpr * ValueExpr
     | VEGreaterEq of ValueExpr * ValueExpr
-    | VEIn of ValueExpr * (ValueExpr array)
-    | VENotIn of ValueExpr * (ValueExpr array)
+    | VEIn of ValueExpr * ValueExpr[]
+    | VENotIn of ValueExpr * ValueExpr[]
     | VEInQuery of ValueExpr * SelectExpr
     | VENotInQuery of ValueExpr * SelectExpr
     | VEIsNull of ValueExpr
     | VEIsNotNull of ValueExpr
-    | VEFunc of SQLName * (ValueExpr array)
+    | VEFunc of SQLName * ValueExpr[]
     | VECast of ValueExpr * DBValueType
-    | VECase of ((ValueExpr * ValueExpr) array) * (ValueExpr option)
-    | VECoalesce of ValueExpr array
+    | VECase of (ValueExpr * ValueExpr)[] * (ValueExpr option)
+    | VECoalesce of ValueExpr[]
     with
         override this.ToString () = this.ToSQLString()
         
@@ -391,8 +407,8 @@ type ValueExpr =
                 let esStr = es |> Seq.map (fun (cond, e) -> sprintf "WHEN %s THEN %s" (cond.ToSQLString()) (e.ToSQLString())) |> String.concat " "
                 let elsStr =
                     match els with
-                        | None -> ""
-                        | Some e -> sprintf "ELSE %s" (e.ToSQLString())
+                    | None -> ""
+                    | Some e -> sprintf "ELSE %s" (e.ToSQLString())
                 concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
             | VECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
@@ -433,11 +449,9 @@ and SelectedColumn =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and ConditionClause =
-    { where : ValueExpr option
-      orderBy : (SortOrder * ValueExpr) array
-      limit : int option
-      offset : int option
+and FromClause =
+    { from : FromExpr
+      where : ValueExpr option
     } with
         override this.ToString () = this.ToSQLString()
 
@@ -446,39 +460,16 @@ and ConditionClause =
                 match this.where with
                 | None -> ""
                 | Some cond -> sprintf "WHERE %s" (cond.ToSQLString())
-            let orderByStr =
-                if Array.isEmpty this.orderBy
-                then ""
-                else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToSQLString()) (ord.ToSQLString())) |> String.concat ", ")
-            let limitStr =
-                match this.limit with
-                | Some n -> sprintf "LIMIT %i" n
-                | None -> ""
-            let offsetStr =
-                match this.offset with
-                | Some n -> sprintf "OFFSET %i" n
-                | None -> ""
-
-            concatWithWhitespaces [whereStr; orderByStr; limitStr; offsetStr]
+                
+            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToSQLString(); whereStr])
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and FromClause =
-    { from : FromExpr
-      condition : ConditionClause
-    } with
-        override this.ToString () = this.ToSQLString()
-
-        member this.ToSQLString () =
-            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToSQLString(); this.condition.ToSQLString()])
-
-        interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString()
-
-and SelectExpr =
-    { columns : SelectedColumn array
+and SingleSelectExpr =
+    { columns : SelectedColumn[]
       clause : FromClause option
+      orderLimit : OrderLimitClause
     } with
         override this.ToString () = this.ToSQLString()
 
@@ -489,8 +480,49 @@ and SelectExpr =
                 | None -> ""
                 | Some clause -> clause.ToSQLString()
 
-            sprintf "SELECT %s" (concatWithWhitespaces [resultsStr; fromStr])
+            sprintf "SELECT %s" (concatWithWhitespaces [resultsStr; fromStr; this.orderLimit.ToSQLString()])
 
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and OrderLimitClause =
+    { orderBy : (SortOrder * ValueExpr)[]
+      limit : ValueExpr option
+      offset : ValueExpr option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+                let orderByStr =
+                    if Array.isEmpty this.orderBy
+                    then ""
+                    else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToSQLString()) (ord.ToSQLString())) |> String.concat ", ")
+                let limitStr =
+                    match this.limit with
+                    | Some e -> sprintf "LIMIT %s" (e.ToSQLString())
+                    | None -> ""
+                let offsetStr =
+                    match this.offset with
+                    | Some e -> sprintf "OFFSET %s" (e.ToSQLString())
+                    | None -> ""
+                concatWithWhitespaces [orderByStr; limitStr; offsetStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and SelectExpr =
+    | SSelect of SingleSelectExpr
+    | SSetOp of SetOperation * SelectExpr * SelectExpr * OrderLimitClause
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | SSelect e -> e.ToSQLString()
+            | SSetOp (op, a, b, order) ->
+                let setStr = sprintf "(%s) %s (%s)" (a.ToSQLString()) (op.ToSQLString()) (b.ToSQLString())
+                concatWithWhitespaces [setStr; order.ToSQLString()]
+        
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
@@ -527,13 +559,13 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
 
 type InsertExpr =
     { name : TableRef
-      columns : ColumnName array
-      values : (ValueExpr array) array
+      columns : ColumnName[]
+      values : ValueExpr[][]
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            let renderInsertValue (values : ValueExpr array) = 
+            let renderInsertValue (values : ValueExpr[]) = 
                 values |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
 
             assert (not <| Array.isEmpty this.values)
@@ -596,10 +628,10 @@ type ConstraintType =
     | CTForeignKey
 
 type ConstraintMeta =
-    | CMUnique of ColumnName array
+    | CMUnique of ColumnName[]
     | CMCheck of ValueExpr
-    | CMPrimaryKey of ColumnName array
-    | CMForeignKey of TableRef * ((ColumnName * ColumnName) array)
+    | CMPrimaryKey of ColumnName[]
+    | CMForeignKey of TableRef * (ColumnName * ColumnName)[]
 
 type TableMeta =
     { columns : Map<ColumnName, ColumnMeta>
@@ -662,7 +694,7 @@ type SchemaOperation =
     // Constraint operations are not plain ALTER TABLE operations because they create new objects at schema namespace.
     | SOCreateConstraint of SchemaObject * TableName * ConstraintMeta
     | SODeleteConstraint of SchemaObject * TableName
-    | SOAlterTable of TableRef * TableOperation array
+    | SOAlterTable of TableRef * TableOperation[]
     with
         override this.ToString () = this.ToSQLString()
 
@@ -694,3 +726,5 @@ type SchemaOperation =
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
+
+let emptyOrderLimitClause = { orderBy = [||]; limit = None; offset = None }

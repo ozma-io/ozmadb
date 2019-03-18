@@ -48,24 +48,28 @@ let private resolveLocalExpr (entity : SourceEntity) : ParsedFieldExpr -> LocalF
         | ref -> raise (ResolveLayoutException <| sprintf "Local expression cannot contain qualified field references: %O" ref)
     let voidPlaceholder name =
         raise (ResolveLayoutException <| sprintf "Placeholders are not allowed in local expressions: %O" name)
-    mapFieldExpr resolveColumn voidPlaceholder
+    let voidQuery query =
+        raise (ResolveLayoutException <| sprintf "Queries are not allowed in local expressions: %O" query)
+    mapFieldExpr resolveColumn voidPlaceholder voidQuery
 
 let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : SourceEntity) : ParsedFieldExpr -> ResolvedReferenceFieldExpr =
     let resolveColumn = function
         | { entity = Some { schema = None; name = FunQLName "this" }; name = thisName } ->
-            match thisEntity.FindField(thisName) with
+            match thisEntity.FindField thisName with
             | Some _ -> RThis thisName
             | None when thisName = funId -> RThis thisName
             | None -> raise (ResolveLayoutException <| sprintf "Local column not found in reference condition: %s" (thisName.ToFunQLString()))
         | { entity = Some { schema = None; name = FunQLName "ref" }; name = refName } ->
-            match refEntity.FindField(refName) with
+            match refEntity.FindField refName with
             | Some _ -> RRef refName
             | None when refName = funId -> RRef refName
             | None -> raise (ResolveLayoutException <| sprintf "Referenced column not found in reference condition: %s" (refName.ToFunQLString()))
         | ref -> raise (ResolveLayoutException <| sprintf "Invalid column reference in reference condition: %O" ref)
     let voidPlaceholder name =
         raise (ResolveLayoutException <| sprintf "Placeholders are not allowed in reference conditions: %O" name)
-    mapFieldExpr resolveColumn voidPlaceholder
+    let voidQuery query =
+        raise (ResolveLayoutException <| sprintf "Queries are not allowed in reference conditions: %O" query)    
+    mapFieldExpr resolveColumn voidPlaceholder voidQuery
 
 let private resolveUniqueConstraint (entity : SourceEntity) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.columns then
