@@ -28,6 +28,7 @@ type Config =
       url : string
       preloadedLayout : string option
       migration : string option
+      authority : string
     }
 
 [<EntryPoint>]
@@ -87,7 +88,7 @@ let main (args : string[]) : int =
         o.DefaultChallengeScheme <- JwtBearerDefaults.AuthenticationScheme
 
     let jwtBearerOptions (cfg : JwtBearerOptions) =
-        cfg.Authority <- "https://keycloak.myprocessx.com/auth/realms/myprocessx-dev/"
+        cfg.Authority <- config.authority
         cfg.TokenValidationParameters <- TokenValidationParameters (
             ValidateAudience = false
         )
