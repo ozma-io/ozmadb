@@ -89,6 +89,8 @@ let main (args : string[]) : int =
 
     let jwtBearerOptions (cfg : JwtBearerOptions) =
         cfg.Authority <- config.authority
+        // We use internal network so it's okay
+        cfg.RequireHttpsMetadata <- false
         cfg.TokenValidationParameters <- TokenValidationParameters (
             ValidateAudience = false
         )
