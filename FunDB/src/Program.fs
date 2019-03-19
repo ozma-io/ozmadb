@@ -28,7 +28,8 @@ type Config =
       url : string
       preloadedLayout : string option
       migration : string option
-      authority : string
+      authAuthority : string
+      authMetadata : string
     }
 
 [<EntryPoint>]
@@ -88,7 +89,8 @@ let main (args : string[]) : int =
         o.DefaultChallengeScheme <- JwtBearerDefaults.AuthenticationScheme
 
     let jwtBearerOptions (cfg : JwtBearerOptions) =
-        cfg.Authority <- config.authority
+        cfg.Authority <- config.authAuthority
+        cfg.MetadataAddress <- config.authMetadata
         // We use internal network so it's okay
         cfg.RequireHttpsMetadata <- false
         cfg.TokenValidationParameters <- TokenValidationParameters (
