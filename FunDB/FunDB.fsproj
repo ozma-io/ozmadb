@@ -70,7 +70,6 @@
     <Compile Include="src/Context.fs" />
 
     <Compile Include="src/API/Utils.fs" />
-    <Compile Include="src/API/Auth.fs" />
     <Compile Include="src/API/View.fs" />
     <Compile Include="src/API/Permissions.fs" />
     <Compile Include="src/API/Entity.fs" />
@@ -83,10 +82,13 @@
     <PackageReference Include="FsLexYacc" Version="7.0.*" />
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.2.*" />
-    <PackageReference Include="BCrypt.Net-Next" Version="3.1.*" />
-    <PackageReference Include="Suave" Version="2.5.*" />
-    <PackageReference Include="Arachne.Http" Version="3.0.*" />
-    <PackageReference Include="jose-jwt" Version="2.4.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Hosting" Version="2.2.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Server.Kestrel" Version="2.2.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="2.2.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Cors" Version="2.2.*" />
+    <PackageReference Include="Microsoft.AspNetCore.HttpOverrides" Version="2.2.*" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="2.2.*" />
+    <PackageReference Include="Giraffe" Version="3.6.*" />
     <PackageReference Include="Jint" Version="3.0.0-beta-*" />
     <PackageReference Include="Newtonsoft.Json" Version="12.0.*" />
   </ItemGroup>

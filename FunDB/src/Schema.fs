@@ -3,12 +3,8 @@ module FunWithFlags.FunDB.Schema
 open System
 open System.Linq
 open Microsoft.EntityFrameworkCore
-open BCrypt.Net
 
 open FunWithFlags.FunDB.Layout.System
-open Suave.Logging
-open System
-open System
 
 type SystemContext (options : DbContextOptions<SystemContext>) =
     inherit DbContext (options)
@@ -252,15 +248,6 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
-        [<ColumnField("string")>]
-        member val PasswordHash = "" with get, set
-    
-        member this.CheckPassword (password) =
-            BCrypt.Verify(password, this.PasswordHash)
-
-        member this.Password
-            with set (value) =
-                this.PasswordHash <- BCrypt.HashPassword(value)
 
 and
     [<AllowNullLiteral>]

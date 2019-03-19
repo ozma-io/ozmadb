@@ -1,21 +1,22 @@
 open System
 open System.IO
-open System.Security.Cryptography.X509Certificates
-open System.Linq
 open Newtonsoft.Json
-open Arachne.Http
-open Arachne.Language
-open Suave
-open Suave.CORS
-open Suave.Operators
-open Suave.Filters
+open Microsoft.AspNetCore.Builder
+open Microsoft.AspNetCore.Http
+open Microsoft.AspNetCore.Hosting
+open Microsoft.Extensions.Logging
+open Microsoft.Extensions.DependencyInjection
+open Microsoft.AspNetCore.Cors.Infrastructure
+open Microsoft.AspNetCore.Authentication
+open Microsoft.AspNetCore.Authentication.JwtBearer
+open Microsoft.IdentityModel.Tokens
+open Microsoft.IdentityModel.Logging
+open Giraffe
+open Giraffe.Serialization.Json
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
-open FunWithFlags.FunDB.Schema
-open FunWithFlags.FunDB.Permissions.Types
-open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Context
-open FunWithFlags.FunDB.API.Auth
 open FunWithFlags.FunDB.API.View
 open FunWithFlags.FunDB.API.Permissions
 open FunWithFlags.FunDB.API.Entity
@@ -24,30 +25,20 @@ open FunWithFlags.FunDB.Layout.Source
 
 type Config =
     { connectionString : string
-      serverCert : string
-      expirationTime : int
-      host : string
-      port : int
+      url : string
       preloadedLayout : string option
       migration : string option
     }
 
-let randomPassword (passwordLength : int) : string =
-    let allowedChars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ0123456789!@$?_-"
-    let rd = Random()
-    Seq.init passwordLength (fun _ -> allowedChars.[rd.Next(0, String.length allowedChars)]) |> Seq.toArray |> System.String
-
 [<EntryPoint>]
 let main (args : string[]) : int =
     // Register a global converter to have nicer native F# types JSON conversion
-    JsonConvert.DefaultSettings <- fun () -> defaultSerializerSettings
+    JsonConvert.DefaultSettings <- fun () -> defaultJsonSerializerSettings
 
     let configPath = args.[0]
     let rawConfig = File.ReadAllText(configPath)
     let config = JsonConvert.DeserializeObject<Config>(rawConfig)
 
-    use cert = new X509Certificate2(config.serverCert)
-    let expirationTime = TimeSpan(0, 0, config.expirationTime)
     let preloadedLayout =
         match config.preloadedLayout with
         | Some path -> path |> File.ReadAllText |> JsonConvert.DeserializeObject<SourceLayout>
@@ -62,54 +53,77 @@ let main (args : string[]) : int =
         }
 
     let cacheStore = ContextCacheStore(config.connectionString, preloadedSettings)
-        
-    using (new DatabaseConnection(config.connectionString)) <| fun conn ->
-        // Create admin user
-        match conn.System.Users.Where(fun x -> x.Name = rootUserName) |> Seq.first with
-        | None ->
-            let password = randomPassword 16
-            let newUser = User(Name=rootUserName, Password=password)
-            ignore <| conn.System.Users.Add(newUser)
-            ignore <| conn.System.SaveChanges()
-            eprintfn "Created root user with password '%s'. Please change the password as soon as possible!" password
-        | Some user -> ()
- 
-        conn.Commit()
 
-    let protectedApi (userName : string) =
-        fun ctx -> async {
-            let getFirstLang = function
-                | AcceptLanguage ((AcceptableLanguage (Range range, _))::_) -> Choice1Of2 (String.Join ("-", range))
-                | _ -> Choice2Of2 ""
-            let lang =            
-                match ctx.request.header "Accept-Language" |> Choice.bind AcceptLanguage.tryParse |> Choice.bind getFirstLang with
-                | Choice1Of2 lang -> lang
-                | _ -> "en-US"
+    let protectedApi (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+        let userClaim = ctx.User.FindFirst "name"
+        let userName = userClaim.Value
+        let specifiedLang =
+            ctx.Request.GetTypedHeaders().AcceptLanguage
+            |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
+            |> Seq.first
+        let lang =
+            match specifiedLang with
+            | Some l -> l.Value.Value
+            | None -> "en-US"
+        use rctx = new RequestContext(cacheStore, userName, lang)
+        choose
+            [ 
+            ] next ctx
 
-            use rctx = new RequestContext(cacheStore, userName, lang)
-            return! choose
-                [ viewsApi rctx
-                  permissionsApi rctx
-                  entitiesApi rctx
-                ] ctx
-        }
+    let webApp =
+        choose
+            [ viewsApi cacheStore
+              permissionsApi cacheStore
+              entitiesApi cacheStore
+              (setStatusCode 404 >=> text "Not Found")
+            ]
 
-    let suaveCfg =
-        { defaultConfig with
-            bindings = [ HttpBinding.createSimple HTTP config.host config.port ]
-        }
-    let corsCfg =
-        { defaultCORSConfig with
-            allowedMethods = InclusiveOption.Some [ HttpMethod.GET; HttpMethod.PUT; HttpMethod.POST; HttpMethod.DELETE; HttpMethod.OPTIONS ]
-        }
-    let corsApi = cors corsCfg
+    let errorHandler (ex : Exception) (logger : ILogger) =
+        logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
+        clearResponse >=> setStatusCode 500 >=> text ex.Message
 
-    let funApi = choose [
-        // FIXME: invalid use of OPTIONS
-        OPTIONS >=> corsApi
-        corsApi >=> authApi config.connectionString (cert.GetECDsaPrivateKey()) expirationTime protectedApi
-        RequestErrors.NOT_FOUND ""
-    ]
-    startWebServer suaveCfg funApi
+    let authenticationOptions (o : AuthenticationOptions) =
+        o.DefaultAuthenticateScheme <- JwtBearerDefaults.AuthenticationScheme
+        o.DefaultChallengeScheme <- JwtBearerDefaults.AuthenticationScheme
+
+    let jwtBearerOptions (cfg : JwtBearerOptions) =
+        cfg.Authority <- "https://keycloak.myprocessx.com/auth/realms/myprocessx-dev/"
+        cfg.TokenValidationParameters <- TokenValidationParameters (
+            ValidateAudience = false
+        )
+
+    let configureCors (cfg : CorsPolicyBuilder) =
+        ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
+
+    let configureApp (app : IApplicationBuilder) =
+        app
+            .UseAuthentication()
+            .UseHttpMethodOverride()
+            .UseCors(configureCors)
+            .UseGiraffeErrorHandler(errorHandler)
+            .UseGiraffe(webApp)
+
+    let configureServices (services : IServiceCollection) =
+        ignore <| services.AddGiraffe()
+        ignore <|
+            services
+                .AddAuthentication(authenticationOptions)
+                .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
+        ignore <| services.AddCors()          
+        ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer defaultJsonSerializerSettings)
+
+    let configureLogging (builder : ILoggingBuilder) =
+        ignore <| builder.AddConsole()
+
+    IdentityModelEventSource.ShowPII <- true    
+
+    WebHostBuilder()
+        .UseKestrel()
+        .Configure(Action<IApplicationBuilder> configureApp)
+        .ConfigureServices(configureServices)
+        .ConfigureLogging(configureLogging)
+        .UseUrls(config.url)
+        .Build()
+        .Run()
 
     0

@@ -1,10 +1,8 @@
 module FunWithFlags.FunDB.API.View
 
-open Suave
-open Suave.Filters
-open Suave.Operators
+open Microsoft.AspNetCore.Http
+open Giraffe
 
-open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.API.Utils
 open FunWithFlags.FunDB.ContextCache
 open FunWithFlags.FunDB.Context
@@ -23,7 +21,9 @@ type ViewInfoGetResponse =
       pureColumnAttributes : ExecutedAttributeMap array
     }
 
-let viewsApi (rctx : RequestContext) : WebPart =
+let viewsApi (cacheStore : ContextCacheStore) : HttpHandler =
+    let guarded = withContext cacheStore
+
     let returnError = function
         | UVEArguments msg -> RequestErrors.BAD_REQUEST <| sprintf "Invalid arguments: %s" msg
         | UVEAccessDenied -> RequestErrors.FORBIDDEN ""
@@ -33,45 +33,42 @@ let viewsApi (rctx : RequestContext) : WebPart =
         | UVEExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
         | UVEFixup msg -> RequestErrors.BAD_REQUEST <| sprintf "Condition compilation error: %s" msg
 
-    let selectFromView (viewRef : UserViewRef) =
-        request <| fun req ->
-            let condition =
-                match req.queryParam "__condition" with
-                    | Choice1Of2 rawCondition -> Some rawCondition
-                    | Choice2Of2 _ -> None
-            let rawArgs = req.query |> Seq.mapMaybe (fun (name, maybeArg) -> Option.map (fun arg -> (name, arg)) maybeArg) |> Map.ofSeq
-            match rctx.GetUserView viewRef condition rawArgs with
-                | Ok (cached, res) -> jsonResponse { info = cached.info
-                                                     result = res
-                                                   }
-                | Result.Error err -> returnError err
+    let selectFromView (viewRef : UserViewRef) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) =
+        let condition =
+            match ctx.GetQueryStringValue "__condition" with
+            | Ok rawCondition -> Some rawCondition
+            | Error _ -> None
+        let rawArgs = queryArgs ctx
+        match rctx.GetUserView viewRef condition rawArgs with
+        | Ok (cached, res) -> json { info = cached.info
+                                     result = res
+                                   } next ctx
+        | Result.Error err -> returnError err next ctx
 
-    let infoView (viewRef : UserViewRef) =
-        match rctx.GetUserViewInfo(viewRef) with
+    let infoView (viewRef : UserViewRef) (rctx : RequestContext) =
+        match rctx.GetUserViewInfo viewRef with
             | Ok cached ->
                 let res =
                     { info = cached.info
                       pureAttributes = cached.pureAttributes.attributes
                       pureColumnAttributes = cached.pureAttributes.columnAttributes
                     }
-                jsonResponse res
+                json res
             | Result.Error err -> returnError err
 
-    // FIXME: `method` is fugly; replace framework?
-    let viewApi (method : string) (viewRef : UserViewRef) =
-        match method with
-            | "entries" -> GET >=> selectFromView viewRef
-            | "info" -> GET >=> infoView viewRef
-            | _ -> succeed
+    let viewApi (viewRef : UserViewRef) =
+        choose
+            [ route "/entries" >=> GET >=> guarded (selectFromView viewRef)
+              route "/info" >=> GET >=> guarded (infoView viewRef)
+            ]
 
-    let anonymousView method =
-        request <| fun req ->
-            match req.queryParam "__query" with
-                | Choice1Of2 rawView -> viewApi method <| UVAnonymous rawView
-                | Choice2Of2 _ -> RequestErrors.BAD_REQUEST "Query not specified"
-    let namedView (name, method) = viewApi method <| UVNamed name
+    let anonymousView (next : HttpFunc) (ctx : HttpContext) =
+        match ctx.GetQueryStringValue "__query" with
+        | Ok rawView -> viewApi (UVAnonymous rawView) next ctx
+        | Error _ -> RequestErrors.BAD_REQUEST "Query not specified" next ctx
+    let namedView name = viewApi <| UVNamed name
 
     choose
-        [ pathScan "/views/anonymous/%s" anonymousView
-          pathScan "/views/by_name/%s/%s" namedView
+        [ subRoute "/views/anonymous" anonymousView
+          subRoutef "/views/by_name/%s" namedView
         ]

@@ -62,7 +62,7 @@ module Seq =
 
     let traverseResult (func : 'a -> Result<'b, 'e>) (vals : seq<'a>) : Result<seq<'b>, 'e> =
         let res = vals |> Seq.map func |> Seq.cache
-        match res |> Seq.filter Result.isError |> Seq.first with
+        match res |> Seq.filter Result.isError |> first with
         | Some err -> Error <| Result.getError err
         | None -> Ok (Seq.map (Result.get) res)
 

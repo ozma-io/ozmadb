@@ -1,13 +1,17 @@
 ﻿module FunWithFlags.FunDB.API.Permissions
 
-open Suave
-open Suave.Filters
-open Suave.Operators
+open Giraffe
 
 open FunWithFlags.FunDB.API.Utils
 open FunWithFlags.FunDB.Context
+open FunWithFlags.FunDB.ContextCache
 
-let permissionsApi (rctx : RequestContext) : WebPart =
+let permissionsApi (cacheStore : ContextCacheStore) : HttpHandler =
+    let guarded = withContext cacheStore
+
+    let permissions (rctx : RequestContext) =
+        json rctx.Cache.allowedDatabase
+
     choose
-        [ path "/permissions" >=> GET >=> jsonResponse rctx.Cache.allowedDatabase
+        [ route "/permissions" >=> GET >=> guarded permissions
         ]
