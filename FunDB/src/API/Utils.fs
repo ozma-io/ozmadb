@@ -21,6 +21,7 @@ type RealmAccess =
 
 let withContext (cacheStore : ContextCacheStore) (f : RequestContext -> HttpHandler) : HttpHandler =
     let protectedApi (next : HttpFunc) (ctx : HttpContext) =
+        ctx.User.Claims |> Seq.iter (fun claim -> eprintfn "type: %s" claim.Type)
         let userClaim = ctx.User.FindFirst "preferred_username"
         let userName = userClaim.Value
         let userRole = ctx.User.FindFirst "realm_access"
