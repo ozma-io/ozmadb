@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -e
 # Build and publish the application.
 
 set -x
