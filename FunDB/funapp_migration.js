@@ -19,7 +19,7 @@ var commonViews = {
         "  left join \"public\".\"ColumnFields\" on \"ColumnFields\".\"Id\" = \"ColumnFieldTranslations\".\"ColumnFieldId\"\n" +
         "  left join \"public\".\"Entities\" on \"Entities\".\"Id\" = \"ColumnFields\".\"EntityId\"\n" +
         "  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
-        "where $$Lang LIKE \"ColumnFieldTranslations\".\"Language\" || '%'" +
+        "where $$Lang LIKE \"ColumnFieldTranslations\".\"Language\" || '%'\n" +
         "union select\n" +
         "  \"Schemas\".\"Name\" as \"SchemaName\",\n" +
         "  \"Entities\".\"Name\" as \"EntityName\",\n" +
