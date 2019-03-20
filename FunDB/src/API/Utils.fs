@@ -21,12 +21,15 @@ type RealmAccess =
 
 let withContext (cacheStore : ContextCacheStore) (f : RequestContext -> HttpHandler) : HttpHandler =
     let protectedApi (next : HttpFunc) (ctx : HttpContext) =
-        ctx.User.Claims |> Seq.iter (fun claim -> eprintfn "type: %s" claim.Type)
         let userClaim = ctx.User.FindFirst "preferred_username"
         let userName = userClaim.Value
-        let userRole = ctx.User.FindFirst "realm_access"
-        let roles = JsonConvert.DeserializeObject<RealmAccess> userRole.Value
-        let isRoot = roles.roles |> Seq.contains "fundb_admin"
+        let userRoles = ctx.User.FindFirst "realm_access"
+        let isRoot =
+            if not <| isNull userRoles then
+                let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
+                roles.roles |> Seq.contains "fundb_admin"
+            else
+                false
 
         let specifiedLang =
             ctx.Request.GetTypedHeaders().AcceptLanguage
