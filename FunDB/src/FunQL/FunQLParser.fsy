@@ -234,6 +234,7 @@ OrderByClause:
 
 OrderByList:
   | OrderByExpr                   { [ $1 ] }
+  | OrderByExpr COMMA             { [ $1 ] }
   | OrderByExpr COMMA OrderByList { $1 :: $3 }
 
 OrderByExpr:

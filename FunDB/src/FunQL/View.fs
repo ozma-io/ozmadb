@@ -304,7 +304,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
             | someMain -> raise (ViewResolveException <| sprintf "Cannot map main entity to the expression: %O, possible value: %O" ref someMain)
 
         let checkField fieldName (field : ResolvedColumnField) =
-            if Option.isNone field.defaultValue then
+            if Option.isNone field.defaultValue && not field.isNullable then
                 if not (Map.containsKey fieldName mappedResults) then
                     raise (ViewResolveException <| sprintf "Required inserted entity field is not in the view expression: %O" fieldName)
         entity.columnFields |> Map.iter checkField
