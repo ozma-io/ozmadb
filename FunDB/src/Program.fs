@@ -91,13 +91,13 @@ let main (args : string[]) : int =
             services
                 .AddAuthentication(authenticationOptions)
                 .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
-        ignore <| services.AddCors()          
+        ignore <| services.AddCors()
         ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer defaultJsonSerializerSettings)
 
     let configureLogging (builder : ILoggingBuilder) =
         ignore <| builder.AddConsole()
 
-    IdentityModelEventSource.ShowPII <- true    
+    IdentityModelEventSource.ShowPII <- true
 
     WebHostBuilder()
         .UseKestrel()

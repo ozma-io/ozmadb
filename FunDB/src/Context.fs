@@ -56,17 +56,6 @@ let private convertArgument (fieldType : FieldType<_, _>) (str : string) : Field
         | FTReference (_, _) -> Option.map FInt <| tryIntInvariant str
         | FTEnum values -> Some <| FString str
 
-let private addCondition (expr : string) (resolved : ResolvedViewExpr) (compiled : CompiledViewExpr) : Result<CompiledViewExpr, string> =
-    match parse tokenizeFunQL conditionClause expr with
-    | Error msg -> Error msg
-    | Ok rawExpr ->
-        let maybeResolved =
-            try
-                Ok <| resolveAddedCondition resolved rawExpr
-            with
-            | ViewResolveException err -> Error err
-        Result.map (compileAddedCondition compiled) maybeResolved
-
 let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<EntityArguments, string> =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind (fieldName.ToString()) rawArgs with
@@ -125,7 +114,7 @@ type RequestContext (opts : RequestParams) =
     let convertViewArguments (rawArgs : RawArguments) (resolved : ResolvedViewExpr) (compiled : CompiledViewExpr) : Result<ViewArguments, string> =
         let findArgument name (arg : CompiledArgument) =
             match name with
-            | PLocal lname -> 
+            | PLocal lname ->
                 match Map.tryFind lname rawArgs with
                 | Some argStr ->
                     match convertArgument arg.fieldType argStr with
@@ -134,6 +123,9 @@ type RequestContext (opts : RequestParams) =
                 | _ -> Error <| sprintf "Argument not found: %O" name
             | PGlobal gname -> Ok (Map.find gname globalArguments)
         compiled.arguments |> Map.traverseResult findArgument
+
+    let getArguments resolved compiled = compiled.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
+    let noFixup resolved compiled = Ok compiled
 
     interface IDisposable with
         member this.Dispose () =
@@ -146,8 +138,6 @@ type RequestContext (opts : RequestParams) =
     member this.CacheStore = cacheStore
 
     member this.GetUserViewInfo (uv : UserViewRef) : Result<CachedUserView, UserViewErrorInfo> =
-        let getArguments resolved compiled = compiled.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType) |> Ok
-        let noFixup resolved compiled = Ok compiled
         match uv with
         | UVAnonymous query -> buildCachedUserView conn.Query cache.layout query noFixup getArguments (fun info res -> info)
         | UVNamed name ->
@@ -155,24 +145,20 @@ type RequestContext (opts : RequestParams) =
             | None -> Error UVENotFound
             | Some cached -> Ok cached
 
-    member this.GetUserView (uv : UserViewRef) (rawCondition : string option) (rawArgs : RawArguments) : Result<CachedUserView * ExecutedViewExpr, UserViewErrorInfo> =
+    member this.GetUserView (uv : UserViewRef) (rawArgs : RawArguments) : Result<CachedUserView * ExecutedViewExpr, UserViewErrorInfo> =
         let filterInfo (info : MergedViewInfo) =
             if isLocalRoot then
                 info
             else
                 { info with
-                      updateEntity = None
-                      columns = info.columns |> Array.map (fun col -> { col with updateField = None })
+                      mainEntity = None
+                      columns = info.columns |> Array.map (fun col -> { col with mainField = None })
                 }
 
         match uv with
         | UVAnonymous query ->
-            let maybeAddCondition =
-                match rawCondition with
-                | None -> fun resolved compiled -> Ok compiled
-                | Some expr -> addCondition expr
             let getResult cached res = (cached, { res with rows = Array.ofSeq res.rows })
-            buildCachedUserView conn.Query cache.layout query maybeAddCondition (convertViewArguments rawArgs) getResult
+            buildCachedUserView conn.Query cache.layout query noFixup (convertViewArguments rawArgs) getResult
         | UVNamed name ->
             match Map.tryFind name cache.userViews with
             | None -> Error UVENotFound
@@ -180,18 +166,11 @@ type RequestContext (opts : RequestParams) =
                 match convertViewArguments rawArgs cached.resolved cached.compiled with
                 | Error msg -> Error <| UVEArguments msg
                 | Ok arguments ->
-                    let newCompiledRes =
-                        match rawCondition with
-                        | None -> Ok cached.compiled
-                        | Some expr -> addCondition expr cached.resolved cached.compiled
-                    match newCompiledRes with
-                    | Error msg -> Error <| UVEFixup msg
-                    | Ok newCompiled ->
-                        try
-                            let getResult info (res : ExecutedViewExpr) = ({ cached with info = filterInfo cached.info }, { res with rows = Array.ofSeq res.rows })
-                            Ok <| runViewExpr conn.Query newCompiled arguments getResult
-                        with
-                        | ViewExecutionError err -> Error <| UVEExecute err
+                    try
+                        let getResult info (res : ExecutedViewExpr) = ({ cached with info = filterInfo cached.info }, { res with rows = Array.ofSeq res.rows })
+                        Ok <| runViewExpr conn.Query cached.compiled arguments getResult
+                    with
+                    | ViewExecutionException err -> Error <| UVEExecute err
 
     member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
         // FIXME
@@ -238,7 +217,7 @@ type RequestContext (opts : RequestParams) =
         if not isLocalRoot && entityRef.schema <> FunQLName "user" then
             Error <| EEAccessDenied
         else if entityRef.schema = funSchema && entityRef.name = funEvents then
-            Error <| EEAccessDenied        
+            Error <| EEAccessDenied
         else
             match cache.layout.FindEntity(entityRef) with
             | None -> Error EENotFound
@@ -278,7 +257,7 @@ type RequestContext (opts : RequestParams) =
         if not isLocalRoot then
             Error <| EEAccessDenied
         else if entityRef.schema = funSchema && entityRef.name = funEvents then
-            Error <| EEAccessDenied        
+            Error <| EEAccessDenied
         else
             match cache.layout.FindEntity(entityRef) with
             | None -> Error EENotFound
@@ -296,10 +275,10 @@ type RequestContext (opts : RequestParams) =
                             EntityId = Nullable id,
                             Details = ""
                         )
-                    ignore <| conn.System.Events.Add(event)            
+                    ignore <| conn.System.Events.Add(event)
                     if entityRef.schema = funSchema then
                         cacheStore.Migrate(conn)
-                    ignore <| conn.System.SaveChanges()                    
+                    ignore <| conn.System.SaveChanges()
                     conn.EnsureCommit()
                     Ok ()
                 with

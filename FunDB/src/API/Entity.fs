@@ -18,13 +18,13 @@ let entitiesApi (cacheStore : ContextCacheStore) : HttpHandler =
         | EEExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
 
     let insertEntity (entityRef : ResolvedEntityRef) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        let rawArgs = queryArgs ctx
+        let rawArgs = formArgs ctx
         match rctx.InsertEntity entityRef rawArgs with
         | Ok () -> text "" next ctx
         | Result.Error err -> returnError err next ctx
 
     let updateEntity (entityRef : ResolvedEntityRef) (id : int) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        let rawArgs = queryArgs ctx
+        let rawArgs = formArgs ctx
         match rctx.UpdateEntity entityRef id rawArgs with
         | Ok () -> Successful.OK "" next ctx
         | Result.Error err -> returnError err next ctx
@@ -46,7 +46,7 @@ let entitiesApi (cacheStore : ContextCacheStore) : HttpHandler =
               name = FunQLName name
             }
         choose
-            [ route "/" >=> POST >=> guarded (insertEntity entityRef)
+            [ route "" >=> POST >=> guarded (insertEntity entityRef)
               routef "/%i" (recordApi entityRef)
             ]
 

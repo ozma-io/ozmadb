@@ -24,16 +24,16 @@ module InformationSchema =
         // All of this shit is because of how EF Core works.
         [<DefaultValue>]
         val mutable schemata : DbSet<Schema>
-        member this.Schemata 
-            with get () = this.schemata 
+        member this.Schemata
+            with get () = this.schemata
             and set value = this.schemata <- value
 
         [<DefaultValue>]
         val mutable tables : DbSet<Table>
-        member this.Tables 
-            with get () = this.tables 
+        member this.Tables
+            with get () = this.tables
             and set value = this.tables <- value
- 
+
         [<DefaultValue>]
         val mutable columns : DbSet<Column>
         member this.Columns
@@ -43,7 +43,7 @@ module InformationSchema =
         [<DefaultValue>]
         val mutable tableConstraints : DbSet<TableConstraint>
         member this.TableConstraints
-            with get () = this.tableConstraints 
+            with get () = this.tableConstraints
             and set value = this.tableConstraints <- value
 
         [<DefaultValue>]
@@ -128,7 +128,7 @@ module InformationSchema =
               table_type : string
 
               schema : Schema
-        
+
               columns : seq<Column>
               table_constraints : seq<TableConstraint>
         }
@@ -272,7 +272,7 @@ let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
                             | Some v -> v
                             | None -> raise (SQLMetaException <| sprintf "Cannot cast array value to type %O: %s" scalarType str)
                         mapValueArray runCast array
-                        
+
                     match findSimpleType scalarType with
                     | None -> castExpr ()
                     | Some STString -> VEValue <| VStringArray array

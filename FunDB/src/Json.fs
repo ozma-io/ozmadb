@@ -18,7 +18,7 @@ type UnixDateTimeOffsetConverter () =
     override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : DateTimeOffset =
         let secs = serializer.Deserialize<int64>(reader)
         DateTimeOffset.FromUnixTimeSeconds(secs)
- 
+
     override this.WriteJson (writer : JsonWriter, value : DateTimeOffset, serializer : JsonSerializer) : unit =
         serializer.Serialize(writer, value.ToUnixTimeSeconds())
 
@@ -28,7 +28,7 @@ type UnixDateTimeConverter () =
     override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : DateTime =
         let secs = serializer.Deserialize<int64>(reader)
         DateTimeOffset.FromUnixTimeSeconds(secs).UtcDateTime
- 
+
     override this.WriteJson (writer : JsonWriter, value : DateTime, serializer : JsonSerializer) : unit =
         serializer.Serialize(writer, DateTimeOffset(value).ToUnixTimeSeconds())
 
@@ -117,7 +117,7 @@ type UnionConverter () =
                     let arg = serializer.Deserialize(reader, someProperty.PropertyType)
                     FSharpValue.MakeUnion(someCase, [|arg|])
             | None -> searchUnion ()
- 
+
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
         let objectType = value.GetType()
         let cases = unionCases objectType
@@ -174,7 +174,7 @@ type ConverterContractResolver () =
                 contract.Converter <- UnixDateTimeConverter ()
             else if objectType = typeof<DateTimeOffset> then
                 contract.Converter <- UnixDateTimeOffsetConverter ()
-    
+
         contract
 
     override this.CreateProperty (memberInfo : MemberInfo, serialization : MemberSerialization) : JsonProperty =
@@ -218,14 +218,14 @@ type ConverterContractResolver () =
                             setDefault emptyList
                             (true, false)
                         else
-                            (false, genType = typedefof<_ option>) 
+                            (false, genType = typedefof<_ option>)
                     else
-                        (false, false)                                          
+                        (false, false)
 
             if prop.Required = Required.Default && not isOption then
                 prop.Required <- Required.Always
-    
-        prop      
+
+        prop
 
 let defaultJsonSerializerSettings =
     JsonSerializerSettings(

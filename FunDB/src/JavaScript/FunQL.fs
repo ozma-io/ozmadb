@@ -47,6 +47,8 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
         | FEGreaterEq (a, b) -> JSCall (JSObjectAccess (JSVar "context", "isGreaterEq"), [| go a; go b |])
         | FEIn (e, items) -> JSCall (JSObjectAccess (JSVar "context", "isIn"), [| go e; JSArray <| Array.map go items |])
         | FENotIn (e, items) -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isIn"), [| go e; JSArray <| Array.map go items |])
+        | FEInQuery (e, query) -> failwith "Not implemented"
+        | FENotInQuery (e, query) -> failwith "Not implemented"
         | FECast (e, typ) ->
             let (isArray, scalarName) =
                 match typ with

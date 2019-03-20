@@ -67,6 +67,10 @@ type FieldRef =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+type Placeholder =
+    | PLocal of string
+    | PGlobal of string
+
 type [<JsonConverter(typeof<FieldValueConverter>)>] FieldValue =
     | FInt of int
     | FDecimal of decimal
@@ -74,12 +78,12 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] FieldValue =
     | FBool of bool
     | FDateTime of DateTimeOffset
     | FDate of DateTimeOffset
-    | FIntArray of int array
-    | FDecimalArray of decimal array
-    | FStringArray of string array
-    | FBoolArray of bool array
-    | FDateTimeArray of DateTimeOffset array
-    | FDateArray of DateTimeOffset array
+    | FIntArray of int[]
+    | FDecimalArray of decimal[]
+    | FStringArray of string[]
+    | FBoolArray of bool[]
+    | FDateTimeArray of DateTimeOffset[]
+    | FDateArray of DateTimeOffset[]
     | FNull
     with
         override this.ToString () = this.ToFunQLString()
@@ -116,7 +120,7 @@ and FieldValueConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : FieldValue =
         raise <| NotImplementedException()
- 
+
     override this.WriteJson (writer : JsonWriter, value : FieldValue, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
 
@@ -153,7 +157,7 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
             | SFTBool -> "bool"
             | SFTDateTime -> "datetime"
             | SFTDate -> "date"
-    
+
         member this.ToJSONString () = this.ToFunQLString()
 
         interface IFunQLString with
@@ -166,7 +170,7 @@ and ScalarFieldTypeConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ScalarFieldType =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, value : ScalarFieldType, serializer : JsonSerializer) : unit =
         serializer.Serialize(writer, value.ToJSONString())
 
@@ -191,7 +195,7 @@ and FieldExprTypeConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : FieldExprType =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, value : FieldExprType, serializer : JsonSerializer) : unit =
         let dict =
             match value with
@@ -199,9 +203,57 @@ and FieldExprTypeConverter () =
             | FETArray st -> [("type", "array" :> obj); ("subtype", st.ToJSONString() :> obj)]
         serializer.Serialize(writer, Map.ofList dict)
 
+type JoinType =
+    | Inner
+    | Left
+    | Right
+    | Outer
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | Left -> "LEFT"
+            | Right -> "RIGHT"
+            | Inner -> "INNER"
+            | Outer -> "OUTER"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+type SetOperation =
+    | Union
+    | Intersect
+    | Except
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | Union -> "UNION"
+            | Intersect -> "INTERSECT"
+            | Except -> "EXCEPT"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+type SortOrder =
+    | Asc
+    | Desc
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | Asc -> "ASC"
+            | Desc -> "DESC"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 type [<JsonConverter(typeof<FieldTypeConverter>)>] FieldType<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FTType of FieldExprType
-    | FTReference of 'e * FieldExpr<'f> option
+    | FTReference of 'e * FieldExpr<'e, 'f> option
     | FTEnum of Set<string>
     with
         override this.ToString () = this.ToFunQLString()
@@ -226,7 +278,7 @@ and FieldTypeConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
         raise <| NotImplementedException()
- 
+
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
         match castUnion<FieldType<IFunQLString, IFunQLString>> value with
@@ -241,33 +293,33 @@ and FieldTypeConverter () =
             [("type", "enum" :> obj); ("values", vals :> obj)] |> Map.ofList |> serialize
         | None -> failwith "impossible"
 
-and Placeholder =
-    | PLocal of string
-    | PGlobal of string
+and AttributeMap<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString = Map<AttributeName, FieldExpr<'e, 'f>>
 
-and FieldExpr<'f> when 'f :> IFunQLString =
+and FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FEValue of FieldValue
     | FEColumn of 'f
     | FEPlaceholder of Placeholder
-    | FENot of FieldExpr<'f>
-    | FEAnd of FieldExpr<'f> * FieldExpr<'f>
-    | FEOr of FieldExpr<'f> * FieldExpr<'f>
-    | FEConcat of FieldExpr<'f> * FieldExpr<'f>
-    | FEEq of FieldExpr<'f> * FieldExpr<'f>
-    | FENotEq of FieldExpr<'f> * FieldExpr<'f>
-    | FELike of FieldExpr<'f> * FieldExpr<'f>
-    | FENotLike of FieldExpr<'f> * FieldExpr<'f>
-    | FELess of FieldExpr<'f> * FieldExpr<'f>
-    | FELessEq of FieldExpr<'f> * FieldExpr<'f>
-    | FEGreater of FieldExpr<'f> * FieldExpr<'f>
-    | FEGreaterEq of FieldExpr<'f> * FieldExpr<'f>
-    | FEIn of FieldExpr<'f> * (FieldExpr<'f> array)
-    | FENotIn of FieldExpr<'f> * (FieldExpr<'f> array)
-    | FECast of FieldExpr<'f> * FieldExprType
-    | FEIsNull of FieldExpr<'f>
-    | FEIsNotNull of FieldExpr<'f>
-    | FECase of ((FieldExpr<'f> * FieldExpr<'f>) array) * (FieldExpr<'f> option)
-    | FECoalesce of FieldExpr<'f> array
+    | FENot of FieldExpr<'e, 'f>
+    | FEAnd of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEOr of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEConcat of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FENotEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FELike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FENotLike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FELess of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FELessEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEGreater of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEGreaterEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEIn of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>[]
+    | FENotIn of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>[]
+    | FEInQuery of FieldExpr<'e, 'f> * SelectExpr<'e, 'f>
+    | FENotInQuery of FieldExpr<'e, 'f> * SelectExpr<'e, 'f>
+    | FECast of FieldExpr<'e, 'f> * FieldExprType
+    | FEIsNull of FieldExpr<'e, 'f>
+    | FEIsNotNull of FieldExpr<'e, 'f>
+    | FECase of (FieldExpr<'e, 'f> * FieldExpr<'e, 'f>)[] * (FieldExpr<'e, 'f> option)
+    | FECoalesce of FieldExpr<'e, 'f>[]
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -295,6 +347,8 @@ and FieldExpr<'f> when 'f :> IFunQLString =
             | FENotIn (e, vals) ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "(%s) NOT IN (%s)" (e.ToFunQLString()) (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
+            | FEInQuery (e, query) -> sprintf "(%s) IN (%s)" (e.ToFunQLString()) (query.ToFunQLString())
+            | FENotInQuery (e, query) -> sprintf "(%s) NOT IN (%s)" (e.ToFunQLString()) (query.ToFunQLString())
             | FECast (e, typ) -> sprintf "(%s) :: %s" (e.ToFunQLString()) (typ.ToFunQLString())
             | FEIsNull e -> sprintf "(%s) IS NULL" (e.ToFunQLString())
             | FEIsNotNull e -> sprintf "(%s) IS NOT NULL" (e.ToFunQLString())
@@ -305,14 +359,142 @@ and FieldExpr<'f> when 'f :> IFunQLString =
                     | None -> ""
                     | Some e -> sprintf "ELSE %s" (e.ToFunQLString())
                 concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
-            | FECoalesce vals -> 
+            | FECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-let mapFieldExpr (columnFunc : 'a -> 'b) (placeholderFunc : Placeholder -> Placeholder) : FieldExpr<'a> -> FieldExpr<'b> =
+and QueryResult<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    { attributes : AttributeMap<'e, 'f>
+      result : QueryResultExpr<'e, 'f>
+    }
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let attrsStr =
+                if Map.isEmpty this.attributes
+                then ""
+                else this.attributes |> Map.toSeq |> Seq.map (fun (name, e) -> sprintf "%s = %s" (name.ToFunQLString()) (e.ToFunQLString())) |> String.concat ", "
+
+            concatWithWhitespaces [this.result.ToFunQLString(); attrsStr]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and QueryResultExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    | QRField of 'f
+    | QRExpr of FunQLName * FieldExpr<'e, 'f>
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | QRField c -> c.ToFunQLString()
+            | QRExpr (name, expr) -> sprintf "%s AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and OrderLimitClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    { orderBy : (SortOrder * FieldExpr<'e, 'f>)[]
+      limit : FieldExpr<'e, 'f> option
+      offset : FieldExpr<'e, 'f> option
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+                let orderByStr =
+                    if Array.isEmpty this.orderBy
+                    then ""
+                    else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToFunQLString()) (ord.ToFunQLString())) |> String.concat ", ")
+                let limitStr =
+                    match this.limit with
+                    | Some e -> sprintf "LIMIT %s" (e.ToFunQLString())
+                    | None -> ""
+                let offsetStr =
+                    match this.offset with
+                    | Some e -> sprintf "OFFSET %s" (e.ToFunQLString())
+                    | None -> ""
+                concatWithWhitespaces [orderByStr; limitStr; offsetStr]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    | FEntity of 'e
+    | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FSubExpr of EntityName * SelectExpr<'e, 'f>
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | FEntity e -> e.ToFunQLString()
+            | FJoin (joinType, a, b, cond) -> sprintf "%s %s JOIN %s ON %s" (a.ToFunQLString()) (joinType.ToFunQLString()) (b.ToFunQLString()) (cond.ToFunQLString())
+            | FSubExpr (name, expr) ->
+                sprintf "%s AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    { from: FromExpr<'e, 'f>
+      where: FieldExpr<'e, 'f> option
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let whereStr =
+                match this.where with
+                | None -> ""
+                | Some cond -> sprintf "WHERE %s" (cond.ToFunQLString())
+            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToFunQLString(); whereStr])
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and SingleSelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    { attributes : AttributeMap<'e, 'f>
+      results: QueryResult<'e, 'f>[]
+      clause: FromClause<'e, 'f> option
+      orderLimit: OrderLimitClause<'e, 'f>
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let attributesStrs = this.attributes |> Map.toSeq |> Seq.map (fun (name, expr) -> sprintf "@%s = %s" (name.ToFunQLString()) (expr.ToFunQLString()))
+            let resultsStrs = this.results |> Seq.map (fun res -> res.ToFunQLString())
+            let resultStr = Seq.append attributesStrs resultsStrs |> String.concat ", "
+            let fromStr =
+                match this.clause with
+                | None -> ""
+                | Some clause -> clause.ToFunQLString()
+
+            sprintf "SELECT %s" (concatWithWhitespaces [resultStr; fromStr; this.orderLimit.ToFunQLString()])
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString ()
+
+and SelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    | SSelect of SingleSelectExpr<'e, 'f>
+    | SSetOp of SetOperation * SelectExpr<'e, 'f> * SelectExpr<'e, 'f> * OrderLimitClause<'e, 'f>
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () : string = // FIXME: inference bug?
+            match this with
+            | SSelect e -> e.ToFunQLString()
+            | SSetOp (op, a, b, order) ->
+                let setStr = sprintf "(%s) %s (%s)" (a.ToFunQLString()) (op.ToFunQLString()) (b.ToFunQLString())
+                concatWithWhitespaces [setStr; order.ToFunQLString()]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+let mapFieldExpr (columnFunc : 'f1 -> 'f2) (placeholderFunc : Placeholder -> Placeholder) (queryFunc : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
     let rec traverse = function
         | FEValue value -> FEValue value
         | FEColumn c -> FEColumn (columnFunc c)
@@ -331,6 +513,8 @@ let mapFieldExpr (columnFunc : 'a -> 'b) (placeholderFunc : Placeholder -> Place
         | FEGreaterEq (a, b) -> FEGreaterEq (traverse a, traverse b)
         | FEIn (e, vals) -> FEIn (traverse e, Array.map traverse vals)
         | FENotIn (e, vals) -> FENotIn (traverse e, Array.map traverse vals)
+        | FEInQuery (e, query) -> FEInQuery (traverse e, queryFunc query)
+        | FENotInQuery (e, query) -> FENotInQuery (traverse e, queryFunc query)
         | FECast (e, typ) -> FECast (traverse e, typ)
         | FEIsNull e -> FEIsNull (traverse e)
         | FEIsNotNull e -> FEIsNotNull (traverse e)
@@ -338,7 +522,7 @@ let mapFieldExpr (columnFunc : 'a -> 'b) (placeholderFunc : Placeholder -> Place
         | FECoalesce vals -> FECoalesce (Array.map traverse vals)
     traverse
 
-let iterFieldExpr (colFunc : 'a -> unit) (placeholderFunc : Placeholder -> unit) : FieldExpr<'a> -> unit =
+let iterFieldExpr (colFunc : 'f -> unit) (placeholderFunc : Placeholder -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
     let rec traverse = function
         | FEValue value -> ()
         | FEColumn c -> colFunc c
@@ -357,6 +541,8 @@ let iterFieldExpr (colFunc : 'a -> unit) (placeholderFunc : Placeholder -> unit)
         | FEGreaterEq (a, b) -> traverse a; traverse b
         | FEIn (e, vals) -> traverse e; Array.iter traverse vals
         | FENotIn (e, vals) -> traverse e; Array.iter traverse vals
+        | FEInQuery (e, query) -> traverse e; queryFunc query
+        | FENotInQuery (e, query) -> traverse e; queryFunc query
         | FECast (e, typ) -> traverse e
         | FEIsNull e -> traverse e
         | FEIsNotNull e -> traverse e
@@ -366,124 +552,17 @@ let iterFieldExpr (colFunc : 'a -> unit) (placeholderFunc : Placeholder -> unit)
         | FECoalesce vals -> Array.iter traverse vals
     traverse
 
-type SortOrder =
-    | Asc
-    | Desc
-    with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            match this with
-            | Asc -> "ASC"
-            | Desc -> "DESC"
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-type QueryResult<'f> when 'f :> IFunQLString =
-    { name : FunQLName
-      expression : FieldExpr<'f>
-    }
-    with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () = sprintf "%s AS %s" (this.expression.ToFunQLString()) (this.name.ToFunQLString())
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-type JoinType =
-    | Inner
-    | Left
-    | Right
-    | Outer
-    with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            match this with
-            | Left -> "LEFT"
-            | Right -> "RIGHT"
-            | Inner -> "INNER"
-            | Outer -> "OUTER"
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-           
-type ConditionClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
-    { where: FieldExpr<'f> option
-      orderBy: (SortOrder * FieldExpr<'f>)[]
-    } with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            let whereStr =
-                match this.where with
-                | None -> ""
-                | Some cond -> sprintf "WHERE %s" (cond.ToFunQLString())
-            let orderByStr =
-                if Array.isEmpty this.orderBy
-                then ""
-                else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (ord.ToFunQLString()) (expr.ToFunQLString())) |> String.concat ", ")
-            concatWithWhitespaces [whereStr; orderByStr]
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-type FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
-    { from: FromExpr<'e, 'f>
-      condition: ConditionClause<'e, 'f>
-    } with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-             sprintf "FROM %s" (concatWithWhitespaces [this.from.ToFunQLString(); this.condition.ToFunQLString()])
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-and QueryExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
-    { results: QueryResult<'f>[]
-      clause: FromClause<'e, 'f>
-    } with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            let resultsStr = this.results |> Seq.map (fun res -> res.ToFunQLString()) |> String.concat ", "
-            sprintf "SELECT %s" (concatWithWhitespaces [resultsStr; this.clause.ToFunQLString()])
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString ()
-
-and FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
-    | FEntity of 'e
-    | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'f>
-    | FSubExpr of EntityName * QueryExpr<'e, 'f>
-    with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            match this with
-            | FEntity e -> e.ToFunQLString()
-            | FJoin (joinType, a, b, cond) -> sprintf "%s %s JOIN %s ON %s" (a.ToFunQLString()) (joinType.ToFunQLString()) (b.ToFunQLString()) (cond.ToFunQLString())
-            | FSubExpr (name, expr) -> sprintf "(%s) AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-type AttributeMap<'f> when 'f :> IFunQLString = Map<AttributeName, FieldExpr<'f>>
-
-type ParsedFieldType = FieldType<EntityRef, FieldRef>
-
-type LocalFieldExpr = FieldExpr<FieldName>
+let emptyOrderLimitClause = { orderBy = [||]; limit = None; offset = None }
 
 type FunQLVoid = private FunQLVoid of unit with
     interface IFunQLString with
         member this.ToFunQLString () = failwith "impossible"
 
-type PureFieldExpr = FieldExpr<FunQLVoid>
+type ParsedFieldType = FieldType<EntityRef, FieldRef>
 
-type ViewResults<'f> when 'f :> IFunQLString = (AttributeMap<'f> * QueryResult<'f>)[]
+type LocalFieldExpr = FieldExpr<FunQLVoid, FieldName>
+
+type PureFieldExpr = FieldExpr<FunQLVoid, FunQLVoid>
 
 let funId = FunQLName "Id"
 let funSchema = FunQLName "public"

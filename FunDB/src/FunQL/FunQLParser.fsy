@@ -6,23 +6,28 @@ open FunWithFlags.FunDB.FunQL.AST
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
 
-type ParsedFieldExpr = FieldExpr<FieldRef>
+type ParsedFieldExpr = FieldExpr<EntityRef, FieldRef>
 type ParsedFromExpr = FromExpr<EntityRef, FieldRef>
-type ParsedConditionClause = ConditionClause<EntityRef, FieldRef>
 type ParsedFromClause = FromClause<EntityRef, FieldRef>
-type ParsedQueryExpr = QueryExpr<EntityRef, FieldRef>
-type ParsedQueryResult = QueryResult<FieldRef>type ParsedAttributeMap = AttributeMap<FieldRef>
+type ParsedSelectExpr = SelectExpr<EntityRef, FieldRef>
+type ParsedSingleSelectExpr = SingleSelectExpr<EntityRef, FieldRef>
+type ParsedQueryResult = QueryResult<EntityRef, FieldRef>
+type ParsedQueryResultExpr = QueryResultExpr<EntityRef, FieldRef>
+type ParsedAttributeMap = AttributeMap<EntityRef, FieldRef>
+type ParsedOrderLimitClause = OrderLimitClause<EntityRef, FieldRef>
+
+type ParsedMainEntity =
+    { entity : EntityRef
+    }
 
 type ParsedViewExpr =
     { arguments : Map<string, ParsedFieldType>
-      attributes : ParsedAttributeMap
-      results : ViewResults<FieldRef>
-      clause : ParsedFromClause
-      updateName : EntityRef option
+      select : ParsedSelectExpr
+      mainEntity : ParsedMainEntity option
     }
 
-type private AttributedResult =
-    | AResult of ParsedAttributeMap * QueryResult<FieldRef>
+type private Result =
+    | AResult of QueryResult<EntityRef, FieldRef>
     | AAttribute of FunQLName * ParsedFieldExpr
 
 let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
@@ -31,19 +36,19 @@ let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
     with
         | Failure msg -> failwith <| sprintf "%s: %s" error msg
 
-let private splitResults (results : AttributedResult seq) : ParsedAttributeMap * ViewResults<FieldRef> =
+let private splitResults (results : Result seq) : ParsedAttributeMap * QueryResult<'e, 'f>[] =
     let getResult = function
-        | AResult (attrs, res) -> Some (attrs, res)
+        | AResult res -> Some res
         | AAttribute (name, attr) -> None
     let getAttribute = function
-        | AResult (attrs, res) -> None
+        | AResult res -> None
         | AAttribute (name, attr) -> Some (name, attr)
 
     let attributes = results |> Seq.mapMaybe getAttribute |> parseMap "Clashing row attribute names"    
     let results = results |> Seq.mapMaybe getResult |> Seq.toArray
     (attributes, results)
 
-// We restrict casts to work only on values to clarify their types. This is becaise arbitrary casting breaks abstractionmatch
+// We restrict casts to work only on values to clarify their types. This is because arbitrary casting breaks abstraction
 let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : unit =
     match expr with
         | FEValue v ->
@@ -87,6 +92,8 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %token GREATER_EQ
 %token ARROW
 %token CONCAT
+%token STAR
+%token AT_LEFT_BRACE
 
 // Keywords
 %token SELECT
@@ -110,14 +117,21 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %token IS
 %token NOT
 %token FOR
-%token UPDATE
-%token OF
+%token INSERT
+%token INTO
 %token CASE
 %token WHEN
 %token THEN
 %token ELSE
 %token END
 %token COALESCE
+%token LIMIT
+%token OFFSET
+%token UNION
+%token INTERSECT
+%token EXCEPT
+%token UPDATE
+%token OF
 
 // Types
 %token INT_TYPE
@@ -154,28 +168,17 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %start fieldExpr
 %type <ParsedFieldExpr> fieldExpr
 
-%start conditionClause
-%type <ParsedConditionClause> conditionClause
-
 %%
 
 // Entry points
 viewExpr : ViewExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
-conditionClause : ConditionClause EOF { $1 }
 
 // Expressions
 
 ViewExpr:
-  | MaybeArguments SELECT AttributedResults FromClause UpdateClause {
-      let (attributes, results) = splitResults $3
-      { arguments = $1; attributes = attributes; results = results; clause = $4; updateName = $5 }
-  }
-
-UpdateClause:
-  |                         { None }
-  | FOR UPDATE OF EntityRef { Some $4 }
+  | MaybeArguments SelectExpr InsertEntityClause { { arguments = $1; select = $2; mainEntity = $3 } }
 
 MaybeArguments:
   |                                            { Map.empty }
@@ -192,49 +195,101 @@ ArgumentsListNonEmpty:
 Argument:
   | ARGUMENT_ID ArgumentFieldType { ($1, $2) }
 
-ConditionClause:
-  | WhereClause OrderByClause { { where = $1; orderBy = $2 } }
+SelectVal:
+  | SingleUnlimitedSelectExpr         { SSelect $1 }
+  | LEFT_BRACE SelectExpr RIGHT_BRACE { $2 }
+
+SelectExpr:
+  | SingleSelectExpr                           { SSelect $1 }
+  | LEFT_BRACE SelectExpr RIGHT_BRACE          { $2 }
+  | SelectVal SetOp SetOpExpr OrderLimitClause { SSetOp ($2, $1, $3, $4) }
+
+SetOp:
+  | UNION     { Union }
+  | INTERSECT { Intersect }
+  | EXCEPT    { Except }
+
+SetOpExpr:
+  | SelectVal                 { $1 }
+  | SelectVal SetOp SetOpExpr { SSetOp ($2, $1, $3, emptyOrderLimitClause) }
+
+SingleSelectExpr:
+  | SELECT QueryResults FromClause OrderLimitClause {
+    let (attributes, results) = splitResults $2
+    { attributes = attributes; results = results; clause = $3; orderLimit = $4 }
+  }
+
+SingleUnlimitedSelectExpr:
+  | SELECT QueryResults FromClause {
+    let (attributes, results) = splitResults $2
+    { attributes = attributes; results = results; clause = $3; orderLimit = emptyOrderLimitClause }
+  }
+
+OrderLimitClause:
+  | OrderByClause LimitClause OffsetClause { { orderBy = $1; limit = $2; offset = $3 } }
+
+OrderByClause:
+  |                      { [||] }
+  | ORDER BY OrderByList { List.toArray $3 }
+
+OrderByList:
+  | OrderByExpr                   { [ $1 ] }
+  | OrderByExpr COMMA OrderByList { $1 :: $3 }
+
+OrderByExpr:
+  | FieldExpr OrderByDirection { ($2, $1) }
+
+OrderByDirection:
+  |      { Asc }
+  | ASC  { Asc }
+  | DESC { Desc }
+
+LimitClause:
+  |                 { None }
+  | LIMIT FieldExpr { Some $2 }
+
+OffsetClause:
+  |                  { None }
+  | OFFSET FieldExpr { Some $2 }
 
 FromClause:
-  | FROM FromExpr ConditionClause { { from = $2; condition = $3 } }
+  |                           { None }
+  | FROM FromExpr WhereClause { Some { from = $2; where = $3 } }
 
-Query:
-	| SELECT Results FromClause { { results = List.toArray $2; clause = $3 } }
+InsertEntityClause:
+  |                           { None }
+  | FOR INSERT INTO EntityRef { Some { entity = $4 } }
+  | FOR UPDATE OF EntityRef   { eprintfn "Deprecated FOR INSERT INTO syntax"; Some { entity = $4 } }
 
-Results:
-  | Result COMMA Results { $1 :: $3 }
-  | Result               { [ $1 ] }
-  |                      { [] }
+QueryResults:
+  | QueryResult COMMA QueryResults { $1 :: $3 }
+  | QueryResult                    { [ $1 ] }
+  |                                { [] }
 
-AttributedResults:
-  | AttributedResult COMMA AttributedResults { $1 :: $3 }
-  | AttributedResult                         { [ $1 ] }
-  |                                          { [] }
+QueryResult:
+  | AT ID EQ FieldExpr                { AAttribute (FunQLName $2, $4) }
+  | QueryResultExpr MaybeAttributeMap { AResult { attributes = $2; result = $1 } }
+  | MaybeAttributeMap QueryResultExpr { eprintfn "Deprecated result attribute map order"; AResult { attributes = $1; result = $2 } }
 
-AttributedResult:
-  | MaybeAttributeMap Result { AResult ($1, $2) }
-  | AT ID EQ FieldExpr       { AAttribute (FunQLName $2, $4) }
+QueryResultExpr:
+  | FieldRef        { QRField $1 }
+  | FieldExpr AS ID { QRExpr (FunQLName $3, $1) }
 
 MaybeAttributeMap:
-  |                                                { Map.empty }
-  | LEFT_BRACE RIGHT_BRACE                         { Map.empty }
-  | LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
+  |                                                   { Map.empty }
+  | AT_LEFT_BRACE RIGHT_BRACE                         { Map.empty }
+  | AT_LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
+  | LEFT_BRACE RIGHT_BRACE                            { eprintfn "Deprecated result attribute map syntax"; Map.empty }
+  | LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE    { eprintfn "Deprecated result attribute map syntax"; parseMap "Clashing attribute names" $2 }
 
 AttributeValuesNonEmpty:
   | ID EQ FieldExpr                               { [(FunQLName $1, $3)] }
   | ID EQ FieldExpr COMMA                         { [(FunQLName $1, $3)] }
   | ID EQ FieldExpr COMMA AttributeValuesNonEmpty { (FunQLName $1, $3) :: $5 }
 
-Result:
-  | FieldRef {
-      let fieldRef = $1 : FieldRef
-      { name = fieldRef.name; expression = FEColumn fieldRef }
-  }
-  | FieldExpr AS ID { { name = FunQLName $3; expression = $1 } }
-
 QuerySource:
-  | LEFT_PAREN Query RIGHT_PAREN AS ID { FSubExpr (FunQLName $5, $2) }
-  | EntityRef                          { FEntity ($1) }
+  | LEFT_PAREN SelectExpr RIGHT_PAREN AS ID { FSubExpr (FunQLName $5, $2) }
+  | EntityRef                               { FEntity ($1) }
 
 JoinType:
   |       { Inner }
@@ -353,22 +408,6 @@ Value:
   | LEFT_BRACKET BoolArrayNonEmpty    RIGHT_BRACKET { FBoolArray $2 }
   | LEFT_BRACKET DecimalArrayNonEmpty RIGHT_BRACKET { FDecimalArray $2 }
   | NULL                                            { FNull }
-
-OrderByClause:
-  |                      { [||] }
-  | ORDER BY OrderByList { List.toArray $3 }
-
-OrderByList:
-  | OrderByExpr                   { [ $1 ] }
-  | OrderByExpr COMMA OrderByList { $1 :: $3 }
-
-OrderByExpr:
-  | FieldExpr OrderByDirection { ($2, $1) }
-
-OrderByDirection:
-  |      { Asc }
-  | ASC  { Asc }
-  | DESC { Desc }
 
 ScalarType:
   | INT_TYPE      { SFTInt }

@@ -13,7 +13,8 @@ exception LayoutMetaException of info : string with
 let private compileCheckExpr : LocalFieldExpr -> SQL.ValueExpr =
     let compileColumn c = { table = None; name = compileName c } : SQL.ColumnRef
     let voidPlaceholder c = raise (LayoutMetaException <| sprintf "Unexpected placeholder in check expression: %O" c)
-    genericCompileFieldExpr compileColumn voidPlaceholder
+    let voidQuery c = raise (LayoutMetaException <| sprintf "Unexpected subquery in check expression: %O" c)
+    genericCompileFieldExpr compileColumn voidPlaceholder voidQuery
 
 let private makeUniqueConstraintMeta (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
     SQL.CMUnique <| Array.map (fun name -> SQL.SQLName <| name.ToString()) constr.columns
@@ -42,7 +43,7 @@ let private makeEntityMeta (tableName : SQL.TableRef) (entity : ResolvedEntity) 
         let name = SQL.SQLName <| sprintf "%O__Primary__Id" tableName.name
         let constr = SQL.CMPrimaryKey [| SQL.SQLName "Id" |]
         Seq.singleton (name, constr)
-        
+
     let idColumns =
         let col =
             { columnType = SQL.VTScalar (SQL.STInt.ToSQLRawString())
@@ -84,6 +85,6 @@ let buildLayoutMeta (layout : Layout) : SQL.DatabaseMeta =
     let makeSchema (name, schema) =
         let schemaName = SQL.SQLName (name.ToString())
         (schemaName, makeSchemaMeta schemaName schema)
-        
+
     let schemas = layout.schemas |> Map.toSeq |> Seq.map makeSchema |> Map.ofSeq
     { SQL.schemas = schemas }

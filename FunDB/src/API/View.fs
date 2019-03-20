@@ -34,12 +34,8 @@ let viewsApi (cacheStore : ContextCacheStore) : HttpHandler =
         | UVEFixup msg -> RequestErrors.BAD_REQUEST <| sprintf "Condition compilation error: %s" msg
 
     let selectFromView (viewRef : UserViewRef) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) =
-        let condition =
-            match ctx.GetQueryStringValue "__condition" with
-            | Ok rawCondition -> Some rawCondition
-            | Error _ -> None
         let rawArgs = queryArgs ctx
-        match rctx.GetUserView viewRef condition rawArgs with
+        match rctx.GetUserView viewRef rawArgs with
         | Ok (cached, res) -> json { info = cached.info
                                      result = res
                                    } next ctx

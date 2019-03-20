@@ -17,7 +17,7 @@ let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
 let private makeSourceComputedField (field : ComputedField) : SourceComputedField =
     { expression = field.Expression
     }
-    
+
 let private makeSourceUniqueConstraint (constr : UniqueConstraint) : SourceUniqueConstraint =
     { columns = Array.map FunQLName constr.Columns
     }

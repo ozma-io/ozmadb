@@ -25,7 +25,7 @@ var commonViews = {
         "select\n" +
         "  @\"Type\" = 'Menu',\n" +
         "  \"MainMenuCategories\".\"Name\" as \"CategoryName\",\n" +
-        "  { \"LinkedView\" = \"UserViews\".\"Name\" } COALESCE(\"Translations\".\"Translation\", \"UserViews\".\"Name\") as \"Name\"\n" +
+        "  COALESCE(\"Translations\".\"Translation\", \"UserViews\".\"Name\") as \"Name\" @{ \"LinkedView\" = \"UserViews\".\"Name\" }\n" +
         "from\n" +
         "  \"funapp\".\"MainMenuButtons\"\n" +
         "  left join \"funapp\".\"MainMenuCategories\" on \"MainMenuCategories\".\"Id\" = \"MainMenuButtons\".\"CategoryId\"\n" +
@@ -36,7 +36,7 @@ var commonViews = {
         "select\n" +
         "  @\"Type\" = 'Menu',\n" +
         "  \"Schemas\".\"Name\" as \"CategoryName\",\n" +
-        "  { \"LinkedView\" = '__Table__' || \"Schemas\".\"Name\" || '__' || \"Entities\".\"Name\" } \"Entities\".\"Name\" as \"Name\"\n" +
+        "  \"Entities\".\"Name\" as \"Name\" @{ \"LinkedView\" = '__Table__' || \"Schemas\".\"Name\" || '__' || \"Entities\".\"Name\" }\n" +
         "from\n" +
         "  \"public\".\"Entities\"\n" +
         "  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
@@ -46,11 +46,11 @@ var commonViews = {
         "select\n" +
         "  @\"Type\" = 'Form',\n" +
         "  \"Name\",\n" +
-        "  { \"TextType\" = 'codeeditor' } \"Query\"\n" +
+        "  \"Query\" @{ \"TextType\" = 'codeeditor' }\n" +
         "from\n" +
         "  \"public\".\"UserViews\"\n" +
         "where \"Name\" = $name\n" +
-        "for update of \"public\".\"UserViews\""
+        "for insert into \"public\".\"UserViews\""
 }
 
 function addSummaryViews(views, layout) {
@@ -86,7 +86,7 @@ function addDefaultViews(views, layout) {
                 "select\n  " +
                 ["@\"Type\" = 'Form'"].concat(fields).join(",") +
                 "\nfrom " + sqlName + " " +
-                "where \"Id\" = $id for update of " + sqlName
+                "where \"Id\" = $id for insert into " + sqlName
             views[formName] = formQuery
 
             var tableName = "__Table__" + schemaName + "__" + entityName
@@ -97,7 +97,7 @@ function addDefaultViews(views, layout) {
                   "\"Id\""
                 ].concat(fields).join(", ") +
                 "\nfrom " + sqlName + " " +
-                "for update of " + sqlName
+                "for insert into " + sqlName
             views[tableName] = tableQuery
         }
     }

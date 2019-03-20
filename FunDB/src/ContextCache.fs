@@ -132,12 +132,12 @@ let buildCachedUserView
                     runViewExpr conn compiled arguments <| fun info res ->
                         let cached = { compiled = compiled
                                        resolved = resolved
-                                       info = mergeViewInfo layout resolved info
+                                       info = mergeViewInfo layout resolved compiled info
                                        pureAttributes = getPureAttributes resolved compiled res
                                      }
                         Ok <| func cached res
                 with
-                | ViewExecutionError err -> Error <| UVEExecute err
+                | ViewExecutionException err -> Error <| UVEExecute err
 
 let private rebuildUserViews (conn : DatabaseConnection) (layout : Layout) : Map<string, CachedUserView> =
     let buildOne (uv : UserView) =
@@ -180,11 +180,11 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
 
     let migrationEngine =
         let engine = Jint.Engine(fun cfg -> ignore <| cfg.Culture(CultureInfo.InvariantCulture)).Execute(preloadedSettings.migration)
-    
+
         // XXX: reimplement this in JavaScript for performance if we switch to V8
         let jsRenderSqlName (this : JsValue) (args : JsValue[]) =
             args.[0] |> Jint.Runtime.TypeConverter.ToString |> renderSqlName |> JsString :> JsValue
-        // Strange that this is needed...       
+        // Strange that this is needed...
         let jsRenderSqlNameF = System.Func<JsValue, JsValue[], JsValue>(jsRenderSqlName)
         engine.Global.FastAddProperty("renderSqlName", ClrFunctionInstance(engine, "renderSqlName", jsRenderSqlNameF, 1), true, false, true)
 
@@ -236,7 +236,7 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
                 ignore <| conn.System.UserViews.Remove(view)
 
         ignore <| conn.System.SaveChanges()
-    
+
     let rebuildWithArgs (conn : DatabaseConnection) (layout : Layout) (meta : SQL.AST.DatabaseMeta) (systemViews : SystemViews) =
         let uvs = rebuildUserViews conn layout
         { layout = layout
@@ -296,7 +296,7 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
         using (new DatabaseConnection(connectionString)) <| fun conn ->
             let systemRenderedLayout = renderLayout systemLayout
             assert (resolveLayout systemRenderedLayout = systemLayout)
-            
+
             eprintfn "Migrating system entities to the current version"
             let currentMeta = buildDatabaseMeta conn.Transaction
 
@@ -341,9 +341,9 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
         // We can do this because migration could be performed only after GetCache in the same transaction.
         let (oldVersion, oldState) = cachedState
         // Careful here not to evaluate user views before we do migration
-    
+
         let layout = rebuildLayout conn
-    
+
         // Validate system entries
         let newSystemLayout = { layout with schemas = layout.schemas |> Map.filter (fun name _ -> Map.containsKey name systemLayout.schemas) }
         if newSystemLayout <> systemLayout then
@@ -351,7 +351,7 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
         let oldSystemViews = getCurrentSystemUserViews conn
         if oldSystemViews <> oldState.systemViews then
             raise <| ContextException (CBEValidation "Cannot modify system user views")
-    
+
         // Actually migrate
         let wantedMeta = buildLayoutMeta layout
         let migration = migrateDatabase (filterNonSystemMigrations oldState.meta) (filterNonSystemMigrations wantedMeta)
