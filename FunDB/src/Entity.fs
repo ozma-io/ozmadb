@@ -21,13 +21,14 @@ let insertEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) 
         | None -> raise (EntityExecutionException <| sprintf "Required field not provided: %O" fieldName)
         | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
     let parameters = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
-    let columns = parameters |> Seq.map fst |> Array.ofSeq
+    let columns = Seq.append (Seq.singleton sqlFunId) (parameters |> Seq.map fst) |> Array.ofSeq
     let placeholders = parameters |> Seq.mapi (fun i (name, valueWithType) -> (i, valueWithType)) |> Map.ofSeq
-    let values = parameters |> Seq.mapi (fun i (name, arg) -> SQL.VEPlaceholder i) |> Array.ofSeq
+    let values = parameters |> Seq.mapi (fun i (name, arg) -> SQL.IVValue <| SQL.VEPlaceholder i)
+    let valuesWithId = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
     let query =
         { name = compileResolvedEntityRef entityRef
           columns = columns
-          values = [| values |]
+          values = SQL.IValues [| valuesWithId |]
         } : SQL.InsertExpr
     connection.ExecuteNonQuery (query.ToSQLString()) placeholders
 

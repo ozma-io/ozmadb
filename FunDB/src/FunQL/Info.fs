@@ -35,6 +35,7 @@ type MergedDomains = Map<GlobalDomainId, MergedDomain>
 
 type MainEntityInfo =
   { entity : ResolvedEntityRef
+    name : EntityName
   }
 
 type MergedViewInfo =
@@ -98,6 +99,7 @@ let mergeViewInfo (layout : Layout) (viewExpr : ResolvedViewExpr) (compiled : Co
 
     let makeMainEntity (main : ResolvedMainEntity) =
       { entity = main.entity
+        name = main.name
       }      
 
     { attributeTypes = viewInfo.attributeTypes

@@ -6,7 +6,6 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.View
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.SQL.Meta
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 // Domains is a way to distinguish rows after set operations so that row types and IDs can be traced back.
@@ -517,6 +516,22 @@ let rec private flattenDomains : Domains -> FlattenedDomains = function
     | DSingle (id, dom) -> Map.singleton id dom
     | DMulti (ns, subdoms) -> subdoms |> Map.values |> Seq.fold (fun m subdoms -> Map.union m (flattenDomains subdoms)) Map.empty
 
+let rec private ensureMainIdColumn (mainEntity : ResolvedMainEntity) : SQL.SelectExpr -> SQL.SelectExpr = function
+    | SQL.SSelect query ->
+        // Should be in sync with id columns generation above
+        let checkColumn = function
+            | SQL.SCAll -> false
+            | SQL.SCColumn ref -> false
+            | SQL.SCExpr (name, e) -> name = compileId mainEntity.entity.name
+        if query.columns |> Seq.exists checkColumn then
+            SQL.SSelect query
+        else
+            let fromCol : SQL.ColumnRef = { table = Some { schema = None; name = compileName mainEntity.entity.name }; name = sqlFunId }
+            let res = SQL.SCExpr (compileId mainEntity.entity.name, SQL.VEColumn fromCol)
+            SQL.SSelect { query with columns = Array.append [|res|] query.columns }
+    | SQL.SSetOp (op, a, b, limits) ->
+        failwith "Set operation or no FROM in a view with main entity"    
+
 let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
     eprintfn "Compiling %O" (viewExpr.select.ToFunQLString())
     let convertArgument i (name, fieldType) =
@@ -560,8 +575,13 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
                    pureColumnAttributes = pureColAttrs
                  }
 
+    let ensuredExpr =
+        match viewExpr.mainEntity with
+        | Some mainEntity -> ensureMainIdColumn mainEntity newExpr
+        | None -> newExpr
+    
     { attributesQuery = attrQuery
-      query = newExpr
+      query = ensuredExpr
       arguments = arguments
       domains = domains
       flattenedDomains = flattenDomains domains

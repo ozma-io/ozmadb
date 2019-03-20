@@ -12,6 +12,9 @@ open FunWithFlags.FunDB.ContextCache
 let queryArgs (ctx : HttpContext) =
     ctx.Request.Query |> Seq.mapMaybe (function KeyValue(name, par) -> par |> Seq.first |> Option.map (fun x -> (name, x))) |> Map.ofSeq
 
+let formArgs (ctx : HttpContext) =
+    ctx.Request.Form |> Seq.mapMaybe (function KeyValue(name, par) -> par |> Seq.first |> Option.map (fun x -> (name, x))) |> Map.ofSeq
+
 let authorize =
     requiresAuthentication (challenge JwtBearerDefaults.AuthenticationScheme)
 

@@ -54,6 +54,7 @@ type private QSelectResults =
 
 type ResolvedMainEntity =
     { entity : ResolvedEntityRef
+      name : EntityName
       columnsToFields : Map<FieldName, FieldName>
       fieldsToColumns : Map<FieldName, FieldName>
     }
@@ -67,6 +68,7 @@ type ResolvedViewExpr =
 
 type private MainEntity =
     { entity : ResolvedEntityRef
+      name : EntityName
     }
 
 let rec private findField (name : FieldName) (fields : QSubqueryFields) =
@@ -94,16 +96,17 @@ let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
     | None -> raise (ViewResolveException <| sprintf "Unspecified schema in name: %O" name)
 
 let rec private findMainFromEntity : ResolvedFromExpr -> MainEntity option = function
-    | FEntity ent -> Some { entity = ent }
+    | FEntity ent -> Some { entity = ent; name = ent.name }
     | FJoin (ftype, a, b, where) ->
         match ftype with
         | Left -> findMainFromEntity a
         | Right -> findMainFromEntity b
         | _ -> None
-    | FSubExpr (name, (SSelect { clause = Some expr })) -> findMainFromEntity expr.from
+    | FSubExpr (name, (SSelect { clause = Some expr })) -> Option.map (fun main -> { main with name = name }) <| findMainFromEntity expr.from
     | FSubExpr _ -> None
 
 // Returns map from query column names to fields in main entity
+// Be careful as changes here also require changes to main id propagation in the compiler.
 let private findMainEntity (fields : QSubqueryFields) : ResolvedSelectExpr -> (Map<FieldName, FieldName> * MainEntity) option = function
     | SSelect { results = results; clause = Some clause } ->
         match findMainFromEntity clause.from with
@@ -239,7 +242,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
                 rawResults |> Seq.map (fun (boundField, res) -> (resultName res.result, boundField)) |> Map.ofSeqUnique
             with
                 | Failure msg -> raise (ViewResolveException <| sprintf "Clashing result names: %s" msg)
-            
+    
         let newQuery = {
             attributes = resolveAttributes fromMapping query.attributes
             clause = qClause
@@ -295,9 +298,9 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
             match layout.FindEntity ref with
             | None -> raise (ViewResolveException <| sprintf "Entity not found: %O" main.entity)
             | Some e -> e
-        let mappedResults =
+        let (mappedResults, mainEntity) =
             match findMainEntity fields query with
-            | Some (fields, mainEntity) when mainEntity.entity = ref -> fields
+            | Some (fields, mainEntity) when mainEntity.entity = ref -> (fields, mainEntity)
             | someMain -> raise (ViewResolveException <| sprintf "Cannot map main entity to the expression: %O, possible value: %O" ref someMain)
 
         let checkField fieldName (field : ResolvedColumnField) =
@@ -307,6 +310,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
         entity.columnFields |> Map.iter checkField
 
         { entity = ref
+          name = mainEntity.name
           fieldsToColumns = Map.reverse mappedResults
           columnsToFields = mappedResults
         }

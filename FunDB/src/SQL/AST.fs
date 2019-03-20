@@ -557,22 +557,51 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
         | VECoalesce vals -> Array.iter traverse vals
     traverse
 
+type InsertValue =
+    | IVValue of ValueExpr
+    | IVDefault
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | IVValue e -> e.ToSQLString()
+            | IVDefault -> "DEFAULT"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+type InsertValues =
+    | IValues of InsertValue[][]
+    | IDefaults
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | IValues values ->
+                let renderInsertValue (values : InsertValue[]) = 
+                    values |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
+
+                assert (not <| Array.isEmpty values)
+                sprintf "VALUES %s" (values |> Seq.map renderInsertValue |> String.concat ", ")
+            | IDefaults -> "DEFAULT VALUES"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 type InsertExpr =
     { name : TableRef
       columns : ColumnName[]
-      values : ValueExpr[][]
+      values : InsertValues
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            let renderInsertValue (values : ValueExpr[]) = 
-                values |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
-
-            assert (not <| Array.isEmpty this.values)
-            sprintf "INSERT INTO %s (%s) VALUES %s"
+            sprintf "INSERT INTO %s (%s) %s"
                 (this.name.ToSQLString())
                 (this.columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
-                (this.values |> Seq.map renderInsertValue |> String.concat ", ")
+                (this.values.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
