@@ -4,8 +4,6 @@ open FunWithFlags.FunDB.FunQL.AST
 
 type UserName = string
 
-let rootUserName : UserName = "root"
-
 type AllowedEntity =
     { fields : Set<FieldName>
     }

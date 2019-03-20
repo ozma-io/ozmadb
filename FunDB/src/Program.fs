@@ -2,7 +2,6 @@ open System
 open System.IO
 open Newtonsoft.Json
 open Microsoft.AspNetCore.Builder
-open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Hosting
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
@@ -14,9 +13,7 @@ open Microsoft.IdentityModel.Logging
 open Giraffe
 open Giraffe.Serialization.Json
 
-open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
-open FunWithFlags.FunDB.Context
 open FunWithFlags.FunDB.API.View
 open FunWithFlags.FunDB.API.Permissions
 open FunWithFlags.FunDB.API.Entity
@@ -54,22 +51,6 @@ let main (args : string[]) : int =
         }
 
     let cacheStore = ContextCacheStore(config.connectionString, preloadedSettings)
-
-    let protectedApi (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        let userClaim = ctx.User.FindFirst "name"
-        let userName = userClaim.Value
-        let specifiedLang =
-            ctx.Request.GetTypedHeaders().AcceptLanguage
-            |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
-            |> Seq.first
-        let lang =
-            match specifiedLang with
-            | Some l -> l.Value.Value
-            | None -> "en-US"
-        use rctx = new RequestContext(cacheStore, userName, lang)
-        choose
-            [ 
-            ] next ctx
 
     let webApp =
         choose

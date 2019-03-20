@@ -248,6 +248,8 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val IsRoot = false with get, set
 
 and
     [<AllowNullLiteral>]

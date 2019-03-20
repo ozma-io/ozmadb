@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Context
 
 open System
+open System.Linq
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
@@ -13,6 +14,7 @@ open FunWithFlags.FunDB.FunQL.Parser
 open FunWithFlags.FunDB.FunQL.View
 open FunWithFlags.FunDB.FunQL.Compiler
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.FunQL.Info
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Entity
 open FunWithFlags.FunDB.ContextCache
@@ -81,9 +83,36 @@ type UserViewRef =
     | UVAnonymous of string
     | UVNamed of string
 
-type RequestContext (cacheStore : ContextCacheStore, userName : UserName, language : string) =
+[<NoComparison>]
+type RequestParams =
+    { cacheStore : ContextCacheStore
+      userName : UserName
+      isRoot : bool
+      language : string
+    }
+
+type RequestError =
+    | REUserNotFound
+    with
+        member this.Message =
+            match this with
+            | REUserNotFound -> "User not found"
+
+exception RequestException of info : RequestError with
+    override this.Message = this.info.Message
+
+type RequestContext (opts : RequestParams) =
+    let { cacheStore = cacheStore; userName = userName; language = language; isRoot = isRoot } = opts
     let conn = new DatabaseConnection(cacheStore.ConnectionString)
     let cache = cacheStore.GetCache(conn)
+
+    let isLocalRoot =
+        if isRoot then isRoot else
+            match conn.System.Users.Where(fun user -> user.Name = userName) |> Seq.first with
+            | Some currentUser ->
+                currentUser.IsRoot
+            | None ->
+                raise <| RequestException REUserNotFound
     let transactionTime = DateTimeOffset.UtcNow
     let globalArguments =
         [ ("lang", FString language)
@@ -127,6 +156,15 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
             | Some cached -> Ok cached
 
     member this.GetUserView (uv : UserViewRef) (rawCondition : string option) (rawArgs : RawArguments) : Result<CachedUserView * ExecutedViewExpr, UserViewErrorInfo> =
+        let filterInfo (info : MergedViewInfo) =
+            if isLocalRoot then
+                info
+            else
+                { info with
+                      updateEntity = None
+                      columns = info.columns |> Array.map (fun col -> { col with updateField = None })
+                }
+
         match uv with
         | UVAnonymous query ->
             let maybeAddCondition =
@@ -150,14 +188,14 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
                     | Error msg -> Error <| UVEFixup msg
                     | Ok newCompiled ->
                         try
-                            let getResult info res = (cached, { res with rows = Array.ofSeq res.rows })
+                            let getResult info (res : ExecutedViewExpr) = ({ cached with info = filterInfo cached.info }, { res with rows = Array.ofSeq res.rows })
                             Ok <| runViewExpr conn.Query newCompiled arguments getResult
                         with
                         | ViewExecutionError err -> Error <| UVEExecute err
 
     member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
         // FIXME
-        if userName <> rootUserName && entityRef.schema <> FunQLName "user" then
+        if not isLocalRoot && entityRef.schema <> FunQLName "user" then
             Error <| EEAccessDenied
         else if entityRef.schema = funSchema && entityRef.name = funEvents then
             Error <| EEAccessDenied
@@ -197,7 +235,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
                         Error <| EEExecute e.Message
 
     member this.UpdateEntity (entityRef : ResolvedEntityRef) (id : int) (rawArgs : RawArguments) : Result<unit, EntityErrorInfo> =
-        if userName <> rootUserName && entityRef.schema <> FunQLName "user" then
+        if not isLocalRoot && entityRef.schema <> FunQLName "user" then
             Error <| EEAccessDenied
         else if entityRef.schema = funSchema && entityRef.name = funEvents then
             Error <| EEAccessDenied        
@@ -237,7 +275,7 @@ type RequestContext (cacheStore : ContextCacheStore, userName : UserName, langua
                         Error <| EEExecute e.Message
 
     member this.DeleteEntity (entityRef : ResolvedEntityRef) (id : int) : Result<unit, EntityErrorInfo> =
-        if userName <> rootUserName then
+        if not isLocalRoot then
             Error <| EEAccessDenied
         else if entityRef.schema = funSchema && entityRef.name = funEvents then
             Error <| EEAccessDenied        
