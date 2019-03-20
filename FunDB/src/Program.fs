@@ -29,7 +29,6 @@ type Config =
       preloadedLayout : string option
       migration : string option
       authAuthority : string
-      authMetadata : string
     }
 
 [<EntryPoint>]
@@ -90,9 +89,6 @@ let main (args : string[]) : int =
 
     let jwtBearerOptions (cfg : JwtBearerOptions) =
         cfg.Authority <- config.authAuthority
-        cfg.MetadataAddress <- config.authMetadata
-        // We use internal network so it's okay
-        cfg.RequireHttpsMetadata <- false
         cfg.TokenValidationParameters <- TokenValidationParameters (
             ValidateAudience = false
         )
