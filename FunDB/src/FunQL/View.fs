@@ -118,7 +118,7 @@ let private findMainEntity (fields : QSubqueryFields) : ResolvedSelectExpr -> (M
                 | QRename rname -> failwith <| sprintf "Unexpected rename from %O to %O" name rname
                 | QField (Some ref) -> Some (name, ref.name)
                 | QField None -> None
-            let fields = results |> Seq.mapMaybe getField |> Map.ofSeqUnique            
+            let fields = results |> Seq.mapMaybe getField |> Map.ofSeqUnique
             Some (fields, main)
     | _ -> None
 
@@ -187,7 +187,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
     and resolveFieldExpr (mapping : QMapping) : ParsedFieldExpr -> ResolvedFieldExpr =
         let resolveQuery query =
             let (_, res) = resolveSubSelectExpr query
-            res        
+            res
         mapFieldExpr (snd << resolveField mapping) resolvePlaceholder resolveQuery
 
     and resolveOrderLimitClause (mapping : QMapping) (limits : ParsedOrderLimitClause) : ResolvedOrderLimitClause =
@@ -242,7 +242,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
                 rawResults |> Seq.map (fun (boundField, res) -> (resultName res.result, boundField)) |> Map.ofSeqUnique
             with
                 | Failure msg -> raise (ViewResolveException <| sprintf "Clashing result names: %s" msg)
-    
+
         let newQuery = {
             attributes = resolveAttributes fromMapping query.attributes
             clause = qClause
@@ -272,7 +272,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
                     [ (funId, unboundSubqueryField)
                       (funMain, QRename entity.mainField)
                     ] |> Map.ofSeq
-                
+
                 let fields = Map.union specialFields (Map.union columnFields computedFields)
                 (Map.singleton (Some name.name) (Some resName.schema, fields), FEntity resName)
         | FJoin (jt, e1, e2, where) ->

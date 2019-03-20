@@ -120,7 +120,7 @@ and FieldValueConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : FieldValue =
         raise <| NotImplementedException()
- 
+
     override this.WriteJson (writer : JsonWriter, value : FieldValue, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
 
@@ -157,7 +157,7 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
             | SFTBool -> "bool"
             | SFTDateTime -> "datetime"
             | SFTDate -> "date"
-    
+
         member this.ToJSONString () = this.ToFunQLString()
 
         interface IFunQLString with
@@ -170,7 +170,7 @@ and ScalarFieldTypeConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ScalarFieldType =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, value : ScalarFieldType, serializer : JsonSerializer) : unit =
         serializer.Serialize(writer, value.ToJSONString())
 
@@ -195,7 +195,7 @@ and FieldExprTypeConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : FieldExprType =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, value : FieldExprType, serializer : JsonSerializer) : unit =
         let dict =
             match value with
@@ -233,7 +233,7 @@ type SetOperation =
             | Union -> "UNION"
             | Intersect -> "INTERSECT"
             | Except -> "EXCEPT"
-        
+
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
@@ -278,7 +278,7 @@ and FieldTypeConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
         raise <| NotImplementedException()
- 
+
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
         match castUnion<FieldType<IFunQLString, IFunQLString>> value with
@@ -359,7 +359,7 @@ and FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
                     | None -> ""
                     | Some e -> sprintf "ELSE %s" (e.ToFunQLString())
                 concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
-            | FECoalesce vals -> 
+            | FECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
 
@@ -490,7 +490,7 @@ and SelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
             | SSetOp (op, a, b, order) ->
                 let setStr = sprintf "(%s) %s (%s)" (a.ToFunQLString()) (op.ToFunQLString()) (b.ToFunQLString())
                 concatWithWhitespaces [setStr; order.ToFunQLString()]
-        
+
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 

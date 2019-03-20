@@ -135,15 +135,15 @@ module Map =
 
     let values (map : Map<'k, 'v>) : seq<'v> =
         map |> Map.toSeq |> Seq.map snd
-    
+
     let keysSet (map : Map<'k, 'v>) : Set<'k> =
         map |> keys |> Set.ofSeq
 
     let mapWithKeys (func : 'k1 -> 'a -> ('k2 * 'b)) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
         map |> Map.toSeq |> Seq.map (fun (k, a) -> func k a) |> Map.ofSeq
-    
+
     let mapKeys (func : 'k1 -> 'k2) : Map<'k1, 'a> -> Map<'k2, 'a> = mapWithKeys (fun name v -> (func name, v))
-    
+
     let traverseOption (func : 'k -> 'a -> 'b option) (vals : Map<'k, 'a>) : Map<'k, 'b> option =
         let res = vals |> Map.map func
         if Map.forall (fun key -> Option.isSome) res then

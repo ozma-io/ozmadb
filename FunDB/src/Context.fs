@@ -114,7 +114,7 @@ type RequestContext (opts : RequestParams) =
     let convertViewArguments (rawArgs : RawArguments) (resolved : ResolvedViewExpr) (compiled : CompiledViewExpr) : Result<ViewArguments, string> =
         let findArgument name (arg : CompiledArgument) =
             match name with
-            | PLocal lname -> 
+            | PLocal lname ->
                 match Map.tryFind lname rawArgs with
                 | Some argStr ->
                     match convertArgument arg.fieldType argStr with
@@ -154,7 +154,7 @@ type RequestContext (opts : RequestParams) =
                       mainEntity = None
                       columns = info.columns |> Array.map (fun col -> { col with mainField = None })
                 }
-        
+
         match uv with
         | UVAnonymous query ->
             let getResult cached res = (cached, { res with rows = Array.ofSeq res.rows })
@@ -217,7 +217,7 @@ type RequestContext (opts : RequestParams) =
         if not isLocalRoot && entityRef.schema <> FunQLName "user" then
             Error <| EEAccessDenied
         else if entityRef.schema = funSchema && entityRef.name = funEvents then
-            Error <| EEAccessDenied        
+            Error <| EEAccessDenied
         else
             match cache.layout.FindEntity(entityRef) with
             | None -> Error EENotFound
@@ -257,7 +257,7 @@ type RequestContext (opts : RequestParams) =
         if not isLocalRoot then
             Error <| EEAccessDenied
         else if entityRef.schema = funSchema && entityRef.name = funEvents then
-            Error <| EEAccessDenied        
+            Error <| EEAccessDenied
         else
             match cache.layout.FindEntity(entityRef) with
             | None -> Error EENotFound
@@ -275,10 +275,10 @@ type RequestContext (opts : RequestParams) =
                             EntityId = Nullable id,
                             Details = ""
                         )
-                    ignore <| conn.System.Events.Add(event)            
+                    ignore <| conn.System.Events.Add(event)
                     if entityRef.schema = funSchema then
                         cacheStore.Migrate(conn)
-                    ignore <| conn.System.SaveChanges()                    
+                    ignore <| conn.System.SaveChanges()
                     conn.EnsureCommit()
                     Ok ()
                 with

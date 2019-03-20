@@ -27,7 +27,7 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     member this.Schemas
         with get () = this.schemas
         and set value = this.schemas <- value
-    
+
     [<DefaultValue>]
     val mutable entities : DbSet<Entity>
     [<Entity("FullName")>]
@@ -38,7 +38,7 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     member this.Entities
         with get () = this.entities
         and set value = this.entities <- value
-    
+
     [<DefaultValue>]
     val mutable columnFields : DbSet<ColumnField>
     [<Entity("FullName")>]
@@ -144,7 +144,7 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     [<Entity("Id")>]
     member this.Events
         with get () = this.events
-        and set value = this.events <- value    
+        and set value = this.events <- value
 
 and
     [<AllowNullLiteral>]
@@ -175,7 +175,7 @@ and
         member val Schema = null : Schema with get, set
         [<ColumnField("string", Nullable=true)>]
         member val MainField = "" with get, set
-    
+
         member val ColumnFields = ResizeArray<ColumnField>() with get, set
         member val ComputedFields = ResizeArray<ComputedField>() with get, set
         member val UniqueConstraints = ResizeArray<UniqueConstraint>() with get, set
@@ -294,7 +294,7 @@ and
         [<ColumnField("reference(\"public\".\"ColumnFields\")")>]
         member val ColumnFieldId = 0 with get, set
         member val ColumnField = null : ColumnField with get, set
-    
+
 and
     [<AllowNullLiteral>]
     UserRole () =
@@ -317,7 +317,7 @@ and
         [<ColumnField("string")>]
         member val Type = "" with get, set
         [<ColumnField("string", Nullable=true)>]
-        member val UserName = null : string with get, set    
+        member val UserName = null : string with get, set
         [<ColumnField("string")>]
         member val SchemaName = "" with get, set
         [<ColumnField("string")>]

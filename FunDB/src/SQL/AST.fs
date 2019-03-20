@@ -29,7 +29,7 @@ type SQLRawString = SQLRawString of string
 
         member this.ToSQLString () =
             match this with
-            | SQLRawString s -> s     
+            | SQLRawString s -> s
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -48,7 +48,7 @@ type SchemaObject =
     } with
         override this.ToString () = this.ToSQLString()
 
-        member this.ToSQLString () = 
+        member this.ToSQLString () =
             match this.schema with
             | None -> this.name.ToSQLString()
             | Some schema -> sprintf "%s.%s" (schema.ToSQLString()) (this.name.ToSQLString())
@@ -155,7 +155,7 @@ and ValueConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : Value =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, value : Value, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
 
@@ -216,10 +216,10 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
             | STBool -> "bool"
             | STDateTime -> "datetime"
             | STDate -> "date"
-            | STRegclass -> "regclass"  
+            | STRegclass -> "regclass"
 
         member this.ToSQLRawString () = SQLRawString (this.ToSQLString ())
-        
+
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
@@ -230,7 +230,7 @@ and SimpleTypeConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : SimpleType =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, value : SimpleType, serializer : JsonSerializer) : unit =
         serializer.Serialize(writer, value.ToJSONString())
 
@@ -277,7 +277,7 @@ and ValueTypeConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
         let dict =
             match castUnion<ValueType<ISQLString>> value with
@@ -298,7 +298,7 @@ type SortOrder =
     | Desc
     with
         override this.ToString () = this.ToSQLString()
-        
+
         member this.ToSQLString () =
             match this with
             | Asc -> "ASC"
@@ -321,7 +321,7 @@ type JoinType =
             | Left -> "LEFT"
             | Right -> "RIGHT"
             | Full -> "FULL"
-        
+
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
@@ -337,7 +337,7 @@ type SetOperation =
             | Union -> "UNION"
             | Intersect -> "INTERSECT"
             | Except -> "EXCEPT"
-        
+
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
@@ -370,7 +370,7 @@ type ValueExpr =
     | VECoalesce of ValueExpr[]
     with
         override this.ToString () = this.ToSQLString()
-        
+
         member this.ToSQLString () =
             match this with
             | VEValue v -> v.ToSQLString()
@@ -460,7 +460,7 @@ and FromClause =
                 match this.where with
                 | None -> ""
                 | Some cond -> sprintf "WHERE %s" (cond.ToSQLString())
-                
+
             sprintf "FROM %s" (concatWithWhitespaces [this.from.ToSQLString(); whereStr])
 
         interface ISQLString with
@@ -522,7 +522,7 @@ and SelectExpr =
             | SSetOp (op, a, b, order) ->
                 let setStr = sprintf "(%s) %s (%s)" (a.ToSQLString()) (op.ToSQLString()) (b.ToSQLString())
                 concatWithWhitespaces [setStr; order.ToSQLString()]
-        
+
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
@@ -580,7 +580,7 @@ type InsertValues =
         member this.ToSQLString () =
             match this with
             | IValues values ->
-                let renderInsertValue (values : InsertValue[]) = 
+                let renderInsertValue (values : InsertValue[]) =
                     values |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
 
                 assert (not <| Array.isEmpty values)

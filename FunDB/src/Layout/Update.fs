@@ -134,7 +134,7 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) : bool =
         schemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name))
         |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
         |> Map.ofSeq
-   
+
     for KeyValue (name, schema) in layout.schemas do
         updateSchema db name schema (Map.tryFind name schemasMap)
     let changedEntries = db.SaveChanges()

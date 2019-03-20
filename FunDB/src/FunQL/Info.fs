@@ -100,7 +100,7 @@ let mergeViewInfo (layout : Layout) (viewExpr : ResolvedViewExpr) (compiled : Co
     let makeMainEntity (main : ResolvedMainEntity) =
       { entity = main.entity
         name = main.name
-      }      
+      }
 
     { attributeTypes = viewInfo.attributeTypes
       rowAttributeTypes = viewInfo.rowAttributeTypes

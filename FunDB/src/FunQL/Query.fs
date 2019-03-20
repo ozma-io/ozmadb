@@ -28,7 +28,7 @@ and ExecutedValueConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : ExecutedValue =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, res : ExecutedValue, serializer : JsonSerializer) : unit =
         let vals1 = Map.singleton "value" (res.value :> obj)
         let vals2 =
@@ -55,7 +55,7 @@ and ExecutedRowConverter () =
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ExecutedRow =
         raise <| NotImplementedException ()
- 
+
     override this.WriteJson (writer : JsonWriter, res : ExecutedRow, serializer : JsonSerializer) : unit =
         let vals1 = [("values", res.values :> obj); ("domainId", res.domainId :> obj)] |> Map.ofSeq
         let vals2 =
@@ -69,7 +69,7 @@ and ExecutedRowConverter () =
             else
                 vals2
         serializer.Serialize(writer, vals3)
-    
+
 type ExecutedColumnInfo =
     { name : FunQLName
       attributeTypes : ExecutedAttributeTypes
@@ -206,7 +206,7 @@ let private parseResult (domains : Domains) (result : QueryResult) : ExecutedVie
             match values.[i] with
                 | SQL.VInt id -> Some id
                 | SQL.VNull -> None
-                | _ -> failwith "Entity id is not an integer"            
+                | _ -> failwith "Entity id is not an integer"
 
         let rowAttrs = Map.map (fun name (valType, i) -> values.[i]) rowAttributes
         let values = Array.map getCell columnsMeta

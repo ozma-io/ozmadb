@@ -43,7 +43,7 @@ let private makeEntityMeta (tableName : SQL.TableRef) (entity : ResolvedEntity) 
         let name = SQL.SQLName <| sprintf "%O__Primary__Id" tableName.name
         let constr = SQL.CMPrimaryKey [| SQL.SQLName "Id" |]
         Seq.singleton (name, constr)
-        
+
     let idColumns =
         let col =
             { columnType = SQL.VTScalar (SQL.STInt.ToSQLRawString())
@@ -85,6 +85,6 @@ let buildLayoutMeta (layout : Layout) : SQL.DatabaseMeta =
     let makeSchema (name, schema) =
         let schemaName = SQL.SQLName (name.ToString())
         (schemaName, makeSchemaMeta schemaName schema)
-        
+
     let schemas = layout.schemas |> Map.toSeq |> Seq.map makeSchema |> Map.ofSeq
     { SQL.schemas = schemas }

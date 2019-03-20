@@ -157,7 +157,7 @@ let private compileJoin : JoinType -> SQL.JoinType = function
 let private compileSetOp : SetOperation -> SQL.SetOperation = function
     | Union -> SQL.Union
     | Except -> SQL.Except
-    | Intersect -> SQL.Intersect       
+    | Intersect -> SQL.Intersect
 
 let compileEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema = Option.map compileName entityRef.schema; name = compileName entityRef.name }
 
@@ -249,7 +249,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
         let id = lastGlobalDomainId
         lastGlobalDomainId <- lastGlobalDomainId + 1
         id
-    
+
     let findReferenceMainField (name : FieldName) (field : ResolvedColumnField) : ResolvedFieldRef option =
         match field.fieldType with
         | FTReference (entityRef, where) ->
@@ -283,7 +283,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
                             columns = Array.append [| SQL.SCExpr (domainColumn, SQL.VEValue <| SQL.VInt id) |] expr.columns
                     }
                     (Map.singleton id domains, SQL.SSelect modifiedExpr)
-                | SSetOp (op, a, b, limits) ->            
+                | SSetOp (op, a, b, limits) ->
                     let (domainsMap1, expr1) = compileDomained a
                     let (domainsMap2, expr2) = compileDomained b
                     (Map.unionUnique domainsMap1 domainsMap2, SQL.SSetOp (compileSetOp op, expr1, expr2, compileOrderLimitClause limits))
@@ -297,7 +297,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
                 let (domainsMap, ret) = compileFromClause clause
                 (domainsMap, Some ret)
             | None -> (Map.empty, None)
-        
+
         let attributeColumns =
             select.attributes
                 |> Map.toSeq
@@ -343,12 +343,12 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
                             let ref : SQL.ColumnRef = { table = Some tableRef; name = compilePun fieldName }
                             Seq.singleton <| SQL.SCExpr (compilePun newName, SQL.VEColumn ref)
                         | _ -> Seq.empty
-                    | _ -> Seq.empty   
+                    | _ -> Seq.empty
                 let rec getPunColumns = function
                 | DSingle (id, domain) -> getPunColumn domain
                 | DMulti (ns, nested) -> nested |> Map.values |> Seq.collect getPunColumns
                 let punColumns = getPunColumns domains
-            
+
                 let getNewDomain (domain : Domain) =
                     match Map.tryFind fieldName domain with
                     | None -> Map.empty
@@ -360,7 +360,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
 
                 (Some newDomains, [ idColumns; domainColumns; punColumns ] |> Seq.concat)
             | _ -> (None, Seq.empty)
-        
+
         let domainResults = select.results |> Seq.map getDomainColumns |> Seq.cache
         let domainColumns = domainResults |> Seq.collect snd |> Seq.distinct
         let newDomains = domainResults |> Seq.mapMaybe fst |> Seq.fold mergeDomains (DSingle (newGlobalDomainId (), Map.empty))
@@ -422,7 +422,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
 
             let subquery =
                 SQL.SSelect
-                    { columns = Seq.append (Seq.append (Seq.singleton idColumn) (Seq.append columnFields computedFields)) referenceNames |> Seq.toArray 
+                    { columns = Seq.append (Seq.append (Seq.singleton idColumn) (Seq.append columnFields computedFields)) referenceNames |> Seq.toArray
                       clause = Some { from = from
                                       where = None
                                     }
@@ -436,7 +436,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
                   idColumn = funEmpty
                 }
             let domain = entity.columnFields |> Map.map makeDomainEntry
-        
+
             (Map.singleton entityRef.name (DSingle (newGlobalDomainId (), domain)), subExpr)
         | FJoin (jt, e1, e2, where) ->
             let (domainsMap1, r1) = compileFromExpr e1
@@ -464,9 +464,9 @@ let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
     let foundReference column =
         noReferences <- false
     let foundPlaceholder placeholder =
-        noArgumentReferences <- false    
+        noArgumentReferences <- false
     let foundQuery query =
-        noReferences <- false    
+        noReferences <- false
     SQL.iterValueExpr foundReference ignore foundQuery expr
     if not noReferences then
         None
@@ -501,7 +501,7 @@ let rec private findPureAttributes : SQL.SelectExpr -> Map<SQL.ColumnName, Purit
                 Some (addPurity aPurity bPurity, aExpr, aAttr)
             else
                 None
-        Map.intersectWithMaybe addPure (findPureAttributes a) (findPureAttributes b) 
+        Map.intersectWithMaybe addPure (findPureAttributes a) (findPureAttributes b)
 
 let rec private filterExprColumns (cols : Set<SQL.ColumnName>) : SQL.SelectExpr -> SQL.SelectExpr = function
     | SQL.SSelect query ->
@@ -530,7 +530,7 @@ let rec private ensureMainIdColumn (mainEntity : ResolvedMainEntity) : SQL.Selec
             let res = SQL.SCExpr (compileId mainEntity.entity.name, SQL.VEColumn fromCol)
             SQL.SSelect { query with columns = Array.append [|res|] query.columns }
     | SQL.SSetOp (op, a, b, limits) ->
-        failwith "Set operation or no FROM in a view with main entity"    
+        failwith "Set operation or no FROM in a view with main entity"
 
 let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
     eprintfn "Compiling %O" (viewExpr.select.ToFunQLString())
@@ -579,7 +579,7 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
         match viewExpr.mainEntity with
         | Some mainEntity -> ensureMainIdColumn mainEntity newExpr
         | None -> newExpr
-    
+
     { attributesQuery = attrQuery
       query = ensuredExpr
       arguments = arguments

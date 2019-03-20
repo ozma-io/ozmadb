@@ -68,13 +68,13 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
     let voidPlaceholder name =
         raise (ResolveLayoutException <| sprintf "Placeholders are not allowed in reference conditions: %O" name)
     let voidQuery query =
-        raise (ResolveLayoutException <| sprintf "Queries are not allowed in reference conditions: %O" query)    
+        raise (ResolveLayoutException <| sprintf "Queries are not allowed in reference conditions: %O" query)
     mapFieldExpr resolveColumn voidPlaceholder voidQuery
 
 let private resolveUniqueConstraint (entity : SourceEntity) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.columns then
         raise <| ResolveLayoutException "Empty unique constraint"
-    
+
     let checkColumn name =
         match entity.FindField(name) with
         | Some _ -> name

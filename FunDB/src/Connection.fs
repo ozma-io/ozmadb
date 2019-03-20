@@ -23,7 +23,7 @@ type DatabaseConnection (connectionString : string) =
     do
         ignore <| system.Database.UseTransaction(transaction)
         system.ChangeTracker.QueryTrackingBehavior <- QueryTrackingBehavior.NoTracking
-    
+
     interface IDisposable with
         member this.Dispose () =
             transaction.Dispose()
@@ -36,7 +36,7 @@ type DatabaseConnection (connectionString : string) =
     member this.EnsureCommit () =
         if not transaction.IsCompleted then
             transaction.Commit()
-    
+
     member this.Query = query
     member this.System = system
     member this.Connection = connection
