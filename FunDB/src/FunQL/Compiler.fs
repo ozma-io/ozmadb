@@ -383,7 +383,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
             match result.result with
             | QRField field -> SQL.SCColumn (compileFieldRef field)
             | QRExpr (name, expr) -> SQL.SCExpr (compileName name, compileFieldExpr expr)
-        let attrs = result.attributes |> Map.toSeq |> Seq.map (fun (name, expr) -> compileAttribute (sprintf "CellAttribute__%O" name) name expr)
+        let attrs = result.attributes |> Map.toSeq |> Seq.map (fun (attrName, expr) -> compileAttribute (sprintf "CellAttribute__%O" name) attrName expr)
         Seq.append (Seq.singleton resultColumn) attrs
 
     and compileFromClause (clause : ResolvedFromClause) : Map<EntityName, Domains> * SQL.FromClause =
