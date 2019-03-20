@@ -13,8 +13,8 @@ let entitiesApi (cacheStore : ContextCacheStore) : HttpHandler =
 
     let returnError = function
         | EEArguments msg -> RequestErrors.BAD_REQUEST <| sprintf "Invalid arguments: %s" msg
-        | EEAccessDenied -> RequestErrors.FORBIDDEN ""
-        | EENotFound -> RequestErrors.NOT_FOUND ""
+        | EEAccessDenied -> RequestErrors.FORBIDDEN "Forbidden"
+        | EENotFound -> RequestErrors.NOT_FOUND "Not found"
         | EEExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
 
     let insertEntity (entityRef : ResolvedEntityRef) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =

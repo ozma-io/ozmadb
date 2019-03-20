@@ -26,8 +26,8 @@ let viewsApi (cacheStore : ContextCacheStore) : HttpHandler =
 
     let returnError = function
         | UVEArguments msg -> RequestErrors.BAD_REQUEST <| sprintf "Invalid arguments: %s" msg
-        | UVEAccessDenied -> RequestErrors.FORBIDDEN ""
-        | UVENotFound -> RequestErrors.NOT_FOUND ""
+        | UVEAccessDenied -> RequestErrors.FORBIDDEN "Forbidden"
+        | UVENotFound -> RequestErrors.NOT_FOUND "Not found"
         | UVEParse msg -> RequestErrors.BAD_REQUEST <| sprintf "Parse error: %s" msg
         | UVEResolve msg -> RequestErrors.BAD_REQUEST <| sprintf "Resolution error: %s" msg
         | UVEExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
