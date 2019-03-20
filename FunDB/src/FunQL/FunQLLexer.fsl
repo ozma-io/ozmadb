@@ -8,7 +8,6 @@ open Microsoft.FSharp.Text.Lexing
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.Parsing
-//open FunWithFlags.FunDB.FunQL
 
 }
 
