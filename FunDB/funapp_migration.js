@@ -19,7 +19,18 @@ var commonViews = {
         "  left join \"public\".\"ColumnFields\" on \"ColumnFields\".\"Id\" = \"ColumnFieldTranslations\".\"ColumnFieldId\"\n" +
         "  left join \"public\".\"Entities\" on \"Entities\".\"Id\" = \"ColumnFields\".\"EntityId\"\n" +
         "  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
-        "where $$Lang LIKE \"ColumnFieldTranslations\".\"Language\" || '%'",
+        "where $$Lang LIKE \"ColumnFieldTranslations\".\"Language\" || '%'" +
+        "union select\n" +
+        "  \"Schemas\".\"Name\" as \"SchemaName\",\n" +
+        "  \"Entities\".\"Name\" as \"EntityName\",\n" +
+        "  \"ComputedFields\".\"Name\" as \"FieldName\",\n" +
+        "  \"ComputedFieldTranslations\".\"Translation\"\n" +
+        "from\n" +
+        "  \"funapp\".\"ComputedFieldTranslations\"" +
+        "  left join \"public\".\"ComputedFields\" on \"ComputedFields\".\"Id\" = \"ComputedFieldTranslations\".\"ComputedFieldId\"\n" +
+        "  left join \"public\".\"Entities\" on \"Entities\".\"Id\" = \"ComputedFields\".\"EntityId\"\n" +
+        "  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
+        "where $$Lang LIKE \"ComputedFieldTranslations\".\"Language\" || '%'",
     // Public APIs
     "__TranslatedMenu":
         "select\n" +
