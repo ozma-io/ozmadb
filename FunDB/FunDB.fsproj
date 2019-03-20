@@ -22,6 +22,7 @@
     <Compile Include="src/Parsing.fs" />
 
     <Compile Include="src/SQL/Utils.fs" />
+    <Compile Include="src/SQL/Parsing.fs" />
     <Compile Include="src/SQL/AST.fs" />
     <FsYacc Include="src/SQL/SQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parser" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParser.fs" />
@@ -80,7 +81,6 @@
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="FsLexYacc" Version="7.0.*" />
-    <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.2.*" />
     <PackageReference Include="Microsoft.AspNetCore.Hosting" Version="2.2.*" />
     <PackageReference Include="Microsoft.AspNetCore.Server.Kestrel" Version="2.2.*" />

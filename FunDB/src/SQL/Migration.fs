@@ -94,6 +94,7 @@ let private migrateBuildSchema (schema : SchemaName) (fromMeta : SchemaMeta) (to
                       match Map.tryFind objectName fromMeta.objects with
                           | Some (OMConstraint (oldTableName, oldConstraintType)) ->
                               if tableName <> oldTableName || constraintType <> oldConstraintType then
+                                  eprintfn "Constraints differ: %O vs %O" oldConstraintType constraintType
                                   yield SODeleteConstraint (objRef, oldTableName)
                                   yield SOCreateConstraint (objRef, tableName, constraintType)
                           | _ -> yield SOCreateConstraint (objRef, tableName, constraintType)

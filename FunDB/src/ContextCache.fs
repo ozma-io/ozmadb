@@ -302,9 +302,8 @@ type ContextCacheStore (connectionString : string, preloadedSettings : Preloaded
 
             let systemMigration = migrateDatabase (filterSystemMigrations currentMeta) systemMeta
             for action in systemMigration do
-                eprintfn "Migration step: %O" action
+                eprintfn "System migration step: %O" action
                 conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
-
             let layoutChanged = updateLayout conn.System systemRenderedLayout
 
             let (_, currentVersion) = getCurrentVersion conn layoutChanged

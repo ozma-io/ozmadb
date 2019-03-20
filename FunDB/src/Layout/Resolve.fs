@@ -93,7 +93,7 @@ let private resolveComputedField (entity : SourceEntity) (comp : SourceComputedF
     let computedExpr =
         match parse tokenizeFunQL fieldExpr comp.expression with
         | Ok r -> r
-        | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing computed field expression: %s" msg)
+        | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing computed field expression '%s': %s" comp.expression msg)
 
     { expression = resolveLocalExpr entity computedExpr
     }

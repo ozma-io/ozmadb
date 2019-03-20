@@ -1,16 +1,41 @@
 module FunWithFlags.FunDB.SQL.Utils
 
 open System
+open System.Text
 open System.Globalization
 
-let escapeSqlSymbols (str : string) : string = str.Replace("\\", "\\\\")
+let escapeSqlDoubleQuotes (str : string) : string = sprintf "\"%s\"" (str.Replace("\"", "\"\""))
 
-let escapeSqlDoubleQuotes (str : string) : string = sprintf "\"%s\"" ((escapeSqlSymbols str).Replace("\"", "\\\""))
-
-let escapeSqlSingleQuotes (str : string) : string = sprintf "'%s'" ((escapeSqlSymbols str).Replace("'", "''"))
+// PostgreSQL C-style escape string constants but without E
+let escapeSqlSingleQuotes (str : string) : string =
+    let strBuilder = StringBuilder (2 * str.Length)
+    ignore <| strBuilder.Append('\'')
+    for c in str do
+        match c with
+        | '\\' ->
+            ignore <| strBuilder.Append("\\\\")
+        | '\x08' ->
+            ignore <| strBuilder.Append("\\b")
+        | '\x0c' ->
+            ignore <| strBuilder.Append("\\f")
+        | '\n' ->
+            ignore <| strBuilder.Append("\\n")
+        | '\r' ->
+            ignore <| strBuilder.Append("\\r")
+        | '\t' ->
+            ignore <| strBuilder.Append("\\t")
+        | '\'' ->
+            ignore <| strBuilder.Append("\\'")
+        | c when c < ' ' ->
+            ignore <| strBuilder.AppendFormat("\\x{0:X2}", int c)
+        | c ->
+            ignore <| strBuilder.Append(c)
+    ignore <| strBuilder.Append('\'')
+    strBuilder.ToString()
 
 let renderSqlName = escapeSqlDoubleQuotes
 let renderSqlString = escapeSqlSingleQuotes
+let renderSqlArrayString (str : string) = sprintf "\"%s\"" (str.Replace("\"", "\\\""))
 
 let renderSqlBool : bool -> string = function
     | true -> "TRUE"

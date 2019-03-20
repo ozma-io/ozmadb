@@ -6,17 +6,17 @@ open System
 open Microsoft.FSharp.Text.Lexing
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Parsing.Helpers
-open FunWithFlags.FunDB.FunQL
+open FunWithFlags.FunDB.Parsing
+open FunWithFlags.FunDB.SQL.Parsing
+//open FunWithFlags.FunDB.FunQL
 
 }
 
 // Regular expressions
 let whitespace = [' ' '\t' ]
 let newline = ('\n' | "\r\n")
-let escapes = "\\" ['\\' 't' 'r' 'n']
-let string = "'" ([^ '\\' '\''] | "\\'" | escapes)* "'"
-let escapedId  = "\"" ([^ '\\' '"'] | "\\\"" | escapes)* "\""
+let string = "'" ( [^ '\\' '\''] | "\\" _ )* "'"
+let escapedId  = "\"" ( [^ '"'] | "\"\"" )* "\""
 let unescapedId = ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 // Case-insensitive chars
@@ -63,38 +63,40 @@ and tokenizeFunQL = parse
     // Atoms
     | ['+' '-']? ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parser.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
     | ['+' '-']? ['0'-'9'] ['0'-'9']*                { Parser.INT (lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
-    | escapedId                                      { Parser.ID (escapedString '\"' 0 lexbuf) }
-    | string                                         { Parser.STRING (escapedString '\'' 0 lexbuf) }
+    | escapedId                                      { Parser.ID (escapedId 0 lexbuf) }
+    | string                                         { Parser.STRING (escapedString 0 lexbuf) }
 
     // Argument IDs
-    | "$$" escapedId   { Parser.GLOBAL_ARGUMENT_ID (escapedString '\"' 2 lexbuf) }
+    | "$$" escapedId   { Parser.GLOBAL_ARGUMENT_ID (escapedId 2 lexbuf) }
     | "$$" unescapedId { Parser.GLOBAL_ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 2).ToLower()) }
-    | "$" escapedId    { Parser.ARGUMENT_ID (escapedString '\"' 1 lexbuf) }
+    | "$" escapedId    { Parser.ARGUMENT_ID (escapedId 1 lexbuf) }
     | "$" unescapedId  { Parser.ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 1).ToLower()) }
 
     // Symbols
-    | "@{" { Parser.AT_LEFT_BRACE }
-    | "{"  { Parser.LEFT_BRACE }
-    | "}"  { Parser.RIGHT_BRACE }
-    | "("  { Parser.LEFT_PAREN }
-    | ")"  { Parser.RIGHT_PAREN }
-    | "["  { Parser.LEFT_BRACKET }
-    | "]"  { Parser.RIGHT_BRACKET }
-    | "::" { Parser.DOUBLE_COLON }
-    | ","  { Parser.COMMA }
-    | "."  { Parser.DOT }
-    | "="  { Parser.EQ }
-    | "<>" { Parser.NOT_EQ }
-    | "!=" { Parser.NOT_EQ }
-    | ">=" { Parser.GREATER_EQ }
-    | ">"  { Parser.GREATER }
-    | "<=" { Parser.LESS_EQ }
-    | "<"  { Parser.LESS }
-    | "@"  { Parser.AT }
-    | "=>" { Parser.ARROW }
-    | "||" { Parser.CONCAT }
-    | "*"  { Parser.STAR }
-    
+    | "@{"  { Parser.AT_LEFT_BRACE }
+    | "{"   { Parser.LEFT_BRACE }
+    | "}"   { Parser.RIGHT_BRACE }
+    | "("   { Parser.LEFT_PAREN }
+    | ")"   { Parser.RIGHT_PAREN }
+    | "["   { Parser.LEFT_BRACKET }
+    | "]"   { Parser.RIGHT_BRACKET }
+    | "::"  { Parser.DOUBLE_COLON }
+    | ","   { Parser.COMMA }
+    | "."   { Parser.DOT }
+    | "="   { Parser.EQ }
+    | "<>"  { Parser.NOT_EQ }
+    | "!="  { Parser.NOT_EQ }
+    | ">="  { Parser.GREATER_EQ }
+    | ">"   { Parser.GREATER }
+    | "<="  { Parser.LESS_EQ }
+    | "<"   { Parser.LESS }
+    | "@"   { Parser.AT }
+    | "=>"  { Parser.ARROW }
+    | "||"  { Parser.CONCAT }
+    | "*"   { Parser.STAR }
+    | "~~"  { Parser.LIKE_OP }
+    | "!~~" { Parser.NOT_LIKE_OP }
+
     // Keywords
     | t r u e           { Parser.BOOL true }
     | f a l s e         { Parser.BOOL false }
@@ -131,10 +133,10 @@ and tokenizeFunQL = parse
     | l i m i t         { Parser.LIMIT }
     | o f f s e t       { Parser.OFFSET }
     | u n i o n         { Parser.UNION }
-    | i n t e r s e c t { Parser.INTERSECT} 
+    | i n t e r s e c t { Parser.INTERSECT}
     | u p d a t e       { Parser.UPDATE }
     | o f               { Parser.OF }
-                            
+
     // Types
     | i n t             { Parser.INT_TYPE }
     | d e c i m a l     { Parser.DECIMAL_TYPE }
@@ -145,10 +147,10 @@ and tokenizeFunQL = parse
     | r e f e r e n c e { Parser.REFERENCE_TYPE }
     | a r r a y         { Parser.ARRAY_TYPE }
     | e n u m           { Parser.ENUM_TYPE }
-    
+
     // Unescaped ids
     | unescapedId { Parser.ID ((String lexbuf.Lexeme).ToLower()) }
-    
+
     // Whitespace
     | whitespace { tokenizeFunQL lexbuf }
     | "--"       { lineCommentFunQL lexbuf; tokenizeFunQL lexbuf }

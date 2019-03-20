@@ -44,7 +44,7 @@ let private splitResults (results : Result seq) : ParsedAttributeMap * QueryResu
         | AResult res -> None
         | AAttribute (name, attr) -> Some (name, attr)
 
-    let attributes = results |> Seq.mapMaybe getAttribute |> parseMap "Clashing row attribute names"    
+    let attributes = results |> Seq.mapMaybe getAttribute |> parseMap "Clashing row attribute names"
     let results = results |> Seq.mapMaybe getResult |> Seq.toArray
     (attributes, results)
 
@@ -94,6 +94,8 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %token CONCAT
 %token STAR
 %token AT_LEFT_BRACE
+%token LIKE_OP
+%token NOT_LIKE_OP
 
 // Keywords
 %token SELECT
@@ -152,7 +154,7 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %right NOT
 %nonassoc EQ NOT_EQ
 %nonassoc LESS GREATER LESS_EQ GREATER_EQ
-%nonassoc LIKE
+%nonassoc LIKE LIKE_OP NOT_LIKE_OP
 %nonassoc IN
 %left CONCAT
 %nonassoc IS
@@ -341,6 +343,8 @@ FieldExprEq:
   | FieldExprOp GREATER_EQ FieldExprOp  { FEGreaterEq ($1, $3) }
   | FieldExprOp LIKE FieldExprOp        { FELike ($1, $3) }
   | FieldExprOp NOT LIKE FieldExprOp    { FENotLike ($1, $4) }
+  | FieldExprOp LIKE_OP FieldExprOp     { FELike ($1, $3) }
+  | FieldExprOp NOT_LIKE_OP FieldExprOp { FENotLike ($1, $3) }
   | FieldExprOp IN NonEmptyExprList     { FEIn ($1, $3) }
   | FieldExprOp NOT IN NonEmptyExprList { FENotIn ($1, $4) }
   | FieldExprOp                         { $1 }

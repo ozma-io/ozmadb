@@ -4,7 +4,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.Compiler
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
-
+open FunWithFlags.FunDB.SQL.Meta
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 exception LayoutMetaException of info : string with
@@ -14,7 +14,8 @@ let private compileCheckExpr : LocalFieldExpr -> SQL.ValueExpr =
     let compileColumn c = { table = None; name = compileName c } : SQL.ColumnRef
     let voidPlaceholder c = raise (LayoutMetaException <| sprintf "Unexpected placeholder in check expression: %O" c)
     let voidQuery c = raise (LayoutMetaException <| sprintf "Unexpected subquery in check expression: %O" c)
-    genericCompileFieldExpr compileColumn voidPlaceholder voidQuery
+    // Normalization is needed so that expression will be in same form as ones from pg_catalog.
+    normalizeLocalExpr << genericCompileFieldExpr compileColumn voidPlaceholder voidQuery
 
 let private makeUniqueConstraintMeta (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
     SQL.CMUnique <| Array.map (fun name -> SQL.SQLName <| name.ToString()) constr.columns
@@ -26,7 +27,7 @@ let private makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (field : Re
     let res =
         { columnType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType field.fieldType)
           isNullable = field.isNullable
-          defaultExpr = Option.map compileFieldValue field.defaultValue
+          defaultExpr = Option.map (normalizeLocalExpr << compileFieldValue) field.defaultValue
         } : SQL.ColumnMeta
     let constr =
         match field.fieldType with
@@ -62,12 +63,10 @@ let private makeEntityMeta (tableName : SQL.TableRef) (entity : ResolvedEntity) 
     let userColumns = columnObjects |> Seq.map (fun (name, (column, maybeConstr)) -> (name, column))
     let columnConstraints = columnObjects |> Seq.mapMaybe (fun (name, (column, maybeConstr)) -> maybeConstr)
     let uniqueConstraints = entity.uniqueConstraints |> Map.toSeq |> Seq.map makeUniqueConstraint
-    // FIXME: disabled while we cannot parse them from PostgreSQL schema
-    //let checkConstraints = entity.checkConstraints |> Map.toSeq |> Seq.map makeCheckConstraint
+    let checkConstraints = entity.checkConstraints |> Map.toSeq |> Seq.map makeCheckConstraint
 
     let res = { columns = Seq.append idColumns userColumns |> Map.ofSeq } : SQL.TableMeta
-    //let constraints = Seq.append (Seq.append (Seq.append idConstraints uniqueConstraints) checkConstraints) columnConstraints
-    let constraints = Seq.append (Seq.append idConstraints uniqueConstraints) columnConstraints
+    let constraints = Seq.append (Seq.append (Seq.append idConstraints uniqueConstraints) checkConstraints) columnConstraints
     let objects = List.toSeq [ (tableName.name, SQL.OMTable res); (idSeq, SQL.OMSequence) ]
     Seq.append objects (Seq.map (fun (name, constr) -> (name, SQL.OMConstraint (tableName.name, constr))) constraints)
 

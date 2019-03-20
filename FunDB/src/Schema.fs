@@ -23,7 +23,7 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     val mutable schemas : DbSet<Schema>
     [<Entity("Name")>]
     [<UniqueConstraint("Name", [|"Name"|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%__%' AND \"Name\" <> ''")>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     member this.Schemas
         with get () = this.schemas
         and set value = this.schemas <- value
@@ -33,7 +33,7 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     [<Entity("FullName")>]
     [<ComputedField("FullName", "\"SchemaId\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"SchemaId"; "Name"|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%__%' AND \"Name\" <> ''")>]
+    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     [<CheckConstraint("CorrectMainField", "\"MainField\" <> '' AND \"MainField\" <> 'Id'")>]
     member this.Entities
         with get () = this.entities

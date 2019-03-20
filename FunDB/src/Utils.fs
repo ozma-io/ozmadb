@@ -264,3 +264,20 @@ let castUnion<'a> (value : obj) : 'a option =
         | :? InvalidOperationException -> None
     else
         None
+
+module NumBases =
+    let octChar (c : char) =
+        if c >= '0' && c <= '7' then
+            Some <| int c - int '0'
+        else
+            None
+
+    let hexChar (c : char) =
+        if c >= '0' && c <= '9' then
+            Some <| int c - int '0'
+        else if c >= 'a' && c <= 'f' then
+            Some <| 10 + int c - int 'a'
+        else if c >= 'A' && c <= 'F' then
+            Some <| 10 + int c - int 'A'
+        else
+            None

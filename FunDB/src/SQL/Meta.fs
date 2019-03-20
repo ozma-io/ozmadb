@@ -1,7 +1,7 @@
 module FunWithFlags.FunDB.SQL.Meta
 
 open Microsoft.EntityFrameworkCore
-open Microsoft.Extensions.Logging
+open System.ComponentModel.DataAnnotations
 open System.Linq
 
 open FunWithFlags.FunDB.Utils
@@ -15,223 +15,174 @@ open FunWithFlags.FunDB.SQL.Array.Parser
 exception SQLMetaException of info : string with
     override this.Message = this.info
 
-module InformationSchema =
+type private Oid = uint32
+type private ColumnNum = int16
+
+module PgCatalog =
     open System.ComponentModel.DataAnnotations.Schema
 
-    type InformationSchemaContext (options : DbContextOptions<InformationSchemaContext>) =
+    type PgCatalogContext (options : DbContextOptions<PgCatalogContext>) =
         inherit DbContext (options)
 
         // All of this shit is because of how EF Core works.
         [<DefaultValue>]
-        val mutable schemata : DbSet<Schema>
-        member this.Schemata
-            with get () = this.schemata
-            and set value = this.schemata <- value
+        val mutable pgNamespace : DbSet<Namespace>
+        member this.Namespace
+            with get () = this.pgNamespace
+            and set value = this.pgNamespace <- value
 
         [<DefaultValue>]
-        val mutable tables : DbSet<Table>
-        member this.Tables
-            with get () = this.tables
-            and set value = this.tables <- value
+        val mutable classes : DbSet<Class>
+        member this.Classes
+            with get () = this.classes
+            and set value = this.classes <- value
 
         [<DefaultValue>]
-        val mutable columns : DbSet<Column>
-        member this.Columns
-            with get () = this.columns
-            and set value = this.columns <- value
+        val mutable attributes : DbSet<Attribute>
+        member this.Attributes
+            with get () = this.attributes
+            and set value = this.attributes <- value
 
         [<DefaultValue>]
-        val mutable tableConstraints : DbSet<TableConstraint>
-        member this.TableConstraints
-            with get () = this.tableConstraints
-            and set value = this.tableConstraints <- value
+        val mutable attrDefs : DbSet<AttrDef>
+        member this.AttrDefs
+            with get () = this.attrDefs
+            and set value = this.attrDefs <- value
 
         [<DefaultValue>]
-        val mutable keyColumnUsage : DbSet<KeyColumn>
-        member this.key_column_usage
-            with get () = this.keyColumnUsage
-            and set value = this.keyColumnUsage <- value
-
-        [<DefaultValue>]
-        val mutable constraintColumnUsage : DbSet<ConstraintColumn>
-        member this.ConstraintColumnUsage
-            with get () = this.constraintColumnUsage
-            and set value = this.constraintColumnUsage <- value
-
-        [<DefaultValue>]
-        val mutable sequences : DbSet<Sequence>
-        member this.Sequences
-            with get () = this.sequences
-            and set value = this.sequences <- value
+        val mutable constraints : DbSet<Constraint>
+        member this.Constraints
+            with get () = this.constraints
+            and set value = this.constraints <- value
 
         override this.OnModelCreating (modelBuilder : ModelBuilder) =
-            ignore <| modelBuilder.Entity<Schema>()
-                .HasKey([| "catalog_name"; "schema_name" |])
-            ignore <| modelBuilder.Entity<Table>()
-                .HasKey([| "table_catalog"; "table_schema"; "table_name" |])
-            ignore <| modelBuilder.Entity<Table>()
-                .HasOne(fun table -> table.schema)
-                .WithMany(fun (schema : Schema) -> schema.tables)
-                .HasForeignKey([| "table_catalog"; "table_schema" |])
-            ignore <| modelBuilder.Entity<Column>()
-                .HasKey([| "table_catalog"; "table_schema"; "table_name"; "column_name" |])
-            ignore <| modelBuilder.Entity<Column>()
-                .HasOne(fun column -> column.table)
-                .WithMany(fun (table : Table) -> table.columns)
-                .HasForeignKey([| "table_catalog"; "table_schema"; "table_name" |])
-            ignore <| modelBuilder.Entity<TableConstraint>()
-                .HasKey([| "constraint_catalog"; "constraint_schema"; "constraint_name" |])
-            ignore <| modelBuilder.Entity<TableConstraint>()
-                .HasOne(fun constr -> constr.table)
-                .WithMany(fun (table : Table) -> table.table_constraints)
-                .HasForeignKey([| "table_catalog"; "table_schema"; "table_name" |])
-            ignore <| modelBuilder.Entity<KeyColumn>()
-                .HasKey([| "constraint_catalog"; "constraint_schema"; "constraint_name"; "column_name" |])
-            ignore <| modelBuilder.Entity<KeyColumn>()
-                .HasOne(fun key -> key.table_constraint)
-                .WithMany(fun (constr : TableConstraint) -> constr.key_column_usage)
-                .HasForeignKey([| "constraint_catalog"; "constraint_schema"; "constraint_name" |])
-            ignore <| modelBuilder.Entity<ConstraintColumn>()
-                .HasKey([| "constraint_catalog"; "constraint_schema"; "constraint_name"; "table_catalog"; "table_schema"; "table_name"; "column_name" |])
-            ignore <| modelBuilder.Entity<ConstraintColumn>()
-                .HasOne(fun col -> col.table_constraint)
-                .WithMany(fun (constr : TableConstraint) -> constr.constraint_column_usage)
-                .HasForeignKey([| "constraint_catalog"; "constraint_schema"; "constraint_name" |])
-            ignore <| modelBuilder.Entity<Sequence>()
-                .HasKey([| "sequence_catalog"; "sequence_schema"; "sequence_name" |])
-            ignore <| modelBuilder.Entity<Sequence>()
-                .HasOne(fun seq -> seq.schema)
-                .WithMany(fun (schema : Schema) -> schema.sequences)
-                .HasForeignKey([| "sequence_catalog"; "sequence_schema" |])
+            ignore <| modelBuilder.Entity<Attribute>()
+                .HasKey([| "attrelid"; "attnum" |])
+            ignore <| modelBuilder.Entity<AttrDef>()
+                .HasOne(fun def -> def.attribute)
+                .WithMany(fun attr -> attr.attrDefs)
+                .HasForeignKey([| "adrelid"; "adnum" |])
 
     and
-        [<Table("schemata", Schema="information_schema")>]
+        [<Table("pg_namespace", Schema="pg_catalog")>]
         [<CLIMutable>]
         [<NoEquality>]
         [<NoComparison>]
-        Schema =
-            { catalog_name : string
-              schema_name : string
-              tables : seq<Table>
-              sequences : seq<Sequence>
+        Namespace =
+            { [<Column(TypeName="oid")>]
+              [<Key>]
+              oid : Oid
+              nspname : string
+
+              classes : seq<Class>
             }
 
     and
-        [<Table("tables", Schema="information_schema")>]
+        [<Table("pg_class", Schema="pg_catalog")>]
         [<CLIMutable>]
         [<NoEquality>]
         [<NoComparison>]
-        Table =
-            { table_catalog : string
-              table_schema : string
-              table_name : string
-              table_type : string
+        Class =
+            { [<Column(TypeName="oid")>]
+              [<Key>]
+              oid : Oid
+              relname : string
+              [<Column(TypeName="oid")>]
+              relnamespace : Oid
+              relkind : char
 
-              schema : Schema
+              [<ForeignKey("relnamespace")>]
+              pgNamespace : Namespace
 
-              columns : seq<Column>
-              table_constraints : seq<TableConstraint>
-        }
+              attributes : seq<Attribute>
+              [<InverseProperty("pgClass")>]
+              constraints : seq<Constraint>
+            }
 
     and
-        [<Table("columns", Schema="information_schema")>]
+        [<Table("pg_attribute", Schema="pg_catalog")>]
         [<CLIMutable>]
         [<NoEquality>]
         [<NoComparison>]
-        Column =
-            { table_catalog : string
-              table_schema : string
-              table_name : string
-              column_name : string
-              column_default : string
-              is_nullable : string
-              udt_catalog : string
-              udt_schema : string
-              udt_name : string
+        Attribute =
+            { [<Column(TypeName="oid")>]
+              attrelid : Oid
+              attname : string
+              [<Column(TypeName="oid")>]
+              atttypid : Oid
+              attnum : ColumnNum
+              attnotnull : bool
+              attisdropped : bool
 
-              table : Table
+              [<ForeignKey("attrelid")>]
+              pgClass : Class
+              [<ForeignKey("atttypid")>]
+              pgType : Type
+
+              attrDefs : seq<AttrDef>
            }
 
     and
-        [<Table("table_constraints", Schema="information_schema")>]
+        [<Table("pg_type", Schema="pg_catalog")>]
         [<CLIMutable>]
         [<NoEquality>]
         [<NoComparison>]
-        TableConstraint =
-            { constraint_catalog : string
-              constraint_schema : string
-              constraint_name : string
-              table_catalog : string
-              table_schema : string
-              table_name : string
-              constraint_type : string
+        Type =
+            { [<Column(TypeName="oid")>]
+              [<Key>]
+              oid : Oid
+              typname : string
+              typtype : char
+           }
 
-              table : Table
+    and
+        [<Table("pg_attrdef", Schema="pg_catalog")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        AttrDef =
+            { [<Column(TypeName="oid")>]
+              [<Key>]
+              oid : Oid
+              [<Column(TypeName="oid")>]
+              adrelid : Oid
+              adnum : ColumnNum
+              adsrc : string
 
-              key_column_usage : seq<KeyColumn>
-              constraint_column_usage : seq<ConstraintColumn>
+              [<ForeignKey("adrelid")>]
+              pgClass : Class
+              attribute : Attribute
             }
 
     and
-        [<Table("key_column_usage", Schema="information_schema")>]
+        [<Table("pg_constraint", Schema="pg_catalog")>]
         [<CLIMutable>]
         [<NoEquality>]
         [<NoComparison>]
-        KeyColumn =
-            { constraint_catalog : string
-              constraint_schema : string
-              constraint_name : string
-              table_catalog : string
-              table_schema : string
-              table_name : string
-              column_name : string
-              ordinal_position : int
+        Constraint =
+            { [<Column(TypeName="oid")>]
+              [<Key>]
+              oid : Oid
+              conname : string
+              contype : char
+              [<Column(TypeName="oid")>]
+              conrelid : Oid
+              [<Column(TypeName="oid")>]
+              confrelid : Oid
+              conkey : ColumnNum[]
+              confkey : ColumnNum[]
+              consrc : string
 
-              table_constraint : TableConstraint
+              [<ForeignKey("conrelid")>]
+              pgClass : Class
+              [<ForeignKey("confrelid")>]
+              pgRelClass : Class
             }
 
-    and
-        [<Table("constraint_column_usage", Schema="information_schema")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        ConstraintColumn =
-            { constraint_catalog : string
-              constraint_schema : string
-              constraint_name : string
-              table_catalog : string
-              table_schema : string
-              table_name : string
-              column_name : string
-
-              table_constraint : TableConstraint
-            }
-
-    and
-        [<Table("sequences", Schema="information_schema")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        Sequence =
-            { sequence_catalog : string
-              sequence_schema : string
-              sequence_name : string
-
-              schema : Schema
-            }
-
- open InformationSchema
+ open PgCatalog
  open Npgsql
 
 let private publicSchema = SQLName "public"
-
-let private parseConstraintType (str : string) : ConstraintType option =
-    match str.ToUpper() with
-    | "UNIQUE" -> Some CTUnique
-    | "CHECK" -> Some CTCheck
-    | "PRIMARY KEY" -> Some CTPrimaryKey
-    | "FOREIGN KEY" -> Some CTForeignKey
-    | _ -> None
 
 let private tryRegclass (str : string) : SchemaObject option =
     match parse tokenizeSQL schemaObject str with
@@ -257,49 +208,57 @@ let private makeColumnFromName (schema : string) (table : string) (column : stri
 
 // Convert string-cast patterns into actual types so that we reverse lost type information.
 // Don't reduce the expressions beyond that!
-let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
+let normalizeLocalExpr : ValueExpr -> ValueExpr =
     let rec traverse = function
-        | VECast (VEValue (VString str), typ) ->
-            let castExpr () = VECast (VEValue (VString str), typ)
-            match typ with
-            | VTArray scalarType ->
-                match parse tokenizeArray stringArray str with
-                | Error msg -> raise (SQLMetaException <| sprintf "Cannot parse array: %s" msg)
-                | Ok array ->
-                    let runArrayCast (castFunc : string -> 'a option) : ValueArray<'a> =
-                        let runCast (str : string) =
-                            match castFunc str with
-                            | Some v -> v
-                            | None -> raise (SQLMetaException <| sprintf "Cannot cast array value to type %O: %s" scalarType str)
-                        mapValueArray runCast array
+        | VECast (v, typ) ->
+            match traverse v with
+            | VEValue (VString str) ->
+                let castExpr () = VECast (VEValue (VString str), typ)
+                match typ with
+                | VTArray scalarType ->
+                    match parse tokenizeArray stringArray str with
+                    | Error msg -> raise (SQLMetaException <| sprintf "Cannot parse array: %s" msg)
+                    | Ok array ->
+                        let runArrayCast (castFunc : string -> 'a option) : ValueArray<'a> =
+                            let runCast (str : string) =
+                                match castFunc str with
+                                | Some v -> v
+                                | None -> raise (SQLMetaException <| sprintf "Cannot cast array value to type %O: %s" scalarType str)
+                            mapValueArray runCast array
+
+                        match findSimpleType scalarType with
+                        | None -> castExpr ()
+                        | Some STString -> VEValue <| VStringArray array
+                        | Some STInt -> VEValue (VIntArray <| runArrayCast tryIntInvariant)
+                        | Some STDecimal -> VEValue (VDecimalArray <| runArrayCast tryDecimalInvariant)
+                        | Some STBool -> VEValue (VBoolArray <| runArrayCast tryBool)
+                        | Some STDateTime -> VEValue (VDateTimeArray <| runArrayCast tryDateTimeOffsetInvariant)
+                        | Some STDate -> VEValue (VDateArray <| runArrayCast tryDateInvariant)
+                        | Some STRegclass -> VEValue (VRegclassArray <| runArrayCast tryRegclass)
+                | VTScalar scalarType ->
+                    let runCast castFunc =
+                        match castFunc str with
+                        | Some v -> v
+                        | None -> raise (SQLMetaException <| sprintf "Cannot cast scalar value to type %O: %s" scalarType str)
 
                     match findSimpleType scalarType with
                     | None -> castExpr ()
-                    | Some STString -> VEValue <| VStringArray array
-                    | Some STInt -> VEValue (VIntArray <| runArrayCast tryIntInvariant)
-                    | Some STDecimal -> VEValue (VDecimalArray <| runArrayCast tryDecimalInvariant)
-                    | Some STBool -> VEValue (VBoolArray <| runArrayCast tryBool)
-                    | Some STDateTime -> VEValue (VDateTimeArray <| runArrayCast tryDateTimeOffsetInvariant)
-                    | Some STDate -> VEValue (VDateArray <| runArrayCast tryDateInvariant)
-                    | Some STRegclass -> VEValue (VRegclassArray <| runArrayCast tryRegclass)
-            | VTScalar scalarType ->
-                let runCast castFunc =
-                    match castFunc str with
-                    | Some v -> v
-                    | None -> raise (SQLMetaException <| sprintf "Cannot cast scalar value to type %O: %s" scalarType str)
-
-                match findSimpleType scalarType with
-                | None -> castExpr ()
-                | Some STString -> castExpr ()
-                | Some STInt -> VEValue (VInt <| runCast tryIntInvariant)
-                | Some STDecimal -> VEValue (VDecimal <| runCast tryDecimalInvariant)
-                | Some STBool -> VEValue (VBool <| runCast tryBool)
-                | Some STDateTime -> VEValue (VDateTime <| runCast tryDateTimeOffsetInvariant)
-                | Some STDate -> VEValue (VDate <| runCast tryDateInvariant)
-                | Some STRegclass -> VEValue (VRegclass <| runCast tryRegclass)
+                    | Some STString -> VEValue (VString str)
+                    | Some STInt -> VEValue (VInt <| runCast tryIntInvariant)
+                    | Some STDecimal -> VEValue (VDecimal <| runCast tryDecimalInvariant)
+                    | Some STBool -> VEValue (VBool <| runCast tryBool)
+                    | Some STDateTime -> VEValue (VDateTime <| runCast tryDateTimeOffsetInvariant)
+                    | Some STDate -> VEValue (VDate <| runCast tryDateInvariant)
+                    | Some STRegclass -> VEValue (VRegclass <| runCast tryRegclass)
+            | VEValue v ->
+                match findSimpleValueType typ with
+                | Some styp when valueSimpleType v = Some styp -> VEValue v
+                | _ -> VECast (VEValue v, typ)
+            | normV -> VECast (normV, typ)
         | VEValue value -> VEValue value
-        | VEColumn c -> raise (SQLMetaException <| sprintf "Invalid reference in default expression: %O" c)
-        | VEPlaceholder i -> raise (SQLMetaException <| sprintf "Invalid placeholder in default expression: %i" i)
+        | VEColumn ({ table = None } as c) -> VEColumn c
+        | VEColumn c -> raise (SQLMetaException <| sprintf "Invalid non-local reference in local expression: %O" c)
+        | VEPlaceholder i -> raise (SQLMetaException <| sprintf "Invalid placeholder in local expression: %i" i)
         | VENot e -> VENot (traverse e)
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
@@ -316,13 +275,17 @@ let private normalizeDefaultExpr : ValueExpr -> ValueExpr =
         | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
         | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
         | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
-        | VEInQuery (e, query) -> raise (SQLMetaException <| sprintf "Invalid subquery in default expression: %O" query)
-        | VENotInQuery (e, query) -> raise (SQLMetaException <| sprintf "Invalid subquery in default expression: %O" query)
+        | VEInQuery (e, query) -> raise (SQLMetaException <| sprintf "Invalid subquery in local expression: %O" query)
+        | VENotInQuery (e, query) -> raise (SQLMetaException <| sprintf "Invalid subquery in local expression: %O" query)
         | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
-        | VECast (e, typ) -> VECast (traverse e, typ)
         | VECase (es, els) -> VECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
         | VECoalesce vals -> VECoalesce (Array.map traverse vals)
     traverse
+
+let parseLocalExpr (raw : string) : ValueExpr =
+    match parse tokenizeSQL valueExpr raw with
+    | Ok expr -> normalizeLocalExpr expr
+    | Error msg -> raise (SQLMetaException <| sprintf "Cannot parse local expression '%s': %s" raw msg)
 
 let parseUdtName (str : string) =
     if str.StartsWith("_") then
@@ -330,93 +293,117 @@ let parseUdtName (str : string) =
     else
         VTScalar <| SQLRawString str
 
-let private makeColumnMeta (column : Column) : ColumnName * ColumnMeta =
+let private makeColumnMeta (attr : Attribute) : ColumnName * ColumnMeta =
     let columnType =
-        if column.udt_schema <> "pg_catalog" then
-            raise (SQLMetaException <| sprintf "Unsupported user-defined data type: %s.%s" column.udt_schema column.udt_name)
-        parseUdtName column.udt_name
-    let defaultExpr =
-        if isNull column.column_default
-        then None
-        else
-            match parse tokenizeSQL valueExpr column.column_default with
-            | Ok expr -> Some <| normalizeDefaultExpr expr
-            | Error msg -> raise (SQLMetaException <| sprintf "Cannot parse column default value: %s" msg)
-    let isNullable =
-        match tryBool column.is_nullable with
-        | Some v -> v
-        | None -> raise (SQLMetaException <| sprintf "Invalid is_nullable value: %s" column.is_nullable)
+        if attr.pgType.typtype <> 'b' then
+            raise (SQLMetaException <| sprintf "Unsupported non-base type: %s" attr.pgType.typname)
+        parseUdtName attr.pgType.typname
+    let defaultExpr = attr.attrDefs |> Seq.first |> Option.map (fun def -> parseLocalExpr def.adsrc)
     let res =
         { columnType = columnType
-          isNullable = isNullable
+          isNullable = not attr.attnotnull
           defaultExpr = defaultExpr
         }
-    (SQLName column.column_name, res)
+    (SQLName attr.attname, res)
 
-let private makeConstraintMeta (constr : TableConstraint) : ConstraintName * ConstraintMeta =
-    let keyColumns () =
-        constr.key_column_usage |> Seq.sortBy (fun key -> key.ordinal_position) |> Seq.map (fun key -> SQLName key.column_name) |> Seq.toArray
-    let constraintColumns () =
-        // We don't have any key to sort on so we pray that PostgreSQL's result order is good. Re: move to pg_catalog.
-        constr.constraint_column_usage |> Seq.map (fun col -> makeColumnFromName col.table_schema col.table_name col.column_name) |> Seq.toArray
-    let res =
-        match parseConstraintType constr.constraint_type with
-        | None -> raise (SQLMetaException <| sprintf "Unknown constraint type: %s" constr.constraint_type)
-        | Some CTUnique -> CMUnique (keyColumns ())
-        | Some CTPrimaryKey -> CMPrimaryKey (keyColumns ())
-        | Some CTCheck -> failwith "Not implemented yet"
-        | Some CTForeignKey ->
-            let cols = constraintColumns ()
-            let checkTable (a : ResolvedColumnRef) (b : ResolvedColumnRef) =
-                if a.table <> b.table then
-                    raise (SQLMetaException <| sprintf "Different column tables in a foreign key: %O vs %O" a.table b.table)
-                else b
-            ignore <| Seq.fold1 checkTable cols
-            let ref = cols.[0].table
-            CMForeignKey (ref, Array.zip (keyColumns ()) (Array.map (fun (a : ResolvedColumnRef) -> a.name) cols))
-    (SQLName constr.constraint_name, res)
+type private TableColumnIds = Map<ColumnNum, ColumnName>
 
-let private makeTableMeta (table : Table) : TableName * TableMeta * (ConstraintName * ConstraintMeta) seq =
-    if table.table_type.ToUpper() <> "BASE TABLE" then
-        raise (SQLMetaException <| sprintf "Unsupported table type: %s" table.table_type)
+[<NoComparison>]
+type private PgTableMeta =
+    { columns : TableColumnIds
+      constraints : Constraint seq
+    }
+
+[<NoComparison>]
+type private PgSchemaMeta =
+    { objects : Map<SQLName, ObjectMeta>
+      tables : Map<TableName, PgTableMeta>
+    }
+type private PgSchemas = Map<SchemaName, PgSchemaMeta>
+
+let private makeUnconstrainedTableMeta (cl : Class) : TableName * (TableMeta * PgTableMeta) =
     // FIXME: filtering CHECK constraints as we cannot handle them yet
-    let constraints = table.table_constraints |> Seq.filter (fun x -> x.constraint_type <> "CHECK") |> Seq.map makeConstraintMeta
-    let res = { columns = table.columns |> Seq.map makeColumnMeta |> Map.ofSeqUnique }
-    (SQLName table.table_name, res, constraints)
+    let filteredAttrs = cl.attributes |> Seq.filter (fun attr -> attr.attnum > 0s && not attr.attisdropped)
+    let columnIds = filteredAttrs |> Seq.map (fun attr -> (attr.attnum, SQLName attr.attname)) |> Map.ofSeqUnique
+    let columns = filteredAttrs |> Seq.map makeColumnMeta |> Map.ofSeqUnique
+    let res = { columns = columns }
+    let name = SQLName cl.relname
+    let meta =
+        { columns = columnIds
+          constraints = cl.constraints
+        }
+    (name, (res, meta))
 
-let private makeSequenceMeta (sequence : Sequence) : TableName =
-    SQLName sequence.sequence_name
+let private makeSequenceMeta (cl : Class) : TableName =
+    SQLName cl.relname
 
-let private makeSchemaMeta (schema : Schema) : SchemaName * SchemaMeta =
-    let tableObjects = schema.tables |> Seq.map makeTableMeta |> Seq.cache
-    let tables = tableObjects |> Seq.map (fun (name, table, constraints) -> (name, OMTable table)) |> Map.ofSeqUnique
-    let constraints =
-        tableObjects
-        |> Seq.collect (fun (name, table, constraints) -> Seq.map (fun (constrName, constr) -> (constrName, OMConstraint (name, constr))) constraints)
-        |> Map.ofSeqUnique
-    let sequences = schema.sequences |> Seq.map makeSequenceMeta |> Seq.map (fun name -> (name, OMSequence)) |> Map.ofSeqUnique
-    let name = SQLName schema.schema_name
-    let res = { objects = Map.unionUnique (Map.unionUnique tables constraints) sequences }
+let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchemaMeta =
+    let tableObjects = ns.classes |> Seq.filter (fun cl -> cl.relkind = 'r') |> Seq.map makeUnconstrainedTableMeta |> Map.ofSeqUnique
+    let tablesMeta = tableObjects |> Map.map (fun name (table, meta) -> meta)
+    let tables = tableObjects |> Map.map (fun name (table, meta) -> OMTable table)
+    let sequences = ns.classes |> Seq.filter (fun cl -> cl.relkind = 'S') |> Seq.map (fun cl -> (makeSequenceMeta cl, OMSequence)) |> Map.ofSeqUnique
+    let name = SQLName ns.nspname
+    let res =
+        { objects = Map.unionUnique tables sequences
+          tables = tablesMeta
+        }
     (name, res)
+
+type private Phase2Convert (schemaIds : PgSchemas) =
+    let makeConstraintMeta (tableName : TableName) (columnIds : TableColumnIds) (constr : Constraint) : (ConstraintName * ConstraintMeta) option =
+        let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
+        let ret =
+            match constr.contype with
+            | 'c' ->
+                Some <| CMCheck (parseLocalExpr constr.consrc)
+            | 'f' ->
+                let refSchema = SQLName constr.pgRelClass.pgNamespace.nspname
+                let refName = SQLName constr.pgRelClass.relname
+                let refTable = Map.find refName (Map.find refSchema schemaIds).tables
+                let makeRefColumn (fromNum : ColumnNum) (toNum : ColumnNum) =
+                    let fromName = makeLocalColumn fromNum
+                    let toName = Map.find toNum refTable.columns
+                    (fromName, toName)
+
+                let tableRef = { schema = Some refSchema; name = refName }
+                let cols = Seq.map2 makeRefColumn constr.conkey constr.confkey |> Seq.toArray
+                Some <| CMForeignKey (tableRef, cols)
+            | 'p' ->
+                Some <| CMPrimaryKey (Array.map makeLocalColumn constr.conkey)
+            | 'u' ->
+                Some <| CMUnique (Array.map makeLocalColumn constr.conkey)
+            | _ -> None
+
+        Option.map (fun r -> (SQLName constr.conname, r)) ret
+
+    let finishSchemaMeta (schemaName : SchemaName) (schema : PgSchemaMeta) : SchemaMeta =
+        let makeConstraints (tableName : TableName, table : PgTableMeta) =
+            table.constraints |> Seq.mapMaybe (makeConstraintMeta tableName table.columns) |> Seq.map (fun (constrRame, constr) -> (constrRame, OMConstraint (tableName, constr)))
+        let newObjects = schema.tables |> Map.toSeq |> Seq.collect makeConstraints |> Map.ofSeqUnique
+        { objects = Map.unionUnique schema.objects newObjects
+        }
+
+    member this.FinishSchemaMeta = finishSchemaMeta
 
 let buildDatabaseMeta (transaction : NpgsqlTransaction) : DatabaseMeta =
     let dbOptions =
-        (DbContextOptionsBuilder<InformationSchemaContext> ())
+        (DbContextOptionsBuilder<PgCatalogContext> ())
             .UseNpgsql(transaction.Connection)
-    use db = new InformationSchemaContext(dbOptions.Options)
+    use db = new PgCatalogContext(dbOptions.Options)
     ignore <| db.Database.UseTransaction(transaction)
 
-    let schemas =
-        db.Schemata.Where(fun schema -> not (schema.schema_name.StartsWith("pg_")) && schema.schema_name <> "information_schema")
-            .Include(fun schema -> schema.tables)
-                .ThenInclude(fun (table : Table) -> table.columns)
-            .Include(fun schema -> schema.tables)
-                .ThenInclude(fun (table : Table)-> table.table_constraints)
-                    .ThenInclude(fun (constr : TableConstraint) -> constr.key_column_usage)
-            .Include(fun schema -> schema.tables)
-                .ThenInclude(fun (table : Table) -> table.table_constraints)
-                    .ThenInclude(fun (constr : TableConstraint) -> constr.constraint_column_usage)
-            .Include(fun schema -> schema.sequences)
+    let namespaces =
+        db.Namespace.Where(fun ns -> not (ns.nspname.StartsWith("pg_")) && ns.nspname <> "information_schema")
+            .Include(fun ns -> ns.classes)
+                .ThenInclude(fun (cl : Class) -> cl.attributes)
+                    .ThenInclude(fun (attr : Attribute) -> attr.attrDefs)
+            .Include(fun ns -> ns.classes)
+                .ThenInclude(fun (cl : Class) -> cl.attributes)
+                    .ThenInclude(fun (attr : Attribute) -> attr.pgType)
+            .Include(fun ns -> ns.classes)
+                .ThenInclude(fun (cl : Class) -> cl.constraints)
 
-    // We ignore catalog, assuming a database is constant -- it should be so according to PostgreSQL.
-    { schemas = schemas |> Seq.map makeSchemaMeta |> Map.ofSeqUnique }
+    let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
+    let phase2 = Phase2Convert(unconstrainedSchemas)
+    let schemas = unconstrainedSchemas |> Map.map phase2.FinishSchemaMeta
+    { schemas = schemas }

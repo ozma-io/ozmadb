@@ -138,10 +138,10 @@ type [<JsonConverter(typeof<ValueConverter>)>] Value =
             | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
-            | VStringArray vals -> renderArray escapeSqlDoubleQuotes "text" vals
+            | VStringArray vals -> renderArray renderSqlArrayString "text" vals
             | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-            | VDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "timestamp" vals
-            | VDateArray vals -> renderArray (renderSqlDate >> escapeSqlDoubleQuotes) "date" vals
+            | VDateTimeArray vals -> renderArray (renderSqlDateTime >> renderSqlArrayString) "timestamp" vals
+            | VDateArray vals -> renderArray (renderSqlDate >> renderSqlArrayString) "date" vals
             | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
             | VNull -> "NULL"
 
@@ -293,6 +293,27 @@ let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
 type DBValueType = ValueType<SQLRawString>
 type SimpleValueType = ValueType<SimpleType>
 
+let valueSimpleType : Value -> SimpleValueType option = function
+    | VInt i -> Some <| VTScalar STInt
+    | VDecimal d -> Some <| VTScalar STDecimal
+    | VString s -> Some <| VTScalar STString
+    | VBool b -> Some <| VTScalar STBool
+    | VDateTime dt -> Some <| VTScalar STDateTime
+    | VDate dt -> Some <| VTScalar STDate
+    | VRegclass rc -> Some <| VTScalar STRegclass
+    | VIntArray vals -> Some <| VTArray STInt
+    | VDecimalArray vals -> Some <| VTArray STDecimal
+    | VStringArray vals -> Some <| VTArray STString
+    | VBoolArray vals -> Some <| VTArray STBool
+    | VDateTimeArray vals -> Some <| VTArray STDateTime
+    | VDateArray vals -> Some <| VTArray STDate
+    | VRegclassArray vals -> Some <| VTArray STRegclass
+    | VNull -> None
+
+let findSimpleValueType : DBValueType -> SimpleValueType option = function
+    | VTScalar a -> Option.map VTScalar (findSimpleType a)
+    | VTArray a -> Option.map VTArray (findSimpleType a)
+
 type SortOrder =
     | Asc
     | Desc
@@ -386,7 +407,7 @@ type ValueExpr =
             | VEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VENotLike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
+            | VENotLike (e, pat) -> sprintf "(%s) NOT LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
             | VELess (a, b) -> sprintf "(%s) < (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VELessEq (a, b) -> sprintf "(%s) <= (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEGreater (a, b) -> sprintf "(%s) > (%s)" (a.ToSQLString()) (b.ToSQLString())
