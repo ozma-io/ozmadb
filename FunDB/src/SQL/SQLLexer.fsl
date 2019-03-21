@@ -74,6 +74,7 @@ rule tokenizeSQL = parse
     | f a l s e       { Parser.BOOL false }
     | n u l l         { Parser.NULL }
     | a n d           { Parser.AND }
+    | o r             { Parser.OR }
     | i s             { Parser.IS }
     | n o t           { Parser.NOT }
     | c a s e         { Parser.CASE }
