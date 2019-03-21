@@ -83,6 +83,8 @@ rule tokenizeSQL = parse
     | e l s e         { Parser.ELSE }
     | e n d           { Parser.END }
     | c o a l e s c e { Parser.COALESCE }
+    | l i k e         { Parser.LIKE }
+    | i n             { Parser.IN }
 
     // Unescaped ids
     | ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_' '$']* { Parser.ID ((String lexbuf.Lexeme).ToLower()) }
