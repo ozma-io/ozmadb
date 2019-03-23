@@ -18,7 +18,7 @@ let formArgs (ctx : HttpContext) =
 let authorize =
     requiresAuthentication (challenge JwtBearerDefaults.AuthenticationScheme)
 
-type private RealmAccess =
+type RealmAccess =
     { roles : string[]
     }
 
