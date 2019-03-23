@@ -14,6 +14,7 @@ open Giraffe
 open Giraffe.Serialization.Json
 
 open FunWithFlags.FunDB.Json
+open FunWithFlags.FunDB.API.Utils
 open FunWithFlags.FunDB.API.View
 open FunWithFlags.FunDB.API.Permissions
 open FunWithFlags.FunDB.API.Entity
@@ -25,7 +26,8 @@ type Config =
       url : string
       preloadedLayout : string option
       migration : string option
-      authAuthority : string
+      authAuthority : string option
+      disableSecurity : bool option
     }
 
 [<EntryPoint>]
@@ -36,6 +38,10 @@ let main (args : string[]) : int =
     let configPath = args.[0]
     let rawConfig = File.ReadAllText(configPath)
     let config = JsonConvert.DeserializeObject<Config>(rawConfig)
+    let disableSecurity =
+        match config.disableSecurity with
+        | None -> false
+        | Some v -> v           
 
     let preloadedLayout =
         match config.preloadedLayout with
@@ -51,12 +57,16 @@ let main (args : string[]) : int =
         }
 
     let cacheStore = ContextCacheStore(config.connectionString, preloadedSettings)
+    let apiSettings =
+        { cacheStore = cacheStore
+          disableSecurity = disableSecurity
+        }
 
     let webApp =
         choose
-            [ viewsApi cacheStore
-              permissionsApi cacheStore
-              entitiesApi cacheStore
+            [ viewsApi apiSettings
+              permissionsApi apiSettings
+              entitiesApi apiSettings
               (setStatusCode 404 >=> text "Not Found")
             ]
 
@@ -69,7 +79,10 @@ let main (args : string[]) : int =
         o.DefaultChallengeScheme <- JwtBearerDefaults.AuthenticationScheme
 
     let jwtBearerOptions (cfg : JwtBearerOptions) =
-        cfg.Authority <- config.authAuthority
+        cfg.Authority <-
+            match config.authAuthority with
+            | None -> failwith "authAuthority is not set in configuration file"
+            | Some aut -> aut
         cfg.TokenValidationParameters <- TokenValidationParameters (
             ValidateAudience = false
         )
@@ -78,26 +91,29 @@ let main (args : string[]) : int =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
 
     let configureApp (app : IApplicationBuilder) =
-        app
-            .UseAuthentication()
-            .UseHttpMethodOverride()
-            .UseCors(configureCors)
-            .UseGiraffeErrorHandler(errorHandler)
-            .UseGiraffe(webApp)
+        if not disableSecurity then
+            ignore <| app.UseAuthentication()
+        ignore <|
+            app
+                .UseHttpMethodOverride()
+                .UseCors(configureCors)
+                .UseGiraffeErrorHandler(errorHandler)
+                .UseGiraffe(webApp)
 
     let configureServices (services : IServiceCollection) =
         ignore <| services.AddGiraffe()
-        ignore <|
-            services
-                .AddAuthentication(authenticationOptions)
-                .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
+        if not disableSecurity then
+            ignore <|
+                services
+                    .AddAuthentication(authenticationOptions)
+                    .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
         ignore <| services.AddCors()
         ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer defaultJsonSerializerSettings)
 
     let configureLogging (builder : ILoggingBuilder) =
         ignore <| builder.AddConsole()
 
-    IdentityModelEventSource.ShowPII <- true
+    // IdentityModelEventSource.ShowPII <- true
 
     WebHostBuilder()
         .UseKestrel()

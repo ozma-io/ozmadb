@@ -8,8 +8,8 @@ open FunWithFlags.FunDB.ContextCache
 open FunWithFlags.FunDB.Context
 open FunWithFlags.FunDB.FunQL.AST
 
-let entitiesApi (cacheStore : ContextCacheStore) : HttpHandler =
-    let guarded = withContext cacheStore
+let entitiesApi (settings : APISettings) : HttpHandler =
+    let guarded = withContext settings
 
     let returnError = function
         | EEArguments msg -> RequestErrors.BAD_REQUEST <| sprintf "Invalid arguments: %s" msg

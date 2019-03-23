@@ -6,8 +6,8 @@ open FunWithFlags.FunDB.API.Utils
 open FunWithFlags.FunDB.Context
 open FunWithFlags.FunDB.ContextCache
 
-let permissionsApi (cacheStore : ContextCacheStore) : HttpHandler =
-    let guarded = withContext cacheStore
+let permissionsApi (settings : APISettings) : HttpHandler =
+    let guarded = withContext settings
 
     let permissions (rctx : RequestContext) =
         json rctx.Cache.allowedDatabase

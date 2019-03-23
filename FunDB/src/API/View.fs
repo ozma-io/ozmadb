@@ -21,8 +21,8 @@ type ViewInfoGetResponse =
       pureColumnAttributes : ExecutedAttributeMap array
     }
 
-let viewsApi (cacheStore : ContextCacheStore) : HttpHandler =
-    let guarded = withContext cacheStore
+let viewsApi (settings : APISettings) : HttpHandler =
+    let guarded = withContext settings
 
     let returnError = function
         | UVEArguments msg -> RequestErrors.BAD_REQUEST <| sprintf "Invalid arguments: %s" msg

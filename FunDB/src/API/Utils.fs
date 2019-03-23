@@ -18,22 +18,18 @@ let formArgs (ctx : HttpContext) =
 let authorize =
     requiresAuthentication (challenge JwtBearerDefaults.AuthenticationScheme)
 
-type RealmAccess =
+type private RealmAccess =
     { roles : string[]
     }
 
-let withContext (cacheStore : ContextCacheStore) (f : RequestContext -> HttpHandler) : HttpHandler =
-    let protectedApi (next : HttpFunc) (ctx : HttpContext) =
-        let userClaim = ctx.User.FindFirst "preferred_username"
-        let userName = userClaim.Value
-        let userRoles = ctx.User.FindFirst "realm_access"
-        let isRoot =
-            if not <| isNull userRoles then
-                let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
-                roles.roles |> Seq.contains "fundb_admin"
-            else
-                false
+[<NoComparison>]
+type APISettings =
+    { cacheStore : ContextCacheStore
+      disableSecurity : bool
+    }
 
+let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
+    let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) =
         let specifiedLang =
             ctx.Request.GetTypedHeaders().AcceptLanguage
             |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
@@ -45,7 +41,7 @@ let withContext (cacheStore : ContextCacheStore) (f : RequestContext -> HttpHand
         try
             use rctx =
                 new RequestContext {
-                    cacheStore = cacheStore
+                    cacheStore = settings.cacheStore
                     userName = userName
                     isRoot = isRoot
                     language = lang
@@ -53,4 +49,22 @@ let withContext (cacheStore : ContextCacheStore) (f : RequestContext -> HttpHand
             f rctx next ctx
         with
         | RequestException REUserNotFound -> RequestErrors.FORBIDDEN "" next ctx
-    authorize >=> protectedApi
+
+    let protectedApi (next : HttpFunc) (ctx : HttpContext) =
+        let userClaim = ctx.User.FindFirst "preferred_username"
+        let userName = userClaim.Value
+        let userRoles = ctx.User.FindFirst "realm_access"
+        let isRoot =
+            if not <| isNull userRoles then
+                let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
+                roles.roles |> Seq.contains "fundb_admin"
+            else
+                false
+        makeContext userName isRoot next ctx
+    
+    let unprotectedApi = makeContext "anonymous@example.com" true
+
+    if settings.disableSecurity then
+        unprotectedApi
+    else
+        authorize >=> protectedApi
