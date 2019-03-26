@@ -4,7 +4,6 @@ open System
 open System.Linq
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Types
@@ -97,11 +96,11 @@ type RequestContext (opts : RequestParams) =
 
     let isLocalRoot =
         if isRoot then isRoot else
-            match conn.System.Users.Where(fun user -> user.Name = userName) |> Seq.first with
-            | Some currentUser ->
-                currentUser.IsRoot
-            | None ->
-                raise <| RequestException REUserNotFound
+            let lowerUserName = userName.ToLowerInvariant()
+            // FIXME: SLOW!
+            match conn.System.Users.Where(fun user -> user.Name.ToLowerInvariant() = lowerUserName).SingleOrDefault() with
+            | null -> raise <| RequestException REUserNotFound
+            | user -> user.IsRoot
     let transactionTime = DateTimeOffset.UtcNow
     let globalArguments =
         [ ("lang", FString language)
