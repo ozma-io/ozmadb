@@ -394,6 +394,7 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
             let entity = Option.getOrFailWith (fun () -> sprintf "Can't find entity %O" entityRef) <| layout.FindEntity entityRef
             let tableRef = compileResolvedEntityRef entityRef
             let idColumn = SQL.SCColumn { table = Some tableRef; name = sqlFunId }
+            let idColumnExpr = SQL.VEColumn { table = Some tableRef; name = sqlFunId }
 
             let columnFields = entity.columnFields |> Map.toSeq |> Seq.map (fun (name, field) -> SQL.SCColumn { table = Some tableRef; name = compileName name })
             let computedFields = entity.computedFields |> Map.toSeq |> Seq.map (fun (name, field) -> SQL.SCExpr (compileName name, compileLocalFieldExpr (Some tableRef) field.expression))
@@ -426,7 +427,12 @@ type private QueryCompiler (layout : Layout, arguments : ArgumentsMap) =
                       clause = Some { from = from
                                       where = None
                                     }
-                      orderLimit = SQL.emptyOrderLimitClause
+                      orderLimit =
+                          // Always sort by ID
+                          { orderBy = [| (SQL.Asc, idColumnExpr) |]
+                            limit = None
+                            offset = None
+                          }
                     }
             let subExpr = SQL.FSubExpr (tableRef.name, subquery)
 
