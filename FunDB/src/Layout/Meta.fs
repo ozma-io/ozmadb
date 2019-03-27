@@ -35,6 +35,16 @@ let private makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (field : Re
                 // FIXME: support restrictions!
                 let tableRef = compileResolvedEntityRef entityRef
                 Some (SQL.SQLName <| sprintf "%O__Foreign__%O" columnName.table.name columnName.name, SQL.CMForeignKey (tableRef, [| (columnName.name, SQL.SQLName "Id") |]))
+            | FTEnum vals ->
+                let expr =
+                    if Set.isEmpty vals then
+                        SQL.VEValue (SQL.VBool false)
+                    else
+                        let makeCheck value =
+                            let col = SQL.VEColumn { table = None; name = columnName.name }
+                            SQL.VEEq (col, SQL.VEValue (SQL.VString value))
+                        vals |> Set.toSeq |> Seq.map makeCheck |> Seq.fold1 (fun a b -> SQL.VEOr (a, b))
+                Some (SQL.SQLName <| sprintf "%O__Enum__%O" columnName.table.name columnName.name, SQL.CMCheck expr)
             | _ -> None
     (res, constr)
 
