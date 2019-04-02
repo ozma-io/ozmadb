@@ -67,6 +67,17 @@ type FieldRef =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+type ResolvedFieldRef =
+    { entity : ResolvedEntityRef
+      name : FieldName
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () = sprintf "%s.%s" (this.entity.ToFunQLString()) (this.name.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 type Placeholder =
     | PLocal of string
     | PGlobal of string
@@ -247,6 +258,18 @@ type SortOrder =
             match this with
             | Asc -> "ASC"
             | Desc -> "DESC"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+type LinkedRef<'f> when 'f :> IFunQLString =
+    { ref : 'f
+      path : FieldName[]
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            Seq.append (Seq.singleton <| this.ref.ToFunQLString()) (Seq.collect (fun (p : FieldName) -> ["->"; p.ToFunQLString()]) this.path) |> String.concat ""
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -558,9 +581,14 @@ type FunQLVoid = private FunQLVoid of unit with
     interface IFunQLString with
         member this.ToFunQLString () = failwith "impossible"
 
-type ParsedFieldType = FieldType<EntityRef, FieldRef>
+type LinkedFieldRef = LinkedRef<FieldRef>
+type LinkedFieldName = LinkedRef<FieldName>
+
+type ParsedFieldType = FieldType<EntityRef, LinkedFieldRef>
 
 type LocalFieldExpr = FieldExpr<FunQLVoid, FieldName>
+
+type LinkedLocalFieldExpr = FieldExpr<FunQLVoid, LinkedFieldName>
 
 type PureFieldExpr = FieldExpr<FunQLVoid, FunQLVoid>
 

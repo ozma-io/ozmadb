@@ -39,12 +39,15 @@ type ResolvedColumnField =
     }
 
 type ResolvedComputedField =
-    { expression : LocalFieldExpr
+    { expression : LinkedLocalFieldExpr
+      // Set when there's no dereferences in the expression
+      isLocal : bool
     }
 
 type ResolvedField =
     | RColumnField of ResolvedColumnField
     | RComputedField of ResolvedComputedField
+    | RId
 
 type ResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
@@ -54,12 +57,17 @@ type ResolvedEntity =
       mainField : FieldName
     } with
         member this.FindField (name : FieldName) =
-            match Map.tryFind name this.columnFields with
-            | Some col -> Some <| RColumnField col
-            | None ->
-                match Map.tryFind name this.computedFields with
-                | Some comp -> Some <| RComputedField comp
-                | None -> None
+            if name = funId then
+                Some (funId, RId)
+            else if name = funMain then
+                this.FindField this.mainField
+            else
+                match Map.tryFind name this.columnFields with
+                | Some col -> Some (name, RColumnField col)
+                | None ->
+                    match Map.tryFind name this.computedFields with
+                    | Some comp -> Some (name, RComputedField comp)
+                    | None -> None
 
 type ResolvedSchema =
     { entities : Map<EntityName, ResolvedEntity>
@@ -76,3 +84,9 @@ type Layout =
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
+
+let mapAllFields (f : FieldName -> ResolvedField -> 'a) (entity : ResolvedEntity) : Map<FieldName, 'a> =
+    let columns = entity.columnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, f name (RColumnField col)))
+    let computed = entity.computedFields |> Map.toSeq |> Seq.map (fun (name, comp) -> (name, f name (RComputedField comp)))
+    let id = (funId, f funId RId)
+    Map.ofSeq (Seq.append (Seq.singleton id) (Seq.append columns computed))

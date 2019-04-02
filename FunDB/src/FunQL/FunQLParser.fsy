@@ -6,15 +6,15 @@ open FunWithFlags.FunDB.FunQL.AST
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
 
-type ParsedFieldExpr = FieldExpr<EntityRef, FieldRef>
-type ParsedFromExpr = FromExpr<EntityRef, FieldRef>
-type ParsedFromClause = FromClause<EntityRef, FieldRef>
-type ParsedSelectExpr = SelectExpr<EntityRef, FieldRef>
-type ParsedSingleSelectExpr = SingleSelectExpr<EntityRef, FieldRef>
-type ParsedQueryResult = QueryResult<EntityRef, FieldRef>
-type ParsedQueryResultExpr = QueryResultExpr<EntityRef, FieldRef>
-type ParsedAttributeMap = AttributeMap<EntityRef, FieldRef>
-type ParsedOrderLimitClause = OrderLimitClause<EntityRef, FieldRef>
+type ParsedFieldExpr = FieldExpr<EntityRef, LinkedFieldRef>
+type ParsedFromExpr = FromExpr<EntityRef, LinkedFieldRef>
+type ParsedFromClause = FromClause<EntityRef, LinkedFieldRef>
+type ParsedSelectExpr = SelectExpr<EntityRef, LinkedFieldRef>
+type ParsedSingleSelectExpr = SingleSelectExpr<EntityRef, LinkedFieldRef>
+type ParsedQueryResult = QueryResult<EntityRef, LinkedFieldRef>
+type ParsedQueryResultExpr = QueryResultExpr<EntityRef, LinkedFieldRef>
+type ParsedAttributeMap = AttributeMap<EntityRef, LinkedFieldRef>
+type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
 
 type ParsedMainEntity =
     { entity : EntityRef
@@ -27,7 +27,7 @@ type ParsedViewExpr =
     }
 
 type private Result =
-    | AResult of QueryResult<EntityRef, FieldRef>
+    | AResult of QueryResult<EntityRef, LinkedFieldRef>
     | AAttribute of FunQLName * ParsedFieldExpr
 
 let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
@@ -90,12 +90,13 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %token GREATER
 %token LESS_EQ
 %token GREATER_EQ
-%token ARROW
+%token BOLD_ARROW
 %token CONCAT
 %token STAR
 %token AT_LEFT_BRACE
 %token LIKE_OP
 %token NOT_LIKE_OP
+%token ARROW
 
 // Keywords
 %token SELECT
@@ -183,8 +184,8 @@ ViewExpr:
   | MaybeArguments SelectExpr InsertEntityClause { { arguments = $1; select = $2; mainEntity = $3 } }
 
 MaybeArguments:
-  |                                            { Map.empty }
-  | LEFT_PAREN ArgumentsList RIGHT_PAREN ARROW { $2 }
+  |                                                 { Map.empty }
+  | LEFT_PAREN ArgumentsList RIGHT_PAREN BOLD_ARROW { $2 }
 
 ArgumentsList:
   |                       { Map.empty }
@@ -275,7 +276,7 @@ QueryResult:
   | MaybeAttributeMap QueryResultExpr { eprintfn "Deprecated result attribute map order"; AResult { attributes = $1; result = $2 } }
 
 QueryResultExpr:
-  | FieldRef        { QRField $1 }
+  | LinkedFieldRef  { QRField $1 }
   | FieldExpr AS ID { QRExpr (FunQLName $3, $1) }
 
 MaybeAttributeMap:
@@ -311,6 +312,13 @@ FromExpr:
 EntityRef:
   | ID DOT ID { { schema = Some (FunQLName $1); name = FunQLName $3; } }
   | ID        { { schema = None; name = FunQLName $1; } }
+
+LinkedFieldRef:
+  | FieldRef LinkedFieldsList { { ref = $1; path = List.toArray $2 } }
+
+LinkedFieldsList:
+  |                           { List.empty }
+  | ARROW ID LinkedFieldsList { FunQLName $2 :: $3 }
 
 FieldRef:
   | ID DOT ID DOT ID { { entity = Some { schema = Some (FunQLName $1); name = FunQLName $3 }; name = FunQLName $5 } }
@@ -359,7 +367,7 @@ FieldExprOp:
   | FieldExprVal                           { $1 }
 
 FieldExprVal:
-  | FieldRef                         { FEColumn $1 }
+  | LinkedFieldRef                   { FEColumn $1 }
   | ARGUMENT_ID                      { FEPlaceholder (PLocal $1) }
   | GLOBAL_ARGUMENT_ID               { FEPlaceholder (PGlobal $1) }
   | Value                            { FEValue $1 }

@@ -349,7 +349,8 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
         }
     (name, res)
 
-type private Phase2Convert (schemaIds : PgSchemas) =
+// Two phases of resolution to resolve constraints which address columns ty their numbers.
+type private Phase2Resolver (schemaIds : PgSchemas) =
     let makeConstraintMeta (tableName : TableName) (columnIds : TableColumnIds) (constr : Constraint) : (ConstraintName * ConstraintMeta) option =
         let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
         let ret =
@@ -404,6 +405,6 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) : DatabaseMeta =
                 .ThenInclude(fun (cl : Class) -> cl.constraints)
 
     let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
-    let phase2 = Phase2Convert(unconstrainedSchemas)
+    let phase2 = Phase2Resolver(unconstrainedSchemas)
     let schemas = unconstrainedSchemas |> Map.map phase2.FinishSchemaMeta
     { schemas = schemas }

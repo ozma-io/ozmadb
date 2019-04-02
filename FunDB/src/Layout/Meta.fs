@@ -10,8 +10,23 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 exception LayoutMetaException of info : string with
     override this.Message = this.info
 
-let private compileCheckExpr : LocalFieldExpr -> SQL.ValueExpr =
-    let compileColumn c = { table = None; name = compileName c } : SQL.ColumnRef
+let rec private compileComputedExpr (entity : ResolvedEntity) : LinkedLocalFieldExpr -> SQL.ValueExpr =
+    let makeFullName = function
+        | { ref = name; path = [||] } -> compileComputedName entity name
+        | c-> failwith <| sprintf "Unexpected dereference in computed field expression: %O" c
+    let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
+    let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
+    genericCompileFieldExpr makeFullName voidPlaceholder voidQuery
+
+and compileComputedName (entity : ResolvedEntity) (name : FieldName) =
+    let (realName, field) = entity.FindField name |> Option.get
+    match field with
+    | RId
+    | RColumnField _ -> SQL.VEColumn { table = None; name = compileName realName }
+    | RComputedField comp -> compileComputedExpr entity comp.expression
+        
+let private compileCheckExpr (entity : ResolvedEntity) : LocalFieldExpr -> SQL.ValueExpr =
+    let compileColumn = compileComputedName entity
     let voidPlaceholder c = raise (LayoutMetaException <| sprintf "Unexpected placeholder in check expression: %O" c)
     let voidQuery c = raise (LayoutMetaException <| sprintf "Unexpected subquery in check expression: %O" c)
     // Normalization is needed so that expression will be in same form as ones from pg_catalog.
@@ -20,8 +35,8 @@ let private compileCheckExpr : LocalFieldExpr -> SQL.ValueExpr =
 let private makeUniqueConstraintMeta (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
     SQL.CMUnique <| Array.map (fun name -> SQL.SQLName <| name.ToString()) constr.columns
 
-let private makeCheckConstraintMeta (constr : ResolvedCheckConstraint) : SQL.ConstraintMeta =
-    SQL.CMCheck <| compileCheckExpr constr.expression
+let private makeCheckConstraintMeta (entity : ResolvedEntity) (constr : ResolvedCheckConstraint) : SQL.ConstraintMeta =
+    SQL.CMCheck <| compileCheckExpr entity constr.expression
 
 let private makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.ConstraintName * SQL.ConstraintMeta) option =
     let res =
@@ -67,7 +82,7 @@ let private makeEntityMeta (tableName : SQL.TableRef) (entity : ResolvedEntity) 
         let columnName = SQL.SQLName (name.ToString())
         (columnName, makeColumnFieldMeta { table = tableName; name = columnName } field)
     let makeUniqueConstraint (name, constr) = (SQL.SQLName <| sprintf "%O__Unique__%O" tableName.name name, makeUniqueConstraintMeta constr)
-    let makeCheckConstraint (name, constr) = (SQL.SQLName <| sprintf "%O__Check__%O" tableName.name name, makeCheckConstraintMeta constr)
+    let makeCheckConstraint (name, constr) = (SQL.SQLName <| sprintf "%O__Check__%O" tableName.name name, makeCheckConstraintMeta entity constr)
 
     let columnObjects = entity.columnFields |> Map.toSeq |> Seq.map makeColumn |> Seq.cache
     let userColumns = columnObjects |> Seq.map (fun (name, (column, maybeConstr)) -> (name, column))

@@ -26,7 +26,7 @@ type MergedColumnInfo =
 
 type MergedDomainField = {
     ref : ResolvedFieldRef
-    field : ResolvedColumnField
+    field : ResolvedColumnField option
     idColumn : EntityName
 }
 
@@ -90,10 +90,11 @@ let mergeViewInfo (layout : Layout) (viewExpr : ResolvedViewExpr) (compiled : Co
         }
 
     let mergeDomainField (f : DomainField) : MergedDomainField =
-        let entity = Option.getOrFailWith (fun () -> sprintf "Cannot find an entity from domain: %O" f.field.entity) <| layout.FindEntity f.field.entity
-        let field = Map.findOrFailWith (fun () -> sprintf "Cannot find a field from domain: %O" f.field) f.field.name entity.columnFields
-        { ref = f.field
-          field = field
+        { ref = f.ref
+          field =
+              match f.field with
+              | RColumnField col -> Some col
+              | _ -> None
           idColumn = f.idColumn
         }
 

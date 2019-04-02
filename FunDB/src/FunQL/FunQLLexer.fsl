@@ -90,11 +90,12 @@ and tokenizeFunQL = parse
     | "<="  { Parser.LESS_EQ }
     | "<"   { Parser.LESS }
     | "@"   { Parser.AT }
-    | "=>"  { Parser.ARROW }
+    | "=>"  { Parser.BOLD_ARROW }
     | "||"  { Parser.CONCAT }
     | "*"   { Parser.STAR }
     | "~~"  { Parser.LIKE_OP }
     | "!~~" { Parser.NOT_LIKE_OP }
+    | "->"  { Parser.ARROW }
 
     // Keywords
     | t r u e           { Parser.BOOL true }

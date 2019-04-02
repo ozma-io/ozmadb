@@ -28,6 +28,7 @@ type SourceComputedField =
 type SourceField =
     | SColumnField of SourceColumnField
     | SComputedField of SourceComputedField
+    | SId
 
 type SourceEntity =
     { [<JsonProperty(Required=Required.DisallowNull)>]
@@ -41,12 +42,17 @@ type SourceEntity =
       mainField : FieldName
     } with
         member this.FindField (name : FieldName) =
-            match Map.tryFind name this.columnFields with
-            | Some col -> Some <| SColumnField col
-            | None ->
-                match Map.tryFind name this.computedFields with
-                | Some comp -> Some <| SComputedField comp
-                | None -> None
+            if name = funId then
+                Some SId
+            else if name = funMain then
+                this.FindField this.mainField
+            else
+                match Map.tryFind name this.columnFields with
+                | Some col -> Some <| SColumnField col
+                | None ->
+                    match Map.tryFind name this.computedFields with
+                    | Some comp -> Some <| SComputedField comp
+                    | None -> None
 
 type SourceSchema =
     { [<JsonProperty(Required=Required.DisallowNull)>]
