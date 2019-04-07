@@ -455,7 +455,7 @@ and FromExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and SelectedColumn =
-    | SCAll
+    | SCAll of TableRef option
     | SCColumn of ColumnRef
     | SCExpr of ColumnName * ValueExpr
     with
@@ -463,7 +463,8 @@ and SelectedColumn =
 
         member this.ToSQLString () =
             match this with
-            | SCAll -> "*"
+            | SCAll None -> "*"
+            | SCAll (Some ref) -> sprintf "%s.*" (ref.ToSQLString())
             | SCColumn c -> c.ToSQLString()
             | SCExpr (name, expr) -> sprintf "%s AS %s" (expr.ToSQLString()) (name.ToSQLString())
 

@@ -430,14 +430,14 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
                     | None -> Seq.empty
                     | Some info ->
                         let colName =
+                            if isTopLevel then
+                                match mainEntity with
+                                | Some main when info.ref.entity = main.entity ->
+                                    foundMainId <- true
+                                | _ -> ()
                             if info.idColumn = funEmpty then
                                 sqlFunId
                             else
-                                if isTopLevel then
-                                    match mainEntity with
-                                    | Some main when info.ref.entity = main.entity ->
-                                        foundMainId <- true
-                                    | _ -> ()
                                 compileId info.idColumn
                         Seq.singleton <| SQL.SCExpr (compileId entityName, SQL.VEColumn { table = Some tableRef; name = colName })
                 let rec getIdColumns = function
@@ -477,10 +477,10 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
                 | DMulti (ns, nested) -> DMulti (ns, nested |> Map.map (fun key domains -> getNewDomains domains))
                 let newDomains = getNewDomains domains
 
-                (Some newDomains, [ idColumns; domainColumns; punColumns ] |> Seq.concat)
-            | _ -> (None, Seq.empty)
+                (Some newDomains, [ idColumns; domainColumns; punColumns ] |> Seq.concat |> Seq.toArray)
+            | _ -> (None, [||])
 
-        let domainResults = select.results |> Seq.map getDomainColumns |> Seq.cache
+        let domainResults = select.results |> Seq.map getDomainColumns |> Seq.toArray
         let domainColumns = domainResults |> Seq.collect snd |> Seq.distinct
         let newDomains = domainResults |> Seq.mapMaybe fst |> Seq.fold mergeDomains (DSingle (newGlobalDomainId (), Map.empty))
 
@@ -575,7 +575,7 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         let from = buildJoins (SQL.FTable tableRef) paths
 
         SQL.SSelect
-            { columns = Array.append [|SQL.SCAll|] computedFields
+            { columns = Array.append [| SQL.SCAll (Some tableRef) |] computedFields
               clause = Some { from = from
                               where = None
                             }
@@ -645,7 +645,7 @@ let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
         Some Pure
 
 let private checkPureColumn : SQL.SelectedColumn -> (SQL.ColumnName * PurityStatus) option = function
-    | SQL.SCAll -> None
+    | SQL.SCAll _ -> None
     | SQL.SCColumn _ -> None
     | SQL.SCExpr (name, expr) -> Option.map (fun purity -> (name, purity)) (checkPureExpr expr)
 
@@ -684,22 +684,6 @@ let rec private filterExprColumns (cols : Set<SQL.ColumnName>) : SQL.SelectExpr 
 let rec private flattenDomains : Domains -> FlattenedDomains = function
     | DSingle (id, dom) -> Map.singleton id dom
     | DMulti (ns, subdoms) -> subdoms |> Map.values |> Seq.fold (fun m subdoms -> Map.union m (flattenDomains subdoms)) Map.empty
-
-let rec private ensureMainIdColumn (mainEntity : ResolvedMainEntity) : SQL.SelectExpr -> SQL.SelectExpr = function
-    | SQL.SSelect query ->
-        // Should be in sync with id columns generation above
-        let checkColumn = function
-            | SQL.SCAll -> false
-            | SQL.SCColumn ref -> false
-            | SQL.SCExpr (name, e) -> name = compileId mainEntity.entity.name
-        if query.columns |> Seq.exists checkColumn then
-            SQL.SSelect query
-        else
-            let fromCol : SQL.ColumnRef = { table = Some { schema = None; name = compileName mainEntity.entity.name }; name = sqlFunId }
-            let res = SQL.SCExpr (compileId mainEntity.entity.name, SQL.VEColumn fromCol)
-            SQL.SSelect { query with columns = Array.append [|res|] query.columns }
-    | SQL.SSetOp (op, a, b, limits) ->
-        failwith "Set operation or no FROM in a view with main entity"
 
 let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
     let convertArgument i (name, fieldType) =
