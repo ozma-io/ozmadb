@@ -104,8 +104,7 @@ function addDefaultViews(views, layout) {
             var tableQuery =
                 "select\n  " +
                 [ "@\"CreateView\" = '" + formName + "'",
-                  "@\"LinkedView\" = '" + formName + "'",
-                  "\"Id\""
+                  "\"Id\" @{ \"RowLinkedView\" = '" + formName + "' }"
                 ].concat(fields).join(", ") +
                 "\nfrom " + sqlName + " " +
                 "for insert into " + sqlName
