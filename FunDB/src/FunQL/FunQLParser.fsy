@@ -263,7 +263,6 @@ FromClause:
 InsertEntityClause:
   |                           { None }
   | FOR INSERT INTO EntityRef { Some { entity = $4 } }
-  | FOR UPDATE OF EntityRef   { eprintfn "Deprecated FOR INSERT INTO syntax"; Some { entity = $4 } }
 
 QueryResults:
   | QueryResult COMMA QueryResults { $1 :: $3 }
@@ -273,7 +272,6 @@ QueryResults:
 QueryResult:
   | AT ID EQ FieldExpr                { AAttribute (FunQLName $2, $4) }
   | QueryResultExpr MaybeAttributeMap { AResult { attributes = $2; result = $1 } }
-  | MaybeAttributeMap QueryResultExpr { eprintfn "Deprecated result attribute map order"; AResult { attributes = $1; result = $2 } }
 
 QueryResultExpr:
   | LinkedFieldRef  { QRField $1 }
@@ -283,8 +281,6 @@ MaybeAttributeMap:
   |                                                   { Map.empty }
   | AT_LEFT_BRACE RIGHT_BRACE                         { Map.empty }
   | AT_LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
-  | LEFT_BRACE RIGHT_BRACE                            { eprintfn "Deprecated result attribute map syntax"; Map.empty }
-  | LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE    { eprintfn "Deprecated result attribute map syntax"; parseMap "Clashing attribute names" $2 }
 
 AttributeValuesNonEmpty:
   | ID EQ FieldExpr                               { [(FunQLName $1, $3)] }
