@@ -52,7 +52,7 @@
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            "Name": { "expression": "\"Language\" || '.' || \"UserViewId\"" }
+            "Name": { "expression": "\"Language\" || '.' || \"UserViewId\"->\"__main\"" }
           },
           "uniqueConstraints": {
             "UniqueTranslation": { "columns": [ "UserViewId", "Language" ] }
@@ -70,7 +70,7 @@
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            "Name": { "expression": "\"Language\" || '.' || \"ColumnFieldId\"" }
+            "Name": { "expression": "\"Language\" || '.' || \"ColumnFieldId\"->\"__main\"" }
           },
           "uniqueConstraints": {
             "UniqueTranslation": { "columns": [ "ColumnFieldId", "Language" ] }
@@ -88,7 +88,7 @@
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            "Name": { "expression": "\"Language\" || '.' || \"ComputedFieldId\"" }
+            "Name": { "expression": "\"Language\" || '.' || \"ComputedFieldId\"->\"__main\"" }
           },
           "uniqueConstraints": {
             "UniqueTranslation": { "columns": [ "ComputedFieldId", "Language" ] }
