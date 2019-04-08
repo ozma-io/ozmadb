@@ -1,16 +1,17 @@
-module FunWithFlags.FunDB.FunQL.View
+module FunWithFlags.FunDB.FunQL.Resolve
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Parser
+open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.Layout.Types
 
 // Validates fields and expressions to the point where database can catch all the remaining problems
 // and all further processing code can avoid any checks.
+// ...that is, except checking references to other views.
 
-exception ViewResolveException of info : string with
-    override this.Message = this.info
+type ViewResolveException (message : string) =
+    inherit Exception(message)
 
 [<NoComparison>]
 type BoundField =
@@ -41,7 +42,7 @@ type private QSubqueryFields = Map<FieldName, QSubqueryField>
 
 type private QMapping = Map<EntityName option, SchemaName option * QSubqueryFields>
 
-type private SomeArgumentsMap = Map<string, ParsedFieldType>
+type private SomeArgumentsMap = Map<ArgumentName, ParsedFieldType>
 type private ArgumentsMap = Map<Placeholder, Argument>
 
 type ResolvedFieldExpr = FieldExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
@@ -73,25 +74,37 @@ type ResolvedViewExpr =
     { arguments : ArgumentsMap
       select : ResolvedSelectExpr
       mainEntity : ResolvedMainEntity option
-      columns : FieldName[]
-    }
+    } with
+        override this.ToString () = this.ToFunQLString()
 
-type private MainEntity =
-    { entity : ResolvedEntityRef
-      name : EntityName
-    }
+        member this.ToFunQLString () =
+            let selectStr = this.select.ToFunQLString()
+            if Map.isEmpty this.arguments
+            then selectStr
+            else
+                let printArgument (name : Placeholder, arg : Argument) =
+                    match name with
+                    | PGlobal _ -> None
+                    | PLocal _ -> Some <| sprintf "%s %s" (name.ToFunQLString()) (arg.ToFunQLString())
+                let argStr = this.arguments |> Map.toSeq |> Seq.mapMaybe printArgument |> String.concat ", "
+                sprintf "(%s): %s" argStr selectStr
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString ()
+
+type private MainEntities = Map<ResolvedEntityRef, EntityName>
 
 let private unboundSubqueryField = QField None
 
-let rec private findRootField (name : FieldName) (fields : QSubqueryFields) =
+let rec private findRootField (name : FieldName) (fields : QSubqueryFields) : (FieldName * BoundField option) option =
     match Map.tryFind name fields with
-    | None -> raise (ViewResolveException <| sprintf "Unknown field: %O" name)
+    | None -> None
     | Some (QRename newName) -> findRootField newName fields
-    | Some (QField field) -> (name, field)
+    | Some (QField field) -> Some (name, field)
 
-let private checkName (name : string) : unit =
+let private checkName (FunQLName name) : unit =
     if not (goodName name) then
-        raise (ViewResolveException <| sprintf "Invalid name: %s" name)
+        raisef ViewResolveException "Invalid name: %s" name
 
 let resultFieldRef : ResolvedQueryResultExpr -> FieldRef option = function
     | QRField field -> Some field.ref.ref
@@ -105,53 +118,71 @@ let resultName : ResolvedQueryResultExpr -> FieldName = function
 let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
     match name.schema with
     | Some schema -> { schema = schema; name = name.name }
-    | None -> raise (ViewResolveException <| sprintf "Unspecified schema in name: %O" name)
+    | None -> raisef ViewResolveException "Unspecified schema in name: %O" name
 
-let rec private findMainFromEntity : ResolvedFromExpr -> MainEntity option = function
-    | FEntity ent -> Some { entity = ent; name = ent.name }
+let rec private findMainsFromEntity : ResolvedFromExpr -> MainEntities = function
+    | FEntity ent -> Map.singleton ent ent.name
     | FJoin (ftype, a, b, where) ->
         match ftype with
-        | Left -> findMainFromEntity a
-        | Right -> findMainFromEntity b
-        | _ -> None
-    | FSubExpr (name, (SSelect { clause = Some expr })) -> Option.map (fun main -> { main with name = name }) <| findMainFromEntity expr.from
-    | FSubExpr _ -> None
+        | Left -> findMainsFromEntity a
+        | Right -> findMainsFromEntity b
+        | Inner ->
+            let mains1 = findMainsFromEntity a
+            let mains2 = findMainsFromEntity b
+            if Map.isEmpty <| Map.intersect mains1 mains2 then
+                Map.union mains1 mains2
+            else
+                Map.empty
+        | _ -> Map.empty
+    | FSubExpr (name, (SSelect { clause = Some expr })) ->
+        let mains = findMainsFromEntity expr.from
+        if Map.count mains = 1 then
+            let (ref, innerName) = mains |> Map.toSeq |> Seq.exactlyOne
+            Map.singleton ref name
+        else
+            Map.empty
+    | FSubExpr _ -> Map.empty
+    | FValues _ -> Map.empty
 
 // Returns map from query column names to fields in main entity
 // Be careful as changes here also require changes to main id propagation in the compiler.
-let private findMainEntity (fields : QSubqueryFields) : ResolvedSelectExpr -> (Map<FieldName, FieldName> * MainEntity) option = function
+let private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFields) : ResolvedSelectExpr -> (Map<FieldName, FieldName> * EntityName) option = function
     | SSelect { results = results; clause = Some clause } ->
-        match findMainFromEntity clause.from with
+        match Map.tryFind ref <| findMainsFromEntity clause.from with
         | None -> None
-        | Some main ->
+        | Some mainName ->
             let getField (result : ResolvedQueryResult) : (FieldName * FieldName) option =
                 let name = resultName result.result
                 match Map.find name fields with
-                | QField (Some { ref = boundRef; field = RColumnField _ }) when boundRef.entity = main.entity -> Some (name, boundRef.name)
+                | QField (Some { ref = boundRef; field = RColumnField _ }) when boundRef.entity = ref -> Some (name, boundRef.name)
                 | QRename newName -> failwith <| sprintf "Unexpected rename which should have been removed: %O -> %O" name newName
                 | _ -> None
             let fields = results |> Seq.mapMaybe getField |> Map.ofSeqUnique
-            Some (fields, main)
+            Some (fields, mainName)
     | _ -> None
 
 type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
 
-    let rec resolvePath (field : ResolvedColumnField) = function
-        | [] -> []
+    let rec resolvePath (boundField : BoundField) : FieldName list -> (BoundField * FieldName list) = function
+        | [] -> (boundField, [])
         | (ref :: refs) ->
-            match field.fieldType with
-            | FTReference (entityRef, _) ->
+            match boundField.field with
+            | RColumnField { fieldType = FTReference (entityRef, _) } ->
                 let newEntity = layout.FindEntity entityRef |> Option.get
                 match newEntity.FindField ref with
-                | Some (newRef, RColumnField newField) -> newRef :: resolvePath newField refs
-                | Some (newRef, RComputedField _)
-                | Some (newRef, RId) ->
-                    if not <| List.isEmpty refs then
-                        raise (ViewResolveException <| sprintf "Invalid dereference: %O" ref)
-                    [newRef]
-                | None -> raise (ViewResolveException <| sprintf "Column not found in dereference: %O" ref)
-            | _ -> raise (ViewResolveException <| sprintf "Invalid dereference in local expression path: %O" ref)
+                | Some (newRef, refField) ->
+                    let nextBoundField =
+                        { ref =
+                              { entity = entityRef
+                                name = newRef
+                              }
+                          field = refField
+                        }
+                    let (newBoundField, newPath) = resolvePath nextBoundField refs
+                    (newBoundField, newRef :: newPath)
+                | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
+            | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
 
     let resolveField (mapping : QMapping) (f : LinkedFieldRef) : QSubqueryField * LinkedResolvedFieldRef =
         let (entityName, (schemaName, fields)) =
@@ -160,39 +191,46 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
                 if mapping.Count = 1 then
                     Map.toSeq mapping |> Seq.head
                 else
-                    raise (ViewResolveException <| sprintf "None or more than one possible interpretation: %O" f.ref)
+                    raisef ViewResolveException "None or more than one possible interpretation of %O in %O" f.ref f
             | Some ename ->
                 let srcName = Some ename.name
                 match Map.tryFind srcName mapping with
                 | Some ((schema, ref) as ret) ->
                     if Option.isSome ename.schema && schema <> ename.schema then
-                        raise (ViewResolveException <| sprintf "Invalid entity schema: %O" ename)
+                        raisef ViewResolveException "Invalid entity schema %O in %O" ename f
                     else
                         (srcName, ret)
                 | None ->
-                    raise (ViewResolveException <| sprintf "Field entity not found for: %O" ename)
-        let (newName, boundField) = findRootField f.ref.name fields
+                    raisef ViewResolveException "Field entity not found for %O in %O" ename f
+        let (newName, boundField) =
+            match findRootField f.ref.name fields with
+            | Some r -> r
+            | None -> raisef ViewResolveException "Unknown field %O in %O" f.ref.name f
 
-        let newPath =
+        let (newBoundField, newPath) =
             match boundField with
-            | Some { field = (RColumnField col) } -> List.toArray <| resolvePath col (Array.toList f.path)
-            | _ when Array.isEmpty f.path -> [||]
-            | _ -> raise (ViewResolveException <| sprintf "Invalid dereference: %O" f)
+            | Some field ->
+                let (bf, path) = resolvePath field (Array.toList f.path)
+                (Some bf, List.toArray path)
+            | None when Array.isEmpty f.path ->
+                (None, [||])
+            | _ ->
+                raisef ViewResolveException "Dereference on an unbound field in %O" f
 
         let newRef = { entity = Option.map (fun ename -> { schema = None; name = ename }) entityName; name = newName } : FieldRef
-        (QField boundField, { ref = { ref = newRef; bound = boundField }; path = newPath })
+        (QField newBoundField, { ref = { ref = newRef; bound = boundField }; path = newPath })
 
     let resolvePlaceholder (name : Placeholder) : Placeholder =
         if Map.containsKey name arguments then
             usedArguments <- Set.add name usedArguments
             name
         else
-            raise (ViewResolveException <| sprintf "Undefined placeholder: %O" name)
+            raisef ViewResolveException "Undefined placeholder: %O" name
 
     let resolveLimitFieldExpr (expr : ParsedFieldExpr) : ResolvedFieldExpr =
-        let foundReference column = raise (ViewResolveException <| sprintf "Reference in LIMIT or OFFSET: %O" column)
-        let foundQuery query = raise (ViewResolveException <| sprintf "Subquery in LIMIT or OFFSET: %O" query)
-        mapFieldExpr foundReference resolvePlaceholder foundQuery expr
+        let foundReference column = raisef ViewResolveException "Reference in LIMIT or OFFSET: %O" column
+        let foundQuery query = raisef ViewResolveException "Subquery in LIMIT or OFFSET: %O" query
+        mapFieldExpr id foundReference resolvePlaceholder foundQuery expr
 
     let rec resolveResult (mapping : QMapping) (result : ParsedQueryResult) : QSubqueryField * ResolvedQueryResult =
         let (boundField, expr) = resolveResultExpr mapping result.result
@@ -206,16 +244,13 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
         | QRField f ->
             let (boundField, f') = resolveField mapping f
             (boundField, QRField f')
+        | QRExpr (name, FEColumn f) ->
+            let (boundField, f') = resolveField mapping f
+            (boundField, QRExpr (name, FEColumn f'))
         | QRExpr (name, e) ->
-            checkName (name.ToString())
+            checkName name
             let (_, e') = resolveFieldExpr mapping e
-            let boundField =
-                match e' with
-                | FEColumn col ->
-                    let (_, fields) = Map.find (Option.map (fun (ename : EntityRef) -> ename.name) col.ref.ref.entity) mapping
-                    Map.find col.ref.ref.name fields
-                | _ -> unboundSubqueryField
-            (boundField, QRExpr (name, e'))
+            (unboundSubqueryField, QRExpr (name, e'))
 
     and resolveAttributes (mapping : QMapping) (attributes : ParsedAttributeMap) : ResolvedAttributeMap =
         Map.map (fun name expr -> snd <| resolveFieldExpr mapping expr) attributes
@@ -224,13 +259,19 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
         let mutable isLocal = true
         let resolveColumn col =
             let (_, ret) = resolveField mapping col
+
             if not <| Array.isEmpty col.path then
                 isLocal <- false
+            match ret.ref.bound with
+            | Some { field = RComputedField { isLocal = false } } ->
+                isLocal <- false
+            | _ -> ()
+
             ret
         let resolveQuery query =
             let (_, res) = resolveSubSelectExpr query
             res
-        let ret = mapFieldExpr resolveColumn resolvePlaceholder resolveQuery expr
+        let ret = mapFieldExpr id resolveColumn resolvePlaceholder resolveQuery expr
         (isLocal, ret)
 
     and resolveOrderLimitClause (mapping : QMapping) (limits : ParsedOrderLimitClause) : bool * ResolvedOrderLimitClause =
@@ -260,26 +301,26 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
             let (results1, a') = resolveSelectExpr a
             let (results2, b') = resolveSelectExpr b
             if Array.length results1.fieldAttributeNames <> Array.length results2.fieldAttributeNames then
-                raise (ViewResolveException "Different number of columns in a set operation expression")
+                raisef ViewResolveException "Different number of columns in a set operation expression"
             for ((name1, attrs1), (name2, attrs2)) in Seq.zip results1.fieldAttributeNames results2.fieldAttributeNames do
                 if name1 <> name2 then
-                    raise (ViewResolveException <| sprintf "Different column names in a set operation: %O and %O" name1 name2)
+                    raisef ViewResolveException "Different column names in a set operation: %O and %O" name1 name2
                 if attrs1 <> attrs2 then
-                    raise (ViewResolveException <| sprintf "Different attributes for column %O in a set operation expression" name1)
+                    raisef ViewResolveException "Different attributes for column %O in a set operation expression" name1
             let newFields = Map.unionWith (fun name f1 f2 -> unboundSubqueryField) results1.fields results2.fields
             let orderLimitMapping = Map.singleton None (None, newFields)
             let (limitsAreLocal, resolvedLimits) = resolveOrderLimitClause orderLimitMapping limits
             if not limitsAreLocal then
-                raise (ViewResolveException <| sprintf "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.orderBy)
+                raisef ViewResolveException "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.orderBy
             ({ results1 with fields = newFields }, SSetOp (op, a', b', resolvedLimits))
 
     and resolveSubSelectExpr (query : ParsedSelectExpr) : QSubqueryFields * ResolvedSelectExpr =
         let (results, res) = resolveSelectExpr query
         if not <| Map.isEmpty results.attributes then
-            raise (ViewResolveException "Subqueries cannot have attributes")
+            raisef ViewResolveException "Subqueries cannot have attributes"
         for (name, attrs) in results.fieldAttributeNames do
             if not <| Set.isEmpty attrs then
-                raise (ViewResolveException <| sprintf "Subquery field %O cannot have attributes" name)
+                raisef ViewResolveException "Subquery field %O cannot have attributes" name
         (results.fields, res)
 
     and resolveSingleSelectExpr (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
@@ -295,7 +336,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
             try
                 rawResults |> Seq.map (fun (boundField, res) -> (resultName res.result, boundField)) |> Map.ofSeqUnique
             with
-                | Failure msg -> raise (ViewResolveException <| sprintf "Clashing result names: %s" msg)
+                | Failure msg -> raisef ViewResolveException "Clashing result names: %s" msg
 
         let newQuery = {
             attributes = resolveAttributes fromMapping query.attributes
@@ -316,7 +357,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
         | FEntity name ->
             let resName = resolveEntityRef name
             match layout.FindEntity resName with
-            | None -> raise (ViewResolveException <| sprintf "Entity not found: %O" name)
+            | None -> raisef ViewResolveException "Entity not found: %O" name
             | Some entity ->
                 let makeBoundField (name : FieldName) (field : ResolvedField) =
                     let ref = { entity = resName; name = name } : ResolvedFieldRef
@@ -333,36 +374,56 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
                 try
                     Map.unionUnique newMapping1 newMapping2
                 with
-                | Failure msg -> raise (ViewResolveException <| sprintf "Clashing entity names in a join: %s" msg)
+                | Failure msg -> raisef ViewResolveException "Clashing entity names in a join: %s" msg
 
             let (isLocal, newFieldExpr) = resolveFieldExpr newMapping where
             if not isLocal then
-                raise (ViewResolveException <| sprintf "Cannot use dereferences in join expressions: %O" where)
+                raisef ViewResolveException "Cannot use dereferences in join expressions: %O" where
             (newMapping, FJoin (jt, newE1, newE2, newFieldExpr))
         | FSubExpr (name, q) ->
-            checkName (name.ToString())
+            checkName name
             let (fields, newQ) = resolveSubSelectExpr q
             (Map.singleton (Some name) (None, fields), FSubExpr (name, newQ))
+        | FValues (name, fieldNames, values) ->
+            checkName name
+
+            let mapEntry entry =
+                if Array.length entry <> Array.length fieldNames then
+                    raisef ViewResolveException "Invalid number of items in VALUES entry: %i" (Array.length entry)
+                entry |> Array.map (resolveFieldExpr Map.empty >> snd)
+            let newValues = values |> Array.map mapEntry
+
+            let mapName name =
+                checkName name
+                (name, QField None)
+            let fields =
+                try
+                    fieldNames |> Seq.map mapName |> Map.ofSeqUnique
+                with
+                    | Failure msg -> raisef ViewResolveException "Clashing VALUES names: %s" msg
+
+            let mapping = Map.singleton (Some name) (None, fields)
+            (mapping, FValues (name, fieldNames, newValues))
 
     let resolveMainEntity (fields : QSubqueryFields) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
         let ref = resolveEntityRef main.entity
         let entity =
             match layout.FindEntity ref with
-            | None -> raise (ViewResolveException <| sprintf "Entity not found: %O" main.entity)
+            | None -> raisef ViewResolveException "Entity not found: %O" main.entity
             | Some e -> e
-        let (mappedResults, mainEntity) =
-            match findMainEntity fields query with
-            | Some (fields, mainEntity) when mainEntity.entity = ref -> (fields, mainEntity)
-            | someMain -> raise (ViewResolveException <| sprintf "Cannot map main entity to the expression: %O, possible value: %O" ref someMain)
+        let (mappedResults, mainName) =
+            match findMainEntity ref fields query with
+            | Some (fields, mainName) -> (fields, mainName)
+            | someMain -> raisef ViewResolveException "Cannot map main entity to the expression: %O, possible value: %O" ref someMain
 
         let checkField fieldName (field : ResolvedColumnField) =
             if Option.isNone field.defaultValue && not field.isNullable then
                 if not (Map.containsKey fieldName mappedResults) then
-                    raise (ViewResolveException <| sprintf "Required inserted entity field is not in the view expression: %O" fieldName)
+                    raisef ViewResolveException "Required inserted entity field is not in the view expression: %O" fieldName
         entity.columnFields |> Map.iter checkField
 
         { entity = ref
-          name = mainEntity.name
+          name = mainName
           fieldsToColumns = Map.reverse mappedResults
           columnsToFields = mappedResults
         }
@@ -371,23 +432,16 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
     member this.ResolveMainEntity = resolveMainEntity
     member this.UsedArguments = usedArguments
 
-let rec private getColumns : ResolvedSelectExpr -> FieldName[] = function
-    | SSelect query ->
-        query.results |> Array.map (fun r -> resultName r.result)
-    | SSetOp (op, a, b, limits) ->
-        // Columns should be the same
-        getColumns a
-
 let resolveViewExpr (layout : Layout) (globalArguments : SomeArgumentsMap) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
     let checkArgument name arg =
         checkName name
         match arg.argType with
         | FTReference (entityRef, where) ->
             if Option.isNone <| layout.FindEntity(resolveEntityRef entityRef) then
-                raise (ViewResolveException <| sprintf "Unknown entity in reference: %O" entityRef)
+                raisef ViewResolveException "Unknown entity in reference: %O" entityRef
         | FTEnum vals ->
             if Set.isEmpty vals then
-                raise (ViewResolveException "Enums must not be empty")
+                raisef ViewResolveException "Enums must not be empty"
         | _ -> ()
     Map.iter checkArgument viewExpr.arguments
 
@@ -401,5 +455,4 @@ let resolveViewExpr (layout : Layout) (globalArguments : SomeArgumentsMap) (view
     { arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArguments)
       select = qQuery
       mainEntity = mainEntity
-      columns = getColumns qQuery
     }

@@ -1,25 +1,36 @@
-﻿module FunWithFlags.FunDB.Entity
+﻿module FunWithFlags.FunDB.Operations.Entity
+
+open System.Threading.Tasks
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Compiler
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-exception EntityExecutionException of info : string with
-    override this.Message = this.info
+type EntityExecutionException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = EntityExecutionException (message, null)
 
 type EntityId = int
 type EntityArguments = Map<FieldName, FieldValue>
 
-let insertEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) : unit =
+let private runQuery (connection : QueryConnection) (placeholders : ExprParameters) (query : ISQLString) : Task<unit> =
+    try
+        connection.ExecuteNonQuery (query.ToSQLString()) placeholders
+    with
+        | :? QueryException as ex -> raisefWithInner EntityExecutionException ex.InnerException "%s" ex.Message
+
+let insertEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) : Task<unit> =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind fieldName args with
         | None when Option.isSome field.defaultValue -> None
         | None when field.isNullable -> None
-        | None -> raise (EntityExecutionException <| sprintf "Required field not provided: %O" fieldName)
-        | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
+        | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
+        | Some arg -> Some (compileName fieldName, (field.valueType, compileFieldValueSingle arg))
     let parameters = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
     let columns = Seq.append (Seq.singleton sqlFunId) (parameters |> Seq.map fst) |> Array.ofSeq
     let placeholders = parameters |> Seq.mapi (fun i (name, valueWithType) -> (i, valueWithType)) |> Map.ofSeq
@@ -30,13 +41,13 @@ let insertEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) 
           columns = columns
           values = SQL.IValues [| valuesWithId |]
         } : SQL.InsertExpr
-    connection.ExecuteNonQuery (query.ToSQLString()) placeholders
+    runQuery connection placeholders query
 
-let updateEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) (args : EntityArguments) : unit =
+let updateEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) (args : EntityArguments) : Task<unit> =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind fieldName args with
         | None -> None
-        | Some arg -> Some (compileName fieldName, (field.valueType, compileArgument arg))
+        | Some arg -> Some (compileName fieldName, (field.valueType, compileFieldValueSingle arg))
     let parameters = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
     // We reserve placeholder 0 for id
     let columns = parameters |> Seq.mapi (fun i (name, arg) -> (name, SQL.VEPlaceholder (i + 1))) |> Map.ofSeq
@@ -48,13 +59,13 @@ let updateEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) 
           columns = columns
           where = Some where
         } : SQL.UpdateExpr
-    connection.ExecuteNonQuery (query.ToSQLString()) placeholders
+    runQuery connection placeholders query
 
-let deleteEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) : unit =
+let deleteEntity (connection : QueryConnection) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) : Task<unit> =
     let where = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder 0)
     let placeholders = Map.singleton 0 (SQL.VTScalar SQL.STInt, SQL.VInt id)
     let query =
         { name = compileResolvedEntityRef entityRef
           where = Some where
         } : SQL.DeleteExpr
-    connection.ExecuteNonQuery (query.ToSQLString()) placeholders
+    runQuery connection placeholders query

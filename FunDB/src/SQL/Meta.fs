@@ -1,20 +1,24 @@
 module FunWithFlags.FunDB.SQL.Meta
 
-open Microsoft.EntityFrameworkCore
 open System.ComponentModel.DataAnnotations
 open System.Linq
+open System.Threading.Tasks
+open Microsoft.EntityFrameworkCore
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.AST
-open FunWithFlags.FunDB.SQL.Lexer
-open FunWithFlags.FunDB.SQL.Parser
-open FunWithFlags.FunDB.SQL.Array.Lexer
-open FunWithFlags.FunDB.SQL.Array.Parser
+open FunWithFlags.FunDB.SQL.Lex
+open FunWithFlags.FunDB.SQL.Parse
+open FunWithFlags.FunDB.SQL.Array.Lex
+open FunWithFlags.FunDB.SQL.Array.Parse
 
-exception SQLMetaException of info : string with
-    override this.Message = this.info
+type SQLMetaException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = SQLMetaException (message, null)
 
 type private Oid = uint32
 type private ColumnNum = int16
@@ -218,13 +222,13 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
                 match typ with
                 | VTArray scalarType ->
                     match parse tokenizeArray stringArray str with
-                    | Error msg -> raise (SQLMetaException <| sprintf "Cannot parse array: %s" msg)
+                    | Error msg -> raisef SQLMetaException "Cannot parse array: %s" msg
                     | Ok array ->
                         let runArrayCast (castFunc : string -> 'a option) : ValueArray<'a> =
                             let runCast (str : string) =
                                 match castFunc str with
                                 | Some v -> v
-                                | None -> raise (SQLMetaException <| sprintf "Cannot cast array value to type %O: %s" scalarType str)
+                                | None -> raisef SQLMetaException "Cannot cast array value to type %O: %s" scalarType str
                             mapValueArray runCast array
 
                         match findSimpleType scalarType with
@@ -241,7 +245,7 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
                     let runCast castFunc =
                         match castFunc str with
                         | Some v -> v
-                        | None -> raise (SQLMetaException <| sprintf "Cannot cast scalar value to type %O: %s" scalarType str)
+                        | None -> raisef SQLMetaException "Cannot cast scalar value to type %O: %s" scalarType str
 
                     match findSimpleType scalarType with
                     | None -> castExpr ()
@@ -260,8 +264,8 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
             | normV -> VECast (normV, typ)
         | VEValue value -> VEValue value
         | VEColumn ({ table = None } as c) -> VEColumn c
-        | VEColumn c -> raise (SQLMetaException <| sprintf "Invalid non-local reference in local expression: %O" c)
-        | VEPlaceholder i -> raise (SQLMetaException <| sprintf "Invalid placeholder in local expression: %i" i)
+        | VEColumn c -> raisef SQLMetaException "Invalid non-local reference in local expression: %O" c
+        | VEPlaceholder i -> raisef SQLMetaException "Invalid placeholder in local expression: %i" i
         | VENot e -> VENot (traverse e)
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
@@ -278,17 +282,20 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
         | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
         | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
-        | VEInQuery (e, query) -> raise (SQLMetaException <| sprintf "Invalid subquery in local expression: %O" query)
-        | VENotInQuery (e, query) -> raise (SQLMetaException <| sprintf "Invalid subquery in local expression: %O" query)
+        | VEInQuery (e, query) -> raisef SQLMetaException "Invalid subquery in local expression: %O" query
+        | VENotInQuery (e, query) -> raisef SQLMetaException "Invalid subquery in local expression: %O" query
         | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
         | VECase (es, els) -> VECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
         | VECoalesce vals -> VECoalesce (Array.map traverse vals)
+        | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
+        | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
     traverse
+
 
 let parseLocalExpr (raw : string) : ValueExpr =
     match parse tokenizeSQL valueExpr raw with
     | Ok expr -> normalizeLocalExpr expr
-    | Error msg -> raise (SQLMetaException <| sprintf "Cannot parse local expression '%s': %s" raw msg)
+    | Error msg -> raisef SQLMetaException "Cannot parse local expression: %s" msg
 
 let parseUdtName (str : string) =
     if str.StartsWith("_") then
@@ -297,17 +304,20 @@ let parseUdtName (str : string) =
         VTScalar <| SQLRawString str
 
 let private makeColumnMeta (attr : Attribute) : ColumnName * ColumnMeta =
-    let columnType =
-        if attr.pgType.typtype <> 'b' then
-            raise (SQLMetaException <| sprintf "Unsupported non-base type: %s" attr.pgType.typname)
-        parseUdtName attr.pgType.typname
-    let defaultExpr = attr.attrDefs |> Seq.first |> Option.map (fun def -> parseLocalExpr def.adsrc)
-    let res =
-        { columnType = columnType
-          isNullable = not attr.attnotnull
-          defaultExpr = defaultExpr
-        }
-    (SQLName attr.attname, res)
+    try
+        let columnType =
+            if attr.pgType.typtype <> 'b' then
+                raisef SQLMetaException "Unsupported non-base type: %s" attr.pgType.typname
+            parseUdtName attr.pgType.typname
+        let defaultExpr = attr.attrDefs |> Seq.first |> Option.map (fun def -> parseLocalExpr def.adsrc)
+        let res =
+            { columnType = columnType
+              isNullable = not attr.attnotnull
+              defaultExpr = defaultExpr
+            }
+        (SQLName attr.attname, res)
+    with
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in column %s: %s" attr.attname e.Message
 
 type private TableColumnIds = Map<ColumnNum, ColumnName>
 
@@ -325,32 +335,35 @@ type private PgSchemaMeta =
 type private PgSchemas = Map<SchemaName, PgSchemaMeta>
 
 let private makeUnconstrainedTableMeta (cl : Class) : TableName * (TableMeta * PgTableMeta) =
-    // FIXME: filtering CHECK constraints as we cannot handle them yet
-    let filteredAttrs = cl.attributes |> Seq.filter (fun attr -> attr.attnum > 0s && not attr.attisdropped)
-    let columnIds = filteredAttrs |> Seq.map (fun attr -> (attr.attnum, SQLName attr.attname)) |> Map.ofSeqUnique
-    let columns = filteredAttrs |> Seq.map makeColumnMeta |> Map.ofSeqUnique
-    let res = { columns = columns }
-    let name = SQLName cl.relname
-    let meta =
-        { columns = columnIds
-          constraints = cl.constraints
-        }
-    (name, (res, meta))
+    try
+        let filteredAttrs = cl.attributes |> Seq.filter (fun attr -> attr.attnum > 0s && not attr.attisdropped)
+        let columnIds = filteredAttrs |> Seq.map (fun attr -> (attr.attnum, SQLName attr.attname)) |> Map.ofSeqUnique
+        let columns = filteredAttrs |> Seq.map makeColumnMeta |> Map.ofSeqUnique
+        let res = { columns = columns }
+        let meta =
+            { columns = columnIds
+              constraints = cl.constraints
+            }
+        (SQLName cl.relname, (res, meta))
+    with
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in table %s: %s" cl.relname e.Message
 
 let private makeSequenceMeta (cl : Class) : TableName =
     SQLName cl.relname
 
 let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchemaMeta =
-    let tableObjects = ns.classes |> Seq.filter (fun cl -> cl.relkind = 'r') |> Seq.map makeUnconstrainedTableMeta |> Map.ofSeqUnique
-    let tablesMeta = tableObjects |> Map.map (fun name (table, meta) -> meta)
-    let tables = tableObjects |> Map.map (fun name (table, meta) -> OMTable table)
-    let sequences = ns.classes |> Seq.filter (fun cl -> cl.relkind = 'S') |> Seq.map (fun cl -> (makeSequenceMeta cl, OMSequence)) |> Map.ofSeqUnique
-    let name = SQLName ns.nspname
-    let res =
-        { objects = Map.unionUnique tables sequences
-          tables = tablesMeta
-        }
-    (name, res)
+    try
+        let tableObjects = ns.classes |> Seq.filter (fun cl -> cl.relkind = 'r') |> Seq.map makeUnconstrainedTableMeta |> Map.ofSeqUnique
+        let tablesMeta = tableObjects |> Map.map (fun name (table, meta) -> meta)
+        let tables = tableObjects |> Map.map (fun name (table, meta) -> OMTable table)
+        let sequences = ns.classes |> Seq.filter (fun cl -> cl.relkind = 'S') |> Seq.map (fun cl -> (makeSequenceMeta cl, OMSequence)) |> Map.ofSeqUnique
+        let res =
+            { objects = Map.unionUnique tables sequences
+              tables = tablesMeta
+            }
+        (SQLName ns.nspname, res)
+    with
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in schema %s: %s" ns.nspname e.Message
 
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =
@@ -389,25 +402,25 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 
     member this.FinishSchemaMeta = finishSchemaMeta
 
-let buildDatabaseMeta (transaction : NpgsqlTransaction) : DatabaseMeta =
-    let dbOptions =
-        (DbContextOptionsBuilder<PgCatalogContext> ())
-            .UseNpgsql(transaction.Connection)
-    use db = new PgCatalogContext(dbOptions.Options)
-    ignore <| db.Database.UseTransaction(transaction)
+let buildDatabaseMeta (transaction : NpgsqlTransaction) : Task<DatabaseMeta> =
+    task {
+        let dbOptions =
+            (DbContextOptionsBuilder<PgCatalogContext> ())
+                .UseNpgsql(transaction.Connection)
+        use db = new PgCatalogContext(dbOptions.Options)
+        ignore <| db.Database.UseTransaction(transaction)
 
-    let namespaces =
-        db.Namespace.Where(fun ns -> not (ns.nspname.StartsWith("pg_")) && ns.nspname <> "information_schema")
-            .Include(fun ns -> ns.classes)
-                .ThenInclude(fun (cl : Class) -> cl.attributes)
-                    .ThenInclude(fun (attr : Attribute) -> attr.attrDefs)
-            .Include(fun ns -> ns.classes)
-                .ThenInclude(fun (cl : Class) -> cl.attributes)
-                    .ThenInclude(fun (attr : Attribute) -> attr.pgType)
-            .Include(fun ns -> ns.classes)
-                .ThenInclude(fun (cl : Class) -> cl.constraints)
+        let! namespaces =
+            db.Namespace.Where(fun ns -> not (ns.nspname.StartsWith("pg_")) && ns.nspname <> "information_schema")
+                .Include("classes")
+                .Include("classes.attributes")
+                .Include("classes.attributes.attrDefs")
+                .Include("classes.attributes.pgType")
+                .Include("classes.constraints")
+                .ToListAsync()
 
-    let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
-    let phase2 = Phase2Resolver(unconstrainedSchemas)
-    let schemas = unconstrainedSchemas |> Map.map phase2.FinishSchemaMeta
-    { schemas = schemas }
+        let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
+        let phase2 = Phase2Resolver(unconstrainedSchemas)
+        let schemas = unconstrainedSchemas |> Map.map phase2.FinishSchemaMeta
+        return { schemas = schemas }
+    }

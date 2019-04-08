@@ -1,19 +1,21 @@
 module FunWithFlags.FunDB.FunQL.Query
 
 open System
+open System.Threading.Tasks
 open Newtonsoft.Json
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Compiler
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
 type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
 
-exception ViewExecutionException of info : string with
-    override this.Message = this.info
+type ViewExecutionException (message : string) =
+    inherit Exception(message)
 
 type [<JsonConverter(typeof<ExecutedValueConverter>)>] [<NoComparison>] ExecutedValue =
     { attributes : ExecutedAttributeMap
@@ -239,55 +241,66 @@ let private parseResult (domains : Domains) (result : QueryResult) : ExecutedVie
 
 type ViewArguments = Map<Placeholder, FieldValue>
 
+let private typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : unit =
+    match fieldType with
+    | FTEnum vals ->
+        match value with
+        | FString str when Set.contains str vals -> ()
+        | _ -> raisef ViewExecutionException "Argument is not from allowed values of a enum: %O" value
+    // Most casting/typechecking will be done by database or Npgsql
+    | _ -> ()
+
 // XXX: Add user access rights enforcing there later.
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ViewArguments) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> 'a) : 'a =
-    let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
-        let value =
-            match Map.tryFind name arguments with
+let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ViewArguments) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
+    task {
+        let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
+            let value =
+                match Map.tryFind name arguments with
+                | None ->
+                    if mapping.optional then
+                        FNull
+                    else
+                        raisef ViewExecutionException "Argument not found: %O" name
+                | Some value -> value
+            typecheckArgument mapping.fieldType value
+            (mapping.placeholder, (mapping.valueType, compileFieldValueSingle value))
+        let parameters = viewExpr.arguments |> Map.mapWithKeys makeParameter
+
+        let! attrsResult = task {
+            match viewExpr.attributesQuery with
+            | Some attributesExpr -> return! connection.ExecuteQuery attributesExpr.query parameters (parseAttributesResult >> Task.FromResult)
             | None ->
-                if mapping.optional then
-                    FNull
-                else
-                    raise (ViewExecutionException <| sprintf "Argument not found: %O" name)
-            | Some value -> value
-        match typecheckArgument mapping.fieldType value with
-        | Ok () -> ()
-        | Error msg -> raise (ViewExecutionException msg)
-        (mapping.placeholder, (mapping.valueType, compileArgument value))
-    let parameters = viewExpr.arguments |> Map.mapWithKeys makeParameter
+                return
+                    { attributes = Map.empty
+                      attributeTypes = Map.empty
+                      columnAttributes = Map.empty
+                    }
+        }
 
-    let attrsResult =
-        match viewExpr.attributesQuery with
-        | Some attributesExpr -> connection.ExecuteQuery attributesExpr.query parameters parseAttributesResult
-        | None ->
-            { attributes = Map.empty
-              attributeTypes = Map.empty
-              columnAttributes = Map.empty
-            }
+        let getColumnInfo (col : ExecutedColumnInfo) =
+            let attributeTypes =
+                match Map.tryFind col.name attrsResult.columnAttributes with
+                | None -> Map.empty
+                | Some (attrTypes, attrs) -> attrTypes
+            { col with attributeTypes = attributeTypes }
 
-    let getColumnInfo (col : ExecutedColumnInfo) =
-        let attributeTypes =
+        let getColumnAttributes (col : ExecutedColumnInfo) =
             match Map.tryFind col.name attrsResult.columnAttributes with
             | None -> Map.empty
-            | Some (attrTypes, attrs) -> attrTypes
-        { col with attributeTypes = attributeTypes }
+            | Some (attrTypes, attrs) -> attrs
 
-    let getColumnAttributes (col : ExecutedColumnInfo) =
-        match Map.tryFind col.name attrsResult.columnAttributes with
-        | None -> Map.empty
-        | Some (attrTypes, attrs) -> attrs
+        return! connection.ExecuteQuery (viewExpr.query.ToString()) parameters <| fun rawResult ->
+            let (info, rows) = parseResult viewExpr.domains rawResult
 
-    connection.ExecuteQuery (viewExpr.query.ToString()) parameters <| fun rawResult ->
-        let (info, rows) = parseResult viewExpr.domains rawResult
-
-        let mergedInfo =
-            { info with
-                  attributeTypes = attrsResult.attributeTypes
-                  columns = Array.map getColumnInfo info.columns
-            }
-        let result =
-            { attributes = attrsResult.attributes
-              columnAttributes = Array.map getColumnAttributes info.columns
-              rows = rows
-            }
-        resultFunc mergedInfo result
+            let mergedInfo =
+                { info with
+                      attributeTypes = attrsResult.attributeTypes
+                      columns = Array.map getColumnInfo info.columns
+                }
+            let result =
+                { attributes = attrsResult.attributes
+                  columnAttributes = Array.map getColumnAttributes info.columns
+                  rows = rows
+                }
+            resultFunc mergedInfo result
+    }

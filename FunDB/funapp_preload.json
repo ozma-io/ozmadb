@@ -1,6 +1,9 @@
 {
   "schemas": {
     "funapp": {
+
+      "userViewGenerator": "./funapp_migration.js",
+
       "entities": {
         "Settings": {
           "columnFields": {
@@ -33,73 +36,69 @@
         "MainMenuButtons": {
           "columnFields": {
             "CategoryId": { "fieldType": "reference(\"funapp\".\"MainMenuCategories\")" },
-            "UserViewId": { "fieldType": "reference(\"public\".\"UserViews\")" },
+            "SchemaName": { "fieldType": "string" },
+            "UserViewName": { "fieldType": "string" },
             "OrdinalPosition": { "fieldType": "int" }
           },
           "computedFields": {
-            "Name": { "expression": "\"CategoryId\" || '.' || \"UserViewId\"" }
+            "Name": { "expression": "\"CategoryId\"=>\"__main\" || '.' || \"SchemaName\" || '.' || \"UserViewName\"" }
           },
           "uniqueConstraints": {
-            "UniqueButton": { "columns": [ "CategoryId", "UserViewId" ] }
+            "UniqueButton": { "columns": [ "CategoryId", "SchemaName", "UserViewName" ] }
+          },
+          "checkConstraints": {
+            "NonEmptySchema": { "expression": "\"SchemaName\" <> ''" },
+            "NonEmptyUserView": { "expression": "\"UserViewName\" <> ''" }
           },
           "mainField": "Name"
         },
 
         "UserViewTranslations": {
           "columnFields": {
-            "UserViewId": { "fieldType": "reference(\"public\".\"UserViews\")" },
+            "SchemaName": { "fieldType": "string" },
+            "UserViewName": { "fieldType": "string" },
             "Language": { "fieldType": "string" },
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            "Name": { "expression": "\"Language\" || '.' || \"UserViewId\"->\"__main\"" }
+            "Name": { "expression": "\"Language\" || '.' || \"SchemaName\" || '.' || \"UserViewName\"" }
           },
           "uniqueConstraints": {
-            "UniqueTranslation": { "columns": [ "UserViewId", "Language" ] }
+            "UniqueTranslation": { "columns": [ "SchemaName", "UserViewName", "Language" ] }
           },
           "checkConstraints": {
+            "NonEmptySchema": { "expression": "\"SchemaName\" <> ''" },
+            "NonEmptyUserView": { "expression": "\"UserViewName\" <> ''" },
             "NonEmptyLanguage": { "expression": "\"Language\" <> ''" }
           },
           "mainField": "Name"
         },
 
-        "ColumnFieldTranslations": {
+        "FieldTranslations": {
           "columnFields": {
-            "ColumnFieldId": { "fieldType": "reference(\"public\".\"ColumnFields\")" },
+            "SchemaName": { "fieldType": "string" },
+            "EntityName": { "fieldType": "string" },
+            "FieldName": { "fieldType": "string" },
             "Language": { "fieldType": "string" },
             "Translation": { "fieldType": "string" }
           },
           "computedFields": {
-            "Name": { "expression": "\"Language\" || '.' || \"ColumnFieldId\"->\"__main\"" }
+            "Name": { "expression": "\"Language\" || '.' || \"SchemaName\" || '.' || \"EntityName\" || '.' || \"FieldName\"" }
           },
           "uniqueConstraints": {
-            "UniqueTranslation": { "columns": [ "ColumnFieldId", "Language" ] }
+            "UniqueTranslation": { "columns": [ "SchemaName", "EntityName", "FieldName", "Language" ] }
           },
           "checkConstraints": {
-            "NonEmptyLanguage": { "expression": "\"Language\" <> ''" }
-          },
-          "mainField": "Name"
-        },
-
-        "ComputedFieldTranslations": {
-          "columnFields": {
-            "ComputedFieldId": { "fieldType": "reference(\"public\".\"ComputedFields\")" },
-            "Language": { "fieldType": "string" },
-            "Translation": { "fieldType": "string" }
-          },
-          "computedFields": {
-            "Name": { "expression": "\"Language\" || '.' || \"ComputedFieldId\"->\"__main\"" }
-          },
-          "uniqueConstraints": {
-            "UniqueTranslation": { "columns": [ "ComputedFieldId", "Language" ] }
-          },
-          "checkConstraints": {
+            "NonEmptySchema": { "expression": "\"SchemaName\" <> ''" },
+            "NonEmptyEntity": { "expression": "\"EntityName\" <> ''" },
+            "NonEmptyField": { "expression": "\"FieldName\" <> ''" },
             "NonEmptyLanguage": { "expression": "\"Language\" <> ''" }
           },
           "mainField": "Name"
         }
 
       }
+
     }
   }
 }

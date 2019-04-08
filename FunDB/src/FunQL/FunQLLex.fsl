@@ -1,0 +1,172 @@
+{
+
+module FunWithFlags.FunDB.FunQL.Lex
+
+open System
+open Microsoft.FSharp.Text.Lexing
+
+open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Parsing
+open FunWithFlags.FunDB.SQL.Parsing
+
+}
+
+// Regular expressions
+let whitespace = [' ' '\t' ]
+let newline = ('\n' | "\r\n")
+let string = "'" ( [^ '\\' '\''] | "\\" _ )* "'"
+let escapedId  = "\"" ( [^ '"'] | "\"\"" )* "\""
+let unescapedId = ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
+
+// Case-insensitive chars
+let a = ['A' 'a']
+let b = ['B' 'b']
+let c = ['C' 'c']
+let d = ['D' 'd']
+let e = ['E' 'e']
+let f = ['F' 'f']
+let g = ['G' 'g']
+let h = ['H' 'h']
+let i = ['I' 'i']
+let j = ['J' 'j']
+let k = ['K' 'k']
+let l = ['L' 'l']
+let m = ['M' 'm']
+let n = ['N' 'n']
+let o = ['O' 'o']
+let p = ['P' 'p']
+let q = ['Q' 'q']
+let r = ['R' 'r']
+let s = ['S' 's']
+let t = ['T' 't']
+let u = ['U' 'u']
+let v = ['V' 'v']
+let w = ['W' 'w']
+let x = ['X' 'x']
+let y = ['Y' 'y']
+let z = ['Z' 'z']
+
+rule commentFunQL level = parse
+    | "/*"       { commentFunQL (level + 1) lexbuf }
+    | "*/"       { if level = 0 then () else commentFunQL (level - 1) lexbuf }
+    | escapedId  { commentFunQL level lexbuf }
+    | string     { commentFunQL level lexbuf }
+    | newline    { newline lexbuf; commentFunQL level lexbuf }
+    | _          { commentFunQL level lexbuf }
+
+and lineCommentFunQL = parse
+    | newline { newline lexbuf }
+    | _       { lineCommentFunQL lexbuf }
+
+and tokenizeFunQL = parse
+    // Atoms
+    | ['+' '-']? ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parse.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
+    | ['+' '-']? ['0'-'9'] ['0'-'9']*                { Parse.INT (lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
+    | escapedId                                      { Parse.ID (escapedId 0 lexbuf) }
+    | string                                         { Parse.STRING (escapedString 0 lexbuf) }
+
+    // Argument IDs
+    | "$$" escapedId   { Parse.GLOBAL_ARGUMENT_ID (escapedId 2 lexbuf) }
+    | "$$" unescapedId { Parse.GLOBAL_ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 2).ToLower()) }
+    | "$" escapedId    { Parse.ARGUMENT_ID (escapedId 1 lexbuf) }
+    | "$" unescapedId  { Parse.ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 1).ToLower()) }
+
+    // Symbols
+    | "@{"  { Parse.AT_LEFT_BRACE }
+    | "{"   { Parse.LEFT_BRACE }
+    | "}"   { Parse.RIGHT_BRACE }
+    | "("   { Parse.LEFT_PAREN }
+    | ")"   { Parse.RIGHT_PAREN }
+    | "["   { Parse.LEFT_BRACKET }
+    | "]"   { Parse.RIGHT_BRACKET }
+    | "::"  { Parse.DOUBLE_COLON }
+    | ":"   { Parse.COLON }
+    | ","   { Parse.COMMA }
+    | "."   { Parse.DOT }
+    | "="   { Parse.EQ }
+    | "<>"  { Parse.NOT_EQ }
+    | "!="  { Parse.NOT_EQ }
+    | ">="  { Parse.GREATER_EQ }
+    | ">"   { Parse.GREATER }
+    | "<="  { Parse.LESS_EQ }
+    | "<"   { Parse.LESS }
+    | "@"   { Parse.AT }
+    | "=>"  { Parse.BOLD_ARROW }
+    | "||"  { Parse.CONCAT }
+    | "*"   { Parse.STAR }
+    | "~~"  { Parse.LIKE_OP }
+    | "!~~" { Parse.NOT_LIKE_OP }
+    | "->"  { Parse.ARROW }
+    | "+"   { Parse.PLUS }
+    | "-"   { Parse.MINUS }
+    | "*"   { Parse.MULTIPLY }
+    | "/"   { Parse.DIVIDE }
+    | "&"   { Parse.AMPERSAND }
+    | "->>" { Parse.DOUBLE_ARROW }
+
+    // Keywords
+    | t r u e           { Parse.BOOL true }
+    | f a l s e         { Parse.BOOL false }
+    | n u l l           { Parse.NULL }
+    | s e l e c t       { Parse.SELECT }
+    | f r o m           { Parse.FROM }
+    | w h e r e         { Parse.WHERE }
+    | l e f t           { Parse.LEFT }
+    | r i g h t         { Parse.RIGHT }
+    | i n n e r         { Parse.INNER }
+    | o u t e r         { Parse.OUTER }
+    | j o i n           { Parse.JOIN }
+    | o n               { Parse.ON }
+    | o r d e r         { Parse.ORDER }
+    | b y               { Parse.BY }
+    | a s               { Parse.AS }
+    | a s c             { Parse.ASC }
+    | d e s c           { Parse.DESC }
+    | a n d             { Parse.AND }
+    | o r               { Parse.OR }
+    | l i k e           { Parse.LIKE }
+    | i n               { Parse.IN }
+    | i s               { Parse.IS }
+    | n o t             { Parse.NOT }
+    | f o r             { Parse.FOR }
+    | i n s e r t       { Parse.INSERT }
+    | i n t o           { Parse.INTO }
+    | c a s e           { Parse.CASE }
+    | w h e n           { Parse.WHEN }
+    | t h e n           { Parse.THEN }
+    | e l s e           { Parse.ELSE }
+    | e n d             { Parse.END }
+    | c o a l e s c e   { Parse.COALESCE }
+    | l i m i t         { Parse.LIMIT }
+    | o f f s e t       { Parse.OFFSET }
+    | u n i o n         { Parse.UNION }
+    | i n t e r s e c t { Parse.INTERSECT}
+    | u p d a t e       { Parse.UPDATE }
+    | o f               { Parse.OF }
+    | v a l u e s       { Parse.VALUES }
+
+    // Types
+    | i n t             { Parse.INT_TYPE }
+    | d e c i m a l     { Parse.DECIMAL_TYPE }
+    | s t r i n g       { Parse.STRING_TYPE }
+    | b o o l           { Parse.BOOL_TYPE }
+    | d a t e t i m e   { Parse.DATETIME_TYPE }
+    | d a t e           { Parse.DATE_TYPE }
+    | r e f e r e n c e { Parse.REFERENCE_TYPE }
+    | a r r a y         { Parse.ARRAY_TYPE }
+    | e n u m           { Parse.ENUM_TYPE }
+    | j s o n           { Parse.JSON_TYPE }
+    | u v r e f         { Parse.UVREF_TYPE }
+
+    // Unescaped ids
+    | unescapedId { Parse.ID ((String lexbuf.Lexeme).ToLower()) }
+
+    // Whitespace
+    | whitespace { tokenizeFunQL lexbuf }
+    | "--"       { lineCommentFunQL lexbuf; tokenizeFunQL lexbuf }
+    | "/*"       { commentFunQL 0 lexbuf; tokenizeFunQL lexbuf }
+    | newline    { newline lexbuf; tokenizeFunQL lexbuf }
+
+    // Misc
+    | _   { failwith <| sprintf "Lexical error: %s" (LexBuffer<_>.LexemeString lexbuf) }
+    | eof { Parse.EOF }

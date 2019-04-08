@@ -1,10 +1,12 @@
 open System
 open System.IO
 open Newtonsoft.Json
+open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
+open Microsoft.Extensions.Logging.Console
 open Microsoft.AspNetCore.Cors.Infrastructure
 open Microsoft.AspNetCore.Authentication
 open Microsoft.AspNetCore.Authentication.JwtBearer
@@ -19,14 +21,14 @@ open FunWithFlags.FunDB.API.Utils
 open FunWithFlags.FunDB.API.View
 open FunWithFlags.FunDB.API.Permissions
 open FunWithFlags.FunDB.API.Entity
-open FunWithFlags.FunDB.ContextCache
-open FunWithFlags.FunDB.Layout.Source
+open FunWithFlags.FunDB.API.SaveRestore
+open FunWithFlags.FunDB.Operations.ContextCache
+open FunWithFlags.FunDB.Operations.Preload
 
 type Config =
     { connectionString : string
       url : string
-      preloadedLayout : string option
-      migration : string option
+      preloads : string option
       authAuthority : string option
       disableSecurity : bool option
     }
@@ -46,32 +48,26 @@ let main (args : string[]) : int =
         | None -> false
         | Some v -> v
 
-    let preloadedLayout =
-        match config.preloadedLayout with
-        | Some path -> path |> File.ReadAllText |> JsonConvert.DeserializeObject<SourceLayout>
-        | None -> emptySourceLayout
-    let migration =
-        match config.migration with
-        | Some path -> path |> File.ReadAllText
-        | None -> ""
-    let preloadedSettings =
-        { layout = preloadedLayout
-          migration = migration
-        }
+    let sourcePreload =
+        match config.preloads with
+        | Some path -> readSourcePreload path
+        | None -> emptySourcePreload
+    let preload = resolvePreload sourcePreload
 
-    let cacheStore = ContextCacheStore(config.connectionString, preloadedSettings)
-    let apiSettings =
-        { cacheStore = cacheStore
-          disableSecurity = disableSecurity
-        }
+    let webApp (next : HttpFunc) (ctx : HttpContext) =
+        let cacheStore = ctx.GetService<ContextCacheStore>()
+        let apiSettings =
+            { cacheStore = cacheStore
+              disableSecurity = disableSecurity
+            }
 
-    let webApp =
         choose
             [ viewsApi apiSettings
               permissionsApi apiSettings
               entitiesApi apiSettings
+              saveRestoreApi apiSettings
               (setStatusCode 404 >=> text "Not Found")
-            ]
+            ] next ctx
 
     let errorHandler (ex : Exception) (logger : ILogger) =
         logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
@@ -112,6 +108,10 @@ let main (args : string[]) : int =
                     .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
         ignore <| services.AddCors()
         ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer defaultJsonSerializerSettings)
+        let makeCacheStore (sp : IServiceProvider) =
+            let logFactory = sp.GetService<ILoggerFactory>()
+            ContextCacheStore(logFactory, config.connectionString, preload)
+        ignore <| services.AddSingleton<ContextCacheStore>(makeCacheStore)
 
     let configureLogging (builder : ILoggingBuilder) =
         ignore <| builder.AddConsole()

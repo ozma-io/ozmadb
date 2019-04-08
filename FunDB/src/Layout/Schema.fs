@@ -1,5 +1,9 @@
 module FunWithFlags.FunDB.Layout.Schema
 
+open System.Threading.Tasks
+open Microsoft.EntityFrameworkCore
+open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Layout.Source
@@ -35,13 +39,20 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         if entity.MainField = null
         then funId
         else FunQLName entity.MainField
+      forbidExternalReferences = entity.ForbidExternalReferences
     }
 
 let private makeSourceSchema (schema : Schema) : SourceSchema =
-    { entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique }
+    { entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
+    }
 
-let buildSchemaLayout (db : SystemContext) : SourceLayout =
-    let schemas = getLayoutObjects db
+let buildSchemaLayout (db : SystemContext) : Task<SourceLayout> =
+    task {
+        let currentSchemas = getLayoutObjects db.Schemas
+        let! schemas = currentSchemas.ToListAsync()
+        let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
 
-    { schemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
+        return
+            { schemas = sourceSchemas
+            }
     }

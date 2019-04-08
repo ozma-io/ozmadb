@@ -1,10 +1,10 @@
-module FunWithFlags.FunDB.FunQL.Compiler
+module FunWithFlags.FunDB.FunQL.Compile
 
 open System
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.View
+open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.Layout.Types
 open Newtonsoft.Json.Linq
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -16,12 +16,12 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 // Each row has a different domain key assigned, so half of rows may come from entity A and half from entity B.
 // This way one can make use if IDs assigned to cells to reference and update them.
 [<NoComparison>]
-type DomainField = {
-    ref : ResolvedFieldRef
-    field : ResolvedField
-    // A field with assigned idEntity of Foo will use ID column "__Id__Foo"
-    idColumn : EntityName
-}
+type DomainField =
+    { ref : ResolvedFieldRef
+      field : ResolvedField
+      // A field with assigned idEntity of Foo will use ID column "__Id__Foo"
+      idColumn : EntityName
+    }
 
 type Domain = Map<FieldName, DomainField>
 type GlobalDomainId = int
@@ -107,23 +107,15 @@ type private JoinPath =
     }
 and private JoinPaths = Map<JoinKey, JoinPath>
 
-let typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : Result<unit, string> =
-    match fieldType with
-    | FTEnum vals ->
-        match value with
-        | FString str when Set.contains str vals -> Ok ()
-        | _ -> Error <| sprintf "Argument is not from allowed values of a enum: %O" value
-    // Most casting/typechecking will be done by database or Npgsql
-    | _ -> Ok ()
-
 let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETArray SFTString -> FStringArray [||]
-    | FETArray SFTInt -> FStringArray [||]
-    | FETArray SFTDecimal -> FStringArray [||]
-    | FETArray SFTBool -> FStringArray [||]
-    | FETArray SFTDateTime -> FStringArray [||]
-    | FETArray SFTDate -> FStringArray [||]
+    | FETArray SFTInt -> FIntArray [||]
+    | FETArray SFTDecimal -> FDecimalArray [||]
+    | FETArray SFTBool -> FBoolArray [||]
+    | FETArray SFTDateTime -> FDateTimeArray [||]
+    | FETArray SFTDate -> FDateArray [||]
     | FETArray SFTJson -> FJsonArray [||]
+    | FETArray SFTUserViewRef -> FUserViewRefArray [||]
     | FETScalar SFTString -> FString ""
     | FETScalar SFTInt -> FInt 0
     | FETScalar SFTDecimal -> FDecimal 0m
@@ -131,6 +123,7 @@ let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETScalar SFTDateTime -> FDateTime DateTimeOffset.UnixEpoch
     | FETScalar SFTDate -> FDateTime DateTimeOffset.UnixEpoch
     | FETScalar SFTJson -> FJson (JObject ())
+    | FETScalar SFTUserViewRef -> FUserViewRef { schema = None; name = FunQLName "" }
 
 let defaultCompiledArgument : ParsedFieldType -> FieldValue = function
     | FTType feType -> defaultCompiledExprArgument feType
@@ -162,6 +155,7 @@ let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
     | SFTDateTime -> SQL.STDateTime
     | SFTDate -> SQL.STDate
     | SFTJson -> SQL.STJson
+    | SFTUserViewRef -> SQL.STJson
 
 let private compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
     | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
@@ -201,26 +195,7 @@ let private compileResolvedFieldRef (fieldRef : ResolvedFieldRef) : SQL.ColumnRe
 
 let private compileArray (vals : 'a array) : SQL.ValueArray<'a> = Array.map SQL.AVValue vals
 
-let compileFieldValue : FieldValue -> SQL.ValueExpr = function
-    | FInt i -> SQL.VEValue (SQL.VInt i)
-    | FDecimal d -> SQL.VEValue (SQL.VDecimal d)
-    // PostgreSQL cannot deduce text's type on its own
-    | FString s -> SQL.VECast (SQL.VEValue (SQL.VString s), SQL.VTScalar (SQL.STString.ToSQLRawString()))
-    | FBool b -> SQL.VEValue (SQL.VBool b)
-    | FDateTime dt -> SQL.VEValue (SQL.VDateTime dt)
-    | FDate d -> SQL.VEValue (SQL.VDate d)
-    | FJson j -> SQL.VEValue (SQL.VJson j)
-    | FIntArray vals -> SQL.VEValue (SQL.VIntArray (compileArray vals))
-    | FDecimalArray vals -> SQL.VEValue (SQL.VDecimalArray (compileArray vals))
-    | FStringArray vals -> SQL.VEValue (SQL.VStringArray (compileArray vals))
-    | FBoolArray vals -> SQL.VEValue (SQL.VBoolArray (compileArray vals))
-    | FDateTimeArray vals -> SQL.VEValue (SQL.VDateTimeArray (compileArray vals))
-    | FDateArray vals -> SQL.VEValue (SQL.VDateArray (compileArray vals))
-    | FJsonArray vals -> SQL.VEValue (SQL.VJsonArray (compileArray vals))
-    | FNull -> SQL.VEValue SQL.VNull
-
-// Differs from compileFieldValue in that it doesn't emit value expressions.
-let compileArgument : FieldValue -> SQL.Value = function
+let compileFieldValueSingle : FieldValue -> SQL.Value = function
     | FInt i -> SQL.VInt i
     | FDecimal d -> SQL.VDecimal d
     | FString s -> SQL.VString s
@@ -228,6 +203,7 @@ let compileArgument : FieldValue -> SQL.Value = function
     | FDateTime dt -> SQL.VDateTime dt
     | FDate d -> SQL.VDate d
     | FJson j -> SQL.VJson j
+    | FUserViewRef r -> SQL.VJson <| JToken.FromObject(r)
     | FIntArray vals -> SQL.VIntArray (compileArray vals)
     | FDecimalArray vals -> SQL.VDecimalArray (compileArray vals)
     | FStringArray vals -> SQL.VStringArray (compileArray vals)
@@ -235,7 +211,15 @@ let compileArgument : FieldValue -> SQL.Value = function
     | FDateTimeArray vals -> SQL.VDateTimeArray (compileArray vals)
     | FDateArray vals -> SQL.VDateArray (compileArray vals)
     | FJsonArray vals -> SQL.VJsonArray (compileArray vals)
+    | FUserViewRefArray vals -> SQL.VJsonArray (vals |> Array.map (fun x -> JToken.FromObject(x)) |> compileArray)
     | FNull -> SQL.VNull
+
+let compileFieldValue (v : FieldValue) : SQL.ValueExpr =
+    let ret = compileFieldValueSingle v
+    match v with
+    // PostgreSQL cannot deduce text's type on its own
+    | FString _ ->SQL.VECast (SQL.VEValue ret, SQL.VTScalar (SQL.STString.ToSQLRawString()))
+    | _ -> SQL.VEValue ret
 
 let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc : Placeholder -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
     let rec traverse = function
@@ -265,6 +249,8 @@ let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc 
         | FECoalesce arr -> SQL.VECoalesce (Array.map traverse arr)
         | FEJsonArray vals -> SQL.VEFunc (SQL.SQLName "jsonb_build_array", Array.map traverse vals)
         | FEJsonObject obj -> SQL.VEFunc (SQL.SQLName "jsonb_build_object", obj |> Map.toSeq |> Seq.collect (fun (FunQLName name, v) -> [SQL.VEValue <| SQL.VString name; traverse v]) |> Seq.toArray)
+        | FEJsonArrow (a, b) -> SQL.VEJsonArrow (traverse a, traverse b)
+        | FEJsonTextArrow (a, b) -> SQL.VEJsonTextArrow (traverse a, traverse b)
     traverse
 
 type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity option, arguments : ArgumentsMap) =
@@ -285,24 +271,24 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         let id = lastJoinId
         lastJoinId <- lastJoinId + 1
         compileJoinId id
-     
-    let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (ref : EntityName) : JoinPaths * SQL.ValueExpr =
-        let (realName, field) = entity.FindField ref |> Option.get
+
+    let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (field : ResolvedField) (ref : FieldName) : JoinPaths * SQL.ValueExpr =
+        eprintfn "Ref: %O %O" tableRef ref
         match field with
         | RId
-        | RColumnField _ -> (paths, SQL.VEColumn { table = Some { schema = None; name = tableRef.name }; name = compileName realName })
+        | RColumnField _ -> (paths, SQL.VEColumn { table = Some { schema = None; name = tableRef.name }; name = compileName ref })
         | RComputedField comp -> compileLinkedLocalFieldExpr paths tableRef entity comp.expression
-    
-    and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) : EntityName list -> JoinPaths * SQL.ValueExpr = function
-        | [] -> failwith "Invalid empty path"
-        | [ref] -> compileRef paths tableRef entity ref
+
+    and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (field : ResolvedField) (name : FieldName) : EntityName list -> JoinPaths * SQL.ValueExpr = function
+        | [] -> compileRef paths tableRef entity field name
         | (ref :: refs) ->
-            match entity.FindField ref with
-            | Some (_, RColumnField { fieldType = FTReference (entityRef, _) }) ->
-                let newEntity = Option.getOrFailWith (fun () -> sprintf "Can't find entity %O" entityRef) <| layout.FindEntity entityRef
+            match field with
+            | RColumnField { fieldType = FTReference (entityRef, _) } ->
+                let newEntity = Option.get <| layout.FindEntity entityRef
+                let (realName, newField) = Option.get <| newEntity.FindField ref
                 let pathKey =
                     { table = tableRef.name
-                      column = compileName ref
+                      column = compileName name
                       toTable = entityRef
                     }
                 let (newPath, res) =
@@ -310,15 +296,15 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
                     | None ->
                         let newRealName = newJoinId ()
                         let newTableRef = { schema = None; name = newRealName } : SQL.TableRef
-                        let (nested, res) = compilePath Map.empty newTableRef newEntity refs
-                        let path = 
+                        let (nested, res) = compilePath Map.empty newTableRef newEntity newField realName refs
+                        let path =
                             { name = newRealName
                               nested = nested
                             }
                         (path, res)
                     | Some path ->
                         let newTableRef = { schema = None; name = path.name } : SQL.TableRef
-                        let (nested, res) = compilePath path.nested newTableRef newEntity refs
+                        let (nested, res) = compilePath path.nested newTableRef newEntity newField realName refs
                         let newPath = { path with nested = nested }
                         (newPath, res)
                 (Map.add pathKey newPath paths, res)
@@ -327,7 +313,8 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
     and compileLinkedLocalFieldExpr (paths0 : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LinkedLocalFieldExpr) : JoinPaths * SQL.ValueExpr =
         let mutable paths = paths0
         let compileLinkedName (linked : LinkedFieldName) =
-            let (newPaths, ret) = compilePath paths tableRef entity (linked.ref :: Array.toList linked.path)
+            let (_, field) = entity.FindField linked.ref |> Option.get
+            let (newPaths, ret) = compilePath paths tableRef entity field linked.ref (Array.toList linked.path)
             paths <- newPaths
             ret
         let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
@@ -340,13 +327,14 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         | ([||], None) ->
             let columnRef = compileFieldRef linked.ref.ref
             (paths0, SQL.VEColumn columnRef)
-        | (path, Some bound) ->
+        | (_, Some bound) ->
             let tableRef =
                 match linked.ref.ref.entity with
                 | Some renamedTable -> compileEntityRef renamedTable
                 | None -> compileResolvedEntityRef bound.ref.entity
             let entity = layout.FindEntity bound.ref.entity |> Option.get
-            compilePath paths0 tableRef entity (linked.ref.ref.name :: Array.toList path)
+            let (_, field) = entity.FindField bound.ref.name |> Option.get
+            compilePath paths0 tableRef entity field linked.ref.ref.name (Array.toList linked.path)
         | _ -> failwith "Unexpected path with no bound field"
 
     let rec compileLinkedFieldExpr (paths0 : JoinPaths) (expr : ResolvedFieldExpr) : JoinPaths * SQL.ValueExpr =
@@ -408,7 +396,7 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
 
     and compileSingleSelectExpr (isTopLevel : bool) (select : ResolvedSingleSelectExpr) : Domains * SQL.SingleSelectExpr =
         let mutable paths = Map.empty
-    
+
         let (domainsMap, queryClause) =
             match select.clause with
             | Some clause ->
@@ -433,7 +421,7 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         let resultColumns = select.results |> Seq.collect compileRes
 
         let mutable foundMainId = false
-    
+
         let getDomainColumns (result : ResolvedQueryResult) =
             match resultFieldRef result.result with
             | Some { entity = Some { name = entityName }; name = fieldName } ->
@@ -474,7 +462,8 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
                         let entity = Option.getOrFailWith (fun () -> sprintf "Can't find entity: %O" info.ref.entity) <| layout.FindEntity info.ref.entity
                         match info.field with
                         | RColumnField { fieldType = FTReference (newEntityRef, _) } ->
-                            let (newPaths, expr) = compilePath paths tableRef entity [fieldName; funMain]
+                            let (_, field) = entity.FindField fieldName |> Option.get
+                            let (newPaths, expr) = compilePath paths tableRef entity field fieldName [funMain]
                             paths <- newPaths
                             Seq.singleton <| SQL.SCExpr (compilePun newName, expr)
                         | _ -> Seq.empty
@@ -541,12 +530,12 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
                 let (newPaths, ret) = compileLinkedFieldExpr paths expr
                 paths <- newPaths
                 SQL.SCExpr (compileName name, ret)
-    
+
         let compileAttr (attrName, expr) =
             let (newPaths, ret) = compileAttribute paths (sprintf "CellAttribute__%O" name) attrName expr
             paths <- newPaths
             ret
-        
+
         let attrs = result.attributes |> Map.toSeq |> Seq.map compileAttr
         let cols = Seq.append (Seq.singleton resultColumn) attrs |> Seq.toArray
         (paths, Array.toSeq cols)
@@ -563,7 +552,7 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
 
     and buildJoins (from : SQL.FromExpr) (paths : JoinPaths) =
         Map.fold joinPath from paths
-    
+
     and joinPath (from : SQL.FromExpr) (joinKey : JoinKey) (path : JoinPath) =
         let tableRef = { schema = None; name = joinKey.table } : SQL.TableRef
         let toTableRef = { schema = None; name = path.name } : SQL.TableRef
@@ -573,7 +562,7 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         let toColumn = SQL.VEColumn { table = Some toTableRef; name = sqlFunId }
         let joinExpr = SQL.VEEq (fromColumn, toColumn)
         let subquery = compileFromEntityRef joinKey.toTable entity
-        let currJoin = SQL.FJoin (SQL.Left, from, SQL.FSubExpr (path.name, subquery), joinExpr)
+        let currJoin = SQL.FJoin (SQL.Left, from, SQL.FSubExpr (path.name, None, subquery), joinExpr)
         buildJoins currJoin path.nested
 
     and compileFromEntityRef (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SQL.SelectExpr =
@@ -597,10 +586,10 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         | FEntity entityRef ->
             let entity = Option.getOrFailWith (fun () -> sprintf "Can't find entity %O" entityRef) <| layout.FindEntity entityRef
             let tableRef = compileResolvedEntityRef entityRef
-        
+
             let subquery = compileFromEntityRef entityRef entity
-            let subExpr = SQL.FSubExpr (tableRef.name, subquery)
-        
+            let subExpr = SQL.FSubExpr (tableRef.name, None, subquery)
+
             let makeDomainEntry name field =
                 { ref = { entity = entityRef; name = name }
                   field = field
@@ -613,14 +602,19 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
             let (domainsMap1, r1) = compileFromExpr e1
             let (domainsMap2, r2) = compileFromExpr e2
             let domainsMap = Map.unionUnique domainsMap1 domainsMap2
-            let (newPaths, joinExpr) = compileLinkedFieldExpr Map.empty where
-            if not <| Map.isEmpty newPaths then
+            let (joinPaths, joinExpr) = compileLinkedFieldExpr Map.empty where
+            if not <| Map.isEmpty joinPaths then
                 failwith <| sprintf "Unexpected dereference in join expression: %O" where
             let ret = SQL.FJoin (compileJoin jt, r1, r2, joinExpr)
             (domainsMap, ret)
         | FSubExpr (name, q) ->
             let (domainsMap, expr) = compileSelectExpr false q
-            let ret = SQL.FSubExpr (compileName name, expr)
+            let ret = SQL.FSubExpr (compileName name, None, expr)
+            (Map.singleton name domainsMap, ret)
+        | FValues (name, fieldNames, values) ->
+            let domainsMap = DSingle (newDomainNamespaceId (), Map.empty)
+            let compiledValues = values |> Array.map (Array.map (compileLinkedFieldExpr Map.empty >> snd))
+            let ret = SQL.FSubExpr (compileName name, Some (Array.map compileName fieldNames), SQL.SValues compiledValues)
             (Map.singleton name domainsMap, ret)
 
     member this.CompileSelectExpr = compileSelectExpr true
@@ -670,6 +664,7 @@ let rec private findPureAttributes : SQL.SelectExpr -> Map<SQL.ColumnName, Purit
                 | _ -> None
             | _ -> None
         query.columns |> Seq.mapMaybe assignPure |> Map.ofSeq
+    | SQL.SValues _ -> Map.empty
     | SQL.SSetOp (op, a, b, limits) ->
         let addPure name (aPurity, aExpr, aAttr) (bPurity, bExpr, bAttr) =
             if aExpr = bExpr then
@@ -684,6 +679,7 @@ let rec private filterExprColumns (cols : Set<SQL.ColumnName>) : SQL.SelectExpr 
             | SQL.SCExpr (name, _) -> not <| Set.contains name cols
             | _ -> true
         SQL.SSelect { query with columns = query.columns |> Array.filter checkColumn }
+    | SQL.SValues values -> SQL.SValues values
     | SQL.SSetOp (op, a, b, limits) ->
         SQL.SSetOp (op, filterExprColumns cols a, filterExprColumns cols b, limits)
 

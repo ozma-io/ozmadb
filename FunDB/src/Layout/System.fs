@@ -12,6 +12,7 @@ open FunWithFlags.FunDB.FunQL.AST
 type EntityAttribute (mainField : string) =
     inherit Attribute ()
     member this.MainField = mainField
+    member val ForbidExternalReferences = false with get, set
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Property, AllowMultiple=true)>]
@@ -91,11 +92,11 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * SourceEntity) 
               uniqueConstraints = uniqueConstraints |> Seq.map makeSourceUniqueConstraint |> Map.ofSeq
               checkConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
               mainField = FunQLName entityAttr.MainField
+              forbidExternalReferences = entityAttr.ForbidExternalReferences
             }
         Some (FunQLName prop.Name, res)
 
-// Build entities map for public schema using mish-mash of our custom attributes and Entity Framework Core declarations.
-let buildSystemLayout (contextClass : Type) : SourceLayout =
+// Build entities map using mish-mash of our custom attributes and Entity Framework Core declarations.
+let buildSystemSchema (contextClass : Type) : SourceSchema =
     let entities = contextClass.GetProperties() |> Seq.mapMaybe makeSourceEntity |> Map.ofSeq
-    { schemas = Map.singleton funSchema { entities = entities }
-    }
+    { entities = entities }

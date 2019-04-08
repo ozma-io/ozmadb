@@ -21,7 +21,7 @@ type ParsedMainEntity =
 
 [<NoComparison>]
 type ParsedViewExpr =
-    { arguments : Map<string, Argument>
+    { arguments : Map<ArgumentName, Argument>
       select : ParsedSelectExpr
       mainEntity : ParsedMainEntity option
     }
@@ -148,6 +148,12 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
 %token LIKE_OP
 %token NOT_LIKE_OP
 %token ARROW
+%token DOUBLE_ARROW
+%token PLUS
+%token MINUS
+%token MULTIPLY
+%token DIVIDE
+%token AMPERSAND
 
 // Keywords
 %token SELECT
@@ -186,6 +192,7 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
 %token EXCEPT
 %token UPDATE
 %token OF
+%token VALUES
 
 // Types
 %token INT_TYPE
@@ -198,6 +205,7 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
 %token ARRAY_TYPE
 %token ENUM_TYPE
 %token JSON_TYPE
+%token UVREF_TYPE
 
 // Misc
 %token EOF
@@ -209,8 +217,10 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
 %nonassoc LESS GREATER LESS_EQ GREATER_EQ
 %nonassoc LIKE LIKE_OP NOT_LIKE_OP
 %nonassoc IN
-%left CONCAT
+%left CONCAT ARROW DOUBLE_ARROW
 %nonassoc IS
+%left PLUS MINUS
+%left MULTIPLY DIVIDE
 %left DOUBLE_COLON
 %left DOT
 
@@ -236,8 +246,8 @@ ViewExpr:
   | MaybeArguments SelectExpr InsertEntityClause { { arguments = $1; select = $2; mainEntity = $3 } }
 
 MaybeArguments:
-  |                                                 { Map.empty }
-  | LEFT_PAREN ArgumentsList RIGHT_PAREN BOLD_ARROW { $2 }
+  |                                            { Map.empty }
+  | LEFT_PAREN ArgumentsList RIGHT_PAREN COLON { $2 }
 
 ArgumentsList:
   |                       { Map.empty }
@@ -248,7 +258,7 @@ ArgumentsListNonEmpty:
   | ArgumentEntry                             { [ $1 ] }
 
 ArgumentEntry:
-  | ARGUMENT_ID Argument { ($1, $2) }
+  | ARGUMENT_ID Argument { (FunQLName $1, $2) }
 
 Argument:
   | ArgumentFieldType      { { argType = $1; optional = false } }
@@ -326,12 +336,12 @@ QueryResults:
   |                                { [] }
 
 QueryResult:
-  | AT ID EQ FieldExpr                { AAttribute (FunQLName $2, $4) }
-  | QueryResultExpr MaybeAttributeMap { AResult { attributes = $2; result = $1 } }
+  | AT Name EQ FieldExpr                { AAttribute ($2, $4) }
+  | QueryResultExpr MaybeAttributeMap   { AResult { attributes = $2; result = $1 } }
 
 QueryResultExpr:
-  | LinkedFieldRef  { QRField $1 }
-  | FieldExpr AS ID { QRExpr (FunQLName $3, $1) }
+  | LinkedFieldRef    { QRField $1 }
+  | FieldExpr AS Name { QRExpr ($3, $1) }
 
 MaybeAttributeMap:
   |                                                   { Map.empty }
@@ -339,13 +349,36 @@ MaybeAttributeMap:
   | AT_LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
 
 AttributeValuesNonEmpty:
-  | ID EQ FieldExpr                               { [(FunQLName $1, $3)] }
-  | ID EQ FieldExpr COMMA                         { [(FunQLName $1, $3)] }
-  | ID EQ FieldExpr COMMA AttributeValuesNonEmpty { (FunQLName $1, $3) :: $5 }
+  | Name EQ FieldExpr                               { [($1, $3)] }
+  | Name EQ FieldExpr COMMA                         { [($1, $3)] }
+  | Name EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
 
 QuerySource:
-  | LEFT_PAREN SelectExpr RIGHT_PAREN AS ID { FSubExpr (FunQLName $5, $2) }
-  | EntityRef                               { FEntity ($1) }
+  | LEFT_PAREN SelectExpr RIGHT_PAREN AS Name           { FSubExpr ($5, $2) }
+  | LEFT_PAREN Values RIGHT_PAREN AS Name ColumnAliases { FValues ($5, $6, $2) }
+  | EntityRef                                           { FEntity ($1) }
+  | LEFT_PAREN FromExpr RIGHT_PAREN                     { $2 }
+
+ColumnAliases:
+  | LEFT_PAREN ColumnAliasesList RIGHT_PAREN { List.toArray $2 }
+
+ColumnAliasesList:
+  | Name                         { [$1] }
+  | Name COMMA ColumnAliasesList { $1 :: $3 }
+
+Values:
+  | VALUES ValuesEntryList { List.toArray $2 }
+
+ValuesEntryList:
+  | ValuesEntry                       { [$1] }
+  | ValuesEntry COMMA ValuesEntryList { $1 :: $3 }
+
+ValuesEntry:
+  | LEFT_PAREN ValueItemsList RIGHT_PAREN { List.toArray $2 }
+
+ValueItemsList:
+  | FieldExpr                      { [$1]  }
+  | FieldExpr COMMA ValueItemsList { $1 :: $3 }
 
 JoinType:
   |       { Inner }
@@ -362,20 +395,20 @@ FromExpr:
   | QuerySource JoinChain { List.fold applyJoin $1 $2 }
 
 EntityRef:
-  | ID DOT ID { { schema = Some (FunQLName $1); name = FunQLName $3; } }
-  | ID        { { schema = None; name = FunQLName $1; } }
+  | Name DOT Name { { schema = Some $1; name = $3; } }
+  | Name          { { schema = None; name = $1; } }
 
 LinkedFieldRef:
   | FieldRef LinkedFieldsList { { ref = $1; path = List.toArray $2 } }
 
 LinkedFieldsList:
-  |                           { List.empty }
-  | ARROW ID LinkedFieldsList { FunQLName $2 :: $3 }
+  |                                  { List.empty }
+  | BOLD_ARROW Name LinkedFieldsList { $2 :: $3 }
 
 FieldRef:
-  | ID DOT ID DOT ID { { entity = Some { schema = Some (FunQLName $1); name = FunQLName $3 }; name = FunQLName $5 } }
-  | ID DOT ID        { { entity = Some { schema = None; name = FunQLName $1 }; name = FunQLName $3 } }
-  | ID               { { entity = None; name = FunQLName $1 } }
+  | Name DOT Name DOT Name { { entity = Some { schema = Some $1; name = $3 }; name = $5 } }
+  | Name DOT Name          { { entity = Some { schema = None; name = $1 }; name = $3 } }
+  | Name                   { { entity = None; name = $1 } }
 
 WhereClause:
   |                 { None }
@@ -413,6 +446,8 @@ FieldExprEq:
 
 FieldExprOp:
   | FieldExprOp CONCAT FieldExprOp         { FEConcat ($1, $3) }
+  | FieldExprOp ARROW FieldExprOp          { FEJsonArrow ($1, $3) }
+  | FieldExprOp DOUBLE_ARROW FieldExprOp   { FEJsonTextArrow ($1, $3) }
   | FieldExprOp DOUBLE_COLON FieldExprType { restrictCast $1 $3; FECast ($1, $3) }
   | COALESCE NonEmptyExprList              { FECoalesce $2 }
   | CaseExpr                               { $1 }
@@ -420,8 +455,8 @@ FieldExprOp:
 
 FieldExprVal:
   | LinkedFieldRef                   { FEColumn $1 }
-  | ARGUMENT_ID                      { FEPlaceholder (PLocal $1) }
-  | GLOBAL_ARGUMENT_ID               { FEPlaceholder (PGlobal $1) }
+  | ARGUMENT_ID                      { FEPlaceholder (PLocal <| FunQLName $1) }
+  | GLOBAL_ARGUMENT_ID               { FEPlaceholder (PGlobal <| FunQLName $1) }
   | Value                            { FEValue $1 }
   | JsonObject                       { $1 }
   | LEFT_PAREN FieldExpr RIGHT_PAREN { $2 }
@@ -465,24 +500,29 @@ DecimalArrayList:
 DecimalArrayNonEmpty:
   | DecimalArrayList { List.toArray $1 }
 
-JsonArrayList:
-  | JsonObject                     { [ $1 ] }
-  | JsonObject COMMA JsonArrayList { $1 :: $3 }
+UserViewRefArrayList:
+  | UserViewRef                            { [ $1 ] }
+  | UserViewRef COMMA UserViewRefArrayList { $1 :: $3 }
 
-JsonArrayNonEmpty:
-  | JsonArrayList { List.toArray $1 }
+UserViewRefArrayNonEmpty:
+  | UserViewRefArrayList { List.toArray $1 }
 
 Value:
-  | INT                                             { FInt $1 }
-  | DECIMAL                                         { FDecimal $1 }
-  | STRING                                          { FString $1 }
-  | BOOL                                            { FBool $1 }
-  | LEFT_BRACKET RIGHT_BRACKET                      { FStringArray [||] }
-  | LEFT_BRACKET StringArrayNonEmpty  RIGHT_BRACKET { FStringArray $2 }
-  | LEFT_BRACKET IntArrayNonEmpty     RIGHT_BRACKET { FIntArray $2 }
-  | LEFT_BRACKET BoolArrayNonEmpty    RIGHT_BRACKET { FBoolArray $2 }
-  | LEFT_BRACKET DecimalArrayNonEmpty RIGHT_BRACKET { FDecimalArray $2 }
-  | NULL                                            { FNull }
+  | INT                                                 { FInt $1 }
+  | DECIMAL                                             { FDecimal $1 }
+  | STRING                                              { FString $1 }
+  | BOOL                                                { FBool $1 }
+  | UserViewRef                                         { FUserViewRef $1 }
+  | LEFT_BRACKET RIGHT_BRACKET                          { FStringArray [||] }
+  | LEFT_BRACKET StringArrayNonEmpty      RIGHT_BRACKET { FStringArray $2 }
+  | LEFT_BRACKET IntArrayNonEmpty         RIGHT_BRACKET { FIntArray $2 }
+  | LEFT_BRACKET BoolArrayNonEmpty        RIGHT_BRACKET { FBoolArray $2 }
+  | LEFT_BRACKET DecimalArrayNonEmpty     RIGHT_BRACKET { FDecimalArray $2 }
+  | LEFT_BRACKET UserViewRefArrayNonEmpty RIGHT_BRACKET { FUserViewRefArray $2 }
+  | NULL                                                { FNull }
+
+UserViewRef:
+  | AMPERSAND EntityRef { $2 }
 
 JsonObject:
   | LEFT_BRACE JsonFields RIGHT_BRACE { coalesceJsonObject $2 }
@@ -511,6 +551,7 @@ ScalarType:
   | DATETIME_TYPE { SFTDateTime }
   | DATE_TYPE     { SFTDate }
   | JSON_TYPE     { SFTJson }
+  | UVREF_TYPE    { SFTUserViewRef }
 
 FieldExprType:
   | ScalarType                                    { FETScalar $1 }
@@ -530,3 +571,6 @@ ArgumentFieldType:
 EnumList:
   | STRING                { [ $1 ] }
   | STRING COMMA EnumList { $1 :: $3 }
+
+Name:
+  | ID { FunQLName $1 }

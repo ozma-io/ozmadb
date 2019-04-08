@@ -40,6 +40,8 @@ type SourceEntity =
       [<JsonProperty(Required=Required.DisallowNull)>]
       checkConstraints : Map<ConstraintName, SourceCheckConstraint>
       mainField : FieldName
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      forbidExternalReferences : bool
     } with
         member this.FindField (name : FieldName) =
             if name = funId then
@@ -58,6 +60,9 @@ type SourceSchema =
     { [<JsonProperty(Required=Required.DisallowNull)>]
       entities : Map<EntityName, SourceEntity>
     }
+
+let emptySourceSchema : SourceSchema =
+    { entities = Map.empty }
 
 type SourceLayout =
     { [<JsonProperty(Required=Required.DisallowNull)>]

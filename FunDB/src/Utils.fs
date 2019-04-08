@@ -1,11 +1,45 @@
 module FunWithFlags.FunDB.Utils
 
+open Printf
 open System
 open System.Collections.Generic
 open System.Globalization
+open System.Threading.Tasks
+open System.Runtime.ExceptionServices
 open Microsoft.FSharp.Reflection
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type Void = private Void of unit
+type Exception = System.Exception
+
+module Task =
+    let bind (f : 'a -> Task<'b>) (a : Task<'a>) : Task<'b> =
+        task {
+            let! r = a
+            return! f r
+        }
+
+    let result (a : 'a) : Task<'a> =
+        Task.FromResult a
+
+    let map (f : 'a -> 'b) (a : Task<'a>) : Task<'b> =
+        task {
+            let! r = a
+            return f r
+        }
+
+    let map2Sync (f : 'a -> 'b -> 'c) (a : Task<'a>) (b : Task<'b>) : Task<'c> =
+        task {
+            let! r1 = a
+            let! r2 = b
+            return f r1 r2
+        }
+
+    let awaitSync (t : Task<'a>) : 'a =
+        t.GetAwaiter().GetResult()
+
+let curry f a b = f (a, b)
+let uncurry f (a, b) = f a b
 
 module Option =
     let getOrFailWith (errorFunc : unit -> string) : 'a option -> 'a = function
@@ -15,6 +49,13 @@ module Option =
     let toSeq : 'a option -> 'a seq = function
         | Some r -> Seq.singleton r
         | None -> Seq.empty
+
+    let mapTask (f : 'a -> Task<'b>) (opt : 'a option) : Task<'b option> =
+        task {
+            match opt with
+            | None -> return None
+            | Some a -> return! Task.map Some (f a)
+        }
 
 module Result =
     let isOk : Result<'a, 'e> -> bool = function
@@ -58,19 +99,108 @@ module Seq =
     let areEqual (a : seq<'a>) (b : seq<'a>) : bool =
         Seq.compareWith (fun e1 e2 -> if e1 = e2 then 0 else -1) a b = 0
 
+    let iterTaskSync (f : 'a -> Task<unit>) (s : seq<'a>) : Task<unit> =
+        task {
+            for a in s do
+                do! f a
+        }
+
+    let mapTaskSync (f : 'a -> Task<'b>) (s : seq<'a>) : Task<seq<'b>> =
+        task {
+            let list = List<'b>()
+            for a in s do
+                let! b = f a
+                list.Add(b)
+            return list :> seq<'b>
+        }
+
+    let iterStop (f : 'a -> bool) (s : seq<'a>) : unit =
+        let i = s.GetEnumerator()
+        let mutable cont = true
+        while cont && i.MoveNext() do
+            cont <- f i.Current
+
+    let iterTaskSyncStop (f : 'a -> Task<bool>) (s : seq<'a>) : Task<unit> =
+        task {
+            let i = s.GetEnumerator()
+            let mutable cont = true
+            while cont && i.MoveNext() do
+                let! c = f i.Current
+                cont <- c
+        }
+
     // FIXME: make those stop on first failure
     let traverseOption (func : 'a -> 'b option) (vals : seq<'a>) : seq<'b> option =
-        let res = vals |> Seq.map func |> Seq.cache
-        if Seq.forall Option.isSome res then
-            Some (Seq.map Option.get res)
-        else
+        let list = List<'b>()
+        let mutable failed = false
+        let tryOne a =
+            match func a with
+            | Some b ->
+                list.Add(b)
+                true
+            | None ->
+                failed <- true
+                false
+        iterStop tryOne vals
+        if failed then
             None
+        else
+            Some (list :> seq<'b>)
 
     let traverseResult (func : 'a -> Result<'b, 'e>) (vals : seq<'a>) : Result<seq<'b>, 'e> =
-        let res = vals |> Seq.map func |> Seq.cache
-        match res |> Seq.filter Result.isError |> first with
-        | Some err -> Error <| Result.getError err
-        | None -> Ok (Seq.map (Result.get) res)
+        let list = List<'b>()
+        let mutable error = None
+        let tryOne a =
+            match func a with
+            | Ok b ->
+                list.Add(b)
+                true
+            | Error e ->
+                error <- Some e
+                false
+        iterStop tryOne vals
+        match error with
+        | None -> Ok (list :> seq<'b>)
+        | Some e -> Error e
+
+    let traverseOptionTaskSync (func : 'a -> Task<'b option>) (vals : seq<'a>) : Task<seq<'b> option> =
+        task {
+            let list = List<'b>()
+            let mutable failed = false
+            let tryOne a = task {
+                match! func a with
+                | Some b ->
+                    list.Add(b)
+                    return true
+                | None ->
+                    failed <- true
+                    return false
+            }
+            do! iterTaskSyncStop tryOne vals
+            if failed then
+                return None
+            else
+                return Some (list :> seq<'b>)
+        }
+
+    let traverseResultTaskSync (func : 'a -> Task<Result<'b, 'e>>) (vals : seq<'a>) : Task<Result<seq<'b>, 'e>> =
+        task {
+            let list = List<'b>()
+            let mutable error = None
+            let tryOne a = task {
+                match! func a with
+                | Ok b ->
+                    list.Add(b)
+                    return true
+                | Error e ->
+                    error <- Some e
+                    return false
+            }
+            do! iterTaskSyncStop tryOne vals
+            match error with
+            | None -> return Ok (list :> seq<'b>)
+            | Some e -> return Error e
+        }
 
 module Map =
     let ofSeqWith (resolve : 'k -> 'v -> 'v -> 'v) (items : seq<'k * 'v>) : Map<'k, 'v> =
@@ -89,6 +219,9 @@ module Map =
         match Map.tryFind k m with
         | Some v -> v
         | None -> def
+
+    let mapTaskSync (f : 'k -> 'a -> Task<'b>) (m : Map<'k, 'a>) : Task<Map<'k, 'b>> =
+        m |> Map.toSeq |> Seq.mapTaskSync (fun (k, v) -> Task.map (fun nv -> (k, nv)) (f k v)) |> Task.map Map.ofSeq
 
     let mapMaybe (f : 'k -> 'a -> 'b option) (m : Map<'k, 'a>) : Map<'k, 'b> =
         m |> Map.toSeq |> Seq.mapMaybe (fun (k, v) -> Option.map (fun v' -> (k, v')) (f k v)) |> Map.ofSeq
@@ -178,6 +311,10 @@ module Set =
 
     let ofSeqUnique (items : seq<'a>) : Set<'a> =
         Seq.fold (fun s x -> if Set.contains x s then failwith (sprintf "Item '%s' already exists" (x.ToString ())) else Set.add x s) Set.empty items
+
+module Array =
+    let mapTaskSync (f : 'a -> Task<'b>) (arr : 'a[]) : Task<'b[]> =
+        Task.map Seq.toArray (Seq.mapTaskSync f arr)
 
 let tryInt (culture : CultureInfo) (str : string) : int option =
     match Int32.TryParse(str, NumberStyles.Integer ||| NumberStyles.AllowDecimalPoint, culture) with
@@ -281,3 +418,16 @@ module NumBases =
             Some <| 10 + int c - int 'A'
         else
             None
+
+let raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
+    kprintf <| fun str ->
+        raise  <| constr (str, inner)
+
+let raisef (constr : string -> 'e) : StringFormat<'a, 'b> -> 'a =
+    let thenRaise str =
+        raise  <| constr str
+    kprintf thenRaise
+
+let inline reraise' (e : exn) =
+    (ExceptionDispatchInfo.Capture e).Throw ()
+    Unchecked.defaultof<_>

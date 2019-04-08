@@ -2,18 +2,23 @@ module FunWithFlags.FunDB.SQL.Query
 
 open System
 open System.Linq
+open System.Threading.Tasks
+open Microsoft.Extensions.Logging
 open Npgsql
 open NpgsqlTypes
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.AST
-open FunWithFlags.FunDB.SQL.Lexer
-open FunWithFlags.FunDB.SQL.Parser
+open FunWithFlags.FunDB.SQL.Lex
+open FunWithFlags.FunDB.SQL.Parse
 
-exception QueryException of info : string with
-    override this.Message = this.info
+type QueryException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = QueryException (message, null)
 
 type ExprParameters = Map<int, SimpleValueType * Value>
 
@@ -28,10 +33,10 @@ let private parseType typeStr =
     | Ok valType ->
         let coerceType typeName =
             match findSimpleType typeName with
-            | None -> raise (QueryException <| sprintf "Unknown database type: %O" typeName)
+            | None -> raisef QueryException "Unknown database type: %O" typeName
             | Some t -> t
         mapValueType coerceType valType
-    | Error msg -> raise (QueryException <| sprintf "Cannot parse database type: %s" msg)
+    | Error msg -> raisef QueryException "Cannot parse database type: %s" msg
 
 let private convertInt : obj -> int option = function
     | :? byte as value -> Some <| int value
@@ -56,7 +61,7 @@ let private convertValue valType (rawValue : obj) =
     | (VTScalar STInt, value) ->
         match convertInt value with
         | Some i -> VInt i
-        | None -> raise (QueryException <| sprintf "Unknown integer type: %s" (value.GetType().FullName))
+        | None -> raisef QueryException "Unknown integer type: %s" (value.GetType().FullName)
     | (VTScalar STDecimal, (:? decimal as value)) -> VDecimal value
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
@@ -66,7 +71,7 @@ let private convertValue valType (rawValue : obj) =
     | (VTScalar STJson, (:? string as value)) ->
         match tryJson value with
         | Some j -> VJson j
-        | None -> raise (QueryException <| sprintf "Invalid JSON value: %s" value)
+        | None -> raisef QueryException "Invalid JSON value: %s" value
     | (VTArray scalarType, (:? Array as rootVals)) ->
         let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
             let convertOne : obj -> ArrayValue<'a> = function
@@ -75,7 +80,7 @@ let private convertValue valType (rawValue : obj) =
                 | value ->
                     match convFunc value with
                     | Some v -> AVValue v
-                    | None -> raise (QueryException <| sprintf "Cannot convert array value: %O" value)
+                    | None -> raisef QueryException "Cannot convert array value: %O" value
             Seq.map convertOne (vals.Cast<obj>()) |> Array.ofSeq
 
         match scalarType with
@@ -85,9 +90,9 @@ let private convertValue valType (rawValue : obj) =
         | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
         | STDateTime -> VDateTimeArray (convertArray tryCast<DateTimeOffset> rootVals)
         | STDate -> VDateArray (convertArray convertDate rootVals)
-        | STRegclass -> raise (QueryException <| sprintf "Regclass arrays are not supported: %O" rootVals)
+        | STRegclass -> raisef QueryException "Regclass arrays are not supported: %O" rootVals
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
-    | (typ, value) -> raise (QueryException <| sprintf "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName))
+    | (typ, value) -> raisef QueryException "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName)
 
 let private npgsqlSimpleType : SimpleType -> NpgsqlDbType = function
     | STInt -> NpgsqlDbType.Integer
@@ -96,7 +101,7 @@ let private npgsqlSimpleType : SimpleType -> NpgsqlDbType = function
     | STBool -> NpgsqlDbType.Boolean
     | STDateTime -> NpgsqlDbType.Timestamp
     | STDate -> NpgsqlDbType.Date
-    | STRegclass -> raise <| QueryException "Regclass type is not supported"
+    | STRegclass -> raisef QueryException "Regclass type is not supported"
     | STJson -> NpgsqlDbType.Jsonb
 
 let private npgsqlType : SimpleValueType -> NpgsqlDbType = function
@@ -114,7 +119,7 @@ let private npgsqlValue : Value -> obj = function
     | VInt i -> upcast i
     | VDecimal d -> upcast d
     | VString s -> upcast s
-    | VRegclass name -> raise (QueryException <| sprintf "Regclass arguments are not supported: %O" name)
+    | VRegclass name -> raisef QueryException "Regclass arguments are not supported: %O" name
     | VBool b -> upcast b
     | VDateTime dt -> upcast dt.UtcDateTime
     | VDate dt -> upcast dt.UtcDateTime
@@ -125,30 +130,36 @@ let private npgsqlValue : Value -> obj = function
     | VBoolArray vals -> npgsqlArrayValue vals
     | VDateTimeArray vals -> npgsqlArrayValue vals
     | VDateArray vals -> npgsqlArrayValue vals
-    | VRegclassArray vals -> raise (QueryException <| sprintf "Regclass arguments are not supported: %O" vals)
+    | VRegclassArray vals -> raisef QueryException "Regclass arguments are not supported: %O" vals
     | VJsonArray vals -> npgsqlArrayValue vals
     | VNull -> upcast DBNull.Value
 
-type QueryConnection (connection : NpgsqlConnection) =
-    let withCommand (queryStr : string) (pars : ExprParameters) (runFunc : NpgsqlCommand -> 'a) : 'a =
-        use command = new NpgsqlCommand(queryStr, connection)
-        for KeyValue (name, (valueType, value)) in pars do
-            ignore <| command.Parameters.AddWithValue(name.ToString(), npgsqlType valueType, npgsqlValue value)
-        eprintfn "Executing query: %s" queryStr
-        eprintfn "Parameters: %O" pars
-        command.Prepare()
-        try
-            runFunc command
-        with
-        | :? PostgresException as ex -> raise (QueryException <| sprintf "PostgreSQL exception: %s" ex.Message)
+type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnection) =
+    let logger = loggerFactory.CreateLogger<QueryConnection> ()
 
-    member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) : unit =
-        withCommand queryStr pars <| fun command ->
-            ignore <| command.ExecuteNonQuery()
+    let withCommand (queryStr : string) (pars : ExprParameters) (runFunc : NpgsqlCommand -> Task<'a>) : Task<'a> =
+        task {
+            use command = new NpgsqlCommand(queryStr, connection)
+            for KeyValue (name, (valueType, value)) in pars do
+                ignore <| command.Parameters.AddWithValue(name.ToString(), npgsqlType valueType, npgsqlValue value)
+            logger.LogInformation("Executing query with args {args}: {query}", pars, queryStr)
+            do! command.PrepareAsync()
+            try
+                return! runFunc command
+            with
+            | :? PostgresException as ex ->
+                return raisefWithInner QueryException ex "Error while executing"
+        }
 
-    member this.ExecuteQuery (queryStr : string) (pars : ExprParameters) (queryFunc : QueryResult -> 'a) : 'a =
-        withCommand queryStr pars <| fun command ->
-            use reader = command.ExecuteReader()
+    member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) : Task<unit> =
+        withCommand queryStr pars <| fun command -> task {
+            let! _ = command.ExecuteNonQueryAsync()
+            return ()
+        }
+
+    member this.ExecuteQuery (queryStr : string) (pars : ExprParameters) (queryFunc : QueryResult -> Task<'a>) : Task<'a> =
+        withCommand queryStr pars <| fun command -> task {
+            use! reader = command.ExecuteReaderAsync()
             let getColumn i =
                 let name = reader.GetName(i)
                 let typ = parseType (reader.GetDataTypeName(i))
@@ -162,4 +173,5 @@ type QueryConnection (connection : NpgsqlConnection) =
                     while reader.Read() do
                         yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
                 }
-            queryFunc { columns = columns; rows = rows }
+            return! queryFunc { columns = columns; rows = rows }
+        }

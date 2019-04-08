@@ -40,11 +40,15 @@ type ResolvedColumnField =
       isNullable : bool
     }
 
+type FieldKey = SchemaName * EntityName * FieldName
+type ColumnFieldsMap = Set<FieldKey>
+
 [<NoComparison>]
 type ResolvedComputedField =
     { expression : LinkedLocalFieldExpr
       // Set when there's no dereferences in the expression
       isLocal : bool
+      usedColumnFields : ColumnFieldsMap
     }
 
 [<NoComparison>]
@@ -60,6 +64,7 @@ type ResolvedEntity =
       uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
       checkConstraints : Map<ConstraintName, ResolvedCheckConstraint>
       mainField : FieldName
+      forbidExternalReferences : bool
     } with
         member this.FindField (name : FieldName) =
             if name = funId then
@@ -83,7 +88,6 @@ type ResolvedSchema =
 type Layout =
     { schemas : Map<SchemaName, ResolvedSchema>
     } with
-
         member this.FindEntity (entity : ResolvedEntityRef) =
             match Map.tryFind entity.schema this.schemas with
             | None -> None

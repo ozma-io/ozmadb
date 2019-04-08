@@ -1,22 +1,46 @@
 module FunWithFlags.FunDB.API.Utils
 
-open Giraffe
+open System.Collections.Generic
+open Microsoft.Extensions.Primitives
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
+open FSharp.Control.Tasks.V2.ContextInsensitive
 open Newtonsoft.Json
+open Giraffe
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Context
-open FunWithFlags.FunDB.ContextCache
+open FunWithFlags.FunDB.Json
+open FunWithFlags.FunDB.Operations.Context
+open FunWithFlags.FunDB.Operations.ContextCache
 
-let queryArgs (ctx : HttpContext) =
-    ctx.Request.Query |> Seq.mapMaybe (function KeyValue(name, par) -> par |> Seq.first |> Option.map (fun x -> (name, x))) |> Map.ofSeq
+let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
+    let args1 = rawArgs |> Seq.mapMaybe (function KeyValue(name, par) -> par |> Seq.first |> Option.map (fun x -> (name, x)))
+    let tryArg (name, arg) =
+        match tryJson arg with
+        | None -> Error name
+        | Some r -> Ok (name, r)
+    match Seq.traverseResult tryArg args1 with
+    | Error name -> sprintf "Invalid JSON value in argument %s" name |> text |> RequestErrors.badRequest
+    | Ok args2 -> f <| Map.ofSeq args2
 
-let formArgs (ctx : HttpContext) =
-    ctx.Request.Form |> Seq.mapMaybe (function KeyValue(name, par) -> par |> Seq.first |> Option.map (fun x -> (name, x))) |> Map.ofSeq
+let queryArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+    processArgs f ctx.Request.Query next ctx
+
+let formArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+    task {
+        let! form = ctx.Request.ReadFormAsync ()
+        return! processArgs f form next ctx
+    }
 
 let authorize =
     requiresAuthentication (challenge JwtBearerDefaults.AuthenticationScheme)
+
+let commitAndReturn (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    task {
+        match! rctx.Commit () with
+        | Ok () -> return! Successful.OK "" next ctx
+        | Error msg -> return! RequestErrors.badRequest (text msg) next ctx
+    }
 
 type RealmAccess =
     { roles : string[]
@@ -29,7 +53,7 @@ type APISettings =
     }
 
 let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
-    let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) =
+    let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
         let specifiedLang =
             ctx.Request.GetTypedHeaders().AcceptLanguage
             |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
@@ -39,16 +63,19 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
             | Some l -> l.Value.Value
             | None -> "en-US"
         try
-            use rctx =
-                new RequestContext {
-                    cacheStore = settings.cacheStore
-                    userName = userName
-                    isRoot = isRoot
-                    language = lang
-            }
-            f rctx next ctx
+            use! rctx =
+                RequestContext.Create
+                    { cacheStore = settings.cacheStore
+                      userName = userName
+                      isRoot = isRoot
+                      language = lang
+                    }
+            return! f rctx next ctx
         with
-        | RequestException REUserNotFound -> RequestErrors.FORBIDDEN "" next ctx
+        | :? RequestException as e ->
+            match e.Info with
+            | REUserNotFound -> return! RequestErrors.forbidden (text "") next ctx
+    }
 
     let protectedApi (next : HttpFunc) (ctx : HttpContext) =
         let userClaim = ctx.User.FindFirst "preferred_username"
@@ -61,7 +88,7 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
             else
                 false
         makeContext userName isRoot next ctx
-    
+
     let unprotectedApi = makeContext "anonymous@example.com" true
 
     if settings.disableSecurity then

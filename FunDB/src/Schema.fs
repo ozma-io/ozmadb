@@ -12,7 +12,7 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     // All of this shit is because of how EF Core works.
     [<DefaultValue>]
     val mutable state : DbSet<StateValue>
-    [<Entity("Name")>]
+    [<Entity("Name", ForbidExternalReferences=true)>]
     [<UniqueConstraint("Name", [|"Name"|])>]
     [<CheckConstraint("NotEmpty", "\"Name\" <> ''")>]
     member this.State
@@ -21,7 +21,7 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable schemas : DbSet<Schema>
-    [<Entity("Name")>]
+    [<Entity("Name", ForbidExternalReferences=true)>]
     [<UniqueConstraint("Name", [|"Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     member this.Schemas
@@ -30,8 +30,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable entities : DbSet<Entity>
-    [<Entity("FullName")>]
-    [<ComputedField("FullName", "\"SchemaId\"->\"__main\" || '.' || \"Name\"")>]
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"SchemaId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     [<CheckConstraint("CorrectMainField", "\"MainField\" <> '' AND \"MainField\" <> 'Id'")>]
@@ -41,8 +41,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable columnFields : DbSet<ColumnField>
-    [<Entity("FullName")>]
-    [<ComputedField("FullName", "\"EntityId\"->\"__main\" || '.' || \"Name\"")>]
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
     member this.ColumnFields
@@ -51,8 +51,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable computedFields : DbSet<ComputedField>
-    [<Entity("FullName")>]
-    [<ComputedField("FullName", "\"EntityId\"->\"__main\" || '.' || \"Name\"")>]
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
     member this.ComputedFields
@@ -61,8 +61,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable uniqueConstraints : DbSet<UniqueConstraint>
-    [<Entity("FullName")>]
-    [<ComputedField("FullName", "\"EntityId\"->\"__main\" || '.' || \"Name\"")>]
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     [<CheckConstraint("NotEmpty", "\"Columns\" <> ([] :: array(string))")>]
@@ -72,8 +72,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable checkConstraints : DbSet<CheckConstraint>
-    [<Entity("FullName")>]
-    [<ComputedField("FullName", "\"EntityId\"->\"__main\" || '.' || \"Name\"")>]
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     member this.CheckConstraints
@@ -82,8 +82,9 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable userViews : DbSet<UserView>
-    [<Entity("Name")>]
-    [<UniqueConstraint("Name", [|"Name"|])>]
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"Name\"")>]
+    [<UniqueConstraint("Name", [|"SchemaId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" <> ''")>]
     member this.UserViews
         with get () = this.userViews
@@ -100,8 +101,9 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable roles : DbSet<Role>
-    [<Entity("Name")>]
-    [<UniqueConstraint("Name", [|"Name"|])>]
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"Name\"")>]
+    [<UniqueConstraint("Name", [|"SchemaId"; "Name"|])>]
     [<CheckConstraint("NotReserved", "\"Name\" <> ''")>]
     member this.Roles
         with get () = this.roles
@@ -109,15 +111,15 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable roleParents : DbSet<RoleParent>
-    [<Entity("Id")>]
-    [<CheckConstraint("NotRecursive", "\"ParentId\" <> \"Id\"")>]
+    [<Entity("Id", ForbidExternalReferences=true)>]
+    [<UniqueConstraint("Role", [|"RoleId"; "ParentId"|])>]
     member this.RoleParents
         with get () = this.roleParents
         and set value = this.roleParents <- value
 
     [<DefaultValue>]
     val mutable roleEntities : DbSet<RoleEntity>
-    [<Entity("Id")>]
+    [<Entity("Id", ForbidExternalReferences=true)>]
     [<UniqueConstraint("Entry", [|"RoleId"; "EntityId"|])>]
     member this.RoleEntities
         with get () = this.roleEntities
@@ -125,8 +127,9 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable roleColumnFields : DbSet<RoleColumnField>
-    [<Entity("Id")>]
-    [<UniqueConstraint("Entry", [|"RoleId"; "ColumnFieldId"|])>]
+    [<Entity("Id", ForbidExternalReferences=true)>]
+    [<UniqueConstraint("Entry", [|"RoleEntityId"; "ColumnFieldId"|])>]
+    // FIXME: Check that ColumnFieldId=>EntityId = RoleEntityId=>EntityId
     member this.RoleColumnFields
         with get () = this.roleColumnFields
         and set value = this.roleColumnFields <- value
@@ -146,6 +149,14 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
         with get () = this.events
         and set value = this.events <- value
 
+    override this.OnModelCreating (modelBuilder : ModelBuilder) =
+        ignore <| modelBuilder.Entity<RoleParent>()
+            .HasOne(fun roleParent -> roleParent.Role)
+            .WithMany(fun (role : Role) -> role.Parents :> RoleParent seq)
+        ignore <| modelBuilder.Entity<RoleParent>()
+            .HasOne(fun roleParent -> roleParent.Parent)
+            .WithMany(fun (role : Role) -> role.Children :> RoleParent seq)
+
 and
     [<AllowNullLiteral>]
     StateValue () =
@@ -163,6 +174,8 @@ and
         member val Name = "" with get, set
 
         member val Entities = ResizeArray<Entity>() with get, set
+        member val Roles = ResizeArray<Role>() with get, set
+        member val UserViews = ResizeArray<UserView>() with get, set
 
 and
     [<AllowNullLiteral>]
@@ -173,8 +186,11 @@ and
         [<ColumnField("reference(\"public\".\"Schemas\")")>]
         member val SchemaId = 0 with get, set
         member val Schema = null : Schema with get, set
+        // FIXME: Make this ColumnField relation when we implement reference constraints.
         [<ColumnField("string", Nullable=true)>]
         member val MainField = "" with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val ForbidExternalReferences = false with get, set
 
         member val ColumnFields = ResizeArray<ColumnField>() with get, set
         member val ComputedFields = ResizeArray<ComputedField>() with get, set
@@ -218,6 +234,8 @@ and
         [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
+        // Order is important here
+        // Change this if/when we implement "ordered 1-N references".
         [<ColumnField("array(string)")>]
         member val Columns = [||] : string[] with get, set
 
@@ -237,8 +255,13 @@ and
     [<AllowNullLiteral>]
     UserView () =
         member val Id = 0 with get, set
+        [<ColumnField("reference(\"public\".\"Schemas\")")>]
+        member val SchemaId = 0 with get, set
+        member val Schema = null : Schema with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val AllowBroken = false with get, set
         [<ColumnField("string")>]
         member val Query = "" with get, set
 
@@ -255,16 +278,23 @@ and
     [<AllowNullLiteral>]
     Role () =
         member val Id = 0 with get, set
+        [<ColumnField("reference(\"public\".\"Schemas\")")>]
+        member val SchemaId = 0 with get, set
+        member val Schema = null : Schema with get, set
         [<ColumnField("string")>]
         member val Name = "" with get, set
 
-        member val Parents = ResizeArray<Role>() with get, set
+        member val Parents = ResizeArray<RoleParent>() with get, set
+        member val Children = ResizeArray<RoleParent>() with get, set
         member val Entities = ResizeArray<RoleEntity>() with get, set
 
 and
     [<AllowNullLiteral>]
     RoleParent () =
         member val Id = 0 with get, set
+        [<ColumnField("reference(\"public\".\"Roles\")")>]
+        member val RoleId = 0 with get, set
+        member val Role = null : Role with get, set
         [<ColumnField("reference(\"public\".\"Roles\")")>]
         member val ParentId = 0 with get, set
         member val Parent = null : Role with get, set
@@ -279,18 +309,18 @@ and
         [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
-        [<ColumnField("bool", Default="TRUE")>]
-        member val ReadOnly = true with get, set
         [<ColumnField("string", Nullable=true)>]
         member val Where = null : string with get, set
+
+        member val ColumnFields = ResizeArray<RoleColumnField>() with get, set
 
 and
     [<AllowNullLiteral>]
     RoleColumnField () =
         member val Id = 0 with get, set
-        [<ColumnField("reference(\"public\".\"Roles\")")>]
-        member val RoleId = 0 with get, set
-        member val Role = null : Role with get, set
+        [<ColumnField("reference(\"public\".\"RoleEntities\")")>]
+        member val RoleEntityId = 0 with get, set
+        member val RoleEntity = null : RoleEntity with get, set
         [<ColumnField("reference(\"public\".\"ColumnFields\")")>]
         member val ColumnFieldId = 0 with get, set
         member val ColumnField = null : ColumnField with get, set
@@ -318,19 +348,48 @@ and
         member val Type = "" with get, set
         [<ColumnField("string", Nullable=true)>]
         member val UserName = null : string with get, set
-        [<ColumnField("string")>]
-        member val SchemaName = "" with get, set
-        [<ColumnField("string")>]
-        member val EntityName = "" with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val SchemaName = null : string with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val EntityName = null : string with get, set
         [<ColumnField("int", Nullable=true)>]
         member val EntityId = Nullable<int>() with get, set
         [<ColumnField("string")>]
         member val Details = "" with get, set
 
-let getLayoutObjects (db : SystemContext) : IQueryable<Schema> =
-    db.Schemas
-        .Include(fun sch -> sch.Entities)
+let getFieldsObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
+    schemas
+        .Include("Entities")
         .Include("Entities.ColumnFields")
+
+let getLayoutObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
+    (getFieldsObjects schemas)
         .Include("Entities.ComputedFields")
         .Include("Entities.UniqueConstraints")
         .Include("Entities.CheckConstraints")
+
+let getRolesObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
+    schemas
+        .Include("Roles")
+        .Include("Roles.Parents")
+        .Include("Roles.Parents.Parent")
+        .Include("Roles.Entities")
+        .Include("Roles.Entities.Entity")
+        .Include("Roles.Entities.Entity.Schema")
+        .Include("Roles.Entities.ColumnFields")
+        .Include("Roles.Entities.ColumnFields.ColumnField")
+
+let getUserViewsObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
+    schemas
+        .Include("UserViews")
+
+let updateDifference (db : SystemContext) (updateFunc : 'k -> 'nobj -> 'eobj -> unit) (createFunc : 'k -> 'eobj) (newObjects : Map<'k, 'nobj>) (existingObjects : Map<'k, 'eobj>) =
+    for KeyValue (name, newObject) in newObjects do
+        match Map.tryFind name existingObjects with
+        | Some existingObject -> updateFunc name newObject existingObject
+        | None ->
+            let newExistingObject = createFunc name
+            updateFunc name newObject newExistingObject
+    for KeyValue (name, existingObject) in existingObjects do
+        if not <| Map.containsKey name newObjects then
+            ignore <| db.Remove(existingObject)

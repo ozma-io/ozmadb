@@ -1,24 +1,27 @@
-module FunWithFlags.FunDB.Connection
+module FunWithFlags.FunDB.Operations.Connection
 
 open System
 open System.Data
+open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 open Npgsql
 
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.SQL.Query
 
-type DatabaseConnection (connectionString : string) =
+type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : string) =
+    let logger = loggerFactory.CreateLogger<DatabaseConnection>()
     let connection = new NpgsqlConnection(connectionString)
     do
         connection.Open()
-    let query = new QueryConnection(connection)
+    let query = QueryConnection(loggerFactory, connection)
     let system =
         let systemOptions =
             (DbContextOptionsBuilder<SystemContext> ())
+                .UseLoggerFactory(loggerFactory)
                 .UseNpgsql(connection)
         new SystemContext(systemOptions.Options)
-    // Introduce better locking
+    // FIXME: Maybe introduce more granular locking?
     let transaction = connection.BeginTransaction(IsolationLevel.Serializable)
     do
         ignore <| system.Database.UseTransaction(transaction)
@@ -31,11 +34,8 @@ type DatabaseConnection (connectionString : string) =
             connection.Dispose()
 
     member this.Commit () =
-        transaction.Commit()
-
-    member this.EnsureCommit () =
-        if not transaction.IsCompleted then
-            transaction.Commit()
+        logger.LogInformation("Commiting changes")
+        transaction.CommitAsync()
 
     member this.Query = query
     member this.System = system

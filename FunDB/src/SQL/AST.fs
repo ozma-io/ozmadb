@@ -403,6 +403,8 @@ type [<NoComparison>] ValueExpr =
     | VECast of ValueExpr * DBValueType
     | VECase of (ValueExpr * ValueExpr)[] * (ValueExpr option)
     | VECoalesce of ValueExpr[]
+    | VEJsonArrow of ValueExpr * ValueExpr
+    | VEJsonTextArrow of ValueExpr * ValueExpr
     with
         override this.ToString () = this.ToSQLString()
 
@@ -448,6 +450,8 @@ type [<NoComparison>] ValueExpr =
             | VECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+            | VEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToSQLString()) (b.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -455,15 +459,22 @@ type [<NoComparison>] ValueExpr =
 and [<NoComparison>] FromExpr =
     | FTable of TableRef
     | FJoin of JoinType * FromExpr * FromExpr * ValueExpr
-    | FSubExpr of SQLName * SelectExpr
+    | FSubExpr of TableName * ColumnName[] option * SelectExpr
     with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
             match this with
             | FTable t -> t.ToSQLString()
-            | FJoin (joinType, a, b, cond) -> sprintf "%s %s JOIN %s ON %s" (a.ToSQLString()) (joinType.ToSQLString()) (b.ToSQLString()) (cond.ToSQLString())
-            | FSubExpr (name, expr) -> sprintf "(%s) AS %s" (expr.ToSQLString()) (name.ToSQLString())
+            | FJoin (joinType, a, b, cond) ->
+                sprintf "(%s %s JOIN %s ON %s)" (a.ToSQLString()) (joinType.ToSQLString()) (b.ToSQLString()) (cond.ToSQLString())
+            | FSubExpr (name, fieldNames, expr) ->
+                let fieldNamesStr =
+                    match fieldNames with
+                    | None -> ""
+                    | Some names -> names |> Seq.map (fun n -> n.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
+                let subStr = sprintf "(%s) AS %s" (expr.ToSQLString()) (name.ToSQLString())
+                concatWithWhitespaces [subStr; fieldNamesStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -548,6 +559,7 @@ and [<NoComparison>] OrderLimitClause =
 
 and [<NoComparison>] SelectExpr =
     | SSelect of SingleSelectExpr
+    | SValues of ValueExpr[][]
     | SSetOp of SetOperation * SelectExpr * SelectExpr * OrderLimitClause
     with
         override this.ToString () = this.ToSQLString()
@@ -555,6 +567,10 @@ and [<NoComparison>] SelectExpr =
         member this.ToSQLString () =
             match this with
             | SSelect e -> e.ToSQLString()
+            | SValues values ->
+                assert not (Array.isEmpty values)
+                let valuesStr = values |> Seq.map (fun array -> array |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)") |> String.concat ", "
+                sprintf "VALUES %s" valuesStr
             | SSetOp (op, a, b, order) ->
                 let setStr = sprintf "(%s) %s (%s)" (a.ToSQLString()) (op.ToSQLString()) (b.ToSQLString())
                 concatWithWhitespaces [setStr; order.ToSQLString()]
@@ -591,6 +607,8 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
             Option.iter traverse els
         | VECoalesce vals -> Array.iter traverse vals
+        | VEJsonArrow (a, b) -> traverse a; traverse b
+        | VEJsonTextArrow (a, b) -> traverse a; traverse b
     traverse
 
 [<NoComparison>]

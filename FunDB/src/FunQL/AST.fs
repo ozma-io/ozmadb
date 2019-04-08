@@ -2,8 +2,9 @@ module FunWithFlags.FunDB.FunQL.AST
 
 open System
 open System.ComponentModel
+open System.Threading.Tasks
 open Newtonsoft.Json
-open Newtonsoft.Json.Linq
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
@@ -28,6 +29,8 @@ type EntityName = FunQLName
 type FieldName = FunQLName
 type ConstraintName = FunQLName
 type AttributeName = FunQLName
+type ArgumentName = FunQLName
+type UserViewName = FunQLName
 
 type EntityRef =
     { schema : SchemaName option
@@ -43,6 +46,8 @@ type EntityRef =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+type UserViewRef = EntityRef
+
 type ResolvedEntityRef =
     { schema : SchemaName
       name : EntityName
@@ -53,6 +58,8 @@ type ResolvedEntityRef =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
+
+type ResolvedUserViewRef = ResolvedEntityRef
 
 type FieldRef =
     { entity : EntityRef option
@@ -80,8 +87,17 @@ type ResolvedFieldRef =
             member this.ToFunQLString () = this.ToFunQLString()
 
 type Placeholder =
-    | PLocal of string
-    | PGlobal of string
+    | PLocal of ArgumentName
+    | PGlobal of ArgumentName
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | PLocal arg -> sprintf "$%s" (arg.ToFunQLString())
+            | PGlobal arg -> sprintf "$$%s" (arg.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString ()
 
 type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue =
     | FInt of int
@@ -91,6 +107,7 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue 
     | FDateTime of DateTimeOffset
     | FDate of DateTimeOffset
     | FJson of JToken
+    | FUserViewRef of UserViewRef
     | FIntArray of int[]
     | FDecimalArray of decimal[]
     | FStringArray of string[]
@@ -98,6 +115,7 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue 
     | FDateTimeArray of DateTimeOffset[]
     | FDateArray of DateTimeOffset[]
     | FJsonArray of JToken[]
+    | FUserViewRefArray of UserViewRef[]
     | FNull
     with
         override this.ToString () = this.ToFunQLString()
@@ -117,6 +135,7 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue 
             | FDateTime dt -> sprintf "%s :: datetime" (dt |> renderSqlDateTime |> renderSqlString)
             | FDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
             | FJson j -> renderFunQLJson j
+            | FUserViewRef r -> sprintf "&%s" (r.ToFunQLString())
             | FIntArray vals -> renderArray renderSqlInt "int" vals
             | FDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | FStringArray vals -> renderArray escapeSqlDoubleQuotes "string" vals
@@ -124,6 +143,7 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue 
             | FDateTimeArray vals -> renderArray (renderSqlDateTime >> renderSqlString) "datetime" vals
             | FDateArray vals -> renderArray (renderSqlDate >> renderSqlString) "date" vals
             | FJsonArray vals -> renderArray renderFunQLJson "json" vals
+            | FUserViewRefArray vals -> renderArray (fun (r : EntityRef) -> sprintf "&%s" (r.ToFunQLString())) "uvref" vals
             | FNull -> "NULL"
 
         interface IFunQLString with
@@ -148,6 +168,7 @@ and FieldValueConverter () =
         | FDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
         | FDate dt -> serialize <| dt.ToUnixTimeSeconds()
         | FJson j -> j.WriteTo(writer)
+        | FUserViewRef r -> serialize r
         | FIntArray vals -> serialize vals
         | FDecimalArray vals -> serialize vals
         | FStringArray vals -> serialize vals
@@ -155,6 +176,7 @@ and FieldValueConverter () =
         | FDateTimeArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
         | FDateArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
         | FJsonArray vals -> serialize vals
+        | FUserViewRefArray vals -> serialize vals
         | FNull -> serialize null
 
 type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
@@ -165,6 +187,7 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
     | SFTDateTime
     | SFTDate
     | SFTJson
+    | SFTUserViewRef
     with
         override this.ToString () = this.ToJSONString()
 
@@ -176,7 +199,8 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
             | SFTBool -> "bool"
             | SFTDateTime -> "datetime"
             | SFTDate -> "date"
-            | SFTJson -> "jsonb"
+            | SFTJson -> "json"
+            | SFTUserViewRef -> "uvref"
 
         member this.ToJSONString () = this.ToFunQLString()
 
@@ -278,7 +302,7 @@ type LinkedRef<'f> when 'f :> IFunQLString =
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            Seq.append (Seq.singleton <| this.ref.ToFunQLString()) (Seq.collect (fun (p : FieldName) -> ["->"; p.ToFunQLString()]) this.path) |> String.concat ""
+            Seq.append (Seq.singleton <| this.ref.ToFunQLString()) (Seq.collect (fun (p : FieldName) -> ["=>"; p.ToFunQLString()]) this.path) |> String.concat ""
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -354,6 +378,8 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLS
     | FECoalesce of FieldExpr<'e, 'f>[]
     | FEJsonArray of FieldExpr<'e, 'f>[]
     | FEJsonObject of Map<FunQLName, FieldExpr<'e, 'f>>
+    | FEJsonArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEJsonTextArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -361,8 +387,7 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLS
             match this with
             | FEValue value -> value.ToFunQLString()
             | FEColumn c -> c.ToFunQLString()
-            | FEPlaceholder (PLocal s) -> sprintf "$%s" (renderSqlName s)
-            | FEPlaceholder (PGlobal s) -> sprintf "$$%s" (renderSqlName s)
+            | FEPlaceholder p -> p.ToFunQLString()
             | FENot e -> sprintf "NOT (%s)" (e.ToFunQLString())
             | FEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToFunQLString()) (b.ToFunQLString())
@@ -398,6 +423,8 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLS
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
             | FEJsonArray vals -> vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", " |> sprintf "[%s]"
             | FEJsonObject obj -> obj |> Map.toSeq |> Seq.map (fun (k, v) -> sprintf "%s: %s" (k.ToFunQLString()) (v.ToFunQLString())) |> String.concat ", " |> sprintf "{%s}"
+            | FEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToFunQLString()) (b.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -413,7 +440,7 @@ and [<NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQ
             let attrsStr =
                 if Map.isEmpty this.attributes
                 then ""
-                else this.attributes |> Map.toSeq |> Seq.map (fun (name, e) -> sprintf "%s = %s" (name.ToFunQLString()) (e.ToFunQLString())) |> String.concat ", "
+                else this.attributes |> Map.toSeq |> Seq.map (fun (name, e) -> sprintf "%s = %s" (name.ToFunQLString()) (e.ToFunQLString())) |> String.concat ", " |> sprintf "@{ %s }"
 
             concatWithWhitespaces [this.result.ToFunQLString(); attrsStr]
 
@@ -463,15 +490,21 @@ and [<NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLSt
     | FEntity of 'e
     | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FSubExpr of EntityName * SelectExpr<'e, 'f>
+    | FValues of EntityName * FieldName[] * FieldExpr<'e, 'f>[][]
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             match this with
             | FEntity e -> e.ToFunQLString()
-            | FJoin (joinType, a, b, cond) -> sprintf "%s %s JOIN %s ON %s" (a.ToFunQLString()) (joinType.ToFunQLString()) (b.ToFunQLString()) (cond.ToFunQLString())
+            | FJoin (joinType, a, b, cond) -> sprintf "(%s) %s JOIN (%s) ON %s" (a.ToFunQLString()) (joinType.ToFunQLString()) (b.ToFunQLString()) (cond.ToFunQLString())
             | FSubExpr (name, expr) ->
-                sprintf "%s AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
+                sprintf "(%s) AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
+            | FValues (name, fieldNames, values) ->
+                assert not (Array.isEmpty values)
+                let valuesStr = values |> Seq.map (fun array -> array |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", " |> sprintf "(%s)") |> String.concat ", "
+                let fieldNamesStr = fieldNames |> Seq.map (fun n -> n.ToFunQLString()) |> String.concat ", "
+                sprintf "(VALUES %s) AS %s (%s)" valuesStr (name.ToFunQLString()) fieldNamesStr
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -530,9 +563,9 @@ and [<NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQL
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-let mapFieldExpr (columnFunc : 'f1 -> 'f2) (placeholderFunc : Placeholder -> Placeholder) (queryFunc : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
+let mapFieldExpr (valueFunc : FieldValue -> FieldValue) (columnFunc : 'f1 -> 'f2) (placeholderFunc : Placeholder -> Placeholder) (queryFunc : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
     let rec traverse = function
-        | FEValue value -> FEValue value
+        | FEValue value -> FEValue (valueFunc value)
         | FEColumn c -> FEColumn (columnFunc c)
         | FEPlaceholder s -> FEPlaceholder (placeholderFunc s)
         | FENot e -> FENot (traverse e)
@@ -558,11 +591,51 @@ let mapFieldExpr (columnFunc : 'f1 -> 'f2) (placeholderFunc : Placeholder -> Pla
         | FECoalesce vals -> FECoalesce (Array.map traverse vals)
         | FEJsonArray vals -> FEJsonArray (Array.map traverse vals)
         | FEJsonObject obj -> FEJsonObject (Map.map (fun name -> traverse) obj)
+        | FEJsonArrow (a, b) -> FEJsonArrow (traverse a, traverse b)
+        | FEJsonTextArrow (a, b) -> FEJsonTextArrow (traverse a, traverse b)
     traverse
 
-let iterFieldExpr (colFunc : 'f -> unit) (placeholderFunc : Placeholder -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
+let mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (columnFunc : 'f1 -> Task<'f2>) (placeholderFunc : Placeholder -> Task<Placeholder>) (queryFunc : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
     let rec traverse = function
-        | FEValue value -> ()
+        | FEValue value -> Task.map FEValue (valueFunc value)
+        | FEColumn c -> Task.map FEColumn (columnFunc c)
+        | FEPlaceholder s -> Task.map FEPlaceholder (placeholderFunc s)
+        | FENot e -> Task.map FENot (traverse e)
+        | FEAnd (a, b) -> Task.map2Sync (curry FEAnd) (traverse a) (traverse b)
+        | FEOr (a, b) -> Task.map2Sync (curry FEOr) (traverse a) (traverse b)
+        | FEConcat (a, b) -> Task.map2Sync (curry FEConcat) (traverse a) (traverse b)
+        | FEEq (a, b) -> Task.map2Sync (curry FEEq) (traverse a) (traverse b)
+        | FENotEq (a, b) -> Task.map2Sync (curry FENotEq) (traverse a) (traverse b)
+        | FELike (e, pat) -> Task.map2Sync (curry FELike) (traverse e) (traverse pat)
+        | FENotLike (e, pat) -> Task.map2Sync (curry FENotLike) (traverse e) (traverse pat)
+        | FELess (a, b) -> Task.map2Sync (curry FELess) (traverse a) (traverse b)
+        | FELessEq (a, b) -> Task.map2Sync (curry FELessEq) (traverse a) (traverse b)
+        | FEGreater (a, b) -> Task.map2Sync (curry FEGreater) (traverse a) (traverse b)
+        | FEGreaterEq (a, b) -> Task.map2Sync (curry FEGreaterEq) (traverse a) (traverse b)
+        | FEIn (e, vals) -> Task.map2Sync (curry FEIn) (traverse e) (Array.mapTaskSync traverse vals)
+        | FENotIn (e, vals) -> Task.map2Sync (curry FENotIn) (traverse e) (Array.mapTaskSync traverse vals)
+        | FEInQuery (e, query) -> Task.map2Sync (curry FEInQuery) (traverse e) (queryFunc query)
+        | FENotInQuery (e, query) -> Task.map2Sync (curry FENotInQuery) (traverse e) (queryFunc query)
+        | FECast (e, typ) -> Task.map (fun newE -> FECast (newE, typ)) (traverse e)
+        | FEIsNull e -> Task.map FEIsNull (traverse e)
+        | FEIsNotNull e -> Task.map FEIsNotNull (traverse e)
+        | FECase (es, els) ->
+            let mapOne (cond, e) = task {
+                let! newCond = traverse cond
+                let! newE = traverse e
+                return (newCond, newE)
+            }
+            Task.map2Sync (curry FECase) (Array.mapTaskSync mapOne es) (Option.mapTask traverse els)
+        | FECoalesce vals -> Task.map FECoalesce (Array.mapTaskSync traverse vals)
+        | FEJsonArray vals -> Task.map FEJsonArray (Array.mapTaskSync traverse vals)
+        | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTaskSync (fun name -> traverse) obj)
+        | FEJsonArrow (a, b) -> Task.map2Sync (curry FEJsonArrow) (traverse a) (traverse b)
+        | FEJsonTextArrow (a, b) -> Task.map2Sync (curry FEJsonTextArrow) (traverse a) (traverse b)
+    traverse
+
+let iterFieldExpr (valueFunc : FieldValue -> unit) (colFunc : 'f -> unit) (placeholderFunc : Placeholder -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
+    let rec traverse = function
+        | FEValue value -> valueFunc value
         | FEColumn c -> colFunc c
         | FEPlaceholder s -> placeholderFunc s
         | FENot e -> traverse e
@@ -590,6 +663,8 @@ let iterFieldExpr (colFunc : 'f -> unit) (placeholderFunc : Placeholder -> unit)
         | FECoalesce vals -> Array.iter traverse vals
         | FEJsonArray vals -> Array.iter traverse vals
         | FEJsonObject obj -> Map.iter (fun name -> traverse) obj
+        | FEJsonArrow (a, b) -> traverse a; traverse b
+        | FEJsonTextArrow (a, b) -> traverse a; traverse b
     traverse
 
 let emptyOrderLimitClause = { orderBy = [||]; limit = None; offset = None }
@@ -613,7 +688,18 @@ type PureFieldExpr = FieldExpr<FunQLVoid, FunQLVoid>
 type Argument =
     { argType: ParsedFieldType
       optional: bool
-    }
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let typeStr = this.argType.ToFunQLString()
+            if this.optional then
+                sprintf "%s NULL" typeStr
+            else
+                typeStr
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString ()
 
 let funId = FunQLName "Id"
 let funSchema = FunQLName "public"

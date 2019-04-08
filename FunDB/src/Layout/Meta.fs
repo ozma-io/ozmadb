@@ -1,14 +1,11 @@
 module FunWithFlags.FunDB.Layout.Meta
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.FunQL.Compiler
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Meta
 module SQL = FunWithFlags.FunDB.SQL.AST
-
-exception LayoutMetaException of info : string with
-    override this.Message = this.info
 
 let rec private compileComputedExpr (entity : ResolvedEntity) : LinkedLocalFieldExpr -> SQL.ValueExpr =
     let makeFullName = function
@@ -24,11 +21,11 @@ and compileComputedName (entity : ResolvedEntity) (name : FieldName) =
     | RId
     | RColumnField _ -> SQL.VEColumn { table = None; name = compileName realName }
     | RComputedField comp -> compileComputedExpr entity comp.expression
-        
+
 let private compileCheckExpr (entity : ResolvedEntity) : LocalFieldExpr -> SQL.ValueExpr =
     let compileColumn = compileComputedName entity
-    let voidPlaceholder c = raise (LayoutMetaException <| sprintf "Unexpected placeholder in check expression: %O" c)
-    let voidQuery c = raise (LayoutMetaException <| sprintf "Unexpected subquery in check expression: %O" c)
+    let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in check expression: %O" c
+    let voidQuery c = failwith <| sprintf "Unexpected subquery in check expression: %O" c
     // Normalization is needed so that expression will be in same form as ones from pg_catalog.
     normalizeLocalExpr << genericCompileFieldExpr compileColumn voidPlaceholder voidQuery
 

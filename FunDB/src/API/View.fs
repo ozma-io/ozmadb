@@ -2,22 +2,23 @@ module FunWithFlags.FunDB.API.View
 
 open Microsoft.AspNetCore.Http
 open Giraffe
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.API.Utils
-open FunWithFlags.FunDB.ContextCache
-open FunWithFlags.FunDB.Context
-open FunWithFlags.FunDB.FunQL.Info
+open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.UserViews.Types
+open FunWithFlags.FunDB.Operations.Context
+open FunWithFlags.FunDB.API.Utils
 
 [<NoComparison>]
 type ViewEntriesGetResponse =
-    { info : MergedViewInfo
+    { info : UserViewInfo
       result : ExecutedViewExpr
     }
 
 [<NoComparison>]
 type ViewInfoGetResponse =
-    { info : MergedViewInfo
+    { info : UserViewInfo
       pureAttributes : ExecutedAttributeMap
       pureColumnAttributes : ExecutedAttributeMap array
     }
@@ -26,34 +27,37 @@ let viewsApi (settings : APISettings) : HttpHandler =
     let guarded = withContext settings
 
     let returnError = function
-        | UVEArguments msg -> RequestErrors.BAD_REQUEST <| sprintf "Invalid arguments: %s" msg
-        | UVEAccessDenied -> RequestErrors.FORBIDDEN "Forbidden"
-        | UVENotFound -> RequestErrors.NOT_FOUND "Not found"
-        | UVEParse msg -> RequestErrors.BAD_REQUEST <| sprintf "Parse error: %s" msg
-        | UVEResolve msg -> RequestErrors.BAD_REQUEST <| sprintf "Resolution error: %s" msg
-        | UVEExecute msg -> RequestErrors.BAD_REQUEST <| sprintf "Execution error: %s" msg
-        | UVEFixup msg -> RequestErrors.BAD_REQUEST <| sprintf "Condition compilation error: %s" msg
+        | UVEArguments msg -> sprintf "Invalid arguments: %s" msg |> text |> RequestErrors.badRequest
+        | UVEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
+        | UVENotFound -> text "Not found" |> RequestErrors.notFound
+        | UVEResolve msg -> text msg |> RequestErrors.badRequest
+        | UVEExecute msg -> text msg |> RequestErrors.badRequest
 
-    let selectFromView (viewRef : UserViewRef) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) =
-        let rawArgs = queryArgs ctx
-        match rctx.GetUserView viewRef rawArgs with
-        | Ok (cached, res) -> json { info = cached.info
-                                     result = res
-                                   } next ctx
-        | Result.Error err -> returnError err next ctx
+    let selectFromView (viewRef : UserViewSource) (rctx : RequestContext) =
+        queryArgs <| fun rawArgs next ctx -> task {
+            match! rctx.GetUserView viewRef rawArgs with
+            | Ok (cached, res) ->
+                let ret =
+                    { info = cached.info
+                      result = res
+                    }
+                return! Successful.ok (json ret) next ctx
+            | Result.Error err -> return! returnError err next ctx
+        }
 
-    let infoView (viewRef : UserViewRef) (rctx : RequestContext) =
-        match rctx.GetUserViewInfo viewRef with
+    let infoView (viewRef : UserViewSource) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+        match! rctx.GetUserViewInfo viewRef with
             | Ok cached ->
                 let res =
                     { info = cached.info
                       pureAttributes = cached.pureAttributes.attributes
                       pureColumnAttributes = cached.pureAttributes.columnAttributes
                     }
-                json res
-            | Result.Error err -> returnError err
+                return! Successful.ok (json res) next ctx
+            | Result.Error err -> return! returnError err next ctx
+    }
 
-    let viewApi (viewRef : UserViewRef) =
+    let viewApi (viewRef : UserViewSource) =
         choose
             [ route "/entries" >=> GET >=> guarded (selectFromView viewRef)
               route "/info" >=> GET >=> guarded (infoView viewRef)
@@ -63,9 +67,9 @@ let viewsApi (settings : APISettings) : HttpHandler =
         match ctx.GetQueryStringValue "__query" with
         | Ok rawView -> viewApi (UVAnonymous rawView) next ctx
         | Error _ -> RequestErrors.BAD_REQUEST "Query not specified" next ctx
-    let namedView name = viewApi <| UVNamed name
+    let namedView (schemaName, uvName) = viewApi <| UVNamed { schema = FunQLName schemaName; name = FunQLName uvName }
 
     choose
         [ subRoute "/views/anonymous" anonymousView
-          subRoutef "/views/by_name/%s" namedView
+          subRoutef "/views/by_name/%s/%s" namedView
         ]

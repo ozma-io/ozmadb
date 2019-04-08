@@ -28,9 +28,10 @@ let private renderEntity (entity : ResolvedEntity) : SourceEntity =
       uniqueConstraints = Map.map (fun name constr -> renderUniqueConstraint constr) entity.uniqueConstraints
       checkConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
       mainField = entity.mainField
+      forbidExternalReferences = entity.forbidExternalReferences
     }
 
-let private renderSchema (schema : ResolvedSchema) : SourceSchema =
+let renderSchema (schema : ResolvedSchema) : SourceSchema =
     { entities = Map.map (fun name entity -> renderEntity entity) schema.entities
     }
 

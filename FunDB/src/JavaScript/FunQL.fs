@@ -1,11 +1,13 @@
 module FunWithFlags.FunDB.JavaScript.FunQL
 
 open System
+
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.JavaScript.AST
 open FunWithFlags.FunDB.FunQL.AST
 
-exception JSCompileException of info : string with
-    override this.Message = this.info
+type JSCompileException (message : string) =
+    inherit Exception(message)
 
 // FIXME: may not take offset into consideration
 let jsDateTime (dt : DateTimeOffset) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour; dt.Minute; dt.Second; dt.Millisecond |] |> Array.map (double >> JSNumber >> JSValue))
@@ -20,6 +22,7 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FDateTime dt -> jsDateTime dt
     | FDate dt -> jsDate dt
     | FJson j -> failwith "Not implemented"
+    | FUserViewRef r -> failwith "Not implemented"
     | FIntArray ints -> JSArray <| Array.map (double >> JSNumber >> JSValue) ints
     | FDecimalArray decs -> JSArray <| Array.map (double >> JSNumber >> JSValue) decs
     | FStringArray strings -> JSArray <| Array.map (JSString >> JSValue) strings
@@ -27,6 +30,7 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FDateTimeArray dts -> JSArray <| Array.map jsDateTime dts
     | FDateArray dts -> JSArray <| Array.map jsDate dts
     | FJsonArray jss -> failwith "Not implemented"
+    | FUserViewRefArray refs -> failwith "Not implemented"
     | FNull -> JSValue JSNull
 
 // Expects local variable `context`.
@@ -34,7 +38,7 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
     let rec go = function
         | FEValue v -> jsFieldValue v
         | FEColumn col -> JSCall (JSObjectAccess (JSVar "context", "getColumn"), [| JSValue (JSString (col.ToString())) |])
-        | FEPlaceholder p -> raise (JSCompileException <| sprintf "Unexpected placeholder in local expression: %O" p)
+        | FEPlaceholder p -> raisef JSCompileException "Unexpected placeholder in local expression: %O" p
         | FENot e -> JSNot <| go e
         | FEAnd (a, b) -> JSAnd (go a, go b)
         | FEOr (a, b) -> JSOr (go a, go b)
@@ -63,4 +67,6 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
         | FECoalesce items -> JSCall (JSObjectAccess (JSVar "context", "coalesce"), Array.map go items)
         | FEJsonArray items -> failwith "Not implemented"
         | FEJsonObject obj -> failwith "Not implemented"
-    go    
+        | FEJsonArrow (a, b) -> failwith "Not implemented"
+        | FEJsonTextArrow (a, b) -> failwith "Not implemented"
+    go

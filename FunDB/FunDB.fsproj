@@ -24,56 +24,75 @@
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/Parsing.fs" />
     <Compile Include="src/SQL/AST.fs" />
-    <FsYacc Include="src/SQL/SQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parser" />
-    <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParser.fs" />
-    <FsLex Include="src/SQL/SQLLexer.fsl" OtherFlags="--unicode" />
-    <Compile Include="$(RootIntermediateOutputPath)/gen/SQLLexer.fs" />
-    <FsYacc Include="src/SQL/ArrayParser.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Array.Parser" />
-    <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayParser.fs" />
-    <FsLex Include="src/SQL/ArrayLexer.fsl" OtherFlags="--unicode" />
-    <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayLexer.fs" />
+    <FsYacc Include="src/SQL/SQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parse" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParse.fs" />
+    <FsLex Include="src/SQL/SQLLex.fsl" OtherFlags="--unicode" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/SQLLex.fs" />
+    <FsYacc Include="src/SQL/ArrayParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Array.Parse" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayParse.fs" />
+    <FsLex Include="src/SQL/ArrayLex.fsl" OtherFlags="--unicode" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayLex.fs" />
     <Compile Include="src/SQL/Query.fs" />
     <Compile Include="src/SQL/Migration.fs" />
     <Compile Include="src/SQL/Meta.fs" />
 
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />
-    <FsYacc Include="src/FunQL/FunQLParser.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parser" />
-    <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParser.fs" />
-    <FsLex Include="src/FunQL/FunQLLexer.fsl" OtherFlags="--unicode" />
-    <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLexer.fs" />
+    <FsYacc Include="src/FunQL/FunQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parse" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParse.fs" />
+    <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
+    <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
 
     <Compile Include="src/Layout/Types.fs" />
+    <Compile Include="src/Permissions/Types.fs" />
 
-    <Compile Include="src/FunQL/View.fs" />
-    <Compile Include="src/FunQL/Compiler.fs" />
-    <Compile Include="src/FunQL/Query.fs" />
-    <Compile Include="src/FunQL/Info.fs" />
+    <Compile Include="src/FunQL/Resolve.fs" />
+    <Compile Include="src/FunQL/Dereference.fs" />
+    <Compile Include="src/FunQL/Compile.fs" />
+  
     <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Resolve.fs" />
     <Compile Include="src/Layout/System.fs" />
+  
     <Compile Include="src/Schema.fs" />
+
+    <Compile Include="src/FunQL/Query.fs" />
+
     <Compile Include="src/Layout/Schema.fs" />
     <Compile Include="src/Layout/Render.fs" />
     <Compile Include="src/Layout/Update.fs" />
     <Compile Include="src/Layout/Meta.fs" />
 
-    <Compile Include="src/Permissions/Types.fs" />
+    <Compile Include="src/Permissions/Source.fs" />
+    <Compile Include="src/Permissions/Resolve.fs" />
     <Compile Include="src/Permissions/Schema.fs" />
+    <Compile Include="src/Permissions/Render.fs" />
+    <Compile Include="src/Permissions/Update.fs" />
 
     <Compile Include="src/JavaScript/Utils.fs" />
     <Compile Include="src/JavaScript/AST.fs" />
     <Compile Include="src/JavaScript/FunQL.fs" />
 
-    <Compile Include="src/Connection.fs" />
-    <Compile Include="src/Entity.fs" />
-    <Compile Include="src/ContextCache.fs" />
-    <Compile Include="src/Context.fs" />
+    <Compile Include="src/UserViews/Source.fs" />
+    <Compile Include="src/UserViews/Types.fs" />
+    <Compile Include="src/UserViews/Resolve.fs" />
+    <Compile Include="src/UserViews/Schema.fs" />
+    <Compile Include="src/UserViews/Generate.fs" />
+    <Compile Include="src/UserViews/Render.fs" />
+    <Compile Include="src/UserViews/Update.fs" />
+
+    <Compile Include="src/Operations/Connection.fs" />
+    <Compile Include="src/Operations/Preload.fs" />
+    <Compile Include="src/Operations/Entity.fs" />
+    <Compile Include="src/Operations/ContextCache.fs" />
+    <Compile Include="src/Operations/SaveRestore.fs" />
+    <Compile Include="src/Operations/Context.fs" />
 
     <Compile Include="src/API/Utils.fs" />
     <Compile Include="src/API/View.fs" />
     <Compile Include="src/API/Permissions.fs" />
     <Compile Include="src/API/Entity.fs" />
+    <Compile Include="src/API/SaveRestore.fs" />
     
     <Compile Include="src/Program.fs" />
   </ItemGroup>
@@ -90,6 +109,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Cors" Version="2.2.*" />
     <PackageReference Include="Microsoft.AspNetCore.HttpOverrides" Version="2.2.*" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="2.2.*" />
+    <PackageReference Include="FluidCaching" Version="1.3.*" />
     <PackageReference Include="Giraffe" Version="3.6.*" />
     <PackageReference Include="Jint" Version="3.0.0-beta-*" />
     <PackageReference Include="Newtonsoft.Json" Version="12.0.*" />

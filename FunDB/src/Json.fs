@@ -12,6 +12,8 @@ open Microsoft.FSharp.Collections
 
 open FunWithFlags.FunDB.Utils
 
+type JToken = Newtonsoft.Json.Linq.JToken
+
 type UnixDateTimeOffsetConverter () =
     inherit JsonConverter<DateTimeOffset> ()
 
@@ -68,78 +70,143 @@ let private isOption (map : UnionCases) : ((UnionCaseInfo * PropertyInfo) * Unio
     else
         None
 
-type UnionConverter () =
+[<AllowNullLiteral>]
+[<AttributeUsage(AttributeTargets.Class)>]
+type SerializeAsObjectAttribute (caseFieldName : string) =
+    inherit Attribute ()
+    member this.CaseFieldName = caseFieldName
+
+[<AllowNullLiteral>]
+[<AttributeUsage(AttributeTargets.Method)>]
+type CaseNameAttribute (caseName : string) =
+    inherit Attribute ()
+    member this.CaseName = caseName
+
+let private unionAsObject (objectType : Type) =
+    let asObject = Attribute.GetCustomAttribute(objectType, typeof<SerializeAsObjectAttribute>) :?> SerializeAsObjectAttribute
+    if isNull asObject then
+        None
+    else
+        let getName (case : UnionCaseInfo, fields: PropertyInfo[]) =
+            let name =
+                match case.GetCustomAttributes typeof<CaseNameAttribute> |> Seq.cast |> Seq.first with
+                | None -> case.Name
+                | Some (nameAttr : CaseNameAttribute) -> nameAttr.CaseName
+            for field in fields do
+                if field.Name = name then
+                    failwith <| sprintf "Field name %s of case %s clashes with case field name" field.Name case.Name
+            name
+        let nameCases = unionCases objectType |> Seq.map (function c -> (getName c, c)) |> Map.ofSeqUnique
+        Some (asObject.CaseFieldName, nameCases)
+
+type UnionConverter (objectType : Type) =
     inherit JsonConverter ()
 
-    override this.CanConvert (objectType : Type) : bool =
-        FSharpType.IsUnion objectType
+    let cases = unionCases objectType
+    let casesMap = cases |> Seq.map (function (case, _) as c -> (case.Name, c)) |> Map.ofSeq
 
-    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
-        let cases = unionCases objectType
+    let searchCases (name : string) (doCase : (UnionCaseInfo * PropertyInfo[]) -> obj) : obj =
+        match Map.tryFind name casesMap with
+            | Some c -> doCase c
+            | None -> raise <| JsonException(sprintf "Unknown union case \"%s\"" name)
 
-        let searchUnion () =
-            let tryCase : (UnionCaseInfo * PropertyInfo[]) -> obj option =
-                if isUnionEnum cases then
-                    let name = serializer.Deserialize<string>(reader)
-                    fun (case, _) ->
-                        if case.Name = name then
-                            Some <| FSharpValue.MakeUnion(case, [||])
-                        else
-                            None
-                else
-                    let array = JArray.Load reader
-                    let nameToken = array.[0]
-                    if nameToken.Type <> JTokenType.String then
-                        raise <| JsonException("Invalid union name")
-                    let name = JToken.op_Explicit nameToken : string
-                    fun (case, fields) ->
-                        if case.Name = name then
-                            let args = fields |> Array.mapi (fun i field -> array.[i + 1].ToObject(field.PropertyType))
-                            Some <| FSharpValue.MakeUnion(case, args)
-                        else
-                            None
-            match cases |> Seq.mapMaybe tryCase |> Seq.first with
-            | Some ret -> ret
-            | None -> raise <| JsonException("Unknown union case")
-
+    let readJson : JsonReader -> JsonSerializer -> obj =
         match isNewtype cases with
         | Some (case, argProperty) ->
-            let arg = serializer.Deserialize(reader, argProperty.PropertyType)
-            FSharpValue.MakeUnion(case, [|arg|])
+            fun reader serializer ->
+                let arg = serializer.Deserialize(reader, argProperty.PropertyType)
+                FSharpValue.MakeUnion(case, [|arg|])
         | None ->
             // XXX: We do lose information here is we serialize e.g. ('a option option).
             match isOption cases with
             | Some ((someCase, someProperty), noneCase) ->
-                if reader.TokenType = JsonToken.Null then
-                    ignore <| reader.Read()
-                    FSharpValue.MakeUnion(noneCase, [||])
+                fun reader serializer ->
+                    if reader.TokenType = JsonToken.Null then
+                        ignore <| reader.Read()
+                        FSharpValue.MakeUnion(noneCase, [||])
+                    else
+                        let arg = serializer.Deserialize(reader, someProperty.PropertyType)
+                        FSharpValue.MakeUnion(someCase, [|arg|])
+            | None ->
+                if isUnionEnum cases then
+                    fun reader serializer ->
+                        let name = serializer.Deserialize<string>(reader)
+                        searchCases name <| fun (case, _) ->
+                            FSharpValue.MakeUnion(case, [||])
                 else
-                    let arg = serializer.Deserialize(reader, someProperty.PropertyType)
-                    FSharpValue.MakeUnion(someCase, [|arg|])
-            | None -> searchUnion ()
+                    match unionAsObject objectType with
+                    | Some (caseFieldName, caseNames) ->
+                        fun reader serializer ->
+                            let obj = JObject.Load reader
+                            let name =
+                                match obj.TryGetValue(caseFieldName) with
+                                | (true, nameToken) -> JToken.op_Explicit nameToken : string
+                                | (false, _) -> raise <| JsonException(sprintf "Couldn't find case property \"%s\"" caseFieldName)
+                            match Map.tryFind name caseNames with
+                            | Some (case, fields) ->
+                                let getField (prop : PropertyInfo) =
+                                    match obj.TryGetValue(prop.Name) with
+                                    | (true, valueToken) -> valueToken.ToObject(prop.PropertyType)
+                                    | (false, _) -> raise <| JsonException(sprintf "Couldn't find required field \"%s\"" prop.Name)
+                                let args = fields |> Array.map getField
+                                FSharpValue.MakeUnion (case, args)
+                            | None -> raise <| JsonException(sprintf "Unknown union case \"%s\"" name)
+                    | None ->
+                        fun reader serializer ->
+                            let array = JArray.Load reader
+                            let nameToken = array.[0]
+                            if nameToken.Type <> JTokenType.String then
+                                raise <| JsonException("Invalid union name")
+                            let name = JToken.op_Explicit nameToken : string
+                            searchCases name <| fun (case, fields) ->
+                                let args = fields |> Array.mapi (fun i field -> array.[i + 1].ToObject(field.PropertyType))
+                                FSharpValue.MakeUnion(case, args)
 
-    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
-        let objectType = value.GetType()
-        let cases = unionCases objectType
-        let (case, args) = FSharpValue.GetUnionFields(value, objectType)
-
+    let writeJson : UnionCaseInfo -> obj[] -> JsonWriter -> JsonSerializer -> unit =
         match isNewtype cases with
         | Some (case, argProperty) ->
-            serializer.Serialize(writer, args.[0])
+            fun case args writer serializer ->
+                serializer.Serialize(writer, args.[0])
         | None ->
             match isOption cases with
             | Some ((someCase, someProperty), noneCase) ->
-                if case = noneCase then
-                    writer.WriteNull()
-                else if case = someCase then
-                    serializer.Serialize(writer, args.[0])
-                else
-                    failwith "Sanity check failed"
+                fun case args writer serializer ->
+                    if case = noneCase then
+                        writer.WriteNull()
+                    else if case = someCase then
+                        serializer.Serialize(writer, args.[0])
+                    else
+                        failwith "Sanity check failed"
             | None ->
                 if isUnionEnum cases then
-                    serializer.Serialize(writer, case.Name)
+                    fun case args writer serializer ->
+                        serializer.Serialize(writer, case.Name)
                 else
-                    serializer.Serialize(writer, Array.append [|case.Name :> obj|] args)
+                    match unionAsObject objectType with
+                    | Some (caseFieldName, caseNames) ->
+                        let reverseNames = caseNames |> Map.toSeq |> Seq.map (fun (name, (case, fields)) -> (case.Name, (name, fields))) |> Map.ofSeq
+                        fun case args writer serializer ->
+                            let (caseName, fields) = Map.find case.Name reverseNames
+                            writer.WriteStartObject()
+                            writer.WritePropertyName(caseFieldName)
+                            writer.WriteValue(caseName)
+                            for (field, arg) in Seq.zip fields args do
+                                writer.WritePropertyName(field.Name)
+                                serializer.Serialize(writer, arg)
+                            writer.WriteEndObject()
+                    | None ->
+                        fun case args writer serializer ->
+                            serializer.Serialize(writer, Array.append [|case.Name :> obj|] args)
+
+    override this.CanConvert (someType : Type) : bool =
+        someType = objectType
+
+    override this.ReadJson (reader : JsonReader, someType : Type, existingValue, serializer : JsonSerializer) : obj =
+        readJson reader serializer
+
+    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
+        let (case, args) = FSharpValue.GetUnionFields(value, objectType)
+        writeJson case args writer serializer
 
 // Needed for dictionary keys.
  type NewtypeConverter<'nt> () =
@@ -169,7 +236,7 @@ type ConverterContractResolver () =
 
         if isNull contract.Converter then
             if FSharpType.IsUnion objectType then
-                contract.Converter <- UnionConverter ()
+                contract.Converter <- UnionConverter objectType
             if objectType = typeof<DateTime> then
                 contract.Converter <- UnixDateTimeConverter ()
             else if objectType = typeof<DateTimeOffset> then
@@ -227,6 +294,10 @@ type ConverterContractResolver () =
 
         prop
 
+(* Default settings for F# types:
+   * All fields are always required, unless type is Option;
+   * Default values for containers are provided.
+*)
 let defaultJsonSerializerSettings =
     JsonSerializerSettings(
         ContractResolver = ConverterContractResolver (),
