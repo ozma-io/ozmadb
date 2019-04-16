@@ -2,6 +2,8 @@ module FunWithFlags.FunDB.Context
 
 open System
 open System.Linq
+open Newtonsoft.Json
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Connection
@@ -20,49 +22,62 @@ open FunWithFlags.FunDB.ContextCache
 
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-let private parseExprArgument (fieldExprType : FieldExprType) (str : string) : FieldValue option =
-    let decodeArray constrFunc convertFunc =
-            str.Split(',') |> Seq.traverseOption convertFunc |> Option.map (Array.ofSeq >> constrFunc)
+let private decodeValue (constrFunc : 'A -> FieldValue) (isNullable : bool) (str: string) : FieldValue option =
+    try
+        let tok = JToken.Parse(str)
+        if tok.Type = JTokenType.Null then
+            if isNullable then
+                Some FNull
+            else
+                None
+        else
+            Some (constrFunc <| tok.ToObject())
+    with
+    | :? JsonException -> None
 
-    let decodeDateTime = tryIntInvariant >> Option.map (int64 >> DateTimeOffset.FromUnixTimeSeconds)
-
+// May throw!
+let private parseExprArgument (fieldExprType : FieldExprType) : bool -> string -> FieldValue option =
     match fieldExprType with
-    // FIXME: breaks strings with commas!
-    | FETArray SFTString -> failwith "Not supported yet"
-    | FETArray SFTInt -> decodeArray FIntArray tryIntInvariant
-    | FETArray SFTDecimal -> decodeArray FDecimalArray tryDecimalInvariant
-    | FETArray SFTBool -> decodeArray FBoolArray tryBool
-    | FETArray SFTDateTime -> decodeArray FDateTimeArray decodeDateTime
-    | FETArray SFTDate -> decodeArray FDateArray decodeDateTime
-    | FETScalar SFTString ->
-        // FIXME: lossy!
-        if str = "" then Some <| FNull else Some <| FString str
-    | FETScalar SFTInt -> Option.map FInt <| tryIntInvariant str
-    | FETScalar SFTDecimal -> Option.map FDecimal <| tryDecimalInvariant str
-    | FETScalar SFTBool -> Option.map FBool <| tryBool str
-    | FETScalar SFTDateTime -> Option.map FDateTime <| decodeDateTime str
-    | FETScalar SFTDate -> Option.map FDate <| decodeDateTime str
+    | FETArray SFTString -> decodeValue FStringArray
+    | FETArray SFTInt -> decodeValue FIntArray
+    | FETArray SFTDecimal -> decodeValue FDecimalArray
+    | FETArray SFTBool -> decodeValue FBoolArray
+    | FETArray SFTDateTime -> decodeValue FDateTimeArray
+    | FETArray SFTDate -> decodeValue FDateArray
+    | FETScalar SFTString -> decodeValue FString
+    | FETScalar SFTInt -> decodeValue FInt
+    | FETScalar SFTDecimal -> decodeValue FDecimal
+    | FETScalar SFTBool -> decodeValue FBool
+    | FETScalar SFTDateTime -> decodeValue FDateTime
+    | FETScalar SFTDate -> decodeValue FDate
 
 type RawArguments = Map<string, string>
 
-let private convertArgument (fieldType : FieldType<_, _>) (str : string) : FieldValue option =
-    // Magic value that means NULL
-    if str = "\x00" then
-        Some FNull
-    else
-        match fieldType with
-        | FTType feType -> parseExprArgument feType str
-        | FTReference (_, _) -> Option.map FInt <| tryIntInvariant str
-        | FTEnum values -> Some <| FString str
+exception private EnumException
+
+let private convertArgument (fieldType : FieldType<_, _>) (isNullable : bool) (str : string) : FieldValue option =
+    match fieldType with
+    | FTType feType -> parseExprArgument feType isNullable str
+    | FTReference (_, _) -> decodeValue FInt isNullable str
+    | FTEnum values ->
+        let checkAndEncode v =
+            if Set.contains v values then
+                FString v
+            else
+                raise EnumException
+        try
+            decodeValue checkAndEncode isNullable str
+        with
+        | EnumException -> None          
 
 let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<EntityArguments, string> =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind (fieldName.ToString()) rawArgs with
         | None -> Ok None
         | Some value ->
-            match convertArgument field.fieldType value with
+            match convertArgument field.fieldType field.isNullable value with
             | None -> Error <| sprintf "Cannot convert field to expected type %O: %O" field.fieldType fieldName
-            | Some arg -> (fieldName, arg) |> Some |> Ok
+            | Some arg -> Ok (Some (fieldName, arg))
     match entity.columnFields |> Map.toSeq |> Seq.traverseResult getValue with
     | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
     | Error err -> Error err
@@ -116,7 +131,7 @@ type RequestContext (opts : RequestParams) =
             | PLocal lname ->
                 match Map.tryFind lname rawArgs with
                 | Some argStr ->
-                    match convertArgument arg.fieldType argStr with
+                    match convertArgument arg.fieldType false argStr with
                     | None -> Error <| sprintf "Cannot convert argument %O to type %O" name fieldType
                     | Some arg -> Ok arg
                 | _ -> Error <| sprintf "Argument not found: %O" name
