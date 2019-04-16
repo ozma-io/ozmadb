@@ -80,6 +80,7 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="4.0.*" />
+    <PackageReference Include="Npgsql.Json.NET" Version="4.0.*" />
     <PackageReference Include="FsLexYacc" Version="7.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.2.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="2.2.*" />

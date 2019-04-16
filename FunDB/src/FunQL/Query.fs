@@ -15,7 +15,7 @@ type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
 exception ViewExecutionException of info : string with
     override this.Message = this.info
 
-type [<JsonConverter(typeof<ExecutedValueConverter>)>] ExecutedValue =
+type [<JsonConverter(typeof<ExecutedValueConverter>)>] [<NoComparison>] ExecutedValue =
     { attributes : ExecutedAttributeMap
       value : SQL.Value
       pun : SQL.Value option
@@ -42,7 +42,7 @@ and ExecutedValueConverter () =
             | Some p -> Map.add "pun" (p :> obj) vals2
         serializer.Serialize(writer, vals3)
 
-type [<JsonConverter(typeof<ExecutedRowConverter>)>] ExecutedRow =
+type [<JsonConverter(typeof<ExecutedRowConverter>)>] [<NoComparison>] ExecutedRow =
     { attributes : ExecutedAttributeMap
       values : ExecutedValue array
       entityIds : Map<EntityName, int>
@@ -91,6 +91,7 @@ type ExecutedViewExpr =
       rows : ExecutedRow seq
     }
 
+[<NoComparison>]
 type private ExecutedAttributes =
     { attributes : ExecutedAttributeMap
       attributeTypes : ExecutedAttributeTypes

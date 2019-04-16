@@ -12,6 +12,7 @@ open Microsoft.IdentityModel.Tokens
 open Microsoft.IdentityModel.Logging
 open Giraffe
 open Giraffe.Serialization.Json
+open Npgsql
 
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.API.Utils
@@ -34,6 +35,8 @@ type Config =
 let main (args : string[]) : int =
     // Register a global converter to have nicer native F# types JSON conversion
     JsonConvert.DefaultSettings <- fun () -> defaultJsonSerializerSettings
+    // Enable JSON for PostgreSQL
+    ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
 
     let configPath = args.[0]
     let rawConfig = File.ReadAllText(configPath)
@@ -41,7 +44,7 @@ let main (args : string[]) : int =
     let disableSecurity =
         match config.disableSecurity with
         | None -> false
-        | Some v -> v           
+        | Some v -> v
 
     let preloadedLayout =
         match config.preloadedLayout with

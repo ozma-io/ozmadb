@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.FunQL.AST
 open System
 open System.ComponentModel
 open Newtonsoft.Json
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
@@ -82,19 +83,21 @@ type Placeholder =
     | PLocal of string
     | PGlobal of string
 
-type [<JsonConverter(typeof<FieldValueConverter>)>] FieldValue =
+type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue =
     | FInt of int
     | FDecimal of decimal
     | FString of string
     | FBool of bool
     | FDateTime of DateTimeOffset
     | FDate of DateTimeOffset
+    | FJson of JToken
     | FIntArray of int[]
     | FDecimalArray of decimal[]
     | FStringArray of string[]
     | FBoolArray of bool[]
     | FDateTimeArray of DateTimeOffset[]
     | FDateArray of DateTimeOffset[]
+    | FJsonArray of JToken[]
     | FNull
     with
         override this.ToString () = this.ToFunQLString()
@@ -113,12 +116,14 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] FieldValue =
             | FBool b -> renderSqlBool b
             | FDateTime dt -> sprintf "%s :: datetime" (dt |> renderSqlDateTime |> renderSqlString)
             | FDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
+            | FJson j -> renderFunQLJson j
             | FIntArray vals -> renderArray renderSqlInt "int" vals
             | FDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | FStringArray vals -> renderArray escapeSqlDoubleQuotes "string" vals
             | FBoolArray vals -> renderArray renderSqlBool "bool" vals
-            | FDateTimeArray vals -> renderArray (renderSqlDateTime >> escapeSqlDoubleQuotes) "datetime" vals
-            | FDateArray vals -> renderArray (renderSqlDate >> escapeSqlDoubleQuotes) "date" vals
+            | FDateTimeArray vals -> renderArray (renderSqlDateTime >> renderSqlString) "datetime" vals
+            | FDateArray vals -> renderArray (renderSqlDate >> renderSqlString) "date" vals
+            | FJsonArray vals -> renderArray renderFunQLJson "json" vals
             | FNull -> "NULL"
 
         interface IFunQLString with
@@ -142,12 +147,14 @@ and FieldValueConverter () =
         | FBool b -> serialize b
         | FDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
         | FDate dt -> serialize <| dt.ToUnixTimeSeconds()
+        | FJson j -> j.WriteTo(writer)
         | FIntArray vals -> serialize vals
         | FDecimalArray vals -> serialize vals
         | FStringArray vals -> serialize vals
         | FBoolArray vals -> serialize vals
         | FDateTimeArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
         | FDateArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+        | FJsonArray vals -> serialize vals
         | FNull -> serialize null
 
 type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
@@ -157,6 +164,7 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
     | SFTBool
     | SFTDateTime
     | SFTDate
+    | SFTJson
     with
         override this.ToString () = this.ToJSONString()
 
@@ -168,6 +176,7 @@ type [<JsonConverter(typeof<ScalarFieldTypeConverter>)>] ScalarFieldType =
             | SFTBool -> "bool"
             | SFTDateTime -> "datetime"
             | SFTDate -> "date"
+            | SFTJson -> "jsonb"
 
         member this.ToJSONString () = this.ToFunQLString()
 
@@ -274,7 +283,7 @@ type LinkedRef<'f> when 'f :> IFunQLString =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type [<JsonConverter(typeof<FieldTypeConverter>)>] FieldType<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+type [<JsonConverter(typeof<FieldTypeConverter>)>] [<NoComparison>] FieldType<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FTType of FieldExprType
     | FTReference of 'e * FieldExpr<'e, 'f> option
     | FTEnum of Set<string>
@@ -318,7 +327,7 @@ and FieldTypeConverter () =
 
 and AttributeMap<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString = Map<AttributeName, FieldExpr<'e, 'f>>
 
-and FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FEValue of FieldValue
     | FEColumn of 'f
     | FEPlaceholder of Placeholder
@@ -343,6 +352,8 @@ and FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FEIsNotNull of FieldExpr<'e, 'f>
     | FECase of (FieldExpr<'e, 'f> * FieldExpr<'e, 'f>)[] * (FieldExpr<'e, 'f> option)
     | FECoalesce of FieldExpr<'e, 'f>[]
+    | FEJsonArray of FieldExpr<'e, 'f>[]
+    | FEJsonObject of Map<FunQLName, FieldExpr<'e, 'f>>
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -385,11 +396,13 @@ and FieldExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
             | FECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
+            | FEJsonArray vals -> vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", " |> sprintf "[%s]"
+            | FEJsonObject obj -> obj |> Map.toSeq |> Seq.map (fun (k, v) -> sprintf "%s: %s" (k.ToFunQLString()) (v.ToFunQLString())) |> String.concat ", " |> sprintf "{%s}"
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and QueryResult<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and [<NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     { attributes : AttributeMap<'e, 'f>
       result : QueryResultExpr<'e, 'f>
     }
@@ -407,7 +420,7 @@ and QueryResult<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and QueryResultExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and [<NoComparison>] QueryResultExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | QRField of 'f
     | QRExpr of FunQLName * FieldExpr<'e, 'f>
     with
@@ -421,7 +434,7 @@ and QueryResultExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and OrderLimitClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and [<NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     { orderBy : (SortOrder * FieldExpr<'e, 'f>)[]
       limit : FieldExpr<'e, 'f> option
       offset : FieldExpr<'e, 'f> option
@@ -446,7 +459,7 @@ and OrderLimitClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and [<NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | FEntity of 'e
     | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FSubExpr of EntityName * SelectExpr<'e, 'f>
@@ -463,7 +476,7 @@ and FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and [<NoComparison>] FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     { from: FromExpr<'e, 'f>
       where: FieldExpr<'e, 'f> option
     } with
@@ -479,7 +492,7 @@ and FromClause<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and SingleSelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and [<NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     { attributes : AttributeMap<'e, 'f>
       results: QueryResult<'e, 'f>[]
       clause: FromClause<'e, 'f> option
@@ -501,7 +514,7 @@ and SingleSelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-and SelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+and [<NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
     | SSelect of SingleSelectExpr<'e, 'f>
     | SSetOp of SetOperation * SelectExpr<'e, 'f> * SelectExpr<'e, 'f> * OrderLimitClause<'e, 'f>
     with
@@ -543,6 +556,8 @@ let mapFieldExpr (columnFunc : 'f1 -> 'f2) (placeholderFunc : Placeholder -> Pla
         | FEIsNotNull e -> FEIsNotNull (traverse e)
         | FECase (es, els) -> FECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
         | FECoalesce vals -> FECoalesce (Array.map traverse vals)
+        | FEJsonArray vals -> FEJsonArray (Array.map traverse vals)
+        | FEJsonObject obj -> FEJsonObject (Map.map (fun name -> traverse) obj)
     traverse
 
 let iterFieldExpr (colFunc : 'f -> unit) (placeholderFunc : Placeholder -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
@@ -573,6 +588,8 @@ let iterFieldExpr (colFunc : 'f -> unit) (placeholderFunc : Placeholder -> unit)
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
             Option.iter traverse els
         | FECoalesce vals -> Array.iter traverse vals
+        | FEJsonArray vals -> Array.iter traverse vals
+        | FEJsonObject obj -> Map.iter (fun name -> traverse) obj
     traverse
 
 let emptyOrderLimitClause = { orderBy = [||]; limit = None; offset = None }

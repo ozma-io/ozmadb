@@ -15,6 +15,7 @@ type ViewEntriesGetResponse =
       result : ExecutedViewExpr
     }
 
+[<NoComparison>]
 type ViewInfoGetResponse =
     { info : MergedViewInfo
       pureAttributes : ExecutedAttributeMap

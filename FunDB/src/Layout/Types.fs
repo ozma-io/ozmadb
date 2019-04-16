@@ -27,10 +27,12 @@ type ResolvedUniqueConstraint =
     { columns : FunQLName array
     }
 
+[<NoComparison>]
 type ResolvedCheckConstraint =
     { expression : LocalFieldExpr
     }
 
+[<NoComparison>]
 type ResolvedColumnField =
     { fieldType : ResolvedFieldType
       valueType : SQL.SimpleValueType
@@ -38,17 +40,20 @@ type ResolvedColumnField =
       isNullable : bool
     }
 
+[<NoComparison>]
 type ResolvedComputedField =
     { expression : LinkedLocalFieldExpr
       // Set when there's no dereferences in the expression
       isLocal : bool
     }
 
+[<NoComparison>]
 type ResolvedField =
     | RColumnField of ResolvedColumnField
     | RComputedField of ResolvedComputedField
     | RId
 
+[<NoComparison>]
 type ResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
       computedFields : Map<FieldName, ResolvedComputedField>
@@ -69,10 +74,12 @@ type ResolvedEntity =
                     | Some comp -> Some (name, RComputedField comp)
                     | None -> None
 
+[<NoComparison>]
 type ResolvedSchema =
     { entities : Map<EntityName, ResolvedEntity>
     }
 
+[<NoComparison>]
 type Layout =
     { schemas : Map<SchemaName, ResolvedSchema>
     } with

@@ -71,6 +71,7 @@ let private resolveEntityRef : EntityRef -> ResolvedEntityRef = function
     | { schema = Some schema; name = name } -> { schema = schema; name = name }
     | ref -> raise (ResolveLayoutException <| sprintf "Unspecified schema for entity %O" ref.name)
 
+[<NoComparison>]
 type private HalfResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
       computedFields : Map<FieldName, SourceComputedField>
@@ -79,10 +80,12 @@ type private HalfResolvedEntity =
       mainField : FieldName
     }
 
+[<NoComparison>]
 type private HalfResolvedSchema =
     { entities : Map<EntityName, HalfResolvedEntity>
     }
 
+[<NoComparison>]
 type private HalfResolvedLayout =
     { schemas : Map<SchemaName, HalfResolvedSchema>
     }

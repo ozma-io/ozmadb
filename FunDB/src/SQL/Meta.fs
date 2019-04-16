@@ -5,6 +5,7 @@ open System.ComponentModel.DataAnnotations
 open System.Linq
 
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Lexer
@@ -235,6 +236,7 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
                         | Some STDateTime -> VEValue (VDateTimeArray <| runArrayCast tryDateTimeOffsetInvariant)
                         | Some STDate -> VEValue (VDateArray <| runArrayCast tryDateInvariant)
                         | Some STRegclass -> VEValue (VRegclassArray <| runArrayCast tryRegclass)
+                        | Some STJson -> VEValue (VJsonArray <| runArrayCast tryJson)
                 | VTScalar scalarType ->
                     let runCast castFunc =
                         match castFunc str with
@@ -250,6 +252,7 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
                     | Some STDateTime -> VEValue (VDateTime <| runCast tryDateTimeOffsetInvariant)
                     | Some STDate -> VEValue (VDate <| runCast tryDateInvariant)
                     | Some STRegclass -> VEValue (VRegclass <| runCast tryRegclass)
+                    | Some STJson -> VEValue (VJson <| runCast tryJson)
             | VEValue v ->
                 match findSimpleValueType typ with
                 | Some styp when valueSimpleType v = Some styp -> VEValue v

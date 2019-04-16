@@ -19,12 +19,14 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FBool b -> JSValue <| JSBool b
     | FDateTime dt -> jsDateTime dt
     | FDate dt -> jsDate dt
+    | FJson j -> failwith "Not implemented"
     | FIntArray ints -> JSArray <| Array.map (double >> JSNumber >> JSValue) ints
     | FDecimalArray decs -> JSArray <| Array.map (double >> JSNumber >> JSValue) decs
     | FStringArray strings -> JSArray <| Array.map (JSString >> JSValue) strings
     | FBoolArray bools -> JSArray <| Array.map (JSBool >> JSValue) bools
     | FDateTimeArray dts -> JSArray <| Array.map jsDateTime dts
     | FDateArray dts -> JSArray <| Array.map jsDate dts
+    | FJsonArray jss -> failwith "Not implemented"
     | FNull -> JSValue JSNull
 
 // Expects local variable `context`.
@@ -58,5 +60,7 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
         | FEIsNull e -> JSStrictEq (go e, JSValue JSNull)
         | FEIsNotNull e -> JSStrictNotEq (go e, JSValue JSNull)
         | FECase (es, els) -> failwith "Not implemented"
-        | FECoalesce (items) -> JSCall (JSObjectAccess (JSVar "context", "coalesce"), Array.map go items )
-    go
+        | FECoalesce items -> JSCall (JSObjectAccess (JSVar "context", "coalesce"), Array.map go items)
+        | FEJsonArray items -> failwith "Not implemented"
+        | FEJsonObject obj -> failwith "Not implemented"
+    go    

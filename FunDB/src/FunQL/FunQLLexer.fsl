@@ -80,6 +80,7 @@ and tokenizeFunQL = parse
     | "["   { Parser.LEFT_BRACKET }
     | "]"   { Parser.RIGHT_BRACKET }
     | "::"  { Parser.DOUBLE_COLON }
+    | ":"   { Parser.COLON }
     | ","   { Parser.COMMA }
     | "."   { Parser.DOT }
     | "="   { Parser.EQ }
@@ -147,6 +148,7 @@ and tokenizeFunQL = parse
     | r e f e r e n c e { Parser.REFERENCE_TYPE }
     | a r r a y         { Parser.ARRAY_TYPE }
     | e n u m           { Parser.ENUM_TYPE }
+    | j s o n           { Parser.JSON_TYPE }
 
     // Unescaped ids
     | unescapedId { Parser.ID ((String lexbuf.Lexeme).ToLower()) }

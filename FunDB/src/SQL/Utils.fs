@@ -3,6 +3,8 @@ module FunWithFlags.FunDB.SQL.Utils
 open System
 open System.Text
 open System.Globalization
+open Newtonsoft.Json
+open Newtonsoft.Json.Linq
 
 let escapeSqlDoubleQuotes (str : string) : string = sprintf "\"%s\"" (str.Replace("\"", "\"\""))
 
@@ -48,6 +50,8 @@ let renderSqlInt (i : int) : string = i.ToString(CultureInfo.InvariantCulture)
 let renderSqlDateTime (dt : DateTimeOffset) : string = dt.ToString("O", CultureInfo.InvariantCulture)
 
 let renderSqlDate (dt : DateTimeOffset) : string = dt.ToString("d", CultureInfo.InvariantCulture)
+
+let renderSqlJson (j : JToken) : string = j.ToString(Formatting.None)
 
 type ISQLString =
     abstract member ToSQLString : unit -> string

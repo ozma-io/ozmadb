@@ -1,10 +1,9 @@
 %{
 
+open Newtonsoft.Json.Linq
+
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
-
-let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
-    FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
 
 type ParsedFieldExpr = FieldExpr<EntityRef, LinkedFieldRef>
 type ParsedFromExpr = FromExpr<EntityRef, LinkedFieldRef>
@@ -20,12 +19,14 @@ type ParsedMainEntity =
     { entity : EntityRef
     }
 
+[<NoComparison>]
 type ParsedViewExpr =
     { arguments : Map<string, ParsedFieldType>
       select : ParsedSelectExpr
       mainEntity : ParsedMainEntity option
     }
 
+[<NoComparison>]
 type private Result =
     | AResult of QueryResult<EntityRef, LinkedFieldRef>
     | AAttribute of FunQLName * ParsedFieldExpr
@@ -61,6 +62,55 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
                 | _ -> failwith "Casting cannot be performed between arrays and scalars"
         | _ -> failwith <| sprintf "Casting can only be performed on values: %O :: %O" expr exprType
 
+let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
+    FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
+
+let private jsonObject (vals : (string * JToken) seq) : JObject =
+    let o = JObject()
+    for (k, v) in vals do
+        o.[k] <- v
+    o
+
+let private jsonArray (vals : JToken seq) : JArray =
+    let arr = JArray()
+    for v in vals do
+        arr.Add(v)
+    arr
+
+let private valueToJson : FieldValue -> JToken = function
+  | FInt i -> JToken.op_Implicit i
+  | FDecimal d -> JToken.op_Implicit d
+  | FString s -> JToken.op_Implicit s
+  | FBool b -> JToken.op_Implicit b
+  | FJson j -> j
+  | FStringArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
+  | FIntArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
+  | FBoolArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
+  | FDecimalArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
+  | FJsonArray ss -> jsonArray ss :> JToken
+  | FNull -> JValue.CreateNull() :> JToken
+  | v -> failwith <| sprintf "Encountered impossible value %O while converting to JSON in parser" v
+
+let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : ParsedFieldExpr =
+    let rec tryExtract = function
+        | [] -> Some []
+        | ((name, FEValue v) :: t) -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
+        | _ -> None
+    
+    match tryExtract exprs with
+    | None -> FEJsonObject (exprs |> Seq.map (fun (name, e) -> (FunQLName name, e)) |> Map.ofSeq)
+    | Some vals -> FEValue (FJson (vals |> Seq.map (fun (name, v) -> (name, valueToJson v)) |> jsonObject))
+
+let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
+    let rec tryExtract = function
+        | [] -> Some []
+        | ((FEValue v) :: t) -> Option.map (fun nt -> v :: nt) (tryExtract t)
+        | _ -> None
+    
+    match tryExtract exprs with
+    | None -> FEJsonArray (List.toArray exprs)
+    | Some vals -> FEValue (FJson (vals |> Seq.map valueToJson |> jsonArray))
+
 %}
 
 // Atoms
@@ -81,6 +131,7 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %token LEFT_BRACKET
 %token RIGHT_BRACKET
 %token DOUBLE_COLON
+%token COLON
 %token COMMA
 %token DOT
 %token EQ
@@ -146,6 +197,7 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 %token REFERENCE_TYPE
 %token ARRAY_TYPE
 %token ENUM_TYPE
+%token JSON_TYPE
 
 // Misc
 %token EOF
@@ -367,6 +419,7 @@ FieldExprVal:
   | ARGUMENT_ID                      { FEPlaceholder (PLocal $1) }
   | GLOBAL_ARGUMENT_ID               { FEPlaceholder (PGlobal $1) }
   | Value                            { FEValue $1 }
+  | JsonObject                       { $1 }
   | LEFT_PAREN FieldExpr RIGHT_PAREN { $2 }
 
 CaseExpr:
@@ -408,6 +461,13 @@ DecimalArrayList:
 DecimalArrayNonEmpty:
   | DecimalArrayList { List.toArray $1 }
 
+JsonArrayList:
+  | JsonObject                     { [ $1 ] }
+  | JsonObject COMMA JsonArrayList { $1 :: $3 }
+
+JsonArrayNonEmpty:
+  | JsonArrayList { List.toArray $1 }
+
 Value:
   | INT                                             { FInt $1 }
   | DECIMAL                                         { FDecimal $1 }
@@ -420,6 +480,25 @@ Value:
   | LEFT_BRACKET DecimalArrayNonEmpty RIGHT_BRACKET { FDecimalArray $2 }
   | NULL                                            { FNull }
 
+JsonObject:
+  | LEFT_BRACE JsonFields RIGHT_BRACE { coalesceJsonObject $2 }
+
+JsonFields:
+  |                            { [] }
+  | JsonField                  { [$1] }
+  | JsonField COMMA JsonFields { $1 :: $3 }
+
+JsonField:
+  | ID COLON FieldExpr { ($1, $3) }
+
+JsonArray:
+  | LEFT_BRACKET JsonItems RIGHT_BRACKET { coalesceJsonArray $2 }
+
+JsonItems:
+  |                           { [] }
+  | FieldExpr                 { [$1] }
+  | FieldExpr COMMA JsonItems { $1 :: $3 }
+
 ScalarType:
   | INT_TYPE      { SFTInt }
   | DECIMAL_TYPE  { SFTDecimal }
@@ -427,6 +506,7 @@ ScalarType:
   | BOOL_TYPE     { SFTBool }
   | DATETIME_TYPE { SFTDateTime }
   | DATE_TYPE     { SFTDate }
+  | JSON_TYPE     { SFTJson }
 
 FieldExprType:
   | ScalarType                                    { FETScalar $1 }

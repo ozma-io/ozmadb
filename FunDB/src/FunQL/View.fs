@@ -12,11 +12,13 @@ open FunWithFlags.FunDB.Layout.Types
 exception ViewResolveException of info : string with
     override this.Message = this.info
 
+[<NoComparison>]
 type BoundField =
     { ref : ResolvedFieldRef
       field : ResolvedField
     }
 
+[<NoComparison>]
 type BoundFieldRef =
     { ref : FieldRef
       bound : BoundField option
@@ -30,6 +32,7 @@ type BoundFieldRef =
 
 type LinkedResolvedFieldRef = LinkedRef<BoundFieldRef>
 
+[<NoComparison>]
 type private QSubqueryField =
     | QRename of FieldName
     | QField of BoundField option
@@ -51,6 +54,7 @@ type ResolvedFromClause = FromClause<ResolvedEntityRef, LinkedResolvedFieldRef>
 type ResolvedAttributeMap = AttributeMap<ResolvedEntityRef, LinkedResolvedFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<ResolvedEntityRef, LinkedResolvedFieldRef>
 
+[<NoComparison>]
 type private QSelectResults =
     { fields : QSubqueryFields
       fieldAttributeNames : (FieldName * Set<FieldName>)[]
@@ -64,6 +68,7 @@ type ResolvedMainEntity =
       fieldsToColumns : Map<FieldName, FieldName>
     }
 
+[<NoComparison>]
 type ResolvedViewExpr =
     { arguments : ArgumentsMap
       select : ResolvedSelectExpr

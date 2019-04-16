@@ -5,6 +5,7 @@ open System.Linq
 open Npgsql
 open NpgsqlTypes
 
+open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.AST
@@ -28,7 +29,9 @@ let private parseType typeStr =
         let coerceType typeName =
             match findSimpleType typeName with
             | None -> raise (QueryException <| sprintf "Unknown database type: %O" typeName)
-            | Some t -> t
+            | Some t ->
+                eprintfn "type: %O simple: %O" valType t
+                t
         mapValueType coerceType valType
     | Error msg -> raise (QueryException <| sprintf "Cannot parse database type: %s" msg)
 
@@ -62,6 +65,10 @@ let private convertValue valType (rawValue : obj) =
     | (VTScalar STDateTime, (:? DateTimeOffset as value)) -> VDateTime value
     | (VTScalar STDateTime, (:? DateTime as value)) -> VDateTime (DateTimeOffset (value, TimeSpan.Zero))
     | (VTScalar STDate, (:? DateTime as value)) -> VDate (DateTimeOffset (value, TimeSpan.Zero))
+    | (VTScalar STJson, (:? string as value)) ->
+        match tryJson value with
+        | Some j -> VJson j
+        | None -> raise (QueryException <| sprintf "Invalid JSON value: %s" value)
     | (VTArray scalarType, (:? Array as rootVals)) ->
         let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
             let convertOne : obj -> ArrayValue<'a> = function
@@ -81,6 +88,7 @@ let private convertValue valType (rawValue : obj) =
         | STDateTime -> VDateTimeArray (convertArray tryCast<DateTimeOffset> rootVals)
         | STDate -> VDateArray (convertArray convertDate rootVals)
         | STRegclass -> raise (QueryException <| sprintf "Regclass arrays are not supported: %O" rootVals)
+        | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
     | (typ, value) -> raise (QueryException <| sprintf "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName))
 
 let private npgsqlSimpleType : SimpleType -> NpgsqlDbType = function
@@ -91,17 +99,18 @@ let private npgsqlSimpleType : SimpleType -> NpgsqlDbType = function
     | STDateTime -> NpgsqlDbType.Timestamp
     | STDate -> NpgsqlDbType.Date
     | STRegclass -> raise <| QueryException "Regclass type is not supported"
+    | STJson -> NpgsqlDbType.Jsonb
 
 let private npgsqlType : SimpleValueType -> NpgsqlDbType = function
     | VTScalar s -> npgsqlSimpleType s
     | VTArray s -> npgsqlSimpleType s ||| NpgsqlDbType.Array
 
 let rec private npgsqlArrayValue (vals : ArrayValue<'a> array) : obj =
-    let convertValue : ArrayValue<'a> -> obj = function
+    let convertOne : ArrayValue<'a> -> obj = function
         | AVValue v -> upcast v
         | AVArray vals -> npgsqlArrayValue vals
         | AVNull -> upcast DBNull.Value
-    upcast (Array.map convertValue vals)
+    upcast (Array.map convertOne vals)
 
 let private npgsqlValue : Value -> obj = function
     | VInt i -> upcast i
@@ -111,6 +120,7 @@ let private npgsqlValue : Value -> obj = function
     | VBool b -> upcast b
     | VDateTime dt -> upcast dt.UtcDateTime
     | VDate dt -> upcast dt.UtcDateTime
+    | VJson j -> upcast j
     | VIntArray vals -> npgsqlArrayValue vals
     | VDecimalArray vals -> npgsqlArrayValue vals
     | VStringArray vals -> npgsqlArrayValue vals
@@ -118,6 +128,7 @@ let private npgsqlValue : Value -> obj = function
     | VDateTimeArray vals -> npgsqlArrayValue vals
     | VDateArray vals -> npgsqlArrayValue vals
     | VRegclassArray vals -> raise (QueryException <| sprintf "Regclass arguments are not supported: %O" vals)
+    | VJsonArray vals -> npgsqlArrayValue vals
     | VNull -> upcast DBNull.Value
 
 type QueryConnection (connection : NpgsqlConnection) =

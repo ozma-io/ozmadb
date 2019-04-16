@@ -6,6 +6,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.View
 open FunWithFlags.FunDB.Layout.Types
+open Newtonsoft.Json.Linq
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 // Domains is a way to distinguish rows after set operations so that row types and IDs can be traced back.
@@ -14,6 +15,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 // Local domain ids get assigned to all sets in a set operation.
 // Each row has a different domain key assigned, so half of rows may come from entity A and half from entity B.
 // This way one can make use if IDs assigned to cells to reference and update them.
+[<NoComparison>]
 type DomainField = {
     ref : ResolvedFieldRef
     field : ResolvedField
@@ -25,6 +27,7 @@ type Domain = Map<FieldName, DomainField>
 type GlobalDomainId = int
 type DomainNamespaceId = int
 type LocalDomainId = int
+[<NoComparison>]
 type Domains =
     | DSingle of GlobalDomainId * Domain
     | DMulti of DomainNamespaceId * Map<LocalDomainId, Domains>
@@ -83,6 +86,7 @@ let parseColumnName (name : SQL.SQLName) =
     | [|name|] -> CTColumn (FunQLName name)
     | _ -> failwith <| sprintf "Cannot parse column name: %O" name
 
+[<NoComparison>]
 type CompiledArgument =
     { placeholder : int
       fieldType : ParsedFieldType
@@ -118,12 +122,14 @@ let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETArray SFTBool -> FStringArray [||]
     | FETArray SFTDateTime -> FStringArray [||]
     | FETArray SFTDate -> FStringArray [||]
+    | FETArray SFTJson -> FJsonArray [||]
     | FETScalar SFTString -> FString ""
     | FETScalar SFTInt -> FInt 0
     | FETScalar SFTDecimal -> FDecimal 0m
     | FETScalar SFTBool -> FBool false
     | FETScalar SFTDateTime -> FDateTime DateTimeOffset.UnixEpoch
     | FETScalar SFTDate -> FDateTime DateTimeOffset.UnixEpoch
+    | FETScalar SFTJson -> FJson (JObject ())
 
 let defaultCompiledArgument : ParsedFieldType -> FieldValue = function
     | FTType feType -> defaultCompiledExprArgument feType
@@ -138,6 +144,7 @@ type CompiledAttributesExpr =
       pureColumnAttributes : Map<FieldName, Set<AttributeName>>
     }
 
+[<NoComparison>]
 type CompiledViewExpr =
     { attributesQuery : CompiledAttributesExpr option
       query : SQL.SelectExpr
@@ -153,6 +160,7 @@ let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
     | SFTBool -> SQL.STBool
     | SFTDateTime -> SQL.STDateTime
     | SFTDate -> SQL.STDate
+    | SFTJson -> SQL.STJson
 
 let private compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
     | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
@@ -200,12 +208,14 @@ let compileFieldValue : FieldValue -> SQL.ValueExpr = function
     | FBool b -> SQL.VEValue (SQL.VBool b)
     | FDateTime dt -> SQL.VEValue (SQL.VDateTime dt)
     | FDate d -> SQL.VEValue (SQL.VDate d)
+    | FJson j -> SQL.VEValue (SQL.VJson j)
     | FIntArray vals -> SQL.VEValue (SQL.VIntArray (compileArray vals))
     | FDecimalArray vals -> SQL.VEValue (SQL.VDecimalArray (compileArray vals))
     | FStringArray vals -> SQL.VEValue (SQL.VStringArray (compileArray vals))
     | FBoolArray vals -> SQL.VEValue (SQL.VBoolArray (compileArray vals))
     | FDateTimeArray vals -> SQL.VEValue (SQL.VDateTimeArray (compileArray vals))
     | FDateArray vals -> SQL.VEValue (SQL.VDateArray (compileArray vals))
+    | FJsonArray vals -> SQL.VEValue (SQL.VJsonArray (compileArray vals))
     | FNull -> SQL.VEValue SQL.VNull
 
 // Differs from compileFieldValue in that it doesn't emit value expressions.
@@ -216,12 +226,14 @@ let compileArgument : FieldValue -> SQL.Value = function
     | FBool b -> SQL.VBool b
     | FDateTime dt -> SQL.VDateTime dt
     | FDate d -> SQL.VDate d
+    | FJson j -> SQL.VJson j
     | FIntArray vals -> SQL.VIntArray (compileArray vals)
     | FDecimalArray vals -> SQL.VDecimalArray (compileArray vals)
     | FStringArray vals -> SQL.VStringArray (compileArray vals)
     | FBoolArray vals -> SQL.VBoolArray (compileArray vals)
     | FDateTimeArray vals -> SQL.VDateTimeArray (compileArray vals)
     | FDateArray vals -> SQL.VDateArray (compileArray vals)
+    | FJsonArray vals -> SQL.VJsonArray (compileArray vals)
     | FNull -> SQL.VNull
 
 let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc : Placeholder -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
@@ -250,6 +262,8 @@ let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc 
         | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
         | FECase (es, els) -> SQL.VECase (Array.map (fun (cond, expr) -> (traverse cond, traverse expr)) es, Option.map traverse els)
         | FECoalesce arr -> SQL.VECoalesce (Array.map traverse arr)
+        | FEJsonArray vals -> SQL.VEFunc (SQL.SQLName "jsonb_build_array", Array.map traverse vals)
+        | FEJsonObject obj -> SQL.VEFunc (SQL.SQLName "jsonb_build_object", obj |> Map.toSeq |> Seq.collect (fun (FunQLName name, v) -> [SQL.VEValue <| SQL.VString name; traverse v]) |> Seq.toArray)
     traverse
 
 type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity option, arguments : ArgumentsMap) =

@@ -44,12 +44,14 @@ let private parseExprArgument (fieldExprType : FieldExprType) : bool -> string -
     | FETArray SFTBool -> decodeValue FBoolArray
     | FETArray SFTDateTime -> decodeValue FDateTimeArray
     | FETArray SFTDate -> decodeValue FDateArray
+    | FETArray SFTJson -> decodeValue FJsonArray
     | FETScalar SFTString -> decodeValue FString
     | FETScalar SFTInt -> decodeValue FInt
     | FETScalar SFTDecimal -> decodeValue FDecimal
     | FETScalar SFTBool -> decodeValue FBool
     | FETScalar SFTDateTime -> decodeValue FDateTime
     | FETScalar SFTDate -> decodeValue FDate
+    | FETScalar SFTJson -> decodeValue FJson
 
 type RawArguments = Map<string, string>
 

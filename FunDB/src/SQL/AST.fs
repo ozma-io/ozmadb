@@ -4,6 +4,7 @@ module FunWithFlags.FunDB.SQL.AST
 
 open System
 open Newtonsoft.Json
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.Utils
@@ -99,7 +100,7 @@ let rec mapArrayValue (func : 'a -> 'b) : ArrayValue<'a> -> ArrayValue<'b> = fun
 and mapValueArray (func : 'a -> 'b) (vals : ValueArray<'a>) : ValueArray<'b> =
     Array.map (mapArrayValue func) vals
 
-type [<JsonConverter(typeof<ValueConverter>)>] Value =
+type [<JsonConverter(typeof<ValueConverter>)>] [<NoComparison>] Value =
     | VInt of int
     | VDecimal of decimal
     | VString of string
@@ -107,6 +108,7 @@ type [<JsonConverter(typeof<ValueConverter>)>] Value =
     | VBool of bool
     | VDateTime of DateTimeOffset
     | VDate of DateTimeOffset
+    | VJson of JToken
     | VIntArray of ValueArray<int>
     | VDecimalArray of ValueArray<decimal>
     | VStringArray of ValueArray<string>
@@ -114,6 +116,7 @@ type [<JsonConverter(typeof<ValueConverter>)>] Value =
     | VDateTimeArray of ValueArray<DateTimeOffset>
     | VDateArray of ValueArray<DateTimeOffset>
     | VRegclassArray of ValueArray<SchemaObject>
+    | VJsonArray of ValueArray<JToken>
     | VNull
     with
         override this.ToString () = this.ToSQLString()
@@ -136,6 +139,7 @@ type [<JsonConverter(typeof<ValueConverter>)>] Value =
             | VBool b -> renderSqlBool b
             | VDateTime dt -> sprintf "%s :: timestamp" (dt |> renderSqlDateTime |> renderSqlString)
             | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
+            | VJson j -> sprintf "%s :: jsonb" (j |> renderSqlJson |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | VStringArray vals -> renderArray renderSqlArrayString "text" vals
@@ -143,6 +147,7 @@ type [<JsonConverter(typeof<ValueConverter>)>] Value =
             | VDateTimeArray vals -> renderArray (renderSqlDateTime >> renderSqlArrayString) "timestamp" vals
             | VDateArray vals -> renderArray (renderSqlDate >> renderSqlArrayString) "date" vals
             | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
+            | VJsonArray vals -> renderArray (renderSqlJson >> renderSqlArrayString) "jsonb" vals
             | VNull -> "NULL"
 
         interface ISQLString with
@@ -175,6 +180,7 @@ and ValueConverter () =
         | VBool b -> serialize b
         | VDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
         | VDate dt -> serialize <| dt.ToUnixTimeSeconds()
+        | VJson j -> j.WriteTo(writer)
         | VRegclass rc -> serialize <| string rc
         | VIntArray vals -> serializeArray id vals
         | VDecimalArray vals -> serializeArray id vals
@@ -183,6 +189,7 @@ and ValueConverter () =
         | VDateTimeArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
         | VDateArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
         | VRegclassArray vals -> serializeArray string vals
+        | VJsonArray vals -> serializeArray id vals
         | VNull -> serialize null
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
@@ -195,6 +202,7 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
     | STDateTime
     | STDate
     | STRegclass
+    | STJson
     with
         override this.ToString () = this.ToJSONString()
 
@@ -207,6 +215,7 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
             | STDateTime -> "timestamp"
             | STDate -> "date"
             | STRegclass -> "regclass"
+            | STJson -> "jsonb"
 
         member this.ToJSONString () =
             match this with
@@ -217,6 +226,7 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
             | STDateTime -> "datetime"
             | STDate -> "date"
             | STRegclass -> "regclass"
+            | STJson -> "json"
 
         member this.ToSQLRawString () = SQLRawString (this.ToSQLString ())
 
@@ -251,6 +261,8 @@ let findSimpleType (str : SQLRawString) : SimpleType option =
     | "timestamp" -> Some STDateTime
     | "date" -> Some STDate
     | "regclass" -> Some STRegclass
+    | "jsonb" -> Some STJson
+    | "json" -> Some STJson
     | _ -> None
 
 type [<JsonConverter(typeof<ValueTypeConverter>)>] ValueType<'t> when 't :> ISQLString =
@@ -301,6 +313,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VDateTime dt -> Some <| VTScalar STDateTime
     | VDate dt -> Some <| VTScalar STDate
     | VRegclass rc -> Some <| VTScalar STRegclass
+    | VJson j -> Some <| VTScalar STJson
     | VIntArray vals -> Some <| VTArray STInt
     | VDecimalArray vals -> Some <| VTArray STDecimal
     | VStringArray vals -> Some <| VTArray STString
@@ -308,6 +321,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VDateTimeArray vals -> Some <| VTArray STDateTime
     | VDateArray vals -> Some <| VTArray STDate
     | VRegclassArray vals -> Some <| VTArray STRegclass
+    | VJsonArray vals -> Some <| VTArray STJson
     | VNull -> None
 
 let findSimpleValueType : DBValueType -> SimpleValueType option = function
@@ -363,7 +377,7 @@ type SetOperation =
             member this.ToSQLString () = this.ToSQLString()
 
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
-type ValueExpr =
+type [<NoComparison>] ValueExpr =
     | VEValue of Value
     | VEColumn of ColumnRef
     | VEPlaceholder of int
@@ -438,7 +452,7 @@ type ValueExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
 
-and FromExpr =
+and [<NoComparison>] FromExpr =
     | FTable of TableRef
     | FJoin of JoinType * FromExpr * FromExpr * ValueExpr
     | FSubExpr of SQLName * SelectExpr
@@ -454,7 +468,7 @@ and FromExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and SelectedColumn =
+and [<NoComparison>] SelectedColumn =
     | SCAll of TableRef option
     | SCColumn of ColumnRef
     | SCExpr of ColumnName * ValueExpr
@@ -471,7 +485,7 @@ and SelectedColumn =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and FromClause =
+and [<NoComparison>] FromClause =
     { from : FromExpr
       where : ValueExpr option
     } with
@@ -488,7 +502,7 @@ and FromClause =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and SingleSelectExpr =
+and [<NoComparison>] SingleSelectExpr =
     { columns : SelectedColumn[]
       clause : FromClause option
       orderLimit : OrderLimitClause
@@ -507,7 +521,7 @@ and SingleSelectExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and OrderLimitClause =
+and [<NoComparison>] OrderLimitClause =
     { orderBy : (SortOrder * ValueExpr)[]
       limit : ValueExpr option
       offset : ValueExpr option
@@ -532,7 +546,7 @@ and OrderLimitClause =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and SelectExpr =
+and [<NoComparison>] SelectExpr =
     | SSelect of SingleSelectExpr
     | SSetOp of SetOperation * SelectExpr * SelectExpr * OrderLimitClause
     with
@@ -579,6 +593,7 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
         | VECoalesce vals -> Array.iter traverse vals
     traverse
 
+[<NoComparison>]
 type InsertValue =
     | IVValue of ValueExpr
     | IVDefault
@@ -593,6 +608,7 @@ type InsertValue =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+[<NoComparison>]
 type InsertValues =
     | IValues of InsertValue[][]
     | IDefaults
@@ -612,6 +628,7 @@ type InsertValues =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+[<NoComparison>]
 type InsertExpr =
     { name : TableRef
       columns : ColumnName[]
@@ -628,6 +645,7 @@ type InsertExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+[<NoComparison>]
 type UpdateExpr =
     { name : TableRef
       columns : Map<ColumnName, ValueExpr>
@@ -648,6 +666,7 @@ type UpdateExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+[<NoComparison>]
 type DeleteExpr =
     { name : TableRef
       where : ValueExpr option
@@ -666,6 +685,7 @@ type DeleteExpr =
 
 // Meta
 
+[<NoComparison>]
 type ColumnMeta =
     { columnType : DBValueType
       isNullable : bool
@@ -678,12 +698,14 @@ type ConstraintType =
     | CTPrimaryKey
     | CTForeignKey
 
+[<NoComparison>]
 type ConstraintMeta =
     | CMUnique of ColumnName[]
     | CMCheck of ValueExpr
     | CMPrimaryKey of ColumnName[]
     | CMForeignKey of TableRef * (ColumnName * ColumnName)[]
 
+[<NoComparison>]
 type TableMeta =
     { columns : Map<ColumnName, ColumnMeta>
     }
@@ -692,11 +714,13 @@ let emptyTableMeta =
     { columns = Map.empty
     }
 
+[<NoComparison>]
 type ObjectMeta =
     | OMTable of TableMeta
     | OMSequence
     | OMConstraint of TableName * ConstraintMeta
 
+[<NoComparison>]
 type SchemaMeta =
     { objects : Map<SQLName, ObjectMeta>
     }
@@ -705,10 +729,12 @@ let emptySchemaMeta =
     { objects = Map.empty
     }
 
+[<NoComparison>]
 type DatabaseMeta =
     { schemas : Map<SchemaName, SchemaMeta>
     }
 
+[<NoComparison>]
 type TableOperation =
     | TOCreateColumn of ColumnName * ColumnMeta
     | TODeleteColumn of ColumnName
@@ -735,6 +761,7 @@ type TableOperation =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+[<NoComparison>]
 type SchemaOperation =
     | SOCreateSchema of SchemaName
     | SODeleteSchema of SchemaName

@@ -85,6 +85,7 @@ type ContextBuildErrorInfo =
 exception ContextException of info : ContextBuildErrorInfo with
     override this.Message = this.info.Message
 
+[<NoComparison>]
 type CachedUserView =
     { resolved : ResolvedViewExpr
       compiled : CompiledViewExpr
@@ -159,6 +160,7 @@ let private rebuildLayout (conn : DatabaseConnection) =
 
 type private SystemViews = Map<string, string>
 
+[<NoComparison>]
 type CachedRequestContext =
     { layout : Layout
       userViews : Map<string, CachedUserView>

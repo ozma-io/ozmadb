@@ -10,11 +10,13 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 // Combined data from query and the view expression.
 
+[<NoComparison>]
 type MainFieldInfo =
     { name : FieldName
       field : ResolvedColumnField
     }
 
+[<NoComparison>]
 type MergedColumnInfo =
     { name : FunQLName
       attributeTypes : ExecutedAttributeTypes
@@ -24,6 +26,7 @@ type MergedColumnInfo =
       mainField : MainFieldInfo option
     }
 
+[<NoComparison>]
 type MergedDomainField = {
     ref : ResolvedFieldRef
     field : ResolvedColumnField option
@@ -38,6 +41,7 @@ type MainEntityInfo =
     name : EntityName
   }
 
+[<NoComparison>]
 type MergedViewInfo =
     { attributeTypes : ExecutedAttributeTypes
       rowAttributeTypes : ExecutedAttributeTypes
@@ -46,6 +50,7 @@ type MergedViewInfo =
       columns : MergedColumnInfo[]
     }
 
+[<NoComparison>]
 type PureAttributes =
     { attributes : ExecutedAttributeMap
       columnAttributes : ExecutedAttributeMap[]

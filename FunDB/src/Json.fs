@@ -232,3 +232,9 @@ let defaultJsonSerializerSettings =
         ContractResolver = ConverterContractResolver (),
         DefaultValueHandling = DefaultValueHandling.Populate
     )
+
+let tryJson (str : string) : JToken option =
+    try
+        Some <| JToken.Parse(str)
+    with
+    | :? JsonException -> None

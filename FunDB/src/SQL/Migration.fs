@@ -45,6 +45,7 @@ let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta
           yield SODeleteSchema schemaName
         }
 
+[<NoComparison>]
 type AColumnMeta =
     { columnType : DBValueType
       isNullable : bool
