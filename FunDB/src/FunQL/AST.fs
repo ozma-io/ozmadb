@@ -609,6 +609,12 @@ type LinkedLocalFieldExpr = FieldExpr<FunQLVoid, LinkedFieldName>
 
 type PureFieldExpr = FieldExpr<FunQLVoid, FunQLVoid>
 
+[<NoComparison>]
+type Argument =
+    { argType: ParsedFieldType
+      optional: bool
+    }
+
 let funId = FunQLName "Id"
 let funSchema = FunQLName "public"
 let funView = FunQLName "view"

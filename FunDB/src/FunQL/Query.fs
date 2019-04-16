@@ -244,7 +244,11 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
     let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
         let value =
             match Map.tryFind name arguments with
-            | None -> raise (ViewExecutionException <| sprintf "Argument not found: %O" name)
+            | None ->
+                if mapping.optional then
+                    FNull
+                else
+                    raise (ViewExecutionException <| sprintf "Argument not found: %O" name)
             | Some value -> value
         match typecheckArgument mapping.fieldType value with
         | Ok () -> ()

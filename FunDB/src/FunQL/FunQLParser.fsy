@@ -21,7 +21,7 @@ type ParsedMainEntity =
 
 [<NoComparison>]
 type ParsedViewExpr =
-    { arguments : Map<string, ParsedFieldType>
+    { arguments : Map<string, Argument>
       select : ParsedSelectExpr
       mainEntity : ParsedMainEntity option
     }
@@ -244,11 +244,15 @@ ArgumentsList:
   | ArgumentsListNonEmpty { parseMap "Clashing argument names" $1 }
 
 ArgumentsListNonEmpty:
-  | Argument COMMA ArgumentsListNonEmpty { $1 :: $3 }
-  | Argument                             { [ $1 ] }
+  | ArgumentEntry COMMA ArgumentsListNonEmpty { $1 :: $3 }
+  | ArgumentEntry                             { [ $1 ] }
+
+ArgumentEntry:
+  | ARGUMENT_ID Argument { ($1, $2) }
 
 Argument:
-  | ARGUMENT_ID ArgumentFieldType { ($1, $2) }
+  | ArgumentFieldType      { { argType = $1; optional = false } }
+  | ArgumentFieldType NULL { { argType = $1; optional = true } }
 
 SelectVal:
   | SingleUnlimitedSelectExpr         { SSelect $1 }

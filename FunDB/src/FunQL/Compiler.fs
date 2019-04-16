@@ -91,6 +91,7 @@ type CompiledArgument =
     { placeholder : int
       fieldType : ParsedFieldType
       valueType : SQL.SimpleValueType
+      optional : bool
     }
 
 type private ArgumentsMap = Map<Placeholder, CompiledArgument>
@@ -691,12 +692,13 @@ let rec private flattenDomains : Domains -> FlattenedDomains = function
     | DMulti (ns, subdoms) -> subdoms |> Map.values |> Seq.fold (fun m subdoms -> Map.union m (flattenDomains subdoms)) Map.empty
 
 let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
-    let convertArgument i (name, fieldType) =
-        let info = {
-            placeholder = i
-            fieldType = fieldType
-            valueType = compileFieldType fieldType
-        }
+    let convertArgument i (name, arg) =
+        let info =
+            { placeholder = i
+              fieldType = arg.argType
+              valueType = compileFieldType arg.argType
+              optional = arg.optional
+            }
         (name, info)
 
     let arguments =

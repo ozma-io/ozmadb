@@ -42,7 +42,7 @@ type private QSubqueryFields = Map<FieldName, QSubqueryField>
 type private QMapping = Map<EntityName option, SchemaName option * QSubqueryFields>
 
 type private SomeArgumentsMap = Map<string, ParsedFieldType>
-type private ArgumentsMap = Map<Placeholder, ParsedFieldType>
+type private ArgumentsMap = Map<Placeholder, Argument>
 
 type ResolvedFieldExpr = FieldExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
 type ResolvedSelectExpr = SelectExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
@@ -379,9 +379,9 @@ let rec private getColumns : ResolvedSelectExpr -> FieldName[] = function
         getColumns a
 
 let resolveViewExpr (layout : Layout) (globalArguments : SomeArgumentsMap) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
-    let checkArgument name typ =
+    let checkArgument name arg =
         checkName name
-        match typ with
+        match arg.argType with
         | FTReference (entityRef, where) ->
             if Option.isNone <| layout.FindEntity(resolveEntityRef entityRef) then
                 raise (ViewResolveException <| sprintf "Unknown entity in reference: %O" entityRef)
@@ -392,7 +392,7 @@ let resolveViewExpr (layout : Layout) (globalArguments : SomeArgumentsMap) (view
     Map.iter checkArgument viewExpr.arguments
 
     let localArguments = Map.mapKeys PLocal viewExpr.arguments
-    let globalArguments = Map.mapKeys PGlobal globalArguments
+    let globalArguments = globalArguments |> Map.toSeq |> Seq.map (fun (name, argType) -> (PGlobal name, { argType = argType; optional = false })) |> Map.ofSeq
     let allArguments = Map.union localArguments globalArguments
     let qualifier = QueryResolver (layout, allArguments)
     let (results, qQuery) = qualifier.ResolveSelectExpr viewExpr.select
