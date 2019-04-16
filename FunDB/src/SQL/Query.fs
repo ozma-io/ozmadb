@@ -29,9 +29,7 @@ let private parseType typeStr =
         let coerceType typeName =
             match findSimpleType typeName with
             | None -> raise (QueryException <| sprintf "Unknown database type: %O" typeName)
-            | Some t ->
-                eprintfn "type: %O simple: %O" valType t
-                t
+            | Some t -> t
         mapValueType coerceType valType
     | Error msg -> raise (QueryException <| sprintf "Cannot parse database type: %s" msg)
 
