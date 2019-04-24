@@ -54,10 +54,14 @@ type APISettings =
 
 let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
     let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
+        let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
         let specifiedLang =
-            ctx.Request.GetTypedHeaders().AcceptLanguage
-            |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
-            |> Seq.first
+            if isNull acceptLanguage then
+                None
+            else
+                acceptLanguage
+                |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
+                |> Seq.first
         let lang =
             match specifiedLang with
             | Some l -> l.Value.Value
