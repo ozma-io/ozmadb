@@ -273,7 +273,6 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         compileJoinId id
 
     let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (field : ResolvedField) (ref : FieldName) : JoinPaths * SQL.ValueExpr =
-        eprintfn "Ref: %O %O" tableRef ref
         match field with
         | RId
         | RColumnField _ -> (paths, SQL.VEColumn { table = Some { schema = None; name = tableRef.name }; name = compileName ref })
