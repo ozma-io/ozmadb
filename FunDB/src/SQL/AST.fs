@@ -578,6 +578,40 @@ and [<NoComparison>] SelectExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+let mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -> int) (queryFunc : SelectExpr -> SelectExpr) : ValueExpr -> ValueExpr =
+    let rec traverse = function
+        | VEValue value -> VEValue value
+        | VEColumn c -> VEColumn <| colFunc c
+        | VEPlaceholder i -> VEPlaceholder <| placeholderFunc i
+        | VENot e -> VENot <| traverse e
+        | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
+        | VEOr (a, b) -> VEOr (traverse a, traverse b)
+        | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
+        | VEEq (a, b) -> VEEq (traverse a, traverse b)
+        | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
+        | VELike (e, pat) -> VELike (traverse e, traverse pat)
+        | VENotLike (e, pat) -> VENotLike (traverse e, traverse pat)
+        | VELess (a, b) -> VELess (traverse a, traverse b)
+        | VELessEq (a, b) -> VELessEq (traverse a, traverse b)
+        | VEGreater (a, b) -> VEGreater (traverse a, traverse b)
+        | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
+        | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
+        | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
+        | VEInQuery (e, query) -> VEInQuery (traverse e, queryFunc query)
+        | VENotInQuery (e, query) -> VENotInQuery (traverse e, queryFunc query)
+        | VEIsNull e -> VEIsNull <| traverse e
+        | VEIsNotNull e -> VEIsNotNull <| traverse e
+        | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
+        | VECast (e, typ) -> VECast (traverse e, typ)
+        | VECase (es, els) ->
+            let es' = Array.map (fun (cond, e) -> (traverse cond, traverse e)) es
+            let els' = Option.map traverse els
+            VECase (es', els')
+        | VECoalesce vals -> VECoalesce <| Array.map traverse vals
+        | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
+        | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
+    traverse
+
 let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) (queryFunc : SelectExpr -> unit) : ValueExpr -> unit =
     let rec traverse = function
         | VEValue value -> ()

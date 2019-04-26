@@ -40,22 +40,38 @@ type ResolvedColumnField =
       isNullable : bool
     }
 
-type FieldKey = SchemaName * EntityName * FieldName
-type ColumnFieldsMap = Set<FieldKey>
-
 [<NoComparison>]
 type ResolvedComputedField =
     { expression : LinkedLocalFieldExpr
       // Set when there's no dereferences in the expression
       isLocal : bool
-      usedColumnFields : ColumnFieldsMap
+      // Set when computed field uses Id
+      hasId : bool
+      usedSchemas : UsedSchemas
     }
 
 [<NoComparison>]
-type ResolvedField =
-    | RColumnField of ResolvedColumnField
-    | RComputedField of ResolvedComputedField
+type GenericResolvedField<'col, 'comp> =
+    | RColumnField of 'col
+    | RComputedField of 'comp
     | RId
+
+type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedField>
+
+let inline genericFindField (columnFields : Map<FieldName, 'col>) (computedFields : Map<FieldName, 'comp>) (mainField : FieldName) =
+    let rec traverse (name : FieldName) =
+        if name = funId then
+            Some (funId, RId)
+        else if name = funMain then
+            traverse mainField
+        else
+            match Map.tryFind name columnFields with
+            | Some col -> Some (name, RColumnField col)
+            | None ->
+                match Map.tryFind name computedFields with
+                | Some comp -> Some (name, RComputedField comp)
+                | None -> None
+    traverse
 
 [<NoComparison>]
 type ResolvedEntity =
@@ -67,17 +83,7 @@ type ResolvedEntity =
       forbidExternalReferences : bool
     } with
         member this.FindField (name : FieldName) =
-            if name = funId then
-                Some (funId, RId)
-            else if name = funMain then
-                this.FindField this.mainField
-            else
-                match Map.tryFind name this.columnFields with
-                | Some col -> Some (name, RColumnField col)
-                | None ->
-                    match Map.tryFind name this.computedFields with
-                    | Some comp -> Some (name, RComputedField comp)
-                    | None -> None
+            genericFindField this.columnFields this.computedFields this.mainField name
 
 [<NoComparison>]
 type ResolvedSchema =

@@ -19,44 +19,10 @@ let private checkName (FunQLName name) : unit =
     if not <| goodName name then
         raisef ResolvePermissionsException "Invalid role name"
 
-let private mergeWhere (a : LocalFieldExpr option) (b : LocalFieldExpr option) =
-    match (a, b) with
-    | (None, _) -> None
-    | (_, None) -> None
-    | (Some e1, Some e2) -> Some <| FEOr (e1, e2)
+type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissions : SourcePermissions) =
+    let mutable goodParents = Set.empty
 
-let private mergeRestrictions (a : Restrictions option) (b : Restrictions option) =
-    match (a, b) with
-    | (Some r1, Some r2) -> Some <| Map.union r1 r2
-    | _ -> None
-
-let private mergeAllowedEntity (a : FlatAllowedEntity) (b : FlatAllowedEntity) : FlatAllowedEntity =
-    { fields = Map.unionWith (fun _ -> mergeRestrictions) a.fields b.fields
-    }
-
-let private mergeAllowedSchema (a : FlatAllowedSchema) (b : FlatAllowedSchema) : FlatAllowedSchema =
-    { entities = Map.unionWith (fun name -> mergeAllowedEntity) a.entities b.entities
-    }
-
-let private mergeAllowedDatabase (a : FlatAllowedDatabase) (b : FlatAllowedDatabase) : FlatAllowedDatabase =
-    { schemas = Map.unionWith (fun name -> mergeAllowedSchema) a.schemas b.schemas
-    }
-
-let private flatAllowedEntity (ent : AllowedEntity) : FlatAllowedEntity =
-    let restrictions = Option.map (fun (where : LocalFieldExpr) -> Map.singleton (where.ToFunQLString()) where) ent.where
-    { fields = ent.fields |> Set.toSeq |> Seq.map (fun field -> (field, restrictions)) |> Map.ofSeq
-    }
-
-let private flatAllowedSchema (schema : AllowedSchema) : FlatAllowedSchema =
-    { entities = Map.map (fun name -> flatAllowedEntity) schema.entities
-    }
-
-let private flatAllowedDatabase (db : AllowedDatabase) : FlatAllowedDatabase =
-    { schemas = Map.map (fun name -> flatAllowedSchema) db.schemas
-    }
-
-type private Phase1Resolver (layout : Layout) =
-    let resolveWhere (entity : ResolvedEntity) (where : string) =
+    let resolveCondition (entity : ResolvedEntity) (allowIds : bool) (where : string) =
         let whereExpr =
             match parse tokenizeFunQL fieldExpr where with
             | Ok r -> r
@@ -66,11 +32,18 @@ type private Phase1Resolver (layout : Layout) =
             | { ref = { entity = None; name = name }; path = [||] } ->
                 match entity.FindField name with
                 | None -> raisef ResolvePermissionsException "Column not found in restriction expression: %O" name
-                | Some (_, RId)
+                | Some (_, RId) ->
+                    if allowIds then
+                        name
+                    else
+                        raisef ResolvePermissionsException "Ids aren't allowed in this restriction expression: %O" name
                 | Some (_, RColumnField _) -> name
                 | Some (_, RComputedField comp) ->
                     if comp.isLocal then
-                        name
+                        if allowIds || not comp.hasId then
+                            name
+                        else
+                            raisef ResolvePermissionsException "Ids aren't allowed in this restriction expression: %O" name
                     else
                         raisef ResolvePermissionsException "Non-local computed field reference in restriction expression: %O" name
             | ref ->
@@ -82,114 +55,199 @@ type private Phase1Resolver (layout : Layout) =
 
         mapFieldExpr id resolveColumn voidPlaceholder voidQuery whereExpr
 
-    let resolveAllowedEntity (entity : ResolvedEntity) (allowedEntity : SourceAllowedEntity) : AllowedEntity =
+    let resolveAllowedField (entity : ResolvedEntity) (allowedField : SourceAllowedField) : AllowedField =
+        let resolveOne = Option.map (resolveCondition entity true)
+        { change = allowedField.change
+          select = resolveOne allowedField.select
+        }
+
+    // bool - is it broken?
+    let resolveAllowedEntity (entity : ResolvedEntity) (allowedEntity : SourceAllowedEntity) : (exn option * AllowedEntity) =
+        let mutable error = None
+    
+        let mapField name (allowedField : SourceAllowedField) =
+            try
+                checkName name
+                if not <| Map.containsKey name entity.columnFields then
+                    raisef ResolvePermissionsException "Unknown field"
+                if allowedField.change && Option.isNone allowedEntity.check then
+                    raisef ResolvePermissionsException "Cannot allow to change without providing check expression"
+                resolveAllowedField entity allowedField
+            with
+            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed field %O: %s" name e.Message
         let checkField fieldName =
             if not <| Map.containsKey fieldName entity.columnFields then
                 raisef ResolvePermissionsException "Undefined column field: %O" fieldName
-        allowedEntity.fields |> Seq.iter checkField
 
-        { fields = allowedEntity.fields
-          where = Option.map (resolveWhere entity) allowedEntity.where
-        }
+        let resolveOne allowIds = Option.map (resolveCondition entity allowIds)
+        let fields = allowedEntity.fields |> Map.map mapField
 
-    let resolveAllowedSchema (schema : ResolvedSchema) (allowedSchema : SourceAllowedSchema) : AllowedSchema =
+        let insert =
+            if not allowedEntity.insert then
+                Ok false
+            else
+                try
+                    // Check than we can change all required fields.
+                    if Option.isNone allowedEntity.check then
+                        raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
+                    for KeyValue(fieldName, field) in entity.columnFields do
+                        if Option.isNone field.defaultValue && not field.isNullable then
+                            match Map.tryFind fieldName fields with
+                            | Some { change = true } -> ()
+                            | _ -> raisef ResolvePermissionsException "Required field %O is not allowed for inserting" fieldName
+                    Ok true
+                with
+                | :? ResolvePermissionsException as e when allowedEntity.allowBroken || forceAllowBroken ->
+                    error <- Some (e :> exn)
+                    Error (e :> exn)
+
+        let resolveDelete delete =
+            try
+                // Check that we can read all fields.
+                if Option.isNone allowedEntity.select then
+                    raisef ResolvePermissionsException "Read access needs to be granted to delete records"
+                for KeyValue(fieldName, field) in entity.columnFields do
+                    match Map.tryFind fieldName fields with
+                    | Some { select = Some _ } -> ()
+                    | _ -> raisef ResolvePermissionsException "Read access to field %O needs to be granted to delete records" fieldName
+                Ok <| resolveCondition entity true delete
+            with
+            | :? ResolvePermissionsException as e when allowedEntity.allowBroken || forceAllowBroken ->
+                error <- Some (e :> exn)
+                Error ({ source = delete; error = e } : AllowedOperationError)            
+
+        if Option.isSome allowedEntity.update && Option.isNone allowedEntity.check then
+            raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
+
+        let ret =
+            { allowBroken = allowedEntity.allowBroken
+              fields = fields
+              check = resolveOne false allowedEntity.check
+              insert = insert
+              select = resolveOne true allowedEntity.select
+              update = resolveOne true allowedEntity.update
+              delete = Option.map resolveDelete allowedEntity.delete
+            }
+        (error, ret)
+
+    let resolveAllowedSchema (schema : ResolvedSchema) (allowedSchema : SourceAllowedSchema) : ErroredAllowedSchema * AllowedSchema =
+        let mutable errors = Map.empty
+    
         let mapEntity name allowedEntity =
             try
                 let entity =
                     match Map.tryFind name schema.entities with
                     | None -> raisef ResolvePermissionsException "Undefined entity"
                     | Some s -> s
-                resolveAllowedEntity entity allowedEntity
+                try
+                    let (error, ret) = resolveAllowedEntity entity allowedEntity
+                    match error with
+                    | Some e ->
+                        errors <- Map.add name e errors
+                    | None -> ()                    
+                    Ok ret
+                with
+                | :? ResolvePermissionsException as e when allowedEntity.allowBroken || forceAllowBroken ->
+                    errors <- Map.add name (e :> exn) errors
+                    Error { source = allowedEntity; error = e }
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed entity %O: %s" name e.Message
-        { entities = allowedSchema.entities |> Map.map mapEntity
-        }
+        
+        let ret =
+            { entities = allowedSchema.entities |> Map.map mapEntity
+            }
+        (errors, ret)
 
-    let resolveAllowedDatabase (db : SourceAllowedDatabase) : AllowedDatabase =
+    let resolveAllowedDatabase (db : SourceAllowedDatabase) : ErroredAllowedDatabase * AllowedDatabase =
+        let mutable errors = Map.empty
+    
         let mapSchema name allowedSchema =
             try
                 let schema =
                     match Map.tryFind name layout.schemas with
                     | None -> raisef ResolvePermissionsException "Undefined schema"
                     | Some s -> s
-                resolveAllowedSchema schema allowedSchema
+                let (schemaErrors, newAllowed) = resolveAllowedSchema schema allowedSchema
+                if not <| Map.isEmpty schemaErrors then
+                    errors <- Map.add name schemaErrors errors
+                newAllowed              
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed schema %O: %s" name e.Message
-        { schemas = db.schemas |> Map.map mapSchema
-        }
+        
+        let ret =
+            { schemas = db.schemas |> Map.map mapSchema
+            } : AllowedDatabase
+        (errors, ret)
 
-    let resolveRole (role : SourceRole) : ResolvedRole =
-        let resolvedDb = resolveAllowedDatabase role.permissions
-        { parents = role.parents
-          permissions = resolvedDb
-          flatPermissions = flatAllowedDatabase resolvedDb
-        }
+    let rec checkParents (stack : Set<ResolvedRoleRef>) (ref : ResolvedRoleRef) (role : SourceRole) : unit =
+        if Set.contains ref goodParents then
+            ()
+        else
+            if Set.contains ref stack then
+                raisef ResolvePermissionsException "Cycle detected: %O" stack
+            let newStack = Set.add ref stack
+            let checkParent (parent : ResolvedRoleRef) =
+                let schema =
+                    match Map.tryFind parent.schema permissions.schemas with
+                    | None -> raisef ResolvePermissionsException "Undefined parent schema for %O" parent
+                    | Some s -> s
+                let parentRole =
+                    match Map.tryFind parent.name schema.roles with
+                    | None -> raisef ResolvePermissionsException "Undefined parent role for %O" parent
+                    | Some s -> s            
+                checkParents newStack parent parentRole
+            role.parents |> Set.iter checkParent
+            goodParents <- Set.add ref goodParents
 
-    let resolvePermissionsSchema (schema : SourcePermissionsSchema) : PermissionsSchema =
+    let resolveRole (ref : ResolvedRoleRef) (role : SourceRole) : ErroredAllowedDatabase * ResolvedRole =
+        let (errors, resolvedDb) = resolveAllowedDatabase role.permissions
+        checkParents Set.empty ref role
+        let ret =
+            { parents = role.parents
+              permissions = resolvedDb
+            }
+        (errors, ret)
+
+    let resolvePermissionsSchema (schemaName : SchemaName) (schema : SourcePermissionsSchema) : ErroredRoles * PermissionsSchema =
+        let mutable errors = Map.empty
+
         let mapRole name role =
             try
                 checkName name
-                resolveRole role
+                let ref = { schema = schemaName; name = name }                
+                let (roleErrors, newRole) = resolveRole ref role
+                if not <| Map.isEmpty roleErrors then
+                    errors <- Map.add name roleErrors errors
+                newRole            
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in role %O: %s" name e.Message
-        { roles = schema.roles |> Map.map mapRole
-        }
+        
+        let ret =
+            { roles = schema.roles |> Map.map mapRole
+            }
+        (errors, ret)
 
-    let resolvePermissions (perms : SourcePermissions) : Permissions =
+    let resolvePermissions () : ErroredPermissions * Permissions =
+        let mutable errors = Map.empty
+    
         let mapSchema name schema =
             try
                 if not <| Map.containsKey name layout.schemas then
                     raisef ResolvePermissionsException "Unknown schema name"
-                resolvePermissionsSchema schema
+                let (schemaErrors, newSchema) = resolvePermissionsSchema name schema
+                if not <| Map.isEmpty schemaErrors then
+                    errors <- Map.add name schemaErrors errors
+                newSchema
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in schema %O: %s" name e.Message
-        { schemas = perms.schemas |> Map.map mapSchema
-        }
+        
+        let ret =
+            { schemas = permissions.schemas |> Map.map mapSchema
+            }
+        (errors, ret)
 
     member this.ResolvePermissions = resolvePermissions
 
-type private RolesFlattener (layout : Layout, perms : Permissions) =
-    let mutable flattened : Map<RoleRef, FlatAllowedDatabase> = Map.empty
-
-    let rec flattenRoleByKey (stack : Set<RoleRef>) (parentRole : RoleRef) (name : RoleRef) : FlatAllowedDatabase =
-        match Map.tryFind name flattened with
-        | Some res -> res
-        | None ->
-            if Set.contains name stack then
-                raisef ResolvePermissionsException "Cycle detected: %O" stack
-            let role =
-                match Map.tryFind name.schema perms.schemas with
-                | None -> raisef ResolvePermissionsException "Unknown parent role of %O: %O" parentRole name
-                | Some schema ->
-                    match Map.tryFind name.name schema.roles with
-                    | None -> raisef ResolvePermissionsException "Unknown parent role of %O: %O" parentRole name
-                    | Some s -> s
-            let newStack = Set.add name stack
-
-            flattenRole newStack name role
-
-    and flattenRole (stack : Set<RoleRef>) (name : RoleRef) (role : ResolvedRole) : FlatAllowedDatabase =
-            let flat = role.parents |> Set.toSeq |> Seq.map (flattenRoleByKey stack name) |> Seq.fold mergeAllowedDatabase role.flatPermissions
-            flattened <- Map.add name flat flattened
-            flat
-
-    let flattenPermissionsSchema schemaName (schema : PermissionsSchema) =
-        let resolveOne entityName role =
-            let ref = { schema = schemaName; name = entityName }
-            { role with
-                  flatPermissions = flattenRole (Set.singleton ref) ref role
-            }
-        { roles = Map.map resolveOne schema.roles
-        }
-
-    let flattenPermissions () =
-        { schemas = Map.map flattenPermissionsSchema perms.schemas
-        }
-
-    member this.FlattenRoles = flattenPermissions
-
-let resolvePermissions (layout : Layout) (source : SourcePermissions) : Permissions =
-    let phase1 = Phase1Resolver layout
-    let perms1 = phase1.ResolvePermissions source
-    let flattener = RolesFlattener (layout, perms1)
-    flattener.FlattenRoles ()
+let resolvePermissions (layout : Layout) (forceAllowBroken : bool) (source : SourcePermissions) : ErroredPermissions * Permissions =
+    let phase1 = Phase1Resolver (layout, forceAllowBroken, source)
+    phase1.ResolvePermissions ()

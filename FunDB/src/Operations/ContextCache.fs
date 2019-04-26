@@ -13,9 +13,12 @@ open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
 open FunWithFlags.FunDB.Layout.Resolve
+open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Schema
 open FunWithFlags.FunDB.Permissions.Resolve
+open FunWithFlags.FunDB.Permissions.Update
+open FunWithFlags.FunDB.Permissions.Flatten
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Resolve
@@ -28,7 +31,6 @@ open FunWithFlags.FunDB.SQL.Migration
 module SQL = FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.Operations.Connection
 open FunWithFlags.FunDB.Operations.Preload
-open Newtonsoft.Json
 
 type ContextException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -39,7 +41,7 @@ type ContextException (message : string, innerException : Exception) =
 type CachedRequestContext =
     { layout : Layout
       userViews : UserViews
-      permissions : Permissions
+      permissions : FlatPermissions
       systemViews : SourceUserViews
       userMeta : SQL.DatabaseMeta
     }
@@ -73,40 +75,6 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
     let filterUserLayout (layout : Layout) : Layout =
         { schemas = filterUserSchemas preload layout.schemas }
 
-    let initialRebuild (conn : DatabaseConnection) (layout : Layout) (userMeta : SQL.DatabaseMeta) (forceBrokenUvs : bool) = task {
-        logger.LogInformation("Updating system user views")
-        let sourceSystemUvs = preloadUserViews layout preload
-        let! _ = updateUserViews conn.System sourceSystemUvs
-
-        let! sourcePermissions = buildSchemaPermissions conn.System
-        let permissions = resolvePermissions layout sourcePermissions
-
-        let! sourceUvs = buildSchemaUserViews conn.System
-        let! (brokenUvs, userViews) = resolveUserViews conn.Query layout forceBrokenUvs sourceUvs
-
-        if forceBrokenUvs && not (Map.isEmpty brokenUvs) then
-            let mutable critical = false
-            for KeyValue(schemaName, schema) in brokenUvs do
-                for uvName in schema do
-                    let err = Map.find uvName (Map.find schemaName userViews.schemas).userViews |> Result.getError
-                    if Map.containsKey schemaName preload.schemas then
-                        critical <- true
-                        logger.LogError(err.error, "System view {uv} is broken", ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString())
-                    else
-                        logger.LogWarning(err.error, "Marking {uv} as broken", ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString())
-            if critical then
-                failwith "Broken system user views"
-            do! markBrokenUserViews conn.System brokenUvs
-
-        return
-            { layout = layout
-              permissions = permissions
-              userViews = userViews
-              systemViews = sourceSystemUvs
-              userMeta = userMeta
-            }
-    }
-
     // Called when state update by another instance is detected.
     let rebuildFromDatabase (conn : DatabaseConnection) = task {
         let! meta = buildDatabaseMeta conn.Transaction
@@ -116,7 +84,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
         let layout = resolveLayout sourceLayout
 
         let! sourcePermissions = buildSchemaPermissions conn.System
-        let permissions = resolvePermissions layout sourcePermissions
+        let (_, permissions) = resolvePermissions layout false sourcePermissions
 
         let! sourceUvs = buildSchemaUserViews conn.System
         let! (_, userViews) = resolveUserViews conn.Query layout false sourceUvs
@@ -126,7 +94,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
         return
             { layout = layout
-              permissions = permissions
+              permissions = flattenPermissions layout permissions
               userViews = userViews
               systemViews = systemViews
               userMeta = userMeta
@@ -166,30 +134,51 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
             logger.LogInformation("Updating system user views")
             let systemViews = preloadUserViews layout preload
             let! _ = updateUserViews conn.System systemViews
-
-            let! sourcePermissions = buildSchemaPermissions conn.System
-            let permissions = resolvePermissions layout sourcePermissions
-
+        
             let! sourceViews = buildSchemaUserViews conn.System
             let! (brokenViews, userViews) = resolveUserViews conn.Query layout true sourceViews
 
             if not (Map.isEmpty brokenViews) then
                 let mutable critical = false
                 for KeyValue(schemaName, schema) in brokenViews do
-                    for uvName in schema do
-                        let err = Map.find uvName (Map.find schemaName userViews.schemas).userViews |> Result.getError
-                        if Map.containsKey schemaName preload.schemas then
-                            critical <- true
-                            logger.LogError(err.error, "System view {uv} is broken", ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString())
+                    let isSystem = Map.containsKey schemaName preload.schemas
+                    if isSystem then
+                        critical <- true
+                    for KeyValue(uvName, err) in schema do
+                        let uvName = ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString()
+                        if isSystem then
+                            logger.LogError(err, "System view {uv} is broken", uvName)
                         else
-                            logger.LogWarning(err.error, "Marking {uv} as broken", ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString())
+                            logger.LogWarning(err, "Marking {uv} as broken", uvName)
                 if critical then
                     failwith "Broken system user views"
-                do! markBrokenUserViews conn.System brokenViews
+                do! markBrokenUserViews conn.System brokenViews  
+
+            let! sourcePermissions = buildSchemaPermissions conn.System
+            let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
+
+            if not (Map.isEmpty brokenPerms) then
+                let mutable critical = false
+                for KeyValue(schemaName, schema) in brokenPerms do
+                    let isSystem = Map.containsKey schemaName preload.schemas
+                    if isSystem then
+                        critical <- true            
+                    for KeyValue(roleName, role) in schema do
+                        for KeyValue(allowedSchemaName, allowedSchema) in role do
+                            for KeyValue(allowedEntityName, err) in allowedSchema do
+                                let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()           
+                                let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()                                                     
+                                if isSystem then
+                                    logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
+                                else
+                                    logger.LogWarning(err, "Marking {uv} as broken for entity {entity}", roleName, allowedName)
+                if critical then
+                    failwith "Broken system roles"
+                do! markBrokenPermissions conn.System brokenPerms
 
             let state =
                 { layout = layout
-                  permissions = permissions
+                  permissions = flattenPermissions layout permissions
                   userViews = userViews
                   systemViews = systemViews
                   userMeta = userMeta
@@ -235,9 +224,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                 let! permissionsSource = buildSchemaPermissions conn.System
                 if not <| preloadPermissionsAreUnchanged permissionsSource preload then
                     raisef ResolveLayoutException "Cannot modify system permissions"
-                let permissions =
+                let (_, permissions) =
                     try
-                        resolvePermissions layout permissionsSource
+                        resolvePermissions layout false permissionsSource
                     with
                     | :? ResolvePermissionsException as err -> raisefWithInner ContextException err "Failed to resolve permissions"
 
@@ -251,7 +240,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                 try
                     for action in migration do
                         logger.LogInformation("Migration step: {}", action)
-                        do! conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+                        let! _ = conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+                        ()
                 with
                 | :? QueryException as err -> raisefWithInner ContextException err "Migration error"
 
@@ -269,7 +259,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
                 let newState =
                     { layout = layout
-                      permissions = permissions
+                      permissions = flattenPermissions layout permissions
                       userViews = userViews
                       systemViews = newSystemViews
                       userMeta = wantedUserMeta

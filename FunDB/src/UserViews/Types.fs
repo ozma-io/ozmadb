@@ -88,7 +88,8 @@ type UserViews =
             | None -> None
             | Some schema -> Map.tryFind ref.name schema.userViews
 
-type ErroredUserViews = Map<SchemaName, Set<UserViewName>>
+type ErroredUserViewsSchema = Map<UserViewName, exn>
+type ErroredUserViews = Map<SchemaName, ErroredUserViewsSchema>
 
 // Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
 let globalArgumentTypes: Map<ArgumentName, ParsedFieldType> =

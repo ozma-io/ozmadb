@@ -97,6 +97,130 @@
           "mainField": "Name"
         }
 
+      },
+
+      "roles": {
+        "Observer": {
+          "permissions": {
+            "schemas": {
+
+              "public": {
+                "entities": {
+
+                  "Schemas": {
+                    "select": "true",
+                    "fields": {
+                      "Name": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
+                  "UserViews": {
+                    "select": "true",
+                    "fields": {
+                      "SchemaId": {
+                        "select": "true"
+                      },
+                      "Name": {
+                        "select": "true"
+                      }
+                    }
+                  }
+
+                }
+              },
+
+              "funapp": {
+                "entities": {
+
+                  "Settings": {
+                    "select": "true",
+                    "fields": {
+                      "Name": {
+                        "select": "true"
+                      },
+                      "Value": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
+                  "MainMenuCategories": {
+                    "select": "true",
+                    "fields": {
+                      "Name": {
+                        "select": "true"
+                      },
+                      "OrdinalPosition": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
+                  "MainMenuButtons": {
+                    "select": "true",
+                    "fields": {
+                      "CategoryId": {
+                        "select": "true"
+                      },
+                      "SchemaName": {
+                        "select": "true"
+                      },
+                      "UserViewName": {
+                        "select": "true"
+                      },
+                      "OrdinalPosition": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
+                  "UserViewTranslations": {
+                    "select": "true",
+                    "fields": {
+                      "SchemaName": {
+                        "select": "true"
+                      },
+                      "UserViewName": {
+                        "select": "true"
+                      },
+                      "Language": {
+                        "select": "true"
+                      },
+                      "Translation": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
+                  "FieldTranslations": {
+                    "select": "true",
+                    "fields": {
+                      "SchemaName": {
+                        "select": "true"
+                      },
+                      "EntityName": {
+                        "select": "true"
+                      },
+                      "FieldName": {
+                        "select": "true"
+                      },
+                      "Language": {
+                        "select": "true"
+                      },
+                      "Translation": {
+                        "select": "true"
+                      }
+                    }
+                  }
+
+                }
+              }
+
+            }
+          }
+        }
       }
 
     }

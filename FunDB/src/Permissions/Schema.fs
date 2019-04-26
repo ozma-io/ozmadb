@@ -12,18 +12,21 @@ open FunWithFlags.FunDB.FunQL.AST
 type SchemaRolesException (message : string) =
     inherit Exception(message)
 
-let private makeSourceAllowedEntity (entity : RoleEntity) : SourceAllowedEntity =
-    let checkColumnField (col : RoleColumnField) =
-        if col.ColumnField.EntityId <> entity.EntityId then
-            raisef SchemaRolesException "Role column field \"%s\" doesn't correspond to entity \"%s\"" col.ColumnField.Name entity.Entity.Name
-    entity.ColumnFields |> Seq.iter checkColumnField
+let private makeSourceAllowedField (field : RoleColumnField) : SourceAllowedField =
+    { change = field.Change
+      select = Option.ofNull field.Select
+    }
 
-    { fields = entity.ColumnFields |> Seq.map (fun col -> FunQLName col.ColumnField.Name) |> Set.ofSeqUnique
-      where =
-        if isNull entity.Where then
-            None
-        else
-            Some entity.Where
+let private makeSourceAllowedEntity (entity : RoleEntity) : SourceAllowedEntity =
+    let fields = entity.ColumnFields |> Seq.map (fun col -> (FunQLName col.ColumnName, makeSourceAllowedField col)) |> Map.ofSeqUnique
+
+    { fields = fields
+      allowBroken = entity.AllowBroken
+      check = Option.ofNull entity.Check
+      insert = entity.Insert
+      select = Option.ofNull entity.Select
+      update = Option.ofNull entity.Update
+      delete = Option.ofNull entity.Delete
     }
 
 let private makeSourceAllowedEntities (entity : RoleEntity) : Map<EntityName, SourceAllowedEntity> =

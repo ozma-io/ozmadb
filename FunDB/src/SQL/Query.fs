@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.SQL.Query
 
 open System
 open System.Linq
+open System.Collections.Generic
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Npgsql
@@ -151,10 +152,22 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 return raisefWithInner QueryException ex "Error while executing"
         }
 
-    member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) : Task<unit> =
+    member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) : Task<int> =
+        withCommand queryStr pars <| fun command -> command.ExecuteNonQueryAsync()
+
+    member this.ExecuteIdQuery (queryStr : string) (pars : ExprParameters) : Task<int> =
         withCommand queryStr pars <| fun command -> task {
-            let! _ = command.ExecuteNonQueryAsync()
-            return ()
+            use! reader = command.ExecuteReaderAsync()
+            if reader.FieldCount <> 1 then
+                raisef QueryException "Not one column"
+            let! hasRow0 = reader.ReadAsync()
+            if not hasRow0 then
+                raisef QueryException "No first row"
+            let errorId = reader.GetInt32(0)
+            let! hasRow1 = reader.ReadAsync()
+            if hasRow1 then
+                raisef QueryException "Has a first row"
+            return errorId
         }
 
     member this.ExecuteQuery (queryStr : string) (pars : ExprParameters) (queryFunc : QueryResult -> Task<'a>) : Task<'a> =
@@ -168,10 +181,17 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             let getRow i =
                 let (_, typ) = columns.[i]
                 reader.[i] |> convertValue typ
-            let rows =
-                seq {
-                    while reader.Read() do
-                        yield seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
-                }
+            
+            let rows = List()
+            // ??? F# ???
+            let mutable hasRow = false
+            let! hasRow0 = reader.ReadAsync()
+            hasRow <- hasRow0
+            while hasRow do
+                let row = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
+                rows.Add(row)
+                let! hasRow1 = reader.ReadAsync()
+                hasRow <- hasRow1
+                
             return! queryFunc { columns = columns; rows = rows }
         }

@@ -9,6 +9,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
+open FunWithFlags.FunDB.Permissions.Types
 
 type private EntityKey = SchemaName * EntityName
 
@@ -20,35 +21,37 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
         |> Seq.collect (fun schema -> schema.Entities |> Seq.map (fun entity -> ((FunQLName schema.Name, FunQLName entity.Name), entityToInfo entity)))
         |> Map.ofSeqUnique
 
+    let updateAllowedField (field : SourceAllowedField) (existingField : RoleColumnField) : unit =
+        existingField.Change <- field.change
+        existingField.Select <- Option.toNull field.select
+
     let updateAllowedFields (entityKey : EntityKey) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) =
         let oldFieldsMap =
             existingEntity.ColumnFields
-            |> Seq.map (fun roleField -> (FunQLName roleField.ColumnField.Name, roleField))
+            |> Seq.map (fun roleField -> (FunQLName roleField.ColumnName, roleField))
             |> Map.ofSeqUnique
-
-        let fieldsMap =
-            entity.fields |> Set.toSeq |> Seq.map (fun name -> (name, ())) |> Map.ofSeq
 
         let (_, allFieldsMap) = Map.find entityKey allEntitiesMap
 
-        let updateFunc _ a b = ()
-        let createFunc fieldName =
-            let fieldId = Map.find fieldName allFieldsMap
+        let updateFunc _ = updateAllowedField
+        let createFunc (FunQLName fieldName) =
             let newField =
                 RoleColumnField (
-                    ColumnFieldId = fieldId
+                    ColumnName = fieldName
                 )
             existingEntity.ColumnFields.Add(newField)
             newField
-        updateDifference db updateFunc createFunc fieldsMap oldFieldsMap
+        updateDifference db updateFunc createFunc entity.fields oldFieldsMap
 
     let updateAllowedEntity (entityKey : EntityKey) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) : unit =
         updateAllowedFields entityKey entity existingEntity
-        match entity.where with
-        | None ->
-            existingEntity.Where <- null
-        | Some whereStr ->
-            existingEntity.Where <- whereStr
+        
+        existingEntity.AllowBroken <- entity.allowBroken
+        existingEntity.Insert <- entity.insert
+        existingEntity.Check <- Option.toNull entity.check
+        existingEntity.Select <- Option.toNull entity.select
+        existingEntity.Update <- Option.toNull entity.update
+        existingEntity.Delete <- Option.toNull entity.delete
 
     let updateAllowedDatabase (role : SourceRole) (existingRole : Role) : unit =
         let oldEntitiesMap =
@@ -109,4 +112,30 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) : Task<bo
         updater.UpdateSchemas roles.schemas schemasMap
         let! changedEntries = db.SaveChangesAsync()
         return changedEntries > 0
+    }
+
+let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) : Task<unit> =
+    task {
+        let currentSchemas = db.Schemas |> getFieldsObjects |> getRolesObjects
+
+        let! schemasMap =
+            currentSchemas.AsTracking().ToListAsync()
+
+        for schema in schemasMap do
+            match Map.tryFind (FunQLName schema.Name) perms with
+            | None -> ()
+            | Some schemaErrors ->
+                for role in schema.Roles do
+                    match Map.tryFind (FunQLName role.Name) schemaErrors with
+                    | None -> ()
+                    | Some roleErrors ->
+                        for entity in role.Entities do
+                            match Map.tryFind (FunQLName entity.Entity.Schema.Name) roleErrors with
+                            | None -> ()
+                            | Some entityErrors ->
+                                if Map.containsKey (FunQLName entity.Entity.Name) entityErrors then
+                                    entity.AllowBroken <- true
+    
+        let! _ = db.SaveChangesAsync()
+        return ()
     }

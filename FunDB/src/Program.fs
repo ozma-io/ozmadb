@@ -19,7 +19,6 @@ open Npgsql
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.API.Utils
 open FunWithFlags.FunDB.API.View
-open FunWithFlags.FunDB.API.Permissions
 open FunWithFlags.FunDB.API.Entity
 open FunWithFlags.FunDB.API.SaveRestore
 open FunWithFlags.FunDB.Operations.ContextCache
@@ -63,7 +62,6 @@ let main (args : string[]) : int =
 
         choose
             [ viewsApi apiSettings
-              permissionsApi apiSettings
               entitiesApi apiSettings
               saveRestoreApi apiSettings
               (setStatusCode 404 >=> text "Not Found")

@@ -82,6 +82,8 @@ type private HalfResolvedEntity =
       mainField : FieldName
       forbidExternalReferences : bool
     }
+        member this.FindField (name : FieldName) =
+            genericFindField this.columnFields this.computedFields this.mainField name
 
 [<NoComparison>]
 type private HalfResolvedSchema =
@@ -189,36 +191,50 @@ type private Phase1Resolver (layout : SourceLayout) =
 
     member this.ResolveLayout = resolveLayout
 
+type private ComputedFieldProperties =
+    { isLocal : bool
+      hasId : bool
+      usedSchemas : UsedSchemas
+    }
+
 type private Phase2Resolver (layout : HalfResolvedLayout) =
-    let rec checkPath (entity : HalfResolvedEntity) (fieldName : FieldName) = function
+    let mutable cachedComputedFields : Map<ResolvedFieldRef, ResolvedComputedField> = Map.empty  
+
+    let rec checkPath (stack : Set<ResolvedFieldRef>) (usedSchemas : UsedSchemas) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (fields : FieldName list) : ComputedFieldProperties =
+        match fields with  
         | [] ->
-            // Should be in sync with ResolvedEntity.FindField
-            if fieldName = funId then
-                ()
-            else if fieldName = funMain then
-                ()
-            else
-                match Map.tryFind fieldName entity.columnFields with
-                | Some col -> ()
-                | None ->
-                    match Map.tryFind fieldName entity.computedFields with
-                    | Some comp -> ()
-                    | None -> raisef ResolveLayoutException "Column field not found in path: %O" fieldName
+            match entity.FindField fieldRef.name with
+            | Some (_, RId) ->
+                { isLocal = true; hasId = true; usedSchemas = usedSchemas }
+            | Some (_, RComputedField comp) ->
+                let field = resolveComputedField stack entity fieldRef comp
+                { isLocal = field.isLocal; hasId = field.hasId; usedSchemas = mergeUsedSchemas usedSchemas field.usedSchemas }
+            | Some (_, RColumnField _) ->
+                let newUsed = addUsedField fieldRef.entity.schema fieldRef.entity.name fieldRef.name usedSchemas
+                { isLocal = true; hasId = false; usedSchemas = newUsed }
+            | None -> raisef ResolveLayoutException "Column field not found in path: %O" fieldRef.name
         | (ref :: refs) ->
-            match Map.tryFind fieldName entity.columnFields with
+            match Map.tryFind fieldRef.name entity.columnFields with
             | Some { fieldType = FTReference (refEntity, _) } ->
                 let newEntity = Map.find refEntity.name (Map.find refEntity.schema layout.schemas).entities
-                checkPath newEntity ref refs
+                let newUsed = addUsedFieldRef fieldRef usedSchemas
+                let ret = checkPath stack newUsed newEntity { entity = refEntity; name = ref } refs
+                { ret with isLocal = false }
             | _ -> raisef ResolveLayoutException "Invalid dereference in path: %O" ref
 
-    let resolveComputedExpr (entity : HalfResolvedEntity) (expr : ParsedFieldExpr) : bool * LinkedLocalFieldExpr =
+    and resolveComputedExpr (stack : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) (expr : ParsedFieldExpr) : ResolvedComputedField =
         let mutable isLocal = true
+        let mutable hasId = false
+        let mutable usedSchemas = Map.empty
 
         let resolveColumn : LinkedFieldRef -> LinkedFieldName = function
             | { ref = { entity = None; name = name }; path = path } ->
-                checkPath entity name (Array.toList path)
-                if not <| Array.isEmpty path then
+                let res = checkPath stack usedSchemas entity { entity = entityRef; name = name } (Array.toList path)
+                usedSchemas <- res.usedSchemas
+                if not res.isLocal then
                     isLocal <- false
+                if res.hasId then
+                    hasId <- true
                 { ref = name; path = path }
             | ref ->
                 raisef ResolveLayoutException "Invalid reference in computed column: %O" ref
@@ -228,18 +244,26 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
             raisef ResolveLayoutException "Queries are not allowed in computed columns: %O" query
 
         let exprRes = mapFieldExpr id resolveColumn voidPlaceholder voidQuery expr
-        (isLocal, exprRes)
-
-    let resolveComputedField (entity : HalfResolvedEntity) (comp : SourceComputedField) : ResolvedComputedField =
-        let computedExpr =
-            match parse tokenizeFunQL fieldExpr comp.expression with
-            | Ok r -> r
-            | Error msg -> raisef ResolveLayoutException "Error parsing computed field expression: %s" msg
-        let (isLocal, expr) = resolveComputedExpr entity computedExpr
-        { expression = expr
+        { expression = exprRes
           isLocal = isLocal
-          usedColumnFields = Set.empty
+          hasId = hasId
+          usedSchemas = usedSchemas
         }
+
+    and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : SourceComputedField) : ResolvedComputedField =
+        match Map.tryFind fieldRef cachedComputedFields with
+        | Some f -> f
+        | None ->
+            if Set.contains fieldRef stack then
+                raisef ResolveLayoutException "Cycle detected in computed fields: %O" stack
+            let computedExpr =
+                match parse tokenizeFunQL fieldExpr comp.expression with
+                | Ok r -> r
+                | Error msg -> raisef ResolveLayoutException "Error parsing computed field expression: %s" msg
+            let newStack = Set.add fieldRef stack
+            let field = resolveComputedExpr newStack fieldRef.entity entity computedExpr
+            cachedComputedFields <- Map.add fieldRef field cachedComputedFields
+            field
 
     let resolveCheckExpr (entity : ResolvedEntity) : ParsedFieldExpr -> LocalFieldExpr =
         let resolveColumn : LinkedFieldRef -> FieldName = function
@@ -271,11 +295,11 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
             | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing check constraint expression: %s" msg)
         { expression = resolveCheckExpr entity checkExpr }
 
-    let resolveEntity (entity : HalfResolvedEntity) : ResolvedEntity =
+    let resolveEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) : ResolvedEntity =
         let mapComputedField name field =
             try
                 checkFieldName name
-                resolveComputedField entity field
+                resolveComputedField Set.empty entity { entity = entityRef; name = name } field
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in computed field %O: %s" name e.Message
         let computedFields = Map.map mapComputedField entity.computedFields
@@ -299,10 +323,11 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
               checkConstraints = checkConstraints
         }
 
-    let resolveSchema (schema : HalfResolvedSchema) : ResolvedSchema =
+    let resolveSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : ResolvedSchema =
         let mapEntity name entity =
             try
-                resolveEntity entity
+                let ref = { schema = schemaName; name = name }
+                resolveEntity ref entity
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in entity %O: %s" name e.Message
         { entities = schema.entities |> Map.map mapEntity
@@ -311,7 +336,7 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
     let resolveLayout () =
         let mapSchema name schema =
             try
-                resolveSchema schema
+                resolveSchema name schema
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in schema %O: %s" name e.Message
         { schemas = Map.map mapSchema layout.schemas
@@ -319,59 +344,9 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
 
     member this.ResolveLayout = resolveLayout
 
-type private Phase3Resolver (layout : Layout) =
-    let mutable checkedFields : Set<ResolvedFieldRef> = Set.empty
-
-    let rec checkComputedFieldCycles (stack : Set<ResolvedFieldRef>) (fieldRef : ResolvedFieldRef) (entity : ResolvedEntity) (field : ResolvedComputedField) =
-        if Set.contains fieldRef checkedFields then
-            ()
-        else if Set.contains fieldRef stack then
-            raisef ResolveLayoutException "Cycle detected: %O" stack
-        else
-            let newStack = Set.add fieldRef stack
-
-            let checkColumn (linkedField : LinkedFieldName) =
-                checkPathCycles newStack fieldRef.entity entity (linkedField.ref :: Array.toList linkedField.path)
-            let noopPlaceholder name = ()
-            let noopQuery query = ()
-            iterFieldExpr ignore checkColumn noopPlaceholder noopQuery field.expression
-            checkedFields <- Set.add fieldRef checkedFields
-
-    and checkPathCycles (stack : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : FieldName list -> unit = function
-        | [] -> failwith "Unexpected empty list of references"
-        | [ref] ->
-            match entity.FindField ref |> Option.get with
-            | (_, RId)
-            | (_, RColumnField _) -> ()
-            | (_, RComputedField comp) ->
-                checkComputedFieldCycles stack { entity = entityRef; name = ref } entity comp
-        | (ref :: refs) ->
-            match entity.FindField ref |> Option.get with
-            | (_, RColumnField { fieldType = FTReference (newEntityRef, _) }) ->
-                let newEntity = layout.FindEntity newEntityRef |> Option.get
-                checkPathCycles stack newEntityRef newEntity refs
-            | _ -> failwith "Unexpected invalid reference"
-
-    let checkComputedFields (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) =
-        for KeyValue(fieldName, field) in entity.computedFields do
-            checkComputedFieldCycles Set.empty { entity = entityRef; name = fieldName } entity field
-
-    let checkEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) =
-        checkComputedFields entityRef entity
-
-    let checkSchema (schemaName : SchemaName) (schema : ResolvedSchema) =
-        schema.entities |> Map.iter (fun entityName entity -> checkEntity { schema = schemaName; name = entityName } entity)
-
-    let checkLayout () =
-        layout.schemas |> Map.iter checkSchema
-
-    member this.CheckLayout = checkLayout
-
 let resolveLayout (layout : SourceLayout) : Layout =
     let phase1 = Phase1Resolver layout
     let layout1 = phase1.ResolveLayout ()
     let phase2 = Phase2Resolver layout1
     let layout2 = phase2.ResolveLayout ()
-    let phase3 = Phase3Resolver layout2
-    phase3.CheckLayout ()
     layout2

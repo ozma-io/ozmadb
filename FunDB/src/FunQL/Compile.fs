@@ -47,8 +47,9 @@ let rec private mergeDomains (doms1 : Domains) (doms2 : Domains) : Domains =
     | (DMulti (ns1, subdoms1), (DMulti _ as doms2)) ->
         DMulti (ns1, Map.map (fun name doms1 -> mergeDomains doms1 doms2) subdoms1)
 
-let compileName : FunQLName -> SQL.SQLName = function
-    | FunQLName name -> SQL.SQLName name
+let compileName (FunQLName name) = SQL.SQLName name
+
+let decompileName (SQL.SQLName name) = FunQLName name
 
 let sqlFunId = compileName funId
 let sqlFunView = compileName funView
@@ -145,6 +146,7 @@ type CompiledViewExpr =
       arguments : ArgumentsMap
       domains : Domains
       flattenedDomains : FlattenedDomains
+      usedSchemas : UsedSchemas
     }
 
 let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
@@ -252,6 +254,30 @@ let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc 
         | FEJsonArrow (a, b) -> SQL.VEJsonArrow (traverse a, traverse b)
         | FEJsonTextArrow (a, b) -> SQL.VEJsonTextArrow (traverse a, traverse b)
     traverse
+
+let rec compileLocalComputedField (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LinkedLocalFieldExpr) : SQL.ValueExpr =
+        let compileRef (ref : LinkedFieldName) =
+            // This is checked during resolve already.
+            assert (Array.isEmpty ref.path)
+            let (_, field) = entity.FindField ref.ref |> Option.get
+            match field with
+            | RId
+            | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName ref.ref }
+            | RComputedField comp -> compileLocalComputedField tableRef entity comp.expression
+        let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in local computed field expression: %O" c
+        let voidQuery q = failwith <| sprintf "Unexpected query in local computed field expression: %O" q
+        genericCompileFieldExpr compileRef voidPlaceholder voidQuery expr
+
+let compileLocalFieldExpr (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LocalFieldExpr) : SQL.ValueExpr =
+        let compileRef (name : FieldName) =
+            let (_, field) = entity.FindField name |> Option.get
+            match field with
+            | RId
+            | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName name }
+            | RComputedField comp -> compileLocalComputedField tableRef entity comp.expression
+        let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in local field expression: %O" c
+        let voidQuery q = failwith <| sprintf "Unexpected query in local field expression: %O" q
+        genericCompileFieldExpr compileRef voidPlaceholder voidQuery expr
 
 type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity option, arguments : ArgumentsMap) =
     let mutable lastDomainNamespaceId = 0
@@ -569,7 +595,8 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         let idColumnExpr = SQL.VEColumn { table = Some tableRef; name = sqlFunId }
 
         SQL.SSelect
-            { columns = [| SQL.SCAll None |]
+            { // Warning: SCAll is used as marker when applying permissions to detect leaf-level SELECT's -- be careful!
+              columns = [| SQL.SCAll None |]
               clause = Some { from = SQL.FTable tableRef
                               where = None
                             }
@@ -734,4 +761,5 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
       arguments = arguments
       domains = domains
       flattenedDomains = flattenDomains domains
+      usedSchemas = viewExpr.usedSchemas
     }

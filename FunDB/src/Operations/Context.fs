@@ -11,6 +11,8 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Types
+open FunWithFlags.FunDB.Permissions.Flatten
+open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Compile
@@ -73,10 +75,12 @@ type RestoreErrorInfo =
 
 type RequestErrorInfo =
     | REUserNotFound
+    | RENoRole
     with
         member this.Message =
             match this with
             | REUserNotFound -> "User not found"
+            | RENoRole -> "Access denied"
 
 type RequestException (info : RequestErrorInfo) =
     inherit Exception(info.Message)
@@ -156,7 +160,16 @@ type RequestParams =
       language : string
     }
 
-type RequestContext private (opts : RequestParams, ctx : IContext, isLocalRoot : bool) =
+[<NoComparison>]
+type RoleType =
+    | RTRoot
+    | RTRole of FlatRole
+
+let private getRole = function
+    | RTRoot -> None
+    | RTRole role -> Some role
+
+type RequestContext private (opts : RequestParams, ctx : IContext, roleType : RoleType) =
     let { cacheStore = cacheStore; userName = userName; language = language; isRoot = isRoot } = opts
     let logger = cacheStore.LoggerFactory.CreateLogger<RequestContext>()
     let mutable needMigration = false
@@ -203,18 +216,27 @@ type RequestContext private (opts : RequestParams, ctx : IContext, isLocalRoot :
     static member Create (opts : RequestParams) : Task<RequestContext> = task {
         let! ctx = opts.cacheStore.GetCache()
         try
-            let! isLocalRoot = task {
+            let! roleType = task {
                 if opts.isRoot then
-                    return true
+                    return RTRoot
                 else
                     let lowerUserName = opts.userName.ToLowerInvariant()
                     // FIXME: SLOW!
-                    match! ctx.Connection.System.Users.Where(fun user -> user.Name.ToLowerInvariant() = lowerUserName).SingleOrDefaultAsync() with
-                    | null ->
-                        return raise <| RequestException REUserNotFound
-                    | user -> return user.IsRoot
+                    let! user =
+                        ctx.Connection.System.Users
+                            .Include("Role")
+                            .Include("Role.Schema")
+                            .Where(fun user -> user.Name.ToLowerInvariant() = lowerUserName)
+                            .SingleOrDefaultAsync()
+                    match user with
+                    | null -> return raise <| RequestException REUserNotFound
+                    | user when user.IsRoot -> return RTRoot
+                    | user when isNull user.Role -> return raise <| RequestException RENoRole
+                    | user ->
+                        let role = ctx.State.permissions.FindRole { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get
+                        return RTRole role
             }
-            return new RequestContext(opts, ctx, isLocalRoot)
+            return new RequestContext(opts, ctx, roleType)
         with
         | e ->
             ctx.Dispose ()
@@ -230,56 +252,67 @@ type RequestContext private (opts : RequestParams, ctx : IContext, isLocalRoot :
     member this.Context = ctx
     member this.CacheStore = cacheStore
 
-    member this.Commit () : Task<Result<unit, string>> = task {
-        try
-            if needMigration then
-                do! ctx.Migrate ()
-            else
-                let! _ = ctx.Connection.System.SaveChangesAsync ()
-                do! ctx.Connection.Commit ()
-            return Ok ()
-        with
-        | :? DbUpdateException
-        | :? ContextException as ex ->
-            logger.LogError(ex, "Failed to commit")
-            return Error <| printException ex
-    }
+    member this.Commit () : Task<Result<unit, string>> =
+        task {
+            try
+                if needMigration then
+                    do! ctx.Migrate ()
+                else
+                    let! _ = ctx.Connection.System.SaveChangesAsync ()
+                    do! ctx.Connection.Commit ()
+                return Ok ()
+            with
+            | :? DbUpdateException
+            | :? ContextException as ex ->
+                logger.LogError(ex, "Failed to commit")
+                return Error <| printException ex
+        }
 
-    member this.GetUserViewInfo = resolveSource
-
-    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) : Task<Result<ResolvedUserView * ExecutedViewExpr, UserViewErrorInfo>> = task {
-        let filterInfo (info : UserViewInfo) =
-            if isLocalRoot then
-                info
-            else
-                { info with
-                      mainEntity = None
-                      columns = info.columns |> Array.map (fun col -> { col with mainField = None })
-                }
-
-        match! resolveSource source with
-        | Error e -> return Error e
-        | Ok uv ->
-            match convertViewArguments rawArgs uv.compiled with
-            | Error msg -> return Error <| UVEArguments msg
-            | Ok arguments ->
+    member this.GetUserViewInfo (source : UserViewSource) =
+        task {
+            match! resolveSource source with
+            | Error e -> return Error e
+            | Ok uv ->
                 try
-                    let getResult info (res : ExecutedViewExpr) = task {
-                        return ({ uv with info = filterInfo uv.info }, { res with rows = Array.ofSeq res.rows })
-                    }
-                    let! r = runViewExpr ctx.Connection.Query uv.compiled arguments getResult
-                    return Ok r
+                    match roleType with
+                    | RTRoot -> ()
+                    | RTRole role -> checkRoleViewExpr ctx.State.layout role uv.compiled
+                    return Ok uv
                 with
-                | :? ViewExecutionException as err -> return Error <| UVEExecute err.Message
-    }
+                | :? PermissionsViewException as err ->
+                    logger.LogError(err, "Access denied to user view info")
+                    return Error UVEAccessDenied
+        }
 
-    member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> = task {
-        // FIXME
-        if not isLocalRoot && entityRef.schema <> FunQLName "user" then
-            return Error EEAccessDenied
-        else if entityRef.schema = funSchema && entityRef.name = funEvents then
-            return Error EEAccessDenied
-        else
+    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) : Task<Result<ResolvedUserView * ExecutedViewExpr, UserViewErrorInfo>> =
+        task {
+            match! resolveSource source with
+            | Error e -> return Error e
+            | Ok uv ->
+                match convertViewArguments rawArgs uv.compiled with
+                | Error msg -> return Error <| UVEArguments msg
+                | Ok arguments ->
+                    try
+                        let restricted =
+                            match roleType with
+                            | RTRoot -> uv.compiled
+                            | RTRole role -> applyRoleViewExpr ctx.State.layout role uv.compiled
+                        let getResult info (res : ExecutedViewExpr) = task {
+                            return (uv, { res with rows = Array.ofSeq res.rows })
+                        }
+                        let! r = runViewExpr ctx.Connection.Query restricted arguments getResult
+                        return Ok r
+                    with
+                    | :? ViewExecutionException as err ->
+                        logger.LogError(err, "Failed to run user view")
+                        return Error <| UVEExecute err.Message
+                    | :? PermissionsViewException as err ->
+                        logger.LogError(err, "Access denied to user view")
+                        return Error UVEAccessDenied
+        }
+
+    member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> =
+        task {
             match ctx.State.layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
             | Some entity ->
@@ -287,7 +320,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, isLocalRoot :
                 | Error str -> return Error <| EEArguments str
                 | Ok args ->
                     try
-                        do! insertEntity ctx.Connection.Query entityRef entity args
+                        do! insertEntity ctx.Connection.Query (getRole roleType) entityRef entity args
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -308,14 +341,13 @@ type RequestContext private (opts : RequestParams, ctx : IContext, isLocalRoot :
                     | :? EntityExecutionException as ex ->
                         logger.LogError(ex, "Failed to insert entry")
                         return Error (EEExecute <| printException ex)
-    }
+                    | :? EntityDeniedException as ex ->
+                        logger.LogError(ex, "Access denied")
+                        return Error EEAccessDenied
+        }
 
-    member this.UpdateEntity (entityRef : ResolvedEntityRef) (id : int) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> = task {
-        if not isLocalRoot && entityRef.schema <> FunQLName "user" then
-            return Error EEAccessDenied
-        else if entityRef.schema = funSchema && entityRef.name = funEvents then
-            return Error EEAccessDenied
-        else
+    member this.UpdateEntity (entityRef : ResolvedEntityRef) (id : int) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> =
+        task {
             match ctx.State.layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
             | Some entity ->
@@ -324,7 +356,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, isLocalRoot :
                 | Ok args when Map.isEmpty args -> return Ok ()
                 | Ok args ->
                     try
-                        do! updateEntity ctx.Connection.Query entityRef entity id args
+                        do! updateEntity ctx.Connection.Query (getRole roleType) entityRef entity id args
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -344,19 +376,18 @@ type RequestContext private (opts : RequestParams, ctx : IContext, isLocalRoot :
                     | :? EntityExecutionException as ex ->
                         logger.LogError(ex, "Failed to update entry")
                         return Error (EEExecute <| printException ex)
-    }
+                    | :? EntityDeniedException as ex ->
+                        logger.LogError(ex, "Access denied")
+                        return Error EEAccessDenied
+        }
 
-    member this.DeleteEntity (entityRef : ResolvedEntityRef) (id : int) : Task<Result<unit, EntityErrorInfo>> = task {
-        if not isLocalRoot then
-            return Error EEAccessDenied
-        else if entityRef.schema = funSchema && entityRef.name = funEvents then
-            return Error EEAccessDenied
-        else
+    member this.DeleteEntity (entityRef : ResolvedEntityRef) (id : int) : Task<Result<unit, EntityErrorInfo>> =
+        task {
             match ctx.State.layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
             | Some entity ->
                 try
-                    do! deleteEntity ctx.Connection.Query entityRef entity id
+                    do! deleteEntity ctx.Connection.Query (getRole roleType) entityRef entity id
                     let event =
                         EventEntry (
                             TransactionTimestamp = transactionTime,
@@ -374,43 +405,48 @@ type RequestContext private (opts : RequestParams, ctx : IContext, isLocalRoot :
                     return Ok ()
                 with
                     | :? EntityExecutionException as ex ->
-                    logger.LogError(ex, "Failed to delete entry")
-                    return Error (EEExecute <| printException ex)
-    }
+                        logger.LogError(ex, "Failed to delete entry")
+                        return Error (EEExecute <| printException ex)
+                    | :? EntityDeniedException as ex ->
+                        logger.LogError(ex, "Access denied")
+                        return Error EEAccessDenied
+        }
 
-    member this.SaveSchema (name : SchemaName) : Task<Result<SchemaDump, SaveErrorInfo>> = task {
-        if not isLocalRoot then
-            return Error SEAccessDenied
-        else
-            try
-                let! schema = saveSchema ctx.Connection.System name
-                return Ok schema
-            with
-            | :? SaveSchemaException as ex ->
-                match ex.Info with
-                | SaveRestore.SENotFound -> return Error SENotFound
-    }
+    member this.SaveSchema (name : SchemaName) : Task<Result<SchemaDump, SaveErrorInfo>> =
+        task {
+            if roleType <> RTRoot then
+                return Error SEAccessDenied
+            else
+                try
+                    let! schema = saveSchema ctx.Connection.System name
+                    return Ok schema
+                with
+                | :? SaveSchemaException as ex ->
+                    match ex.Info with
+                    | SaveRestore.SENotFound -> return Error SENotFound
+        }
 
-    member this.RestoreSchema (name : SchemaName) (dump : SchemaDump) : Task<Result<unit, RestoreErrorInfo>> = task {
-        if not isLocalRoot then
-            return Error REAccessDenied
-        else if Map.containsKey name cacheStore.Preload.schemas then
-            return Error REPreloaded
-        else
-            let! modified = restoreSchema ctx.Connection.System name dump
-            let event =
-                EventEntry (
-                    TransactionTimestamp = transactionTime,
-                    Timestamp = DateTimeOffset.UtcNow,
-                    Type = "restore_schema",
-                    UserName = userName,
-                    SchemaName = name.ToString(),
-                    EntityName = null,
-                    EntityId = Nullable(),
-                    Details = dump.ToString()
-                )
-            ignore <| ctx.Connection.System.Events.Add(event)
-            if modified then
-                needMigration <- true
-            return Ok ()
-    }
+    member this.RestoreSchema (name : SchemaName) (dump : SchemaDump) : Task<Result<unit, RestoreErrorInfo>> =
+        task {
+            if roleType <> RTRoot then
+                return Error REAccessDenied
+            else if Map.containsKey name cacheStore.Preload.schemas then
+                return Error REPreloaded
+            else
+                let! modified = restoreSchema ctx.Connection.System name dump
+                let event =
+                    EventEntry (
+                        TransactionTimestamp = transactionTime,
+                        Timestamp = DateTimeOffset.UtcNow,
+                        Type = "restore_schema",
+                        UserName = userName,
+                        SchemaName = name.ToString(),
+                        EntityName = null,
+                        EntityId = Nullable(),
+                        Details = dump.ToString()
+                    )
+                ignore <| ctx.Connection.System.Events.Add(event)
+                if modified then
+                    needMigration <- true
+                return Ok ()
+        }

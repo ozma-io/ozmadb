@@ -78,7 +78,8 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
         with
         | :? RequestException as e ->
             match e.Info with
-            | REUserNotFound -> return! RequestErrors.forbidden (text "") next ctx
+            | REUserNotFound
+            | RENoRole -> return! RequestErrors.forbidden (text "") next ctx
     }
 
     let protectedApi (next : HttpFunc) (ctx : HttpContext) =

@@ -1,13 +1,26 @@
 module FunWithFlags.FunDB.Permissions.Source
 
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.Permissions.Types
 
 open Newtonsoft.Json
 
+type SourceAllowedField =
+    { [<JsonProperty(Required=Required.DisallowNull)>]
+      change: bool
+      select : string option
+    }
+
 type SourceAllowedEntity =
-    { fields : Set<FieldName>
-      where : string option
+    { [<JsonProperty(Required=Required.DisallowNull)>]
+      allowBroken : bool
+      check : string option
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      insert : bool
+      select : string option
+      update : string option
+      delete : string option
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      fields : Map<FieldName, SourceAllowedField>
     }
 
 type SourceAllowedSchema =

@@ -119,7 +119,8 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable roleEntities : DbSet<RoleEntity>
-    [<Entity("Id", ForbidExternalReferences=true)>]
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"RoleId\"=>\"__main\" || '.' || \"EntityId\"=>\"__main\"")>]
     [<UniqueConstraint("Entry", [|"RoleId"; "EntityId"|])>]
     member this.RoleEntities
         with get () = this.roleEntities
@@ -127,20 +128,12 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
 
     [<DefaultValue>]
     val mutable roleColumnFields : DbSet<RoleColumnField>
-    [<Entity("Id", ForbidExternalReferences=true)>]
-    [<UniqueConstraint("Entry", [|"RoleEntityId"; "ColumnFieldId"|])>]
-    // FIXME: Check that ColumnFieldId=>EntityId = RoleEntityId=>EntityId
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"RoleEntityId\"=>\"__main\" || '.' || \"ColumnName\"")>]
+    [<UniqueConstraint("Entry", [|"RoleEntityId"; "ColumnName"|])>]
     member this.RoleColumnFields
         with get () = this.roleColumnFields
         and set value = this.roleColumnFields <- value
-
-    [<DefaultValue>]
-    val mutable userRoles : DbSet<UserRole>
-    [<Entity("Id")>]
-    [<UniqueConstraint("Entry", [|"UserId"; "RoleId"|])>]
-    member this.UserRoles
-        with get () = this.userRoles
-        and set value = this.userRoles <- value
 
     [<DefaultValue>]
     val mutable events : DbSet<EventEntry>
@@ -273,6 +266,9 @@ and
         member val Name = "" with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val IsRoot = false with get, set
+        [<ColumnField("reference(\"public\".\"Roles\")", Nullable=true)>]
+        member val RoleId : Nullable<int> = Nullable () with get, set
+        member val Role = null : Role with get, set    
 
 and
     [<AllowNullLiteral>]
@@ -309,8 +305,18 @@ and
         [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val AllowBroken = false with get, set    
+        [<ColumnField("bool", Default="FALSE")>]
+        member val Insert = false with get, set
         [<ColumnField("string", Nullable=true)>]
-        member val Where = null : string with get, set
+        member val Check = null : string with get, set    
+        [<ColumnField("string", Nullable=true)>]
+        member val Select = null : string with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val Update = null : string with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val Delete = null : string with get, set            
 
         member val ColumnFields = ResizeArray<RoleColumnField>() with get, set
 
@@ -321,20 +327,13 @@ and
         [<ColumnField("reference(\"public\".\"RoleEntities\")")>]
         member val RoleEntityId = 0 with get, set
         member val RoleEntity = null : RoleEntity with get, set
-        [<ColumnField("reference(\"public\".\"ColumnFields\")")>]
-        member val ColumnFieldId = 0 with get, set
-        member val ColumnField = null : ColumnField with get, set
-
-and
-    [<AllowNullLiteral>]
-    UserRole () =
-        member val Id = 0 with get, set
-        [<ColumnField("reference(\"public\".\"Users\")")>]
-        member val UserId = 0 with get, set
-        member val User = null : User with get, set
-        [<ColumnField("reference(\"public\".\"Roles\")")>]
-        member val RoleId = 0 with get, set
-        member val Role = null : Role with get, set
+        // FIXME: Make this ColumnField relation when we implement reference constraints.
+        [<ColumnField("string")>]
+        member val ColumnName = "" : string with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val Change = false with get, set
+        [<ColumnField("string", Nullable=true)>]
+        member val Select = null : string with get, set
 
 and
     [<AllowNullLiteral>]
@@ -377,7 +376,6 @@ let getRolesObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
         .Include("Roles.Entities.Entity")
         .Include("Roles.Entities.Entity.Schema")
         .Include("Roles.Entities.ColumnFields")
-        .Include("Roles.Entities.ColumnFields.ColumnField")
 
 let getUserViewsObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
     schemas

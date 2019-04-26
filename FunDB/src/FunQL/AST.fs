@@ -31,6 +31,7 @@ type ConstraintName = FunQLName
 type AttributeName = FunQLName
 type ArgumentName = FunQLName
 type UserViewName = FunQLName
+type RoleName = FunQLName
 
 type EntityRef =
     { schema : SchemaName option
@@ -700,6 +701,21 @@ type Argument =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
+
+type UsedFields = Set<FieldName>
+type UsedEntities = Map<EntityName, UsedFields>
+type UsedSchemas = Map<SchemaName, UsedEntities>
+
+let addUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldName : FieldName) (usedSchemas : UsedSchemas) : UsedSchemas =
+    let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
+    let oldEntity = Map.findWithDefault entityName (fun () -> Set.empty) oldSchema
+    Map.add schemaName (Map.add entityName (Set.add fieldName oldEntity) oldSchema) usedSchemas
+
+let addUsedFieldRef (ref : ResolvedFieldRef) =
+    addUsedField ref.entity.schema ref.entity.name ref.name
+
+let mergeUsedSchemas : UsedSchemas -> UsedSchemas -> UsedSchemas =
+    Map.unionWith (fun _ -> Map.unionWith (fun _ -> Set.union))
 
 let funId = FunQLName "Id"
 let funSchema = FunQLName "public"

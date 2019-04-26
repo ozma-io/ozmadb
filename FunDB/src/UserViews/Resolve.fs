@@ -143,9 +143,16 @@ type UserViewFatalResolveException (message : string, innerException : Exception
 
     new (message : string) = UserViewFatalResolveException (message, null)
 
-type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialCachedViews : Map<SchemaName,UserViewsSchema>, halfResolved : HalfResolvedViews, forceAllowBroken : bool) =
-    // FIXME: slow data structure for this
-    let mutable cachedViews = initialCachedViews
+type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialViews : Map<SchemaName, UserViewsSchema>, halfResolved : HalfResolvedViews, forceAllowBroken : bool) =
+    let mutable cachedViews : Map<ResolvedUserViewRef, Result<ResolvedUserView, UserViewError>> = Map.empty
+
+    let findCached (ref : ResolvedUserViewRef) =
+        match Map.tryFind ref cachedViews with
+        | Some r -> Some r
+        | None ->
+            match Map.tryFind ref.schema initialViews with
+            | Some schema -> Map.tryFind ref.name schema.userViews
+            | None -> None
 
     let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) : UserViewInfo =
         let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.entity |> Option.get, main)) viewExpr.mainEntity
@@ -177,19 +184,6 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialCac
           columns = Array.map2 getResultColumn (getColumns viewExpr.select) viewInfo.columns
           mainEntity = Option.map makeMainEntity viewExpr.mainEntity
         }
-
-    let findCached (ref : ResolvedUserViewRef) =
-        match Map.tryFind ref.schema cachedViews with
-        | None -> None
-        | Some schema -> Map.tryFind ref.name schema.userViews
-
-    let addCached (ref : ResolvedUserViewRef) (res : Result<ResolvedUserView, UserViewError>) =
-        let oldSchema =
-            match Map.tryFind ref.schema cachedViews with
-            | None -> { userViews = Map.empty } : UserViewsSchema
-            | Some schema -> schema
-        let newSchema = { oldSchema with userViews = Map.add ref.name res oldSchema.userViews }
-        cachedViews <- Map.add ref.schema newSchema cachedViews
 
     let rec resolveUserView (stack : Set<ResolvedUserViewRef>) (homeSchema : SchemaName option) (uv : HalfResolvedView) : Task<ResolvedUserView> =
         // Check view with deep resolve; will be needed later for resolving called user views.
@@ -263,77 +257,87 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialCac
             | :? ViewExecutionException as err -> return raisefWithInner UserViewResolveException err "Test execution error"
         }
 
-    let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : Task<Set<UserViewName>> = task {
-        let mutable errors = Set.empty
-        let iterUserView name maybeUv = task {
-            let ref = { schema = schemaName; name = name }
-            match maybeUv with
-            | Error e ->
-                addCached ref (Error e)
-                if not e.source.allowBroken then
-                    errors <- Set.add name errors
-            | Ok uv ->
-            match findCached ref with
-            | Some _ -> ()
-            | None ->
-                let! r = task {
-                    try
-                        let! r = resolveUserView (Set.singleton ref) (Some schemaName) uv
-                        return Ok r
-                    with
-                    | :? UserViewResolveException as e ->
-                        if uv.allowBroken || forceAllowBroken then
-                            if not uv.source.allowBroken then
-                                errors <- Set.add name errors
-                            let err =
-                                { error = e :> exn
-                                  source = uv.source
-                                }
-                            return Error err
-                        else
-                            return raisefWithInner UserViewResolveException e "Error in user view %O" ref
-                    | :? UserViewFatalResolveException as e ->
-                        return raisefWithInner UserViewResolveException e.InnerException "%s" e.Message
-                }
-                addCached ref r
-        }
+    let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : Task<ErroredUserViewsSchema * UserViewsSchema> = task {
+        let mutable errors = Map.empty
+    
+        let mapUserView name maybeUv =
+            task {
+                let ref = { schema = schemaName; name = name }
+                match maybeUv with
+                | Error e ->
+                    cachedViews <- Map.add ref (Error e) cachedViews
+                    if not e.source.allowBroken then
+                        errors <- Map.add name e.error errors
+                    return Error e
+                | Ok uv ->
+                    match findCached ref with
+                    | Some (Error e) ->
+                        if not e.source.allowBroken then
+                            errors <- Map.add name e.error errors        
+                        return Error e
+                    | Some (Ok uv) ->
+                        return Ok uv
+                    | None ->
+                        let! r =
+                            task {
+                                try
+                                    let! r = resolveUserView (Set.singleton ref) (Some schemaName) uv
+                                    return Ok r
+                                with
+                                | :? UserViewResolveException as e ->
+                                    if uv.allowBroken || forceAllowBroken then
+                                        if not uv.source.allowBroken then
+                                            errors <- Map.add name (e :> exn) errors
+                                        let err =
+                                            { error = e :> exn
+                                              source = uv.source
+                                            }
+                                        return Error err
+                                    else
+                                        return raisefWithInner UserViewResolveException e "Error in user view %O" ref
+                                | :? UserViewFatalResolveException as e ->
+                                    return raisefWithInner UserViewResolveException e.InnerException "%s" e.Message
+                            }
+                        cachedViews <- Map.add ref r cachedViews
+                        return r
+            }
 
-        for KeyValue(name, maybeUv) in schema do
-            do! iterUserView name maybeUv
-        return errors
+        let! userViews = schema |> Map.mapTaskSync mapUserView
+        let ret = { userViews = userViews } : UserViewsSchema
+        return (errors, ret)
     }
 
-    let resolveUserViews () : Task<ErroredUserViews> = task {
+    let resolveUserViews () : Task<ErroredUserViews * UserViews> = task {
         let mutable errors = Map.empty
-        let iterSchema name schema = task {
-            try
-                let! schemaErrors = resolveUserViewsSchema name schema
-                if not <| Set.isEmpty schemaErrors then
-                    errors <- Map.add name schemaErrors errors
-            with
-            | :? UserViewResolveException as e ->
-                return raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
-        }
-        for KeyValue(name, schema) in halfResolved do
-            do! iterSchema name schema
-        return errors
+    
+        let mapSchema name schema =
+            task {
+                try
+                    let! (schemaErrors, newSchema) = resolveUserViewsSchema name schema
+                    if not <| Map.isEmpty schemaErrors then
+                        errors <- Map.add name schemaErrors errors
+                    return newSchema
+                with
+                | :? UserViewResolveException as e ->
+                    return raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
+            }
+        
+        let! schemas = halfResolved |> Map.mapTaskSync mapSchema
+        let ret = { schemas = schemas } : UserViews
+        return (errors, ret)
     }
 
     member this.ResolveAnonymousUserView uv =
         assert (Map.isEmpty halfResolved)
         resolveUserView Set.empty None uv
     member this.ResolveUserViews = resolveUserViews
-    member this.CachedViews = cachedViews
 
 let resolveUserViews (conn : QueryConnection) (layout : Layout) (forceAllowBroken : bool) (userViews : SourceUserViews) : Task<ErroredUserViews * UserViews> =
     task {
         let phase1 = Phase1Resolver(layout, forceAllowBroken)
         let resolvedViews = phase1.ResolveUserViews userViews
         let phase2 = Phase2Resolver(layout, conn, Map.empty, resolvedViews, forceAllowBroken)
-        let! errors = phase2.ResolveUserViews ()
-        let ret =
-            { schemas = phase2.CachedViews
-            } : UserViews
+        let! (errors, ret) = phase2.ResolveUserViews ()
         return (errors, ret)
     }
 

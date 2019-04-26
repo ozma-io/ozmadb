@@ -61,9 +61,18 @@ let readSourcePreload (path : string) : SourcePreload =
     let serializer = JsonSerializer.CreateDefault()
     serializer.Deserialize<SourcePreload>(jsonStream)
 
+// Empty schemas in Roles aren't reflected in the database so we need to remove them -- otherwise a "change" will always be detected.
+let private normalizeRole (role : SourceRole) =
+    { role with
+          permissions =
+              { role.permissions with
+                    schemas = role.permissions.schemas |> Map.filter (fun name schema -> not (Map.isEmpty schema.entities))
+              }
+    }
+
 let private resolvePreloadedSchema (preload : SourcePreloadedSchema) : PreloadedSchema =
     let schema = { entities = preload.entities } : SourceSchema
-    let permissions = { roles = preload.roles }
+    let permissions = { roles = Map.map (fun name -> normalizeRole) preload.roles }
 
     let readUserViewGenerator path =
         let program = File.ReadAllText path
@@ -140,7 +149,8 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
         let systemMigration = migrateDatabase currentSystemMeta newSystemMeta
         for action in systemMigration do
             logger.LogInformation("System migration step: {}", action)
-            do! conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+            let! _ = conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+            ()
 
         let! changed1 = updateLayout conn.System sourceLayout
         let permissions = preloadPermissions preload
@@ -158,7 +168,8 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
         let userMigration = migrateDatabase currentUserMeta2 newUserMeta
         for action in userMigration do
             logger.LogInformation("User migration step: {}", action)
-            do! conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+            let! _ = conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+            ()
 
         return (changed1 || changed2, newLayout, newUserMeta)
     }

@@ -74,6 +74,7 @@ type ResolvedViewExpr =
     { arguments : ArgumentsMap
       select : ResolvedSelectExpr
       mainEntity : ResolvedMainEntity option
+      usedSchemas : UsedSchemas
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -163,9 +164,17 @@ let private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFields) 
 
 type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
+    let mutable usedSchemas : UsedSchemas = Map.empty
 
     let rec resolvePath (boundField : BoundField) : FieldName list -> (BoundField * FieldName list) = function
-        | [] -> (boundField, [])
+        | [] ->
+            match boundField.field with
+            | RColumnField _ ->
+                usedSchemas <- addUsedFieldRef boundField.ref usedSchemas
+            | RComputedField comp ->
+                usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
+            | _ -> ()
+            (boundField, [])
         | (ref :: refs) ->
             match boundField.field with
             | RColumnField { fieldType = FTReference (entityRef, _) } ->
@@ -179,6 +188,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
                               }
                           field = refField
                         }
+                    usedSchemas <- addUsedField entityRef.schema entityRef.name ref usedSchemas
                     let (newBoundField, newPath) = resolvePath nextBoundField refs
                     (newBoundField, newRef :: newPath)
                 | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
@@ -431,6 +441,7 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
     member this.ResolveSelectExpr = resolveSelectExpr
     member this.ResolveMainEntity = resolveMainEntity
     member this.UsedArguments = usedArguments
+    member this.UsedSchemas = usedSchemas
 
 let resolveViewExpr (layout : Layout) (globalArguments : SomeArgumentsMap) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
     let checkArgument name arg =
@@ -455,4 +466,5 @@ let resolveViewExpr (layout : Layout) (globalArguments : SomeArgumentsMap) (view
     { arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArguments)
       select = qQuery
       mainEntity = mainEntity
+      usedSchemas = qualifier.UsedSchemas
     }

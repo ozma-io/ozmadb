@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open System.Runtime.ExceptionServices
 open Microsoft.FSharp.Reflection
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open System.Diagnostics.Tracing
 
 type Void = private Void of unit
 type Exception = System.Exception
@@ -57,6 +58,23 @@ module Option =
             | Some a -> return! Task.map Some (f a)
         }
 
+    let ofNull (obj : 'a) : 'a option =
+        if isNull obj then
+            None
+        else
+            Some obj
+
+    let toNull : 'a option -> 'a = function
+        | None -> null
+        | Some x -> x       
+
+    let unionWith (f : 'a -> 'a -> 'a) (a : 'a option) (b : 'a option) : 'a option =
+        match (a, b) with
+        | (None, None) -> None
+        | (Some v, None)
+        | (None, Some v) -> Some v
+        | (Some v1, Some v2) -> Some (f v1 v2)
+
 module Result =
     let isOk : Result<'a, 'e> -> bool = function
         | Ok _ -> true
@@ -66,6 +84,14 @@ module Result =
         | Ok _ -> false
         | Error _ -> true
 
+    let getOption : Result<'a, 'e> -> 'a option = function
+        | Ok v -> Some v
+        | Error _ -> None
+
+    let getErrorOption : Result<'a, 'e> -> 'e option = function
+        | Ok _ -> None
+        | Error v -> Some v
+
     let get : Result<'a, 'e> -> 'a = function
         | Ok v -> v
         | Error _ -> failwith "Result.get"
@@ -73,6 +99,10 @@ module Result =
     let getError : Result<'a, 'e> -> 'e = function
         | Ok _ -> failwith "Result.getError"
         | Error v -> v
+
+    let getOrDefault (f : 'e -> 'a) : Result<'a, 'e> -> 'a = function
+        | Ok a -> a
+        | Error e -> f e
 
 module Seq =
     let mapMaybe (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
@@ -428,6 +458,6 @@ let raisef (constr : string -> 'e) : StringFormat<'a, 'b> -> 'a =
         raise  <| constr str
     kprintf thenRaise
 
-let inline reraise' (e : exn) =
+let reraise' (e : exn) =
     (ExceptionDispatchInfo.Capture e).Throw ()
     Unchecked.defaultof<_>
