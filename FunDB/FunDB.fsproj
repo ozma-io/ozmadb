@@ -49,6 +49,7 @@
 
     <Compile Include="src/FunQL/Resolve.fs" />
     <Compile Include="src/FunQL/Dereference.fs" />
+    <Compile Include="src/FunQL/Arguments.fs" />
     <Compile Include="src/FunQL/Compile.fs" />
   
     <Compile Include="src/Layout/Source.fs" />

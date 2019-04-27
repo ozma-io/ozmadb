@@ -305,6 +305,9 @@ module Map =
     let mapWithKeys (func : 'k1 -> 'a -> ('k2 * 'b)) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
         map |> Map.toSeq |> Seq.map (fun (k, a) -> func k a) |> Map.ofSeq
 
+    let mapWithKeysMaybe (func : 'k1 -> 'a -> ('k2 * 'b) option) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
+        map |> Map.toSeq |> Seq.mapMaybe (fun (k, a) -> func k a) |> Map.ofSeq
+
     let mapKeys (func : 'k1 -> 'k2) : Map<'k1, 'a> -> Map<'k2, 'a> = mapWithKeys (fun name v -> (func name, v))
 
     let traverseOption (func : 'k -> 'a -> 'b option) (vals : Map<'k, 'a>) : Map<'k, 'b> option =

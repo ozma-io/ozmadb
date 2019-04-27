@@ -686,8 +686,8 @@ type LinkedLocalFieldExpr = FieldExpr<FunQLVoid, LinkedFieldName>
 type PureFieldExpr = FieldExpr<FunQLVoid, FunQLVoid>
 
 [<NoComparison>]
-type Argument =
-    { argType: ParsedFieldType
+type Argument<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
+    { argType: FieldType<'e, 'f>
       optional: bool
     } with
         override this.ToString () = this.ToFunQLString()
@@ -701,6 +701,11 @@ type Argument =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
+
+type ArgumentFieldType = FieldType<ResolvedEntityRef, FunQLVoid>
+
+type ParsedArgument = Argument<EntityRef, LinkedFieldRef>
+type ResolvedArgument = Argument<ResolvedEntityRef, FunQLVoid>
 
 type UsedFields = Set<FieldName>
 type UsedEntities = Map<EntityName, UsedFields>
@@ -722,3 +727,18 @@ let funSchema = FunQLName "public"
 let funView = FunQLName "view"
 let funMain = FunQLName "__main"
 let funEvents = FunQLName "Events"
+
+// Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
+let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
+    Map.ofSeq
+        [ (FunQLName "lang", { argType = FTType <| FETScalar SFTString
+                               optional = false })
+          (FunQLName "user", { argType = FTType <| FETScalar SFTString
+                               optional = false })
+          (FunQLName "user_id", { argType = FTType <| FETScalar SFTInt
+                                  optional = false })
+          (FunQLName "transaction_time", { argType = FTType <| FETScalar SFTDateTime
+                                           optional = false })
+        ]
+
+let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal

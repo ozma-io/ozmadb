@@ -21,7 +21,7 @@ type ParsedMainEntity =
 
 [<NoComparison>]
 type ParsedViewExpr =
-    { arguments : Map<ArgumentName, Argument>
+    { arguments : Map<ArgumentName, ParsedArgument>
       select : ParsedSelectExpr
       mainEntity : ParsedMainEntity option
     }

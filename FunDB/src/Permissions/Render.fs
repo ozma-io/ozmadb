@@ -1,31 +1,30 @@
 module FunWithFlags.FunDB.Permissions.Render
 
-open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
 
-let private renderLocalExpr (e : LocalFieldExpr) = e.ToFunQLString()
+let private renderRestriction (e : Restriction) = e.expression.ToFunQLString()
 
 let private renderOperation = function
-  | Ok e -> renderLocalExpr e
+  | Ok e -> renderRestriction e
   | Error (e : AllowedOperationError) -> e.source
 
 let private renderAllowedField (allowedField : AllowedField) : SourceAllowedField =
     { change = allowedField.change
-      select = Option.map renderLocalExpr allowedField.select
+      select = Option.map renderRestriction allowedField.select
     }
 
 let private renderAllowedEntity = function
     | Ok allowedEntity ->
         { allowBroken = allowedEntity.allowBroken
           fields = Map.map (fun name -> renderAllowedField) allowedEntity.fields
-          check = Option.map renderLocalExpr allowedEntity.check
+          check = Option.map renderRestriction allowedEntity.check
           insert =
             match allowedEntity.insert with
             | Ok i -> i
             | Error _ -> true
-          select = Option.map renderLocalExpr allowedEntity.select
-          update = Option.map renderLocalExpr allowedEntity.update
+          select = Option.map renderRestriction allowedEntity.select
+          update = Option.map renderRestriction allowedEntity.update
           delete = Option.map renderOperation allowedEntity.delete
         } : SourceAllowedEntity
     | Error e -> e.source

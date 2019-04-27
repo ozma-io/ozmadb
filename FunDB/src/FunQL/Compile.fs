@@ -1,12 +1,13 @@
 module FunWithFlags.FunDB.FunQL.Compile
 
 open System
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
-open Newtonsoft.Json.Linq
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 // Domains is a way to distinguish rows after set operations so that row types and IDs can be traced back.
@@ -87,16 +88,6 @@ let parseColumnName (name : SQL.SQLName) =
     | [|name|] -> CTColumn (FunQLName name)
     | _ -> failwith <| sprintf "Cannot parse column name: %O" name
 
-[<NoComparison>]
-type CompiledArgument =
-    { placeholder : int
-      fieldType : ParsedFieldType
-      valueType : SQL.SimpleValueType
-      optional : bool
-    }
-
-type private ArgumentsMap = Map<Placeholder, CompiledArgument>
-
 type private JoinKey =
     { table : SQL.TableName
       column : SQL.ColumnName
@@ -126,7 +117,7 @@ let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETScalar SFTJson -> FJson (JObject ())
     | FETScalar SFTUserViewRef -> FUserViewRef { schema = None; name = FunQLName "" }
 
-let defaultCompiledArgument : ParsedFieldType -> FieldValue = function
+let defaultCompiledArgument : ArgumentFieldType -> FieldValue = function
     | FTType feType -> defaultCompiledExprArgument feType
     | FTReference (entityRef, None) -> FInt 0
     | FTReference (entityRef, Some where) -> failwith "Reference with a condition in an argument"
@@ -142,31 +133,11 @@ type CompiledAttributesExpr =
 [<NoComparison>]
 type CompiledViewExpr =
     { attributesQuery : CompiledAttributesExpr option
-      query : SQL.SelectExpr
-      arguments : ArgumentsMap
+      query : Query<SQL.SelectExpr>
       domains : Domains
       flattenedDomains : FlattenedDomains
       usedSchemas : UsedSchemas
     }
-
-let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
-    | SFTInt -> SQL.STInt
-    | SFTDecimal -> SQL.STDecimal
-    | SFTString -> SQL.STString
-    | SFTBool -> SQL.STBool
-    | SFTDateTime -> SQL.STDateTime
-    | SFTDate -> SQL.STDate
-    | SFTJson -> SQL.STJson
-    | SFTUserViewRef -> SQL.STJson
-
-let private compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
-    | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
-    | FETArray stype -> SQL.VTArray <| compileScalarType stype
-
-let compileFieldType : FieldType<_, _> -> SQL.SimpleValueType = function
-    | FTType fetype -> compileFieldExprType fetype
-    | FTReference (ent, restriction) -> SQL.VTScalar SQL.STInt
-    | FTEnum vals -> SQL.VTScalar SQL.STString
 
 let private compileOrder : SortOrder -> SQL.SortOrder = function
     | Asc -> SQL.Asc
@@ -194,27 +165,6 @@ let private compileFieldRef (fieldRef : FieldRef) : SQL.ColumnRef =
 
 let private compileResolvedFieldRef (fieldRef : ResolvedFieldRef) : SQL.ColumnRef =
     { table = Some <| compileResolvedEntityRef fieldRef.entity; name = compileName fieldRef.name }
-
-let private compileArray (vals : 'a array) : SQL.ValueArray<'a> = Array.map SQL.AVValue vals
-
-let compileFieldValueSingle : FieldValue -> SQL.Value = function
-    | FInt i -> SQL.VInt i
-    | FDecimal d -> SQL.VDecimal d
-    | FString s -> SQL.VString s
-    | FBool b -> SQL.VBool b
-    | FDateTime dt -> SQL.VDateTime dt
-    | FDate d -> SQL.VDate d
-    | FJson j -> SQL.VJson j
-    | FUserViewRef r -> SQL.VJson <| JToken.FromObject(r)
-    | FIntArray vals -> SQL.VIntArray (compileArray vals)
-    | FDecimalArray vals -> SQL.VDecimalArray (compileArray vals)
-    | FStringArray vals -> SQL.VStringArray (compileArray vals)
-    | FBoolArray vals -> SQL.VBoolArray (compileArray vals)
-    | FDateTimeArray vals -> SQL.VDateTimeArray (compileArray vals)
-    | FDateArray vals -> SQL.VDateArray (compileArray vals)
-    | FJsonArray vals -> SQL.VJsonArray (compileArray vals)
-    | FUserViewRefArray vals -> SQL.VJsonArray (vals |> Array.map (fun x -> JToken.FromObject(x)) |> compileArray)
-    | FNull -> SQL.VNull
 
 let compileFieldValue (v : FieldValue) : SQL.ValueExpr =
     let ret = compileFieldValueSingle v
@@ -268,18 +218,18 @@ let rec compileLocalComputedField (tableRef : SQL.TableRef) (entity : ResolvedEn
         let voidQuery q = failwith <| sprintf "Unexpected query in local computed field expression: %O" q
         genericCompileFieldExpr compileRef voidPlaceholder voidQuery expr
 
-let compileLocalFieldExpr (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LocalFieldExpr) : SQL.ValueExpr =
+let compileLocalFieldExpr (arguments : CompiledArgumentsMap) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LocalFieldExpr) : SQL.ValueExpr =
         let compileRef (name : FieldName) =
             let (_, field) = entity.FindField name |> Option.get
             match field with
             | RId
             | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName name }
             | RComputedField comp -> compileLocalComputedField tableRef entity comp.expression
-        let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in local field expression: %O" c
+        let compilePlaceholder name = SQL.VEPlaceholder arguments.[name].placeholderId
         let voidQuery q = failwith <| sprintf "Unexpected query in local field expression: %O" q
-        genericCompileFieldExpr compileRef voidPlaceholder voidQuery expr
+        genericCompileFieldExpr compileRef compilePlaceholder voidQuery expr
 
-type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity option, arguments : ArgumentsMap) =
+type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity option, arguments : CompiledArgumentsMap) =
     let mutable lastDomainNamespaceId = 0
     let newDomainNamespaceId () =
         let id = lastDomainNamespaceId
@@ -369,7 +319,7 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
             paths <- newPaths
             ret
         let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
-        let compilePlaceholder name = SQL.VEPlaceholder arguments.[name].placeholder
+        let compilePlaceholder name = SQL.VEPlaceholder arguments.[name].placeholderId
         let compileSubSelectExpr = snd << compileSelectExpr false
         let ret = genericCompileFieldExpr compileLinkedRef compilePlaceholder compileSubSelectExpr expr
         (paths, ret)
@@ -714,22 +664,9 @@ let rec private flattenDomains : Domains -> FlattenedDomains = function
     | DMulti (ns, subdoms) -> subdoms |> Map.values |> Seq.fold (fun m subdoms -> Map.union m (flattenDomains subdoms)) Map.empty
 
 let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
-    let convertArgument i (name, arg) =
-        let info =
-            { placeholder = i
-              fieldType = arg.argType
-              valueType = compileFieldType arg.argType
-              optional = arg.optional
-            }
-        (name, info)
+    let arguments = compileArguments viewExpr.arguments
 
-    let arguments =
-        viewExpr.arguments
-            |> Map.toSeq
-            |> Seq.mapi convertArgument
-            |> Map.ofSeq
-
-    let compiler = QueryCompiler (layout, viewExpr.mainEntity, arguments)
+    let compiler = QueryCompiler (layout, viewExpr.mainEntity, arguments.types)
     let (domains, expr) = compiler.CompileSelectExpr viewExpr.select
 
     let allPureAttrs = findPureAttributes expr
@@ -757,8 +694,7 @@ let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledVi
                  }
 
     { attributesQuery = attrQuery
-      query = newExpr
-      arguments = arguments
+      query = { expression = newExpr; arguments = arguments }
       domains = domains
       flattenedDomains = flattenDomains domains
       usedSchemas = viewExpr.usedSchemas

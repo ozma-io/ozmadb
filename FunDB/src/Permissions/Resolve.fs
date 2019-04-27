@@ -22,12 +22,14 @@ let private checkName (FunQLName name) : unit =
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissions : SourcePermissions) =
     let mutable goodParents = Set.empty
 
-    let resolveCondition (entity : ResolvedEntity) (allowIds : bool) (where : string) =
+    let resolveRestriction (entity : ResolvedEntity) (allowIds : bool) (where : string) : Restriction =
         let whereExpr =
             match parse tokenizeFunQL fieldExpr where with
             | Ok r -> r
             | Error msg -> raisef ResolvePermissionsException "Error parsing restriction expression: %s" msg
 
+        let mutable globalArguments = Set.empty
+    
         let resolveColumn : LinkedFieldRef -> FieldName = function
             | { ref = { entity = None; name = name }; path = [||] } ->
                 match entity.FindField name with
@@ -48,15 +50,22 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                         raisef ResolvePermissionsException "Non-local computed field reference in restriction expression: %O" name
             | ref ->
                 raisef ResolvePermissionsException"Invalid reference in restriction expression: %O" ref
-        let voidPlaceholder name =
-            raisef ResolvePermissionsException "Placeholders are not allowed in restriction expressions: %O" name
+        let resolvePlaceholder = function
+            | PLocal name -> raisef ResolvePermissionsException "Local argument %O is not allowed in restriction expression" name
+            | PGlobal name when Map.containsKey name globalArgumentTypes ->
+                globalArguments <- Set.add name globalArguments
+                PGlobal name
+            | PGlobal name -> raisef ResolvePermissionsException "Unknown global argument %O" name
         let voidQuery query =
-            raisef ResolvePermissionsException "Queries are not allowed in restriction expressions: %O" query
+            raisef ResolvePermissionsException "Query is not allowed in restriction expression: %O" query
 
-        mapFieldExpr id resolveColumn voidPlaceholder voidQuery whereExpr
+        let expr = mapFieldExpr id resolveColumn resolvePlaceholder voidQuery whereExpr
+        { expression = expr
+          globalArguments = globalArguments
+        }
 
     let resolveAllowedField (entity : ResolvedEntity) (allowedField : SourceAllowedField) : AllowedField =
-        let resolveOne = Option.map (resolveCondition entity true)
+        let resolveOne = Option.map (resolveRestriction entity true)
         { change = allowedField.change
           select = resolveOne allowedField.select
         }
@@ -79,7 +88,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             if not <| Map.containsKey fieldName entity.columnFields then
                 raisef ResolvePermissionsException "Undefined column field: %O" fieldName
 
-        let resolveOne allowIds = Option.map (resolveCondition entity allowIds)
+        let resolveOne allowIds = Option.map (resolveRestriction entity allowIds)
         let fields = allowedEntity.fields |> Map.map mapField
 
         let insert =
@@ -110,7 +119,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     match Map.tryFind fieldName fields with
                     | Some { select = Some _ } -> ()
                     | _ -> raisef ResolvePermissionsException "Read access to field %O needs to be granted to delete records" fieldName
-                Ok <| resolveCondition entity true delete
+                Ok <| resolveRestriction entity true delete
             with
             | :? ResolvePermissionsException as e when allowedEntity.allowBroken || forceAllowBroken ->
                 error <- Some (e :> exn)

@@ -16,9 +16,9 @@ open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.UserViews.Types
-open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Resolve
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Operations.Entity
@@ -169,15 +169,20 @@ let private getRole = function
     | RTRoot -> None
     | RTRole role -> Some role
 
-type RequestContext private (opts : RequestParams, ctx : IContext, roleType : RoleType) =
+type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : int option, roleType : RoleType) =
     let { cacheStore = cacheStore; userName = userName; language = language; isRoot = isRoot } = opts
     let logger = cacheStore.LoggerFactory.CreateLogger<RequestContext>()
     let mutable needMigration = false
 
     let transactionTime = DateTimeOffset.UtcNow
+    let userId =
+        match rawUserId with
+        | None -> FNull
+        | Some id -> FInt id
     let globalArguments =
         [ (FunQLName "lang", FString language)
           (FunQLName "user", FString userName)
+          (FunQLName "user_id", userId)
           (FunQLName "transaction_time", FDateTime transactionTime)
         ] |> Map.ofSeq
     do
@@ -200,7 +205,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, roleType : Ro
             | Some (Ok cached) -> return Ok cached
     }
 
-    let convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ViewArguments, string> =
+    let convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValues, string> =
         let findArgument name (arg : CompiledArgument) =
             match name with
             | PLocal (FunQLName lname) ->
@@ -211,32 +216,32 @@ type RequestContext private (opts : RequestParams, ctx : IContext, roleType : Ro
                     | Some arg -> Ok arg
                 | _ -> Error <| sprintf "Argument not found: %O" name
             | PGlobal gname -> Ok (Map.find gname globalArguments)
-        compiled.arguments |> Map.traverseResult findArgument
+        compiled.query.arguments.types |> Map.traverseResult findArgument
 
     static member Create (opts : RequestParams) : Task<RequestContext> = task {
         let! ctx = opts.cacheStore.GetCache()
         try
-            let! roleType = task {
+            let lowerUserName = opts.userName.ToLowerInvariant()
+            // FIXME: SLOW!    
+            let! rawUser =
+                ctx.Connection.System.Users
+                    .Include("Role")
+                    .Include("Role.Schema")
+                    .Where(fun user -> user.Name.ToLowerInvariant() = lowerUserName)
+                    .SingleOrDefaultAsync()    
+            let userId = if isNull rawUser then None else Some rawUser.Id
+            let roleType =
                 if opts.isRoot then
-                    return RTRoot
+                    RTRoot
                 else
-                    let lowerUserName = opts.userName.ToLowerInvariant()
-                    // FIXME: SLOW!
-                    let! user =
-                        ctx.Connection.System.Users
-                            .Include("Role")
-                            .Include("Role.Schema")
-                            .Where(fun user -> user.Name.ToLowerInvariant() = lowerUserName)
-                            .SingleOrDefaultAsync()
-                    match user with
-                    | null -> return raise <| RequestException REUserNotFound
-                    | user when user.IsRoot -> return RTRoot
-                    | user when isNull user.Role -> return raise <| RequestException RENoRole
+                    match rawUser with
+                    | null -> raise <| RequestException REUserNotFound
+                    | user when user.IsRoot -> RTRoot
+                    | user when isNull user.Role -> raise <| RequestException RENoRole
                     | user ->
                         let role = ctx.State.permissions.FindRole { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get
-                        return RTRole role
-            }
-            return new RequestContext(opts, ctx, roleType)
+                        RTRole role
+            return new RequestContext(opts, ctx, userId, roleType)
         with
         | e ->
             ctx.Dispose ()
@@ -303,9 +308,6 @@ type RequestContext private (opts : RequestParams, ctx : IContext, roleType : Ro
                         let! r = runViewExpr ctx.Connection.Query restricted arguments getResult
                         return Ok r
                     with
-                    | :? ViewExecutionException as err ->
-                        logger.LogError(err, "Failed to run user view")
-                        return Error <| UVEExecute err.Message
                     | :? PermissionsViewException as err ->
                         logger.LogError(err, "Access denied to user view")
                         return Error UVEAccessDenied
@@ -320,7 +322,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, roleType : Ro
                 | Error str -> return Error <| EEArguments str
                 | Ok args ->
                     try
-                        do! insertEntity ctx.Connection.Query (getRole roleType) entityRef entity args
+                        do! insertEntity ctx.Connection.Query globalArguments (getRole roleType) entityRef entity args
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -356,7 +358,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, roleType : Ro
                 | Ok args when Map.isEmpty args -> return Ok ()
                 | Ok args ->
                     try
-                        do! updateEntity ctx.Connection.Query (getRole roleType) entityRef entity id args
+                        do! updateEntity ctx.Connection.Query globalArguments (getRole roleType) entityRef entity id args
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -387,7 +389,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, roleType : Ro
             | None -> return Error EENotFound
             | Some entity ->
                 try
-                    do! deleteEntity ctx.Connection.Query (getRole roleType) entityRef entity id
+                    do! deleteEntity ctx.Connection.Query globalArguments (getRole roleType) entityRef entity id
                     let event =
                         EventEntry (
                             TransactionTimestamp = transactionTime,

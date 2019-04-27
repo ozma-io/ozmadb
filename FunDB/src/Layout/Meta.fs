@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Layout.Meta
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Meta

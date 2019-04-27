@@ -43,7 +43,6 @@ type private QSubqueryFields = Map<FieldName, QSubqueryField>
 type private QMapping = Map<EntityName option, SchemaName option * QSubqueryFields>
 
 type private SomeArgumentsMap = Map<ArgumentName, ParsedFieldType>
-type private ArgumentsMap = Map<Placeholder, Argument>
 
 type ResolvedFieldExpr = FieldExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
 type ResolvedSelectExpr = SelectExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
@@ -69,9 +68,11 @@ type ResolvedMainEntity =
       fieldsToColumns : Map<FieldName, FieldName>
     }
 
+type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
+
 [<NoComparison>]
 type ResolvedViewExpr =
-    { arguments : ArgumentsMap
+    { arguments : ResolvedArgumentsMap
       select : ResolvedSelectExpr
       mainEntity : ResolvedMainEntity option
       usedSchemas : UsedSchemas
@@ -83,7 +84,7 @@ type ResolvedViewExpr =
             if Map.isEmpty this.arguments
             then selectStr
             else
-                let printArgument (name : Placeholder, arg : Argument) =
+                let printArgument (name : Placeholder, arg : ResolvedArgument) =
                     match name with
                     | PGlobal _ -> None
                     | PLocal _ -> Some <| sprintf "%s %s" (name.ToFunQLString()) (arg.ToFunQLString())
@@ -116,10 +117,31 @@ let resultName : ResolvedQueryResultExpr -> FieldName = function
     | QRField field -> field.ref.ref.name
     | QRExpr (name, _) -> name
 
+// Copy of that in Layout.Resolve but with a different exception.
 let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
     match name.schema with
     | Some schema -> { schema = schema; name = name.name }
     | None -> raisef ViewResolveException "Unspecified schema in name: %O" name
+
+let private resolveArgumentFieldType (layout : Layout) : ParsedFieldType -> ArgumentFieldType = function
+    | FTType ft -> FTType ft
+    | FTReference (entityRef, Some where) -> raisef ViewResolveException "Restrictions in reference arguments aren't allowed"
+    | FTReference (entityRef, None) ->
+        let resolvedRef = resolveEntityRef entityRef
+        let refEntity =
+            match layout.FindEntity(resolvedRef) with
+            | None -> raisef ViewResolveException "Cannot find entity %O from reference type" resolvedRef
+            | Some refEntity -> refEntity
+        FTReference (resolvedRef, None)
+    | FTEnum vals ->
+        if Set.isEmpty vals then
+            raisef ViewResolveException "Enums must not be empty"
+        FTEnum vals
+
+let resolveArgument (layout : Layout) (arg : ParsedArgument) : ResolvedArgument =
+    { argType = resolveArgumentFieldType layout arg.argType
+      optional = arg.optional
+    }
 
 let rec private findMainsFromEntity : ResolvedFromExpr -> MainEntities = function
     | FEntity ent -> Map.singleton ent ent.name
@@ -162,7 +184,7 @@ let private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFields) 
             Some (fields, mainName)
     | _ -> None
 
-type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
+type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
 
@@ -443,27 +465,15 @@ type private QueryResolver (layout : Layout, arguments : ArgumentsMap) =
     member this.UsedArguments = usedArguments
     member this.UsedSchemas = usedSchemas
 
-let resolveViewExpr (layout : Layout) (globalArguments : SomeArgumentsMap) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
-    let checkArgument name arg =
-        checkName name
-        match arg.argType with
-        | FTReference (entityRef, where) ->
-            if Option.isNone <| layout.FindEntity(resolveEntityRef entityRef) then
-                raisef ViewResolveException "Unknown entity in reference: %O" entityRef
-        | FTEnum vals ->
-            if Set.isEmpty vals then
-                raisef ViewResolveException "Enums must not be empty"
-        | _ -> ()
-    Map.iter checkArgument viewExpr.arguments
-
-    let localArguments = Map.mapKeys PLocal viewExpr.arguments
-    let globalArguments = globalArguments |> Map.toSeq |> Seq.map (fun (name, argType) -> (PGlobal name, { argType = argType; optional = false })) |> Map.ofSeq
-    let allArguments = Map.union localArguments globalArguments
+let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
+    let arguments = viewExpr.arguments |> Map.map (fun name -> resolveArgument layout)
+    let localArguments = Map.mapKeys PLocal arguments
+    let allArguments = Map.union localArguments globalArgumentsMap
     let qualifier = QueryResolver (layout, allArguments)
     let (results, qQuery) = qualifier.ResolveSelectExpr viewExpr.select
     let mainEntity = Option.map (qualifier.ResolveMainEntity results.fields qQuery) viewExpr.mainEntity
 
-    { arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArguments)
+    { arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArgumentsMap)
       select = qQuery
       mainEntity = mainEntity
       usedSchemas = qualifier.UsedSchemas

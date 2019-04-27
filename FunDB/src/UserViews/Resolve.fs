@@ -97,7 +97,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             | Ok rawExpr -> rawExpr
         let resolved =
             try
-                resolveViewExpr layout globalArgumentTypes parsed
+                resolveViewExpr layout parsed
             with
             | :? ViewResolveException as err -> raisefWithInner UserViewResolveException err "Resolve error"
         { source = uv
@@ -241,8 +241,14 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
                 | :? ViewDereferenceException as err -> return raisefWithInner UserViewResolveException err "Dereference error"
             }
             let compiled = compileViewExpr layout dereferenced
-            let limited = { compiled with query = limitView compiled.query }
-            let arguments = compiled.arguments |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType)
+            let limited =
+                { compiled with
+                      query =
+                          { compiled.query with
+                                expression = limitView compiled.query.expression
+                          }
+                }
+            let arguments = compiled.query.arguments.types |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType)
 
             try
                 return! runViewExpr conn limited arguments <| fun info res ->
@@ -254,7 +260,7 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
                           allowBroken = uv.allowBroken
                         }
             with
-            | :? ViewExecutionException as err -> return raisefWithInner UserViewResolveException err "Test execution error"
+            | :? QueryException as err -> return raisefWithInner UserViewResolveException err "Test execution error"
         }
 
     let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : Task<ErroredUserViewsSchema * UserViewsSchema> = task {

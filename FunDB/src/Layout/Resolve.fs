@@ -6,7 +6,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
-open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Source
 
@@ -110,7 +110,7 @@ type private Phase1Resolver (layout : SourceLayout) =
             FTReference (resolvedRef, resolvedWhere)
         | FTEnum vals ->
             if Set.isEmpty vals then
-                raise (ResolveLayoutException "Enums must not be empty")
+                raisef ResolveLayoutException "Enums must not be empty"
             FTEnum vals
 
     let resolveColumnField (schemaName : SchemaName) (entity : SourceEntity) (col : SourceColumnField) : ResolvedColumnField =

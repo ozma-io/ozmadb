@@ -3,65 +3,76 @@ module FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Flatten
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 
 type PermissionsViewException (message : string) =
     inherit Exception(message)
 
+type private UsedArguments = Set<FunQL.ArgumentName>
 type private FieldAccess = ValueExpr option
 type private EntityAccess = Map<FunQL.EntityName, FieldAccess>
 type private SchemaAccess = Map<FunQL.SchemaName, EntityAccess>
 
-let private filterUsedFields (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) (entityPerms : FlatAllowedEntity) (usedFields : FunQL.UsedFields) : FieldAccess =
-    let select =
-        match entityPerms.select with
-        | None -> raisef PermissionsViewException "No read access"
-        | Some select -> select    
-    
-    let findOne name =
-        match Map.tryFind name select with
-        | None -> raisef PermissionsViewException "No read access for field %O" name
-        | Some restrictions -> restrictions
+type private AccessCompiler (initialArguments : QueryArguments) =
+    let mutable arguments = initialArguments
 
-    let compileRestriction expr =
-        let compiledRef = compileResolvedEntityRef ref
-        compileLocalFieldExpr compiledRef entity expr
+    let filterUsedFields (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) (entityPerms : FlatAllowedEntity) (usedFields : FunQL.UsedFields) : FieldAccess =
+        let select =
+            match entityPerms.select with
+            | None -> raisef PermissionsViewException "No read access"
+            | Some select -> select    
+        
+        let findOne name =
+            match Map.tryFind name select with
+            | None -> raisef PermissionsViewException "No read access for field %O" name
+            | Some restrictions -> restrictions
 
-    usedFields
-        |> Set.toSeq
-        |> Seq.map findOne
-        |> Seq.fold1 mergeAllowedOperation
-        |> allowedOperationExpression
-        |> Option.map compileRestriction
+        let compileRestriction restr =
+            let compiledRef = compileResolvedEntityRef ref
+            for arg in restr.globalArguments do
+                arguments <- addArgument (FunQL.PGlobal arg) FunQL.globalArgumentTypes.[arg] arguments
+            compileLocalFieldExpr arguments.types compiledRef entity restr.expression
 
-let private filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (schemaPerms : FlatAllowedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =
-    let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
-        try
-            match Map.tryFind name schemaPerms.entities with
-            | Some entityPerms ->
-                let entity = Map.find name schema.entities
-                let ref = { schema = schemaName; name = name } : FunQL.ResolvedEntityRef
-                filterUsedFields ref entity entityPerms usedFields
-            | None -> raisef PermissionsViewException "No access to fields %O" usedFields
-        with
-        | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied in entity %O: %s" name e.Message
+        usedFields
+            |> Set.toSeq
+            |> Seq.map findOne
+            |> Seq.fold1 mergeAllowedOperation
+            |> allowedOperationRestriction
+            |> Option.map compileRestriction
 
-    Map.map mapEntity usedEntities
+    let filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (schemaPerms : FlatAllowedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =
+        let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
+            try
+                match Map.tryFind name schemaPerms.entities with
+                | Some entityPerms ->
+                    let entity = Map.find name schema.entities
+                    let ref = { schema = schemaName; name = name } : FunQL.ResolvedEntityRef
+                    filterUsedFields ref entity entityPerms usedFields
+                | None -> raisef PermissionsViewException "No access to fields %O" usedFields
+            with
+            | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied in entity %O: %s" name e.Message
 
-let private filterUsedSchemas (layout : Layout) (role : FlatRole) (usedSchemas : FunQL.UsedSchemas) : SchemaAccess =
-    let mapSchema (name : FunQL.SchemaName) (usedEntities : FunQL.UsedEntities) =
-        try
-            match Map.tryFind name role.permissions.schemas with
-            | Some schemaPerms ->
-                let schema = Map.find name layout.schemas
-                filterUsedEntities name schema schemaPerms usedEntities
-            | None -> raisef PermissionsViewException "No access to entities %O" usedEntities
-        with
-        | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied in schema %O: %s" name e.Message
+        Map.map mapEntity usedEntities
 
-    Map.map mapSchema usedSchemas
+    let filterUsedSchemas (layout : Layout) (role : FlatRole) (usedSchemas : FunQL.UsedSchemas) : SchemaAccess =
+        let mapSchema (name : FunQL.SchemaName) (usedEntities : FunQL.UsedEntities) =
+            try
+                match Map.tryFind name role.permissions.schemas with
+                | Some schemaPerms ->
+                    let schema = Map.find name layout.schemas
+                    filterUsedEntities name schema schemaPerms usedEntities      
+                | None -> raisef PermissionsViewException "No access to entities %O" usedEntities
+            with
+            | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied in schema %O: %s" name e.Message
+
+        Map.map mapSchema usedSchemas
+
+    member this.Arguments = arguments
+    member this.FilterUsedSchemas = filterUsedSchemas
 
 type private PermissionsApplier (access : SchemaAccess) =
     let rec applyToSelectExpr : SelectExpr -> SelectExpr = function
@@ -125,13 +136,19 @@ type private PermissionsApplier (access : SchemaAccess) =
     member this.ApplyToSelectExpr = applyToSelectExpr
 
 let checkRoleViewExpr (layout : Layout) (role : FlatRole) (expr : CompiledViewExpr) : unit =
-    let access = filterUsedSchemas layout role expr.usedSchemas
+    let accessCompiler = AccessCompiler expr.query.arguments
+    let access = accessCompiler.FilterUsedSchemas layout role expr.usedSchemas
     ()
 
-let applyRoleViewExpr (layout : Layout) (role : FlatRole) (expr : CompiledViewExpr) : CompiledViewExpr =
-    let access = filterUsedSchemas layout role expr.usedSchemas
+let applyRoleViewExpr (layout : Layout) (role : FlatRole) (view : CompiledViewExpr) : CompiledViewExpr =
+    let accessCompiler = AccessCompiler view.query.arguments
+    let access = accessCompiler.FilterUsedSchemas layout role view.usedSchemas
     let applier = PermissionsApplier access
-    let query = applier.ApplyToSelectExpr expr.query
-    { expr with
-          query = query
+    let expression = applier.ApplyToSelectExpr view.query.expression
+    { view with
+          query =
+              { view.query with
+                    expression = expression
+                    arguments = accessCompiler.Arguments
+              }
     }

@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Permissions.Types
 
+open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
 
@@ -8,11 +9,23 @@ type UserName = string
 type ResolvedRoleRef = ResolvedEntityRef
 
 [<NoComparison>]
+type Restriction =
+    { expression : LocalFieldExpr
+      globalArguments : Set<ArgumentName>
+    } with
+    override this.ToString () = this.ToFunQLString ()
+
+    member this.ToFunQLString () = this.expression.ToFunQLString ()
+
+    interface IFunQLString with
+        member this.ToFunQLString () = this.ToFunQLString()
+
+[<NoComparison>]
 type AllowedField =
     { // Are you allowed to change (UPDATE/INSERT) this field?
       change : bool
       // Are you allowed to select this entry? If yes, what _additional_ restrictions are in place if this field is used, on top of entity-wide?
-      select : LocalFieldExpr option
+      select : Restriction option
     }
 
 [<NoComparison>]
@@ -25,15 +38,15 @@ type AllowedOperationError =
 type AllowedEntity =
     { allowBroken : bool
       // Post-UPDATE/INSERT check expression. If None you cannot UPDATE nor INSERT.
-      check : LocalFieldExpr option
+      check : Restriction option
       // Are you allowed to INSERT?
       insert : Result<bool, exn>
       // Which entries are you allowed to SELECT?
-      select : LocalFieldExpr option
+      select : Restriction option
       // Which entries are you allowed to UPDATE (on top of SELECT)?
-      update : LocalFieldExpr option
+      update : Restriction option
       // Which entries are you allowed to DELETE (on top of SELECT)?
-      delete : Result<LocalFieldExpr, AllowedOperationError> option
+      delete : Result<Restriction, AllowedOperationError> option
       fields : Map<FieldName, AllowedField>
     }
 

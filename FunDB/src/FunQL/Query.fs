@@ -8,14 +8,12 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
 type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
-
-type ViewExecutionException (message : string) =
-    inherit Exception(message)
 
 type [<JsonConverter(typeof<ExecutedValueConverter>)>] [<NoComparison>] ExecutedValue =
     { attributes : ExecutedAttributeMap
@@ -239,32 +237,10 @@ let private parseResult (domains : Domains) (result : QueryResult) : ExecutedVie
         }
     (viewInfo, rows)
 
-type ViewArguments = Map<Placeholder, FieldValue>
-
-let private typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : unit =
-    match fieldType with
-    | FTEnum vals ->
-        match value with
-        | FString str when Set.contains str vals -> ()
-        | _ -> raisef ViewExecutionException "Argument is not from allowed values of a enum: %O" value
-    // Most casting/typechecking will be done by database or Npgsql
-    | _ -> ()
-
 // XXX: Add user access rights enforcing there later.
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ViewArguments) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
+let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValues) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
-        let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
-            let value =
-                match Map.tryFind name arguments with
-                | None ->
-                    if mapping.optional then
-                        FNull
-                    else
-                        raisef ViewExecutionException "Argument not found: %O" name
-                | Some value -> value
-            typecheckArgument mapping.fieldType value
-            (mapping.placeholder, (mapping.valueType, compileFieldValueSingle value))
-        let parameters = viewExpr.arguments |> Map.mapWithKeys makeParameter
+        let parameters = prepareArguments viewExpr.query.arguments arguments
 
         let! attrsResult = task {
             match viewExpr.attributesQuery with
@@ -289,7 +265,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | None -> Map.empty
             | Some (attrTypes, attrs) -> attrs
 
-        return! connection.ExecuteQuery (viewExpr.query.ToString()) parameters <| fun rawResult ->
+        return! connection.ExecuteQuery (viewExpr.query.expression.ToSQLString()) parameters <| fun rawResult ->
             let (info, rows) = parseResult viewExpr.domains rawResult
 
             let mergedInfo =

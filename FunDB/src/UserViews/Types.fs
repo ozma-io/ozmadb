@@ -90,11 +90,3 @@ type UserViews =
 
 type ErroredUserViewsSchema = Map<UserViewName, exn>
 type ErroredUserViews = Map<SchemaName, ErroredUserViewsSchema>
-
-// Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
-let globalArgumentTypes: Map<ArgumentName, ParsedFieldType> =
-    Map.ofSeq
-        [ (FunQLName "lang", FTType <| FETScalar SFTString)
-          (FunQLName "user", FTType <| FETScalar SFTString)
-          (FunQLName "transaction_time", FTType <| FETScalar SFTDateTime)
-        ]

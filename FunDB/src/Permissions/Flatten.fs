@@ -8,9 +8,9 @@ open FunWithFlags.FunDB.Permissions.Types
 // Actually stringified expression, used for deduplication.
 type RestrictionKey = string
 // Logically OR'ed expressions from different roles. 
-type RestrictionsAny = Map<RestrictionKey, LocalFieldExpr>
+type RestrictionsAny = Map<RestrictionKey, Restriction>
 // Logically AND'ed expressions from one role. 
-type RestrictionsAll = Map<RestrictionKey, LocalFieldExpr>
+type RestrictionsAll = Map<RestrictionKey, Restriction>
 
 [<NoComparison>]
 type AllowedOperation =
@@ -85,6 +85,16 @@ type private HalfFlatAllowedDatabase =
     { schemas : Map<SchemaName, HalfFlatAllowedSchema>
     }
 
+let private restrictionAnd (a : Restriction) (b : Restriction) =
+    { expression = FEAnd (a.expression, b.expression)
+      globalArguments = Set.union a.globalArguments b.globalArguments
+    }
+
+let private restrictionOr (a : Restriction) (b : Restriction) =
+    { expression = FEOr (a.expression, b.expression)
+      globalArguments = Set.union a.globalArguments b.globalArguments
+    }
+
 let mergeAllowedOperation (a : AllowedOperation) (b : AllowedOperation) =
     match (a, b) with
     | (OAllowed, OAllowed) -> OAllowed
@@ -92,14 +102,14 @@ let mergeAllowedOperation (a : AllowedOperation) (b : AllowedOperation) =
     | (OAllowed, OFiltered f) -> OFiltered f
     | (OFiltered f1, OFiltered f2) -> OFiltered <| Map.union f1 f2
 
-let allowedOperationExpression : AllowedOperation -> LocalFieldExpr option = function
+let allowedOperationRestriction : AllowedOperation -> Restriction option = function
     | OAllowed -> None
-    | OFiltered f -> f |> Map.values |> Seq.fold1 (curry FEAnd) |> Some
+    | OFiltered f -> f |> Map.values |> Seq.fold1 restrictionAnd |> Some
 
 let private mergeRestrictionsAny (restrs : RestrictionsAny) =
-    match restrs |> Map.values |> Seq.fold1 (curry FEOr) with
-    | FEValue (FBool true) -> OAllowed
-    | expr -> OFiltered <| Map.singleton (expr.ToFunQLString()) expr
+    match restrs |> Map.values |> Seq.fold1 restrictionOr with
+    | { expression = FEValue (FBool true) } -> OAllowed
+    | restr -> OFiltered <| Map.singleton (restr.ToFunQLString()) restr
 
 let private mapSingleRestriction (restrs : RestrictionsAny) =
     if Map.isEmpty restrs then
@@ -143,9 +153,9 @@ let private mergeAllowedDatabase (a : HalfFlatAllowedDatabase) (b : HalfFlatAllo
     }
 
 let private flattenAllowedEntity (ent : AllowedEntity) : HalfFlatAllowedEntity =
-    let flattenRestrictions = Option.map (fun (where : LocalFieldExpr) -> (where.ToFunQLString()), where)
+    let flattenRestrictions = Option.map (fun (where : Restriction) -> (where.ToFunQLString()), where)
 
-    let makeFields (accessor : AllowedField -> LocalFieldExpr option) (entityExpr : LocalFieldExpr) =
+    let makeFields (accessor : AllowedField -> Restriction option) (entityExpr : Restriction) =
         let entityStr = entityExpr.ToFunQLString()
 
         let mapField field =
@@ -156,14 +166,14 @@ let private flattenAllowedEntity (ent : AllowedEntity) : HalfFlatAllowedEntity =
                 if entityStr = fieldStr then
                     Some fieldExpr
                 else
-                    Some <| FEAnd (entityExpr, fieldExpr)
+                    Some <| restrictionAnd entityExpr fieldExpr
                 
         ent.fields |> Map.mapMaybe (fun name -> mapField)
 
-    let makeRestriction (e : LocalFieldExpr) = Map.singleton (e.ToFunQLString()) e
+    let makeRestriction (e : Restriction) = Map.singleton (e.ToFunQLString()) e
     let makeRestrictions = Map.map (fun name -> makeRestriction)
     let foldRestrictionsAll restrs =
-        let expr = restrs |> Map.values |> Seq.fold1 (curry FEAnd)
+        let expr = restrs |> Map.values |> Seq.fold1 restrictionAnd
         Map.singleton (expr.ToFunQLString()) expr
 
     let mergeEntries = Map.intersectWith (fun name -> Map.union)
