@@ -86,12 +86,22 @@ type private HalfFlatAllowedDatabase =
     }
 
 let private restrictionAnd (a : Restriction) (b : Restriction) =
-    { expression = FEAnd (a.expression, b.expression)
+    let e =
+        match (a.expression, b.expression) with
+        | (FEValue (FBool true), e)
+        | (e, FEValue (FBool true)) -> e
+        | (e1, e2) -> FEOr (e1, e2)
+    { expression = e
       globalArguments = Set.union a.globalArguments b.globalArguments
     }
 
 let private restrictionOr (a : Restriction) (b : Restriction) =
-    { expression = FEOr (a.expression, b.expression)
+    let e =
+        match (a.expression, b.expression) with
+        | (FEValue (FBool false), e)
+        | (e, FEValue (FBool false)) -> e
+        | (e1, e2) -> FEOr (e1, e2)
+    { expression = e
       globalArguments = Set.union a.globalArguments b.globalArguments
     }
 
