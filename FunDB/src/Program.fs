@@ -29,7 +29,10 @@ type Config =
       url : string
       preloads : string option
       authAuthority : string option
+      // Disables auth completely
       disableSecurity : bool option
+      // Disables permissions model, e.g. one should be in Users table but everyone is local root
+      disableACL : bool option
     }
 
 [<EntryPoint>]
@@ -42,10 +45,7 @@ let main (args : string[]) : int =
     let configPath = args.[0]
     let rawConfig = File.ReadAllText(configPath)
     let config = JsonConvert.DeserializeObject<Config>(rawConfig)
-    let disableSecurity =
-        match config.disableSecurity with
-        | None -> false
-        | Some v -> v
+    let disableSecurity = Option.defaultValue false config.disableSecurity
 
     let sourcePreload =
         match config.preloads with
@@ -58,6 +58,7 @@ let main (args : string[]) : int =
         let apiSettings =
             { cacheStore = cacheStore
               disableSecurity = disableSecurity
+              disableACL = Option.defaultValue false config.disableACL
             }
 
         choose

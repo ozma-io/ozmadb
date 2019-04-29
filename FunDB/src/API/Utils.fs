@@ -50,6 +50,7 @@ type RealmAccess =
 type APISettings =
     { cacheStore : ContextCacheStore
       disableSecurity : bool
+      disableACL : bool
     }
 
 let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
@@ -73,6 +74,7 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
                       userName = userName
                       isRoot = isRoot
                       language = lang
+                      disableACL = settings.disableACL
                     }
             return! f rctx next ctx
         with

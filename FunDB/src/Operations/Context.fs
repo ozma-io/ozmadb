@@ -157,6 +157,7 @@ type RequestParams =
     { cacheStore : ContextCacheStore
       userName : UserName
       isRoot : bool
+      disableACL : bool
       language : string
     }
 
@@ -236,7 +237,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 else
                     match rawUser with
                     | null -> raise <| RequestException REUserNotFound
-                    | user when user.IsRoot -> RTRoot
+                    | user when user.IsRoot || opts.disableACL -> RTRoot
                     | user when isNull user.Role -> raise <| RequestException RENoRole
                     | user ->
                         let role = ctx.State.permissions.FindRole { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get
