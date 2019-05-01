@@ -793,6 +793,7 @@ type TableOperation =
     | TOAlterColumnType of ColumnName * DBValueType
     | TOAlterColumnNull of ColumnName * bool
     | TOAlterColumnDefault of ColumnName * ValueExpr option
+    with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
