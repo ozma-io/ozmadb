@@ -22,6 +22,29 @@ let private checkName (FunQLName name) : unit =
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissions : SourcePermissions) =
     let mutable goodParents = Set.empty
 
+    let rec checkPath (allowIds : bool) (entity : ResolvedEntity) (name : FieldName) (fields : FieldName list) : unit =
+        match fields with  
+        | [] ->
+            match entity.FindField name with
+            | None -> raisef ResolvePermissionsException "Column not found in restriction expression: %O" name
+            | Some (_, RId) ->
+                if allowIds then
+                    ()
+                else
+                    raisef ResolvePermissionsException "Ids aren't allowed in this restriction expression: %O" name
+            | Some (_, RColumnField _) -> ()
+            | Some (_, RComputedField comp) ->
+                if allowIds || not comp.hasId then
+                    ()
+                else
+                    raisef ResolvePermissionsException "Ids aren't allowed in this restriction expression: %O" name
+        | (ref :: refs) ->
+            match Map.tryFind name entity.columnFields with
+            | Some { fieldType = FTReference (refEntity, _) } ->
+                let newEntity = Map.find refEntity.name (Map.find refEntity.schema layout.schemas).entities
+                checkPath allowIds newEntity ref refs
+            | _ -> raisef ResolvePermissionsException "Invalid dereference in path: %O" ref
+
     let resolveRestriction (entity : ResolvedEntity) (allowIds : bool) (where : string) : Restriction =
         let whereExpr =
             match parse tokenizeFunQL fieldExpr where with
@@ -30,26 +53,12 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
 
         let mutable globalArguments = Set.empty
     
-        let resolveColumn : LinkedFieldRef -> FieldName = function
-            | { ref = { entity = None; name = name }; path = [||] } ->
-                match entity.FindField name with
-                | None -> raisef ResolvePermissionsException "Column not found in restriction expression: %O" name
-                | Some (_, RId) ->
-                    if allowIds then
-                        name
-                    else
-                        raisef ResolvePermissionsException "Ids aren't allowed in this restriction expression: %O" name
-                | Some (_, RColumnField _) -> name
-                | Some (_, RComputedField comp) ->
-                    if comp.isLocal then
-                        if allowIds || not comp.hasId then
-                            name
-                        else
-                            raisef ResolvePermissionsException "Ids aren't allowed in this restriction expression: %O" name
-                    else
-                        raisef ResolvePermissionsException "Non-local computed field reference in restriction expression: %O" name
+        let resolveColumn : LinkedFieldRef -> LinkedFieldName = function
+            | { ref = { entity = None; name = name }; path = path } ->
+                checkPath allowIds entity name (Array.toList path)
+                { ref = name; path = path }
             | ref ->
-                raisef ResolvePermissionsException"Invalid reference in restriction expression: %O" ref
+                raisef ResolvePermissionsException "Invalid reference in restriction expression: %O" ref
         let resolvePlaceholder = function
             | PLocal name -> raisef ResolvePermissionsException "Local argument %O is not allowed in restriction expression" name
             | PGlobal name when Map.containsKey name globalArgumentTypes ->
@@ -70,7 +79,6 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
           select = resolveOne allowedField.select
         }
 
-    // bool - is it broken?
     let resolveAllowedEntity (entity : ResolvedEntity) (allowedEntity : SourceAllowedEntity) : (exn option * AllowedEntity) =
         let mutable error = None
     

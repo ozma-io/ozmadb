@@ -103,9 +103,8 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> Task<un
                 }
         }
 
-
     and resolveFromExpr : ResolvedFromExpr -> Task<ResolvedFromExpr> = function
-        | FEntity name -> Task.result <| FEntity name
+        | FEntity (pun, name) -> Task.result <| FEntity (pun, name)
         | FJoin (jt, e1, e2, where) ->
             task {
                 let! e1' = resolveFromExpr e1

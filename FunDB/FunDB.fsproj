@@ -44,8 +44,6 @@
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
 
     <Compile Include="src/Layout/Types.fs" />
-    <Compile Include="src/Permissions/Source.fs" />
-    <Compile Include="src/Permissions/Types.fs" />
 
     <Compile Include="src/FunQL/Resolve.fs" />
     <Compile Include="src/FunQL/Dereference.fs" />
@@ -64,11 +62,14 @@
     <Compile Include="src/Layout/Render.fs" />
     <Compile Include="src/Layout/Update.fs" />
     <Compile Include="src/Layout/Meta.fs" />
+    <Compile Include="src/Permissions/Source.fs" />
+    <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Resolve.fs" />
     <Compile Include="src/Permissions/Schema.fs" />
     <Compile Include="src/Permissions/Render.fs" />
     <Compile Include="src/Permissions/Update.fs" />
     <Compile Include="src/Permissions/Flatten.fs" />
+    <Compile Include="src/Permissions/Compile.fs" />
     <Compile Include="src/Permissions/View.fs" />
     <Compile Include="src/Permissions/Entity.fs" />
 

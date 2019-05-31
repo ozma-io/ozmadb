@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
+module SQL = FunWithFlags.FunDB.SQL.AST
 
 type UserName = string
 
@@ -10,7 +11,7 @@ type ResolvedRoleRef = ResolvedEntityRef
 
 [<NoComparison>]
 type Restriction =
-    { expression : LocalFieldExpr
+    { expression : LinkedLocalFieldExpr
       globalArguments : Set<ArgumentName>
     } with
     override this.ToString () = this.ToFunQLString ()

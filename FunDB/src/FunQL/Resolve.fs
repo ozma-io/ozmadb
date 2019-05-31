@@ -16,12 +16,12 @@ type ViewResolveException (message : string) =
 [<NoComparison>]
 type BoundField =
     { ref : ResolvedFieldRef
-      field : ResolvedField
+      immediate : bool // Set if field references value from a table directly, not via a subexpression.
     }
 
 [<NoComparison>]
-type BoundFieldRef =
-    { ref : FieldRef
+type BoundRef<'f> when 'f :> IFunQLString =
+    { ref : 'f
       bound : BoundField option
     } with
         override this.ToString () = this.ToFunQLString()
@@ -31,12 +31,20 @@ type BoundFieldRef =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type LinkedResolvedFieldRef = LinkedRef<BoundFieldRef>
+type LinkedBoundFieldRef = LinkedRef<BoundRef<FieldRef>>
+
+[<NoComparison>]
+type private BoundFieldInfo =
+    { ref : ResolvedFieldRef
+      entity : ResolvedEntity
+      field : ResolvedField
+      immediate : bool
+    }
 
 [<NoComparison>]
 type private QSubqueryField =
     | QRename of FieldName
-    | QField of BoundField option
+    | QField of BoundFieldInfo option
 
 type private QSubqueryFields = Map<FieldName, QSubqueryField>
 
@@ -44,15 +52,15 @@ type private QMapping = Map<EntityName option, SchemaName option * QSubqueryFiel
 
 type private SomeArgumentsMap = Map<ArgumentName, ParsedFieldType>
 
-type ResolvedFieldExpr = FieldExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
-type ResolvedSelectExpr = SelectExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
-type ResolvedSingleSelectExpr = SingleSelectExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
-type ResolvedQueryResult = QueryResult<ResolvedEntityRef, LinkedResolvedFieldRef>
-type ResolvedQueryResultExpr = QueryResultExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
-type ResolvedFromExpr = FromExpr<ResolvedEntityRef, LinkedResolvedFieldRef>
-type ResolvedFromClause = FromClause<ResolvedEntityRef, LinkedResolvedFieldRef>
-type ResolvedAttributeMap = AttributeMap<ResolvedEntityRef, LinkedResolvedFieldRef>
-type ResolvedOrderLimitClause = OrderLimitClause<ResolvedEntityRef, LinkedResolvedFieldRef>
+type ResolvedFieldExpr = FieldExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedSelectExpr = SelectExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedSingleSelectExpr = SingleSelectExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedQueryResult = QueryResult<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedQueryResultExpr = QueryResultExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedFromExpr = FromExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedFromClause = FromClause<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedAttributeMap = AttributeMap<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedOrderLimitClause = OrderLimitClause<ResolvedEntityRef, LinkedBoundFieldRef>
 
 [<NoComparison>]
 type private QSelectResults =
@@ -98,7 +106,7 @@ type private MainEntities = Map<ResolvedEntityRef, EntityName>
 
 let private unboundSubqueryField = QField None
 
-let rec private findRootField (name : FieldName) (fields : QSubqueryFields) : (FieldName * BoundField option) option =
+let rec private findRootField (name : FieldName) (fields : QSubqueryFields) : (FieldName * BoundFieldInfo option) option =
     match Map.tryFind name fields with
     | None -> None
     | Some (QRename newName) -> findRootField newName fields
@@ -144,7 +152,7 @@ let resolveArgument (layout : Layout) (arg : ParsedArgument) : ResolvedArgument 
     }
 
 let rec private findMainsFromEntity : ResolvedFromExpr -> MainEntities = function
-    | FEntity ent -> Map.singleton ent ent.name
+    | FEntity (pun, ent) -> Map.singleton ent <| Option.defaultValue ent.name pun
     | FJoin (ftype, a, b, where) ->
         match ftype with
         | Left -> findMainsFromEntity a
@@ -188,7 +196,9 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
 
-    let rec resolvePath (boundField : BoundField) : FieldName list -> (BoundField * FieldName list) = function
+    // Returns innermost bound field. It has sense only for result expressions in subexpressions,
+    // where it will be bound to the result name.
+    let rec resolvePath (boundField : BoundFieldInfo) : FieldName list -> BoundFieldInfo = function
         | [] ->
             match boundField.field with
             | RColumnField _ ->
@@ -196,7 +206,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             | RComputedField comp ->
                 usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
             | _ -> ()
-            (boundField, [])
+            boundField
         | (ref :: refs) ->
             match boundField.field with
             | RColumnField { fieldType = FTReference (entityRef, _) } ->
@@ -209,14 +219,20 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                                 name = newRef
                               }
                           field = refField
+                          entity = newEntity
+                          immediate = false
                         }
                     usedSchemas <- addUsedField entityRef.schema entityRef.name ref usedSchemas
-                    let (newBoundField, newPath) = resolvePath nextBoundField refs
-                    (newBoundField, newRef :: newPath)
+                    resolvePath nextBoundField refs
                 | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
             | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
 
-    let resolveField (mapping : QMapping) (f : LinkedFieldRef) : QSubqueryField * LinkedResolvedFieldRef =
+    // Returns:
+    // * Subquery field information in case this field will be used as a result from a subexpression.
+    //   It will be added to `mapping` of the resulting SELECT, hence it bounds innermost field in path;
+    // * Outer bound field, if exists;
+    // * Resulting reference.
+    let resolveField (mapping : QMapping) (f : LinkedFieldRef) : QSubqueryField * BoundFieldInfo option * LinkedBoundFieldRef =
         let (entityName, (schemaName, fields)) =
             match f.ref.entity with
             | None ->
@@ -234,23 +250,23 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                         (srcName, ret)
                 | None ->
                     raisef ViewResolveException "Field entity not found for %O in %O" ename f
-        let (newName, boundField) =
+        let (newName, outerBoundField) =
             match findRootField f.ref.name fields with
             | Some r -> r
             | None -> raisef ViewResolveException "Unknown field %O in %O" f.ref.name f
 
-        let (newBoundField, newPath) =
-            match boundField with
+        let (innerBoundField, outerRef) =
+            match outerBoundField with
             | Some field ->
-                let (bf, path) = resolvePath field (Array.toList f.path)
-                (Some bf, List.toArray path)
+                let inner = resolvePath { field with immediate = false } (Array.toList f.path)
+                (Some inner, Some { ref = field.ref; immediate = field.immediate })
             | None when Array.isEmpty f.path ->
-                (None, [||])
+                (None, None)
             | _ ->
                 raisef ViewResolveException "Dereference on an unbound field in %O" f
 
         let newRef = { entity = Option.map (fun ename -> { schema = None; name = ename }) entityName; name = newName } : FieldRef
-        (QField newBoundField, { ref = { ref = newRef; bound = boundField }; path = newPath })
+        (QField innerBoundField, outerBoundField, { ref = { ref = newRef; bound = outerRef }; path = f.path })
 
     let resolvePlaceholder (name : Placeholder) : Placeholder =
         if Map.containsKey name arguments then
@@ -274,10 +290,10 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
 
     and resolveResultExpr (mapping : QMapping) : ParsedQueryResultExpr -> QSubqueryField * ResolvedQueryResultExpr = function
         | QRField f ->
-            let (boundField, f') = resolveField mapping f
+            let (boundField, _, f') = resolveField mapping f
             (boundField, QRField f')
         | QRExpr (name, FEColumn f) ->
-            let (boundField, f') = resolveField mapping f
+            let (boundField, _, f') = resolveField mapping f
             (boundField, QRExpr (name, FEColumn f'))
         | QRExpr (name, e) ->
             checkName name
@@ -290,11 +306,11 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     and resolveFieldExpr (mapping : QMapping) (expr : ParsedFieldExpr) : bool * ResolvedFieldExpr =
         let mutable isLocal = true
         let resolveColumn col =
-            let (_, ret) = resolveField mapping col
+            let (_, outer, ret) = resolveField mapping col
 
             if not <| Array.isEmpty col.path then
                 isLocal <- false
-            match ret.ref.bound with
+            match outer with
             | Some { field = RComputedField { isLocal = false } } ->
                 isLocal <- false
             | _ -> ()
@@ -386,18 +402,18 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         (newMapping, res)
 
     and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
-        | FEntity name ->
+        | FEntity (pun, name) ->
             let resName = resolveEntityRef name
             match layout.FindEntity resName with
             | None -> raisef ViewResolveException "Entity not found: %O" name
             | Some entity ->
                 let makeBoundField (name : FieldName) (field : ResolvedField) =
                     let ref = { entity = resName; name = name } : ResolvedFieldRef
-                    QField <| Some { ref = ref; field = field }
+                    QField <| Some { ref = ref; entity = entity; field = field; immediate = true }
 
                 let realFields = mapAllFields makeBoundField entity
                 let fields = Map.add funMain (QRename entity.mainField) realFields
-                (Map.singleton (Some name.name) (Some resName.schema, fields), FEntity resName)
+                (Map.singleton (Some <| Option.defaultValue name.name pun) (Some resName.schema, fields), FEntity (pun, resName))
         | FJoin (jt, e1, e2, where) ->
             let (newMapping1, newE1) = resolveFromExpr e1
             let (newMapping2, newE2) = resolveFromExpr e2

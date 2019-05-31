@@ -356,7 +356,8 @@ AttributeValuesNonEmpty:
 QuerySource:
   | LEFT_PAREN SelectExpr RIGHT_PAREN AS Name           { FSubExpr ($5, $2) }
   | LEFT_PAREN Values RIGHT_PAREN AS Name ColumnAliases { FValues ($5, $6, $2) }
-  | EntityRef                                           { FEntity ($1) }
+  | EntityRef                                           { FEntity (None, $1) }
+  | EntityRef AS Name                                   { FEntity (Some $3, $1) }
   | LEFT_PAREN FromExpr RIGHT_PAREN                     { $2 }
 
 ColumnAliases:

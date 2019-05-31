@@ -488,7 +488,7 @@ and [<NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLString and 'f :> 
             member this.ToFunQLString () = this.ToFunQLString()
 
 and [<NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLString =
-    | FEntity of 'e
+    | FEntity of EntityName option * 'e
     | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FSubExpr of EntityName * SelectExpr<'e, 'f>
     | FValues of EntityName * FieldName[] * FieldExpr<'e, 'f>[][]
@@ -497,7 +497,10 @@ and [<NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQLSt
 
         member this.ToFunQLString () =
             match this with
-            | FEntity e -> e.ToFunQLString()
+            | FEntity (name, e) ->
+                match name with
+                | Some n -> sprintf "%s AS %s" (e.ToFunQLString()) (n.ToFunQLString())
+                | None ->  e.ToFunQLString()
             | FJoin (joinType, a, b, cond) -> sprintf "(%s) %s JOIN (%s) ON %s" (a.ToFunQLString()) (joinType.ToFunQLString()) (b.ToFunQLString()) (cond.ToFunQLString())
             | FSubExpr (name, expr) ->
                 sprintf "(%s) AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
@@ -742,3 +745,6 @@ let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
         ]
 
 let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal
+
+let relaxEntityRef (ref : ResolvedEntityRef) : EntityRef =
+    { schema = Some ref.schema; name = ref.name }

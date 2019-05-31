@@ -457,7 +457,7 @@ type [<NoComparison>] ValueExpr =
             member this.ToSQLString () = this.ToSQLString ()
 
 and [<NoComparison>] FromExpr =
-    | FTable of TableRef
+    | FTable of TableName option * TableRef
     | FJoin of JoinType * FromExpr * FromExpr * ValueExpr
     | FSubExpr of TableName * ColumnName[] option * SelectExpr
     with
@@ -465,7 +465,10 @@ and [<NoComparison>] FromExpr =
 
         member this.ToSQLString () =
             match this with
-            | FTable t -> t.ToSQLString()
+            | FTable (name, t) ->
+                match name with
+                | Some n -> sprintf "%s AS %s" (t.ToSQLString()) (n.ToSQLString())
+                | None -> t.ToSQLString()
             | FJoin (joinType, a, b, cond) ->
                 sprintf "(%s %s JOIN %s ON %s)" (a.ToSQLString()) (joinType.ToSQLString()) (b.ToSQLString()) (cond.ToSQLString())
             | FSubExpr (name, fieldNames, expr) ->

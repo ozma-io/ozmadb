@@ -323,7 +323,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 | Error str -> return Error <| EEArguments str
                 | Ok args ->
                     try
-                        do! insertEntity ctx.Connection.Query globalArguments (getRole roleType) entityRef entity args
+                        do! insertEntity ctx.Connection.Query globalArguments ctx.State.layout (getRole roleType) entityRef args
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -359,7 +359,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 | Ok args when Map.isEmpty args -> return Ok ()
                 | Ok args ->
                     try
-                        do! updateEntity ctx.Connection.Query globalArguments (getRole roleType) entityRef entity id args
+                        do! updateEntity ctx.Connection.Query globalArguments ctx.State.layout (getRole roleType) entityRef id args
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -390,7 +390,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
             | None -> return Error EENotFound
             | Some entity ->
                 try
-                    do! deleteEntity ctx.Connection.Query globalArguments (getRole roleType) entityRef entity id
+                    do! deleteEntity ctx.Connection.Query globalArguments ctx.State.layout (getRole roleType) entityRef id
                     let event =
                         EventEntry (
                             TransactionTimestamp = transactionTime,

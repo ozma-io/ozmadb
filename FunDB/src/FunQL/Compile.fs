@@ -88,16 +88,16 @@ let parseColumnName (name : SQL.SQLName) =
     | [|name|] -> CTColumn (FunQLName name)
     | _ -> failwith <| sprintf "Cannot parse column name: %O" name
 
-type private JoinKey =
+type JoinKey =
     { table : SQL.TableName
       column : SQL.ColumnName
       toTable : ResolvedEntityRef
     }
-type private JoinPath =
+type JoinPath =
     { name : SQL.TableName
       nested : JoinPaths
     }
-and private JoinPaths = Map<JoinKey, JoinPath>
+and JoinPaths = Map<JoinKey, JoinPath>
 
 let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETArray SFTString -> FStringArray [||]
@@ -288,8 +288,8 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
     and compileLinkedLocalFieldExpr (paths0 : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LinkedLocalFieldExpr) : JoinPaths * SQL.ValueExpr =
         let mutable paths = paths0
         let compileLinkedName (linked : LinkedFieldName) =
-            let (_, field) = entity.FindField linked.ref |> Option.get
-            let (newPaths, ret) = compilePath paths tableRef entity field linked.ref (Array.toList linked.path)
+            let (newName, field) = entity.FindField linked.ref |> Option.get
+            let (newPaths, ret) = compilePath paths tableRef entity field newName (Array.toList linked.path)
             paths <- newPaths
             ret
         let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
@@ -297,19 +297,23 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         let ret = genericCompileFieldExpr compileLinkedName voidPlaceholder voidQuery expr
         (paths, ret)
 
-    let compileLinkedFieldRef (paths0 : JoinPaths) (linked : LinkedResolvedFieldRef) : JoinPaths * SQL.ValueExpr =
+    let compileLinkedFieldRef (paths0 : JoinPaths) (linked : LinkedBoundFieldRef) : JoinPaths * SQL.ValueExpr =
         match (linked.path, linked.ref.bound) with
         | ([||], None) ->
             let columnRef = compileFieldRef linked.ref.ref
             (paths0, SQL.VEColumn columnRef)
-        | (_, Some bound) ->
+        | (_, Some boundRef) ->
             let tableRef =
                 match linked.ref.ref.entity with
                 | Some renamedTable -> compileEntityRef renamedTable
-                | None -> compileResolvedEntityRef bound.ref.entity
-            let entity = layout.FindEntity bound.ref.entity |> Option.get
-            let (_, field) = entity.FindField bound.ref.name |> Option.get
-            compilePath paths0 tableRef entity field linked.ref.ref.name (Array.toList linked.path)
+                | None -> compileResolvedEntityRef boundRef.ref.entity
+            let entity = layout.FindEntity boundRef.ref.entity |> Option.get
+            let (realName, field) = entity.FindField boundRef.ref.name |> Option.get
+            // In case it's an immediate name we need to rename outermost field (i.e. `__main`).
+            // If it's not we need to keep original naming.
+            let newName =
+                if boundRef.immediate then realName else linked.ref.ref.name
+            compilePath paths0 tableRef entity field newName (Array.toList linked.path)
         | _ -> failwith "Unexpected path with no bound field"
 
     let rec compileLinkedFieldExpr (paths0 : JoinPaths) (expr : ResolvedFieldExpr) : JoinPaths * SQL.ValueExpr =
@@ -536,35 +540,15 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
         let fromColumn = SQL.VEColumn { table = Some tableRef; name = joinKey.column }
         let toColumn = SQL.VEColumn { table = Some toTableRef; name = sqlFunId }
         let joinExpr = SQL.VEEq (fromColumn, toColumn)
-        let subquery = compileFromEntityRef joinKey.toTable entity
-        let currJoin = SQL.FJoin (SQL.Left, from, SQL.FSubExpr (path.name, None, subquery), joinExpr)
+        let subquery = SQL.FTable (Some path.name, compileResolvedEntityRef joinKey.toTable)
+        let currJoin = SQL.FJoin (SQL.Left, from, subquery, joinExpr)
         buildJoins currJoin path.nested
 
-    and compileFromEntityRef (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SQL.SelectExpr =
-        let tableRef = compileResolvedEntityRef entityRef
-        let idColumnExpr = SQL.VEColumn { table = Some tableRef; name = sqlFunId }
-
-        SQL.SSelect
-            { // Warning: SCAll is used as marker when applying permissions to detect leaf-level SELECT's -- be careful!
-              columns = [| SQL.SCAll None |]
-              clause = Some { from = SQL.FTable tableRef
-                              where = None
-                            }
-              orderLimit =
-                  // Always sort by ID
-                  { orderBy = [| (SQL.Asc, idColumnExpr) |]
-                    limit = None
-                    offset = None
-                  }
-            }
-
     and compileFromExpr : ResolvedFromExpr -> DomainsMap * SQL.FromExpr = function
-        | FEntity entityRef ->
+        | FEntity (pun, entityRef) ->
             let entity = Option.getOrFailWith (fun () -> sprintf "Can't find entity %O" entityRef) <| layout.FindEntity entityRef
-            let tableRef = compileResolvedEntityRef entityRef
 
-            let subquery = compileFromEntityRef entityRef entity
-            let subExpr = SQL.FSubExpr (tableRef.name, None, subquery)
+            let subquery = SQL.FTable (Option.map compileName pun, compileResolvedEntityRef entityRef)
 
             let makeDomainEntry name field =
                 { ref = { entity = entityRef; name = name }
@@ -573,7 +557,7 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
                   idColumn = funEmpty
                 }
             let domain = mapAllFields makeDomainEntry entity
-            (Map.singleton entityRef.name (DSingle (newGlobalDomainId (), domain)), subExpr)
+            (Map.singleton entityRef.name (DSingle (newGlobalDomainId (), domain)), subquery)
         | FJoin (jt, e1, e2, where) ->
             let (domainsMap1, r1) = compileFromExpr e1
             let (domainsMap2, r2) = compileFromExpr e2
@@ -594,6 +578,12 @@ type private QueryCompiler (layout : Layout, mainEntity : ResolvedMainEntity opt
             (Map.singleton name domainsMap, ret)
 
     member this.CompileSelectExpr = compileSelectExpr true
+
+    member this.CompileSingleFromClause (clause : ResolvedFromClause) =
+        let (paths, domainsMap, compiled) = compileFromClause Map.empty clause
+        { compiled with
+              from = buildJoins compiled.from paths
+        }
 
 type private PurityStatus = Pure | NonArgumentPure
 
@@ -662,6 +652,10 @@ let rec private filterExprColumns (cols : Set<SQL.ColumnName>) : SQL.SelectExpr 
 let rec private flattenDomains : Domains -> FlattenedDomains = function
     | DSingle (id, dom) -> Map.singleton id dom
     | DMulti (ns, subdoms) -> subdoms |> Map.values |> Seq.fold (fun m subdoms -> Map.union m (flattenDomains subdoms)) Map.empty
+
+let compileSingleFromClause (layout : Layout) (argumentsMap : CompiledArgumentsMap) (clause : ResolvedFromClause) : SQL.FromClause =
+    let compiler = QueryCompiler (layout, None, argumentsMap)
+    compiler.CompileSingleFromClause clause
 
 let compileViewExpr (layout : Layout) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
     let arguments = compileArguments viewExpr.arguments

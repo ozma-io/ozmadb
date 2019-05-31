@@ -2,10 +2,12 @@ module FunWithFlags.FunDB.Permissions.View
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Types
+open FunWithFlags.FunDB.Permissions.Compile
 open FunWithFlags.FunDB.Permissions.Flatten
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 
@@ -13,36 +15,35 @@ type PermissionsViewException (message : string) =
     inherit Exception(message)
 
 type private UsedArguments = Set<FunQL.ArgumentName>
-type private FieldAccess = ValueExpr option
+type private FieldAccess = SelectExpr option
 type private EntityAccess = Map<FunQL.EntityName, FieldAccess>
 type private SchemaAccess = Map<FunQL.SchemaName, EntityAccess>
 
-type private AccessCompiler (initialArguments : QueryArguments) =
+type private AccessCompiler (layout : Layout, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
 
     let filterUsedFields (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) (entityPerms : FlatAllowedEntity) (usedFields : FunQL.UsedFields) : FieldAccess =
         let select =
             match entityPerms.select with
             | None -> raisef PermissionsViewException "No read access"
-            | Some select -> select    
+            | Some select -> select
         
         let findOne name =
             match Map.tryFind name select with
             | None -> raisef PermissionsViewException "No read access for field %O" name
             | Some restrictions -> restrictions
 
-        let compileRestriction restr =
-            let compiledRef = compileResolvedEntityRef ref
+        let prepareRestriction restr =
             for arg in restr.globalArguments do
                 arguments <- addArgument (FunQL.PGlobal arg) FunQL.globalArgumentTypes.[arg] arguments
-            compileLocalFieldExpr arguments.types compiledRef entity restr.expression
+            compileRestriction layout ref arguments.types restr
 
         usedFields
             |> Set.toSeq
             |> Seq.map findOne
             |> Seq.fold1 mergeAllowedOperation
             |> allowedOperationRestriction
-            |> Option.map compileRestriction
+            |> Option.map prepareRestriction
 
     let filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (schemaPerms : FlatAllowedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =
         let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
@@ -85,24 +86,10 @@ type private PermissionsApplier (access : SchemaAccess) =
         | SValues values -> SValues values
 
     and applyToSingleSelectExpr (query : SingleSelectExpr) : SingleSelectExpr =
-        match query.columns with
-        | [| SCAll None |] ->
-            // Leaf-level select
-            match query.clause with
-            | Some { from = FTable { schema = Some schemaName; name = entityName } as from; where = None } ->
-                let accessSchema = Map.find (decompileName schemaName) access
-                let accessEntity = Map.find (decompileName entityName) accessSchema
-                { clause = Some { from = from; where = accessEntity }
-                  columns = query.columns
-                  orderLimit = query.orderLimit
-                }
-            | _ -> failwith "Unexpected clause in leaf-level SELECT"
-        | _ ->
-            // Some other select
-            { columns = Array.map applyToSelectedColumn query.columns
-              clause = Option.map applyToFromClause query.clause
-              orderLimit = applyToOrderLimitClause query.orderLimit
-            }
+        { columns = Array.map applyToSelectedColumn query.columns
+          clause = Option.map applyToFromClause query.clause
+          orderLimit = applyToOrderLimitClause query.orderLimit
+        }
 
     and applyToOrderLimitClause (clause : OrderLimitClause) : OrderLimitClause =
         { limit = Option.map applyToValueExpr clause.limit
@@ -124,7 +111,14 @@ type private PermissionsApplier (access : SchemaAccess) =
         }
 
     and applyToFromExpr : FromExpr -> FromExpr = function
-        | FTable _ -> failwith "Unexpected SELECT from table"
+        | FTable (pun, entity) ->
+            let accessSchema = Map.find (decompileName <| Option.get entity.schema) access
+            let accessEntity = Map.find (decompileName entity.name) accessSchema
+            match accessEntity with
+            | None -> FTable (pun, entity)
+            | Some restr ->
+                let name = Option.defaultValue entity.name pun
+                FSubExpr (name, None, restr)
         | FJoin (jt, e1, e2, where) ->
             let e1' = applyToFromExpr e1
             let e2' = applyToFromExpr e2
@@ -136,12 +130,12 @@ type private PermissionsApplier (access : SchemaAccess) =
     member this.ApplyToSelectExpr = applyToSelectExpr
 
 let checkRoleViewExpr (layout : Layout) (role : FlatRole) (expr : CompiledViewExpr) : unit =
-    let accessCompiler = AccessCompiler expr.query.arguments
+    let accessCompiler = AccessCompiler (layout, expr.query.arguments)
     let access = accessCompiler.FilterUsedSchemas layout role expr.usedSchemas
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : FlatRole) (view : CompiledViewExpr) : CompiledViewExpr =
-    let accessCompiler = AccessCompiler view.query.arguments
+    let accessCompiler = AccessCompiler (layout, view.query.arguments)
     let access = accessCompiler.FilterUsedSchemas layout role view.usedSchemas
     let applier = PermissionsApplier access
     let expression = applier.ApplyToSelectExpr view.query.expression

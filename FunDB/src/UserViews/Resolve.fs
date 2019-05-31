@@ -186,43 +186,6 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
         }
 
     let rec resolveUserView (stack : Set<ResolvedUserViewRef>) (homeSchema : SchemaName option) (uv : HalfResolvedView) : Task<ResolvedUserView> =
-        // Check view with deep resolve; will be needed later for resolving called user views.
-        (*let checkView ref =
-            task {
-                // We break the cycle here
-                if not <| Set.contains ref stack then
-                    match findCached ref with
-                    | Some r -> return ()
-                    | None ->
-                        let schema =
-                            match Map.tryFind ref.schema halfResolved with
-                            | None -> raisef UserViewResolveException "Referenced view not found: %O" ref
-                            | Some r -> r
-                        let view =
-                            match Map.tryFind ref.name schema with
-                            | None -> raisef UserViewResolveException "Referenced view not found: %O" ref
-                            | Some (Error e) -> raisefWithInner UserViewResolveException e.error "Referenced view %O is broken" ref
-                            | Some (Ok r) -> r
-                        let newStack = Set.add ref stack
-                        let! r = task {
-                            try
-                                return! Task.map Ok (resolveUserView newStack (Some ref.schema) view)
-                            with
-                                | :? UserViewResolveException as e ->
-                                    if view.allowBroken || forceAllowBroken then
-                                        let err =
-                                            { error = e :> exn
-                                              source = view.source
-                                            }
-                                        return Error err
-                                    else
-                                        return raisefWithInner UserViewFatalResolveException e "Error in user view %O" ref
-                        }
-                        addCached ref r
-                        match r with
-                        | Ok _ -> return ()
-                        | Error e -> return raisefWithInner UserViewResolveException e.error "Referenced view %O is broken" ref
-            }*)
         let checkView ref =
             task {
                 let schema =

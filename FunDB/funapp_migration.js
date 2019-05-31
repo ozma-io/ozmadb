@@ -3,53 +3,53 @@
 var commonViews = {
     // Internal APIs
     "Settings":
-        "select\n" +
+        "SELECT\n" +
         "  \"Name\",\n" +
         "  \"Value\"\n" +
-        "from\n" +
+        "FROM\n" +
         "  \"funapp\".\"Settings\"",
     "FieldTranslations":
-        "select\n" +
+        "SELECT\n" +
         "  \"SchemaName\",\n" +
         "  \"EntityName\",\n" +
         "  \"FieldName\",\n" +
         "  \"Translation\"\n" +
-        "from\n" +
+        "FROM\n" +
         "  \"funapp\".\"FieldTranslations\"\n" +
-        "where $$Lang LIKE \"FieldTranslations\".\"Language\" || '%'",
+        "WHERE $$Lang LIKE \"FieldTranslations\".\"Language\" || '%'",
     // Public APIs
     "TranslatedMenu":
-        "select\n" +
+        "SELECT\n" +
         "  @\"Type\" = 'Menu',\n" +
-        "  \"MainMenuCategories\".\"Name\" as \"CategoryName\",\n" +
-        "  COALESCE(\"Translations\".\"Translation\", \"UserViews\".\"Name\") as \"Name\" @{ \"LinkedView\" = { schema: \"UserViews\".\"SchemaName\", name: \"UserViews\".\"Name\" } }\n" +
-        "from\n" +
+        "  \"MainMenuCategories\".\"Name\" AS \"CategoryName\",\n" +
+        "  COALESCE(\"Translations\".\"Translation\", \"UserViews\".\"Name\") AS \"Name\" @{ \"LinkedView\" = { schema: \"UserViews\".\"SchemaName\", name: \"UserViews\".\"Name\" } }\n" +
+        "FROM\n" +
         "  \"funapp\".\"MainMenuButtons\"\n" +
-        "  left join \"funapp\".\"MainMenuCategories\" on \"MainMenuCategories\".\"Id\" = \"MainMenuButtons\".\"CategoryId\"\n" +
-        "  inner join (select \"UserViews\".\"Name\", \"UserViews\".\"SchemaId\"=>\"Name\" as \"SchemaName\" from \"public\".\"UserViews\") as \"UserViews\" on \"UserViews\".\"SchemaName\" = \"MainMenuButtons\".\"SchemaName\" and \"UserViews\".\"Name\" = \"MainMenuButtons\".\"UserViewName\"\n" +
-        "  left join (select \"SchemaName\", \"UserViewName\", \"Translation\" from \"funapp\".\"UserViewTranslations\" where $$Lang LIKE \"Language\" || '%') as \"Translations\"\n" +
-        "    on \"Translations\".\"SchemaName\" = \"UserViews\".\"SchemaName\" and \"Translations\".\"UserViewName\" = \"UserViews\".\"Name\"\n" +
-        "order by \"MainMenuCategories\".\"OrdinalPosition\", \"MainMenuButtons\".\"OrdinalPosition\"",
+        "  LEFT JOIN \"funapp\".\"MainMenuCategories\" ON \"MainMenuCategories\".\"Id\" = \"MainMenuButtons\".\"CategoryId\"\n" +
+        "  INNER JOIN (SELECT \"UserViews\".\"Name\", \"UserViews\".\"SchemaId\"=>\"Name\" AS \"SchemaName\" FROM \"public\".\"UserViews\") AS \"UserViews\" ON \"UserViews\".\"SchemaName\" = \"MainMenuButtons\".\"SchemaName\" AND \"UserViews\".\"Name\" = \"MainMenuButtons\".\"UserViewName\"\n" +
+        "  LEFT JOIN (SELECT \"SchemaName\", \"UserViewName\", \"Translation\" FROM \"funapp\".\"UserViewTranslations\" where $$Lang LIKE \"Language\" || '%') as \"Translations\"\n" +
+        "    ON \"Translations\".\"SchemaName\" = \"UserViews\".\"SchemaName\" AND \"Translations\".\"UserViewName\" = \"UserViews\".\"Name\"\n" +
+        "ORDER BY \"MainMenuCategories\".\"OrdinalPosition\", \"MainMenuButtons\".\"OrdinalPosition\"",
     "SystemMenu":
-        "select\n" +
+        "SELECT\n" +
         "  @\"Type\" = 'Menu',\n" +
-        "  \"Schemas\".\"Name\" as \"CategoryName\",\n" +
-        "  \"Entities\".\"Name\" as \"Name\" @{ \"LinkedView\" = { schema: 'funapp', name: 'Table-' || \"Schemas\".\"Name\" || '-' || \"Entities\".\"Name\" } }\n" +
-        "from\n" +
+        "  \"Schemas\".\"Name\" AS \"CategoryName\",\n" +
+        "  \"Entities\".\"Name\" AS \"Name\" @{ \"LinkedView\" = { schema: 'funapp', name: 'Table-' || \"Schemas\".\"Name\" || '-' || \"Entities\".\"Name\" } }\n" +
+        "FROM\n" +
         "  \"public\".\"Entities\"\n" +
-        "  left join \"public\".\"Schemas\" on \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
-        "order by \"Entities\".\"Id\"",
+        "  LEFT JOIN \"public\".\"Schemas\" ON \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
+        "ORDER BY \"Entities\".\"Id\"",
     "UserViewByName":
         "( $schema string, $name string ):\n" +
-        "select\n" +
+        "SELECT\n" +
         "  @\"Type\" = 'Form',\n" +
         "  \"SchemaId\",\n" +
         "  \"Name\",\n" +
         "  \"Query\" @{ \"TextType\" = 'codeeditor' }\n" +
-        "from\n" +
+        "FROM\n" +
         "  \"public\".\"UserViews\"\n" +
-        "where \"SchemaId\"=>\"Name\" = $schema and \"Name\" = $name\n" +
-        "for insert into \"public\".\"UserViews\""
+        "WHERE \"SchemaId\"=>\"Name\" = $schema AND \"Name\" = $name\n" +
+        "FOR INSERT INTO \"public\".\"UserViews\""
 }
 
 function addSummaryViews(views, layout) {
@@ -59,7 +59,7 @@ function addSummaryViews(views, layout) {
             var entity = schema.entities[entityName]
             var sqlName = renderSqlName(schemaName) + "." + renderSqlName(entityName)
             var name = "Summary-" + schemaName + "-" + entityName
-            var query = "select \"Id\", __main as \"Main\" from " + sqlName + " order by __main"
+            var query = "SELECT \"Id\", __main AS \"Main\" FROM " + sqlName + " ORDER BY __main"
             views[name] = query
         }
     }
@@ -82,20 +82,22 @@ function addDefaultViews(views, layout) {
             var formName = "Form-" + schemaName + "-" + entityName
             var formQuery =
                 "( $id reference(" + sqlName + ") ):\n" +
-                "select\n  " +
+                "SELECT\n  " +
                 ["@\"Type\" = 'Form'"].concat(fields).join(",") +
-                "\nfrom " + sqlName + " " +
-                "where \"Id\" = $id for insert into " + sqlName
+                "\nFROM " + sqlName + " " +
+                "WHERE \"Id\" = $id" +
+                "\nFOR INSERT INTO " + sqlName
             views[formName] = formQuery
 
             var tableName = "Table-" + schemaName + "-" + entityName
             var tableQuery =
-                "select\n  " +
+                "SELECT\n  " +
                 [ "@\"CreateView\" = &\"" + formName + "\"",
                   "\"Id\" @{ \"RowLinkedView\" = &\"" + formName + "\" }"
                 ].concat(fields).join(", ") +
-                "\nfrom " + sqlName + " " +
-                "for insert into " + sqlName
+                "\nFROM " + sqlName +
+                "\nORDER BY \"Id\"\n" +
+                "FOR INSERT INTO " + sqlName
             views[tableName] = tableQuery
         }
     }

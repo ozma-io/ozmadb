@@ -40,7 +40,7 @@ let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
     | FTEnum vals -> FTEnum vals
     | FTType t -> FTType t
 
-let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (role : FlatRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (rawArgs : EntityArguments) : Task<unit> =
+let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) : Task<unit> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
@@ -49,6 +49,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
             | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = false })
         
+        let entity = layout.FindEntity entityRef |> Option.get
         // FIXME: Lots of shuffling types around; make arguments API better?
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments = argumentTypes |> Seq.map (fun (name, arg) -> (PLocal name, arg)) |> Map.ofSeq |> compileArguments
@@ -71,7 +72,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> query
             | Some role ->
                 try
-                    applyRoleInsert role entityRef entity query
+                    applyRoleInsert layout role entityRef query
                 with
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
@@ -82,13 +83,14 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
 let private funIdArg = { argType = FTType (FETScalar SFTInt); optional = false }
 
-let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (role : FlatRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) (rawArgs : EntityArguments) : Task<unit> =
+let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) : Task<unit> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
             | None -> None
             | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = false })
         
+        let entity = layout.FindEntity entityRef |> Option.get
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments' = argumentTypes |> Seq.map (fun (name, arg) -> (PLocal name, arg)) |> Map.ofSeq |> compileArguments
         let arguments = addArgument (PLocal funId) funIdArg arguments'
@@ -111,7 +113,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> query
             | Some role ->
                 try
-                    applyRoleUpdate role entityRef entity query
+                    applyRoleUpdate layout role entityRef query
                 with
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
@@ -121,7 +123,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             raisef EntityDeniedException "Access denied for update"
     }
 
-let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (role : FlatRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : EntityId) : Task<unit> =
+let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (id : EntityId) : Task<unit> =
     task {
         let arguments = addArgument (PLocal funId) funIdArg emptyArguments
         let whereId = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder arguments.types.[PLocal funId].placeholderId)
@@ -140,7 +142,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> query
             | Some role ->
                 try
-                    applyRoleDelete role entityRef entity query
+                    applyRoleDelete layout role entityRef query
                 with
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message        

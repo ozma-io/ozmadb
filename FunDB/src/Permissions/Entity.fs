@@ -6,12 +6,13 @@ open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Flatten
+open FunWithFlags.FunDB.Permissions.Compile
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type PermissionsEntityException (message : string) =
     inherit Exception(message)
 
-let applyRoleInsert (role : FlatRole) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (query : Query<SQL.InsertExpr>) : Query<SQL.InsertExpr> =
+let applyRoleInsert (layout : Layout)  (role : FlatRole) (entityRef : ResolvedEntityRef) (query : Query<SQL.InsertExpr>) : Query<SQL.InsertExpr> =
     let allowedFields =
         match role.FindEntity entityRef with
         | Some { insert = Some insert } -> insert
@@ -22,7 +23,7 @@ let applyRoleInsert (role : FlatRole) (entityRef : ResolvedEntityRef) (entity : 
             raisef PermissionsEntityException "Access denied to insert field %O" col
     query
 
-let applyRoleUpdate (role : FlatRole) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (query : Query<SQL.UpdateExpr>) : Query<SQL.UpdateExpr> =
+let applyRoleUpdate (layout : Layout) (role : FlatRole) (entityRef : ResolvedEntityRef) (query : Query<SQL.UpdateExpr>) : Query<SQL.UpdateExpr> =
     let allowedFields =
         match role.FindEntity entityRef with
         | Some entity when not <| Map.isEmpty entity.update -> entity.update
@@ -43,7 +44,7 @@ let applyRoleUpdate (role : FlatRole) (entityRef : ResolvedEntityRef) (entity : 
             else
                 args
         let arguments = globalArgumentTypes |> Map.fold findOne query.arguments
-        let newExpr = compileLocalFieldExpr arguments.types query.expression.name entity restriction.expression
+        let newExpr = compileValueRestriction layout entityRef arguments.types restriction
         let expr =
             { query.expression with
                   where = Option.unionWith (curry SQL.VEAnd) query.expression.where (Some newExpr)
@@ -52,7 +53,7 @@ let applyRoleUpdate (role : FlatRole) (entityRef : ResolvedEntityRef) (entity : 
           expression = expr
         }
 
-let applyRoleDelete (role : FlatRole) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (query : Query<SQL.DeleteExpr>) : Query<SQL.DeleteExpr> =
+let applyRoleDelete (layout : Layout) (role : FlatRole) (entityRef : ResolvedEntityRef) (query : Query<SQL.DeleteExpr>) : Query<SQL.DeleteExpr> =
     let maybeRestriction =
         match role.FindEntity entityRef with
         | Some { delete = Some delete } -> allowedOperationRestriction delete
@@ -67,7 +68,7 @@ let applyRoleDelete (role : FlatRole) (entityRef : ResolvedEntityRef) (entity : 
             else
                 args
         let arguments = globalArgumentTypes |> Map.fold findOne query.arguments
-        let newExpr = compileLocalFieldExpr arguments.types query.expression.name entity restriction.expression
+        let newExpr = compileValueRestriction layout entityRef arguments.types restriction
         let expr =
             { query.expression with
                   where = Option.unionWith (curry SQL.VEAnd) query.expression.where (Some newExpr)
