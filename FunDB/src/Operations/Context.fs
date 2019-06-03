@@ -295,23 +295,23 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
             match! resolveSource source with
             | Error e -> return Error e
             | Ok uv ->
-                let restricted =
-                    match roleType with
-                    | RTRoot -> uv.compiled
-                    | RTRole role -> applyRoleViewExpr ctx.State.layout role uv.compiled
-                let getResult info (res : ExecutedViewExpr) = task {
-                    return (uv, { res with rows = Array.ofSeq res.rows })
-                }
-                match convertViewArguments rawArgs restricted with
-                | Error msg -> return Error <| UVEArguments msg
-                | Ok arguments ->
-                    try
-                        let! r = runViewExpr ctx.Connection.Query restricted arguments getResult
-                        return Ok r
-                    with
-                    | :? PermissionsViewException as err ->
-                        logger.LogError(err, "Access denied to user view")
-                        return Error UVEAccessDenied
+                try
+                    let restricted =
+                        match roleType with
+                        | RTRoot -> uv.compiled
+                        | RTRole role -> applyRoleViewExpr ctx.State.layout role uv.compiled
+                    let getResult info (res : ExecutedViewExpr) = task {
+                        return (uv, { res with rows = Array.ofSeq res.rows })
+                    }
+                    match convertViewArguments rawArgs restricted with
+                    | Error msg -> return Error <| UVEArguments msg
+                    | Ok arguments ->
+                            let! r = runViewExpr ctx.Connection.Query restricted arguments getResult
+                            return Ok r
+                with
+                | :? PermissionsViewException as err ->
+                    logger.LogError(err, "Access denied to user view")
+                    return Error UVEAccessDenied
         }
 
     member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> =
