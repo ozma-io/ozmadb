@@ -93,7 +93,7 @@ let compileArguments (args : ResolvedArgumentsMap) : QueryArguments =
     { types = arguments
       lastPlaceholderId = lastPlaceholderId
     }
-  
+
 let private typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : unit =
     match fieldType with
     | FTEnum vals ->

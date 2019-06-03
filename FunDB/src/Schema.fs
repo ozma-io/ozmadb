@@ -268,7 +268,7 @@ and
         member val IsRoot = false with get, set
         [<ColumnField("reference(\"public\".\"Roles\")", Nullable=true)>]
         member val RoleId : Nullable<int> = Nullable () with get, set
-        member val Role = null : Role with get, set    
+        member val Role = null : Role with get, set
 
 and
     [<AllowNullLiteral>]
@@ -306,17 +306,17 @@ and
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("bool", Default="FALSE")>]
-        member val AllowBroken = false with get, set    
+        member val AllowBroken = false with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val Insert = false with get, set
         [<ColumnField("string", Nullable=true)>]
-        member val Check = null : string with get, set    
+        member val Check = null : string with get, set
         [<ColumnField("string", Nullable=true)>]
         member val Select = null : string with get, set
         [<ColumnField("string", Nullable=true)>]
         member val Update = null : string with get, set
         [<ColumnField("string", Nullable=true)>]
-        member val Delete = null : string with get, set            
+        member val Delete = null : string with get, set
 
         member val ColumnFields = ResizeArray<RoleColumnField>() with get, set
 

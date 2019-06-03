@@ -48,7 +48,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None when field.isNullable -> None
             | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
             | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = false })
-        
+
         let entity = layout.FindEntity entityRef |> Option.get
         // FIXME: Lots of shuffling types around; make arguments API better?
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
@@ -76,7 +76,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 with
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
-                
+
         let! affected = runQuery connection globalArgs restricted rawArgs
         return ()
     }
@@ -89,7 +89,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             match Map.tryFind fieldName rawArgs with
             | None -> None
             | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = false })
-        
+
         let entity = layout.FindEntity entityRef |> Option.get
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments' = argumentTypes |> Seq.map (fun (name, arg) -> (PLocal name, arg)) |> Map.ofSeq |> compileArguments
@@ -117,7 +117,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 with
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
-                
+
         let! affected = runQuery connection globalArgs restricted (Map.add funId (FInt id) rawArgs)
         if affected = 0 then
             raisef EntityDeniedException "Access denied for update"
@@ -127,7 +127,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
     task {
         let arguments = addArgument (PLocal funId) funIdArg emptyArguments
         let whereId = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder arguments.types.[PLocal funId].placeholderId)
-        let tableRef = compileResolvedEntityRef entityRef        
+        let tableRef = compileResolvedEntityRef entityRef
 
         let expr =
             { name = tableRef
@@ -145,9 +145,9 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                     applyRoleDelete layout role entityRef query
                 with
                 | :? PermissionsEntityException as e ->
-                    raisefWithInner EntityDeniedException e.InnerException "%s" e.Message        
-        
+                    raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
+
         let! affected = runQuery connection globalArgs restricted (Map.singleton funId (FInt id))
         if affected = 0 then
-            raisef EntityDeniedException "Access denied to delete"    
+            raisef EntityDeniedException "Access denied to delete"
     }

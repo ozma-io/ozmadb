@@ -23,7 +23,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
     let mutable goodParents = Set.empty
 
     let rec checkPath (allowIds : bool) (entity : ResolvedEntity) (name : FieldName) (fields : FieldName list) : unit =
-        match fields with  
+        match fields with
         | [] ->
             match entity.FindField name with
             | None -> raisef ResolvePermissionsException "Column not found in restriction expression: %O" name
@@ -52,7 +52,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             | Error msg -> raisef ResolvePermissionsException "Error parsing restriction expression: %s" msg
 
         let mutable globalArguments = Set.empty
-    
+
         let resolveColumn : LinkedFieldRef -> LinkedFieldName = function
             | { ref = { entity = None; name = name }; path = path } ->
                 checkPath allowIds entity name (Array.toList path)
@@ -81,7 +81,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
 
     let resolveAllowedEntity (entity : ResolvedEntity) (allowedEntity : SourceAllowedEntity) : (exn option * AllowedEntity) =
         let mutable error = None
-    
+
         let mapField name (allowedField : SourceAllowedField) =
             try
                 checkName name
@@ -131,7 +131,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             with
             | :? ResolvePermissionsException as e when allowedEntity.allowBroken || forceAllowBroken ->
                 error <- Some (e :> exn)
-                Error ({ source = delete; error = e } : AllowedOperationError)            
+                Error ({ source = delete; error = e } : AllowedOperationError)
 
         if Option.isSome allowedEntity.update && Option.isNone allowedEntity.check then
             raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
@@ -149,7 +149,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
 
     let resolveAllowedSchema (schema : ResolvedSchema) (allowedSchema : SourceAllowedSchema) : ErroredAllowedSchema * AllowedSchema =
         let mutable errors = Map.empty
-    
+
         let mapEntity name allowedEntity =
             try
                 let entity =
@@ -161,7 +161,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     match error with
                     | Some e ->
                         errors <- Map.add name e errors
-                    | None -> ()                    
+                    | None -> ()
                     Ok ret
                 with
                 | :? ResolvePermissionsException as e when allowedEntity.allowBroken || forceAllowBroken ->
@@ -169,7 +169,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     Error { source = allowedEntity; error = e }
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed entity %O: %s" name e.Message
-        
+
         let ret =
             { entities = allowedSchema.entities |> Map.map mapEntity
             }
@@ -177,7 +177,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
 
     let resolveAllowedDatabase (db : SourceAllowedDatabase) : ErroredAllowedDatabase * AllowedDatabase =
         let mutable errors = Map.empty
-    
+
         let mapSchema name allowedSchema =
             try
                 let schema =
@@ -187,10 +187,10 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                 let (schemaErrors, newAllowed) = resolveAllowedSchema schema allowedSchema
                 if not <| Map.isEmpty schemaErrors then
                     errors <- Map.add name schemaErrors errors
-                newAllowed              
+                newAllowed
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed schema %O: %s" name e.Message
-        
+
         let ret =
             { schemas = db.schemas |> Map.map mapSchema
             } : AllowedDatabase
@@ -211,7 +211,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                 let parentRole =
                     match Map.tryFind parent.name schema.roles with
                     | None -> raisef ResolvePermissionsException "Undefined parent role for %O" parent
-                    | Some s -> s            
+                    | Some s -> s
                 checkParents newStack parent parentRole
             role.parents |> Set.iter checkParent
             goodParents <- Set.add ref goodParents
@@ -231,14 +231,14 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
         let mapRole name role =
             try
                 checkName name
-                let ref = { schema = schemaName; name = name }                
+                let ref = { schema = schemaName; name = name }
                 let (roleErrors, newRole) = resolveRole ref role
                 if not <| Map.isEmpty roleErrors then
                     errors <- Map.add name roleErrors errors
-                newRole            
+                newRole
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in role %O: %s" name e.Message
-        
+
         let ret =
             { roles = schema.roles |> Map.map mapRole
             }
@@ -246,7 +246,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
 
     let resolvePermissions () : ErroredPermissions * Permissions =
         let mutable errors = Map.empty
-    
+
         let mapSchema name schema =
             try
                 if not <| Map.containsKey name layout.schemas then
@@ -257,7 +257,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                 newSchema
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in schema %O: %s" name e.Message
-        
+
         let ret =
             { schemas = permissions.schemas |> Map.map mapSchema
             }

@@ -223,13 +223,13 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
         let! ctx = opts.cacheStore.GetCache()
         try
             let lowerUserName = opts.userName.ToLowerInvariant()
-            // FIXME: SLOW!    
+            // FIXME: SLOW!
             let! rawUser =
                 ctx.Connection.System.Users
                     .Include("Role")
                     .Include("Role.Schema")
                     .Where(fun user -> user.Name.ToLowerInvariant() = lowerUserName)
-                    .SingleOrDefaultAsync()    
+                    .SingleOrDefaultAsync()
             let userId = if isNull rawUser then None else Some rawUser.Id
             let roleType =
                 if opts.isRoot then

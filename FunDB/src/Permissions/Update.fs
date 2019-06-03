@@ -45,7 +45,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     let updateAllowedEntity (entityKey : EntityKey) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) : unit =
         updateAllowedFields entityKey entity existingEntity
-        
+
         existingEntity.AllowBroken <- entity.allowBroken
         existingEntity.Insert <- entity.insert
         existingEntity.Check <- Option.toNull entity.check
@@ -135,7 +135,7 @@ let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) : Ta
                             | Some entityErrors ->
                                 if Map.containsKey (FunQLName entity.Entity.Name) entityErrors then
                                     entity.AllowBroken <- true
-    
+
         let! _ = db.SaveChangesAsync()
         return ()
     }

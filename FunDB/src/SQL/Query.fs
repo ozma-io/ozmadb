@@ -181,7 +181,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             let getRow i =
                 let (_, typ) = columns.[i]
                 reader.[i] |> convertValue typ
-            
+
             let rows = List()
             // ??? F# ???
             let mutable hasRow = false
@@ -192,6 +192,6 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 rows.Add(row)
                 let! hasRow1 = reader.ReadAsync()
                 hasRow <- hasRow1
-                
+
             return! queryFunc { columns = columns; rows = rows }
         }

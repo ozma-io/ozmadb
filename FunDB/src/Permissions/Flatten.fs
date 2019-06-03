@@ -7,9 +7,9 @@ open FunWithFlags.FunDB.Permissions.Types
 
 // Actually stringified expression, used for deduplication.
 type RestrictionKey = string
-// Logically OR'ed expressions from different roles. 
+// Logically OR'ed expressions from different roles.
 type RestrictionsAny = Map<RestrictionKey, Restriction>
-// Logically AND'ed expressions from one role. 
+// Logically AND'ed expressions from one role.
 type RestrictionsAll = Map<RestrictionKey, Restriction>
 
 [<NoComparison>]
@@ -177,7 +177,7 @@ let private flattenAllowedEntity (ent : AllowedEntity) : HalfFlatAllowedEntity =
                     Some fieldExpr
                 else
                     Some <| restrictionAnd entityExpr fieldExpr
-                
+
         ent.fields |> Map.mapMaybe (fun name -> mapField)
 
     let makeRestriction (e : Restriction) = Map.singleton (e.ToFunQLString()) e
@@ -189,7 +189,7 @@ let private flattenAllowedEntity (ent : AllowedEntity) : HalfFlatAllowedEntity =
     let mergeEntries = Map.intersectWith (fun name -> Map.union)
 
     let change = ent.fields |> Map.toSeq |> Seq.filter (fun (name, field) -> field.change) |> Seq.map fst |> Set.ofSeq
-    
+
     let selectFields = Option.map (makeFields (fun x -> x.select)) ent.select
     let select = selectFields |> Option.map makeRestrictions
     let selectWithKeys = Option.map makeRestrictions selectFields
@@ -216,14 +216,14 @@ let private flattenAllowedEntity (ent : AllowedEntity) : HalfFlatAllowedEntity =
         match ent.check with
         | Some check -> Map.singleton (check.ToFunQLString()) check
         | None -> Map.empty
-    
+
     let delete =
         // Merge SELECT for all fields.
         match (selectWithKeys, ent.delete) with
         | (Some ent, Some (Ok del)) ->
             Map.fold (fun a k b -> Map.union a b) (makeRestriction del) ent |> foldRestrictionsAll
         | _ -> Map.empty
-    
+
     { insert = insert
       select = select
       check = check

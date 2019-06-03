@@ -26,7 +26,7 @@ type private AccessCompiler (layout : Layout, initialArguments : QueryArguments)
             match entityPerms.select with
             | None -> raisef PermissionsViewException "No read access"
             | Some select -> select
-        
+
         let findOne name =
             match Map.tryFind name select with
             | None -> raisef PermissionsViewException "No read access for field %O" name
@@ -64,7 +64,7 @@ type private AccessCompiler (layout : Layout, initialArguments : QueryArguments)
                 match Map.tryFind name role.permissions.schemas with
                 | Some schemaPerms ->
                     let schema = Map.find name layout.schemas
-                    filterUsedEntities name schema schemaPerms usedEntities      
+                    filterUsedEntities name schema schemaPerms usedEntities
                 | None -> raisef PermissionsViewException "No read access"
             with
             | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied for schema %O: %s" name e.Message

@@ -228,7 +228,7 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
 
     let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : Task<ErroredUserViewsSchema * UserViewsSchema> = task {
         let mutable errors = Map.empty
-    
+
         let mapUserView name maybeUv =
             task {
                 let ref = { schema = schemaName; name = name }
@@ -242,7 +242,7 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
                     match findCached ref with
                     | Some (Error e) ->
                         if not e.source.allowBroken then
-                            errors <- Map.add name e.error errors        
+                            errors <- Map.add name e.error errors
                         return Error e
                     | Some (Ok uv) ->
                         return Ok uv
@@ -278,7 +278,7 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
 
     let resolveUserViews () : Task<ErroredUserViews * UserViews> = task {
         let mutable errors = Map.empty
-    
+
         let mapSchema name schema =
             task {
                 try
@@ -290,7 +290,7 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
                 | :? UserViewResolveException as e ->
                     return raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
             }
-        
+
         let! schemas = halfResolved |> Map.mapTaskSync mapSchema
         let ret = { schemas = schemas } : UserViews
         return (errors, ret)

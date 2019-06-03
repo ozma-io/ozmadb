@@ -17,7 +17,7 @@ let applyRoleInsert (layout : Layout)  (role : FlatRole) (entityRef : ResolvedEn
         match role.FindEntity entityRef with
         | Some { insert = Some insert } -> insert
         | _ -> raisef PermissionsEntityException "Access denied to insert"
-    
+
     for col in query.expression.columns do
         if col <> sqlFunId && not <| Set.contains (decompileName col) allowedFields then
             raisef PermissionsEntityException "Access denied to insert field %O" col
@@ -28,13 +28,13 @@ let applyRoleUpdate (layout : Layout) (role : FlatRole) (entityRef : ResolvedEnt
         match role.FindEntity entityRef with
         | Some entity when not <| Map.isEmpty entity.update -> entity.update
         | _ -> raisef PermissionsEntityException "Access denied to update"
-            
+
     let addRestriction restrictions col =
         match Map.tryFind (decompileName col) allowedFields with
             | Some restr -> mergeAllowedOperation restrictions restr
-            | None -> raisef PermissionsEntityException "Access denied to insert field %O" col   
+            | None -> raisef PermissionsEntityException "Access denied to insert field %O" col
     let maybeRestriction = query.expression.columns |> Map.keys |> Seq.fold addRestriction OAllowed |> allowedOperationRestriction
-    
+
     match maybeRestriction with
     | None -> query
     | Some restriction ->

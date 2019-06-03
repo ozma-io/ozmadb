@@ -66,7 +66,7 @@ module Option =
 
     let toNull : 'a option -> 'a = function
         | None -> null
-        | Some x -> x       
+        | Some x -> x
 
     let unionWith (f : 'a -> 'a -> 'a) (a : 'a option) (b : 'a option) : 'a option =
         match (a, b) with

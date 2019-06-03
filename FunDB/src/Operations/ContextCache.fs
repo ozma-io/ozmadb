@@ -134,7 +134,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
             logger.LogInformation("Updating system user views")
             let systemViews = preloadUserViews layout preload
             let! _ = updateUserViews conn.System systemViews
-        
+
             let! sourceViews = buildSchemaUserViews conn.System
             let! (brokenViews, userViews) = resolveUserViews conn.Query layout true sourceViews
 
@@ -152,7 +152,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                             logger.LogWarning(err, "Marking {uv} as broken", uvName)
                 if critical then
                     failwith "Broken system user views"
-                do! markBrokenUserViews conn.System brokenViews  
+                do! markBrokenUserViews conn.System brokenViews
 
             let! sourcePermissions = buildSchemaPermissions conn.System
             let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
@@ -162,12 +162,12 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                 for KeyValue(schemaName, schema) in brokenPerms do
                     let isSystem = Map.containsKey schemaName preload.schemas
                     if isSystem then
-                        critical <- true            
+                        critical <- true
                     for KeyValue(roleName, role) in schema do
                         for KeyValue(allowedSchemaName, allowedSchema) in role do
                             for KeyValue(allowedEntityName, err) in allowedSchema do
-                                let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()           
-                                let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()                                                     
+                                let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()
+                                let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()
                                 if isSystem then
                                     logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
                                 else

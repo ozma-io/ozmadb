@@ -198,9 +198,9 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
 
     let rec addUsedFields (ref : ResolvedFieldRef) (field : ResolvedField) : unit =
         match field with
-        | RId -> 
+        | RId ->
             usedSchemas <- addUsedEntityRef ref.entity usedSchemas
-        | RColumnField col -> 
+        | RColumnField col ->
             usedSchemas <- addUsedFieldRef ref usedSchemas
             match col.fieldType with
             | FTReference (entityRef, _) ->
@@ -208,7 +208,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 let newRef = { entity = entityRef; name = realName }
                 addUsedFields newRef newField
             | _ -> ()
-        | RComputedField comp -> 
+        | RComputedField comp ->
             usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
 
     // Returns innermost bound field. It has sense only for result expressions in subexpressions,

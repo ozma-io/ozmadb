@@ -69,7 +69,7 @@ let markBrokenUserViews (db : SystemContext) (uvs : ErroredUserViews) : Task<uni
             for uv in schema.UserViews do
                 if Map.containsKey (FunQLName uv.Name) errors then
                     uv.AllowBroken <- true
-                
+
         let! _ = db.SaveChangesAsync()
         return ()
     }

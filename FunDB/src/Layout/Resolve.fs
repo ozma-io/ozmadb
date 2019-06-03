@@ -198,10 +198,10 @@ type private ComputedFieldProperties =
     }
 
 type private Phase2Resolver (layout : HalfResolvedLayout) =
-    let mutable cachedComputedFields : Map<ResolvedFieldRef, ResolvedComputedField> = Map.empty  
+    let mutable cachedComputedFields : Map<ResolvedFieldRef, ResolvedComputedField> = Map.empty
 
     let rec checkPath (stack : Set<ResolvedFieldRef>) (usedSchemas : UsedSchemas) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (fields : FieldName list) : ComputedFieldProperties =
-        match fields with  
+        match fields with
         | [] ->
             match entity.FindField fieldRef.name with
             | Some (_, RId) ->
