@@ -2,7 +2,6 @@ module FunWithFlags.FunDB.Permissions.View
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.AST
-open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
@@ -53,9 +52,9 @@ type private AccessCompiler (layout : Layout, initialArguments : QueryArguments)
                     let entity = Map.find name schema.entities
                     let ref = { schema = schemaName; name = name } : FunQL.ResolvedEntityRef
                     filterUsedFields ref entity entityPerms usedFields
-                | None -> raisef PermissionsViewException "No access to fields %O" usedFields
+                | None -> raisef PermissionsViewException "No read access"
             with
-            | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied in entity %O: %s" name e.Message
+            | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied for entity %O: %s" name e.Message
 
         Map.map mapEntity usedEntities
 
@@ -66,9 +65,9 @@ type private AccessCompiler (layout : Layout, initialArguments : QueryArguments)
                 | Some schemaPerms ->
                     let schema = Map.find name layout.schemas
                     filterUsedEntities name schema schemaPerms usedEntities      
-                | None -> raisef PermissionsViewException "No access to entities %O" usedEntities
+                | None -> raisef PermissionsViewException "No read access"
             with
-            | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied in schema %O: %s" name e.Message
+            | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied for schema %O: %s" name e.Message
 
         Map.map mapSchema usedSchemas
 

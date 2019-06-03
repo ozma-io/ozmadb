@@ -196,16 +196,26 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
 
+    let rec addUsedFields (ref : ResolvedFieldRef) (field : ResolvedField) : unit =
+        match field with
+        | RId -> 
+            usedSchemas <- addUsedEntityRef ref.entity usedSchemas
+        | RColumnField col -> 
+            usedSchemas <- addUsedFieldRef ref usedSchemas
+            match col.fieldType with
+            | FTReference (entityRef, _) ->
+                let (realName, newField) = layout.FindField entityRef funMain |> Option.get
+                let newRef = { entity = entityRef; name = realName }
+                addUsedFields newRef newField
+            | _ -> ()
+        | RComputedField comp -> 
+            usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
+
     // Returns innermost bound field. It has sense only for result expressions in subexpressions,
     // where it will be bound to the result name.
     let rec resolvePath (boundField : BoundFieldInfo) : FieldName list -> BoundFieldInfo = function
         | [] ->
-            match boundField.field with
-            | RColumnField _ ->
-                usedSchemas <- addUsedFieldRef boundField.ref usedSchemas
-            | RComputedField comp ->
-                usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
-            | _ -> ()
+            addUsedFields boundField.ref boundField.field
             boundField
         | (ref :: refs) ->
             match boundField.field with
@@ -222,7 +232,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                           entity = newEntity
                           immediate = false
                         }
-                    usedSchemas <- addUsedField entityRef.schema entityRef.name ref usedSchemas
+                    usedSchemas <- addUsedField entityRef.schema entityRef.name newRef usedSchemas
                     resolvePath nextBoundField refs
                 | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
             | _ -> raisef ViewResolveException "Invalid dereference: %O" ref

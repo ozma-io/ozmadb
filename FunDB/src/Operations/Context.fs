@@ -299,7 +299,8 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     let restricted =
                         match roleType with
                         | RTRoot -> uv.compiled
-                        | RTRole role -> applyRoleViewExpr ctx.State.layout role uv.compiled
+                        | RTRole role ->
+                            applyRoleViewExpr ctx.State.layout role uv.compiled
                     let getResult info (res : ExecutedViewExpr) = task {
                         return (uv, { res with rows = Array.ofSeq res.rows })
                     }

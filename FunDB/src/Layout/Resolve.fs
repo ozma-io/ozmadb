@@ -209,8 +209,8 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
             | Some (_, RComputedField comp) ->
                 let field = resolveComputedField stack entity fieldRef comp
                 { isLocal = field.isLocal; hasId = field.hasId; usedSchemas = mergeUsedSchemas usedSchemas field.usedSchemas }
-            | Some (_, RColumnField _) ->
-                let newUsed = addUsedField fieldRef.entity.schema fieldRef.entity.name fieldRef.name usedSchemas
+            | Some (newName, RColumnField _) ->
+                let newUsed = addUsedField fieldRef.entity.schema fieldRef.entity.name newName usedSchemas
                 { isLocal = true; hasId = false; usedSchemas = newUsed }
             | None -> raisef ResolveLayoutException "Column field not found in path: %O" fieldRef.name
         | (ref :: refs) ->

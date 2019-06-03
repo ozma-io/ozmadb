@@ -714,6 +714,14 @@ type UsedFields = Set<FieldName>
 type UsedEntities = Map<EntityName, UsedFields>
 type UsedSchemas = Map<SchemaName, UsedEntities>
 
+let addUsedEntity (schemaName : SchemaName) (entityName : EntityName) (usedSchemas : UsedSchemas) : UsedSchemas =
+    let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
+    let oldEntity = Map.findWithDefault entityName (fun () -> Set.empty) oldSchema
+    Map.add schemaName (Map.add entityName oldEntity oldSchema) usedSchemas
+
+let addUsedEntityRef (ref : ResolvedEntityRef) =
+    addUsedEntity ref.schema ref.name
+
 let addUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldName : FieldName) (usedSchemas : UsedSchemas) : UsedSchemas =
     let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
     let oldEntity = Map.findWithDefault entityName (fun () -> Set.empty) oldSchema
