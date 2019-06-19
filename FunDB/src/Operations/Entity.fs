@@ -47,7 +47,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None when Option.isSome field.defaultValue -> None
             | None when field.isNullable -> None
             | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
-            | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = false })
+            | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = field.isNullable })
 
         let entity = layout.FindEntity entityRef |> Option.get
         // FIXME: Lots of shuffling types around; make arguments API better?
@@ -88,7 +88,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
             | None -> None
-            | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = false })
+            | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = field.isNullable })
 
         let entity = layout.FindEntity entityRef |> Option.get
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
