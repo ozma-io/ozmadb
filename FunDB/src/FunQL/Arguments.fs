@@ -134,6 +134,7 @@ let prepareArguments (args : QueryArguments) (values : ArgumentValues) : ExprPar
                 else
                     raisef ArgumentCheckException "Argument not found: %O" name
             | Some value -> value
-        typecheckArgument mapping.fieldType value
+        if not (mapping.optional && value = FNull) then
+            typecheckArgument mapping.fieldType value
         (mapping.placeholderId, (mapping.valueType, compileFieldValueSingle value))
     args.types |> Map.mapWithKeys makeParameter
