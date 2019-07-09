@@ -96,7 +96,7 @@ let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : Parse
         | [] -> Some []
         | ((name, FEValue v) :: t) -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
         | _ -> None
-    
+
     match tryExtract exprs with
     | None -> FEJsonObject (exprs |> Seq.map (fun (name, e) -> (FunQLName name, e)) |> Map.ofSeq)
     | Some vals -> FEValue (FJson (vals |> Seq.map (fun (name, v) -> (name, valueToJson v)) |> jsonObject))
@@ -106,7 +106,7 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
         | [] -> Some []
         | ((FEValue v) :: t) -> Option.map (fun nt -> v :: nt) (tryExtract t)
         | _ -> None
-    
+
     match tryExtract exprs with
     | None -> FEJsonArray (List.toArray exprs)
     | Some vals -> FEValue (FJson (vals |> Seq.map valueToJson |> jsonArray))

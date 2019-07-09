@@ -175,7 +175,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
         let permissions = preloadPermissions preload
         let! changed2 = updatePermissions conn.System permissions
         let defaultAttributes = preloadDefaultAttributes preload
-        let! changed3 = updateAttributes conn.System defaultAttributes    
+        let! changed3 = updateAttributes conn.System defaultAttributes
         let! newLayoutSource = buildSchemaLayout conn.System
         let newLayout = resolveLayout newLayoutSource
 

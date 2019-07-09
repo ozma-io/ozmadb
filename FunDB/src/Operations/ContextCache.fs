@@ -273,7 +273,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                         resolveAttributes layout false attrsSource
                     with
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
-                let mergedAttrs = mergeDefaultAttributes defaultAttrs                
+                let mergedAttrs = mergeDefaultAttributes defaultAttrs
 
                 let! userViewsSource = buildSchemaUserViews conn.System
                 if filterSystemViews userViewsSource <> oldState.systemViews then

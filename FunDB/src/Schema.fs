@@ -351,7 +351,7 @@ and
         member val Id = 0 with get, set
         [<ColumnField("reference(\"public\".\"Schemas\")")>]
         member val SchemaId = 0 with get, set
-        member val Schema = null : Schema with get, set    
+        member val Schema = null : Schema with get, set
         [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val FieldEntityId = 0 with get, set
         member val FieldEntity = null : Entity with get, set

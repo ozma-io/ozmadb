@@ -268,8 +268,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let resolvePlaceholder = function
             | PLocal name -> failwith <| sprintf "Unexpected local argument in default attribute: %O" name
             | (PGlobal name) as arg ->
-                arguments <- addArgument arg (Map.find name globalArgumentTypes) arguments    
-                arg            
+                arguments <- addArgument arg (Map.find name globalArgumentTypes) arguments
+                arg
         let foundQuery query = failwith <| sprintf "Unexpected query in default attribute: %O" query
         mapFieldExpr id resolveReference resolvePlaceholder foundQuery
 
@@ -463,7 +463,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let getDomainColumns (result : ResolvedQueryResult) =
             let currentAttrs = Map.keysSet result.attributes
-    
+
             match resultFieldRef result.result with
             | Some ({ ref = { ref = { entity = Some { name = entityName }; name = fieldName } } } as resultRef) ->
                 let newName = resultName result.result
@@ -538,7 +538,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     Seq.append col (nested |> Map.values |> Seq.collect getDomainColumns)
                 let domainColumns =
                     if Array.isEmpty resultRef.path
-                    then       
+                    then
                         match fromInfo with
                         | FIEntity _ -> Seq.empty
                         | FISubquery info -> getDomainColumns info.domains
@@ -605,8 +605,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let allAttrs = Set.union oldAttrs currentAttrs
                         let makeInheritedAttr name =
                             let attrName = SQL.SQLName <| sprintf "__CellAttribute__%O__%O" fieldName name
-                            SQL.SCColumn { table = Some tableRef; name = attrName }  
-                        let inheritedCols = inheritedAttrs |> Set.toSeq |> Seq.map makeInheritedAttr         
+                            SQL.SCColumn { table = Some tableRef; name = attrName }
+                        let inheritedCols = inheritedAttrs |> Set.toSeq |> Seq.map makeInheritedAttr
                         (allAttrs, inheritedCols)
 
                 (Some newDomains, newAttrs, [ idColumns; domainColumns; punColumns; attrColumns ] |> Seq.concat |> Seq.toArray)
@@ -701,7 +701,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     and compileFromExpr : ResolvedFromExpr -> FromMap * SQL.FromExpr = function
         | FEntity (pun, entityRef) ->
             let entity = Option.getOrFailWith (fun () -> sprintf "Can't find entity %O" entityRef) <| layout.FindEntity entityRef
-            
+
             let makeDomainEntry name field =
                 { ref = { entity = entityRef; name = name }
                   field = field
@@ -744,7 +744,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               from = buildJoins compiled.from paths
         }
 
-    member this.Arguments = arguments    
+    member this.Arguments = arguments
 
 type private PurityStatus = Pure | NonArgumentPure
 
