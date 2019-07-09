@@ -3,6 +3,7 @@
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.FunQL.AST
 
 type ParsedFieldExpr = FieldExpr<EntityRef, LinkedFieldRef>
@@ -65,36 +66,41 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
 
-let private jsonObject (vals : (string * JToken) seq) : JObject =
-    let o = JObject()
-    for (k, v) in vals do
-        o.[k] <- v
-    o
-
-let private jsonArray (vals : JToken seq) : JArray =
-    let arr = JArray()
-    for v in vals do
-        arr.Add(v)
-    arr
-
 let private valueToJson : FieldValue -> JToken = function
-  | FInt i -> JToken.op_Implicit i
-  | FDecimal d -> JToken.op_Implicit d
-  | FString s -> JToken.op_Implicit s
-  | FBool b -> JToken.op_Implicit b
-  | FJson j -> j
-  | FStringArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
-  | FIntArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
-  | FBoolArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
-  | FDecimalArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
-  | FJsonArray ss -> jsonArray ss :> JToken
-  | FNull -> JValue.CreateNull() :> JToken
-  | v -> failwith <| sprintf "Encountered impossible value %O while converting to JSON in parser" v
+    | FInt i -> JToken.op_Implicit i
+    | FDecimal d -> JToken.op_Implicit d
+    | FString s -> JToken.op_Implicit s
+    | FBool b -> JToken.op_Implicit b
+    | FJson j -> j
+    | FStringArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
+    | FIntArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
+    | FBoolArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
+    | FDecimalArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
+    | FJsonArray ss -> jsonArray ss :> JToken
+    | FNull -> JValue.CreateNull() :> JToken
+    // Keep in sync with coalesceJsonObject!
+    | (FUserViewRef _ as v)
+    | (FUserViewRefArray _ as v)
+    | (FDate _ as v)
+    | (FDateTime _ as v)
+    | (FDateArray _ as v)
+    | (FDateTimeArray _ as v) ->
+      failwith <| sprintf "Encountered impossible value %O while converting to JSON in parser" v
+
+let private validJsonValue = function
+    // Keep in sync with valueToJson!
+    | FUserViewRef _
+    | FUserViewRefArray _
+    | FDate _
+    | FDateTime _
+    | FDateArray _
+    | FDateTimeArray _ -> true
+    | _ -> false
 
 let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : ParsedFieldExpr =
     let rec tryExtract = function
         | [] -> Some []
-        | ((name, FEValue v) :: t) -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
+        | ((name, FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
         | _ -> None
 
     match tryExtract exprs with
@@ -104,7 +110,7 @@ let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : Parse
 let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
     let rec tryExtract = function
         | [] -> Some []
-        | ((FEValue v) :: t) -> Option.map (fun nt -> v :: nt) (tryExtract t)
+        | ((FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> v :: nt) (tryExtract t)
         | _ -> None
 
     match tryExtract exprs with

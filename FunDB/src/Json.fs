@@ -309,3 +309,15 @@ let tryJson (str : string) : JToken option =
         Some <| JToken.Parse(str)
     with
     | :? JsonException -> None
+
+let jsonObject (vals : (string * JToken) seq) : JObject =
+    let o = JObject()
+    for (k, v) in vals do
+        o.[k] <- v
+    o
+
+let jsonArray (vals : JToken seq) : JArray =
+    let arr = JArray()
+    for v in vals do
+        arr.Add(v)
+    arr
