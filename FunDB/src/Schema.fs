@@ -370,21 +370,21 @@ and
     [<AllowNullLiteral>]
     EventEntry () =
         member val Id = 0 with get, set
-        [<ColumnField("datetime")>]
+        [<ColumnField("datetime", Immutable=true)>]
         member val TransactionTimestamp = DateTimeOffset.MinValue with get, set
-        [<ColumnField("datetime")>]
+        [<ColumnField("datetime", Immutable=true)>]
         member val Timestamp = DateTimeOffset.MinValue with get, set
-        [<ColumnField("string")>]
+        [<ColumnField("string", Immutable=true)>]
         member val Type = "" with get, set
-        [<ColumnField("string", Nullable=true)>]
+        [<ColumnField("string", Nullable=true, Immutable=true)>]
         member val UserName = null : string with get, set
-        [<ColumnField("string", Nullable=true)>]
+        [<ColumnField("string", Nullable=true, Immutable=true)>]
         member val SchemaName = null : string with get, set
-        [<ColumnField("string", Nullable=true)>]
+        [<ColumnField("string", Nullable=true, Immutable=true)>]
         member val EntityName = null : string with get, set
-        [<ColumnField("int", Nullable=true)>]
+        [<ColumnField("int", Nullable=true, Immutable=true)>]
         member val EntityId = Nullable<int>() with get, set
-        [<ColumnField("string")>]
+        [<ColumnField("string", Immutable=true)>]
         member val Details = "" with get, set
 
 let getFieldsObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
