@@ -441,7 +441,7 @@ and [<NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLString and 'f :> IFunQ
             let attrsStr =
                 if Map.isEmpty this.attributes
                 then ""
-                else this.attributes |> Map.toSeq |> Seq.map (fun (name, e) -> sprintf "%s = %s" (name.ToFunQLString()) (e.ToFunQLString())) |> String.concat ", " |> sprintf "@{ %s }"
+                else renderAttributesMap this.attributes
 
             concatWithWhitespaces [this.result.ToFunQLString(); attrsStr]
 

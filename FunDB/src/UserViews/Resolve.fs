@@ -17,6 +17,7 @@ open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Dereference
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.Attributes.Merge
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -143,7 +144,7 @@ type UserViewFatalResolveException (message : string, innerException : Exception
 
     new (message : string) = UserViewFatalResolveException (message, null)
 
-type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialViews : Map<SchemaName, UserViewsSchema>, halfResolved : HalfResolvedViews, forceAllowBroken : bool) =
+type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttributes, conn : QueryConnection, initialViews : Map<SchemaName, UserViewsSchema>, halfResolved : HalfResolvedViews, forceAllowBroken : bool) =
     let mutable cachedViews : Map<ResolvedUserViewRef, Result<ResolvedUserView, UserViewError>> = Map.empty
 
     let findCached (ref : ResolvedUserViewRef) =
@@ -203,7 +204,7 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
                 with
                 | :? ViewDereferenceException as err -> return raisefWithInner UserViewResolveException err "Dereference error"
             }
-            let compiled = compileViewExpr layout dereferenced
+            let compiled = compileViewExpr layout defaultAttrs dereferenced
             let limited =
                 { compiled with
                       query =
@@ -301,17 +302,17 @@ type private Phase2Resolver (layout : Layout, conn : QueryConnection, initialVie
         resolveUserView Set.empty None uv
     member this.ResolveUserViews = resolveUserViews
 
-let resolveUserViews (conn : QueryConnection) (layout : Layout) (forceAllowBroken : bool) (userViews : SourceUserViews) : Task<ErroredUserViews * UserViews> =
+let resolveUserViews (conn : QueryConnection) (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (forceAllowBroken : bool) (userViews : SourceUserViews) : Task<ErroredUserViews * UserViews> =
     task {
         let phase1 = Phase1Resolver(layout, forceAllowBroken)
         let resolvedViews = phase1.ResolveUserViews userViews
-        let phase2 = Phase2Resolver(layout, conn, Map.empty, resolvedViews, forceAllowBroken)
+        let phase2 = Phase2Resolver(layout, defaultAttrs, conn, Map.empty, resolvedViews, forceAllowBroken)
         let! (errors, ret) = phase2.ResolveUserViews ()
         return (errors, ret)
     }
 
-let resolveAnonymousUserView (conn : QueryConnection) (layout : Layout) (existingViews : UserViews) (q: string) : Task<ResolvedUserView> =
+let resolveAnonymousUserView (conn : QueryConnection) (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (existingViews : UserViews) (q: string) : Task<ResolvedUserView> =
     let phase1 = Phase1Resolver(layout, false)
     let resolvedView = phase1.ResolveUserView { query = q; allowBroken = false }
-    let phase2 = Phase2Resolver(layout, conn, existingViews.schemas, Map.empty, false)
+    let phase2 = Phase2Resolver(layout, defaultAttrs, conn, existingViews.schemas, Map.empty, false)
     phase2.ResolveAnonymousUserView resolvedView

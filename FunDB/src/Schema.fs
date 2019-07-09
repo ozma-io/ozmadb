@@ -136,6 +136,15 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
         and set value = this.roleColumnFields <- value
 
     [<DefaultValue>]
+    val mutable fieldsAttributes : DbSet<FieldAttributes>
+    [<Entity("FullName", ForbidExternalReferences=true)>]
+    [<ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"FieldEntityId\"=>\"__main\" || '.' || \"FieldName\"")>]
+    [<UniqueConstraint("Entry", [|"SchemaId"; "FieldEntityId"; "FieldName"|])>]
+    member this.FieldsAttributes
+        with get () = this.fieldsAttributes
+        and set value = this.fieldsAttributes <- value
+
+    [<DefaultValue>]
     val mutable events : DbSet<EventEntry>
     [<Entity("Id")>]
     member this.Events
@@ -168,6 +177,7 @@ and
 
         member val Entities = ResizeArray<Entity>() with get, set
         member val Roles = ResizeArray<Role>() with get, set
+        member val FieldsAttributes = ResizeArray<FieldAttributes>() with get, set
         member val UserViews = ResizeArray<UserView>() with get, set
 
 and
@@ -181,7 +191,7 @@ and
         member val Schema = null : Schema with get, set
         // FIXME: Make this ColumnField relation when we implement reference constraints.
         [<ColumnField("string", Nullable=true)>]
-        member val MainField = "" with get, set
+        member val MainField = null : string with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val ForbidExternalReferences = false with get, set
 
@@ -329,11 +339,30 @@ and
         member val RoleEntity = null : RoleEntity with get, set
         // FIXME: Make this ColumnField relation when we implement reference constraints.
         [<ColumnField("string")>]
-        member val ColumnName = "" : string with get, set
+        member val ColumnName = "" with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val Change = false with get, set
         [<ColumnField("string", Nullable=true)>]
         member val Select = null : string with get, set
+
+and
+    [<AllowNullLiteral>]
+    FieldAttributes () =
+        member val Id = 0 with get, set
+        [<ColumnField("reference(\"public\".\"Schemas\")")>]
+        member val SchemaId = 0 with get, set
+        member val Schema = null : Schema with get, set    
+        [<ColumnField("reference(\"public\".\"Entities\")")>]
+        member val FieldEntityId = 0 with get, set
+        member val FieldEntity = null : Entity with get, set
+        [<ColumnField("string")>]
+        member val FieldName = "" with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val AllowBroken = false with get, set
+        [<ColumnField("int", Default="0")>]
+        member val Priority = 0 with get, set
+        [<ColumnField("string")>]
+        member val Attributes = "" with get, set
 
 and
     [<AllowNullLiteral>]
@@ -376,6 +405,12 @@ let getRolesObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
         .Include("Roles.Entities.Entity")
         .Include("Roles.Entities.Entity.Schema")
         .Include("Roles.Entities.ColumnFields")
+
+let getAttributesObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
+    schemas
+        .Include("FieldsAttributes")
+        .Include("FieldsAttributes.FieldEntity")
+        .Include("FieldsAttributes.FieldEntity.Schema")
 
 let getUserViewsObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
     schemas

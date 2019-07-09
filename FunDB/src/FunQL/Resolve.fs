@@ -106,6 +106,11 @@ type private MainEntities = Map<ResolvedEntityRef, EntityName>
 
 let private unboundSubqueryField = QField None
 
+let private mergeSubqueryField (f1 : QSubqueryField) (f2 : QSubqueryField) =
+    match (f1, f2) with
+    | (QField (Some bf1), QField (Some bf2)) when bf1.ref = bf2.ref -> QField (Some bf1)
+    | _ -> unboundSubqueryField
+
 let rec private findRootField (name : FieldName) (fields : QSubqueryFields) : (FieldName * BoundFieldInfo option) option =
     match Map.tryFind name fields with
     | None -> None
@@ -116,12 +121,13 @@ let private checkName (FunQLName name) : unit =
     if not (goodName name) then
         raisef ViewResolveException "Invalid name: %s" name
 
-let resultFieldRef : ResolvedQueryResultExpr -> FieldRef option = function
-    | QRField field -> Some field.ref.ref
-    | QRExpr (name, FEColumn field) -> Some field.ref.ref
+let resultFieldRef : ResolvedQueryResultExpr -> LinkedBoundFieldRef option = function
+    | QRField field -> Some field
+    | QRExpr (name, FEColumn field) -> Some field
     | QRExpr (name, _) -> None
 
 let resultName : ResolvedQueryResultExpr -> FieldName = function
+    | QRField field when not (Array.isEmpty field.path) -> Array.last field.path
     | QRField field -> field.ref.ref.name
     | QRExpr (name, _) -> name
 
@@ -365,7 +371,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                     raisef ViewResolveException "Different column names in a set operation: %O and %O" name1 name2
                 if attrs1 <> attrs2 then
                     raisef ViewResolveException "Different attributes for column %O in a set operation expression" name1
-            let newFields = Map.unionWith (fun name f1 f2 -> unboundSubqueryField) results1.fields results2.fields
+            let newFields = Map.unionWith (fun name -> mergeSubqueryField) results1.fields results2.fields
             let orderLimitMapping = Map.singleton None (None, newFields)
             let (limitsAreLocal, resolvedLimits) = resolveOrderLimitClause orderLimitMapping limits
             if not limitsAreLocal then

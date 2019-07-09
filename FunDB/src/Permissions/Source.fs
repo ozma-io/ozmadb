@@ -1,8 +1,8 @@
 module FunWithFlags.FunDB.Permissions.Source
 
-open FunWithFlags.FunDB.FunQL.AST
-
 open Newtonsoft.Json
+
+open FunWithFlags.FunDB.FunQL.AST
 
 type SourceAllowedField =
     { [<JsonProperty(Required=Required.DisallowNull)>]

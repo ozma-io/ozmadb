@@ -233,12 +233,16 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
 %start fieldExpr
 %type <ParsedFieldExpr> fieldExpr
 
+%start attributeMap
+%type <ParsedAttributeMap> attributeMap
+
 %%
 
 // Entry points
 viewExpr : ViewExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
+attributeMap : AttributeMap EOF { $1 }
 
 // Expressions
 
@@ -345,6 +349,9 @@ QueryResultExpr:
 
 MaybeAttributeMap:
   |                                                   { Map.empty }
+  | AttributeMap                                      { $1 }
+
+AttributeMap:
   | AT_LEFT_BRACE RIGHT_BRACE                         { Map.empty }
   | AT_LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
 

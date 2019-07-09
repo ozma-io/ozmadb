@@ -23,6 +23,9 @@ open FunWithFlags.FunDB.UserViews.Generate
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Update
+open FunWithFlags.FunDB.Attributes.Types
+open FunWithFlags.FunDB.Attributes.Source
+open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Operations.Connection
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -31,6 +34,8 @@ type SourcePreloadedSchema =
       entities : Map<EntityName, SourceEntity>
       [<JsonProperty(Required=Required.DisallowNull)>]
       roles : Map<RoleName, SourceRole>
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      defaultAttributes : Map<SchemaName, SourceAttributesSchema>
       userViewGenerator : string option // Path to .js file
     }
 
@@ -47,6 +52,7 @@ let emptySourcePreload : SourcePreload =
 type PreloadedSchema =
     { schema : SourceSchema
       permissions : SourcePermissionsSchema
+      defaultAttributes : SourceAttributesDatabase
       userViewGenerator : UserViewGenerator option
     }
 
@@ -73,6 +79,7 @@ let private normalizeRole (role : SourceRole) =
 let private resolvePreloadedSchema (preload : SourcePreloadedSchema) : PreloadedSchema =
     let schema = { entities = preload.entities } : SourceSchema
     let permissions = { roles = Map.map (fun name -> normalizeRole) preload.roles }
+    let defaultAttributes = { schemas = preload.defaultAttributes } : SourceAttributesDatabase
 
     let readUserViewGenerator path =
         let program = File.ReadAllText path
@@ -81,6 +88,7 @@ let private resolvePreloadedSchema (preload : SourcePreloadedSchema) : Preloaded
 
     { schema = schema
       permissions = permissions
+      defaultAttributes = defaultAttributes
       userViewGenerator = userViewGen
     }
 
@@ -89,6 +97,9 @@ let preloadLayout (preload : Preload) : SourceLayout =
 
 let preloadPermissions (preload : Preload) : SourcePermissions =
     { schemas = preload.schemas |> Map.map (fun name schema -> schema.permissions) }
+
+let preloadDefaultAttributes (preload : Preload) : SourceDefaultAttributes =
+    { schemas = preload.schemas |> Map.map (fun name schema -> schema.defaultAttributes) }
 
 let preloadUserViews (fullLayout : Layout) (preload : Preload) : SourceUserViews =
     let generateUvs : UserViewGenerator option -> SourceUserViewsSchema = function
@@ -105,6 +116,7 @@ let resolvePreload (source : SourcePreload) : Preload =
     let systemPreload =
         { schema = buildSystemSchema typeof<SystemContext>
           permissions = emptySourcePermissionsSchema
+          defaultAttributes = emptySourceAttributesSchema
           userViewGenerator = None
         }
     { schemas = Map.add funSchema systemPreload preloadedSchemas
@@ -123,6 +135,13 @@ let preloadPermissionsAreUnchanged (sourcePerms : SourcePermissions) (preload : 
         | Some existing -> schema = existing.permissions
         | None -> true
     sourcePerms.schemas |> Map.toSeq |> Seq.forall notChanged
+
+let preloadAttributesAreUnchanged (sourceAttrs : SourceDefaultAttributes) (preload : Preload) =
+    let notChanged (name : SchemaName, schema : SourceAttributesDatabase) =
+        match Map.tryFind name preload.schemas with
+        | Some existing -> schema = existing.defaultAttributes
+        | None -> true
+    sourceAttrs.schemas |> Map.toSeq |> Seq.forall notChanged
 
 let filterPreloadedSchemas (preload : Preload) = Map.filter (fun name _ -> Map.containsKey name preload.schemas)
 
@@ -155,6 +174,8 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
         let! changed1 = updateLayout conn.System sourceLayout
         let permissions = preloadPermissions preload
         let! changed2 = updatePermissions conn.System permissions
+        let defaultAttributes = preloadDefaultAttributes preload
+        let! changed3 = updateAttributes conn.System defaultAttributes    
         let! newLayoutSource = buildSchemaLayout conn.System
         let newLayout = resolveLayout newLayoutSource
 
@@ -171,5 +192,5 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
             let! _ = conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
             ()
 
-        return (changed1 || changed2, newLayout, newUserMeta)
+        return (changed1 || changed2 || changed3, newLayout, newUserMeta)
     }

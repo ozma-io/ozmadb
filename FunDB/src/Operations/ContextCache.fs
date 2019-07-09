@@ -19,6 +19,10 @@ open FunWithFlags.FunDB.Permissions.Schema
 open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.Permissions.Update
 open FunWithFlags.FunDB.Permissions.Flatten
+open FunWithFlags.FunDB.Attributes.Schema
+open FunWithFlags.FunDB.Attributes.Resolve
+open FunWithFlags.FunDB.Attributes.Merge
+open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Resolve
@@ -42,6 +46,7 @@ type CachedRequestContext =
     { layout : Layout
       userViews : UserViews
       permissions : FlatPermissions
+      defaultAttrs : MergedDefaultAttributes
       systemViews : SourceUserViews
       userMeta : SQL.DatabaseMeta
     }
@@ -86,8 +91,12 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
         let! sourcePermissions = buildSchemaPermissions conn.System
         let (_, permissions) = resolvePermissions layout false sourcePermissions
 
+        let! sourceAttrs = buildSchemaAttributes conn.System
+        let (_, defaultAttrs) = resolveAttributes layout false sourceAttrs
+        let mergedAttrs = mergeDefaultAttributes defaultAttrs
+
         let! sourceUvs = buildSchemaUserViews conn.System
-        let! (_, userViews) = resolveUserViews conn.Query layout false sourceUvs
+        let! (_, userViews) = resolveUserViews conn.Query layout mergedAttrs false sourceUvs
 
         // Another instance has already rebuilt them, so just load them from the database.
         let systemViews = filterSystemViews sourceUvs
@@ -95,6 +104,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
         return
             { layout = layout
               permissions = flattenPermissions layout permissions
+              defaultAttrs = mergedAttrs
               userViews = userViews
               systemViews = systemViews
               userMeta = userMeta
@@ -135,8 +145,32 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
             let systemViews = preloadUserViews layout preload
             let! _ = updateUserViews conn.System systemViews
 
+            let! sourceAttrs = buildSchemaAttributes conn.System
+            let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
+
+            if not (Map.isEmpty brokenAttrs) then
+                let mutable critical = false
+                for KeyValue(schemaName, schema) in brokenAttrs do
+                    let isSystem = Map.containsKey schemaName preload.schemas
+                    if isSystem then
+                        critical <- true
+                    for KeyValue(attrsSchemaName, attrsSchema) in schema do
+                        for KeyValue(attrsEntityName, attrsEntity) in attrsSchema do
+                            for KeyValue(attrsFieldName, err) in attrsEntity do
+                                let schemaStr = schemaName.ToString()
+                                let defFieldName = ({ entity = { schema = attrsSchemaName; name = attrsEntityName }; name = attrsFieldName } : ResolvedFieldRef).ToString()
+                                if isSystem then
+                                    logger.LogError(err, "System default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
+                                else
+                                    logger.LogWarning(err, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
+                if critical then
+                    failwith "Broken system default attributes"
+                do! markBrokenAttributes conn.System brokenAttrs
+
+            let mergedAttrs = mergeDefaultAttributes defaultAttrs
+
             let! sourceViews = buildSchemaUserViews conn.System
-            let! (brokenViews, userViews) = resolveUserViews conn.Query layout true sourceViews
+            let! (brokenViews, userViews) = resolveUserViews conn.Query layout mergedAttrs true sourceViews
 
             if not (Map.isEmpty brokenViews) then
                 let mutable critical = false
@@ -171,7 +205,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                                 if isSystem then
                                     logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
                                 else
-                                    logger.LogWarning(err, "Marking {uv} as broken for entity {entity}", roleName, allowedName)
+                                    logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
                 if critical then
                     failwith "Broken system roles"
                 do! markBrokenPermissions conn.System brokenPerms
@@ -179,6 +213,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
             let state =
                 { layout = layout
                   permissions = flattenPermissions layout permissions
+                  defaultAttrs = mergedAttrs
                   userViews = userViews
                   systemViews = systemViews
                   userMeta = userMeta
@@ -230,6 +265,16 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     with
                     | :? ResolvePermissionsException as err -> raisefWithInner ContextException err "Failed to resolve permissions"
 
+                let! attrsSource = buildSchemaAttributes conn.System
+                if not <| preloadAttributesAreUnchanged attrsSource preload then
+                    raisef ResolveLayoutException "Cannot modify system default attributes"
+                let (_, defaultAttrs) =
+                    try
+                        resolveAttributes layout false attrsSource
+                    with
+                    | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
+                let mergedAttrs = mergeDefaultAttributes defaultAttrs                
+
                 let! userViewsSource = buildSchemaUserViews conn.System
                 if filterSystemViews userViewsSource <> oldState.systemViews then
                     raisef ContextException "Cannot modify system user views"
@@ -252,7 +297,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                 let! newUserViewsSource = buildSchemaUserViews conn.System
                 let! (_, userViews) = task {
                     try
-                        return! resolveUserViews conn.Query layout false newUserViewsSource
+                        return! resolveUserViews conn.Query layout mergedAttrs false newUserViewsSource
                     with
                     | :? UserViewResolveException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                 }
@@ -260,6 +305,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                 let newState =
                     { layout = layout
                       permissions = flattenPermissions layout permissions
+                      defaultAttrs = mergedAttrs
                       userViews = userViews
                       systemViews = newSystemViews
                       userMeta = wantedUserMeta
@@ -284,7 +330,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
             let getAnonymousView (query : string) : Task<ResolvedUserView> = task {
                 let createNew query = task {
-                    let! uv = resolveAnonymousUserView conn.Query oldState.layout oldState.userViews query
+                    let! uv = resolveAnonymousUserView conn.Query oldState.layout oldState.defaultAttrs oldState.userViews query
                     let ret =
                         { uv = uv
                           query = query

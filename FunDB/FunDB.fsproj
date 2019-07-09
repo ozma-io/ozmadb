@@ -45,6 +45,10 @@
 
     <Compile Include="src/Layout/Types.fs" />
 
+    <Compile Include="src/Attributes/Source.fs" />
+    <Compile Include="src/Attributes/Types.fs" />
+    <Compile Include="src/Attributes/Merge.fs" />
+
     <Compile Include="src/FunQL/Resolve.fs" />
     <Compile Include="src/FunQL/Dereference.fs" />
     <Compile Include="src/FunQL/Arguments.fs" />
@@ -62,6 +66,12 @@
     <Compile Include="src/Layout/Render.fs" />
     <Compile Include="src/Layout/Update.fs" />
     <Compile Include="src/Layout/Meta.fs" />
+  
+    <Compile Include="src/Attributes/Resolve.fs" />
+    <Compile Include="src/Attributes/Schema.fs" />
+    <Compile Include="src/Attributes/Render.fs" />
+    <Compile Include="src/Attributes/Update.fs" />
+
     <Compile Include="src/Permissions/Source.fs" />
     <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Resolve.fs" />
