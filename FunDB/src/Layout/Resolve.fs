@@ -134,6 +134,7 @@ type private Phase1Resolver (layout : SourceLayout) =
           valueType = compileFieldType fieldType
           defaultValue = defaultValue
           isNullable = col.isNullable
+          isImmutable = col.isImmutable
         }
 
     let resolveEntity (schemaName : SchemaName) (entity : SourceEntity) : HalfResolvedEntity =

@@ -19,6 +19,8 @@ type SourceColumnField =
       defaultValue : string option
       [<JsonProperty(Required=Required.DisallowNull)>]
       isNullable : bool
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      isImmutable : bool
     }
 
 type SourceComputedField =

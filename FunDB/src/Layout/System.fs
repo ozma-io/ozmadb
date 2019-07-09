@@ -42,6 +42,7 @@ type ColumnFieldAttribute (colType : string) =
     inherit Attribute ()
     member this.Type = colType
     member val Nullable = false with get, set
+    member val Immutable = false with get, set
     member val Default = null : string with get, set
 
 let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * SourceColumnField) option =
@@ -56,6 +57,7 @@ let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * Sourc
                   then None
                   else Some field.Default
               isNullable = field.Nullable
+              isImmutable = field.Immutable
             }
         Some (FunQLName property.Name, res)
 

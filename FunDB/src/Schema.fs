@@ -204,7 +204,7 @@ and
     [<AllowNullLiteral>]
     ColumnField () =
         member val Id = 0 with get, set
-        [<ColumnField("string")>]
+        [<ColumnField("string", Immutable=true)>]
         member val Name = "" with get, set
         [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
@@ -215,6 +215,8 @@ and
         member val Default = null : string with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val Nullable = false with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val Immutable = false with get, set
 
 and
     [<AllowNullLiteral>]

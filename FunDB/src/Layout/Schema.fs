@@ -16,6 +16,7 @@ let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
           then None
           else Some field.Default
       isNullable = field.Nullable
+      isImmutable = field.Immutable
     }
 
 let private makeSourceComputedField (field : ComputedField) : SourceComputedField =

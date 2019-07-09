@@ -19,6 +19,7 @@ let private renderComputedField (comp : ResolvedComputedField) : SourceComputedF
 let private renderColumnField (column : ResolvedColumnField) : SourceColumnField =
     { fieldType = column.fieldType.ToFunQLString()
       isNullable = column.isNullable
+      isImmutable = column.isImmutable
       defaultValue = Option.map (fun (x : FieldValue) -> x.ToFunQLString()) column.defaultValue
     }
 

@@ -17,6 +17,7 @@ type private LayoutUpdater (db : SystemContext) =
                 | None -> null
                 | Some def -> def
             oldColumn.Nullable <- newColumn.isNullable
+            oldColumn.Immutable <- newColumn.isImmutable
             oldColumn.Default <- def
             oldColumn.Type <- newColumn.fieldType
         let createColumnFunc (FunQLName name) =

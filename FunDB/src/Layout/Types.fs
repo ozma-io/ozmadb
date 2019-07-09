@@ -38,6 +38,7 @@ type ResolvedColumnField =
       valueType : SQL.SimpleValueType
       defaultValue : FieldValue option
       isNullable : bool
+      isImmutable : bool
     }
 
 [<NoComparison>]

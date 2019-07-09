@@ -88,6 +88,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
             | None -> None
+            | Some arg when field.isImmutable -> raisef EntityDeniedException "Field %O is immutable" { entity = entityRef; name = fieldName }
             | Some arg -> Some (fieldName, { argType = clearFieldType field.fieldType; optional = field.isNullable })
 
         let entity = layout.FindEntity entityRef |> Option.get
