@@ -221,6 +221,20 @@
             }
           }
         }
+      },
+
+      "defaultAttributes": {
+        "public": {
+          "entities": {
+            "UserViews": {
+              "fields": {
+                "Query": {
+                  "attributes": "@{ \"TextType\" = 'codeeditor' }"
+                }
+              }
+            }
+          }
+        }
       }
 
     }
