@@ -232,6 +232,14 @@
                   "attributes": "@{ \"TextType\" = 'codeeditor' }"
                 }
               }
+            },
+
+            "FieldsAttributes": {
+              "fields": {
+                "Attributes": {
+                  "attributes": "@{ \"TextType\" = 'codeeditor' }"
+                }
+              }
             }
           }
         }
