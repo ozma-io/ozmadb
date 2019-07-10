@@ -452,15 +452,15 @@ module NumBases =
         else
             None
 
-let raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
+let inline raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
     kprintf <| fun str ->
         raise  <| constr (str, inner)
 
-let raisef (constr : string -> 'e) : StringFormat<'a, 'b> -> 'a =
+let inline raisef (constr : string -> 'e) : StringFormat<'a, 'b> -> 'a =
     let thenRaise str =
         raise  <| constr str
     kprintf thenRaise
 
-let reraise' (e : exn) =
+let inline reraise' (e : exn) =
     (ExceptionDispatchInfo.Capture e).Throw ()
     Unchecked.defaultof<_>

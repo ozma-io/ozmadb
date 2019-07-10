@@ -279,7 +279,7 @@ let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc 
             let tryExtract = function
                 | SQL.VEValue v when validJsonValue v -> Some v
                 | _ -> None
-            
+
             // Recheck if all values can be represented as JSON value; e.g. user view references are now valid values.
             let optimized = Seq.traverseOption tryExtract compiled
             match optimized with
@@ -291,7 +291,7 @@ let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc 
             let tryExtract = function
                 | (FunQLName name, SQL.VEValue v) when validJsonValue v -> Some (name, v)
                 | _ -> None
-            
+
             // Recheck if all values can be represented as JSON value; e.g. user view references are now valid values.
             let optimized = Seq.traverseOption tryExtract (Map.toSeq compiled)
             match optimized with
@@ -636,6 +636,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                         let (_, field) = entity.FindField fieldName |> Option.get
                                         let (newPaths, expr) = compilePath paths tableRef entity field fieldName [funMain]
                                         paths <- newPaths
+                                        foundPun <- true
                                         expr
                                     | _ -> SQL.VEValue SQL.VNull
 
@@ -650,7 +651,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             let (newPaths, punExpr) = compileLinkedFieldRef paths punRef
                             paths <- newPaths
                             Seq.singleton <| SQL.SCExpr (compilePun newName, punExpr)
-                    else Seq.empty
+                    else
+                        Seq.empty
 
                 // Nested and default attributes.
                 let (newAttrs, attrColumns) =

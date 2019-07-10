@@ -28,12 +28,15 @@ type EntityId = int
 type EntityArguments = Map<FieldName, FieldValue>
 
 let private runQuery (connection : QueryConnection) (globalArgs : EntityArguments) (query : Query<'q>) (placeholders : EntityArguments) : Task<int> =
-    try
-        // FIXME: Slow
-        let args = Map.unionUnique (Map.mapKeys PGlobal globalArgs) (Map.mapKeys PLocal placeholders)
-        connection.ExecuteNonQuery (query.expression.ToSQLString()) (prepareArguments query.arguments args)
-    with
-        | :? QueryException as ex -> raisefWithInner EntityExecutionException ex.InnerException "%s" ex.Message
+    task {
+        try
+            // FIXME: Slow
+            let args = Map.unionUnique (Map.mapKeys PGlobal globalArgs) (Map.mapKeys PLocal placeholders)
+            return! connection.ExecuteNonQuery (query.expression.ToSQLString()) (prepareArguments query.arguments args)
+        with
+            | :? QueryException as ex ->
+                return raisefWithInner EntityExecutionException ex.InnerException "%s" ex.Message
+    }
 
 let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
     | FTReference (r, _) -> FTReference (r, None)
