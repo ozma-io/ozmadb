@@ -207,17 +207,17 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
     }
 
     let convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValues, string> =
-        let findArgument name (arg : CompiledArgument) =
+        let findArgument (name, arg : CompiledArgument) =
             match name with
             | PLocal (FunQLName lname) ->
                 match Map.tryFind lname rawArgs with
                 | Some argStr ->
                     match convertArgument arg.fieldType false argStr with
                     | None -> Error <| sprintf "Cannot convert argument %O to type %O" name fieldType
-                    | Some arg -> Ok arg
-                | _ -> Error <| sprintf "Argument not found: %O" name
-            | PGlobal gname -> Ok (Map.find gname globalArguments)
-        compiled.query.arguments.types |> Map.traverseResult findArgument
+                    | Some arg -> Ok (Some (name, arg))
+                | _ -> Ok None
+            | PGlobal gname -> Ok (Some (name, Map.find gname globalArguments))
+        compiled.query.arguments.types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
 
     static member Create (opts : RequestParams) : Task<RequestContext> = task {
         let! ctx = opts.cacheStore.GetCache()

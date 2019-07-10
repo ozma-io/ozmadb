@@ -112,6 +112,13 @@ module Seq =
                   | None -> ()
             }
 
+    let catMaybes (s : seq<'a option>) : seq<'b> =
+        seq { for i in s do
+                  match i with
+                  | Some r -> yield r
+                  | None -> ()
+            }
+
     let mapiMaybe (f : int -> 'a -> 'b option) (s : seq<'a>) : seq<'b> =
         seq { let mutable n = 0
               for i in s do
