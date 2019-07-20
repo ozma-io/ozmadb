@@ -3,7 +3,7 @@
 owner="$(whoami)"
 password="1"
 
-psql "$@" <<EOF
+psql -U postgres "$@" <<EOF
     create user "$owner" login password '$password';
     create database "$owner" owner "$owner";
     \c $owner
