@@ -19,7 +19,7 @@ var commonViews = {
         "  LEFT JOIN \"public\".\"Schemas\" ON \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
         "ORDER BY \"Entities\".\"Id\"",
     "UserViewByName":
-        "( $schema string, $name string ):\n" +
+        "{ $schema string, $name string }:\n" +
         "SELECT\n" +
         "  @\"Type\" = 'Form',\n" +
         "  \"SchemaId\",\n" +
@@ -47,7 +47,7 @@ function addDefaultViews(views, layout) {
 
             var formName = "Form-" + schemaName + "-" + entityName
             var formQuery =
-                "( $id reference(" + sqlName + ") ):\n" +
+                "{ $id reference(" + sqlName + ") }:\n" +
                 "SELECT\n  " +
                 ["@\"Type\" = 'Form'"].concat(fields).join(",") +
                 "\nFROM " + sqlName + " " +

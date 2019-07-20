@@ -257,7 +257,7 @@ ViewExpr:
 
 MaybeArguments:
   |                                            { Map.empty }
-  | LEFT_PAREN ArgumentsList RIGHT_PAREN COLON { $2 }
+  | LEFT_BRACE ArgumentsList RIGHT_BRACE COLON { $2 }
 
 ArgumentsList:
   |                       { Map.empty }
