@@ -753,22 +753,19 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         (info, query)
 
     and compileResult (paths0 : JoinPaths) (result : ResolvedQueryResult) : JoinPaths * SQL.SelectedColumn seq =
-        let name = resultName result.result
+        let sqlName = compileName <| resultName result.result
         let mutable paths = paths0
 
-        let resultColumn =
+        let (newPaths, newExpr) =
             match result.result with
-            | QRField field ->
-                let (newPaths, ret) = compileLinkedFieldRef paths field
-                paths <- newPaths
-                SQL.SCExpr (compileName field.ref.ref.name, ret)
-            | QRExpr (name, expr) ->
-                let (newPaths, ret) = compileLinkedFieldExpr paths expr
-                paths <- newPaths
-                SQL.SCExpr (compileName name, ret)
+            | QRField field -> compileLinkedFieldRef paths field
+            | QRExpr (name, expr) -> compileLinkedFieldExpr paths expr
+
+        paths <- newPaths
+        let resultColumn = SQL.SCExpr (sqlName, newExpr)
 
         let compileAttr (attrName, expr) =
-            let (newPaths, ret) = compileAttribute paths (sprintf "CellAttribute__%O" name) attrName expr
+            let (newPaths, ret) = compileAttribute paths (sprintf "CellAttribute__%O" sqlName) attrName expr
             paths <- newPaths
             ret
 
