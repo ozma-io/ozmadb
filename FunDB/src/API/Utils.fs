@@ -14,11 +14,18 @@ open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.Operations.ContextCache
 
 let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
-    let args1 = rawArgs |> Seq.mapMaybe (function KeyValue(name, par) -> par |> Seq.first |> Option.map (fun x -> (name, x)))
+    let getArg (KeyValue(name : string, par)) =
+        if name.StartsWith("__") then
+            None
+        else
+            par |> Seq.first |> Option.map (fun x -> (name, x))
+    let args1 = rawArgs |> Seq.mapMaybe getArg
+
     let tryArg (name, arg) =
         match tryJson arg with
         | None -> Error name
         | Some r -> Ok (name, r)
+
     match Seq.traverseResult tryArg args1 with
     | Error name -> sprintf "Invalid JSON value in argument %s" name |> text |> RequestErrors.badRequest
     | Ok args2 -> f <| Map.ofSeq args2
