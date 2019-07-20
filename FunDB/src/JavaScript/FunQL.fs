@@ -37,8 +37,8 @@ let jsFieldValue : FieldValue -> JSExpr = function
 let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
     let rec go = function
         | FEValue v -> jsFieldValue v
-        | FEColumn col -> JSCall (JSObjectAccess (JSVar "context", "getColumn"), [| JSValue (JSString (col.ToString())) |])
-        | FEPlaceholder p -> raisef JSCompileException "Unexpected placeholder in local expression: %O" p
+        //| FERef col -> JSCall (JSObjectAccess (JSVar "context", "getColumn"), [| JSValue (JSString (col.ToString())) |])
+        //| FEPlaceholder p -> raisef JSCompileException "Unexpected placeholder in local expression: %O" p
         | FENot e -> JSNot <| go e
         | FEAnd (a, b) -> JSAnd (go a, go b)
         | FEOr (a, b) -> JSOr (go a, go b)
@@ -69,4 +69,5 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
         | FEJsonObject obj -> failwith "Not implemented"
         | FEJsonArrow (a, b) -> failwith "Not implemented"
         | FEJsonTextArrow (a, b) -> failwith "Not implemented"
+        | _ -> failwith "impossible"
     go

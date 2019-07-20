@@ -26,18 +26,18 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
         match fields with
         | [] ->
             match entity.FindField name with
-            | None -> raisef ResolvePermissionsException "Column not found in restriction expression: %O" name
+            | None -> raisef ResolvePermissionsException "Column not found: %O" name
             | Some (_, RId) ->
                 if allowIds then
                     ()
                 else
-                    raisef ResolvePermissionsException "Ids aren't allowed in this restriction expression: %O" name
+                    raisef ResolvePermissionsException "Ids aren't allowed: %O" name
             | Some (_, RColumnField _) -> ()
             | Some (_, RComputedField comp) ->
                 if allowIds || not comp.hasId then
                     ()
                 else
-                    raisef ResolvePermissionsException "Ids aren't allowed in this restriction expression: %O" name
+                    raisef ResolvePermissionsException "Ids aren't allowed: %O" name
         | (ref :: refs) ->
             match Map.tryFind name entity.columnFields with
             | Some { fieldType = FTReference (refEntity, _) } ->
@@ -49,26 +49,38 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
         let whereExpr =
             match parse tokenizeFunQL fieldExpr where with
             | Ok r -> r
-            | Error msg -> raisef ResolvePermissionsException "Error parsing restriction expression: %s" msg
+            | Error msg -> raisef ResolvePermissionsException "Error parsing: %s" msg
 
         let mutable globalArguments = Set.empty
 
-        let resolveColumn : LinkedFieldRef -> LinkedFieldName = function
-            | { ref = { entity = None; name = name }; path = path } ->
+        let resolveReference : LinkedFieldRef -> LinkedFieldName = function
+            | { ref = VRColumn { entity = None; name = name }; path = path } ->
                 checkPath allowIds entity name (Array.toList path)
-                { ref = name; path = path }
+                { ref = VRColumn name; path = path }
+            | { ref = VRPlaceholder (PLocal name) } ->
+                raisef ResolvePermissionsException "Local argument %O is not allowed" name
+            | { ref = VRPlaceholder (PGlobal name as arg); path = path } ->
+                let argInfo =
+                    match Map.tryFind name globalArgumentTypes with
+                    | None -> raisef ResolvePermissionsException "Unknown global argument: %O" ref
+                    | Some argInfo -> argInfo
+                if not <| Array.isEmpty path then
+                    match argInfo.argType with
+                    | FTReference (entityRef, where) ->
+                        let (name, remainingPath) =
+                            match Array.toList path with
+                            | head :: tail -> (head, tail)
+                            | _ -> failwith "impossible"
+                        let argEntity = layout.FindEntity entityRef |> Option.get
+                        checkPath allowIds argEntity name remainingPath
+                    | _ -> raisef ResolvePermissionsException "Argument is not a reference: %O" ref
+                { ref = VRPlaceholder arg; path = path }
             | ref ->
-                raisef ResolvePermissionsException "Invalid reference in restriction expression: %O" ref
-        let resolvePlaceholder = function
-            | PLocal name -> raisef ResolvePermissionsException "Local argument %O is not allowed in restriction expression" name
-            | PGlobal name when Map.containsKey name globalArgumentTypes ->
-                globalArguments <- Set.add name globalArguments
-                PGlobal name
-            | PGlobal name -> raisef ResolvePermissionsException "Unknown global argument %O" name
+                raisef ResolvePermissionsException "Invalid reference: %O" ref
         let voidQuery query =
-            raisef ResolvePermissionsException "Query is not allowed in restriction expression: %O" query
+            raisef ResolvePermissionsException "Query is not allowed: %O" query
 
-        let expr = mapFieldExpr id resolveColumn resolvePlaceholder voidQuery whereExpr
+        let expr = mapFieldExpr id resolveReference voidQuery whereExpr
         { expression = expr
           globalArguments = globalArguments
         }

@@ -350,7 +350,7 @@ QueryResult:
   | QueryResultExpr MaybeAttributeMap   { AResult { attributes = $2; result = $1 } }
 
 QueryResultExpr:
-  | LinkedFieldRef    { QRField $1 }
+  | LinkedValueRef    { QRField $1 }
   | FieldExpr AS Name { QRExpr ($3, $1) }
 
 MaybeAttributeMap:
@@ -412,8 +412,13 @@ EntityRef:
   | Name DOT Name { { schema = Some $1; name = $3; } }
   | Name          { { schema = None; name = $1; } }
 
-LinkedFieldRef:
-  | FieldRef LinkedFieldsList { { ref = $1; path = List.toArray $2 } }
+ValueRef:
+  | FieldRef           { VRColumn $1 }
+  | ARGUMENT_ID        { VRPlaceholder (PLocal <| FunQLName $1) }
+  | GLOBAL_ARGUMENT_ID { VRPlaceholder (PGlobal <| FunQLName $1) }
+
+LinkedValueRef:
+  | ValueRef LinkedFieldsList { { ref = $1; path = List.toArray $2 } }
 
 LinkedFieldsList:
   |                                  { List.empty }
@@ -468,9 +473,7 @@ FieldExprOp:
   | FieldExprVal                           { $1 }
 
 FieldExprVal:
-  | LinkedFieldRef                   { FEColumn $1 }
-  | ARGUMENT_ID                      { FEPlaceholder (PLocal <| FunQLName $1) }
-  | GLOBAL_ARGUMENT_ID               { FEPlaceholder (PGlobal <| FunQLName $1) }
+  | LinkedValueRef                   { FERef $1 }
   | Value                            { FEValue $1 }
   | JsonObject                       { $1 }
   | LEFT_PAREN FieldExpr RIGHT_PAREN { $2 }

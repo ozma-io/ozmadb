@@ -10,25 +10,25 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 let rec private compileComputedExpr (entity : ResolvedEntity) : LinkedLocalFieldExpr -> SQL.ValueExpr =
     let makeFullName = function
-        | { ref = name; path = [||] } -> compileComputedName entity name
-        | c-> failwith <| sprintf "Unexpected dereference in computed field expression: %O" c
-    let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
+        | { ref = col; path = [||] } -> compileComputedName entity col
+        | c -> failwith <| sprintf "Unexpected reference in computed field expression: %O" c
     let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
-    genericCompileFieldExpr makeFullName voidPlaceholder voidQuery
+    genericCompileFieldExpr makeFullName voidQuery
 
-and compileComputedName (entity : ResolvedEntity) (name : FieldName) =
-    let (realName, field) = entity.FindField name |> Option.get
-    match field with
-    | RId
-    | RColumnField _ -> SQL.VEColumn { table = None; name = compileName realName }
-    | RComputedField comp -> compileComputedExpr entity comp.expression
+and compileComputedName (entity : ResolvedEntity) : ValueRef<FieldName> -> SQL.ValueExpr = function
+    | VRColumn name ->
+        let (realName, field) = entity.FindField name |> Option.get
+        match field with
+        | RId
+        | RColumnField _ -> SQL.VEColumn { table = None; name = compileName realName }
+        | RComputedField comp -> compileComputedExpr entity comp.expression
+    | VRPlaceholder arg -> failwith <| sprintf "Unexpected placeholder in computed field expression: %O" arg
 
 let private compileCheckExpr (entity : ResolvedEntity) : LocalFieldExpr -> SQL.ValueExpr =
-    let compileColumn = compileComputedName entity
-    let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in check expression: %O" c
-    let voidQuery c = failwith <| sprintf "Unexpected subquery in check expression: %O" c
+    let compileRef = compileComputedName entity
+    let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
     // Normalization is needed so that expression will be in same form as ones from pg_catalog.
-    normalizeLocalExpr << genericCompileFieldExpr compileColumn voidPlaceholder voidQuery
+    normalizeLocalExpr << genericCompileFieldExpr compileRef voidQuery
 
 let private makeUniqueConstraintMeta (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
     SQL.CMUnique <| Array.map (fun name -> SQL.SQLName <| name.ToString()) constr.columns

@@ -15,7 +15,19 @@ type ResolveAttributesException (message : string, innerException : Exception) =
     new (message : string) = ResolveAttributesException (message, null)
 
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAttrs : SourceDefaultAttributes) =
-    let resolveAttributesField (fieldAttrs : SourceAttributesField) : AttributesField =
+    let rec checkPath (entity : ResolvedEntity) (name : FieldName) (fields : FieldName list) : unit =
+        match fields with
+        | [] ->
+            if Option.isNone <| entity.FindField name then
+                raisef ResolveAttributesException "Column not found in default attribute: %O" name
+        | (ref :: refs) ->
+            match Map.tryFind name entity.columnFields with
+            | Some { fieldType = FTReference (refEntity, _) } ->
+                let newEntity = Map.find refEntity.name (Map.find refEntity.schema layout.schemas).entities
+                checkPath newEntity ref refs
+            | _ -> raisef ResolveAttributesException "Invalid dereference in path: %O" ref
+
+    let resolveAttributesField (entity : ResolvedEntity) (fieldAttrs : SourceAttributesField) : AttributesField =
         let attrsMap =
             match parse tokenizeFunQL attributeMap fieldAttrs.attributes with
             | Ok r -> r
@@ -23,22 +35,36 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
 
         let mutable globalArguments = Set.empty
 
-        let resolveColumn : LinkedFieldRef -> DefaultFieldRef = function
-            | { ref = { entity = Some { schema = None; name = FunQLName "this" }; name = fieldName }; path = [||] } -> ThisRef fieldName
+        let resolveReference : LinkedFieldRef -> LinkedFieldName = function
+            | { ref = VRColumn { entity = None; name = name }; path = path } ->
+                checkPath entity name (Array.toList path)
+                { ref = VRColumn name; path = path }
+            | { ref = VRPlaceholder (PLocal name) } ->
+                raisef ResolveAttributesException "Local argument %O is not allowed" name
+            | { ref = VRPlaceholder (PGlobal name as arg); path = path } ->
+                let argInfo =
+                    match Map.tryFind name globalArgumentTypes with
+                    | None -> raisef ResolveAttributesException "Unknown global argument: %O" ref
+                    | Some argInfo -> argInfo
+                if not <| Array.isEmpty path then
+                    match argInfo.argType with
+                    | FTReference (entityRef, where) ->
+                        let (name, remainingPath) =
+                            match Array.toList path with
+                            | head :: tail -> (head, tail)
+                            | _ -> failwith "impossible"
+                        let argEntity = layout.FindEntity entityRef |> Option.get
+                        checkPath argEntity name remainingPath
+                    | _ -> raisef ResolveAttributesException "Argument is not a reference: %O" ref
+                { ref = VRPlaceholder arg; path = path }
             | ref ->
                 raisef ResolveAttributesException "Invalid reference: %O" ref
-        let resolvePlaceholder = function
-            | PLocal name -> raisef ResolveAttributesException "Local argument %O is not allowed" name
-            | PGlobal name when Map.containsKey name globalArgumentTypes ->
-                globalArguments <- Set.add name globalArguments
-                PGlobal name
-            | PGlobal name -> raisef ResolveAttributesException "Unknown global argument %O" name
         let voidQuery query =
             raisef ResolveAttributesException "Query is not allowed: %O" query
 
         let resolveAttribute name expr =
             try
-                mapFieldExpr id resolveColumn resolvePlaceholder voidQuery expr
+                mapFieldExpr id resolveReference voidQuery expr
             with
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attribute %O: %s" name e.Message
         let resolvedMap = Map.map resolveAttribute attrsMap
@@ -58,7 +84,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
                     match entity.FindField name with
                     | None -> raisef ResolveAttributesException "Unknown field name"
                     | Some field ->
-                            Ok <| resolveAttributesField fieldAttrs
+                            Ok <| resolveAttributesField entity fieldAttrs
                 with
                 | :? ResolveAttributesException as e when fieldAttrs.allowBroken || forceAllowBroken ->
                     errors <- Map.add name (e :> exn) errors

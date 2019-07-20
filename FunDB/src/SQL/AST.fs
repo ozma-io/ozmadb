@@ -405,6 +405,7 @@ type [<NoComparison>] ValueExpr =
     | VECoalesce of ValueExpr[]
     | VEJsonArrow of ValueExpr * ValueExpr
     | VEJsonTextArrow of ValueExpr * ValueExpr
+    | VESubquery of SelectExpr
     with
         override this.ToString () = this.ToSQLString()
 
@@ -452,6 +453,7 @@ type [<NoComparison>] ValueExpr =
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VESubquery query -> sprintf "(%s)" (query.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -613,6 +615,7 @@ let mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -> in
         | VECoalesce vals -> VECoalesce <| Array.map traverse vals
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
+        | VESubquery query -> VESubquery (queryFunc query)
     traverse
 
 let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) (queryFunc : SelectExpr -> unit) : ValueExpr -> unit =
@@ -646,6 +649,7 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
         | VECoalesce vals -> Array.iter traverse vals
         | VEJsonArrow (a, b) -> traverse a; traverse b
         | VEJsonTextArrow (a, b) -> traverse a; traverse b
+        | VESubquery query -> queryFunc query
     traverse
 
 [<NoComparison>]

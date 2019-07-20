@@ -5,25 +5,11 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type DefaultFieldRef = ThisRef of FieldName
-    with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            match this with
-            | ThisRef fieldName -> sprintf "this.%O" fieldName
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-type DefaultAttributeFieldExpr = FieldExpr<FunQLVoid, DefaultFieldRef>
-type DefaultAttributeMap = AttributeMap<FunQLVoid, DefaultFieldRef>
-
 [<NoComparison>]
 type AttributesField =
     { allowBroken : bool
       priority : int
-      attributes : DefaultAttributeMap
+      attributes : LinkedLocalAttributeMap
       globalArguments : Set<ArgumentName>
     }
 

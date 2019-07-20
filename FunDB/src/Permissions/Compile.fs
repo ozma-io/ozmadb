@@ -9,13 +9,17 @@ open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 let private namesToRefs (ref : ResolvedEntityRef) =
-    let resolveColumn (name : LinkedFieldName) : LinkedBoundFieldRef =
-        let resFieldRef = { entity = ref; name = name.ref } : ResolvedFieldRef
-        let fieldRef = { entity = Some <| relaxEntityRef ref; name = name.ref } : FieldRef
-        { ref = { ref = fieldRef; bound = Some { ref = resFieldRef; immediate = true } }; path = name.path }
+    let resolveValueRef = function
+        | VRColumn name ->
+            let resFieldRef = { entity = ref; name = name } : ResolvedFieldRef
+            let fieldRef = { entity = Some <| relaxEntityRef ref; name = name } : FieldRef
+            VRColumn { ref = fieldRef; bound = Some { ref = resFieldRef; immediate = true } }
+        | VRPlaceholder p -> VRPlaceholder p
+    let resolveReference (name : LinkedFieldName) : LinkedBoundFieldRef =
+        { ref = resolveValueRef name.ref; path = name.path }
     let voidQuery query =
         failwith <| sprintf "Queries are not allowed in access conditions: %O" query
-    mapFieldExpr id resolveColumn id voidQuery
+    mapFieldExpr id resolveReference voidQuery
 
 let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.SelectExpr =
     let clause =

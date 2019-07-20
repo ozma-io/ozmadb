@@ -44,7 +44,7 @@ let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : Compiled
         }
     | Some attrInfo ->
         let filterPure (result : ResolvedQueryResult) attrs =
-            let name = resultName result.result
+            let name = result.result.ToName ()
             match Map.tryFind name attrInfo.pureColumnAttributes with
             | None -> Map.empty
             | Some pureAttrs -> attrs |> Map.filter (fun name _ -> Set.contains name pureAttrs)
@@ -153,7 +153,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
     let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) : UserViewInfo =
         let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.entity |> Option.get, main)) viewExpr.mainEntity
         let getResultColumn (result : ResolvedQueryResult) (column : ExecutedColumnInfo) : UserViewColumn =
-            let name = resultName result.result
+            let name = result.result.ToName ()
             let mainField =
                 match mainEntity with
                 | None -> None

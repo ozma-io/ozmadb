@@ -20,7 +20,7 @@ type BoundField =
     }
 
 [<NoComparison>]
-type BoundRef<'f> when 'f :> IFunQLString =
+type BoundRef<'f> when 'f :> IFunQLName =
     { ref : 'f
       bound : BoundField option
     } with
@@ -31,13 +31,19 @@ type BoundRef<'f> when 'f :> IFunQLString =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type LinkedBoundFieldRef = LinkedRef<BoundRef<FieldRef>>
+        member this.ToName () = this.ref.ToName ()
+
+        interface IFunQLName with
+            member this.ToName () = this.ToName ()
+
+type LinkedBoundFieldRef = LinkedRef<ValueRef<BoundRef<FieldRef>>>
 
 [<NoComparison>]
 type private BoundFieldInfo =
     { ref : ResolvedFieldRef
       entity : ResolvedEntity
       field : ResolvedField
+      // Means that field is selected directly from an entity and not from a subexpression.
       immediate : bool
     }
 
@@ -128,15 +134,14 @@ let private checkName (FunQLName name) : unit =
     if not (goodName name) then
         raisef ViewResolveException "Invalid name: %s" name
 
-let resultFieldRef : ResolvedQueryResultExpr -> LinkedBoundFieldRef option = function
-    | QRField field -> Some field
-    | QRExpr (name, FEColumn field) -> Some field
-    | QRExpr (name, _) -> None
+let refField : LinkedRef<ValueRef<'f>> -> LinkedRef<'f> option = function
+    | { ref = VRColumn field; path = path } -> Some { ref = field; path = path }
+    | _ -> None
 
-let resultName : ResolvedQueryResultExpr -> FieldName = function
-    | QRField field when not (Array.isEmpty field.path) -> Array.last field.path
-    | QRField field -> field.ref.ref.name
-    | QRExpr (name, _) -> name
+let resultFieldRef : QueryResultExpr<'e, LinkedRef<ValueRef<'f>>> -> LinkedRef<'f> option = function
+    | QRField ref -> refField ref
+    | QRExpr (name, FERef ref) -> refField ref
+    | QRExpr (name, _) -> None
 
 // Copy of that in Layout.Resolve but with a different exception.
 let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
@@ -181,7 +186,7 @@ let rec private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFiel
     | SSelect { results = results; clause = Some clause } ->
         if findMainEntityRef clause.from = Some ref then
             let getField (result : ResolvedQueryResult) : (FieldName * FieldName) option =
-                let name = resultName result.result
+                let name = result.result.ToName ()
                 match Map.find name fields with
                 | QField (Some { ref = boundRef; field = RColumnField _ }) when boundRef.entity = ref -> Some (name, boundRef.name)
                 | QRename newName -> failwith <| sprintf "Unexpected rename which should have been removed: %O -> %O" name newName
@@ -251,53 +256,84 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     //   It will be added to `mapping` of the resulting SELECT, hence it bounds innermost field in path;
     // * Outer bound field, if exists;
     // * Resulting reference.
-    let resolveField (mapping : QMapping) (f : LinkedFieldRef) : QSubqueryField * BoundFieldInfo option * LinkedBoundFieldRef =
-        let (entityName, (schemaName, fields)) =
-            match f.ref.entity with
-            | None ->
-                if mapping.Count = 1 then
-                    Map.toSeq mapping |> Seq.head
-                else
-                    raisef ViewResolveException "None or more than one possible interpretation of %O in %O" f.ref f
-            | Some ename ->
-                let srcName = Some ename.name
-                match Map.tryFind srcName mapping with
-                | Some ((schema, ref) as ret) ->
-                    if Option.isSome ename.schema && schema <> ename.schema then
-                        raisef ViewResolveException "Invalid entity schema %O in %O" ename f
-                    else
-                        (srcName, ret)
+    let resolveReference (mapping : QMapping) (f : LinkedFieldRef) : QSubqueryField * BoundFieldInfo option * LinkedBoundFieldRef =
+        match f.ref with
+        | VRColumn ref ->
+            let (entityName, (schemaName, fields)) =
+                match ref.entity with
                 | None ->
-                    raisef ViewResolveException "Field entity not found for %O in %O" ename f
-        let (newName, outerBoundField) =
-            match findRootField f.ref.name fields with
-            | Some r -> r
-            | None -> raisef ViewResolveException "Unknown field %O in %O" f.ref.name f
+                    if mapping.Count = 1 then
+                        Map.toSeq mapping |> Seq.head
+                    else
+                        raisef ViewResolveException "None or more than one possible interpretation of %O in %O" f.ref f
+                | Some ename ->
+                    let srcName = Some ename.name
+                    match Map.tryFind srcName mapping with
+                    | Some ((schema, ref) as ret) ->
+                        if Option.isSome ename.schema && schema <> ename.schema then
+                            raisef ViewResolveException "Invalid entity schema %O in %O" ename f
+                        else
+                            (srcName, ret)
+                    | None ->
+                        raisef ViewResolveException "Field entity not found for %O in %O" ename f
+            let (newName, outerBoundField) =
+                match findRootField ref.name fields with
+                | Some r -> r
+                | None -> raisef ViewResolveException "Unknown field %O in %O" ref.name f
 
-        let (innerBoundField, outerRef) =
-            match outerBoundField with
-            | Some field ->
-                let inner = resolvePath { field with immediate = false } (Array.toList f.path)
-                (Some inner, Some { ref = field.ref; immediate = field.immediate })
-            | None when Array.isEmpty f.path ->
-                (None, None)
-            | _ ->
-                raisef ViewResolveException "Dereference on an unbound field in %O" f
+            let (innerBoundField, outerRef) =
+                match outerBoundField with
+                | Some field ->
+                    // FIXME: why immediate = false here?
+                    let inner = resolvePath { field with immediate = false } (Array.toList f.path)
+                    (Some inner, Some { ref = field.ref; immediate = field.immediate })
+                | None when Array.isEmpty f.path ->
+                    (None, None)
+                | _ ->
+                    raisef ViewResolveException "Dereference on an unbound field in %O" f
 
-        let newRef = { entity = Option.map (fun ename -> { schema = None; name = ename }) entityName; name = newName } : FieldRef
-        (QField innerBoundField, outerBoundField, { ref = { ref = newRef; bound = outerRef }; path = f.path })
-
-    let resolvePlaceholder (name : Placeholder) : Placeholder =
-        if Map.containsKey name arguments then
-            usedArguments <- Set.add name usedArguments
-            name
-        else
-            raisef ViewResolveException "Undefined placeholder: %O" name
+            let newRef = { entity = Option.map (fun ename -> { schema = None; name = ename }) entityName; name = newName } : FieldRef
+            (QField innerBoundField, outerBoundField, { ref = VRColumn { ref = newRef; bound = outerRef }; path = f.path })
+        | VRPlaceholder arg ->
+            let argInfo =
+                match Map.tryFind arg arguments with
+                | None -> raisef ViewResolveException "Unknown argument: %O" arg
+                | Some argInfo -> argInfo
+            let innerBoundField =    
+                if Array.isEmpty f.path then
+                    None
+                else
+                    match argInfo.argType with
+                    | FTReference (entityRef, where) ->
+                        let (name, remainingPath) =
+                            match Array.toList f.path with
+                            | head :: tail -> (head, tail)
+                            | _ -> failwith "impossible"
+                        let argEntity = layout.FindEntity entityRef |> Option.get
+                        let (_, argField) = argEntity.FindField name |> Option.get
+                        let fieldInfo =
+                            { ref = { entity = entityRef; name = name }
+                              entity = argEntity
+                              field = argField
+                              immediate = false
+                            }
+                        let inner = resolvePath fieldInfo remainingPath
+                        Some inner
+                    | _ -> raisef ViewResolveException "Argument is not a reference: %O" ref
+            usedArguments <- Set.add arg usedArguments                
+            (QField innerBoundField, None, { ref = VRPlaceholder arg; path = f.path })    
 
     let resolveLimitFieldExpr (expr : ParsedFieldExpr) : ResolvedFieldExpr =
-        let foundReference column = raisef ViewResolveException "Reference in LIMIT or OFFSET: %O" column
-        let foundQuery query = raisef ViewResolveException "Subquery in LIMIT or OFFSET: %O" query
-        mapFieldExpr id foundReference resolvePlaceholder foundQuery expr
+        let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
+            | { ref = VRPlaceholder name; path = [||] } ->
+                if Map.containsKey name arguments then
+                    usedArguments <- Set.add name usedArguments
+                    { ref = VRPlaceholder name; path = [||] }
+                else
+                    raisef ViewResolveException "Undefined placeholder: %O" name
+            | ref -> raisef ViewResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
+        let voidQuery query = raisef ViewResolveException "Subquery in LIMIT or OFFSET: %O" query
+        mapFieldExpr id resolveReference voidQuery expr
 
     let rec resolveResult (mapping : QMapping) (result : ParsedQueryResult) : QSubqueryField * ResolvedQueryResult =
         let (boundField, expr) = resolveResultExpr mapping result.result
@@ -307,13 +343,14 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         }
         (boundField, ret)
 
+    // Should be in sync with resultField
     and resolveResultExpr (mapping : QMapping) : ParsedQueryResultExpr -> QSubqueryField * ResolvedQueryResultExpr = function
         | QRField f ->
-            let (boundField, _, f') = resolveField mapping f
+            let (boundField, _, f') = resolveReference mapping f
             (boundField, QRField f')
-        | QRExpr (name, FEColumn f) ->
-            let (boundField, _, f') = resolveField mapping f
-            (boundField, QRExpr (name, FEColumn f'))
+        | QRExpr (name, FERef f) ->
+            let (boundField, _, f') = resolveReference mapping f
+            (boundField, QRExpr (name, FERef f'))
         | QRExpr (name, e) ->
             checkName name
             let (_, e') = resolveFieldExpr mapping e
@@ -324,8 +361,8 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
 
     and resolveFieldExpr (mapping : QMapping) (expr : ParsedFieldExpr) : bool * ResolvedFieldExpr =
         let mutable isLocal = true
-        let resolveColumn col =
-            let (_, outer, ret) = resolveField mapping col
+        let resolveExprReference col =
+            let (_, outer, ret) = resolveReference mapping col
 
             if not <| Array.isEmpty col.path then
                 isLocal <- false
@@ -338,7 +375,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         let resolveQuery query =
             let (_, res) = resolveSubSelectExpr query
             res
-        let ret = mapFieldExpr id resolveColumn resolvePlaceholder resolveQuery expr
+        let ret = mapFieldExpr id resolveExprReference resolveQuery expr
         (isLocal, ret)
 
     and resolveOrderLimitClause (mapping : QMapping) (limits : ParsedOrderLimitClause) : bool * ResolvedOrderLimitClause =
@@ -361,7 +398,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             let results = {
                 fields = fields
                 attributes = res.attributes
-                fieldAttributeNames = res.results |> Array.map (fun res -> (resultName res.result, Map.keysSet res.attributes))
+                fieldAttributeNames = res.results |> Array.map (fun res -> (res.result.ToName (), Map.keysSet res.attributes))
             }
             (results, SSelect res)
         | SSetOp (op, a, b, limits) ->
@@ -401,7 +438,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         let results = Array.map snd rawResults
         let newFields =
             try
-                rawResults |> Seq.map (fun (boundField, res) -> (resultName res.result, boundField)) |> Map.ofSeqUnique
+                rawResults |> Seq.map (fun (boundField, res) -> (res.result.ToName (), boundField)) |> Map.ofSeqUnique
             with
                 | Failure msg -> raisef ViewResolveException "Clashing result names: %s" msg
 

@@ -19,6 +19,14 @@ type ReferenceRef =
         interface IFunQLString with
             member this.ToFunQLString() = this.ToFunQLString()
 
+        member this.ToName () =
+            match this with
+            | RThis name -> name
+            | RRef name -> name
+
+        interface IFunQLName with
+            member this.ToName () = this.ToName ()
+        
 type ResolvedFieldType = FieldType<ResolvedEntityRef, ReferenceRef>
 
 type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>

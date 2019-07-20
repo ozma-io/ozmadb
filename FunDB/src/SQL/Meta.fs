@@ -289,6 +289,7 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VECoalesce vals -> VECoalesce (Array.map traverse vals)
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
+        | VESubquery query -> raisef SQLMetaException "Invalid subquery in local expression: %O" query
     traverse
 
 

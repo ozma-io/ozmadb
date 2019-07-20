@@ -257,11 +257,10 @@ let private validJsonValue = function
     | SQL.VDateTimeArray _ -> true
     | _ -> false
 
-let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc : Placeholder -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
+let genericCompileFieldExpr (refFunc : 'f -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
     let rec traverse = function
         | FEValue v -> compileFieldValue v
-        | FEColumn c -> columnFunc c
-        | FEPlaceholder name -> placeholderFunc name
+        | FERef c -> refFunc c
         | FENot a -> SQL.VENot (traverse a)
         | FEAnd (a, b) -> SQL.VEAnd (traverse a, traverse b)
         | FEOr (a, b) -> SQL.VEOr (traverse a, traverse b)
@@ -314,28 +313,32 @@ let genericCompileFieldExpr (columnFunc : 'f -> SQL.ValueExpr) (placeholderFunc 
     traverse
 
 let rec compileLocalComputedField (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LinkedLocalFieldExpr) : SQL.ValueExpr =
-        let compileRef (ref : LinkedFieldName) =
+        let compileReference (ref : LinkedFieldName) =
+            let fieldRef =
+                match ref.ref with
+                | VRColumn c -> c
+                | VRPlaceholder p -> failwith <| sprintf "Unexpected placeholder: %O" p
             // This is checked during resolve already.
             assert (Array.isEmpty ref.path)
-            let (_, field) = entity.FindField ref.ref |> Option.get
+            let (_, field) = entity.FindField fieldRef |> Option.get
             match field with
             | RId
-            | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName ref.ref }
+            | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName fieldRef }
             | RComputedField comp -> compileLocalComputedField tableRef entity comp.expression
-        let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in local computed field expression: %O" c
         let voidQuery q = failwith <| sprintf "Unexpected query in local computed field expression: %O" q
-        genericCompileFieldExpr compileRef voidPlaceholder voidQuery expr
+        genericCompileFieldExpr compileReference voidQuery expr
 
 let compileLocalFieldExpr (arguments : CompiledArgumentsMap) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LocalFieldExpr) : SQL.ValueExpr =
-        let compileRef (name : FieldName) =
-            let (_, field) = entity.FindField name |> Option.get
-            match field with
-            | RId
-            | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName name }
-            | RComputedField comp -> compileLocalComputedField tableRef entity comp.expression
-        let compilePlaceholder name = SQL.VEPlaceholder arguments.[name].placeholderId
+        let compileReference = function
+            | VRColumn name ->
+                let (_, field) = entity.FindField name |> Option.get
+                match field with
+                | RId
+                | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName name }
+                | RComputedField comp -> compileLocalComputedField tableRef entity comp.expression
+            | VRPlaceholder name -> SQL.VEPlaceholder arguments.[name].placeholderId
         let voidQuery q = failwith <| sprintf "Unexpected query in local field expression: %O" q
-        genericCompileFieldExpr compileRef compilePlaceholder voidQuery expr
+        genericCompileFieldExpr compileReference voidQuery expr
 
 [<NoComparison>]
 type private ResultColumn =
@@ -343,26 +346,34 @@ type private ResultColumn =
       attributes : Set<AttributeName>
       columns : SQL.SelectedColumn array
     }
-                //(Some newDomains, newAttrs, [ idColumns; domainColumns; punColumns; attrColumns ] |> Seq.concat |> Seq.toArray)
+
+type private SelectFlags =
+    { hasMainEntity : bool
+      isTopLevel : bool
+      metaColumns : bool
+    }
 
 type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttributes, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
 
-    let convertDefaultAttributeExpr (entityRef : ResolvedEntityRef) (entityName : EntityName) : DefaultAttributeFieldExpr -> ResolvedFieldExpr =
-        let resolveReference : DefaultFieldRef -> LinkedBoundFieldRef = function
-            | ThisRef fieldName ->
-                let bound =
-                    { ref = { entity = entityRef; name = fieldName }
-                      immediate = true
-                    }
-                { ref = { ref = { entity = Some { schema = None; name = entityName }; name = fieldName }; bound = Some bound }; path = [||] }
-        let resolvePlaceholder = function
-            | PLocal name -> failwith <| sprintf "Unexpected local argument in default attribute: %O" name
-            | (PGlobal name) as arg ->
-                arguments <- addArgument arg (Map.find name globalArgumentTypes) arguments
-                arg
-        let foundQuery query = failwith <| sprintf "Unexpected query in default attribute: %O" query
-        mapFieldExpr id resolveReference resolvePlaceholder foundQuery
+    let convertLinkedLocalExpr (entityRef : ResolvedEntityRef) (localRef : EntityRef) : LinkedLocalFieldExpr -> ResolvedFieldExpr =
+        let resolveReference (ref : LinkedFieldName) : LinkedBoundFieldRef =
+            let newRef =
+                match ref.ref with
+                | VRColumn fieldName ->
+                    let bound =
+                        { ref = { entity = entityRef; name = fieldName }
+                          immediate = true
+                        }
+                    VRColumn { ref = ({ entity = Some localRef; name = fieldName } : FieldRef); bound = Some bound }
+                | VRPlaceholder (PLocal name) -> failwith <| sprintf "Unexpected local argument: %O" name
+                | VRPlaceholder ((PGlobal name) as arg) ->
+                    arguments <- addArgument arg (Map.find name globalArgumentTypes) arguments
+                    VRPlaceholder arg
+            { ref = newRef; path = ref.path }
+        // FIXME: why so? allow it!
+        let foundQuery query = failwith <| sprintf "Unexpected query: %O" query
+        mapFieldExpr id resolveReference foundQuery
 
     let mutable lastDomainNamespaceId = 0
     let newDomainNamespaceId () =
@@ -393,30 +404,31 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 followPath newFieldRef newField refs
             | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
 
-    let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (field : ResolvedField) (ref : FieldName) : JoinPaths * SQL.ValueExpr =
+    let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (entityRef : ResolvedEntityRef) (field : ResolvedField) (ref : FieldName) : JoinPaths * SQL.ValueExpr =
         match field with
         | RId
-        | RColumnField _ -> (paths, SQL.VEColumn { table = Some { schema = None; name = tableRef.name }; name = compileName ref })
-        | RComputedField comp -> compileLinkedLocalFieldExpr paths tableRef entity comp.expression
+        | RColumnField _ -> (paths, SQL.VEColumn { table = Some tableRef; name = compileName ref })
+        | RComputedField comp ->
+            let localRef = { schema = Option.map decompileName tableRef.schema; name = decompileName tableRef.name } : EntityRef
+            compileLinkedFieldExpr paths <| convertLinkedLocalExpr entityRef localRef comp.expression
 
-    and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (field : ResolvedField) (name : FieldName) : FieldName list -> JoinPaths * SQL.ValueExpr = function
-        | [] -> compileRef paths tableRef entity field name
+    and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (entityRef : ResolvedEntityRef) (field : ResolvedField) (name : FieldName) : FieldName list -> JoinPaths * SQL.ValueExpr = function
+        | [] -> compileRef paths tableRef entityRef field name
         | (ref :: refs) ->
             match field with
-            | RColumnField { fieldType = FTReference (entityRef, _) } ->
-                let newEntity = Option.get <| layout.FindEntity entityRef
-                let (realName, newField) = Option.get <| newEntity.FindField ref
+            | RColumnField { fieldType = FTReference (newEntityRef, _) } ->
+                let (realName, newField) = Option.get <| layout.FindField newEntityRef ref
                 let pathKey =
                     { table = tableRef.name
                       column = compileName name
-                      toTable = entityRef
+                      toTable = newEntityRef
                     }
                 let (newPath, res) =
                     match Map.tryFind pathKey paths with
                     | None ->
                         let newRealName = newJoinId ()
                         let newTableRef = { schema = None; name = newRealName } : SQL.TableRef
-                        let (nested, res) = compilePath Map.empty newTableRef newEntity newField realName refs
+                        let (nested, res) = compilePath Map.empty newTableRef newEntityRef newField realName refs
                         let path =
                             { name = newRealName
                               nested = nested
@@ -424,53 +436,92 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         (path, res)
                     | Some path ->
                         let newTableRef = { schema = None; name = path.name } : SQL.TableRef
-                        let (nested, res) = compilePath path.nested newTableRef newEntity newField realName refs
+                        let (nested, res) = compilePath path.nested newTableRef newEntityRef newField realName refs
                         let newPath = { path with nested = nested }
                         (newPath, res)
                 (Map.add pathKey newPath paths, res)
             | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
 
-    and compileLinkedLocalFieldExpr (paths0 : JoinPaths) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LinkedLocalFieldExpr) : JoinPaths * SQL.ValueExpr =
-        let mutable paths = paths0
-        let compileLinkedName (linked : LinkedFieldName) =
-            let (newName, field) = entity.FindField linked.ref |> Option.get
-            let (newPaths, ret) = compilePath paths tableRef entity field newName (Array.toList linked.path)
-            paths <- newPaths
-            ret
-        let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
-        let voidQuery q = failwith <| sprintf "Unexpected query in computed field expression: %O" q
-        let ret = genericCompileFieldExpr compileLinkedName voidPlaceholder voidQuery expr
-        (paths, ret)
+    and compileLinkedFieldRef (paths0 : JoinPaths) (linked : LinkedBoundFieldRef) : JoinPaths * SQL.ValueExpr =
+        match linked.ref with
+        | VRColumn ref ->
+            match (linked.path, ref.bound) with
+            | ([||], None) ->
+                let columnRef = compileFieldRef ref.ref
+                (paths0, SQL.VEColumn columnRef)
+            | (_, Some boundRef) ->
+                let tableRef =
+                    match ref.ref.entity with
+                    | Some renamedTable -> compileEntityRef renamedTable
+                    | None -> compileResolvedEntityRef boundRef.ref.entity
+                let (realName, field) = layout.FindField boundRef.ref.entity boundRef.ref.name |> Option.get
+                // In case it's an immediate name we need to rename outermost field (i.e. `__main`).
+                // If it's not we need to keep original naming.
+                let newName =
+                    if boundRef.immediate then realName else ref.ref.name
+                compilePath paths0 tableRef boundRef.ref.entity field newName (Array.toList linked.path)
+            | _ -> failwith "Unexpected path with no bound field"
+        | VRPlaceholder name ->
+            if Array.isEmpty linked.path then
+                (paths0, SQL.VEPlaceholder arguments.types.[name].placeholderId)
+            else
+                let argInfo = Map.find name initialArguments.types
+                match argInfo.fieldType with
+                | FTReference (argEntityRef, where) ->
+                    let firstName = linked.path.[0]
+                    let remainingPath = Array.skip 1 linked.path
+                    let argEntityRef' = { schema = Some argEntityRef.schema; name = argEntityRef.name } : EntityRef                    
+                    let argEntity = layout.FindEntity argEntityRef |> Option.get
 
-    let compileLinkedFieldRef (paths0 : JoinPaths) (linked : LinkedBoundFieldRef) : JoinPaths * SQL.ValueExpr =
-        match (linked.path, linked.ref.bound) with
-        | ([||], None) ->
-            let columnRef = compileFieldRef linked.ref.ref
-            (paths0, SQL.VEColumn columnRef)
-        | (_, Some boundRef) ->
-            let tableRef =
-                match linked.ref.ref.entity with
-                | Some renamedTable -> compileEntityRef renamedTable
-                | None -> compileResolvedEntityRef boundRef.ref.entity
-            let entity = layout.FindEntity boundRef.ref.entity |> Option.get
-            let (realName, field) = entity.FindField boundRef.ref.name |> Option.get
-            // In case it's an immediate name we need to rename outermost field (i.e. `__main`).
-            // If it's not we need to keep original naming.
-            let newName =
-                if boundRef.immediate then realName else linked.ref.ref.name
-            compilePath paths0 tableRef entity field newName (Array.toList linked.path)
-        | _ -> failwith "Unexpected path with no bound field"
+                    // Subquery
+                    let makeColumn name path =
+                        let bound =
+                            { ref = { entity = argEntityRef; name = name }
+                              immediate = true
+                            }
+                        let col = VRColumn { ref = ({ entity = Some argEntityRef'; name = name } : FieldRef); bound = Some bound }
+                        { ref = col; path = path }
 
-    let rec compileLinkedFieldExpr (paths0 : JoinPaths) (expr : ResolvedFieldExpr) : JoinPaths * SQL.ValueExpr =
+                    let idColumn = makeColumn funId [||]
+                    let arg = { ref = VRPlaceholder name; path = [||] }
+                    let fromClause =
+                        { from = FEntity (None, argEntityRef)
+                          where = Some <| FEEq (FERef idColumn, FERef arg)
+                        }
+
+                    let result =
+                        { attributes = Map.empty
+                          result = QRField <| makeColumn firstName remainingPath
+                        }
+                    let selectClause =
+                        { attributes = Map.empty
+                          results = [| result |]
+                          clause = Some fromClause
+                          orderLimit = emptyOrderLimitClause
+                        } : ResolvedSingleSelectExpr
+                    let flags =
+                        { hasMainEntity = false
+                          isTopLevel = false
+                          metaColumns = false
+                        }                    
+                    let (info, subquery) = compileSelectExpr flags (SSelect selectClause)
+                    (paths0, SQL.VESubquery subquery)
+                | typ -> failwith <| sprintf "Argument is not a reference: %O" name
+
+    and compileLinkedFieldExpr (paths0 : JoinPaths) (expr : ResolvedFieldExpr) : JoinPaths * SQL.ValueExpr =
         let mutable paths = paths0
         let compileLinkedRef linked =
             let (newPaths, ret) = compileLinkedFieldRef paths linked
             paths <- newPaths
             ret
-        let voidPlaceholder c = failwith <| sprintf "Unexpected placeholder in computed field expression: %O" c
-        let compilePlaceholder name = SQL.VEPlaceholder arguments.types.[name].placeholderId
-        let compileSubSelectExpr = snd << compileSelectExpr false false
-        let ret = genericCompileFieldExpr compileLinkedRef compilePlaceholder compileSubSelectExpr expr
+        let compileSubSelectExpr =
+            let flags =
+                { hasMainEntity = false
+                  isTopLevel = false
+                  metaColumns = false
+                }
+            snd << compileSelectExpr flags
+        let ret = genericCompileFieldExpr compileLinkedRef compileSubSelectExpr expr
         (paths, ret)
 
     and compileAttribute (paths0 : JoinPaths) (prefix : string) (FunQLName name) (expr : ResolvedFieldExpr) : JoinPaths * SQL.SelectedColumn =
@@ -490,9 +541,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.OrderLimitClause
         (paths, ret)
 
-    and compileSelectExpr (hasMainEntity : bool) (isTopLevel : bool) : ResolvedSelectExpr -> SelectInfo * SQL.SelectExpr = function
+    and compileSelectExpr (flags : SelectFlags) : ResolvedSelectExpr -> SelectInfo * SQL.SelectExpr = function
         | SSelect query ->
-            let (info, expr) = compileSingleSelectExpr hasMainEntity isTopLevel query
+            let (info, expr) = compileSingleSelectExpr flags query
             (info, SQL.SSelect expr)
         | SSetOp _ as select ->
             let ns = newDomainNamespaceId ()
@@ -500,7 +551,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let mutable lastId = 0
             let rec compileDomained = function
                 | SSelect query ->
-                    let (info, expr) = compileSingleSelectExpr hasMainEntity isTopLevel query
+                    let (info, expr) = compileSingleSelectExpr flags query
                     let id = lastId
                     lastId <- lastId + 1
                     let modifiedExpr =
@@ -522,13 +573,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             (info, expr)
 
-    and compileSingleSelectExpr (hasMainEntity : bool) (isTopLevel : bool) (select : ResolvedSingleSelectExpr) : SelectInfo * SQL.SingleSelectExpr =
+    and compileSingleSelectExpr (flags : SelectFlags) (select : ResolvedSingleSelectExpr) : SelectInfo * SQL.SingleSelectExpr =
         let mutable paths = Map.empty
 
         let (fromMap, queryClause) =
             match select.clause with
             | Some clause ->
-                let (newPaths, domainsMap, ret) = compileFromClause hasMainEntity paths clause
+                let (newPaths, domainsMap, ret) = compileFromClause flags.hasMainEntity paths clause
                 paths <- newPaths
                 (domainsMap, Some ret)
             | None -> (Map.empty, None)
@@ -551,8 +602,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             paths <- newPaths
 
             match resultFieldRef result.result with
-            | Some ({ ref = { ref = { entity = Some { name = entityName }; name = fieldName } } } as resultRef) ->
-                let newName = resultName result.result
+            | Some ({ ref = { ref = { entity = Some ({ name = entityName } as entityRef); name = fieldName } } } as resultRef) when flags.metaColumns ->
+                let newName = result.result.ToName ()
                 let fromInfo = Map.find entityName fromMap
                 let tableRef : SQL.TableRef = { schema = None; name = compileName entityName }
 
@@ -580,7 +631,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             None
                     else
                         let idPath = Seq.append (Seq.take (Array.length resultRef.path - 1) resultRef.path) (Seq.singleton funId) |> Array.ofSeq
-                        let idRef = { resultRef with path = idPath }
+                        let idRef = { ref = VRColumn resultRef.ref; path = idPath }
                         let (newPaths, idExpr) = compileLinkedFieldRef paths idRef
                         paths <- newPaths
                         Some idExpr
@@ -636,7 +687,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         Seq.empty
 
                 let punColumns =
-                    if isTopLevel
+                    if flags.isTopLevel
                     then
                         // TODO: algorithm is similar to the one for Ids; generalize?
                         if Array.isEmpty resultRef.path
@@ -651,7 +702,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                     match info.field with
                                     | RColumnField { fieldType = FTReference (newEntityRef, _) } ->
                                         let (_, field) = entity.FindField fieldName |> Option.get
-                                        let (newPaths, expr) = compilePath paths tableRef entity field fieldName [funMain]
+                                        let (newPaths, expr) = compilePath paths tableRef info.ref.entity field fieldName [funMain]
                                         paths <- newPaths
                                         foundPun <- true
                                         expr
@@ -664,7 +715,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                 Seq.empty
                         else
                             let punPath = Seq.append (Seq.take (Array.length resultRef.path - 1) resultRef.path) (Seq.singleton funMain) |> Array.ofSeq
-                            let punRef = { resultRef with path = punPath }
+                            let punRef = { ref = VRColumn resultRef.ref; path = punPath }
                             let (newPaths, punExpr) = compileLinkedFieldRef paths punRef
                             paths <- newPaths
                             Seq.singleton <| SQL.SCExpr (compilePun newName, punExpr)
@@ -682,7 +733,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         | Some attrs ->
                             let makeDefaultAttr name =
                                 let attr = Map.find name attrs
-                                let expr = convertDefaultAttributeExpr info.ref.entity entityName attr.expression
+                                let expr = convertLinkedLocalExpr info.ref.entity entityRef attr.expression
                                 let (newPaths, ret) = compileAttribute paths (sprintf "CellAttribute__%O" fieldName) name expr
                                 paths <- newPaths
                                 ret
@@ -712,22 +763,29 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
 
         let resultEntries = select.results |> Seq.map getResultEntry |> Seq.toArray
-        let resultColumns = resultEntries |> Seq.collect (fun entry -> entry.columns) |> Seq.distinct
-        let newDomains = resultEntries |> Seq.mapMaybe (fun entry -> entry.domains) |> Seq.fold mergeDomains (DSingle (newGlobalDomainId (), Map.empty))
-        let queryAttrs = Seq.fold2 (fun attrsMap result entry -> Map.add (resultName result.result) entry.attributes attrsMap) Map.empty select.results resultEntries
+        let emptyDomains = DSingle (newGlobalDomainId (), Map.empty)
+        let (attributes, newDomains, columns) =
+            if flags.metaColumns then
+                let resultColumns = resultEntries |> Seq.collect (fun entry -> entry.columns) |> Seq.distinct
+                let newDomains = resultEntries |> Seq.mapMaybe (fun entry -> entry.domains) |> Seq.fold mergeDomains emptyDomains
+                let queryAttrs = Seq.fold2 (fun attrsMap result entry -> Map.add (result.result.ToName ()) entry.attributes attrsMap) Map.empty select.results resultEntries
 
-        let mainIdColumns =
-            if not hasMainEntity then
-                Seq.empty
+                let mainIdColumns =
+                    if not flags.hasMainEntity then
+                        Seq.empty
+                    else
+                        let findMainId (name, info : FromInfo) : SQL.ColumnRef option =
+                            match info.mainId with
+                            | Some id -> Some { table = Some { schema = None; name = compileName name }; name = id }
+                            | None -> None
+                        let mainId = Map.toSeq fromMap |> Seq.mapMaybe findMainId |> Seq.exactlyOne
+                        Seq.singleton <| SQL.SCExpr (sqlFunMainId, SQL.VEColumn mainId)
+
+                let columns = [ mainIdColumns; attributeColumns; resultColumns ] |> Seq.concat |> Array.ofSeq
+                (queryAttrs, newDomains, columns)
             else
-                let findMainId (name, info : FromInfo) : SQL.ColumnRef option =
-                    match info.mainId with
-                    | Some id -> Some { table = Some { schema = None; name = compileName name }; name = id }
-                    | None -> None
-                let mainId = Map.toSeq fromMap |> Seq.mapMaybe findMainId |> Seq.exactlyOne
-                Seq.singleton <| SQL.SCExpr (sqlFunMainId, SQL.VEColumn mainId)
-
-        let columns = [ mainIdColumns; attributeColumns; resultColumns ] |> Seq.concat |> Array.ofSeq
+                let columns = resultEntries |> Seq.collect (fun entry -> entry.columns) |> Array.ofSeq
+                (Map.empty, emptyDomains, columns)
         let (newOrderLimitPaths, orderLimit) = compileOrderLimitClause paths select.orderLimit
 
         let newClause =
@@ -747,13 +805,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.SingleSelectExpr
 
         let info =
-            { attributes = queryAttrs
+            { attributes = attributes
               domains = newDomains
             }
         (info, query)
 
     and compileResult (paths0 : JoinPaths) (result : ResolvedQueryResult) : JoinPaths * SQL.SelectedColumn seq =
-        let sqlName = compileName <| resultName result.result
+        let sqlName = compileName <| result.result.ToName ()
         let mutable paths = paths0
 
         let (newPaths, newExpr) =
@@ -835,7 +893,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let ret = SQL.FJoin (compileJoin jt, r1, r2, joinExpr)
             (fromMap, ret)
         | FSubExpr (name, q) ->
-            let (selectInfo, expr) = compileSelectExpr hasMainEntity false q
+            let flags =
+                { hasMainEntity = hasMainEntity
+                  isTopLevel = false
+                  metaColumns = true
+                }
+            let (selectInfo, expr) = compileSelectExpr flags q
             let ret = SQL.FSubExpr (compileName name, None, expr)
             let fromInfo =
                 { fromType = FTSubquery selectInfo
@@ -858,7 +921,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             (Map.singleton name fromInfo, ret)
 
-    member this.CompileSelectExpr (hasMainEntity : bool) = compileSelectExpr hasMainEntity true
+    member this.CompileSelectExpr (hasMainEntity : bool) =
+        let flags =
+            { hasMainEntity = hasMainEntity
+              isTopLevel = true
+              metaColumns = true
+            }
+        compileSelectExpr flags
 
     member this.CompileSingleFromClause (clause : ResolvedFromClause) =
         let (paths, domainsMap, compiled) = compileFromClause false Map.empty clause

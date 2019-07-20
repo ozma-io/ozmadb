@@ -35,7 +35,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> Task<un
     }
 
     let resolveLimitFieldExpr (expr : ResolvedFieldExpr) : Task<ResolvedFieldExpr> =
-        mapTaskSyncFieldExpr resolveValue Task.result Task.result Task.result expr
+        mapTaskSyncFieldExpr resolveValue Task.result Task.result expr
 
     let rec resolveResult (result : ResolvedQueryResult) : Task<ResolvedQueryResult> =
         task {
@@ -55,7 +55,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> Task<un
         Map.mapTaskSync (fun name expr -> resolveFieldExpr expr) attributes
 
     and resolveFieldExpr : ResolvedFieldExpr -> Task<ResolvedFieldExpr> =
-        mapTaskSyncFieldExpr resolveValue Task.result Task.result Task.result
+        mapTaskSyncFieldExpr resolveValue Task.result Task.result
 
     and resolveOrderLimitClause (limits : ResolvedOrderLimitClause) : Task<ResolvedOrderLimitClause> =
         let resolveOrderBy (ord, expr) = Task.map (fun expr' -> (ord, expr')) (resolveFieldExpr expr)
