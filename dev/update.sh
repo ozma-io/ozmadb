@@ -1,3 +1,3 @@
 #!/bin/sh
 
-zcat dev.sql.gz | psql "@"
+zcat dev.sql.gz | psql "$@"
