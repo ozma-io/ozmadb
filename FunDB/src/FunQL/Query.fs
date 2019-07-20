@@ -178,7 +178,7 @@ let private parseResult (domains : Domains) (result : QueryResult) : ExecutedVie
         match colType with
         | CTMainIdColumn -> Some i
         | _ -> None
-    let mainIdColumn = allColumns |> Seq.mapiMaybe takeMainIdColumn |> Seq.tryExactlyOne
+    let mainIdColumn = allColumns |> Seq.mapiMaybe takeMainIdColumn |> Seq.first
 
     let takeColumn i (colType, valType) =
         match colType with
