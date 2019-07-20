@@ -8,28 +8,7 @@ var commonViews = {
         "  \"Value\"\n" +
         "FROM\n" +
         "  \"funapp\".\"Settings\"",
-    "FieldTranslations":
-        "SELECT\n" +
-        "  \"SchemaName\",\n" +
-        "  \"EntityName\",\n" +
-        "  \"FieldName\",\n" +
-        "  \"Translation\"\n" +
-        "FROM\n" +
-        "  \"funapp\".\"FieldTranslations\"\n" +
-        "WHERE $$Lang LIKE \"FieldTranslations\".\"Language\" || '%'",
     // Public APIs
-    "TranslatedMenu":
-        "SELECT\n" +
-        "  @\"Type\" = 'Menu',\n" +
-        "  \"MainMenuCategories\".\"Name\" AS \"CategoryName\",\n" +
-        "  COALESCE(\"Translations\".\"Translation\", \"UserViews\".\"Name\") AS \"Name\" @{ \"LinkedView\" = { schema: \"UserViews\".\"SchemaName\", name: \"UserViews\".\"Name\" } }\n" +
-        "FROM\n" +
-        "  \"funapp\".\"MainMenuButtons\"\n" +
-        "  LEFT JOIN \"funapp\".\"MainMenuCategories\" ON \"MainMenuCategories\".\"Id\" = \"MainMenuButtons\".\"CategoryId\"\n" +
-        "  INNER JOIN (SELECT \"UserViews\".\"Name\", \"UserViews\".\"SchemaId\"=>\"Name\" AS \"SchemaName\" FROM \"public\".\"UserViews\") AS \"UserViews\" ON \"UserViews\".\"SchemaName\" = \"MainMenuButtons\".\"SchemaName\" AND \"UserViews\".\"Name\" = \"MainMenuButtons\".\"UserViewName\"\n" +
-        "  LEFT JOIN (SELECT \"SchemaName\", \"UserViewName\", \"Translation\" FROM \"funapp\".\"UserViewTranslations\" where $$Lang LIKE \"Language\" || '%') as \"Translations\"\n" +
-        "    ON \"Translations\".\"SchemaName\" = \"UserViews\".\"SchemaName\" AND \"Translations\".\"UserViewName\" = \"UserViews\".\"Name\"\n" +
-        "ORDER BY \"MainMenuCategories\".\"OrdinalPosition\", \"MainMenuButtons\".\"OrdinalPosition\"",
     "SystemMenu":
         "SELECT\n" +
         "  @\"Type\" = 'Menu',\n" +
@@ -50,19 +29,6 @@ var commonViews = {
         "  \"public\".\"UserViews\"\n" +
         "WHERE \"SchemaId\"=>\"Name\" = $schema AND \"Name\" = $name\n" +
         "FOR INSERT INTO \"public\".\"UserViews\""
-}
-
-function addSummaryViews(views, layout) {
-    for (var schemaName in layout.schemas) {
-        var schema = layout.schemas[schemaName]
-        for (var entityName in schema.entities) {
-            var entity = schema.entities[entityName]
-            var sqlName = renderSqlName(schemaName) + "." + renderSqlName(entityName)
-            var name = "Summary-" + schemaName + "-" + entityName
-            var query = "SELECT \"Id\", __main AS \"Main\" FROM " + sqlName + " ORDER BY __main"
-            views[name] = query
-        }
-    }
 }
 
 function addDefaultViews(views, layout) {
@@ -105,7 +71,6 @@ function addDefaultViews(views, layout) {
 
 function GetUserViews(layout) {
     var newViews = JSON.parse(JSON.stringify(commonViews))
-    addSummaryViews(newViews, layout)
     addDefaultViews(newViews, layout)
     return newViews
 }

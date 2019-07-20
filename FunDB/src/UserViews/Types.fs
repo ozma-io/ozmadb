@@ -39,17 +39,12 @@ type UVDomainField =
 type UVDomain = Map<FieldName, UVDomainField>
 type UVDomains = Map<GlobalDomainId, UVDomain>
 
-type MainEntityInfo =
-    { entity : ResolvedEntityRef
-      name : EntityName
-    }
-
 [<NoComparison>]
 type UserViewInfo =
     { attributeTypes : ExecutedAttributeTypes
       rowAttributeTypes : ExecutedAttributeTypes
       domains : UVDomains
-      mainEntity : MainEntityInfo option
+      mainEntity : ResolvedEntityRef option
       columns : UserViewColumn[]
     }
 

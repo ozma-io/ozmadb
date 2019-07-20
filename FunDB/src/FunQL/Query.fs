@@ -46,6 +46,7 @@ type [<JsonConverter(typeof<ExecutedRowConverter>)>] [<NoComparison>] ExecutedRo
     { attributes : ExecutedAttributeMap
       values : ExecutedValue array
       entityIds : Map<EntityName, int>
+      mainId : int option
       domainId : GlobalDomainId
     }
 and ExecutedRowConverter () =
@@ -57,6 +58,7 @@ and ExecutedRowConverter () =
         raise <| NotImplementedException ()
 
     override this.WriteJson (writer : JsonWriter, res : ExecutedRow, serializer : JsonSerializer) : unit =
+        // TODO: rewrite this to mutable dictionary or use "ignore nulls" policy.
         let vals1 = [("values", res.values :> obj); ("domainId", res.domainId :> obj)] |> Map.ofSeq
         let vals2 =
             if not <| Map.isEmpty res.attributes then
@@ -68,7 +70,11 @@ and ExecutedRowConverter () =
                 Map.add "entityIds" (res.entityIds :> obj) vals2
             else
                 vals2
-        serializer.Serialize(writer, vals3)
+        let vals4 =
+            match res.mainId with
+            | None -> vals3
+            | Some id -> Map.add "mainId" (id :> obj) vals3
+        serializer.Serialize(writer, vals4)
 
 type ExecutedColumnInfo =
     { name : FunQLName
@@ -168,6 +174,12 @@ let private parseResult (domains : Domains) (result : QueryResult) : ExecutedVie
         | _ -> None
     let idColumns = allColumns |> Seq.mapiMaybe takeIdColumn |> Map.ofSeq
 
+    let takeMainIdColumn i (colType, valType) =
+        match colType with
+        | CTMainIdColumn -> Some i
+        | _ -> None
+    let mainIdColumn = allColumns |> Seq.mapiMaybe takeMainIdColumn |> Seq.tryExactlyOne
+
     let takeColumn i (colType, valType) =
         match colType with
             | CTColumn name ->
@@ -209,10 +221,16 @@ let private parseResult (domains : Domains) (result : QueryResult) : ExecutedVie
                 | SQL.VNull -> None
                 | _ -> failwith "Entity id is not an integer"
 
+        let getMainId i =
+            match values.[i] with
+            | SQL.VInt id -> id
+            | _ -> failwith "Entity main id not found"
+
         let rowAttrs = Map.map (fun name (valType, i) -> values.[i]) rowAttributes
         let values = Array.map getCell columnsMeta
         let domainIds = Map.mapMaybe (fun ns i -> getDomainId i) domainColumns
         let entityIds = Map.mapMaybe (fun name i -> getId i) idColumns
+        let mainId = Option.map getMainId mainIdColumn
 
         let rec getGlobalDomainId = function
             | DSingle (id, _) -> id
@@ -225,6 +243,7 @@ let private parseResult (domains : Domains) (result : QueryResult) : ExecutedVie
           values = values
           domainId = getGlobalDomainId domains
           entityIds = entityIds
+          mainId = mainId
         }
 
     let columns = Array.map (fun (attributes, i, column) -> column) columnsMeta

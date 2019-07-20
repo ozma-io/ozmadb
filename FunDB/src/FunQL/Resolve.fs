@@ -44,6 +44,13 @@ type private BoundFieldInfo =
 [<NoComparison>]
 type private QSubqueryField =
     | QRename of FieldName
+    // BoundFieldInfo exists only for fields that are bound to one and only one field.
+    // Any set operation which merges fields with different bound fields discards that.
+    // It's used for:
+    // * checking dereferences;
+    // * finding bound columns for main entity.
+    // Should not be used for anything else - different cells can be bound to different
+    // fields.
     | QField of BoundFieldInfo option
 
 type private QSubqueryFields = Map<FieldName, QSubqueryField>
@@ -69,9 +76,11 @@ type private QSelectResults =
       attributes : ResolvedAttributeMap
     }
 
+// If a query has a main entity it satisfies two properties:
+// 1. All rows can be bound to some entry of that entity;
+// 2. Columns contain all required fields of that entity.
 type ResolvedMainEntity =
     { entity : ResolvedEntityRef
-      name : EntityName
       columnsToFields : Map<FieldName, FieldName>
       fieldsToColumns : Map<FieldName, FieldName>
     }
@@ -101,8 +110,6 @@ type ResolvedViewExpr =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
-
-type private MainEntities = Map<ResolvedEntityRef, EntityName>
 
 let private unboundSubqueryField = QField None
 
@@ -157,46 +164,42 @@ let resolveArgument (layout : Layout) (arg : ParsedArgument) : ResolvedArgument 
       optional = arg.optional
     }
 
-let rec private findMainsFromEntity : ResolvedFromExpr -> MainEntities = function
-    | FEntity (pun, ent) -> Map.singleton ent <| Option.defaultValue ent.name pun
+let rec private findMainEntityRef : ResolvedFromExpr -> ResolvedEntityRef option = function
+    | FEntity (pun, ent) -> Some ent
     | FJoin (ftype, a, b, where) ->
         match ftype with
-        | Left -> findMainsFromEntity a
-        | Right -> findMainsFromEntity b
-        | Inner ->
-            let mains1 = findMainsFromEntity a
-            let mains2 = findMainsFromEntity b
-            if Map.isEmpty <| Map.intersect mains1 mains2 then
-                Map.union mains1 mains2
-            else
-                Map.empty
-        | _ -> Map.empty
-    | FSubExpr (name, (SSelect { clause = Some expr })) ->
-        let mains = findMainsFromEntity expr.from
-        if Map.count mains = 1 then
-            let (ref, innerName) = mains |> Map.toSeq |> Seq.exactlyOne
-            Map.singleton ref name
-        else
-            Map.empty
-    | FSubExpr _ -> Map.empty
-    | FValues _ -> Map.empty
+        | Left -> findMainEntityRef a
+        | Right -> findMainEntityRef b
+        | _ -> None
+    | FSubExpr (name, (SSelect { clause = Some expr })) -> findMainEntityRef expr.from
+    | FSubExpr _ -> None
+    | FValues _ -> None
 
 // Returns map from query column names to fields in main entity
 // Be careful as changes here also require changes to main id propagation in the compiler.
-let private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFields) : ResolvedSelectExpr -> (Map<FieldName, FieldName> * EntityName) option = function
+let rec private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFields) : ResolvedSelectExpr -> Map<FieldName, FieldName> option = function
     | SSelect { results = results; clause = Some clause } ->
-        match Map.tryFind ref <| findMainsFromEntity clause.from with
-        | None -> None
-        | Some mainName ->
+        if findMainEntityRef clause.from = Some ref then
             let getField (result : ResolvedQueryResult) : (FieldName * FieldName) option =
                 let name = resultName result.result
                 match Map.find name fields with
                 | QField (Some { ref = boundRef; field = RColumnField _ }) when boundRef.entity = ref -> Some (name, boundRef.name)
                 | QRename newName -> failwith <| sprintf "Unexpected rename which should have been removed: %O -> %O" name newName
                 | _ -> None
-            let fields = results |> Seq.mapMaybe getField |> Map.ofSeqUnique
-            Some (fields, mainName)
-    | _ -> None
+            let columnsToFields = results |> Seq.mapMaybe getField |> Map.ofSeqUnique
+            Some columnsToFields
+        else
+            None
+    | SSelect _ -> None
+    | SSetOp (op, a, b, clause) ->
+        findMainEntity ref fields a |> Option.bind (fun columnsA ->
+            findMainEntity ref fields b |> Option.map (fun columnsB ->
+                // Because we use QSubqueryFields column maps should be equal.
+                assert (columnsA = columnsB)
+                columnsA
+            )
+        )
+
 
 type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
@@ -475,9 +478,9 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             match layout.FindEntity ref with
             | None -> raisef ViewResolveException "Entity not found: %O" main.entity
             | Some e -> e
-        let (mappedResults, mainName) =
+        let mappedResults =
             match findMainEntity ref fields query with
-            | Some (fields, mainName) -> (fields, mainName)
+            | Some fields -> fields
             | someMain -> raisef ViewResolveException "Cannot map main entity to the expression: %O, possible value: %O" ref someMain
 
         let checkField fieldName (field : ResolvedColumnField) =
@@ -487,7 +490,6 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         entity.columnFields |> Map.iter checkField
 
         { entity = ref
-          name = mainName
           fieldsToColumns = Map.reverse mappedResults
           columnsToFields = mappedResults
         }

@@ -61,11 +61,6 @@ let private mergeDomainField (f : DomainField) : UVDomainField =
       idColumn = f.idColumn
     }
 
-let private makeMainEntity (main : ResolvedMainEntity) : MainEntityInfo =
-    { entity = main.entity
-      name = main.name
-    }
-
 let private limitOrderLimit (orderLimit : SQL.OrderLimitClause) : SQL.OrderLimitClause =
     let newLimit =
         match orderLimit.limit with
@@ -183,7 +178,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
           rowAttributeTypes = viewInfo.rowAttributeTypes
           domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.flattenedDomains
           columns = Array.map2 getResultColumn (getColumns viewExpr.select) viewInfo.columns
-          mainEntity = Option.map makeMainEntity viewExpr.mainEntity
+          mainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.entity) viewExpr.mainEntity
         }
 
     let rec resolveUserView (stack : Set<ResolvedUserViewRef>) (homeSchema : SchemaName option) (uv : HalfResolvedView) : Task<ResolvedUserView> =

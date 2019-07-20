@@ -112,7 +112,7 @@ module Seq =
                   | None -> ()
             }
 
-    let catMaybes (s : seq<'a option>) : seq<'b> =
+    let catMaybes (s : seq<'a option>) : seq<'a> =
         seq { for i in s do
                   match i with
                   | Some r -> yield r

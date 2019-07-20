@@ -171,11 +171,12 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
             let! _ = conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
             ()
 
-        let! changed1 = updateLayout conn.System sourceLayout
         let permissions = preloadPermissions preload
-        let! changed2 = updatePermissions conn.System permissions
+        let! changed1 = updatePermissions conn.System permissions
         let defaultAttributes = preloadDefaultAttributes preload
-        let! changed3 = updateAttributes conn.System defaultAttributes
+        let! changed2 = updateAttributes conn.System defaultAttributes
+        let! changed3 = updateLayout conn.System sourceLayout
+
         let! newLayoutSource = buildSchemaLayout conn.System
         let newLayout = resolveLayout newLayoutSource
 
