@@ -47,9 +47,9 @@ function addDefaultViews(views, layout) {
 
             var formName = "Form-" + schemaName + "-" + entityName
             var formQuery =
-                "{ $id reference(" + sqlName + ") }:\n" +
+                "{ $id reference(" + sqlName + ") }:\n\n" +
                 "SELECT\n  " +
-                ["@\"Type\" = 'Form'"].concat(fields).join(",") +
+                ["@\"Type\" = 'Form'"].concat(fields).join(",\n  ") +
                 "\nFROM " + sqlName + " " +
                 "WHERE \"Id\" = $id" +
                 "\nFOR INSERT INTO " + sqlName
@@ -60,7 +60,7 @@ function addDefaultViews(views, layout) {
                 "SELECT\n  " +
                 [ "@\"CreateView\" = &\"" + formName + "\"",
                   "\"Id\" @{ \"RowLinkedView\" = &\"" + formName + "\" }"
-                ].concat(fields).join(", ") +
+                ].concat(fields).join(",\n  ") +
                 "\nFROM " + sqlName +
                 "\nORDER BY \"Id\"\n" +
                 "FOR INSERT INTO " + sqlName
