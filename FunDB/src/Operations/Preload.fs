@@ -20,10 +20,10 @@ open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDB.Layout.Meta
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Generate
-open FunWithFlags.FunDB.Permissions.Types
+open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Update
-open FunWithFlags.FunDB.Attributes.Types
+open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Operations.Connection
@@ -172,9 +172,23 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
             ()
 
         let permissions = preloadPermissions preload
-        let! changed1 = updatePermissions conn.System permissions
         let defaultAttributes = preloadDefaultAttributes preload
-        let! changed2 = updateAttributes conn.System defaultAttributes
+        let! changed1 =
+            try
+                updatePermissions conn.System permissions
+            with
+            | _ ->
+                // Maybe we'll get a better error
+                let (errors, perms) = resolvePermissions layout false permissions
+                reraise ()
+        let! changed2 =
+            try
+                updateAttributes conn.System defaultAttributes
+            with
+            | _ ->
+                // Maybe we'll get a better error
+                let (errors, attrs) = resolveAttributes layout false defaultAttributes
+                reraise ()
         let! changed3 = updateLayout conn.System sourceLayout
 
         let! newLayoutSource = buildSchemaLayout conn.System
