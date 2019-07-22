@@ -104,20 +104,18 @@ type private ExecutedAttributes =
       columnAttributes : Map<FieldName, ExecutedAttributeTypes * ExecutedAttributeMap>
     }
 
-let private parseAttributesResult (result : QueryResult) : ExecutedAttributes =
+let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult) : ExecutedAttributes =
     let values = Seq.exactlyOne result.rows
 
-    let allColumns = result.columns |> Array.map (fun (name, typ) -> (parseColumnName name, typ))
-
-    let takeViewAttribute i (colType, valType) =
+    let takeViewAttribute colType (_, valType) v =
         match colType with
-        | CTRowAttribute name -> Some (name, (valType, values.[i]))
+        | CTRowAttribute name -> Some (name, (valType, v))
         | _ -> None
-    let viewAttributes = allColumns |> Seq.mapiMaybe takeViewAttribute |> Map.ofSeq
+    let viewAttributes = Seq.map3Maybe takeViewAttribute columns result.columns values |> Map.ofSeq
 
-    let takeColumnAttribute i (colType, valType) =
+    let takeColumnAttribute colType (_, valType) v =
         match colType with
-        | CTCellAttribute (fieldName, name) -> Some (fieldName, (name, (valType, values.[i])))
+        | CTCellAttribute (fieldName, name) -> Some (fieldName, (name, (valType, v)))
         | _ -> None
     let makeColumnAttributes (fieldName : FieldName, values : (FieldName * (AttributeName * (SQL.SimpleValueType * SQL.Value))) seq) =
         let valuesMap = values |> Seq.map snd |> Map.ofSeq
@@ -125,8 +123,7 @@ let private parseAttributesResult (result : QueryResult) : ExecutedAttributes =
         let attrTypes = Map.map (fun name -> fst) valuesMap
         (fieldName, (attrTypes, attrs))
     let colAttributes =
-        allColumns
-        |> Seq.mapiMaybe takeColumnAttribute
+        Seq.map3Maybe takeColumnAttribute columns result.columns values
         |> Seq.groupBy fst
         |> Seq.map makeColumnAttributes
         |> Map.ofSeq
@@ -136,51 +133,48 @@ let private parseAttributesResult (result : QueryResult) : ExecutedAttributes =
       columnAttributes = colAttributes
     }
 
-let private parseResult (domains : Domains) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
-    let allColumns = result.columns |> Array.map (fun (name, typ) -> (parseColumnName name, typ))
-
-    let takeRowAttribute i (colType, valType) =
+let private parseResult (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
+    let takeRowAttribute i colType (_, valType) =
         match colType with
         | CTRowAttribute name -> Some (name, (valType, i))
         | _ -> None
-    let rowAttributes = allColumns |> Seq.mapiMaybe takeRowAttribute |> Map.ofSeq
+    let rowAttributes = Seq.mapi2Maybe takeRowAttribute columns result.columns |> Map.ofSeq
 
-    let takeCellAttribute i (colType, valType) =
+    let takeCellAttribute i colType (_, valType) =
         match colType with
             | CTCellAttribute (fieldName, name) -> Some (fieldName, (name, (valType, i)))
             | _ -> None
     let allCellAttributes =
-        allColumns
-        |> Seq.mapiMaybe takeCellAttribute
+        Seq.mapi2Maybe takeCellAttribute columns result.columns
         |> Seq.groupBy fst
         |> Seq.map (fun (fieldName, attrs) -> (fieldName, attrs |> Seq.map snd |> Map.ofSeq))
         |> Map.ofSeq
 
-    let takePunAttribute i (colType, valType) =
+    let takePunAttribute i colType (_, valType) =
         match colType with
         | CTPunAttribute name -> Some (name, (valType, i))
         | _ -> None
-    let punAttributes = allColumns |> Seq.mapiMaybe takePunAttribute |> Map.ofSeq
+    let punAttributes = Seq.mapi2Maybe takePunAttribute columns result.columns |> Map.ofSeq
 
-    let takeDomainColumn i (colType, valType) =
+    let takeDomainColumn i colType =
         match colType with
         | CTDomainColumn ns -> Some (ns, i)
         | _ -> None
-    let domainColumns = allColumns |> Seq.mapiMaybe takeDomainColumn |> Map.ofSeq
+    let domainColumns = Seq.mapiMaybe takeDomainColumn columns |> Map.ofSeq
 
-    let takeIdColumn i (colType, valType) =
+    let takeIdColumn i colType =
         match colType with
         | CTIdColumn entity -> Some (entity, i)
         | _ -> None
-    let idColumns = allColumns |> Seq.mapiMaybe takeIdColumn |> Map.ofSeq
+    let idColumns = Seq.mapiMaybe takeIdColumn columns |> Map.ofSeq
 
-    let takeMainIdColumn i (colType, valType) =
+    let takeMainIdColumn i colType =
         match colType with
         | CTMainIdColumn -> Some i
         | _ -> None
-    let mainIdColumn = allColumns |> Seq.mapiMaybe takeMainIdColumn |> Seq.first
+    let mainIdColumn = Seq.mapiMaybe takeMainIdColumn columns |> Seq.first
 
-    let takeColumn i (colType, valType) =
+    let takeColumn i colType (_, valType) =
         match colType with
             | CTColumn name ->
                 let cellAttributes =
@@ -197,7 +191,7 @@ let private parseResult (domains : Domains) (result : QueryResult) : ExecutedVie
                     }
                 Some (cellAttributes, i, columnInfo)
             | _ -> None
-    let columnsMeta = allColumns |> Seq.mapiMaybe takeColumn |> Seq.toArray
+    let columnsMeta = Seq.mapi2Maybe takeColumn columns result.columns |> Seq.toArray
 
     let parseRow (values : SQL.Value array) =
         let getCell (cellAttributes, i, column) =
@@ -263,7 +257,8 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
 
         let! attrsResult = task {
             match viewExpr.attributesQuery with
-            | Some attributesExpr -> return! connection.ExecuteQuery attributesExpr.query parameters (parseAttributesResult >> Task.FromResult)
+            | Some attributesExpr ->
+                return! connection.ExecuteQuery attributesExpr.query parameters (parseAttributesResult attributesExpr.columns >> Task.FromResult)
             | None ->
                 return
                     { attributes = Map.empty
@@ -285,7 +280,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | Some (attrTypes, attrs) -> attrs
 
         return! connection.ExecuteQuery (viewExpr.query.expression.ToSQLString()) parameters <| fun rawResult ->
-            let (info, rows) = parseResult viewExpr.domains rawResult
+            let (info, rows) = parseResult viewExpr.domains viewExpr.columns rawResult
 
             let mergedInfo =
                 { info with

@@ -299,7 +299,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 match Map.tryFind arg arguments with
                 | None -> raisef ViewResolveException "Unknown argument: %O" arg
                 | Some argInfo -> argInfo
-            let innerBoundField =    
+            let innerBoundField =
                 if Array.isEmpty f.path then
                     None
                 else
@@ -320,8 +320,8 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                         let inner = resolvePath fieldInfo remainingPath
                         Some inner
                     | _ -> raisef ViewResolveException "Argument is not a reference: %O" ref
-            usedArguments <- Set.add arg usedArguments                
-            (QField innerBoundField, None, { ref = VRPlaceholder arg; path = f.path })    
+            usedArguments <- Set.add arg usedArguments
+            (QField innerBoundField, None, { ref = VRPlaceholder arg; path = f.path })
 
     let resolveLimitFieldExpr (expr : ParsedFieldExpr) : ResolvedFieldExpr =
         let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function

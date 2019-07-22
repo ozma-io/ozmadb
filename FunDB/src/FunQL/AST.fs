@@ -14,7 +14,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 type IFunQLName =
     interface
         inherit IFunQLString
-        
+
         abstract member ToName : unit -> FunQLName
     end
 
@@ -34,7 +34,7 @@ and [<TypeConverter(typeof<NewtypeConverter<FunQLName>>)>] FunQLName = FunQLName
         member this.ToName () = this
 
         interface IFunQLName with
-            member this.ToName () = this        
+            member this.ToName () = this
 
 type SchemaName = FunQLName
 type EntityName = FunQLName
@@ -101,7 +101,7 @@ type FieldRef =
         member this.ToName () = this.name
 
         interface IFunQLName with
-            member this.ToName () = this.ToName ()          
+            member this.ToName () = this.ToName ()
 
 type ResolvedFieldRef =
     { entity : ResolvedEntityRef
@@ -117,7 +117,7 @@ type ResolvedFieldRef =
         member this.ToName () = this.name
 
         interface IFunQLName with
-            member this.ToName () = this.ToName ()          
+            member this.ToName () = this.ToName ()
 
 type Placeholder =
     | PLocal of ArgumentName
@@ -138,7 +138,7 @@ type Placeholder =
             | PGlobal name -> name
 
         interface IFunQLName with
-            member this.ToName () = this.ToName ()          
+            member this.ToName () = this.ToName ()
 
 type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue =
     | FInt of int
@@ -353,7 +353,7 @@ type LinkedRef<'f> when 'f :> IFunQLName =
                 Array.last this.path
             else
                 this.ref.ToName ()
-            
+
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
@@ -752,7 +752,7 @@ type FunQLVoid = private FunQLVoid of unit with
         member this.ToFunQLString () = failwith "impossible"
 
     interface IFunQLName with
-        member this.ToName () = failwith "impossible"    
+        member this.ToName () = failwith "impossible"
 
 type LinkedFieldRef = LinkedRef<ValueRef<FieldRef>>
 type LinkedFieldName = LinkedRef<ValueRef<FieldName>>

@@ -273,7 +273,7 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
     let resolveCheckExpr (entity : ResolvedEntity) : ParsedFieldExpr -> LocalFieldExpr =
         let resolveReference : LinkedFieldRef -> ValueRef<FieldName> = function
             | { ref = VRColumn { entity = None; name = name }; path = [||] } ->
-                let res = 
+                let res =
                     match Map.tryFind name entity.columnFields with
                     | Some col -> name
                     | None ->

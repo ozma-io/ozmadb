@@ -30,11 +30,9 @@ let private checkName (FunQLName name) =
     if not (goodName name) then
         raisef UserViewResolveException "Invalid user view name"
 
-let rec private getColumns : ResolvedSelectExpr -> ResolvedQueryResult[] = function
-    | SSelect query -> query.results
-    | SSetOp (op, a, b, limits) ->
-        // Columns should be the same
-        getColumns a
+let private getColumn : ColumnType -> FunQLName option = function
+    | CTColumn c -> Some c
+    | _ -> None
 
 let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (res : ExecutedViewExpr) : PureAttributes =
     match compiled.attributesQuery with
@@ -43,13 +41,12 @@ let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : Compiled
           columnAttributes = Array.map (fun _ -> Map.empty) res.columnAttributes
         }
     | Some attrInfo ->
-        let filterPure (result : ResolvedQueryResult) attrs =
-            let name = result.result.ToName ()
+        let filterPure name attrs =
             match Map.tryFind name attrInfo.pureColumnAttributes with
             | None -> Map.empty
             | Some pureAttrs -> attrs |> Map.filter (fun name _ -> Set.contains name pureAttrs)
         { attributes = res.attributes |> Map.filter (fun name _ -> Set.contains name attrInfo.pureAttributes)
-          columnAttributes = Array.map2 filterPure (getColumns viewExpr.select) res.columnAttributes
+          columnAttributes = Seq.map2 filterPure (Seq.mapMaybe getColumn compiled.columns) res.columnAttributes |> Seq.toArray
         }
 
 let private mergeDomainField (f : DomainField) : UVDomainField =
@@ -152,8 +149,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
 
     let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) : UserViewInfo =
         let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.entity |> Option.get, main)) viewExpr.mainEntity
-        let getResultColumn (result : ResolvedQueryResult) (column : ExecutedColumnInfo) : UserViewColumn =
-            let name = result.result.ToName ()
+        let getResultColumn name (column : ExecutedColumnInfo) : UserViewColumn =
             let mainField =
                 match mainEntity with
                 | None -> None
@@ -177,7 +173,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
         { attributeTypes = viewInfo.attributeTypes
           rowAttributeTypes = viewInfo.rowAttributeTypes
           domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.flattenedDomains
-          columns = Array.map2 getResultColumn (getColumns viewExpr.select) viewInfo.columns
+          columns = Seq.map2 getResultColumn (Seq.mapMaybe getColumn compiled.columns) viewInfo.columns |> Seq.toArray
           mainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.entity) viewExpr.mainEntity
         }
 

@@ -26,7 +26,7 @@ type ReferenceRef =
 
         interface IFunQLName with
             member this.ToName () = this.ToName ()
-        
+
 type ResolvedFieldType = FieldType<ResolvedEntityRef, ReferenceRef>
 
 type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>
