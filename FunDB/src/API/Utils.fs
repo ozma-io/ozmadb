@@ -42,12 +42,14 @@ let formArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : H
 let authorize =
     requiresAuthentication (challenge JwtBearerDefaults.AuthenticationScheme)
 
-let commitAndReturn (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+let commitAndReturn (handler : HttpHandler) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {
         match! rctx.Commit () with
-        | Ok () -> return! Successful.OK "" next ctx
+        | Ok () -> return! Successful.ok handler next ctx
         | Error msg -> return! RequestErrors.badRequest (text msg) next ctx
     }
+
+let commitAndOk : RequestContext -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (negotiate "")
 
 type RealmAccess =
     { roles : string[]

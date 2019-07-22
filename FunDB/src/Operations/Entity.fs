@@ -27,23 +27,27 @@ type EntityId = int
 
 type EntityArguments = Map<FieldName, FieldValue>
 
-let private runQuery (connection : QueryConnection) (globalArgs : EntityArguments) (query : Query<'q>) (placeholders : EntityArguments) : Task<int> =
+let private runQuery (runFunc : string -> ExprParameters -> Task<'a>) (globalArgs : EntityArguments) (query : Query<'q>) (placeholders : EntityArguments) : Task<'a> =
     task {
         try
             // FIXME: Slow
             let args = Map.unionUnique (Map.mapKeys PGlobal globalArgs) (Map.mapKeys PLocal placeholders)
-            return! connection.ExecuteNonQuery (query.expression.ToSQLString()) (prepareArguments query.arguments args)
+            return! runFunc (query.expression.ToSQLString()) (prepareArguments query.arguments args)
         with
             | :? QueryException as ex ->
                 return raisefWithInner EntityExecutionException ex.InnerException "%s" ex.Message
     }
+
+let private runNonQuery (connection : QueryConnection) = runQuery connection.ExecuteNonQuery
+
+let private runIdQuery (connection : QueryConnection) = runQuery connection.ExecuteIdQuery
 
 let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
     | FTReference (r, _) -> FTReference (r, None)
     | FTEnum vals -> FTEnum vals
     | FTType t -> FTType t
 
-let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) : Task<unit> =
+let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) : Task<int> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
@@ -65,6 +69,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             { name = compileResolvedEntityRef entityRef
               columns = columns
               values = SQL.IValues [| valuesWithId |]
+              returning = [| SQL.SCColumn { table = None; name = sqlFunId } |]
             } : SQL.InsertExpr
         let query =
             { expression = expr
@@ -80,8 +85,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-        let! affected = runQuery connection globalArgs restricted rawArgs
-        return ()
+        return! runIdQuery connection globalArgs restricted rawArgs
     }
 
 let private funIdArg = { argType = FTType (FETScalar SFTInt); optional = false }
@@ -122,7 +126,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-        let! affected = runQuery connection globalArgs restricted (Map.add funId (FInt id) rawArgs)
+        let! affected = runNonQuery connection globalArgs restricted (Map.add funId (FInt id) rawArgs)
         if affected = 0 then
             raisef EntityDeniedException "Access denied for update"
     }
@@ -151,7 +155,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-        let! affected = runQuery connection globalArgs restricted (Map.singleton funId (FInt id))
+        let! affected = runNonQuery connection globalArgs restricted (Map.singleton funId (FInt id))
         if affected = 0 then
             raisef EntityDeniedException "Access denied to delete"
     }

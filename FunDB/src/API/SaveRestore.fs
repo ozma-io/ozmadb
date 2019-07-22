@@ -29,7 +29,7 @@ let saveRestoreApi (settings : APISettings) : HttpHandler =
     let restoreSchema (schemaName : SchemaName) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         let! dump = ctx.BindModelAsync<SchemaDump>()
         match! rctx.RestoreSchema schemaName dump with
-        | Ok () -> return! commitAndReturn rctx next ctx
+        | Ok () -> return! commitAndOk rctx next ctx
         | Error err -> return! returnRestoreError err next ctx
     }
 

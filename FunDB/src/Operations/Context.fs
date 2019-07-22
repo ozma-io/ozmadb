@@ -315,7 +315,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     return Error UVEAccessDenied
         }
 
-    member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> =
+    member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<int, EntityErrorInfo>> =
         task {
             match ctx.State.layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
@@ -324,7 +324,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 | Error str -> return Error <| EEArguments str
                 | Ok args ->
                     try
-                        do! insertEntity ctx.Connection.Query globalArguments ctx.State.layout (getRole roleType) entityRef args
+                        let! newId = insertEntity ctx.Connection.Query globalArguments ctx.State.layout (getRole roleType) entityRef args
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -333,14 +333,14 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
                                 EntityName = entityRef.name.ToString(),
-                                EntityId = Nullable(), // FIXME: set id
+                                EntityId = Nullable newId,
                                 Details = args.ToString()
                             )
                         ignore <| ctx.Connection.System.Events.Add(event)
                         // FIXME: better handling of this
                         if entityRef.schema = funSchema then
                             needMigration <- true
-                        return Ok ()
+                        return Ok newId
                     with
                     | :? EntityExecutionException as ex ->
                         logger.LogError(ex, "Failed to insert entry")

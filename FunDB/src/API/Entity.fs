@@ -17,6 +17,12 @@ type TransactionOp =
     | [<CaseName("update")>] TUpdateEntity of entity : ResolvedEntityRef * id : int * entries : RawArguments
     | [<CaseName("delete")>] TDeleteEntity of entity : ResolvedEntityRef * id : int
 
+[<SerializeAsObject("type")>]
+type TransactionResult =
+    | [<CaseName("insert")>] TRInsertEntity of id : int
+    | [<CaseName("update")>] TRUpdateEntity
+    | [<CaseName("delete")>] TRDeleteEntity
+
 [<NoComparison>]
 type Transaction =
     { operations: TransactionOp[]
@@ -34,20 +40,23 @@ let entitiesApi (settings : APISettings) : HttpHandler =
     let insertEntity (entityRef : ResolvedEntityRef) (rctx : RequestContext) : HttpHandler =
         formArgs <| fun rawArgs next ctx -> task {
             match! rctx.InsertEntity entityRef rawArgs with
-            | Ok () -> return! commitAndReturn rctx next ctx
+            | Ok newId ->
+                let ret = TRInsertEntity newId
+                return! commitAndReturn (json ret) rctx next ctx
             | Result.Error err -> return! returnError err next ctx
         }
 
     let updateEntity (entityRef : ResolvedEntityRef) (id : int) (rctx : RequestContext) : HttpHandler =
         formArgs <| fun rawArgs next ctx -> task {
                 match! rctx.UpdateEntity entityRef id rawArgs with
-                | Ok () -> return! commitAndReturn rctx next ctx
+                | Ok () ->
+                    return! commitAndReturn (json TRUpdateEntity) rctx next ctx
                 | Result.Error err -> return! returnError err next ctx
         }
 
     let deleteEntity (entityRef : ResolvedEntityRef) (id : int) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         match! rctx.DeleteEntity entityRef id with
-        | Ok () -> return! commitAndReturn rctx next ctx
+        | Ok () -> return! commitAndReturn (json TRDeleteEntity) rctx next ctx
         | Result.Error err -> return! returnError err next ctx
     }
 
@@ -74,14 +83,17 @@ let entitiesApi (settings : APISettings) : HttpHandler =
                 task {
                     let! res =
                         match op with
-                        | TInsertEntity (ref, entries) -> rctx.InsertEntity ref entries
-                        | TUpdateEntity (ref, id, entries) -> rctx.UpdateEntity ref id entries
-                        | TDeleteEntity (ref, id) -> rctx.DeleteEntity ref id
+                        | TInsertEntity (ref, entries) ->
+                            Task.map (Result.map TRInsertEntity) <| rctx.InsertEntity ref entries
+                        | TUpdateEntity (ref, id, entries) ->
+                            Task.map (Result.map (fun _ -> TRUpdateEntity)) <| rctx.UpdateEntity ref id entries
+                        | TDeleteEntity (ref, id) ->
+                            Task.map (Result.map (fun _ -> TRDeleteEntity)) <| rctx.DeleteEntity ref id
                     return Result.mapError (fun err -> (op, err)) res
                 }
             let mutable failed = false
             match! transaction.operations |> Seq.traverseResultTaskSync handleOne with
-            | Ok _ -> return! commitAndReturn rctx next ctx
+            | Ok ret -> return! commitAndReturn (json ret) rctx next ctx
             | Error (op, err) -> return! returnError err next ctx
         }
 

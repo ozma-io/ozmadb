@@ -692,14 +692,23 @@ type InsertExpr =
     { name : TableRef
       columns : ColumnName[]
       values : InsertValues
+      returning : SelectedColumn[]
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            sprintf "INSERT INTO %s (%s) %s"
-                (this.name.ToSQLString())
-                (this.columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
-                (this.values.ToSQLString())
+            let returningStr =
+                if Array.isEmpty this.returning then
+                    ""
+                else
+                    let resultsStr = this.returning |> Seq.map (fun res -> res.ToSQLString()) |> String.concat ", "
+                    sprintf "RETURNING %s" resultsStr
+            let insertStr =
+                sprintf "INSERT INTO %s (%s) %s"
+                    (this.name.ToSQLString())
+                    (this.columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+                    (this.values.ToSQLString())
+            concatWithWhitespaces [insertStr; returningStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -720,7 +729,8 @@ type UpdateExpr =
                 match this.where with
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
-            sprintf "UPDATE %s SET %s" (this.name.ToSQLString()) (concatWithWhitespaces [valuesExpr; condExpr])
+            let updateStr = sprintf "UPDATE %s SET %s" (this.name.ToSQLString()) valuesExpr
+            concatWithWhitespaces [updateStr; condExpr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
