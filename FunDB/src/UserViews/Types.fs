@@ -14,53 +14,10 @@ type UserViewRef = FunWithFlags.FunDB.FunQL.AST.UserViewRef
 type ResolvedUserViewRef = FunWithFlags.FunDB.FunQL.AST.ResolvedUserViewRef
 
 [<NoComparison>]
-type MainField =
-    { name : FieldName
-      field : ResolvedColumnField
-    }
-
-[<NoComparison>]
-type UserViewColumn =
-    { name : ViewColumnName
-      attributeTypes : ExecutedAttributeTypes
-      cellAttributeTypes : ExecutedAttributeTypes
-      valueType : SQL.SimpleValueType
-      punType : SQL.SimpleValueType option
-      mainField : MainField option
-    }
-
-[<NoComparison>]
-type UVDomainField =
-    { ref : ResolvedFieldRef
-      field : ResolvedColumnField option
-      idColumn : EntityName
-    }
-
-type UVDomain = Map<FieldName, UVDomainField>
-type UVDomains = Map<GlobalDomainId, UVDomain>
-
-[<NoComparison>]
-type UserViewInfo =
-    { attributeTypes : ExecutedAttributeTypes
-      rowAttributeTypes : ExecutedAttributeTypes
-      domains : UVDomains
-      mainEntity : ResolvedEntityRef option
-      columns : UserViewColumn[]
-    }
-
-[<NoComparison>]
-type PureAttributes =
-    { attributes : ExecutedAttributeMap
-      columnAttributes : ExecutedAttributeMap[]
-    }
-
-[<NoComparison>]
 type ResolvedUserView =
     { resolved : ResolvedViewExpr
       allowBroken : bool
       compiled : CompiledViewExpr
-      info : UserViewInfo
-      pureAttributes : PureAttributes
     }
 
 [<NoComparison>]

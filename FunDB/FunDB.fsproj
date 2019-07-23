@@ -59,6 +59,7 @@
     <Compile Include="src/Layout/System.fs" />
   
     <Compile Include="src/Schema.fs" />
+    <Compile Include="src/Connection.fs" />
 
     <Compile Include="src/FunQL/Query.fs" />
 
@@ -94,8 +95,8 @@
     <Compile Include="src/UserViews/Generate.fs" />
     <Compile Include="src/UserViews/Render.fs" />
     <Compile Include="src/UserViews/Update.fs" />
+    <Compile Include="src/UserViews/DryRun.fs" />
 
-    <Compile Include="src/Operations/Connection.fs" />
     <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/Entity.fs" />
     <Compile Include="src/Operations/ContextCache.fs" />

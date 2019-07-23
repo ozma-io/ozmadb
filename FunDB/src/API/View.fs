@@ -7,6 +7,7 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.UserViews.Types
+open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.API.Utils
 

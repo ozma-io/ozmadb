@@ -20,12 +20,12 @@ open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Resolve
+open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Operations.ContextCache
 open FunWithFlags.FunDB.Operations.SaveRestore
 module SQL = FunWithFlags.FunDB.SQL.AST
-module SaveRestore = FunWithFlags.FunDB.Operations.SaveRestore
 
 type UserViewErrorInfo =
     | UVENotFound
@@ -189,7 +189,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
     do
         assert (globalArgumentTypes |> Map.toSeq |> Seq.forall (fun (name, _) -> Map.containsKey name globalArguments))
 
-    let resolveSource (source : UserViewSource) : Task<Result<ResolvedUserView, UserViewErrorInfo>> = task {
+    let resolveSource (source : UserViewSource) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> = task {
         match source with
         | UVAnonymous query ->
             try
@@ -225,7 +225,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
             let lowerUserName = opts.userName.ToLowerInvariant()
             // FIXME: SLOW!
             let! rawUser =
-                ctx.Connection.System.Users
+                ctx.Transaction.System.Users
                     .Include("Role")
                     .Include("Role.Schema")
                     .Where(fun user -> user.Name.ToLowerInvariant() = lowerUserName)
@@ -264,8 +264,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 if needMigration then
                     do! ctx.Migrate ()
                 else
-                    let! _ = ctx.Connection.System.SaveChangesAsync ()
-                    do! ctx.Connection.Commit ()
+                    do! ctx.Transaction.Commit ()
                 return Ok ()
             with
             | :? DbUpdateException
@@ -282,7 +281,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 try
                     match roleType with
                     | RTRoot -> ()
-                    | RTRole role -> checkRoleViewExpr ctx.State.layout role uv.compiled
+                    | RTRole role -> checkRoleViewExpr ctx.State.layout role uv.uv.compiled
                     return Ok uv
                 with
                 | :? PermissionsViewException as err ->
@@ -290,7 +289,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) : Task<Result<ResolvedUserView * ExecutedViewExpr, UserViewErrorInfo>> =
+    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) : Task<Result<PrefetchedUserView * ExecutedViewExpr, UserViewErrorInfo>> =
         task {
             match! resolveSource source with
             | Error e -> return Error e
@@ -298,9 +297,9 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 try
                     let restricted =
                         match roleType with
-                        | RTRoot -> uv.compiled
+                        | RTRoot -> uv.uv.compiled
                         | RTRole role ->
-                            applyRoleViewExpr ctx.State.layout role uv.compiled
+                            applyRoleViewExpr ctx.State.layout role uv.uv.compiled
                     let getResult info (res : ExecutedViewExpr) = task {
                         return (uv, { res with rows = Array.ofSeq res.rows })
                     }
@@ -336,7 +335,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 EntityId = Nullable newId,
                                 Details = args.ToString()
                             )
-                        ignore <| ctx.Connection.System.Events.Add(event)
+                        ignore <| ctx.Transaction.System.Events.Add(event)
                         // FIXME: better handling of this
                         if entityRef.schema = funSchema then
                             needMigration <- true
@@ -372,7 +371,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 EntityId = Nullable id,
                                 Details = args.ToString()
                             )
-                        ignore <| ctx.Connection.System.Events.Add(event)
+                        ignore <| ctx.Transaction.System.Events.Add(event)
                         if entityRef.schema = funSchema then
                             needMigration <- true
                         return Ok ()
@@ -403,7 +402,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                             EntityId = Nullable id,
                             Details = ""
                         )
-                    ignore <| ctx.Connection.System.Events.Add(event)
+                    ignore <| ctx.Transaction.System.Events.Add(event)
                     if entityRef.schema = funSchema then
                         needMigration <- true
                     return Ok ()
@@ -422,7 +421,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 return Error SEAccessDenied
             else
                 try
-                    let! schema = saveSchema ctx.Connection.System name
+                    let! schema = saveSchema ctx.Transaction.System name
                     return Ok schema
                 with
                 | :? SaveSchemaException as ex ->
@@ -437,7 +436,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
             else if Map.containsKey name cacheStore.Preload.schemas then
                 return Error REPreloaded
             else
-                let! modified = restoreSchema ctx.Connection.System name dump
+                let! modified = restoreSchema ctx.Transaction.System name dump
                 let event =
                     EventEntry (
                         TransactionTimestamp = transactionTime,
@@ -449,7 +448,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         EntityId = Nullable(),
                         Details = dump.ToString()
                     )
-                ignore <| ctx.Connection.System.Events.Add(event)
+                ignore <| ctx.Transaction.System.Events.Add(event)
                 if modified then
                     needMigration <- true
                 return Ok ()

@@ -26,7 +26,7 @@ open FunWithFlags.FunDB.Permissions.Update
 open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
-open FunWithFlags.FunDB.Operations.Connection
+open FunWithFlags.FunDB.Connection
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type SourcePreloadedSchema =
@@ -156,7 +156,7 @@ let filterUserMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
     } : SQL.DatabaseMeta
 
 // Returns only user meta
-let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload : Preload) : Task<bool * Layout * SQL.DatabaseMeta> =
+let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preload : Preload) : Task<bool * Layout * SQL.DatabaseMeta> =
     task {
         logger.LogInformation("Migrating system entities to the current version")
         let sourceLayout = preloadLayout preload
@@ -168,7 +168,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
         let systemMigration = migrateDatabase currentSystemMeta newSystemMeta
         for action in systemMigration do
             logger.LogInformation("System migration step: {}", action)
-            let! _ = conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+            let! _ = conn.Connection.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
             ()
 
         let permissions = preloadPermissions preload
@@ -204,7 +204,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseConnection) (preload
         let userMigration = migrateDatabase currentUserMeta2 newUserMeta
         for action in userMigration do
             logger.LogInformation("User migration step: {}", action)
-            let! _ = conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+            let! _ = conn.Connection.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
             ()
 
         return (changed1 || changed2 || changed3, newLayout, newUserMeta)
