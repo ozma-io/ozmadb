@@ -234,12 +234,15 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
         // To dry-run user views we need to stop the transaction.
         do! transaction1.Commit ()
+        // We dry-run those views that _can_ be failed here, outside of a transaction.
         let! (_, prefetchedBadViews) = dryRunUserViews transaction1.Connection.Query layout false (Some true) sourceUvs userViews
         let transaction2 = new DatabaseTransaction(transaction1.Connection)
         let! (_, currentVersion2) = getCurrentVersion transaction2 false
         if currentVersion2 <> currentVersion then
             return! rebuildFromDatabase transaction2 currentVersion2
         else
+            // Now dry-run those views that _cannot_ fail - we can get an exception here and stop, which is the point -
+            // views with `allowBroken = true` fail on first error and so can be dry-run inside a transaction.
             let! (_, prefetchedGoodViews) = dryRunUserViews transaction2.Connection.Query layout false (Some false) sourceUvs userViews
             let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
 
