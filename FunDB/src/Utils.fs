@@ -206,7 +206,23 @@ module Seq =
                 cont <- c
         }
 
-    // FIXME: make those stop on first failure
+    let foldOption (func : 'acc -> 'a -> 'acc option) (init : 'acc) (vals : seq<'a>) : 'acc option =
+        let mutable acc = init
+        let mutable failed = false
+        let tryOne a =
+            match func acc a with
+            | Some newAcc ->
+                acc <- newAcc
+                true
+            | None ->
+                failed <- true
+                false
+        iterStop tryOne vals
+        if failed then
+            None
+        else
+            Some acc
+
     let traverseOption (func : 'a -> 'b option) (vals : seq<'a>) : seq<'b> option =
         let list = List<'b>()
         let mutable failed = false
