@@ -310,7 +310,10 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                             | head :: tail -> (head, tail)
                             | _ -> failwith "impossible"
                         let argEntity = layout.FindEntity entityRef |> Option.get
-                        let (_, argField) = argEntity.FindField name |> Option.get
+                        let argField =
+                            match argEntity.FindField name with
+                            | None -> raisef ViewResolveException "Field doesn't exist in %O: %O" entityRef name
+                            | Some (_, argField) -> argField
                         let fieldInfo =
                             { ref = { entity = entityRef; name = name }
                               entity = argEntity
