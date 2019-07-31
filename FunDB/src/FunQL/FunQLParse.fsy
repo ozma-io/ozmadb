@@ -279,9 +279,12 @@ SelectVal:
   | LEFT_PAREN SelectExpr RIGHT_PAREN { $2 }
 
 SelectExpr:
-  | SingleSelectExpr                           { SSelect $1 }
   | LEFT_PAREN SelectExpr RIGHT_PAREN          { $2 }
+  | SingleSelectExpr                           { SSelect $1 }
   | SelectVal SetOp SetOpExpr OrderLimitClause { SSetOp ($2, $1, $3, $4) }
+
+SubSelectExpr:
+  | LEFT_PAREN SelectExpr RIGHT_PAREN { $2 }
 
 SetOp:
   | UNION     { Union }
@@ -367,7 +370,7 @@ AttributeValuesNonEmpty:
   | Name EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
 
 QuerySource:
-  | LEFT_PAREN SelectExpr RIGHT_PAREN AS Name           { FSubExpr ($5, $2) }
+  | SubSelectExpr AS Name                               { FSubExpr ($3, $1) }
   | LEFT_PAREN Values RIGHT_PAREN AS Name ColumnAliases { FValues ($5, $6, $2) }
   | EntityRef                                           { FEntity (None, $1) }
   | EntityRef AS Name                                   { FEntity (Some $3, $1) }
@@ -461,6 +464,8 @@ FieldExprEq:
   | FieldExprOp NOT_LIKE_OP FieldExprOp { FENotLike ($1, $3) }
   | FieldExprOp IN NonEmptyExprList     { FEIn ($1, $3) }
   | FieldExprOp NOT IN NonEmptyExprList { FENotIn ($1, $4) }
+  | FieldExprOp IN SubSelectExpr        { FEInQuery ($1, $3) }
+  | FieldExprOp NOT IN SubSelectExpr    { FENotInQuery ($1, $4) }
   | FieldExprOp                         { $1 }
 
 FieldExprOp:
