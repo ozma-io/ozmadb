@@ -24,6 +24,7 @@ var commonViews = {
         "  @\"Type\" = 'Form',\n" +
         "  \"SchemaId\",\n" +
         "  \"Name\",\n" +
+        "  \"AllowBroken\",\n" +
         "  \"Query\" @{ \"TextType\" = 'codeeditor' }\n" +
         "FROM\n" +
         "  \"public\".\"UserViews\"\n" +
