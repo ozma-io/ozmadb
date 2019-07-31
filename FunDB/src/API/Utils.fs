@@ -49,7 +49,7 @@ let commitAndReturn (handler : HttpHandler) (rctx : RequestContext) (next : Http
         | Error msg -> return! RequestErrors.badRequest (text msg) next ctx
     }
 
-let commitAndOk : RequestContext -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (negotiate "")
+let commitAndOk : RequestContext -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
 
 type RealmAccess =
     { roles : string[]
