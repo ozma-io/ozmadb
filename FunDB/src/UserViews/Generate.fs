@@ -32,8 +32,9 @@ type UserViewGenerator (jsProgram : string) =
     let engine =
         let engine = Jint.Engine(fun cfg -> ignore <| cfg.Culture(CultureInfo.InvariantCulture)).Execute(jsProgram)
 
-        if not <| engine.Global.HasProperty(userViewsFunction) then
-            raisef UserViewGenerateException "Function %s is undefined" userViewsFunction
+        let mutable userViewsFunctionKey = Jint.Key userViewsFunction
+        if not <| engine.Global.HasProperty(&userViewsFunctionKey) then
+            raisef UserViewGenerateException "Function %O is undefined" userViewsFunction
 
         // XXX: reimplement this in JavaScript for performance if we switch to V8
         let jsRenderSqlName (this : JsValue) (args : JsValue[]) =
