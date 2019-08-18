@@ -9,6 +9,8 @@
     <FsLexOutputFolder>$(RootIntermediateOutputPath)/gen/</FsLexOutputFolder>
     <FsYaccOutputFolder>$(RootIntermediateOutputPath)/gen/</FsYaccOutputFolder>
     <OutputType>Exe</OutputType>
+
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
