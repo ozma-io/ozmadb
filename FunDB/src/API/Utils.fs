@@ -62,6 +62,8 @@ type APISettings =
       disableACL : bool
     }
 
+let anonymousUsername = "anonymous@example.com"
+
 let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
     let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
         let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
@@ -105,7 +107,7 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
                 false
         makeContext userName isRoot next ctx
 
-    let unprotectedApi = makeContext "anonymous@example.com" true
+    let unprotectedApi = makeContext anonymousUsername true
 
     if settings.disableSecurity then
         unprotectedApi
