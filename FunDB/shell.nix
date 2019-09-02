@@ -1,6 +1,6 @@
-{ nixpkgs ? import <nixpkgs> {} }:
+{ nixpkgs ? import <nixpkgs> {} }@args:
 
-nixpkgs.callPackage ../common.nix {
+(import ../common.nix args).shell.override {
   extraPkgs = pkgs: with pkgs; [ pkgs.dotnet-sdk ];
   extraLibraries = pkgs: with pkgs; [ pkgs.icu pkgs.lttng-ust pkgs.libunwind ];
 }
