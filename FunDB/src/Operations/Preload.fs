@@ -171,9 +171,11 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
             let! _ = conn.Connection.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
             ()
 
+        // We migrate layout first so that permissions and attributes have schemas in the table.
+        let! changed1 = updateLayout conn.System sourceLayout
         let permissions = preloadPermissions preload
         let defaultAttributes = preloadDefaultAttributes preload
-        let! changed1 =
+        let! changed2 =
             try
                 updatePermissions conn.System permissions
             with
@@ -181,7 +183,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
                 // Maybe we'll get a better error
                 let (errors, perms) = resolvePermissions layout false permissions
                 reraise ()
-        let! changed2 =
+        let! changed3 =
             try
                 updateAttributes conn.System defaultAttributes
             with
@@ -189,7 +191,6 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
                 // Maybe we'll get a better error
                 let (errors, attrs) = resolveAttributes layout false defaultAttributes
                 reraise ()
-        let! changed3 = updateLayout conn.System sourceLayout
 
         let! newLayoutSource = buildSchemaLayout conn.System
         let newLayout = resolveLayout newLayoutSource
