@@ -172,7 +172,7 @@ and
     [<AllowNullLiteral>]
     Schema () =
         member val Id = 0 with get, set
-        [<ColumnField("string")>]
+        [<ColumnField("string", Immutable=true)>]
         member val Name = "" with get, set
 
         member val Entities = ResizeArray<Entity>() with get, set
@@ -184,7 +184,7 @@ and
     [<AllowNullLiteral>]
     Entity () =
         member val Id = 0 with get, set
-        [<ColumnField("string")>]
+        [<ColumnField("string", Immutable=true)>]
         member val Name = "" with get, set
         [<ColumnField("reference(\"public\".\"Schemas\")")>]
         member val SchemaId = 0 with get, set
