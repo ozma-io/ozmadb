@@ -451,6 +451,7 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
     | FEJsonObject of Map<FunQLName, FieldExpr<'e, 'f>>
     | FEJsonArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEJsonTextArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FESubquery of SelectExpr<'e, 'f>
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -495,6 +496,7 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
             | FEJsonObject obj -> obj |> Map.toSeq |> Seq.map (fun (k, v) -> sprintf "%s: %s" (k.ToFunQLString()) (v.ToFunQLString())) |> String.concat ", " |> sprintf "{%s}"
             | FEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FESubquery q -> sprintf "(%s)" (q.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -673,6 +675,7 @@ let mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f2) (
         | FEJsonObject obj -> FEJsonObject (Map.map (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> FEJsonArrow (traverse a, traverse b)
         | FEJsonTextArrow (a, b) -> FEJsonTextArrow (traverse a, traverse b)
+        | FESubquery query -> FESubquery (queryFunc query)
     traverse
 
 let mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFunc : 'f1 -> Task<'f2>) (queryFunc : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
@@ -710,6 +713,7 @@ let mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFunc :
         | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTaskSync (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> Task.map2Sync (curry FEJsonArrow) (traverse a) (traverse b)
         | FEJsonTextArrow (a, b) -> Task.map2Sync (curry FEJsonTextArrow) (traverse a) (traverse b)
+        | FESubquery query -> Task.map FESubquery (queryFunc query)
     traverse
 
 let iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
@@ -743,6 +747,7 @@ let iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (query
         | FEJsonObject obj -> Map.iter (fun name -> traverse) obj
         | FEJsonArrow (a, b) -> traverse a; traverse b
         | FEJsonTextArrow (a, b) -> traverse a; traverse b
+        | FESubquery query -> queryFunc query
     traverse
 
 let emptyOrderLimitClause = { orderBy = [||]; limit = None; offset = None }

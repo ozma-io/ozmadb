@@ -481,6 +481,7 @@ FieldExprVal:
   | LinkedValueRef                   { FERef $1 }
   | Value                            { FEValue $1 }
   | JsonObject                       { $1 }
+  | SubSelectExpr                    { FESubquery $1 }
   | LEFT_PAREN FieldExpr RIGHT_PAREN { $2 }
 
 CaseExpr:

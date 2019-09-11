@@ -1,9 +1,19 @@
 module FunWithFlags.FunDB.Permissions.Render
 
+open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
 
-let private renderRestriction (e : Restriction) = e.expression.ToFunQLString()
+let private namesToRefs =
+    let resolveValueRef = function
+        | VRColumn (boundRef : BoundRef<FieldRef>) -> VRColumn { boundRef with ref = { boundRef.ref with entity = None } }
+        | VRPlaceholder p -> VRPlaceholder p
+    let resolveReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
+        { ref = resolveValueRef ref.ref; path = ref.path }
+    mapFieldExpr id resolveReference id
+
+let private renderRestriction (e : Restriction) = (namesToRefs e.expression).ToFunQLString()
 
 let private renderOperation = function
   | Ok e -> renderRestriction e

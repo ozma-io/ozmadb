@@ -6,6 +6,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
+open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
@@ -45,18 +46,21 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                 checkPath allowIds newEntity ref refs
             | _ -> raisef ResolvePermissionsException "Invalid dereference in path: %O" ref
 
-    let resolveRestriction (entity : ResolvedEntity) (allowIds : bool) (where : string) : Restriction =
+    let resolveRestriction (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowIds : bool) (where : string) : Restriction =
         let whereExpr =
             match parse tokenizeFunQL fieldExpr where with
             | Ok r -> r
             | Error msg -> raisef ResolvePermissionsException "Error parsing: %s" msg
 
+        let relaxedRef = relaxEntityRef entityRef
         let mutable globalArguments = Set.empty
 
-        let resolveReference : LinkedFieldRef -> LinkedFieldName = function
+        let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
             | { ref = VRColumn { entity = None; name = name }; path = path } ->
                 checkPath allowIds entity name (Array.toList path)
-                { ref = VRColumn name; path = path }
+                let fieldRef = { entity = entityRef; name = name }
+                let bound = { ref = fieldRef; immediate = true }
+                { ref = VRColumn { ref = { entity = Some relaxedRef; name = name }; bound = Some bound }; path = path }
             | { ref = VRPlaceholder (PLocal name) } ->
                 raisef ResolvePermissionsException "Local argument %O is not allowed" name
             | { ref = VRPlaceholder (PGlobal name as arg); path = path } ->
@@ -77,21 +81,20 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                 { ref = VRPlaceholder arg; path = path }
             | ref ->
                 raisef ResolvePermissionsException "Invalid reference: %O" ref
-        let voidQuery query =
-            raisef ResolvePermissionsException "Query is not allowed: %O" query
+        let resolveQuery query = resolveSelectExpr layout query
 
-        let expr = mapFieldExpr id resolveReference voidQuery whereExpr
+        let expr = mapFieldExpr id resolveReference resolveQuery whereExpr
         { expression = expr
           globalArguments = globalArguments
         }
 
-    let resolveAllowedField (entity : ResolvedEntity) (allowedField : SourceAllowedField) : AllowedField =
-        let resolveOne = Option.map (resolveRestriction entity true)
+    let resolveAllowedField (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowedField : SourceAllowedField) : AllowedField =
+        let resolveOne = Option.map (resolveRestriction entityRef entity true)
         { change = allowedField.change
           select = resolveOne allowedField.select
         }
 
-    let resolveAllowedEntity (entity : ResolvedEntity) (allowedEntity : SourceAllowedEntity) : (exn option * AllowedEntity) =
+    let resolveAllowedEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowedEntity : SourceAllowedEntity) : (exn option * AllowedEntity) =
         let mutable error = None
 
         let mapField name (allowedField : SourceAllowedField) =
@@ -101,14 +104,14 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     raisef ResolvePermissionsException "Unknown field"
                 if allowedField.change && Option.isNone allowedEntity.check then
                     raisef ResolvePermissionsException "Cannot allow to change without providing check expression"
-                resolveAllowedField entity allowedField
+                resolveAllowedField entityRef entity allowedField
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed field %O: %s" name e.Message
         let checkField fieldName =
             if not <| Map.containsKey fieldName entity.columnFields then
                 raisef ResolvePermissionsException "Undefined column field: %O" fieldName
 
-        let resolveOne allowIds = Option.map (resolveRestriction entity allowIds)
+        let resolveOne allowIds = Option.map (resolveRestriction entityRef entity allowIds)
         let fields = allowedEntity.fields |> Map.map mapField
 
         let insert =
@@ -139,7 +142,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     match Map.tryFind fieldName fields with
                     | Some { select = Some _ } -> ()
                     | _ -> raisef ResolvePermissionsException "Read access to field %O needs to be granted to delete records" fieldName
-                Ok <| resolveRestriction entity true delete
+                Ok <| resolveRestriction entityRef entity true delete
             with
             | :? ResolvePermissionsException as e when allowedEntity.allowBroken || forceAllowBroken ->
                 error <- Some (e :> exn)
@@ -159,17 +162,18 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             }
         (error, ret)
 
-    let resolveAllowedSchema (schema : ResolvedSchema) (allowedSchema : SourceAllowedSchema) : ErroredAllowedSchema * AllowedSchema =
+    let resolveAllowedSchema (schemaName : SchemaName) (schema : ResolvedSchema) (allowedSchema : SourceAllowedSchema) : ErroredAllowedSchema * AllowedSchema =
         let mutable errors = Map.empty
 
         let mapEntity name allowedEntity =
             try
+                let entityRef = { schema = schemaName; name = name }
                 let entity =
                     match Map.tryFind name schema.entities with
                     | None -> raisef ResolvePermissionsException "Undefined entity"
                     | Some s -> s
                 try
-                    let (error, ret) = resolveAllowedEntity entity allowedEntity
+                    let (error, ret) = resolveAllowedEntity entityRef entity allowedEntity
                     match error with
                     | Some e ->
                         errors <- Map.add name e errors
@@ -196,7 +200,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     match Map.tryFind name layout.schemas with
                     | None -> raisef ResolvePermissionsException "Undefined schema"
                     | Some s -> s
-                let (schemaErrors, newAllowed) = resolveAllowedSchema schema allowedSchema
+                let (schemaErrors, newAllowed) = resolveAllowedSchema name schema allowedSchema
                 if not <| Map.isEmpty schemaErrors then
                     errors <- Map.add name schemaErrors errors
                 newAllowed

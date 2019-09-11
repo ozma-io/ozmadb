@@ -301,6 +301,7 @@ let genericCompileFieldExpr (refFunc : 'f -> SQL.ValueExpr) (queryFunc : SelectE
                 SQL.VEFunc (SQL.SQLName "jsonb_build_object", args)
         | FEJsonArrow (a, b) -> SQL.VEJsonArrow (traverse a, traverse b)
         | FEJsonTextArrow (a, b) -> SQL.VEJsonTextArrow (traverse a, traverse b)
+        | FESubquery query -> SQL.VESubquery (queryFunc query)
     traverse
 
 let rec compileLocalComputedField (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LinkedLocalFieldExpr) : SQL.ValueExpr =

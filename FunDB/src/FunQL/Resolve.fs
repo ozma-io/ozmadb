@@ -539,6 +539,11 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     member this.UsedArguments = usedArguments
     member this.UsedSchemas = usedSchemas
 
+let resolveSelectExpr (layout : Layout) (select : ParsedSelectExpr) : ResolvedSelectExpr =
+    let qualifier = QueryResolver (layout, globalArgumentsMap)
+    let (results, qQuery) = qualifier.ResolveSelectExpr select
+    qQuery
+
 let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
     let arguments = viewExpr.arguments |> Map.map (fun name -> resolveArgument layout)
     let localArguments = Map.mapKeys PLocal arguments
