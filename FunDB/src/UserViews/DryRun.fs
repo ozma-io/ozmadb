@@ -209,7 +209,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                                 errors <- Map.add name (e :> exn) errors
                             let err =
                                 { error = e :> exn
-                                  source = Map.find schemaName sourceSchema.userViews
+                                  source = Map.find name sourceSchema.userViews
                                 }
                             return Some (name, Error err)
                         else
