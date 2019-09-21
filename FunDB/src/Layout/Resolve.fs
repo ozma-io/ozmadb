@@ -74,14 +74,11 @@ let private resolveEntityRef : EntityRef -> ResolvedEntityRef = function
 [<NoComparison>]
 type private HalfResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
-      computedFields : Map<FieldName, SourceComputedField>
       uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
-      checkConstraints : Map<ConstraintName, SourceCheckConstraint>
-      mainField : FieldName
-      forbidExternalReferences : bool
+      source : SourceEntity
     }
         member this.FindField (name : FieldName) =
-            genericFindField this.columnFields this.computedFields this.mainField name
+            genericFindField this.columnFields this.source.computedFields this.source.mainField name
 
 [<NoComparison>]
 type private HalfResolvedSchema =
@@ -92,10 +89,13 @@ type private HalfResolvedSchema =
 type private HalfResolvedLayout =
     { schemas : Map<SchemaName, HalfResolvedSchema>
     } with
-        member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.schemas with
+        member this.FindEntity (ref : ResolvedEntityRef) =
+            match Map.tryFind ref.schema this.schemas with
             | None -> None
-            | Some schema -> Map.tryFind entity.name schema.entities
+            | Some schema ->
+                match Map.tryFind ref.name schema.entities with
+                | Some entity when not entity.source.hidden -> Some entity
+                | _ -> None
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
@@ -168,11 +168,8 @@ type private Phase1Resolver (layout : SourceLayout) =
                 raisef ResolveLayoutException "Nonexistent main field: %O" entity.mainField
 
         { columnFields = columnFields
-          computedFields = entity.computedFields
           uniqueConstraints = uniqueConstraints
-          checkConstraints = entity.checkConstraints
-          mainField = entity.mainField
-          forbidExternalReferences = entity.forbidExternalReferences
+          source = entity
         }
 
     let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) : HalfResolvedSchema =
@@ -307,14 +304,15 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
                 resolveComputedField Set.empty entity { entity = entityRef; name = name } field
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in computed field %O: %s" name e.Message
-        let computedFields = Map.map mapComputedField entity.computedFields
+        let computedFields = Map.map mapComputedField entity.source.computedFields
         let tempEntity =
             { columnFields = entity.columnFields
               computedFields = computedFields
               uniqueConstraints = entity.uniqueConstraints
               checkConstraints = Map.empty
-              mainField = entity.mainField
-              forbidExternalReferences = entity.forbidExternalReferences
+              mainField = entity.source.mainField
+              forbidExternalReferences = entity.source.forbidExternalReferences
+              hidden = entity.source.hidden
             } : ResolvedEntity
         let mapCheckConstraint name constr =
             try
@@ -322,7 +320,7 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
                 resolveCheckConstraint tempEntity constr
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in check constraint %O: %s" name e.Message
-        let checkConstraints = Map.map mapCheckConstraint entity.checkConstraints
+        let checkConstraints = Map.map mapCheckConstraint entity.source.checkConstraints
 
         { tempEntity with
               checkConstraints = checkConstraints

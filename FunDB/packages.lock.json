@@ -16,11 +16,12 @@
       },
       "FsLexYacc": {
         "type": "Direct",
-        "requested": "[7.0.*, )",
-        "resolved": "7.0.6",
-        "contentHash": "FoamDE9ZNaDsxvvPIi3lQsTiUQn3xeQaAxa8jBWT2kOe9TbTLG83QTlZ+aR8OiTcqfEyRr56S405Q2xsktNT/w==",
+        "requested": "[9.0.*, )",
+        "resolved": "9.0.2",
+        "contentHash": "InLAqXl5J13rqFyR7THtaujyf+c3zjDkLH2k9PqsYLmwWV3Wg6WyXJ8ltEzQ8GNO+ya5aCCtiVPLkxFXL2VCiQ==",
         "dependencies": {
-          "FsLexYacc.Runtime": "[7.0.6, 7.1.0)"
+          "FSharp.Core": "[4.3.4, 4.4.0)",
+          "FsLexYacc.Runtime": "[9.0.2, 9.1.0)"
         }
       },
       "Giraffe": {
@@ -77,21 +78,21 @@
       "Microsoft.AspNetCore.Hosting": {
         "type": "Direct",
         "requested": "[2.2.*, )",
-        "resolved": "2.2.0",
-        "contentHash": "7t4RbUGugpHtQmzAkc9fpDdYJg6t/jcB2VVnjensVYbZFnLDU8pNrG0hrekk1DQG7P2UzpSqKLzDsFF0/lkkbw==",
+        "resolved": "2.2.7",
+        "contentHash": "O0ZBE53Fa9bVGXykDzvgMFW0Pe1QyPPFg1pazN8l3RUFSWBsDJ9/iD1LHXgADA8+ZD3R/1zkvraPa9SZdievxQ==",
         "dependencies": {
           "Microsoft.AspNetCore.Hosting.Abstractions": "2.2.0",
           "Microsoft.AspNetCore.Http": "2.2.0",
           "Microsoft.AspNetCore.Http.Extensions": "2.2.0",
           "Microsoft.Extensions.Configuration": "2.2.0",
-          "Microsoft.Extensions.Configuration.EnvironmentVariables": "2.2.0",
+          "Microsoft.Extensions.Configuration.EnvironmentVariables": "2.2.4",
           "Microsoft.Extensions.Configuration.FileExtensions": "2.2.0",
           "Microsoft.Extensions.DependencyInjection": "2.2.0",
           "Microsoft.Extensions.FileProviders.Physical": "2.2.0",
           "Microsoft.Extensions.Hosting.Abstractions": "2.2.0",
           "Microsoft.Extensions.Logging": "2.2.0",
           "Microsoft.Extensions.Options": "2.2.0",
-          "System.Diagnostics.DiagnosticSource": "4.5.0",
+          "System.Diagnostics.DiagnosticSource": "4.5.1",
           "System.Reflection.Metadata": "1.6.0"
         }
       },
@@ -168,8 +169,8 @@
       "Npgsql": {
         "type": "Direct",
         "requested": "[4.0.*, )",
-        "resolved": "4.0.9",
-        "contentHash": "1yST8Qipk7sjweL7w6KeNWPNUWLcbQ+/k/jFPCtJh+IpyL/2+zUL1YW/8zsa6OzdjiI0P3vOc+WUTGAntnLClg==",
+        "resolved": "4.0.10",
+        "contentHash": "+nsndx6jxTep0TgPuql/TA4nEv37umWN7MWDr/0a4DUYbX2ouKlYoodgrsHkYtRoLDj52+Otnw8ON+PRPB+FvQ==",
         "dependencies": {
           "System.Memory": "4.5.3",
           "System.Runtime.CompilerServices.Unsafe": "4.5.2",
@@ -192,11 +193,11 @@
       "Npgsql.Json.NET": {
         "type": "Direct",
         "requested": "[4.0.*, )",
-        "resolved": "4.0.9",
-        "contentHash": "CwjO89WZ2/zTAnysAjZ5LLveecAIuA5HyuHyCpE+k0MXSaGTVHKT4DCqqiaOm/gHT/Ho4GtJNsppIFLn+KCoFQ==",
+        "resolved": "4.0.10",
+        "contentHash": "Rld6xRofsnuGZiHhNlqjvbTpBqWsaNb9cjpzi2fJr5dETOLJAHMqqmtkCgaJbtNJdN8FxXbPnExTlx9P7+XhuA==",
         "dependencies": {
           "Newtonsoft.Json": "11.0.2",
-          "Npgsql": "4.0.9"
+          "Npgsql": "4.0.10"
         }
       },
       "Esprima": {
@@ -206,10 +207,10 @@
       },
       "FsLexYacc.Runtime": {
         "type": "Transitive",
-        "resolved": "7.0.6",
-        "contentHash": "t4ZMLANeIfW8JUZ6354Dx3V5nNsJ0HBSOs3v+wX8WO1OIACA1hX+D6oz0G8hCZjNzqH2CHrtIN9+USxupXmiTA==",
+        "resolved": "9.0.2",
+        "contentHash": "9DbxDiuuRg/bglWNr/YLW8/+KNEsm1vFB/6FEzMpA9PrtuoPXpot8KYxl5BQUdVe3h22Kc6K1jW4qJwkEtAhLg==",
         "dependencies": {
-          "FSharp.Core": "3.1.2.5"
+          "FSharp.Core": "4.3.4"
         }
       },
       "Microsoft.AspNetCore.Authentication": {
@@ -508,8 +509,8 @@
       },
       "Microsoft.Extensions.Configuration.EnvironmentVariables": {
         "type": "Transitive",
-        "resolved": "2.2.0",
-        "contentHash": "gIqt9PkKO01hZ0zmHnWrZ1E45MDreZTVoyDbL1kMWKtDgxxWTJpYtESTEcgpvR1uB1iex1zKGYzJpOMgmuP5TQ==",
+        "resolved": "2.2.4",
+        "contentHash": "Os7uRhp9xwawY5w2tgXw/86YrmAJZl6aHiQVdS9boWybTWPkJOvXXrQ3AGwuldN1W/r+cfnwRe2ePGeFO4zlzg==",
         "dependencies": {
           "Microsoft.Extensions.Configuration": "2.2.0"
         }
@@ -966,8 +967,8 @@
       },
       "System.Diagnostics.DiagnosticSource": {
         "type": "Transitive",
-        "resolved": "4.5.0",
-        "contentHash": "eIHRELiYDQvsMToML81QFkXEEYXUSUT2F28t1SGrevWqP+epFdw80SyAXIKTXOHrIEXReFOEnEr7XlGiC2GgOg=="
+        "resolved": "4.5.1",
+        "contentHash": "zCno/m44ymWhgLFh7tELDG9587q0l/EynPM0m4KgLaWQbz/TEKvNRX2YT5ip2qXW/uayifQ2ZqbnErsKJ4lYrQ=="
       },
       "System.Diagnostics.Tools": {
         "type": "Transitive",

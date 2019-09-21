@@ -1,7 +1,11 @@
 module FunWithFlags.FunDB.SQL.Migration
 
+open System.Threading.Tasks
+open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDB.SQL.Query
 
 type MigrationPlan = SchemaOperation seq
 
@@ -15,7 +19,7 @@ let private tableOperationOrder = function
 
 // Order for database operations so that dependencies are not violated.
 let private schemaOperationOrder = function
-    | SODeleteConstraint (_, _) -> 1
+    | SODeleteConstraint _ -> 1
     | SODeleteTable _ -> 2
     | SODeleteSequence _ -> 3
     | SODeleteSchema _ -> 4
@@ -25,7 +29,7 @@ let private schemaOperationOrder = function
     | SOAlterTable _ -> 8
     | SOCreateConstraint (_, _, CMPrimaryKey _) -> 9
     | SOCreateConstraint (_, _, CMUnique _) -> 10
-    | SOCreateConstraint (_, _, CMForeignKey (_, _)) -> 11
+    | SOCreateConstraint (_, _, CMForeignKey _) -> 11
     | SOCreateConstraint (_, _, CMCheck _) -> 12
 
 let private deleteBuildTable (table : TableRef) (tableMeta : TableMeta) : MigrationPlan =
@@ -129,5 +133,18 @@ let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMet
                   yield! deleteBuildSchema schemaName schemaMeta
         }
 
-let migrateDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =
+let planDatabaseMigration (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =
     migrateBuildDatabase fromMeta toMeta |> Seq.sortBy schemaOperationOrder
+
+let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) : Task<bool> =
+    task {
+        let mutable touched = false
+        for action in plan do
+            let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+            touched <- true
+            ()
+        if touched then
+            // Clear prepared statements so that things don't break if e.g. database types have changed.
+            query.Connection.UnprepareAll ()
+        return touched
+    }

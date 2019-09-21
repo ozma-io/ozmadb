@@ -90,6 +90,7 @@ type ResolvedEntity =
       checkConstraints : Map<ConstraintName, ResolvedCheckConstraint>
       mainField : FieldName
       forbidExternalReferences : bool
+      hidden : bool
     } with
         member this.FindField (name : FieldName) =
             genericFindField this.columnFields this.computedFields this.mainField name
@@ -103,10 +104,13 @@ type ResolvedSchema =
 type Layout =
     { schemas : Map<SchemaName, ResolvedSchema>
     } with
-        member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.schemas with
+        member this.FindEntity (ref : ResolvedEntityRef) =
+            match Map.tryFind ref.schema this.schemas with
             | None -> None
-            | Some schema -> Map.tryFind entity.name schema.entities
+            | Some schema ->
+                match Map.tryFind ref.name schema.entities with
+                | Some entity when not entity.hidden -> Some entity
+                | _ -> None
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))

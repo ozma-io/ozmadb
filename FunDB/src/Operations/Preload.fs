@@ -165,11 +165,8 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         let! currentMeta = buildDatabaseMeta conn.Transaction
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
 
-        let systemMigration = migrateDatabase currentSystemMeta newSystemMeta
-        for action in systemMigration do
-            logger.LogInformation("System migration step: {}", action)
-            let! _ = conn.Connection.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
-            ()
+        let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
+        let! _ = migrateDatabase conn.Connection.Query systemMigration
 
         // We migrate layout first so that permissions and attributes have schemas in the table.
         let! changed1 = updateLayout conn.System sourceLayout
@@ -202,11 +199,8 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         let! currentMeta2 = buildDatabaseMeta conn.Transaction
         let currentUserMeta2 = filterUserMeta preload currentMeta2
 
-        let userMigration = migrateDatabase currentUserMeta2 newUserMeta
-        for action in userMigration do
-            logger.LogInformation("User migration step: {}", action)
-            let! _ = conn.Connection.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
-            ()
+        let userMigration = planDatabaseMigration currentUserMeta2 newUserMeta
+        let! _ = migrateDatabase conn.Connection.Query userMigration
 
         return (changed1 || changed2 || changed3, newLayout, newUserMeta)
     }

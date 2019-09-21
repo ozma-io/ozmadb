@@ -12,7 +12,7 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     // All of this shit is because of how EF Core works.
     [<DefaultValue>]
     val mutable state : DbSet<StateValue>
-    [<Entity("Name", ForbidExternalReferences=true)>]
+    [<Entity("Name", ForbidExternalReferences=true, Hidden=true)>]
     [<UniqueConstraint("Name", [|"Name"|])>]
     [<CheckConstraint("NotEmpty", "\"Name\" <> ''")>]
     member this.State
@@ -194,6 +194,8 @@ and
         member val MainField = null : string with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val ForbidExternalReferences = false with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val Hidden = false with get, set
 
         member val ColumnFields = ResizeArray<ColumnField>() with get, set
         member val ComputedFields = ResizeArray<ComputedField>() with get, set

@@ -13,6 +13,7 @@ type EntityAttribute (mainField : string) =
     inherit Attribute ()
     member this.MainField = mainField
     member val ForbidExternalReferences = false with get, set
+    member val Hidden = false with get, set
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Property, AllowMultiple=true)>]
@@ -34,7 +35,6 @@ type ComputedFieldAttribute (name : string, expression : string) =
     inherit Attribute ()
     member this.Name = name
     member this.Expression = expression
-
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Property)>]
@@ -95,6 +95,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * SourceEntity) 
               checkConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
               mainField = FunQLName entityAttr.MainField
               forbidExternalReferences = entityAttr.ForbidExternalReferences
+              hidden = entityAttr.Hidden
             }
         Some (FunQLName prop.Name, res)
 

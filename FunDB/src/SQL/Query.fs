@@ -152,6 +152,8 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 return raisefWithInner QueryException ex "Error while executing"
         }
 
+    member this.Connection = connection
+
     member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) : Task<int> =
         withCommand queryStr pars <| fun command -> command.ExecuteNonQueryAsync()
 

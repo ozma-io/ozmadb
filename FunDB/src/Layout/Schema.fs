@@ -41,6 +41,7 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         then funId
         else FunQLName entity.MainField
       forbidExternalReferences = entity.ForbidExternalReferences
+      hidden = entity.Hidden
     }
 
 let private makeSourceSchema (schema : Schema) : SourceSchema =

@@ -82,6 +82,7 @@ type private LayoutUpdater (db : SystemContext) =
         else
             existingEntity.MainField <- entity.mainField.ToString()
         existingEntity.ForbidExternalReferences <- entity.forbidExternalReferences
+        existingEntity.Hidden <- entity.hidden
 
     let updateSchema (schema : SourceSchema) (existingSchema : Schema) : unit =
         let entitiesMap = existingSchema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq

@@ -6,6 +6,7 @@ open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 open FluidCaching
+open Npgsql
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
@@ -83,15 +84,17 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
     let filterUserLayout (layout : Layout) : Layout =
         { schemas = filterUserSchemas preload layout.schemas }
 
+
     // Returns a version and whether a rebuild should be force-performed.
     let getCurrentVersion (conn : DatabaseTransaction) (bump : bool) : Task<bool * int> = task {
-        match! conn.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstOrDefaultAsync() with
-        | null ->
+        let! state = conn.System.State.AsTracking().ToDictionaryAsync(fun x -> x.Name)
+        match tryGetValue state versionField with
+        | None ->
             let newEntry = StateValue (Name = versionField, Value = string fallbackVersion)
             ignore <| conn.System.State.Add(newEntry)
             let! _ = conn.System.SaveChangesAsync()
             return (true, fallbackVersion)
-        | entry ->
+        | Some entry ->
             match tryIntInvariant entry.Value with
             | Some v ->
                 if bump then
@@ -171,13 +174,13 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
         }
 
     let rec getCachedState (transaction1 : DatabaseTransaction) = task {
-        let! (isChanged, layout, userMeta) = initialMigratePreload logger transaction1 preload
-        let! (_, currentVersion) = getCurrentVersion transaction1 isChanged
-
-        logger.LogInformation("Updating system user views")
+        let! (isChanged1, layout, userMeta) = initialMigratePreload logger transaction1 preload
         let systemViews = preloadUserViews layout preload
-        let! _ = updateUserViews transaction1.System systemViews
-
+        let! isChanged2 = updateUserViews transaction1.System systemViews
+        let isChanged = isChanged1 || isChanged2
+        let! (_, currentVersion) = getCurrentVersion transaction1 isChanged
+        // We don't do commit here and instead resolve as much as possible first to fail early.
+    
         let! sourceAttrs = buildSchemaAttributes transaction1.System
         let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
 
@@ -222,6 +225,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
     // Called when state update by another instance is detected.
     let rec rebuildFromDatabase (transaction1 : DatabaseTransaction) (currentVersion : int) = task {
+        // Clear prepared statements so that things don't break if e.g. database types have changed.
+        transaction1.Connection.Connection.UnprepareAll ()
         let! sourceLayout = buildSchemaLayout transaction1.System
         let layout = resolveLayout sourceLayout
 
@@ -326,14 +331,13 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
                 // Actually migrate.
                 let wantedUserMeta = buildLayoutMeta (filterUserLayout layout)
-                let migration = migrateDatabase oldState.userMeta wantedUserMeta
-                try
-                    for action in migration do
-                        logger.LogInformation("Migration step: {}", action)
-                        let! _ = conn.Query.ExecuteNonQuery (action.ToSQLString()) Map.empty
-                        ()
-                with
-                | :? QueryException as err -> raisefWithInner ContextException err "Migration error"
+                let migration = planDatabaseMigration oldState.userMeta wantedUserMeta
+                let! migrared = task {
+                    try
+                        return! migrateDatabase newTransaction.Connection.Query migration
+                    with
+                    | :? QueryException as err -> return raisefWithInner ContextException err "Migration error"
+                }
 
                 logger.LogInformation("Updating system user views")
                 let newSystemViews = preloadUserViews layout preload
@@ -380,6 +384,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     }
 
                 anonymousViewsCache.Clear()
+                if migrared then
+                    // There is no way to force-clear prepared statements for all connections in the pool, so we clear the pool itself instead.
+                    NpgsqlConnection.ClearPool(newTransaction.Connection.Connection)
                 cachedState <- (newVersion, newState)
                 return ()
             }

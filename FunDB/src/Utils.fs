@@ -527,3 +527,7 @@ let inline raisef (constr : string -> 'e) : StringFormat<'a, 'b> -> 'a =
 let inline reraise' (e : exn) =
     (ExceptionDispatchInfo.Capture e).Throw ()
     Unchecked.defaultof<_>
+
+let tryGetValue (dict: IReadOnlyDictionary<'K, 'V>) (key: 'K) : 'V option =
+    let (success, v) = dict.TryGetValue(key)
+    if success then Some v else None

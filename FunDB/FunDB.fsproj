@@ -26,11 +26,11 @@
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/Parsing.fs" />
     <Compile Include="src/SQL/AST.fs" />
-    <FsYacc Include="src/SQL/SQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parse" />
+    <FsYacc Include="src/SQL/SQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParse.fs" />
     <FsLex Include="src/SQL/SQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLLex.fs" />
-    <FsYacc Include="src/SQL/ArrayParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Array.Parse" />
+    <FsYacc Include="src/SQL/ArrayParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Array.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayParse.fs" />
     <FsLex Include="src/SQL/ArrayLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayLex.fs" />
@@ -40,7 +40,7 @@
 
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />
-    <FsYacc Include="src/FunQL/FunQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parse" />
+    <FsYacc Include="src/FunQL/FunQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParse.fs" />
     <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
@@ -116,7 +116,7 @@
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="4.0.*" />
     <PackageReference Include="Npgsql.Json.NET" Version="4.0.*" />
-    <PackageReference Include="FsLexYacc" Version="7.0.*" />
+    <PackageReference Include="FsLexYacc" Version="9.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="2.2.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="2.2.*" />
     <PackageReference Include="Microsoft.AspNetCore.Hosting" Version="2.2.*" />

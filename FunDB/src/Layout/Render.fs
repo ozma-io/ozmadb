@@ -30,6 +30,7 @@ let private renderEntity (entity : ResolvedEntity) : SourceEntity =
       checkConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
       mainField = entity.mainField
       forbidExternalReferences = entity.forbidExternalReferences
+      hidden = entity.hidden
     }
 
 let renderSchema (schema : ResolvedSchema) : SourceSchema =

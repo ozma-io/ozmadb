@@ -44,6 +44,8 @@ type SourceEntity =
       mainField : FieldName
       [<JsonProperty(Required=Required.DisallowNull)>]
       forbidExternalReferences : bool
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      hidden : bool
     } with
         member this.FindField (name : FieldName) =
             if name = funId then

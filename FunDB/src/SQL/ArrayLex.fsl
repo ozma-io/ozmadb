@@ -3,7 +3,7 @@
 module FunWithFlags.FunDB.SQL.Array.Lex
 
 open System
-open Microsoft.FSharp.Text.Lexing
+open FSharp.Text.Lexing
 
 open FunWithFlags.FunDB.SQL.Parsing
 open FunWithFlags.FunDB.SQL.Array

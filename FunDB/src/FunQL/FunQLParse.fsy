@@ -32,6 +32,23 @@ type private Result =
     | AResult of QueryResult<EntityRef, LinkedFieldRef>
     | AAttribute of FunQLName * ParsedFieldExpr
 
+[<NoComparison>]
+type private InSource =
+    | ISValues of ParsedFieldExpr[]
+    | ISSelect of ParsedSelectExpr
+
+let private inExpr (valuesConstr : (ParsedFieldExpr * ParsedFieldExpr[]) -> ParsedFieldExpr)
+                   (selectConstr : (ParsedFieldExpr * ParsedSelectExpr) -> ParsedFieldExpr)
+                   (needle : ParsedFieldExpr)
+                   (haystack : InSource) : ParsedFieldExpr =
+    match haystack with
+    | ISValues vals -> valuesConstr (needle, vals)
+    | ISSelect sel -> selectConstr (needle, sel)
+
+let private extractInOneSource : ParsedFieldExpr[] -> InSource = function
+    | [| FESubquery sel |] -> ISSelect sel
+    | vals -> ISValues vals
+
 let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
     try
         Map.ofSeqUnique vals
@@ -253,7 +270,7 @@ attributeMap : AttributeMap EOF { $1 }
 // Expressions
 
 ViewExpr:
-  | MaybeArguments SelectExpr InsertEntityClause { { arguments = $1; select = $2; mainEntity = $3 } }
+  | MaybeArguments UnparenSelectExpr InsertEntityClause { { arguments = $1; select = $2; mainEntity = $3 } }
 
 MaybeArguments:
   |                                            { Map.empty }
@@ -275,16 +292,16 @@ Argument:
   | ArgumentFieldType NULL { { argType = $1; optional = true } }
 
 SelectVal:
-  | SingleUnlimitedSelectExpr         { SSelect $1 }
-  | LEFT_PAREN SelectExpr RIGHT_PAREN { $2 }
+  | SingleUnlimitedSelectExpr { SSelect $1 }
+  | SubSelectExpr             { $1 }
 
-SelectExpr:
-  | LEFT_PAREN SelectExpr RIGHT_PAREN          { $2 }
+// We don't allow select expressions with nested parentheses now because it's difficult to implement as LALR(1) for all our cases (or I'm missing something obvious).
+UnparenSelectExpr:
   | SingleSelectExpr                           { SSelect $1 }
   | SelectVal SetOp SetOpExpr OrderLimitClause { SSetOp ($2, $1, $3, $4) }
 
 SubSelectExpr:
-  | LEFT_PAREN SelectExpr RIGHT_PAREN { $2 }
+  | LEFT_PAREN UnparenSelectExpr RIGHT_PAREN { $2 }
 
 SetOp:
   | UNION     { Union }
@@ -296,10 +313,7 @@ SetOpExpr:
   | SelectVal SetOp SetOpExpr { SSetOp ($2, $1, $3, emptyOrderLimitClause) }
 
 SingleSelectExpr:
-  | SELECT QueryResults FromClause OrderLimitClause {
-    let (attributes, results) = splitResults $2
-    { attributes = attributes; results = results; clause = $3; orderLimit = $4 }
-  }
+  | SingleUnlimitedSelectExpr OrderLimitClause { { $1 with orderLimit = $2 } }
 
 SingleUnlimitedSelectExpr:
   | SELECT QueryResults FromClause {
@@ -437,7 +451,8 @@ WhereClause:
   | WHERE FieldExpr { Some $2 }
 
 NonEmptyExprs:
-  | FieldExpr                     { [ $1 ] }
+  | FieldExpr { [ $1 ] }
+  | FieldExpr COMMA { [ $1 ] }
   | FieldExpr COMMA NonEmptyExprs { $1 :: $3 }
 
 NonEmptyExprList:
@@ -448,6 +463,11 @@ FieldExpr:
   | FieldExpr AND FieldExpr { FEAnd ($1, $3) }
   | NOT FieldExpr           { FENot $2 }
   | FieldExprEq             { $1 }
+
+// Implemented in this way because there is a conflict between multi-paren-ed SelectExpr and FieldExpr with a SelectExpr inside.
+FieldInSource:
+  | SubSelectExpr    { ISSelect $1 }
+  | NonEmptyExprList { extractInOneSource $1 }
 
 FieldExprEq:
   | FieldExprOp EQ FieldExprOp          { FEEq ($1, $3) }
@@ -462,10 +482,8 @@ FieldExprEq:
   | FieldExprOp NOT LIKE FieldExprOp    { FENotLike ($1, $4) }
   | FieldExprOp LIKE_OP FieldExprOp     { FELike ($1, $3) }
   | FieldExprOp NOT_LIKE_OP FieldExprOp { FENotLike ($1, $3) }
-  | FieldExprOp IN NonEmptyExprList     { FEIn ($1, $3) }
-  | FieldExprOp NOT IN NonEmptyExprList { FENotIn ($1, $4) }
-  | FieldExprOp IN SubSelectExpr        { FEInQuery ($1, $3) }
-  | FieldExprOp NOT IN SubSelectExpr    { FENotInQuery ($1, $4) }
+  | FieldExprOp IN FieldInSource        { inExpr FEIn FEInQuery $1 $3 }
+  | FieldExprOp NOT IN FieldInSource    { inExpr FENotIn FENotInQuery $1 $4 }
   | FieldExprOp                         { $1 }
 
 FieldExprOp:

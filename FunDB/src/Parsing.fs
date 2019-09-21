@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Parsing
 
-open Microsoft.FSharp.Text.Lexing
+open FSharp.Text.Lexing
 
 let newline (lexbuf: LexBuffer<_>) =
     lexbuf.StartPos <- lexbuf.StartPos.NextLine

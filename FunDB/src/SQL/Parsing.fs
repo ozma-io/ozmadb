@@ -1,7 +1,7 @@
 module FunWithFlags.FunDB.SQL.Parsing
 
 open System.Text
-open Microsoft.FSharp.Text.Lexing
+open FSharp.Text.Lexing
 
 open FunWithFlags.FunDB.Utils
 
