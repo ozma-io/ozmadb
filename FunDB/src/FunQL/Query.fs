@@ -250,7 +250,6 @@ let private parseResult (domains : Domains) (columns : ColumnType[]) (result : Q
         }
     (viewInfo, rows)
 
-// XXX: Add user access rights enforcing there later.
 let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValues) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
         let parameters = prepareArguments viewExpr.query.arguments arguments
