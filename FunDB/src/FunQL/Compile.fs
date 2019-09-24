@@ -962,7 +962,7 @@ let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
         noArgumentReferences <- false
     let foundQuery query =
         noReferences <- false
-    SQL.iterValueExpr foundReference ignore foundQuery expr
+    SQL.iterValueExpr foundReference foundPlaceholder foundQuery expr
     if not noReferences then
         None
     else if not noArgumentReferences then
