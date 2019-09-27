@@ -63,13 +63,15 @@ let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) : Ta
 
         let currentSchemas = db.Schemas |> getFieldsObjects |> getAttributesObjects
 
+        let! allSchemas = currentSchemas.AsTracking().ToListAsync()
         // We don't touch in any way schemas not in layout.
-        let wantedSchemas = attrs.schemas |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
-        let! schemas = currentSchemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync()
+        let schemasMap =
+            allSchemas
+            |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
+            |> Seq.filter (fun (name, schema) -> Map.containsKey name attrs.schemas)
+            |> Map.ofSeq
 
-        let schemasMap = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, schema)) |> Map.ofSeq
-
-        let updater = AttributesUpdater(db, schemas)
+        let updater = AttributesUpdater(db, allSchemas)
         updater.UpdateSchemas attrs.schemas schemasMap
         let! changedEntries = db.SaveChangesAsync()
         return changedEntries > 0

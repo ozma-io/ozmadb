@@ -99,13 +99,15 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) : Task<bo
 
         let currentSchemas = db.Schemas |> getFieldsObjects |> getRolesObjects
 
+        let! allSchemas = currentSchemas.AsTracking().ToListAsync()
         // We don't touch in any way schemas not in layout.
-        let wantedSchemas = roles.schemas |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
-        let! schemas = currentSchemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync()
-
-        let schemasMap = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, schema)) |> Map.ofSeq
-
-        let updater = PermissionsUpdater(db, schemas)
+        let schemasMap =
+            allSchemas
+            |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
+            |> Seq.filter (fun (name, schema) -> Map.containsKey name roles.schemas)
+            |> Map.ofSeq
+    
+        let updater = PermissionsUpdater(db, allSchemas)
         updater.UpdateSchemas roles.schemas schemasMap
         let! changedEntries = db.SaveChangesAsync()
         return changedEntries > 0
