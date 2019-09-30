@@ -186,7 +186,7 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string", Immutable=true)>]
         member val Name = "" with get, set
-        [<ColumnField("reference(\"public\".\"Schemas\")")>]
+        [<ColumnField("reference(\"public\".\"Schemas\")", Immutable=true)>]
         member val SchemaId = 0 with get, set
         member val Schema = null : Schema with get, set
         // FIXME: Make this ColumnField relation when we implement reference constraints.
@@ -208,7 +208,7 @@ and
         member val Id = 0 with get, set
         [<ColumnField("string", Immutable=true)>]
         member val Name = "" with get, set
-        [<ColumnField("reference(\"public\".\"Entities\")")>]
+        [<ColumnField("reference(\"public\".\"Entities\")", Immutable=true)>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("string")>]
