@@ -111,8 +111,8 @@ let private validJsonValue = function
     | FDate _
     | FDateTime _
     | FDateArray _
-    | FDateTimeArray _ -> true
-    | _ -> false
+    | FDateTimeArray _ -> false
+    | _ -> true
 
 let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : ParsedFieldExpr =
     let rec tryExtract = function
