@@ -78,10 +78,19 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                         let argEntity = layout.FindEntity entityRef |> Option.get
                         checkPath allowIds argEntity name remainingPath
                     | _ -> raisef ResolvePermissionsException "Argument is not a reference: %O" ref
+                globalArguments <- Set.add name globalArguments
                 { ref = VRPlaceholder arg; path = path }
             | ref ->
                 raisef ResolvePermissionsException "Invalid reference: %O" ref
-        let resolveQuery query = resolveSelectExpr layout query
+        let resolveQuery query =
+            let (usedArgs, newQuery) = resolveSelectExpr layout query
+            for arg in usedArgs do
+                match arg with
+                | PGlobal name ->
+                    globalArguments <- Set.add name globalArguments
+                | PLocal name ->
+                    raisef ResolvePermissionsException "Local argument %O is not allowed" name
+            newQuery
 
         let expr = mapFieldExpr id resolveReference resolveQuery whereExpr
         { expression = expr
