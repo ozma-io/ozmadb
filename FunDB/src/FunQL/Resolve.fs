@@ -210,26 +210,26 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
 
-    let rec addUsedFields (ref : ResolvedFieldRef) (field : ResolvedField) : unit =
+    let rec addUsedFields (useMain : bool) (ref : ResolvedFieldRef) (field : ResolvedField) : unit =
         match field with
         | RId ->
             usedSchemas <- addUsedEntityRef ref.entity usedSchemas
         | RColumnField col ->
             usedSchemas <- addUsedFieldRef ref usedSchemas
             match col.fieldType with
-            | FTReference (entityRef, _) ->
+            | FTReference (entityRef, _) when useMain ->
                 let (realName, newField) = layout.FindField entityRef funMain |> Option.get
                 let newRef = { entity = entityRef; name = realName }
-                addUsedFields newRef newField
+                addUsedFields true newRef newField
             | _ -> ()
         | RComputedField comp ->
             usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
 
     // Returns innermost bound field. It has sense only for result expressions in subexpressions,
     // where it will be bound to the result name.
-    let rec resolvePath (boundField : BoundFieldInfo) : FieldName list -> BoundFieldInfo = function
+    let rec resolvePath (useMain : bool) (boundField : BoundFieldInfo) : FieldName list -> BoundFieldInfo = function
         | [] ->
-            addUsedFields boundField.ref boundField.field
+            addUsedFields useMain boundField.ref boundField.field
             boundField
         | (ref :: refs) ->
             match boundField.field with
@@ -247,7 +247,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                           immediate = false
                         }
                     usedSchemas <- addUsedField entityRef.schema entityRef.name newRef usedSchemas
-                    resolvePath nextBoundField refs
+                    resolvePath useMain nextBoundField refs
                 | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
             | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
 
@@ -256,7 +256,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     //   It will be added to `mapping` of the resulting SELECT, hence it bounds innermost field in path;
     // * Outer bound field, if exists;
     // * Resulting reference.
-    let resolveReference (mapping : QMapping) (f : LinkedFieldRef) : QSubqueryField * BoundFieldInfo option * LinkedBoundFieldRef =
+    let resolveReference (useMain : bool) (mapping : QMapping) (f : LinkedFieldRef) : QSubqueryField * BoundFieldInfo option * LinkedBoundFieldRef =
         match f.ref with
         | VRColumn ref ->
             let (entityName, (schemaName, fields)) =
@@ -285,7 +285,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 match outerBoundField with
                 | Some field ->
                     // FIXME: why immediate = false here?
-                    let inner = resolvePath { field with immediate = false } (Array.toList f.path)
+                    let inner = resolvePath useMain { field with immediate = false } (Array.toList f.path)
                     (Some inner, Some { ref = field.ref; immediate = field.immediate })
                 | None when Array.isEmpty f.path ->
                     (None, None)
@@ -320,7 +320,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                               field = argField
                               immediate = false
                             }
-                        let inner = resolvePath fieldInfo remainingPath
+                        let inner = resolvePath useMain fieldInfo remainingPath
                         Some inner
                     | _ -> raisef ViewResolveException "Argument is not a reference: %O" ref
             usedArguments <- Set.add arg usedArguments
@@ -349,23 +349,23 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     // Should be in sync with resultField
     and resolveResultExpr (mapping : QMapping) : ParsedQueryResultExpr -> QSubqueryField * ResolvedQueryResultExpr = function
         | QRField f ->
-            let (boundField, _, f') = resolveReference mapping f
+            let (boundField, _, f') = resolveReference true mapping f
             (boundField, QRField f')
         | QRExpr (name, FERef f) ->
-            let (boundField, _, f') = resolveReference mapping f
+            let (boundField, _, f') = resolveReference true mapping f
             (boundField, QRExpr (name, FERef f'))
         | QRExpr (name, e) ->
             checkName name
-            let (_, e') = resolveFieldExpr mapping e
+            let (_, e') = resolveFieldExpr true mapping e
             (unboundSubqueryField, QRExpr (name, e'))
 
     and resolveAttributes (mapping : QMapping) (attributes : ParsedAttributeMap) : ResolvedAttributeMap =
-        Map.map (fun name expr -> snd <| resolveFieldExpr mapping expr) attributes
+        Map.map (fun name expr -> snd <| resolveFieldExpr false mapping expr) attributes
 
-    and resolveFieldExpr (mapping : QMapping) (expr : ParsedFieldExpr) : bool * ResolvedFieldExpr =
+    and resolveFieldExpr (useMain : bool) (mapping : QMapping) (expr : ParsedFieldExpr) : bool * ResolvedFieldExpr =
         let mutable isLocal = true
         let resolveExprReference col =
-            let (_, outer, ret) = resolveReference mapping col
+            let (_, outer, ret) = resolveReference useMain mapping col
 
             if not <| Array.isEmpty col.path then
                 isLocal <- false
@@ -384,7 +384,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     and resolveOrderLimitClause (mapping : QMapping) (limits : ParsedOrderLimitClause) : bool * ResolvedOrderLimitClause =
         let mutable isLocal = true
         let resolveOrderBy (ord, expr) =
-            let (thisIsLocal, ret) = resolveFieldExpr mapping expr
+            let (thisIsLocal, ret) = resolveFieldExpr false mapping expr
             if not thisIsLocal then
                 isLocal <- false
             (ord, ret)
@@ -456,7 +456,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     and resolveFromClause (clause : ParsedFromClause) : QMapping * ResolvedFromClause =
         let (newMapping, qFrom) = resolveFromExpr clause.from
         let res = { from = qFrom
-                    where = Option.map (snd << resolveFieldExpr newMapping) clause.where
+                    where = Option.map (snd << resolveFieldExpr false newMapping) clause.where
                   }
         (newMapping, res)
 
@@ -483,7 +483,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 with
                 | Failure msg -> raisef ViewResolveException "Clashing entity names in a join: %s" msg
 
-            let (isLocal, newFieldExpr) = resolveFieldExpr newMapping where
+            let (isLocal, newFieldExpr) = resolveFieldExpr false newMapping where
             if not isLocal then
                 raisef ViewResolveException "Cannot use dereferences in join expressions: %O" where
             (newMapping, FJoin (jt, newE1, newE2, newFieldExpr))
@@ -497,7 +497,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             let mapEntry entry =
                 if Array.length entry <> Array.length fieldNames then
                     raisef ViewResolveException "Invalid number of items in VALUES entry: %i" (Array.length entry)
-                entry |> Array.map (resolveFieldExpr Map.empty >> snd)
+                entry |> Array.map (resolveFieldExpr true Map.empty >> snd)
             let newValues = values |> Array.map mapEntry
 
             let mapName name =
