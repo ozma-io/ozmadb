@@ -48,15 +48,16 @@ let z = ['Z' 'z']
 
 rule commentFunQL level = parse
     | "/*"       { commentFunQL (level + 1) lexbuf }
-    | "*/"       { if level = 0 then () else commentFunQL (level - 1) lexbuf }
+    | "*/"       { if level = 0 then tokenizeFunQL lexbuf else commentFunQL (level - 1) lexbuf }
     | escapedId  { commentFunQL level lexbuf }
     | string     { commentFunQL level lexbuf }
     | newline    { newline lexbuf; commentFunQL level lexbuf }
     | _          { commentFunQL level lexbuf }
 
 and lineCommentFunQL = parse
-    | newline { newline lexbuf }
+    | newline { newline lexbuf; tokenizeFunQL lexbuf }
     | _       { lineCommentFunQL lexbuf }
+    | eof     { Parse.EOF }
 
 and tokenizeFunQL = parse
     // Atoms
@@ -163,8 +164,8 @@ and tokenizeFunQL = parse
 
     // Whitespace
     | whitespace { tokenizeFunQL lexbuf }
-    | "--"       { lineCommentFunQL lexbuf; tokenizeFunQL lexbuf }
-    | "/*"       { commentFunQL 0 lexbuf; tokenizeFunQL lexbuf }
+    | "--"       { lineCommentFunQL lexbuf }
+    | "/*"       { commentFunQL 0 lexbuf }
     | newline    { newline lexbuf; tokenizeFunQL lexbuf }
 
     // Misc
