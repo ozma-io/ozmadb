@@ -86,7 +86,9 @@ type private PermissionsApplier (access : SchemaAccess) =
 
     and applyToSingleSelectExpr (query : SingleSelectExpr) : SingleSelectExpr =
         { columns = Array.map applyToSelectedColumn query.columns
-          clause = Option.map applyToFromClause query.clause
+          from = Option.map applyToFromExpr query.from
+          where = Option.map applyToValueExpr query.where
+          groupBy = Array.map applyToValueExpr query.groupBy
           orderLimit = applyToOrderLimitClause query.orderLimit
         }
 
@@ -103,11 +105,6 @@ type private PermissionsApplier (access : SchemaAccess) =
 
     and applyToValueExpr =
         mapValueExpr id id applyToSelectExpr
-
-    and applyToFromClause (clause : FromClause) : FromClause =
-        { from = applyToFromExpr clause.from
-          where = Option.map applyToValueExpr clause.where
-        }
 
     and applyToFromExpr : FromExpr -> FromExpr = function
         | FTable (pun, entity) ->

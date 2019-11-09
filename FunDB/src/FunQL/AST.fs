@@ -451,6 +451,8 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
     | FEJsonObject of Map<FunQLName, FieldExpr<'e, 'f>>
     | FEJsonArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEJsonTextArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEFunc of FunQLName * FieldExpr<'e, 'f>[]
+    | FEAggFunc of FunQLName * AggExpr<'e, 'f>
     | FESubquery of SelectExpr<'e, 'f>
     with
         override this.ToString () = this.ToFunQLString()
@@ -496,7 +498,27 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
             | FEJsonObject obj -> obj |> Map.toSeq |> Seq.map (fun (k, v) -> sprintf "%s: %s" (k.ToFunQLString()) (v.ToFunQLString())) |> String.concat ", " |> sprintf "{%s}"
             | FEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FEFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args |> Seq.map (fun arg -> arg.ToFunQLString()) |> String.concat ", ")
+            | FEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args.ToFunQLString())
             | FESubquery q -> sprintf "(%s)" (q.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoComparison>] AggExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | AEAll of FieldExpr<'e, 'f>[]
+    | AEDistinct of FieldExpr<'e, 'f>
+    | AEStar
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | AEAll exprs ->
+                assert (not <| Array.isEmpty exprs)
+                exprs |> Array.map (fun x -> x.ToFunQLString()) |> String.concat ", "
+            | AEDistinct expr -> sprintf "DISTINCT %s" (expr.ToFunQLString())
+            | AEStar -> "*"
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -592,26 +614,12 @@ and [<NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and [<NoComparison>] FromClause<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    { from: FromExpr<'e, 'f>
-      where: FieldExpr<'e, 'f> option
-    } with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            let whereStr =
-                match this.where with
-                | None -> ""
-                | Some cond -> sprintf "WHERE %s" (cond.ToFunQLString())
-            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToFunQLString(); whereStr])
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
 and [<NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { attributes : AttributeMap<'e, 'f>
       results: QueryResult<'e, 'f>[]
-      clause: FromClause<'e, 'f> option
+      from: FromExpr<'e, 'f> option
+      where: FieldExpr<'e, 'f> option
+      groupBy: FieldExpr<'e, 'f>[]
       orderLimit: OrderLimitClause<'e, 'f>
     } with
         override this.ToString () = this.ToFunQLString()
@@ -621,11 +629,20 @@ and [<NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IF
             let resultsStrs = this.results |> Seq.map (fun res -> res.ToFunQLString())
             let resultStr = Seq.append attributesStrs resultsStrs |> String.concat ", "
             let fromStr =
-                match this.clause with
+                match this.from with
                 | None -> ""
-                | Some clause -> clause.ToFunQLString()
+                | Some from -> sprintf "FROM %s" (from.ToFunQLString())
+            let whereStr =
+                match this.where with
+                | None -> ""
+                | Some cond -> sprintf "WHERE %s" (cond.ToFunQLString())
+            let groupByStr =
+                if Array.isEmpty this.groupBy then
+                    ""
+                else
+                    sprintf "GROUP BY %s" (this.groupBy |> Array.map (fun x -> x.ToFunQLString()) |> String.concat ", ")
 
-            sprintf "SELECT %s" (concatWithWhitespaces [resultStr; fromStr; this.orderLimit.ToFunQLString()])
+            sprintf "SELECT %s" (concatWithWhitespaces [resultStr; fromStr; whereStr; groupByStr; this.orderLimit.ToFunQLString()])
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
@@ -646,7 +663,7 @@ and [<NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNa
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-let mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f2) (queryFunc : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
+let rec mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f2) (queryFunc : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
     let rec traverse = function
         | FEValue value -> FEValue (valueFunc value)
         | FERef r -> FERef (refFunc r)
@@ -675,10 +692,17 @@ let mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f2) (
         | FEJsonObject obj -> FEJsonObject (Map.map (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> FEJsonArrow (traverse a, traverse b)
         | FEJsonTextArrow (a, b) -> FEJsonTextArrow (traverse a, traverse b)
+        | FEFunc (name, args) -> FEFunc (name, Array.map traverse args)
+        | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse args)
         | FESubquery query -> FESubquery (queryFunc query)
     traverse
 
-let mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFunc : 'f1 -> Task<'f2>) (queryFunc : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
+and mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1, 'f1> -> AggExpr<'e2, 'f2> = function
+    | AEAll exprs -> AEAll (Array.map func exprs)
+    | AEDistinct expr -> AEDistinct (func expr)
+    | AEStar -> AEStar
+
+let rec mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFunc : 'f1 -> Task<'f2>) (queryFunc : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
     let rec traverse = function
         | FEValue value -> Task.map FEValue (valueFunc value)
         | FERef r -> Task.map FERef (refFunc r)
@@ -713,10 +737,17 @@ let mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFunc :
         | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTaskSync (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> Task.map2Sync (curry FEJsonArrow) (traverse a) (traverse b)
         | FEJsonTextArrow (a, b) -> Task.map2Sync (curry FEJsonTextArrow) (traverse a) (traverse b)
+        | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTaskSync traverse args)
+        | FEAggFunc (name, args) -> Task.map (fun x -> FEAggFunc (name, x)) (mapTaskSyncAggExpr traverse args)
         | FESubquery query -> Task.map FESubquery (queryFunc query)
     traverse
 
-let iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
+and mapTaskSyncAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>) : AggExpr<'e1, 'f1> -> Task<AggExpr<'e2, 'f2>> = function
+    | AEAll exprs -> Task.map AEAll (Array.mapTaskSync func exprs)
+    | AEDistinct expr -> Task.map AEDistinct (func expr)
+    | AEStar -> Task.result AEStar
+
+let rec iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
     let rec traverse = function
         | FEValue value -> valueFunc value
         | FERef r -> refFunc r
@@ -747,8 +778,15 @@ let iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (query
         | FEJsonObject obj -> Map.iter (fun name -> traverse) obj
         | FEJsonArrow (a, b) -> traverse a; traverse b
         | FEJsonTextArrow (a, b) -> traverse a; traverse b
+        | FEFunc (name, args) -> Array.iter traverse args
+        | FEAggFunc (name, args) -> iterAggExpr traverse args
         | FESubquery query -> queryFunc query
     traverse
+
+and iterAggExpr (func : FieldExpr<'e, 'f> -> unit) : AggExpr<'e, 'f> -> unit = function
+    | AEAll exprs -> Array.iter func exprs
+    | AEDistinct expr -> func expr
+    | AEStar -> ()
 
 let emptyOrderLimitClause = { orderBy = [||]; limit = None; offset = None }
 
@@ -840,3 +878,14 @@ let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal
 
 let relaxEntityRef (ref : ResolvedEntityRef) : EntityRef =
     { schema = Some ref.schema; name = ref.name }
+
+let allowedAggregateFunctions =
+    Set.ofSeq
+        [ FunQLName "sum"
+          FunQLName "avg"
+        ]
+
+let allowedFunctions =
+    Set.ofSeq
+        [ FunQLName "abs"
+        ]

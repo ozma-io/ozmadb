@@ -248,7 +248,7 @@ let private validJsonValue = function
     | SQL.VDateTimeArray _ -> true
     | _ -> false
 
-let genericCompileFieldExpr (refFunc : 'f -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
+let rec genericCompileFieldExpr (refFunc : 'f -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
     let rec traverse = function
         | FEValue v -> compileFieldValue v
         | FERef c -> refFunc c
@@ -301,8 +301,15 @@ let genericCompileFieldExpr (refFunc : 'f -> SQL.ValueExpr) (queryFunc : SelectE
                 SQL.VEFunc (SQL.SQLName "jsonb_build_object", args)
         | FEJsonArrow (a, b) -> SQL.VEJsonArrow (traverse a, traverse b)
         | FEJsonTextArrow (a, b) -> SQL.VEJsonTextArrow (traverse a, traverse b)
+        | FEFunc (name,  args) -> SQL.VEFunc (compileName name, Array.map traverse args)
+        | FEAggFunc (name,  args) -> SQL.VEAggFunc (compileName name, genericCompileAggExpr traverse args)
         | FESubquery query -> SQL.VESubquery (queryFunc query)
     traverse
+
+and genericCompileAggExpr (func : FieldExpr<'e, 'f> -> SQL.ValueExpr) : AggExpr<'e, 'f> -> SQL.AggExpr = function
+    | AEAll exprs -> SQL.AEAll (Array.map func exprs)
+    | AEDistinct expr -> SQL.AEDistinct (func expr)
+    | AEStar -> SQL.AEStar
 
 let rec compileLocalComputedField (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LinkedLocalFieldExpr) : SQL.ValueExpr =
         let compileReference (ref : LinkedFieldName) =
@@ -476,10 +483,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
                     let idColumn = makeColumn funId [||]
                     let arg = { ref = VRPlaceholder name; path = [||] }
-                    let fromClause =
-                        { from = FEntity (None, argEntityRef)
-                          where = Some <| FEEq (FERef idColumn, FERef arg)
-                        }
 
                     let result =
                         { attributes = Map.empty
@@ -488,7 +491,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     let selectClause =
                         { attributes = Map.empty
                           results = [| result |]
-                          clause = Some fromClause
+                          from = Some <| FEntity (None, argEntityRef)
+                          where = Some <| FEEq (FERef idColumn, FERef arg)
+                          groupBy = [||]
                           orderLimit = emptyOrderLimitClause
                         } : ResolvedSingleSelectExpr
                     let flags =
@@ -570,13 +575,26 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     and compileSingleSelectExpr (flags : SelectFlags) (select : ResolvedSingleSelectExpr) : SelectInfo * SQL.SingleSelectExpr =
         let mutable paths = Map.empty
 
-        let (fromMap, queryClause) =
-            match select.clause with
-            | Some clause ->
-                let (newPaths, domainsMap, ret) = compileFromClause flags.hasMainEntity paths clause
-                paths <- newPaths
-                (domainsMap, Some ret)
+        let (fromMap, from) =
+            match select.from with
+            | Some from ->
+                let (fromMap, newFrom) = compileFromExpr flags.hasMainEntity from
+                (fromMap, Some newFrom)
             | None -> (Map.empty, None)
+
+        let where =
+            match select.where with
+            | None -> None
+            | Some where ->
+                let (newPaths, ret) = compileLinkedFieldExpr paths where
+                paths <- newPaths
+                Some ret
+
+        let compileGroupBy expr =
+            let (newPaths, compiled) = compileLinkedFieldExpr paths expr
+            paths <- newPaths
+            compiled
+        let groupBy = Array.map compileGroupBy select.groupBy
 
         let compileRowAttr (name, expr) =
             let attrCol = CTRowAttribute name
@@ -588,6 +606,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             |> Map.toSeq
             |> Seq.map compileRowAttr
 
+        let addMetaColumns = flags.metaColumns && Array.isEmpty groupBy
+
         // We keep Id columns map to remove duplicates.
         let mutable ids = Map.empty
 
@@ -597,7 +617,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             paths <- newPaths
 
             match resultFieldRef result.result with
-            | Some ({ ref = { ref = { entity = Some ({ name = entityName } as entityRef); name = fieldName } } } as resultRef) when flags.metaColumns ->
+            | Some ({ ref = { ref = { entity = Some ({ name = entityName } as entityRef); name = fieldName } } } as resultRef) when addMetaColumns ->
                 let newName = result.result.ToName ()
                 let fromInfo = Map.find entityName fromMap
                 let tableRef : SQL.TableRef = { schema = None; name = compileName entityName }
@@ -768,7 +788,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let resultEntries = select.results |> Seq.map getResultEntry |> Seq.toArray
         let emptyDomains = DSingle (newGlobalDomainId (), Map.empty)
         let (attributes, newDomains, columns) =
-            if flags.metaColumns then
+            if addMetaColumns then
                 let resultColumns = resultEntries |> Seq.collect (fun entry -> entry.columns) |> Seq.distinct
                 let newDomains = resultEntries |> Seq.mapMaybe (fun entry -> entry.domains) |> Seq.fold mergeDomains emptyDomains
                 let queryAttrs = Seq.fold2 (fun attrsMap result entry -> Map.add (result.result.ToName ()) entry.attributes attrsMap) Map.empty select.results resultEntries
@@ -792,19 +812,18 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 (Map.empty, emptyDomains, columns)
         let (newOrderLimitPaths, orderLimit) = compileOrderLimitClause paths select.orderLimit
 
-        let newClause =
+        let newFrom =
             if Map.isEmpty newOrderLimitPaths then
-                queryClause
+                from
             else
-                let clause = Option.get queryClause
-                Some
-                    { clause with
-                          from = buildJoins clause.from newOrderLimitPaths
-                    }
+                let fromVal = Option.get from
+                Some <| buildJoins fromVal newOrderLimitPaths
 
         let query =
             { columns = Array.map snd columns
-              clause = newClause
+              from = newFrom
+              where = where
+              groupBy = groupBy
               orderLimit = orderLimit
             } : SQL.SingleSelectExpr
 
@@ -837,16 +856,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let attrs = result.attributes |> Map.toSeq |> Seq.map compileAttr
         let cols = Seq.append (Seq.singleton resultColumn) attrs |> Seq.toArray
         (paths, Array.toSeq cols)
-
-    and compileFromClause (hasMainEntity : bool) (paths0 : JoinPaths) (clause : ResolvedFromClause) : JoinPaths * FromMap * SQL.FromClause =
-        let (fromMap, from) = compileFromExpr hasMainEntity clause.from
-        let (newPaths, where) =
-            match clause.where with
-            | None -> (paths0, None)
-            | Some where ->
-                let (newPaths, ret) = compileLinkedFieldExpr paths0 where
-                (newPaths, Some ret)
-        (newPaths, fromMap, { from = from; where = where })
 
     and buildJoins (from : SQL.FromExpr) (paths : JoinPaths) : SQL.FromExpr =
         Map.fold joinPath from paths
@@ -929,6 +938,17 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             (Map.singleton name fromInfo, ret)
 
+    member this.CompileSingleFromClause (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) =
+        let (fromMap, from) = compileFromExpr false from
+        let (newPaths, where) =
+            match where with
+            | None -> (Map.empty, None)
+            | Some where ->
+                let (newPaths, ret) = compileLinkedFieldExpr Map.empty where
+                (newPaths, Some ret)
+        let builtFrom = buildJoins from newPaths
+        (builtFrom, where)
+
     member this.CompileSelectExpr (hasMainEntity : bool) =
         let flags =
             { hasMainEntity = hasMainEntity
@@ -936,12 +956,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               metaColumns = true
             }
         compileSelectExpr flags
-
-    member this.CompileSingleFromClause (clause : ResolvedFromClause) =
-        let (paths, domainsMap, compiled) = compileFromClause false Map.empty clause
-        { compiled with
-              from = buildJoins compiled.from paths
-        }
 
     member this.Arguments = arguments
 
@@ -1027,13 +1041,13 @@ let rec private flattenDomains : Domains -> FlattenedDomains = function
     | DSingle (id, dom) -> Map.singleton id dom
     | DMulti (ns, subdoms) -> subdoms |> Map.values |> Seq.fold (fun m subdoms -> Map.union m (flattenDomains subdoms)) Map.empty
 
-let compileSingleFromClause (layout : Layout) (argumentsMap : CompiledArgumentsMap) (clause : ResolvedFromClause) : SQL.FromClause =
+let compileSingleFromClause (layout : Layout) (argumentsMap : CompiledArgumentsMap) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : SQL.FromExpr * SQL.ValueExpr option =
     let bogusArguments =
         { types = argumentsMap
           lastPlaceholderId = 0
         }
     let compiler = QueryCompiler (layout, emptyMergedDefaultAttributes, bogusArguments)
-    compiler.CompileSingleFromClause clause
+    compiler.CompileSingleFromClause from where
 
 let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
     let compiler = QueryCompiler (layout, defaultAttrs, compileArguments viewExpr.arguments)
@@ -1050,7 +1064,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
         if Array.isEmpty onlyPureAttrs then
             None
         else
-            let query = SQL.SSelect { columns = Array.map (fun info -> info.result) onlyPureAttrs; clause = None; orderLimit = SQL.emptyOrderLimitClause }
+            let query = SQL.SSelect { columns = Array.map (fun info -> info.result) onlyPureAttrs; from = None; where = None; groupBy = [||]; orderLimit = SQL.emptyOrderLimitClause }
 
             let getPureAttribute (info : PureColumn) =
                 match info.columnType with

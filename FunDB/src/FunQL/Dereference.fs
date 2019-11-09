@@ -66,21 +66,18 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
 
     and resolveSingleSelectExpr (query : ResolvedSingleSelectExpr) : ResolvedSingleSelectExpr =
             let attributes = resolveAttributes query.attributes
-            let clause = Option.map resolveFromClause query.clause
+            let from = Option.map resolveFromExpr query.from
+            let where = Option.map resolveFieldExpr query.where
+            let groupBy = Array.map resolveFieldExpr query.groupBy
             let results = Array.map resolveResult query.results
             let orderLimit = resolveOrderLimitClause query.orderLimit
             { attributes = attributes
-              clause = clause
+              from = from
+              where = where
+              groupBy = groupBy
               results = results
               orderLimit = orderLimit
             }
-
-    and resolveFromClause (clause : ResolvedFromClause) : ResolvedFromClause =
-        let from = resolveFromExpr clause.from
-        let where = Option.map resolveFieldExpr clause.where
-        { from = from
-          where = where
-        }
 
     and resolveFromExpr : ResolvedFromExpr -> ResolvedFromExpr = function
         | FEntity (pun, name) -> FEntity (pun, name)

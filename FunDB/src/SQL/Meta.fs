@@ -284,7 +284,8 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
         | VEInQuery (e, query) -> raisef SQLMetaException "Invalid subquery in local expression: %O" query
         | VENotInQuery (e, query) -> raisef SQLMetaException "Invalid subquery in local expression: %O" query
-        | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
+        | VEFunc (name, args) -> VEFunc (name, Array.map traverse args)
+        | VEAggFunc (name, args) -> raisef SQLMetaException "Invalid aggregate function in local expression: %O" name
         | VECase (es, els) -> VECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
         | VECoalesce vals -> VECoalesce (Array.map traverse vals)
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)

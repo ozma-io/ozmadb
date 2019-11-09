@@ -249,6 +249,7 @@ let findSimpleType (str : SQLRawString) : SimpleType option =
     match str.ToString() with
     | "int4" -> Some STInt
     | "integer" -> Some STInt
+    | "bigint" -> Some STInt
     | "text" -> Some STString
     | "decimal" -> Some STDecimal
     | "numeric" -> Some STDecimal
@@ -400,6 +401,7 @@ type [<NoComparison>] ValueExpr =
     | VEIsNull of ValueExpr
     | VEIsNotNull of ValueExpr
     | VEFunc of SQLName * ValueExpr[]
+    | VEAggFunc of SQLName * AggExpr
     | VECast of ValueExpr * DBValueType
     | VECase of (ValueExpr * ValueExpr)[] * (ValueExpr option)
     | VECoalesce of ValueExpr[]
@@ -440,6 +442,7 @@ type [<NoComparison>] ValueExpr =
             | VEIsNull a -> sprintf "(%s) IS NULL" (a.ToSQLString())
             | VEIsNotNull a -> sprintf "(%s) IS NOT NULL" (a.ToSQLString())
             | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
+            | VEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args.ToSQLString())
             | VECast (e, typ) -> sprintf "(%s) :: %s" (e.ToSQLString()) (typ.ToSQLString())
             | VECase (es, els) ->
                 let esStr = es |> Seq.map (fun (cond, e) -> sprintf "WHEN %s THEN %s" (cond.ToSQLString()) (e.ToSQLString())) |> String.concat " "
@@ -457,6 +460,24 @@ type [<NoComparison>] ValueExpr =
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
+
+and [<NoComparison>] AggExpr =
+    | AEAll of ValueExpr[]
+    | AEDistinct of ValueExpr
+    | AEStar
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | AEAll exprs ->
+                assert (not <| Array.isEmpty exprs)
+                exprs |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", "
+            | AEDistinct expr -> sprintf "DISTINCT %s" (expr.ToSQLString())
+            | AEStar -> "*"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
 
 and [<NoComparison>] FromExpr =
     | FTable of TableName option * TableRef
@@ -501,26 +522,11 @@ and [<NoComparison>] SelectedColumn =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and [<NoComparison>] FromClause =
-    { from : FromExpr
-      where : ValueExpr option
-    } with
-        override this.ToString () = this.ToSQLString()
-
-        member this.ToSQLString () =
-            let whereStr =
-                match this.where with
-                | None -> ""
-                | Some cond -> sprintf "WHERE %s" (cond.ToSQLString())
-
-            sprintf "FROM %s" (concatWithWhitespaces [this.from.ToSQLString(); whereStr])
-
-        interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString()
-
 and [<NoComparison>] SingleSelectExpr =
     { columns : SelectedColumn[]
-      clause : FromClause option
+      from : FromExpr option
+      where : ValueExpr option
+      groupBy : ValueExpr[]
       orderLimit : OrderLimitClause
     } with
         override this.ToString () = this.ToSQLString()
@@ -528,11 +534,20 @@ and [<NoComparison>] SingleSelectExpr =
         member this.ToSQLString () =
             let resultsStr = this.columns |> Seq.map (fun res -> res.ToSQLString()) |> String.concat ", "
             let fromStr =
-                match this.clause with
+                match this.from with
                 | None -> ""
-                | Some clause -> clause.ToSQLString()
+                | Some from -> sprintf "FROM %s" (from.ToSQLString())
+            let whereStr =
+                match this.where with
+                | None -> ""
+                | Some cond -> sprintf "WHERE %s" (cond.ToSQLString())
+            let groupByStr =
+                if Array.isEmpty this.groupBy then
+                    ""
+                else
+                    sprintf "GROUP BY %s" (this.groupBy |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", ")
 
-            sprintf "SELECT %s" (concatWithWhitespaces [resultsStr; fromStr; this.orderLimit.ToSQLString()])
+            sprintf "SELECT %s" (concatWithWhitespaces [resultsStr; fromStr; whereStr; groupByStr; this.orderLimit.ToSQLString()])
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -583,7 +598,7 @@ and [<NoComparison>] SelectExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-let mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -> int) (queryFunc : SelectExpr -> SelectExpr) : ValueExpr -> ValueExpr =
+let rec mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -> int) (queryFunc : SelectExpr -> SelectExpr) : ValueExpr -> ValueExpr =
     let rec traverse = function
         | VEValue value -> VEValue value
         | VEColumn c -> VEColumn <| colFunc c
@@ -606,7 +621,8 @@ let mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -> in
         | VENotInQuery (e, query) -> VENotInQuery (traverse e, queryFunc query)
         | VEIsNull e -> VEIsNull <| traverse e
         | VEIsNotNull e -> VEIsNotNull <| traverse e
-        | VEFunc (name,  args) -> VEFunc (name, Array.map traverse args)
+        | VEFunc (name, args) -> VEFunc (name, Array.map traverse args)
+        | VEAggFunc (name, args) -> VEAggFunc (name, mapAggExpr traverse args)
         | VECast (e, typ) -> VECast (traverse e, typ)
         | VECase (es, els) ->
             let es' = Array.map (fun (cond, e) -> (traverse cond, traverse e)) es
@@ -618,7 +634,12 @@ let mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -> in
         | VESubquery query -> VESubquery (queryFunc query)
     traverse
 
-let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) (queryFunc : SelectExpr -> unit) : ValueExpr -> unit =
+and mapAggExpr (func : ValueExpr -> ValueExpr) : AggExpr -> AggExpr = function
+    | AEAll exprs -> AEAll (Array.map func exprs)
+    | AEDistinct expr -> AEDistinct (func expr)
+    | AEStar -> AEStar
+
+let rec iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) (queryFunc : SelectExpr -> unit) : ValueExpr -> unit =
     let rec traverse = function
         | VEValue value -> ()
         | VEColumn c -> colFunc c
@@ -641,7 +662,8 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
         | VENotInQuery (e, query) -> traverse e; queryFunc query
         | VEIsNull e -> traverse e
         | VEIsNotNull e -> traverse e
-        | VEFunc (name,  args) -> Array.iter traverse args
+        | VEFunc (name, args) -> Array.iter traverse args
+        | VEAggFunc (name, args) -> iterAggExpr traverse args
         | VECast (e, typ) -> traverse e
         | VECase (es, els) ->
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
@@ -651,6 +673,11 @@ let iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) 
         | VEJsonTextArrow (a, b) -> traverse a; traverse b
         | VESubquery query -> queryFunc query
     traverse
+
+and iterAggExpr (func : ValueExpr -> unit) : AggExpr -> unit = function
+    | AEAll exprs -> Array.iter func exprs
+    | AEDistinct expr -> func expr
+    | AEStar -> ()
 
 [<NoComparison>]
 type InsertValue =

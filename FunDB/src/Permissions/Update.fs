@@ -106,7 +106,7 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) : Task<bo
             |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
             |> Seq.filter (fun (name, schema) -> Map.containsKey name roles.schemas)
             |> Map.ofSeq
-    
+
         let updater = PermissionsUpdater(db, allSchemas)
         updater.UpdateSchemas roles.schemas schemasMap
         let! changedEntries = db.SaveChangesAsync()

@@ -145,6 +145,9 @@ and tokenizeFunQL = parse
     | u p d a t e       { Parse.UPDATE }
     | o f               { Parse.OF }
     | v a l u e s       { Parse.VALUES }
+    | a l l             { Parse.ALL }
+    | d i s t i n c t   { Parse.DISTINCT }
+    | g r o u p         { Parse.GROUP }
 
     // Types
     | i n t             { Parse.INT_TYPE }

@@ -180,7 +180,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
         let isChanged = isChanged1 || isChanged2
         let! (_, currentVersion) = getCurrentVersion transaction1 isChanged
         // We don't do commit here and instead resolve as much as possible first to fail early.
-    
+
         let! sourceAttrs = buildSchemaAttributes transaction1.System
         let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
 

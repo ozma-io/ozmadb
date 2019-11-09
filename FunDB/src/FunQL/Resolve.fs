@@ -71,7 +71,6 @@ type ResolvedSingleSelectExpr = SingleSelectExpr<ResolvedEntityRef, LinkedBoundF
 type ResolvedQueryResult = QueryResult<ResolvedEntityRef, LinkedBoundFieldRef>
 type ResolvedQueryResultExpr = QueryResultExpr<ResolvedEntityRef, LinkedBoundFieldRef>
 type ResolvedFromExpr = FromExpr<ResolvedEntityRef, LinkedBoundFieldRef>
-type ResolvedFromClause = FromClause<ResolvedEntityRef, LinkedBoundFieldRef>
 type ResolvedAttributeMap = AttributeMap<ResolvedEntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<ResolvedEntityRef, LinkedBoundFieldRef>
 
@@ -176,15 +175,16 @@ let rec private findMainEntityRef : ResolvedFromExpr -> ResolvedEntityRef option
         | Left -> findMainEntityRef a
         | Right -> findMainEntityRef b
         | _ -> None
-    | FSubExpr (name, (SSelect { clause = Some expr })) -> findMainEntityRef expr.from
+    | FSubExpr (name, (SSelect { from = Some from })) -> findMainEntityRef from
     | FSubExpr _ -> None
     | FValues _ -> None
 
 // Returns map from query column names to fields in main entity
 // Be careful as changes here also require changes to main id propagation in the compiler.
 let rec private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFields) : ResolvedSelectExpr -> Map<FieldName, FieldName> option = function
-    | SSelect { results = results; clause = Some clause } ->
-        if findMainEntityRef clause.from = Some ref then
+    | SSelect sel when not (Array.isEmpty sel.groupBy) -> None
+    | SSelect { results = results; from = Some from } ->
+        if findMainEntityRef from = Some ref then
             let getField (result : ResolvedQueryResult) : (FieldName * FieldName) option =
                 let name = result.result.ToName ()
                 match Map.find name fields with
@@ -204,7 +204,6 @@ let rec private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFiel
                 columnsA
             )
         )
-
 
 type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
@@ -431,13 +430,21 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         (results.fields, res)
 
     and resolveSingleSelectExpr (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
-        let (fromMapping, qClause) =
-            match query.clause with
+        let (fromMapping, qFrom) =
+            match query.from with
             | None -> (Map.empty, None)
-            | Some clause ->
-                let (mapping, res) = resolveFromClause clause
+            | Some from ->
+                let (mapping, res) = resolveFromExpr from
                 (mapping, Some res)
-        let rawResults = Array.map (resolveResult fromMapping) query.results
+        let qWhere = Option.map (snd << resolveFieldExpr false fromMapping) query.where
+        let qGroupBy = Array.map (snd << resolveFieldExpr false fromMapping) query.groupBy
+        let dropBoundness = not (Array.isEmpty qGroupBy)
+        let rawResults0 = Array.map (resolveResult fromMapping) query.results
+        let rawResults =
+            if not dropBoundness then
+                rawResults0
+            else
+                Array.map (fun (field, result) -> (unboundSubqueryField, result)) rawResults0
         let results = Array.map snd rawResults
         let newFields =
             try
@@ -447,18 +454,13 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
 
         let newQuery = {
             attributes = resolveAttributes fromMapping query.attributes
-            clause = qClause
+            from = qFrom
+            where = qWhere
+            groupBy = qGroupBy
             results = results
             orderLimit = snd <| resolveOrderLimitClause fromMapping query.orderLimit
         }
         (newFields, newQuery)
-
-    and resolveFromClause (clause : ParsedFromClause) : QMapping * ResolvedFromClause =
-        let (newMapping, qFrom) = resolveFromExpr clause.from
-        let res = { from = qFrom
-                    where = Option.map (snd << resolveFieldExpr false newMapping) clause.where
-                  }
-        (newMapping, res)
 
     and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
         | FEntity (pun, name) ->
