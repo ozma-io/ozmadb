@@ -93,6 +93,8 @@ let compileName (FunQLName name) = SQL.SQLName name
 let decompileName (SQL.SQLName name) = FunQLName name
 
 let sqlFunId = compileName funId
+let sqlFunSubEntity = compileName funSubEntity
+let sqlFunRootEntity = SQL.SQLName "__RootEntity"
 let sqlFunView = compileName funView
 let private funEmpty = FunQLName ""
 
@@ -186,6 +188,8 @@ let private compileEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema =
 let private compileNoSchemaEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema = None; name = compileName entityRef.name }
 
 let compileResolvedEntityRef (entityRef : ResolvedEntityRef) : SQL.TableRef = { schema = Some (compileName entityRef.schema); name = compileName entityRef.name }
+
+let private compileNoSchemaResolvedEntityRef (entityRef : ResolvedEntityRef) : SQL.TableRef = { schema = None; name = compileName entityRef.name }
 
 let private compileFieldRef (fieldRef : FieldRef) : SQL.ColumnRef =
     { table = Option.map compileNoSchemaEntityRef fieldRef.entity; name = compileName fieldRef.name }
@@ -311,34 +315,6 @@ and genericCompileAggExpr (func : FieldExpr<'e, 'f> -> SQL.ValueExpr) : AggExpr<
     | AEDistinct expr -> SQL.AEDistinct (func expr)
     | AEStar -> SQL.AEStar
 
-let rec compileLocalComputedField (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LinkedLocalFieldExpr) : SQL.ValueExpr =
-        let compileReference (ref : LinkedFieldName) =
-            let fieldRef =
-                match ref.ref with
-                | VRColumn c -> c
-                | VRPlaceholder p -> failwith <| sprintf "Unexpected placeholder: %O" p
-            // This is checked during resolve already.
-            assert (Array.isEmpty ref.path)
-            let (_, field) = entity.FindField fieldRef |> Option.get
-            match field with
-            | RId
-            | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName fieldRef }
-            | RComputedField comp -> compileLocalComputedField tableRef entity comp.expression
-        let voidQuery q = failwith <| sprintf "Unexpected query in local computed field expression: %O" q
-        genericCompileFieldExpr compileReference voidQuery expr
-
-let compileLocalFieldExpr (arguments : CompiledArgumentsMap) (tableRef : SQL.TableRef) (entity : ResolvedEntity) (expr : LocalFieldExpr) : SQL.ValueExpr =
-        let compileReference = function
-            | VRColumn name ->
-                let (_, field) = entity.FindField name |> Option.get
-                match field with
-                | RId
-                | RColumnField _ -> SQL.VEColumn { table = Some tableRef; name = compileName name }
-                | RComputedField comp -> compileLocalComputedField tableRef entity comp.expression
-            | VRPlaceholder name -> SQL.VEPlaceholder arguments.[name].placeholderId
-        let voidQuery q = failwith <| sprintf "Unexpected query in local field expression: %O" q
-        genericCompileFieldExpr compileReference voidQuery expr
-
 [<NoComparison>]
 type private ResultColumn =
     { domains : Domains option
@@ -452,7 +428,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let tableRef =
                     match ref.ref.entity with
                     | Some renamedTable -> compileEntityRef renamedTable
-                    | None -> compileResolvedEntityRef boundRef.ref.entity
+                    | None -> compileNoSchemaResolvedEntityRef boundRef.ref.entity
                 let (realName, field) = layout.FindField boundRef.ref.entity boundRef.ref.name |> Option.get
                 // In case it's an immediate name we need to rename outermost field (i.e. `__main`).
                 // If it's not we need to keep original naming.
@@ -884,7 +860,29 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             let domain = mapAllFields makeDomainEntry entity
 
-            let subquery = SQL.FTable (Option.map compileName pun, compileResolvedEntityRef entityRef)
+            let subquery =
+                match entity.inheritance with
+                | None ->
+                    SQL.FTable (Option.map compileName pun, compileResolvedEntityRef entityRef)
+                | Some inheritance ->
+                    let rootEntity = SQL.SCExpr (sqlFunRootEntity, SQL.VEValue (SQL.VString entity.typeName))
+                    let compileInheritedField (name, field) =
+                        SQL.SCExpr (compileName name, SQL.VEColumn { table = None; name = field.columnName })
+                    let systemSeq = [
+                        rootEntity
+                        SQL.SCColumn { table = None; name = sqlFunId }
+                        SQL.SCColumn { table = None; name = sqlFunSubEntity }
+                    ]
+                    let fieldsSeq = entity.columnFields |> Map.toSeq |> Seq.map compileInheritedField
+                    let select =
+                        { columns = Seq.append systemSeq fieldsSeq |> Seq.toArray
+                          from = Some <| SQL.FTable (None, compileResolvedEntityRef entity.root)
+                          where = Some inheritance.checkExpr
+                          groupBy = [||]
+                          orderLimit = SQL.emptyOrderLimitClause
+                        } : SQL.SingleSelectExpr
+                    let expr = SQL.SSelect select
+                    SQL.FSubExpr (compileName entityRef.name, None, expr)
             let fromInfo =
                 { fromType = FTEntity (newGlobalDomainId (), domain)
                   mainId = if hasMainEntity then Some sqlFunId else None

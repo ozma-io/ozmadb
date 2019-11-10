@@ -77,7 +77,10 @@ let private normalizeRole (role : SourceRole) =
     }
 
 let private resolvePreloadedSchema (preload : SourcePreloadedSchema) : PreloadedSchema =
-    let schema = { entities = preload.entities } : SourceSchema
+    let schema =
+        { entities = preload.entities
+          forbidExternalInheritance = true
+        } : SourceSchema
     let permissions = { roles = Map.map (fun name -> normalizeRole) preload.roles }
     let defaultAttributes = { schemas = preload.defaultAttributes } : SourceAttributesDatabase
 
@@ -161,12 +164,24 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         logger.LogInformation("Migrating system entities to the current version")
         let sourceLayout = preloadLayout preload
         let layout = resolveLayout sourceLayout
-        let newSystemMeta = buildLayoutMeta layout
+        let newSystemMeta = buildLayoutMeta layout layout
         let! currentMeta = buildDatabaseMeta conn.Transaction
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
 
         let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
         let! _ = migrateDatabase conn.Connection.Query systemMigration
+
+        // Second migration shouldn't produce any changes.
+        let sanityCheck () =
+            let currentMeta = Task.awaitSync <| buildDatabaseMeta conn.Transaction
+            let currentSystemMeta = filterPreloadedMeta preload currentMeta
+            let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta |> Seq.toArray
+            if Array.isEmpty systemMigration then
+                true
+            else
+                eprintfn "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
+                false
+        assert sanityCheck ()
 
         // We migrate layout first so that permissions and attributes have schemas in the table.
         let! changed1 = updateLayout conn.System sourceLayout
@@ -194,7 +209,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
 
-        let newMeta = buildLayoutMeta newLayout
+        let newMeta = buildLayoutMeta newLayout newLayout
         let newUserMeta = filterUserMeta preload newMeta
         let! currentMeta2 = buildDatabaseMeta conn.Transaction
         let currentUserMeta2 = filterUserMeta preload currentMeta2

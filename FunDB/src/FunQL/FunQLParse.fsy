@@ -236,6 +236,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token DISTINCT
 %token ALL
 %token GROUP
+%token ARRAY
 
 // Types
 %token INT_TYPE
@@ -245,7 +246,6 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token DATETIME_TYPE
 %token DATE_TYPE
 %token REFERENCE_TYPE
-%token ARRAY_TYPE
 %token ENUM_TYPE
 %token JSON_TYPE
 %token UVREF_TYPE
@@ -596,18 +596,22 @@ UserViewRefArrayNonEmpty:
   | UserViewRefArrayList { List.toArray $1 }
 
 Value:
-  | INT                                                 { FInt $1 }
-  | DECIMAL                                             { FDecimal $1 }
-  | STRING                                              { FString $1 }
-  | BOOL                                                { FBool $1 }
-  | UserViewRef                                         { FUserViewRef $1 }
-  | LEFT_BRACKET RIGHT_BRACKET                          { FStringArray [||] }
-  | LEFT_BRACKET StringArrayNonEmpty      RIGHT_BRACKET { FStringArray $2 }
-  | LEFT_BRACKET IntArrayNonEmpty         RIGHT_BRACKET { FIntArray $2 }
-  | LEFT_BRACKET BoolArrayNonEmpty        RIGHT_BRACKET { FBoolArray $2 }
-  | LEFT_BRACKET DecimalArrayNonEmpty     RIGHT_BRACKET { FDecimalArray $2 }
-  | LEFT_BRACKET UserViewRefArrayNonEmpty RIGHT_BRACKET { FUserViewRefArray $2 }
-  | NULL                                                { FNull }
+  | INT                                    { FInt $1 }
+  | DECIMAL                                { FDecimal $1 }
+  | STRING                                 { FString $1 }
+  | BOOL                                   { FBool $1 }
+  | UserViewRef                            { FUserViewRef $1 }
+  | LEFT_BRACKET Array RIGHT_BRACKET       { $2 } // Deprecated syntax
+  | ARRAY LEFT_BRACKET Array RIGHT_BRACKET { $3 }
+  | NULL                                   { FNull }
+
+Array:
+  |                          { FStringArray [||] }
+  | StringArrayNonEmpty      { FStringArray $1 }
+  | IntArrayNonEmpty         { FIntArray $1 }
+  | BoolArrayNonEmpty        { FBoolArray $1 }
+  | DecimalArrayNonEmpty     { FDecimalArray $1 }
+  | UserViewRefArrayNonEmpty { FUserViewRefArray $1 }
 
 UserViewRef:
   | AMPERSAND EntityRef { $2 }
@@ -642,8 +646,8 @@ ScalarType:
   | UVREF_TYPE    { SFTUserViewRef }
 
 FieldExprType:
-  | ScalarType                                    { FETScalar $1 }
-  | ARRAY_TYPE LEFT_PAREN ScalarType RIGHT_PAREN  { FETArray $3 }
+  | ScalarType                               { FETScalar $1 }
+  | ARRAY LEFT_PAREN ScalarType RIGHT_PAREN  { FETArray $3 }
 
 FieldType:
   | FieldExprType                                                   { FTType $1 }

@@ -46,6 +46,9 @@ type SourceEntity =
       forbidExternalReferences : bool
       [<JsonProperty(Required=Required.DisallowNull)>]
       hidden : bool
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      isAbstract : bool
+      parent : ResolvedEntityRef option
     } with
         member this.FindField (name : FieldName) =
             if name = funId then
@@ -63,10 +66,14 @@ type SourceEntity =
 type SourceSchema =
     { [<JsonProperty(Required=Required.DisallowNull)>]
       entities : Map<EntityName, SourceEntity>
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      forbidExternalInheritance : bool
     }
 
 let emptySourceSchema : SourceSchema =
-    { entities = Map.empty }
+    { entities = Map.empty
+      forbidExternalInheritance = false
+    }
 
 type SourceLayout =
     { [<JsonProperty(Required=Required.DisallowNull)>]

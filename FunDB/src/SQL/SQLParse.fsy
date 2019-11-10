@@ -46,6 +46,9 @@ open FunWithFlags.FunDB.SQL.AST
 %token ELSE
 %token END
 %token COALESCE
+%token ARRAY
+%token ANY
+%token SOME
 
 // Misc
 %token EOF
@@ -79,49 +82,61 @@ schemaObject : SchemaObject EOF { $1 }
 // Expressions
 
 ValueExpr:
-  | ValueExpr OR ValueExpr  { VEOr ($1, $3) }
-  | ValueExpr AND ValueExpr { VEAnd ($1, $3) }
-  | NOT ValueExpr           { VENot $2 }
-  | ValueExpr EQ ValueExpr  { VEEq ($1, $3) }
-  | ValueExprLess           { $1 }
+  | ValueExpr OR ValueExpr                            { VEOr ($1, $3) }
+  | ValueExpr AND ValueExpr                           { VEAnd ($1, $3) }
+  | NOT ValueExpr                                     { VENot $2 }
+  | ValueExpr EQ ValueExpr                            { VEEq ($1, $3) }
+  | ValueExpr EQ Any LEFT_PAREN ValueExpr RIGHT_PAREN { VEEqAny ($1, $5) }
+  | ValueExprLess                                     { $1 }
 
 ValueExprLess:
-  | ValueExprMisc LESS ValueExprMisc        { VELess ($1, $3) }
-  | ValueExprMisc GREATER ValueExprMisc     { VEGreater ($1, $3) }
-  | ValueExprMisc LIKE ValueExprMisc        { VELike ($1, $3) }
-  | ValueExprMisc NOT LIKE ValueExprMisc    { VENotLike ($1, $4) }
-  | ValueExprMisc LIKE_OP ValueExprMisc     { VELike ($1, $3) }
-  | ValueExprMisc NOT_LIKE_OP ValueExprMisc { VENotLike ($1, $3) }
-  | ValueExprMisc IN NonEmptyExprList       { VEIn ($1, $3) }
-  | ValueExprMisc NOT IN NonEmptyExprList   { VENotIn ($1, $4) }
-  | ValueExprMisc                           { $1 }
+  | ValueExprMisc LESS ValueExprMisc             { VELess ($1, $3) }
+  | ValueExprMisc GREATER ValueExprMisc          { VEGreater ($1, $3) }
+  | ValueExprMisc LIKE ValueExprMisc             { VELike ($1, $3) }
+  | ValueExprMisc NOT LIKE ValueExprMisc         { VENotLike ($1, $4) }
+  | ValueExprMisc LIKE_OP ValueExprMisc          { VELike ($1, $3) }
+  | ValueExprMisc NOT_LIKE_OP ValueExprMisc      { VENotLike ($1, $3) }
+  | ValueExprMisc IN ParenedNonEmptyExprList     { VEIn ($1, $3) }
+  | ValueExprMisc NOT IN ParenedNonEmptyExprList { VENotIn ($1, $4) }
+  | ValueExprMisc                                { $1 }
 
 ValueExprMisc:
-  | ValueExprMisc CONCAT ValueExprMisc     { VEConcat ($1, $3) }
-  | ValueExprMisc ARROW ValueExprMisc      { VEJsonArrow ($1, $3) }
-  | ValueExprMisc NOT_EQ ValueExprMisc     { VENotEq ($1, $3) }
-  | ValueExprMisc LESS_EQ ValueExprMisc    { VELessEq ($1, $3) }
-  | ValueExprMisc GREATER_EQ ValueExprMisc { VEGreaterEq ($1, $3) }
-  | ValueExprMisc IS NULL                  { VEIsNull $1 }
-  | ValueExprMisc IS NOT NULL              { VEIsNotNull $1 }
-  | ValueExprMisc DOUBLE_COLON ValueType   { VECast ($1, $3) }
-  | COALESCE NonEmptyExprList              { VECoalesce $2 }
-  | CaseExpr                               { $1 }
-  | Name ExprList                          { VEFunc ($1, $2) }
-  | ColumnRef                              { VEColumn $1 }
-  | Value                                  { VEValue $1 }
-  | LEFT_PAREN ValueExpr RIGHT_PAREN       { $2 }
+  | ValueExprMisc CONCAT ValueExprMisc        { VEConcat ($1, $3) }
+  | ValueExprMisc ARROW ValueExprMisc         { VEJsonArrow ($1, $3) }
+  | ValueExprMisc NOT_EQ ValueExprMisc        { VENotEq ($1, $3) }
+  | ValueExprMisc LESS_EQ ValueExprMisc       { VELessEq ($1, $3) }
+  | ValueExprMisc GREATER_EQ ValueExprMisc    { VEGreaterEq ($1, $3) }
+  | ValueExprMisc IS NULL                     { VEIsNull $1 }
+  | ValueExprMisc IS NOT NULL                 { VEIsNotNull $1 }
+  | ValueExprMisc DOUBLE_COLON ValueType      { VECast ($1, $3) }
+  | COALESCE ParenedNonEmptyExprList          { VECoalesce $2 }
+  | CaseExpr                                  { $1 }
+  | Name ParenedExprList                      { VEFunc ($1, $2) }
+  | ColumnRef                                 { VEColumn $1 }
+  | Value                                     { VEValue $1 }
+  | ARRAY LEFT_BRACKET ExprList RIGHT_BRACKET { VEArray $3 }
+  | LEFT_PAREN ValueExpr RIGHT_PAREN          { $2 }
+
+Any:
+  | ANY  { () }
+  | SOME { () }
 
 NonEmptyExprs:
   | ValueExpr                     { [ $1 ] }
   | ValueExpr COMMA NonEmptyExprs { $1 :: $3 }
 
 NonEmptyExprList:
-  | LEFT_PAREN NonEmptyExprs RIGHT_PAREN { List.toArray $2 }
+  | NonEmptyExprs { List.toArray $1 }
+
+ParenedNonEmptyExprList:
+  | LEFT_PAREN NonEmptyExprList RIGHT_PAREN { $2 }
 
 ExprList:
-  | LEFT_PAREN RIGHT_PAREN               { [||] }
-  | LEFT_PAREN NonEmptyExprs RIGHT_PAREN { List.toArray $2 }
+  |                  { [||] }
+  | NonEmptyExprList { $1 }
+
+ParenedExprList:
+  | LEFT_PAREN ExprList RIGHT_PAREN { $2 }
 
 CaseExpr:
   | CASE CaseWhenList CaseElse END { VECase (List.toArray $2, $3) }

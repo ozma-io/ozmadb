@@ -20,17 +20,19 @@ let private tableOperationOrder = function
 // Order for database operations so that dependencies are not violated.
 let private schemaOperationOrder = function
     | SODeleteConstraint _ -> 1
-    | SODeleteTable _ -> 2
-    | SODeleteSequence _ -> 3
-    | SODeleteSchema _ -> 4
-    | SOCreateSchema _ -> 5
-    | SOCreateTable _ -> 6
-    | SOCreateSequence _ -> 7
-    | SOAlterTable _ -> 8
-    | SOCreateConstraint (_, _, CMPrimaryKey _) -> 9
-    | SOCreateConstraint (_, _, CMUnique _) -> 10
-    | SOCreateConstraint (_, _, CMForeignKey _) -> 11
-    | SOCreateConstraint (_, _, CMCheck _) -> 12
+    | SODeleteIndex _ -> 2
+    | SODeleteTable _ -> 3
+    | SODeleteSequence _ -> 4
+    | SODeleteSchema _ -> 5
+    | SOCreateSchema _ -> 6
+    | SOCreateTable _ -> 7
+    | SOCreateSequence _ -> 8
+    | SOAlterTable _ -> 9
+    | SOCreateConstraint (_, _, CMPrimaryKey _) -> 10
+    | SOCreateConstraint (_, _, CMUnique _) -> 11
+    | SOCreateConstraint (_, _, CMForeignKey _) -> 12
+    | SOCreateConstraint (_, _, CMCheck _) -> 13
+    | SOCreateIndex _ -> 14
 
 let private deleteBuildTable (table : TableRef) (tableMeta : TableMeta) : MigrationPlan =
     seq { yield SODeleteTable table
@@ -46,6 +48,8 @@ let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta
                       yield SODeleteSequence objRef
                   | OMConstraint (tableName, constraintMeta) ->
                       yield SODeleteConstraint (objRef, tableName)
+                  | OMIndex (tableName, indexMeta) ->
+                      yield SODeleteIndex objRef
           yield SODeleteSchema schemaName
         }
 
@@ -102,6 +106,13 @@ let private migrateBuildSchema (schema : SchemaName) (fromMeta : SchemaMeta) (to
                                   yield SODeleteConstraint (objRef, oldTableName)
                                   yield SOCreateConstraint (objRef, tableName, constraintType)
                           | _ -> yield SOCreateConstraint (objRef, tableName, constraintType)
+                  | OMIndex (tableName, index) ->
+                      match Map.tryFind objectName fromMeta.objects with
+                          | Some (OMIndex (oldTableName, oldIndex)) ->
+                              if tableName <> oldTableName || index <> oldIndex then
+                                  yield SODeleteIndex objRef
+                                  yield SOCreateIndex (objRef, tableName, index)
+                          | _ -> yield SOCreateIndex (objRef, tableName, index)
 
           for KeyValue (objectName, obj) in fromMeta.objects do
               let objRef = { schema = Some schema; name = objectName }
@@ -118,6 +129,10 @@ let private migrateBuildSchema (schema : SchemaName) (fromMeta : SchemaMeta) (to
                       match Map.tryFind objectName toMeta.objects with
                           | Some (OMConstraint _) -> ()
                           | _ -> yield SODeleteConstraint (objRef, tableName)
+                  | OMIndex (tableName, _) ->
+                      match Map.tryFind objectName toMeta.objects with
+                          | Some (OMIndex _) -> ()
+                          | _ -> yield SODeleteIndex objRef
         }
 
 let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =

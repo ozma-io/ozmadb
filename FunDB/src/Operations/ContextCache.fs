@@ -84,7 +84,6 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
     let filterUserLayout (layout : Layout) : Layout =
         { schemas = filterUserSchemas preload layout.schemas }
 
-
     // Returns a version and whether a rebuild should be force-performed.
     let getCurrentVersion (conn : DatabaseTransaction) (bump : bool) : Task<bool * int> = task {
         let! state = conn.System.State.AsTracking().ToDictionaryAsync(fun x -> x.Name)
@@ -330,7 +329,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     raisef ContextException "Cannot modify system user views"
 
                 // Actually migrate.
-                let wantedUserMeta = buildLayoutMeta (filterUserLayout layout)
+                let wantedUserMeta = buildLayoutMeta layout (filterUserLayout layout)
                 let migration = planDatabaseMigration oldState.userMeta wantedUserMeta
                 let! migrared = task {
                     try

@@ -41,6 +41,8 @@ type SchemaDump =
       userViews : Map<UserViewName, SourceUserView>
       [<JsonProperty(Required=Required.DisallowNull)>]
       defaultAttributes : Map<SchemaName, SourceAttributesSchema>
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      forbidExternalInheritance : bool
     }
 
 let saveSchema (db : SystemContext) (name : SchemaName) : Task<SchemaDump> =
@@ -63,12 +65,13 @@ let saveSchema (db : SystemContext) (name : SchemaName) : Task<SchemaDump> =
               roles = roles.roles
               userViews = userViews.userViews
               defaultAttributes = attributes.schemas
+              forbidExternalInheritance = entities.forbidExternalInheritance
             }
     }
 
 let restoreSchema (db : SystemContext) (name : SchemaName) (dump : SchemaDump) : Task<bool> =
     task {
-        let newLayout = { schemas = Map.singleton name { entities = dump.entities } } : SourceLayout
+        let newLayout = { schemas = Map.singleton name { entities = dump.entities; forbidExternalInheritance = dump.forbidExternalInheritance } } : SourceLayout
         let newPerms = { schemas = Map.singleton name { roles = dump.roles } } : SourcePermissions
         let newUserViews = { schemas = Map.singleton name { userViews = dump.userViews } } : SourceUserViews
         let newAttributes = { schemas = Map.singleton name { schemas = dump.defaultAttributes } } : SourceDefaultAttributes

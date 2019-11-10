@@ -42,10 +42,16 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         else FunQLName entity.MainField
       forbidExternalReferences = entity.ForbidExternalReferences
       hidden = entity.Hidden
+      parent =
+        if entity.Parent = null
+        then None
+        else Some { schema = FunQLName entity.Parent.Schema.Name; name = FunQLName entity.Parent.Name }
+      isAbstract = entity.IsAbstract
     }
 
 let private makeSourceSchema (schema : Schema) : SourceSchema =
     { entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
+      forbidExternalInheritance = schema.ForbidExternalInheritance
     }
 
 let buildSchemaLayout (db : SystemContext) : Task<SourceLayout> =

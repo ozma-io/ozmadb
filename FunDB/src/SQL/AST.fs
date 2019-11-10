@@ -39,6 +39,7 @@ type SchemaName = SQLName
 type TableName = SQLName
 type ColumnName = SQLName
 type ConstraintName = SQLName
+type IndexName = SQLName
 type SequenceName = SQLName
 
 // Values
@@ -128,8 +129,8 @@ type [<JsonConverter(typeof<ValueConverter>)>] [<NoComparison>] Value =
                         | AVValue v -> func v
                         | AVArray vals -> renderArrayInsides vals
                         | AVNull -> "NULL"
-                    arr |> Seq.map renderValue |> String.concat ", " |> sprintf "{%s}"
-                sprintf "E%s :: %s[]" (renderArrayInsides arr |> renderSqlString) typeName
+                    arr |> Seq.map renderValue |> String.concat ", " |> sprintf "ARRAY[%s]"
+                sprintf "%s :: %s[]" (renderArrayInsides arr) typeName
 
             match this with
             | VInt i -> renderSqlInt i
@@ -142,12 +143,12 @@ type [<JsonConverter(typeof<ValueConverter>)>] [<NoComparison>] Value =
             | VJson j -> sprintf "%s :: jsonb" (j |> renderSqlJson |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
-            | VStringArray vals -> renderArray renderSqlArrayString "text" vals
+            | VStringArray vals -> renderArray renderSqlString "text" vals
             | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-            | VDateTimeArray vals -> renderArray (renderSqlDateTime >> renderSqlArrayString) "timestamp" vals
-            | VDateArray vals -> renderArray (renderSqlDate >> renderSqlArrayString) "date" vals
+            | VDateTimeArray vals -> renderArray renderSqlDateTime "timestamp" vals
+            | VDateArray vals -> renderArray renderSqlDate "date" vals
             | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
-            | VJsonArray vals -> renderArray (renderSqlJson >> renderSqlArrayString) "jsonb" vals
+            | VJsonArray vals -> renderArray renderSqlJson "jsonb" vals
             | VNull -> "NULL"
 
         interface ISQLString with
@@ -387,6 +388,7 @@ type [<NoComparison>] ValueExpr =
     | VEOr of ValueExpr * ValueExpr
     | VEConcat of ValueExpr * ValueExpr
     | VEEq of ValueExpr * ValueExpr
+    | VEEqAny of ValueExpr * ValueExpr
     | VENotEq of ValueExpr * ValueExpr
     | VELike of ValueExpr * ValueExpr
     | VENotLike of ValueExpr * ValueExpr
@@ -407,6 +409,7 @@ type [<NoComparison>] ValueExpr =
     | VECoalesce of ValueExpr[]
     | VEJsonArrow of ValueExpr * ValueExpr
     | VEJsonTextArrow of ValueExpr * ValueExpr
+    | VEArray of ValueExpr[]
     | VESubquery of SelectExpr
     with
         override this.ToString () = this.ToSQLString()
@@ -424,6 +427,7 @@ type [<NoComparison>] ValueExpr =
             | VEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEEqAny (e, arr) -> sprintf "(%s) = ANY (%s)" (e.ToSQLString()) (arr.ToSQLString())
             | VENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
             | VENotLike (e, pat) -> sprintf "(%s) NOT LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
@@ -456,6 +460,7 @@ type [<NoComparison>] ValueExpr =
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEArray vals -> sprintf "ARRAY[%s]" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VESubquery query -> sprintf "(%s)" (query.ToSQLString())
 
         interface ISQLString with
@@ -608,6 +613,7 @@ let rec mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
         | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
         | VEEq (a, b) -> VEEq (traverse a, traverse b)
+        | VEEqAny (e, arr) -> VEEqAny (traverse e, traverse arr)
         | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
         | VELike (e, pat) -> VELike (traverse e, traverse pat)
         | VENotLike (e, pat) -> VENotLike (traverse e, traverse pat)
@@ -631,6 +637,7 @@ let rec mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -
         | VECoalesce vals -> VECoalesce <| Array.map traverse vals
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
+        | VEArray vals -> VEArray <| Array.map traverse vals
         | VESubquery query -> VESubquery (queryFunc query)
     traverse
 
@@ -649,6 +656,7 @@ let rec iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> un
         | VEOr (a, b) -> traverse a; traverse b
         | VEConcat (a, b) -> traverse a; traverse b
         | VEEq (a, b) -> traverse a; traverse b
+        | VEEqAny (e, arr) -> traverse e; traverse arr
         | VENotEq (a, b) -> traverse a; traverse b
         | VELike (e, pat) -> traverse e; traverse pat
         | VENotLike (e, pat) -> traverse e; traverse pat
@@ -671,6 +679,7 @@ let rec iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> un
         | VECoalesce vals -> Array.iter traverse vals
         | VEJsonArrow (a, b) -> traverse a; traverse b
         | VEJsonTextArrow (a, b) -> traverse a; traverse b
+        | VEArray vals -> Array.iter traverse vals
         | VESubquery query -> queryFunc query
     traverse
 
@@ -802,6 +811,11 @@ type ConstraintMeta =
     | CMForeignKey of TableRef * (ColumnName * ColumnName)[]
 
 [<NoComparison>]
+type IndexMeta =
+    { columns : ColumnName[]
+    }
+
+[<NoComparison>]
 type TableMeta =
     { columns : Map<ColumnName, ColumnMeta>
     }
@@ -810,11 +824,16 @@ let emptyTableMeta =
     { columns = Map.empty
     }
 
+let unionTableMeta (a : TableMeta) (b : TableMeta) =
+    { columns = Map.unionUnique a.columns b.columns
+    }
+
 [<NoComparison>]
 type ObjectMeta =
     | OMTable of TableMeta
     | OMSequence
     | OMConstraint of TableName * ConstraintMeta
+    | OMIndex of TableName * IndexMeta
 
 [<NoComparison>]
 type SchemaMeta =
@@ -869,6 +888,8 @@ type SchemaOperation =
     // Constraint operations are not plain ALTER TABLE operations because they create new objects at schema namespace.
     | SOCreateConstraint of SchemaObject * TableName * ConstraintMeta
     | SODeleteConstraint of SchemaObject * TableName
+    | SOCreateIndex of SchemaObject * TableName * IndexMeta
+    | SODeleteIndex of SchemaObject
     | SOAlterTable of TableRef * TableOperation[]
     with
         override this.ToString () = this.ToSQLString()
@@ -897,6 +918,12 @@ type SchemaOperation =
                     | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
                 sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) constraintStr
             | SODeleteConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
+            | SOCreateIndex (index, table, pars) ->
+                let cols =
+                    assert (not <| Array.isEmpty pars.columns)
+                    pars.columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                sprintf "CREATE INDEX %s ON %s (%s)" (index.name.ToSQLString()) ({ index with name = table }.ToSQLString()) cols
+            | SODeleteIndex index -> sprintf "DROP INDEX %s" (index.ToSQLString())
             | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
 
         interface ISQLString with

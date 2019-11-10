@@ -1,7 +1,7 @@
 module FunWithFlags.FunDB.Layout.Update
 
+open System
 open System.Threading.Tasks
-open System.Linq
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
@@ -9,7 +9,16 @@ open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 
-type private LayoutUpdater (db : SystemContext) =
+let private entityToInfo (entity : Entity) = entity.Id
+let private makeEntity schemaName (entity : Entity) = ({ schema = schemaName; name = FunQLName entity.Name }, entityToInfo entity)
+let private makeSchema (schema : Schema) = Seq.map (makeEntity (FunQLName schema.Name)) schema.Entities
+
+let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, int> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
+
+type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
+    let allEntitiesMap = makeAllEntitiesMap allSchemas
+    let mutable needsParentPass = false
+
     let updateColumnFields (entity : Entity) : Map<FieldName, SourceColumnField> -> Map<FieldName, ColumnField> -> unit =
         let updateColumnFunc _ (newColumn : SourceColumnField) (oldColumn : ColumnField) =
             let def =
@@ -83,8 +92,23 @@ type private LayoutUpdater (db : SystemContext) =
             existingEntity.MainField <- entity.mainField.ToString()
         existingEntity.ForbidExternalReferences <- entity.forbidExternalReferences
         existingEntity.Hidden <- entity.hidden
+        existingEntity.IsAbstract <- entity.isAbstract
+        match entity.parent with
+        | None ->
+            existingEntity.ParentId <- Nullable()
+        | Some ref ->
+            if not <| isNull existingEntity.Parent then
+                if not (FunQLName existingEntity.Parent.Schema.Name = ref.schema && FunQLName existingEntity.Parent.Name = ref.name) then
+                    match Map.tryFind ref allEntitiesMap with
+                    | None ->
+                        existingEntity.ParentId <- Nullable()
+                        needsParentPass <- true
+                    | Some id ->
+                        existingEntity.ParentId <- Nullable(id)
 
     let updateSchema (schema : SourceSchema) (existingSchema : Schema) : unit =
+        existingSchema.ForbidExternalInheritance <- schema.forbidExternalInheritance
+
         let entitiesMap = existingSchema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
 
         let updateFunc _ = updateEntity
@@ -97,7 +121,7 @@ type private LayoutUpdater (db : SystemContext) =
             newEntity
         updateDifference db updateFunc createFunc schema.entities entitiesMap
 
-    let updateSchemas : Map<SchemaName, SourceSchema> -> Map<SchemaName, Schema> -> unit =
+    let updateSchemas =
         let updateFunc _ = updateSchema
         let createFunc (FunQLName name) =
             let newSchema =
@@ -109,23 +133,51 @@ type private LayoutUpdater (db : SystemContext) =
         updateDifference db updateFunc createFunc
 
     member this.UpdateSchemas = updateSchemas
+    member this.NeedsParentPass = needsParentPass
+
+let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) : Task<unit> =
+    task {
+        let currentSchemas = getLayoutObjects db.Schemas
+        let! schemas = currentSchemas.AsTracking().ToListAsync()
+
+        let allEntitiesMap = makeAllEntitiesMap schemas
+        let neededSchemas =
+            schemas |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.schemas)
+
+        for schema in neededSchemas do
+            for entity in schema.Entities do
+                if not entity.ParentId.HasValue then
+                    let newEntity = layout.FindEntity { schema = FunQLName schema.Name; name = FunQLName entity.Name } |> Option.get
+                    match newEntity.parent with
+                    | None -> ()
+                    | Some ref ->
+                        let id = Map.find ref allEntitiesMap
+                        entity.ParentId <- Nullable(id)
+
+        let! changedEntries = db.SaveChangesAsync()
+        return ()
+    }
 
 let updateLayout (db : SystemContext) (layout : SourceLayout) : Task<bool> =
     task {
         let! _ = db.SaveChangesAsync()
 
-        let schemas = getLayoutObjects db.Schemas
+        let currentSchemas = getLayoutObjects db.Schemas
+        let! schemas = currentSchemas.AsTracking().ToListAsync()
 
         // We don't touch in any way schemas not in layout.
-        let wantedSchemas = layout.schemas |> Map.toSeq |> Seq.map (fun (name, schema) -> name.ToString()) |> Seq.toArray
-        let! schemasList = schemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync()
         let schemasMap =
-            schemasList
+            schemas
+            |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.schemas)
             |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
             |> Map.ofSeq
 
-        let updater = LayoutUpdater db
+        let updater = LayoutUpdater (db, schemas)
         updater.UpdateSchemas layout.schemas schemasMap
         let! changedEntries = db.SaveChangesAsync()
+
+        if updater.NeedsParentPass then
+            do! updateLayoutParents db layout
+
         return changedEntries > 0
     }

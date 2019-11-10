@@ -1,9 +1,11 @@
 module FunWithFlags.FunDB.SQL.Meta
 
+open System
 open System.ComponentModel.DataAnnotations
 open System.Linq
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
+open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
@@ -77,6 +79,7 @@ module PgCatalog =
             { [<Column(TypeName="oid")>]
               [<Key>]
               oid : Oid
+              [<Required>]
               nspname : string
 
               classes : seq<Class>
@@ -91,6 +94,7 @@ module PgCatalog =
             { [<Column(TypeName="oid")>]
               [<Key>]
               oid : Oid
+              [<Required>]
               relname : string
               [<Column(TypeName="oid")>]
               relnamespace : Oid
@@ -100,8 +104,10 @@ module PgCatalog =
               pgNamespace : Namespace
 
               attributes : seq<Attribute>
-              [<InverseProperty("pgClass")>]
+              [<InverseProperty("pgTableClass")>]
               constraints : seq<Constraint>
+              [<InverseProperty("pgTableClass")>]
+              indexes : seq<Index>
             }
 
     and
@@ -112,6 +118,7 @@ module PgCatalog =
         Attribute =
             { [<Column(TypeName="oid")>]
               attrelid : Oid
+              [<Required>]
               attname : string
               [<Column(TypeName="oid")>]
               atttypid : Oid
@@ -120,7 +127,7 @@ module PgCatalog =
               attisdropped : bool
 
               [<ForeignKey("attrelid")>]
-              pgClass : Class
+              pgTableClass : Class
               [<ForeignKey("atttypid")>]
               pgType : Type
 
@@ -136,6 +143,7 @@ module PgCatalog =
             { [<Column(TypeName="oid")>]
               [<Key>]
               oid : Oid
+              [<Required>]
               typname : string
               typtype : char
            }
@@ -152,10 +160,11 @@ module PgCatalog =
               [<Column(TypeName="oid")>]
               adrelid : Oid
               adnum : ColumnNum
+              [<Required>]
               adsrc : string
 
               [<ForeignKey("adrelid")>]
-              pgClass : Class
+              pgTableClass : Class
               attribute : Attribute
             }
 
@@ -173,15 +182,36 @@ module PgCatalog =
               [<Column(TypeName="oid")>]
               conrelid : Oid
               [<Column(TypeName="oid")>]
-              confrelid : Oid
+              confrelid : Nullable<Oid> // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
               conkey : ColumnNum[]
               confkey : ColumnNum[]
               consrc : string
 
               [<ForeignKey("conrelid")>]
-              pgClass : Class
+              pgTableClass : Class
               [<ForeignKey("confrelid")>]
               pgRelClass : Class
+            }
+
+    and
+        [<Table("pg_index", Schema="pg_catalog")>]
+        [<CLIMutable>]
+        [<NoEquality>]
+        [<NoComparison>]
+        Index =
+            { [<Column(TypeName="oid")>]
+              [<Key>]
+              indexrelid : Oid
+              [<Column(TypeName="oid")>]
+              indrelid : Oid
+              indisunique : bool
+              indisprimary : bool
+              indkey : ColumnNum[]
+
+              [<ForeignKey("indexrelid")>]
+              pgClass : Class
+              [<ForeignKey("indrelid")>]
+              pgTableClass : Class
             }
 
  open PgCatalog
@@ -211,14 +241,29 @@ let private makeColumnFromName (schema : string) (table : string) (column : stri
       name = SQLName column
     }
 
-// Convert string-cast patterns into actual types so that we reverse lost type information.
+// Convert string-cast and array-cast patterns into actual types so that we reverse lost type information.
 // Don't reduce the expressions beyond that!
 let normalizeLocalExpr : ValueExpr -> ValueExpr =
+    let omitArrayCast (valType : SimpleType) (value : ValueExpr) (typ : DBValueType) =
+        match typ with
+        | VTArray scalarType ->
+            match findSimpleType scalarType with
+            | Some dbType when valType = dbType -> value
+            | _ -> VECast (value, typ)
+        | _ -> VECast (value, typ)
     let rec traverse = function
         | VECast (v, typ) ->
             match traverse v with
-            | VEValue (VString str) ->
-                let castExpr () = VECast (VEValue (VString str), typ)
+            | VEValue (VStringArray arr) as value -> omitArrayCast STString value typ
+            | VEValue (VIntArray arr) as value -> omitArrayCast STInt value typ
+            | VEValue (VDecimalArray arr) as value -> omitArrayCast STDecimal value typ
+            | VEValue (VBoolArray arr) as value -> omitArrayCast STBool value typ
+            | VEValue (VDateTimeArray arr) as value -> omitArrayCast STDateTime value typ
+            | VEValue (VDateArray arr) as value -> omitArrayCast STDate value typ
+            | VEValue (VRegclassArray arr) as value -> omitArrayCast STRegclass value typ
+            | VEValue (VJsonArray arr) as value -> omitArrayCast STJson value typ
+
+            | VEValue (VString str) as value ->
                 match typ with
                 | VTArray scalarType ->
                     match parse tokenizeArray stringArray str with
@@ -232,7 +277,7 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
                             mapValueArray runCast array
 
                         match findSimpleType scalarType with
-                        | None -> castExpr ()
+                        | None -> VECast (value, typ)
                         | Some STString -> VEValue <| VStringArray array
                         | Some STInt -> VEValue (VIntArray <| runArrayCast tryIntInvariant)
                         | Some STDecimal -> VEValue (VDecimalArray <| runArrayCast tryDecimalInvariant)
@@ -248,7 +293,7 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
                         | None -> raisef SQLMetaException "Cannot cast scalar value to type %O: %s" scalarType str
 
                     match findSimpleType scalarType with
-                    | None -> castExpr ()
+                    | None -> VECast (value, typ)
                     | Some STString -> VEValue (VString str)
                     | Some STInt -> VEValue (VInt <| runCast tryIntInvariant)
                     | Some STDecimal -> VEValue (VDecimal <| runCast tryDecimalInvariant)
@@ -257,12 +302,12 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
                     | Some STDate -> VEValue (VDate <| runCast tryDateInvariant)
                     | Some STRegclass -> VEValue (VRegclass <| runCast tryRegclass)
                     | Some STJson -> VEValue (VJson <| runCast tryJson)
-            | VEValue v ->
+            | VEValue v as value ->
                 match findSimpleValueType typ with
                 | Some styp when valueSimpleType v = Some styp -> VEValue v
-                | _ -> VECast (VEValue v, typ)
-            | normV -> VECast (normV, typ)
-        | VEValue value -> VEValue value
+                | _ -> VECast (value, typ)
+            | value -> VECast (value, typ)
+        | VEValue _ as node -> node
         | VEColumn ({ table = None } as c) -> VEColumn c
         | VEColumn c -> raisef SQLMetaException "Invalid non-local reference in local expression: %O" c
         | VEPlaceholder i -> raisef SQLMetaException "Invalid placeholder in local expression: %i" i
@@ -271,6 +316,24 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
         | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
         | VEEq (a, b) -> VEEq (traverse a, traverse b)
+        | VEEqAny (e, arr) ->
+            let newE = traverse e
+            let rec expandArrayValue (expandOne : 'a -> Value) = function
+                | AVValue v -> VEValue (expandOne v)
+                | AVArray vals -> VEArray (Array.map (expandArrayValue expandOne) vals)
+                | AVNull -> VEValue VNull
+            let buildIn (expandOne : 'a -> Value) (arr : ArrayValue<'a>[]) =
+                VEIn (e, Array.map (expandArrayValue expandOne) arr)
+            match traverse arr with
+            | VEValue (VStringArray arr) -> buildIn VString arr
+            | VEValue (VIntArray arr) -> buildIn VInt arr
+            | VEValue (VDecimalArray arr) -> buildIn VDecimal arr
+            | VEValue (VBoolArray arr) -> buildIn VBool arr
+            | VEValue (VDateTimeArray arr) -> buildIn VDateTime arr
+            | VEValue (VDateArray arr) -> buildIn VDate arr
+            | VEValue (VRegclassArray arr) -> buildIn VRegclass arr
+            | VEValue (VJsonArray arr) -> buildIn VJson arr
+            | newArr -> VEEqAny (newE, newArr)
         | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
         | VELike (e, pat) -> VELike (traverse e, traverse pat)
         | VENotLike (e, pat) -> VENotLike (traverse e, traverse pat)
@@ -290,14 +353,43 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VECoalesce vals -> VECoalesce (Array.map traverse vals)
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
+        | VEArray vals ->
+            let newVals = Array.map traverse vals
+            let tryValue = function
+                | VEValue (VString v) -> Some (v :> obj, STString)
+                | VEValue (VInt v) -> Some (v :> obj, STInt)
+                | VEValue (VDecimal v) -> Some (v :> obj, STDecimal)
+                | VEValue (VBool v) -> Some (v :> obj, STBool)
+                | VEValue (VDateTime v) -> Some (v :> obj, STDateTime)
+                | VEValue (VDate v) -> Some (v :> obj, STDate)
+                | VEValue (VRegclass v) -> Some (v :> obj, STRegclass)
+                | VEValue (VJson v) -> Some (v :> obj, STJson)
+                | _ -> None
+            match Seq.traverseOption tryValue newVals |> Option.map Seq.toArray with
+            | None -> VEArray newVals
+            | Some conVals when Array.isEmpty conVals -> VEValue (VStringArray [||])
+            | Some conVals ->
+                let (_, firstType) = conVals.[0]
+                if Array.forall (fun (_, typ) -> typ = firstType) conVals then
+                    let makeArray constr castFunc = VEValue <| constr (Array.map (fun (v, typ) -> AVValue (castFunc v)) conVals)
+                    match firstType with
+                    | STString -> makeArray VStringArray (fun x -> x :?> string)
+                    | STInt -> makeArray VIntArray (fun x -> x :?> int)
+                    | STDecimal -> makeArray VDecimalArray (fun x -> x :?> decimal)
+                    | STBool -> makeArray VBoolArray (fun x -> x :?> bool)
+                    | STDateTime -> makeArray VDateTimeArray (fun x -> x :?> DateTimeOffset)
+                    | STDate -> makeArray VDateArray (fun x -> x :?> DateTimeOffset)
+                    | STRegclass -> makeArray VRegclassArray (fun x -> x :?> SchemaObject)
+                    | STJson -> makeArray VJsonArray (fun x -> x :?> JToken)
+                else
+                    VEArray newVals
         | VESubquery query -> raisef SQLMetaException "Invalid subquery in local expression: %O" query
     traverse
-
 
 let parseLocalExpr (raw : string) : ValueExpr =
     match parse tokenizeSQL valueExpr raw with
     | Ok expr -> normalizeLocalExpr expr
-    | Error msg -> raisef SQLMetaException "Cannot parse local expression: %s" msg
+    | Error msg -> raisef SQLMetaException "Cannot parse local expression %s: %s" raw msg
 
 let parseUdtName (str : string) =
     if str.StartsWith("_") then
@@ -327,6 +419,7 @@ type private TableColumnIds = Map<ColumnNum, ColumnName>
 type private PgTableMeta =
     { columns : TableColumnIds
       constraints : Constraint seq
+      indexes : Index seq
     }
 
 [<NoComparison>]
@@ -345,6 +438,7 @@ let private makeUnconstrainedTableMeta (cl : Class) : TableName * (TableMeta * P
         let meta =
             { columns = columnIds
               constraints = cl.constraints
+              indexes = cl.indexes
             }
         (SQLName cl.relname, (res, meta))
     with
@@ -395,9 +489,28 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 
         Option.map (fun r -> (SQLName constr.conname, r)) ret
 
+    let makeIndexMeta (tableName : TableName) (columnIds : TableColumnIds) (index : Index) : (IndexName * IndexMeta) option =
+        let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
+        if index.indisunique || index.indisprimary then
+            None
+        else
+            let cols = Array.map makeLocalColumn index.indkey
+            let ret =
+                { columns = cols
+                } : IndexMeta
+            Some (SQLName index.pgClass.relname, ret)
+
     let finishSchemaMeta (schemaName : SchemaName) (schema : PgSchemaMeta) : SchemaMeta =
         let makeConstraints (tableName : TableName, table : PgTableMeta) =
-            table.constraints |> Seq.mapMaybe (makeConstraintMeta tableName table.columns) |> Seq.map (fun (constrRame, constr) -> (constrRame, OMConstraint (tableName, constr)))
+            let constraints =
+                table.constraints
+                |> Seq.mapMaybe (makeConstraintMeta tableName table.columns)
+                |> Seq.map (fun (constrRame, constr) -> (constrRame, OMConstraint (tableName, constr)))
+            let indexes =
+                table.indexes
+                |> Seq.mapMaybe (makeIndexMeta tableName table.columns)
+                |> Seq.map (fun (indexName, index) -> (indexName, OMIndex (tableName, index)))
+            Seq.append constraints indexes
         let newObjects = schema.tables |> Map.toSeq |> Seq.collect makeConstraints |> Map.ofSeqUnique
         { objects = Map.unionUnique schema.objects newObjects
         }
@@ -409,16 +522,24 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) : Task<DatabaseMeta> =
         let dbOptions =
             (DbContextOptionsBuilder<PgCatalogContext> ())
                 .UseNpgsql(transaction.Connection)
+#if DEBUG
+        use loggerFactory = LoggerFactory.Create(fun builder -> ignore <| builder.AddConsole())
+        ignore <| dbOptions.UseLoggerFactory(loggerFactory)
+#endif
         use db = new PgCatalogContext(dbOptions.Options)
         ignore <| db.Database.UseTransaction(transaction)
 
         let! namespaces =
-            db.Namespace.Where(fun ns -> not (ns.nspname.StartsWith("pg_")) && ns.nspname <> "information_schema")
+            db.Namespace.AsNoTracking().Where(fun ns -> not (ns.nspname.StartsWith("pg_")) && ns.nspname <> "information_schema")
                 .Include("classes")
                 .Include("classes.attributes")
                 .Include("classes.attributes.attrDefs")
                 .Include("classes.attributes.pgType")
                 .Include("classes.constraints")
+                .Include("classes.constraints.pgRelClass")
+                .Include("classes.constraints.pgRelClass.pgNamespace")
+                .Include("classes.indexes")
+                .Include("classes.indexes.pgClass")
                 .ToListAsync()
 
         let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique

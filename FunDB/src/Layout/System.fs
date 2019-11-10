@@ -14,6 +14,7 @@ type EntityAttribute (mainField : string) =
     member this.MainField = mainField
     member val ForbidExternalReferences = false with get, set
     member val Hidden = false with get, set
+    member val IsAbstract = false with get, set
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Property, AllowMultiple=true)>]
@@ -47,7 +48,8 @@ type ColumnFieldAttribute (colType : string) =
 
 let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * SourceColumnField) option =
     let field = Attribute.GetCustomAttribute(property, typeof<ColumnFieldAttribute>) :?> ColumnFieldAttribute
-    if isNull field
+    // Check also that property is not inherited.
+    if property.DeclaringType <> property.ReflectedType || isNull field
     then None
     else
         let res =
@@ -76,7 +78,7 @@ let private makeSourceCheckConstraint (constr : CheckConstraintAttribute) : FunQ
 let private getAttribute<'t when 't :> Attribute> (prop : PropertyInfo) =
     Attribute.GetCustomAttributes(prop, typeof<'t>) |> Array.map (fun x -> x :?> 't)
 
-let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * SourceEntity) option =
+let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceEntity) option =
     let entityAttr = Attribute.GetCustomAttribute(prop, typeof<EntityAttribute>) :?> EntityAttribute
     if isNull entityAttr
     then None
@@ -96,10 +98,23 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * SourceEntity) 
               mainField = FunQLName entityAttr.MainField
               forbidExternalReferences = entityAttr.ForbidExternalReferences
               hidden = entityAttr.Hidden
+              parent = None
+              isAbstract = entityAttr.IsAbstract
             }
-        Some (FunQLName prop.Name, res)
+        Some (FunQLName prop.Name, entityClass, res)
 
 // Build entities map using mish-mash of our custom attributes and Entity Framework Core declarations.
 let buildSystemSchema (contextClass : Type) : SourceSchema =
-    let entities = contextClass.GetProperties() |> Seq.mapMaybe makeSourceEntity |> Map.ofSeq
-    { entities = entities }
+    let entitiesInfo = contextClass.GetProperties() |> Seq.mapMaybe makeSourceEntity |> Seq.cache
+    let types = entitiesInfo |> Seq.map (fun (name, propType, entity) -> (propType.FullName, name)) |> Map.ofSeq
+
+    let applyParent (entity : SourceEntity) (propType : Type) =
+        match propType.BaseType with
+        | null as baseType | baseType when baseType = typeof<obj> -> entity
+        | baseType ->
+            { entity with parent = Some { schema = funSchema; name = Map.find baseType.FullName types }}
+
+    let entities = entitiesInfo |> Seq.map (fun (name, propType, entity) -> (name, applyParent entity propType)) |> Map.ofSeq
+    { entities = entities
+      forbidExternalInheritance = true
+    }

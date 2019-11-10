@@ -10,15 +10,10 @@ open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Types
-
-type private EntityKey = SchemaName * EntityName
+open FunWithFlags.FunDB.Layout.Update
 
 type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
-    let entityToInfo (entity : Entity) = entity.Id
-    let makeEntity schemaName (entity : Entity) = ((schemaName, FunQLName entity.Name), entityToInfo entity)
-    let makeSchema (schema : Schema) = Seq.map (makeEntity (FunQLName schema.Name)) schema.Entities
-
-    let allEntitiesMap = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
+    let allEntitiesMap = makeAllEntitiesMap allSchemas
 
     let updateAttributesField (attrs : SourceAttributesField) (existingAttrs : FieldAttributes) : unit =
         existingAttrs.AllowBroken <- attrs.allowBroken
@@ -26,12 +21,12 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     let updateAttributesDatabase (schema : SourceAttributesDatabase) (existingSchema : Schema) : unit =
         let addOldAttrsKey (attrs : FieldAttributes) =
-            ((FunQLName attrs.FieldEntity.Schema.Name, FunQLName attrs.FieldEntity.Name, FunQLName attrs.FieldName), attrs)
+            (({ schema = FunQLName attrs.FieldEntity.Schema.Name; name = FunQLName attrs.FieldEntity.Name }, FunQLName attrs.FieldName), attrs)
         let oldAttrsMap =
             existingSchema.FieldsAttributes |> Seq.map addOldAttrsKey |> Map.ofSeq
 
         let addNewAttrsFieldsKey schemaName entityName (fieldName, attrs : SourceAttributesField) =
-            ((schemaName, entityName, fieldName), attrs)
+            (({ schema = schemaName; name = entityName }, fieldName), attrs)
         let addNewAttrsEntitiesKey schemaName (entityName, entity : SourceAttributesEntity) =
             entity.fields |> Map.toSeq |> Seq.map (addNewAttrsFieldsKey schemaName entityName)
         let addNewAttrsKey (schemaName, schema : SourceAttributesSchema) =
@@ -39,8 +34,8 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
         let newAttrsMap = schema.schemas |> Map.toSeq |> Seq.collect addNewAttrsKey |> Map.ofSeq
 
         let updateFunc _ = updateAttributesField
-        let createFunc (schemaName, entityName, FunQLName fieldName) =
-            let entityId = Map.find (schemaName, entityName) allEntitiesMap
+        let createFunc (entityRef, FunQLName fieldName) =
+            let entityId = Map.find entityRef allEntitiesMap
             let newAttrs =
                 FieldAttributes (
                     FieldEntityId = entityId,

@@ -224,22 +224,22 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
         try
             let lowerUserName = opts.userName.ToLowerInvariant()
             // FIXME: SLOW!
-            let! rawUser =
+            let! rawUsers =
                 ctx.Transaction.System.Users
                     .Include("Role")
                     .Include("Role.Schema")
-                    .Where(fun user -> user.Name.ToLowerInvariant() = lowerUserName)
-                    .SingleOrDefaultAsync()
-            let userId = if isNull rawUser then None else Some rawUser.Id
+                    .ToListAsync()
+            let rawUser = rawUsers |> Seq.filter (fun user -> user.Name.ToLowerInvariant() = lowerUserName) |> Seq.first
+            let userId = rawUser |> Option.map (fun u -> u.Id)
             let roleType =
                 if opts.isRoot then
                     RTRoot
                 else
                     match rawUser with
-                    | null -> raise <| RequestException REUserNotFound
-                    | user when user.IsRoot || opts.disableACL -> RTRoot
-                    | user when isNull user.Role -> raise <| RequestException RENoRole
-                    | user ->
+                    | None -> raise <| RequestException REUserNotFound
+                    | Some user when user.IsRoot || opts.disableACL -> RTRoot
+                    | Some user when isNull user.Role -> raise <| RequestException RENoRole
+                    | Some user ->
                         let role = ctx.State.permissions.FindRole { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get
                         RTRole role
             return new RequestContext(opts, ctx, userId, roleType)

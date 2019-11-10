@@ -465,16 +465,18 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
         | FEntity (pun, name) ->
             let resName = resolveEntityRef name
-            match layout.FindEntity resName with
-            | None -> raisef ViewResolveException "Entity not found: %O" name
-            | Some entity ->
-                let makeBoundField (name : FieldName) (field : ResolvedField) =
-                    let ref = { entity = resName; name = name } : ResolvedFieldRef
-                    QField <| Some { ref = ref; entity = entity; field = field; immediate = true }
+            let entity =
+                match layout.FindEntity resName with
+                | None -> raisef ViewResolveException "Entity not found: %O" name
+                | Some entity -> entity
 
-                let realFields = mapAllFields makeBoundField entity
-                let fields = Map.add funMain (QRename entity.mainField) realFields
-                (Map.singleton (Some <| Option.defaultValue name.name pun) (Some resName.schema, fields), FEntity (pun, resName))
+            let makeBoundField (name : FieldName) (field : ResolvedField) =
+                let ref = { entity = resName; name = name } : ResolvedFieldRef
+                QField <| Some { ref = ref; entity = entity; field = field; immediate = true }
+
+            let realFields = mapAllFields makeBoundField entity
+            let fields = Map.add funMain (QRename entity.mainField) realFields
+            (Map.singleton (Some <| Option.defaultValue name.name pun) (Some resName.schema, fields), FEntity (pun, resName))
         | FJoin (jt, e1, e2, where) ->
             let (newMapping1, newE1) = resolveFromExpr e1
             let (newMapping2, newE2) = resolveFromExpr e2
@@ -519,6 +521,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         let entity =
             match layout.FindEntity ref with
             | None -> raisef ViewResolveException "Entity not found: %O" main.entity
+            | Some e when e.isAbstract -> raisef ViewResolveException "Entity is abstract: %O" main.entity
             | Some e -> e
         let mappedResults =
             match findMainEntity ref fields query with

@@ -37,7 +37,6 @@ let escapeSqlSingleQuotes (str : string) : string =
 
 let renderSqlName = escapeSqlDoubleQuotes
 let renderSqlString = escapeSqlSingleQuotes
-let renderSqlArrayString (str : string) = sprintf "\"%s\"" (str.Replace("\"", "\\\""))
 
 let renderSqlBool : bool -> string = function
     | true -> "TRUE"

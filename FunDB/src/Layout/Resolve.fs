@@ -6,9 +6,11 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Source
+module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ResolveLayoutException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -24,7 +26,7 @@ let private checkSchemaName (FunQLName name) : unit =
         raisef ResolveLayoutException "Invalid schema name"
 
 let private checkFieldName (name : FunQLName) : unit =
-    if name = funId
+    if name = funId || name = funSubEntity
     then raisef ResolveLayoutException "Name is forbidden"
     else checkName name
 
@@ -72,36 +74,54 @@ let private resolveEntityRef : EntityRef -> ResolvedEntityRef = function
     | ref -> raisef ResolveLayoutException "Unspecified schema for entity %O" ref.name
 
 [<NoComparison>]
+type private HalfResolvedComputedField =
+    | HRInherited of ResolvedEntityRef
+    | HRSource of SourceComputedField
+
+[<NoComparison>]
 type private HalfResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
+      computedFields : Map<FieldName, HalfResolvedComputedField>
       uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
+      children : Set<ResolvedEntityRef>
+      typeName : string
+      root : ResolvedEntityRef
       source : SourceEntity
     }
         member this.FindField (name : FieldName) =
-            genericFindField this.columnFields this.source.computedFields this.source.mainField name
+            genericFindField this.columnFields this.computedFields this.source.mainField name
 
-[<NoComparison>]
-type private HalfResolvedSchema =
-    { entities : Map<EntityName, HalfResolvedEntity>
-    }
+type private HalfResolvedEntities = Map<ResolvedEntityRef, HalfResolvedEntity>
 
-[<NoComparison>]
-type private HalfResolvedLayout =
-    { schemas : Map<SchemaName, HalfResolvedSchema>
-    } with
-        member this.FindEntity (ref : ResolvedEntityRef) =
-            match Map.tryFind ref.schema this.schemas with
-            | None -> None
-            | Some schema ->
-                match Map.tryFind ref.name schema.entities with
-                | Some entity when not entity.source.hidden -> Some entity
-                | _ -> None
+let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : 'a -> bool) (getChildren : 'a -> Set<ResolvedEntityRef>) (getEntity : ResolvedEntityRef -> 'a) (entity : 'a) =
+    let column = SQL.VEColumn { table = None; name = sqlFunSubEntity }
+    let rec recur entity =
+        let typeName = getTypeName entity
+        let isAbstract = getIsAbstract entity
+        let children = getChildren entity
+        let myName =
+            if isAbstract then Seq.empty else Seq.singleton typeName
+        let getEntityName childRef =
+            let childEntity = getEntity childRef
+            recur childEntity
+        Seq.append myName (Seq.collect getEntityName children)
+    let options = recur entity |> Seq.toArray
+    if Array.isEmpty options then
+        SQL.VEValue (SQL.VBool false)
+    else if Array.length options = 1 then
+        SQL.VEEq (column, SQL.VEValue (SQL.VString options.[0]))
+    else
+        let makeExpr name = SQL.VEValue (SQL.VString name)
+        SQL.VEIn (column, Array.map makeExpr options)
 
-        member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
-            this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
+let private makeCheckHalfExpr = makeCheckExprGeneric (fun (x : HalfResolvedEntity) -> x.typeName) (fun x -> x.source.isAbstract) (fun x -> x.children)
+
+let makeCheckExpr = makeCheckExprGeneric (fun (x : ResolvedEntity) -> x.typeName) (fun x -> x.isAbstract) (fun x -> x.children)
 
 type private Phase1Resolver (layout : SourceLayout) =
-    let resolveFieldType (schemaName : SchemaName) (entity : SourceEntity) : ParsedFieldType -> ResolvedFieldType = function
+    let mutable cachedEntities : HalfResolvedEntities = Map.empty
+
+    let resolveFieldType (ref : ResolvedEntityRef) (entity : SourceEntity) : ParsedFieldType -> ResolvedFieldType = function
         | FTType ft -> FTType ft
         | FTReference (entityRef, where) ->
             let resolvedRef = resolveEntityRef entityRef
@@ -109,7 +129,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 match layout.FindEntity(resolvedRef) with
                 | None -> raisef ResolveLayoutException "Cannot find entity %O from reference type" resolvedRef
                 | Some refEntity -> refEntity
-            if refEntity.forbidExternalReferences && schemaName <> resolvedRef.schema then
+            if refEntity.forbidExternalReferences && ref.schema <> resolvedRef.schema then
                 raisef ResolveLayoutException "References from other schemas to entity %O are forbidden" entityRef
             let resolvedWhere = Option.map (resolveReferenceExpr entity refEntity) where
             FTReference (resolvedRef, resolvedWhere)
@@ -118,11 +138,11 @@ type private Phase1Resolver (layout : SourceLayout) =
                 raisef ResolveLayoutException "Enums must not be empty"
             FTEnum vals
 
-    let resolveColumnField (schemaName : SchemaName) (entity : SourceEntity) (col : SourceColumnField) : ResolvedColumnField =
+    let resolveColumnField (ref : ResolvedEntityRef) (entity : SourceEntity) (fieldName : FieldName) (col : SourceColumnField) : ResolvedColumnField =
         let fieldType =
             match parse tokenizeFunQL fieldType col.fieldType with
             | Ok r -> r
-            | Error msg -> raisef ResolveLayoutException "Error parsing column field type: %s" msg
+            | Error msg -> raisef ResolveLayoutException "Error parsing column field type %s: %s" col.fieldType msg
         let defaultValue =
             match col.defaultValue with
             | None -> None
@@ -133,23 +153,37 @@ type private Phase1Resolver (layout : SourceLayout) =
                     | Some v -> Some v
                     | None -> raisef ResolveLayoutException "Default expression is not trivial: %s" def
                 | Error msg -> raisef ResolveLayoutException "Error parsing column field default expression: %s" msg
-        let fieldType = resolveFieldType schemaName entity fieldType
+        let fieldType = resolveFieldType ref entity fieldType
+
+        let columnName =
+            match entity.parent with
+            | None -> fieldName.ToString()
+            | Some p when p.schema = ref.schema -> sprintf "%O__%O" ref.name fieldName
+            | Some p -> sprintf "%O__%O__%O" ref.schema ref.name fieldName
 
         { fieldType = fieldType
           valueType = compileFieldType fieldType
           defaultValue = defaultValue
           isNullable = col.isNullable
           isImmutable = col.isImmutable
+          inheritedFrom = None
+          columnName = SQL.SQLName columnName
         }
 
-    let resolveEntity (schemaName : SchemaName) (entity : SourceEntity) : HalfResolvedEntity =
+    let resolveEntity (parent : HalfResolvedEntity option) (entityRef : ResolvedEntityRef) (entity : SourceEntity) : HalfResolvedEntity =
         let mapColumnField name field =
             try
                 checkFieldName name
-                resolveColumnField schemaName entity field
+                resolveColumnField entityRef entity name field
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in column field %O: %s" name e.Message
-        let columnFields = Map.map mapColumnField entity.columnFields
+        let mapComputedField name field =
+            try
+                checkFieldName name
+                HRSource field
+            with
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in computed field %O: %s" name e.Message
+
         let mapUniqueConstraint name constr =
             try
                 checkName name
@@ -158,41 +192,120 @@ type private Phase1Resolver (layout : SourceLayout) =
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in unique constraint %O: %s" name e.Message
         let uniqueConstraints = Map.map mapUniqueConstraint entity.uniqueConstraints
 
+        let columnFields =
+            match parent with
+            | None -> Map.map mapColumnField entity.columnFields
+            | Some p ->
+                let parentRef = Option.get entity.parent
+                let selfFields = Map.map mapColumnField entity.columnFields
+                let addParent (field : ResolvedColumnField) =
+                    if Option.isNone field.inheritedFrom then
+                        { field with inheritedFrom = Some parentRef }
+                    else
+                        field
+                let inheritedFields = Map.map (fun name field -> addParent field) p.columnFields
+                Map.unionUnique inheritedFields selfFields
+        let computedFields =
+            match parent with
+            | None -> Map.map mapComputedField entity.computedFields
+            | Some p ->
+                let parentRef = Option.get entity.parent
+                let selfFields = Map.map mapComputedField entity.computedFields
+                let addParent = function
+                    | HRSource source -> HRInherited parentRef
+                    | HRInherited pref -> HRInherited pref
+                let inheritedFields = Map.map (fun name field -> addParent field) p.computedFields
+                Map.unionUnique inheritedFields selfFields
+
         let fields =
             try
-                Set.ofSeqUnique <| Seq.append (Map.toSeq columnFields |> Seq.map fst) (Map.toSeq entity.computedFields |> Seq.map fst)
+                Set.ofSeqUnique <| Seq.append (Map.toSeq columnFields |> Seq.map fst) (Map.toSeq computedFields |> Seq.map fst)
             with
             | Failure msg -> raisef ResolveLayoutException "Clashing field names: %s" msg
         if entity.mainField <> funId then
             if not <| Set.contains entity.mainField fields then
                 raisef ResolveLayoutException "Nonexistent main field: %O" entity.mainField
 
+        let root =
+            match parent with
+            | None -> entityRef
+            | Some p -> p.root
+
+        let typeName =
+            if root.schema = entityRef.schema then
+                entityRef.name.ToString()
+            else
+                sprintf "%O__%O" entityRef.schema entityRef.name
+
         { columnFields = columnFields
+          computedFields = computedFields
           uniqueConstraints = uniqueConstraints
+          children = Set.empty
+          root = root
+          typeName = typeName
           source = entity
         }
 
-    let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) : HalfResolvedSchema =
-        let mapEntity name entity =
-            try
-                checkName name
-                resolveEntity schemaName entity
-            with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in entity %O: %s" name e.Message
-        { entities = schema.entities |> Map.map mapEntity
-        }
+    let rec resolveOneEntity (stack : Set<ResolvedEntityRef>) (child : ResolvedEntityRef option) (ref : ResolvedEntityRef) (entity : SourceEntity) : HalfResolvedEntity =
+        try
+            let resolveParent parentRef =
+                let newStack = Set.add ref stack
+                if Set.contains parentRef newStack then
+                    raisef ResolveLayoutException "Inheritance cycle detected"
+                else
+                    let parentSchema =
+                        match Map.tryFind parentRef.schema layout.schemas with
+                        | None -> raisef ResolveLayoutException "Parent entity %O is undefined" parentRef
+                        | Some parent -> parent
+                    let parentEntity =
+                        match Map.tryFind parentRef.name parentSchema.entities with
+                        | None -> raisef ResolveLayoutException "Parent entity %O is undefined" parentRef
+                        | Some parent -> parent
+                    if parentRef.schema <> ref.schema then
+                        if parentEntity.forbidExternalReferences then
+                            raisef ResolveLayoutException "Parent entity %O forbids external references" parentRef
+                        if parentSchema.forbidExternalInheritance then
+                            raisef ResolveLayoutException "Parent schema %O forbids external references" parentRef.schema
+                    resolveOneEntity newStack (Some ref) parentRef parentEntity
 
-    let resolveLayout () : HalfResolvedLayout =
-        let mapSchema name schema =
+            match Map.tryFind ref cachedEntities with
+            | Some cached ->
+                match child with
+                | None -> ()
+                | Some childRef ->
+                    cachedEntities <- Map.add ref { cached with children = Set.add childRef cached.children } cachedEntities
+                cached
+            | None ->
+                checkName ref.name
+                let parent = Option.map resolveParent entity.parent
+                let entity = resolveEntity parent ref entity
+                let entityWithChild =
+                    match child with
+                    | None -> entity
+                    | Some childRef -> { entity with children = Set.singleton childRef }
+                cachedEntities <- Map.add ref entityWithChild cachedEntities
+                entity
+        with
+        | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in entity %O: %s" ref e.Message
+
+    let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) =
+        let rec iterEntity name entity =
+            let ref = { schema = schemaName; name = name }
+            let entity = resolveOneEntity Set.empty None ref entity
+            ()
+        schema.entities |> Map.iter iterEntity
+
+    let resolveLayout () =
+        let iterSchema name schema =
             try
-                checkSchemaName name
                 resolveSchema name schema
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in schema %O: %s" name e.Message
-        { schemas = Map.map mapSchema layout.schemas
-        }
+        Map.iter iterSchema layout.schemas
 
-    member this.ResolveLayout = resolveLayout
+    member this.ResolveLayout () =
+        resolveLayout ()
+        cachedEntities
 
 type private ComputedFieldProperties =
     { isLocal : bool
@@ -200,7 +313,7 @@ type private ComputedFieldProperties =
       usedSchemas : UsedSchemas
     }
 
-type private Phase2Resolver (layout : HalfResolvedLayout) =
+type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntities) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, ResolvedComputedField> = Map.empty
 
     let rec checkPath (stack : Set<ResolvedFieldRef>) (usedSchemas : UsedSchemas) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (fields : FieldName list) : ComputedFieldProperties =
@@ -219,7 +332,7 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
         | (ref :: refs) ->
             match Map.tryFind fieldRef.name entity.columnFields with
             | Some { fieldType = FTReference (refEntity, _) } ->
-                let newEntity = layout.FindEntity refEntity |> Option.get
+                let newEntity = Map.find refEntity entities
                 let newUsed = addUsedFieldRef fieldRef usedSchemas
                 let ret = checkPath stack newUsed newEntity { entity = refEntity; name = ref } refs
                 { ret with isLocal = false }
@@ -250,22 +363,32 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
           isLocal = isLocal
           hasId = hasId
           usedSchemas = usedSchemas
+          inheritedFrom = None
         }
 
-    and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : SourceComputedField) : ResolvedComputedField =
-        match Map.tryFind fieldRef cachedComputedFields with
-        | Some f -> f
-        | None ->
-            if Set.contains fieldRef stack then
-                raisef ResolveLayoutException "Cycle detected in computed fields: %O" stack
-            let computedExpr =
-                match parse tokenizeFunQL fieldExpr comp.expression with
-                | Ok r -> r
-                | Error msg -> raisef ResolveLayoutException "Error parsing computed field expression: %s" msg
-            let newStack = Set.add fieldRef stack
-            let field = resolveComputedExpr newStack fieldRef.entity entity computedExpr
-            cachedComputedFields <- Map.add fieldRef field cachedComputedFields
-            field
+    and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) : HalfResolvedComputedField -> ResolvedComputedField = function
+        | HRInherited parentRef ->
+            let origFieldRef = { fieldRef with entity = parentRef }
+            match Map.tryFind origFieldRef cachedComputedFields with
+            | Some f -> { f with inheritedFrom = Some parentRef }
+            | None ->
+                let origEntity = Map.find parentRef entities
+                let f = resolveComputedField stack origEntity origFieldRef (Map.find fieldRef.name origEntity.computedFields)
+                { f with inheritedFrom = Some parentRef }
+        | HRSource comp ->
+            match Map.tryFind fieldRef cachedComputedFields with
+            | Some f -> f
+            | None ->
+                if Set.contains fieldRef stack then
+                    raisef ResolveLayoutException "Cycle detected in computed fields: %O" stack
+                let computedExpr =
+                    match parse tokenizeFunQL fieldExpr comp.expression with
+                    | Ok r -> r
+                    | Error msg -> raisef ResolveLayoutException "Error parsing computed field expression: %s" msg
+                let newStack = Set.add fieldRef stack
+                let field = resolveComputedExpr newStack fieldRef.entity entity computedExpr
+                cachedComputedFields <- Map.add fieldRef field cachedComputedFields
+                field
 
     let resolveCheckExpr (entity : ResolvedEntity) : ParsedFieldExpr -> LocalFieldExpr =
         let resolveReference : LinkedFieldRef -> ValueRef<FieldName> = function
@@ -300,11 +423,18 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
     let resolveEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) : ResolvedEntity =
         let mapComputedField name field =
             try
-                checkFieldName name
                 resolveComputedField Set.empty entity { entity = entityRef; name = name } field
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in computed field %O: %s" name e.Message
-        let computedFields = Map.map mapComputedField entity.source.computedFields
+
+        let computedFields = Map.map mapComputedField entity.computedFields
+
+        let makeInheritance parent =
+            let checkExpr = makeCheckHalfExpr (fun ref -> Map.find ref entities) entity
+            { parent = parent
+              checkExpr = checkExpr
+            }
+
         let tempEntity =
             { columnFields = entity.columnFields
               computedFields = computedFields
@@ -313,6 +443,11 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
               mainField = entity.source.mainField
               forbidExternalReferences = entity.source.forbidExternalReferences
               hidden = entity.source.hidden
+              inheritance = Option.map makeInheritance entity.source.parent
+              children = entity.children
+              root = entity.root
+              typeName = entity.typeName
+              isAbstract = entity.source.isAbstract
             } : ResolvedEntity
         let mapCheckConstraint name constr =
             try
@@ -326,30 +461,31 @@ type private Phase2Resolver (layout : HalfResolvedLayout) =
               checkConstraints = checkConstraints
         }
 
-    let resolveSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : ResolvedSchema =
+    let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) : ResolvedSchema =
+        let mutable roots = Set.empty
         let mapEntity name entity =
-            try
-                let ref = { schema = schemaName; name = name }
-                resolveEntity ref entity
-            with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in entity %O: %s" name e.Message
-        { entities = schema.entities |> Map.map mapEntity
+            let ref = { schema = schemaName; name = name }
+            let halfEntity = Map.find ref entities
+            let entity = resolveEntity ref halfEntity
+            if Option.isNone entity.inheritance then
+                roots <- Set.add name roots
+            entity
+
+        let entities = schema.entities |> Map.map mapEntity
+        { entities = entities
+          roots = roots
+          forbidExternalInheritance = schema.forbidExternalInheritance
         }
 
     let resolveLayout () =
-        let mapSchema name schema =
-            try
-                resolveSchema name schema
-            with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in schema %O: %s" name e.Message
-        { schemas = Map.map mapSchema layout.schemas
+        { schemas = Map.map resolveSchema layout.schemas
         } : Layout
 
     member this.ResolveLayout = resolveLayout
 
 let resolveLayout (layout : SourceLayout) : Layout =
     let phase1 = Phase1Resolver layout
-    let layout1 = phase1.ResolveLayout ()
-    let phase2 = Phase2Resolver layout1
+    let entities = phase1.ResolveLayout ()
+    let phase2 = Phase2Resolver (layout, entities)
     let layout2 = phase2.ResolveLayout ()
     layout2

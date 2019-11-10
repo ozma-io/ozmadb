@@ -163,7 +163,7 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue 
 
         member this.ToFunQLString () =
             let renderArray func typeName vals =
-                let arrStr = sprintf "[%s]" (vals |> Seq.map func |> String.concat ", ")
+                let arrStr = sprintf "ARRAY[%s]" (vals |> Seq.map func |> String.concat ", ")
                 if Array.isEmpty vals && typeName <> "string" then
                     sprintf "%s :: array(%s)" arrStr typeName
                 else
@@ -855,6 +855,7 @@ let mergeUsedSchemas : UsedSchemas -> UsedSchemas -> UsedSchemas =
     Map.unionWith (fun _ -> Map.unionWith (fun _ -> Set.union))
 
 let funId = FunQLName "Id"
+let funSubEntity = FunQLName "SubEntity"
 let funSchema = FunQLName "public"
 let funView = FunQLName "view"
 let funMain = FunQLName "__main"

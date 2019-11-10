@@ -10,21 +10,16 @@ open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
-
-type private EntityKey = SchemaName * EntityName
+open FunWithFlags.FunDB.Layout.Update
 
 type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
-    let entityToInfo (entity : Entity) = entity.Id
-    let makeEntity schemaName (entity : Entity) = ((schemaName, FunQLName entity.Name), entityToInfo entity)
-    let makeSchema (schema : Schema) = Seq.map (makeEntity (FunQLName schema.Name)) schema.Entities
-
-    let allEntitiesMap = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
+    let allEntitiesMap = makeAllEntitiesMap allSchemas
 
     let updateAllowedField (field : SourceAllowedField) (existingField : RoleColumnField) : unit =
         existingField.Change <- field.change
         existingField.Select <- Option.toNull field.select
 
-    let updateAllowedFields (entityKey : EntityKey) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) =
+    let updateAllowedFields (entityRef : ResolvedEntityRef) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) =
         let oldFieldsMap =
             existingEntity.ColumnFields
             |> Seq.map (fun roleField -> (FunQLName roleField.ColumnName, roleField))
@@ -40,8 +35,8 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
             newField
         updateDifference db updateFunc createFunc entity.fields oldFieldsMap
 
-    let updateAllowedEntity (entityKey : EntityKey) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) : unit =
-        updateAllowedFields entityKey entity existingEntity
+    let updateAllowedEntity (entityRef : ResolvedEntityRef) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) : unit =
+        updateAllowedFields entityRef entity existingEntity
 
         existingEntity.AllowBroken <- entity.allowBroken
         existingEntity.Insert <- entity.insert
@@ -53,17 +48,17 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
     let updateAllowedDatabase (role : SourceRole) (existingRole : Role) : unit =
         let oldEntitiesMap =
             existingRole.Entities
-            |> Seq.map (fun roleEntity -> ((FunQLName roleEntity.Entity.Schema.Name, FunQLName roleEntity.Entity.Name), roleEntity))
+            |> Seq.map (fun roleEntity -> ({ schema = FunQLName roleEntity.Entity.Schema.Name; name = FunQLName roleEntity.Entity.Name }, roleEntity))
             |> Map.ofSeq
 
         let entitiesMap =
             role.permissions.schemas |> Map.toSeq
-            |> Seq.collect (fun (schemaName, entities) -> entities.entities |> Map.toSeq |> Seq.map (fun (entityName, entity) -> ((schemaName, entityName), entity)))
+            |> Seq.collect (fun (schemaName, entities) -> entities.entities |> Map.toSeq |> Seq.map (fun (entityName, entity) -> ({ schema = schemaName; name = entityName }, entity)))
             |> Map.ofSeq
 
         let updateFunc = updateAllowedEntity
-        let createFunc entityKey =
-            let entityId = Map.find entityKey allEntitiesMap
+        let createFunc entityRef =
+            let entityId = Map.find entityRef allEntitiesMap
             let newEntity =
                 RoleEntity (
                     EntityId = entityId

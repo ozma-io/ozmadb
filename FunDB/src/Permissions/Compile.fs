@@ -8,16 +8,14 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.SelectExpr =
+let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.SingleSelectExpr =
     let (from, where) = compileSingleFromClause layout arguments (FEntity (None, ref)) (Some restr.expression)
-    let select =
-        { columns = [| compileResolvedEntityRef ref |> Some |> SQL.SCAll |]
-          from = Some from
-          where = where
-          groupBy = [||]
-          orderLimit = SQL.emptyOrderLimitClause
-        } : SQL.SingleSelectExpr
-    SQL.SSelect select
+    { columns = [| compileResolvedEntityRef ref |> Some |> SQL.SCAll |]
+      from = Some from
+      where = where
+      groupBy = [||]
+      orderLimit = SQL.emptyOrderLimitClause
+    }
 
 let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.ValueExpr =
     let (from, where) = compileSingleFromClause layout arguments (FEntity (None, ref)) (Some restr.expression)

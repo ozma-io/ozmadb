@@ -14,7 +14,7 @@ type PermissionsViewException (message : string) =
     inherit Exception(message)
 
 type private UsedArguments = Set<FunQL.ArgumentName>
-type private FieldAccess = SelectExpr option
+type private FieldAccess = SingleSelectExpr option
 type private EntityAccess = Map<FunQL.EntityName, FieldAccess>
 type private SchemaAccess = Map<FunQL.SchemaName, EntityAccess>
 
@@ -74,6 +74,16 @@ type private AccessCompiler (layout : Layout, initialArguments : QueryArguments)
     member this.Arguments = arguments
     member this.FilterUsedSchemas = filterUsedSchemas
 
+let private (|SubEntitySelect|_|) : SingleSelectExpr -> FunQL.ResolvedEntityRef option = function
+    | { columns = columns; from = Some (FTable (None, tableRef)) } when not (Array.isEmpty columns) ->
+        match columns.[0] with
+        | SCExpr (name, VEValue (VString rootName)) when name = sqlFunRootEntity ->
+            let rootRef = { schema = decompileName <| Option.get tableRef.schema; name = decompileName tableRef.name } : FunQL.ResolvedEntityRef
+            let realRef = parseTypeName rootRef rootName
+            Some realRef
+        | _ -> None
+    | _ -> None
+
 type private PermissionsApplier (access : SchemaAccess) =
     let rec applyToSelectExpr : SelectExpr -> SelectExpr = function
         | SSelect query -> SSelect <| applyToSingleSelectExpr query
@@ -85,12 +95,21 @@ type private PermissionsApplier (access : SchemaAccess) =
         | SValues values -> SValues values
 
     and applyToSingleSelectExpr (query : SingleSelectExpr) : SingleSelectExpr =
-        { columns = Array.map applyToSelectedColumn query.columns
-          from = Option.map applyToFromExpr query.from
-          where = Option.map applyToValueExpr query.where
-          groupBy = Array.map applyToValueExpr query.groupBy
-          orderLimit = applyToOrderLimitClause query.orderLimit
-        }
+        match query with
+        // Special case -- subentity select which gets generated when someone uses subentity in FROM.
+        | SubEntitySelect realRef as select ->
+            let accessSchema = Map.find realRef.schema access
+            let accessEntity = Map.find realRef.name accessSchema
+            match accessEntity with
+            | None -> select
+            | Some restr -> restr
+        | _ ->
+            { columns = Array.map applyToSelectedColumn query.columns
+              from = Option.map applyToFromExpr query.from
+              where = Option.map applyToValueExpr query.where
+              groupBy = Array.map applyToValueExpr query.groupBy
+              orderLimit = applyToOrderLimitClause query.orderLimit
+            }
 
     and applyToOrderLimitClause (clause : OrderLimitClause) : OrderLimitClause =
         { limit = Option.map applyToValueExpr clause.limit
@@ -114,7 +133,7 @@ type private PermissionsApplier (access : SchemaAccess) =
             | None -> FTable (pun, entity)
             | Some restr ->
                 let name = Option.defaultValue entity.name pun
-                FSubExpr (name, None, restr)
+                FSubExpr (name, None, SSelect restr)
         | FJoin (jt, e1, e2, where) ->
             let e1' = applyToFromExpr e1
             let e2' = applyToFromExpr e2

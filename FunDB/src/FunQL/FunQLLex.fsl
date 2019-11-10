@@ -141,13 +141,14 @@ and tokenizeFunQL = parse
     | l i m i t         { Parse.LIMIT }
     | o f f s e t       { Parse.OFFSET }
     | u n i o n         { Parse.UNION }
-    | i n t e r s e c t { Parse.INTERSECT}
+    | i n t e r s e c t { Parse.INTERSECT }
     | u p d a t e       { Parse.UPDATE }
     | o f               { Parse.OF }
     | v a l u e s       { Parse.VALUES }
     | a l l             { Parse.ALL }
     | d i s t i n c t   { Parse.DISTINCT }
     | g r o u p         { Parse.GROUP }
+    | a r r a y         { Parse.ARRAY }
 
     // Types
     | i n t             { Parse.INT_TYPE }
@@ -157,7 +158,6 @@ and tokenizeFunQL = parse
     | d a t e t i m e   { Parse.DATETIME_TYPE }
     | d a t e           { Parse.DATE_TYPE }
     | r e f e r e n c e { Parse.REFERENCE_TYPE }
-    | a r r a y         { Parse.ARRAY_TYPE }
     | e n u m           { Parse.ENUM_TYPE }
     | j s o n           { Parse.JSON_TYPE }
     | u v r e f         { Parse.UVREF_TYPE }

@@ -47,6 +47,8 @@ type ResolvedColumnField =
       defaultValue : FieldValue option
       isNullable : bool
       isImmutable : bool
+      inheritedFrom : ResolvedEntityRef option
+      columnName : SQL.ColumnName
     }
 
 [<NoComparison>]
@@ -57,6 +59,13 @@ type ResolvedComputedField =
       // Set when computed field uses Id
       hasId : bool
       usedSchemas : UsedSchemas
+      inheritedFrom : ResolvedEntityRef option
+    }
+
+[<NoComparison>]
+type EntityInheritance =
+    { parent : ResolvedEntityRef
+      checkExpr : SQL.ValueExpr
     }
 
 [<NoComparison>]
@@ -65,6 +74,7 @@ type GenericResolvedField<'col, 'comp> =
     | RComputedField of 'comp
     | RId
 
+[<NoComparison>]
 type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedField>
 
 let inline genericFindField (columnFields : Map<FieldName, 'col>) (computedFields : Map<FieldName, 'comp>) (mainField : FieldName) =
@@ -91,13 +101,31 @@ type ResolvedEntity =
       mainField : FieldName
       forbidExternalReferences : bool
       hidden : bool
+      inheritance : EntityInheritance option
+      children : Set<ResolvedEntityRef>
+      typeName : string // SubEntity value for this entity
+      isAbstract : bool
+      // Hierarchy root
+      root : ResolvedEntityRef
     } with
         member this.FindField (name : FieldName) =
             genericFindField this.columnFields this.computedFields this.mainField name
 
+// Should be in sync with type names generation in Resolve
+let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntityRef =
+    match typeName.Split("__") with
+    | [| entityName |] -> { root with name = FunQLName entityName }
+    | [| schemaName; entityName |] -> { schema = FunQLName schemaName; name = FunQLName entityName }
+    | _ -> failwith "Invalid type name"
+
+let entityHasSubtype (entity : ResolvedEntity) : bool =
+    Option.isSome entity.inheritance || entity.isAbstract || not (Set.isEmpty entity.children)
+
 [<NoComparison>]
 type ResolvedSchema =
     { entities : Map<EntityName, ResolvedEntity>
+      roots : Set<EntityName>
+      forbidExternalInheritance : bool
     }
 
 [<NoComparison>]

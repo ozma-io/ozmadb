@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Schema
 open System
 open System.Linq
 open Microsoft.EntityFrameworkCore
+open System.ComponentModel.DataAnnotations
 
 open FunWithFlags.FunDB.Layout.System
 
@@ -23,7 +24,6 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     val mutable schemas : DbSet<Schema>
     [<Entity("Name", ForbidExternalReferences=true)>]
     [<UniqueConstraint("Name", [|"Name"|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
     member this.Schemas
         with get () = this.schemas
         and set value = this.schemas <- value
@@ -33,8 +33,6 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     [<Entity("FullName", ForbidExternalReferences=true)>]
     [<ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"SchemaId"; "Name"|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")>]
-    [<CheckConstraint("CorrectMainField", "\"MainField\" <> '' AND \"MainField\" <> 'Id'")>]
     member this.Entities
         with get () = this.entities
         and set value = this.entities <- value
@@ -44,7 +42,6 @@ type SystemContext (options : DbContextOptions<SystemContext>) =
     [<Entity("FullName", ForbidExternalReferences=true)>]
     [<ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")>]
     [<UniqueConstraint("Name", [|"EntityId"; "Name"|])>]
-    [<CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")>]
     member this.ColumnFields
         with get () = this.columnFields
         and set value = this.columnFields <- value
@@ -164,8 +161,10 @@ and
     StateValue () =
         member val Id = 0 with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Name = "" with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Value = "" with get, set
 
 and
@@ -173,7 +172,10 @@ and
     Schema () =
         member val Id = 0 with get, set
         [<ColumnField("string", Immutable=true)>]
+        [<Required>]
         member val Name = "" with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val ForbidExternalInheritance = false with get, set
 
         member val Entities = ResizeArray<Entity>() with get, set
         member val Roles = ResizeArray<Role>() with get, set
@@ -185,6 +187,7 @@ and
     Entity () =
         member val Id = 0 with get, set
         [<ColumnField("string", Immutable=true)>]
+        [<Required>]
         member val Name = "" with get, set
         [<ColumnField("reference(\"public\".\"Schemas\")", Immutable=true)>]
         member val SchemaId = 0 with get, set
@@ -196,6 +199,11 @@ and
         member val ForbidExternalReferences = false with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val Hidden = false with get, set
+        [<ColumnField("bool", Default="FALSE")>]
+        member val IsAbstract = false with get, set
+        [<ColumnField("reference(\"public\".\"Entities\")", Nullable=true, Immutable=true)>]
+        member val ParentId = Nullable<int>() with get, set
+        member val Parent = null : Entity with get, set
 
         member val ColumnFields = ResizeArray<ColumnField>() with get, set
         member val ComputedFields = ResizeArray<ComputedField>() with get, set
@@ -207,11 +215,13 @@ and
     ColumnField () =
         member val Id = 0 with get, set
         [<ColumnField("string", Immutable=true)>]
+        [<Required>]
         member val Name = "" with get, set
         [<ColumnField("reference(\"public\".\"Entities\")", Immutable=true)>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Type = "" with get, set
         [<ColumnField("string", Nullable=true)>]
         member val Default = null : string with get, set
@@ -225,11 +235,13 @@ and
     ComputedField () =
         member val Id = 0 with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Name = "" with get, set
         [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Expression = "" with get, set
 
 and
@@ -237,6 +249,7 @@ and
     UniqueConstraint () =
         member val Id = 0 with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Name = "" with get, set
         [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
@@ -244,6 +257,7 @@ and
         // Order is important here
         // Change this if/when we implement "ordered 1-N references".
         [<ColumnField("array(string)")>]
+        [<Required>]
         member val Columns = [||] : string[] with get, set
 
 and
@@ -251,11 +265,13 @@ and
     CheckConstraint () =
         member val Id = 0 with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Name = "" with get, set
         [<ColumnField("reference(\"public\".\"Entities\")")>]
         member val EntityId = 0 with get, set
         member val Entity = null : Entity with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Expression = "" with get, set
 
 and
@@ -266,10 +282,12 @@ and
         member val SchemaId = 0 with get, set
         member val Schema = null : Schema with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Name = "" with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val AllowBroken = false with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Query = "" with get, set
 
 and
@@ -277,11 +295,12 @@ and
     User () =
         member val Id = 0 with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Name = "" with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val IsRoot = false with get, set
         [<ColumnField("reference(\"public\".\"Roles\")", Nullable=true)>]
-        member val RoleId : Nullable<int> = Nullable () with get, set
+        member val RoleId = Nullable<int>() with get, set
         member val Role = null : Role with get, set
 
 and
@@ -292,6 +311,7 @@ and
         member val SchemaId = 0 with get, set
         member val Schema = null : Schema with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Name = "" with get, set
 
         member val Parents = ResizeArray<RoleParent>() with get, set
@@ -343,6 +363,7 @@ and
         member val RoleEntity = null : RoleEntity with get, set
         // FIXME: Make this ColumnField relation when we implement reference constraints.
         [<ColumnField("string")>]
+        [<Required>]
         member val ColumnName = "" with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val Change = false with get, set
@@ -360,12 +381,14 @@ and
         member val FieldEntityId = 0 with get, set
         member val FieldEntity = null : Entity with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val FieldName = "" with get, set
         [<ColumnField("bool", Default="FALSE")>]
         member val AllowBroken = false with get, set
         [<ColumnField("int", Default="0")>]
         member val Priority = 0 with get, set
         [<ColumnField("string")>]
+        [<Required>]
         member val Attributes = "" with get, set
 
 and
@@ -377,6 +400,7 @@ and
         [<ColumnField("datetime", Immutable=true)>]
         member val Timestamp = DateTimeOffset.MinValue with get, set
         [<ColumnField("string", Immutable=true)>]
+        [<Required>]
         member val Type = "" with get, set
         [<ColumnField("string", Nullable=true, Immutable=true)>]
         member val UserName = null : string with get, set
@@ -387,6 +411,7 @@ and
         [<ColumnField("int", Nullable=true, Immutable=true)>]
         member val EntityId = Nullable<int>() with get, set
         [<ColumnField("string", Immutable=true)>]
+        [<Required>]
         member val Details = "" with get, set
 
 let getFieldsObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
@@ -399,12 +424,15 @@ let getLayoutObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
         .Include("Entities.ComputedFields")
         .Include("Entities.UniqueConstraints")
         .Include("Entities.CheckConstraints")
+        .Include("Entities.Parent")
+        .Include("Entities.Parent.Schema")
 
 let getRolesObjects (schemas : IQueryable<Schema>) : IQueryable<Schema> =
     schemas
         .Include("Roles")
         .Include("Roles.Parents")
         .Include("Roles.Parents.Parent")
+        .Include("Roles.Parents.Parent.Schema")
         .Include("Roles.Entities")
         .Include("Roles.Entities.Entity")
         .Include("Roles.Entities.Entity.Schema")

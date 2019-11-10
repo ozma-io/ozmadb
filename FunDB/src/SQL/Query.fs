@@ -145,7 +145,11 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 ignore <| command.Parameters.AddWithValue(name.ToString(), npgsqlType valueType, npgsqlValue value)
             logger.LogInformation("Executing query with args {args}: {query}", pars, queryStr)
             try
-                do! command.PrepareAsync()
+                try
+                    do! command.PrepareAsync()
+                with :? PostgresException as ex ->
+                    logger.LogError(ex, "Failed to prepare {query}", queryStr)
+                    reraise' ex
                 return! runFunc command
             with
             | :? PostgresException as ex ->
