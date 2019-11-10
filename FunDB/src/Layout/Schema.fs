@@ -8,6 +8,12 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDBSchema.Schema
+
+type SchemaLayoutException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = SchemaLayoutException (message, null)
 
 let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
     { fieldType = field.Type
@@ -33,11 +39,11 @@ let private makeSourceCheckConstraint (constr : CheckConstraint) : SourceCheckCo
 
 let private makeSourceEntity (entity : Entity) : SourceEntity =
     { columnFields = entity.ColumnFields |> Seq.map (fun col -> (FunQLName col.Name, makeSourceColumnField col)) |> Map.ofSeqUnique
-      computedFields = entity.ComputedFields |> Seq.map (fun col -> (FunQLName col.Name, makeSourceComputedField col)) |> Map.ofSeqUnique
+      computedFields = entity.ComputedFields |> Seq.map (fun comp -> (FunQLName comp.Name, makeSourceComputedField comp)) |> Map.ofSeqUnique
       uniqueConstraints = entity.UniqueConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceUniqueConstraint constr)) |> Map.ofSeqUnique
       checkConstraints = entity.CheckConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceCheckConstraint constr)) |> Map.ofSeqUnique
       mainField =
-        if entity.MainField = null
+        if isNull entity.MainField
         then funId
         else FunQLName entity.MainField
       forbidExternalReferences = entity.ForbidExternalReferences

@@ -1,8 +1,8 @@
 module FunWithFlags.FunDB.SQL.Meta
 
 open System
-open System.ComponentModel.DataAnnotations
 open System.Linq
+open Npgsql
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
@@ -16,206 +16,14 @@ open FunWithFlags.FunDB.SQL.Lex
 open FunWithFlags.FunDB.SQL.Parse
 open FunWithFlags.FunDB.SQL.Array.Lex
 open FunWithFlags.FunDB.SQL.Array.Parse
+open FunWithFlags.FunDBSchema.PgCatalog
+
+type ColumnNum = int16
 
 type SQLMetaException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
 
     new (message : string) = SQLMetaException (message, null)
-
-type private Oid = uint32
-type private ColumnNum = int16
-
-module PgCatalog =
-    open System.ComponentModel.DataAnnotations.Schema
-
-    type PgCatalogContext (options : DbContextOptions<PgCatalogContext>) =
-        inherit DbContext (options)
-
-        // All of this shit is because of how EF Core works.
-        [<DefaultValue>]
-        val mutable pgNamespace : DbSet<Namespace>
-        member this.Namespace
-            with get () = this.pgNamespace
-            and set value = this.pgNamespace <- value
-
-        [<DefaultValue>]
-        val mutable classes : DbSet<Class>
-        member this.Classes
-            with get () = this.classes
-            and set value = this.classes <- value
-
-        [<DefaultValue>]
-        val mutable attributes : DbSet<Attribute>
-        member this.Attributes
-            with get () = this.attributes
-            and set value = this.attributes <- value
-
-        [<DefaultValue>]
-        val mutable attrDefs : DbSet<AttrDef>
-        member this.AttrDefs
-            with get () = this.attrDefs
-            and set value = this.attrDefs <- value
-
-        [<DefaultValue>]
-        val mutable constraints : DbSet<Constraint>
-        member this.Constraints
-            with get () = this.constraints
-            and set value = this.constraints <- value
-
-        override this.OnModelCreating (modelBuilder : ModelBuilder) =
-            ignore <| modelBuilder.Entity<Attribute>()
-                .HasKey([| "attrelid"; "attnum" |])
-            ignore <| modelBuilder.Entity<AttrDef>()
-                .HasOne(fun def -> def.attribute)
-                .WithMany(fun attr -> attr.attrDefs)
-                .HasForeignKey([| "adrelid"; "adnum" |])
-
-    and
-        [<Table("pg_namespace", Schema="pg_catalog")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        Namespace =
-            { [<Column(TypeName="oid")>]
-              [<Key>]
-              oid : Oid
-              [<Required>]
-              nspname : string
-
-              classes : seq<Class>
-            }
-
-    and
-        [<Table("pg_class", Schema="pg_catalog")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        Class =
-            { [<Column(TypeName="oid")>]
-              [<Key>]
-              oid : Oid
-              [<Required>]
-              relname : string
-              [<Column(TypeName="oid")>]
-              relnamespace : Oid
-              relkind : char
-
-              [<ForeignKey("relnamespace")>]
-              pgNamespace : Namespace
-
-              attributes : seq<Attribute>
-              [<InverseProperty("pgTableClass")>]
-              constraints : seq<Constraint>
-              [<InverseProperty("pgTableClass")>]
-              indexes : seq<Index>
-            }
-
-    and
-        [<Table("pg_attribute", Schema="pg_catalog")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        Attribute =
-            { [<Column(TypeName="oid")>]
-              attrelid : Oid
-              [<Required>]
-              attname : string
-              [<Column(TypeName="oid")>]
-              atttypid : Oid
-              attnum : ColumnNum
-              attnotnull : bool
-              attisdropped : bool
-
-              [<ForeignKey("attrelid")>]
-              pgTableClass : Class
-              [<ForeignKey("atttypid")>]
-              pgType : Type
-
-              attrDefs : seq<AttrDef>
-           }
-
-    and
-        [<Table("pg_type", Schema="pg_catalog")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        Type =
-            { [<Column(TypeName="oid")>]
-              [<Key>]
-              oid : Oid
-              [<Required>]
-              typname : string
-              typtype : char
-           }
-
-    and
-        [<Table("pg_attrdef", Schema="pg_catalog")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        AttrDef =
-            { [<Column(TypeName="oid")>]
-              [<Key>]
-              oid : Oid
-              [<Column(TypeName="oid")>]
-              adrelid : Oid
-              adnum : ColumnNum
-              [<Required>]
-              adsrc : string
-
-              [<ForeignKey("adrelid")>]
-              pgTableClass : Class
-              attribute : Attribute
-            }
-
-    and
-        [<Table("pg_constraint", Schema="pg_catalog")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        Constraint =
-            { [<Column(TypeName="oid")>]
-              [<Key>]
-              oid : Oid
-              conname : string
-              contype : char
-              [<Column(TypeName="oid")>]
-              conrelid : Oid
-              [<Column(TypeName="oid")>]
-              confrelid : Nullable<Oid> // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
-              conkey : ColumnNum[]
-              confkey : ColumnNum[]
-              consrc : string
-
-              [<ForeignKey("conrelid")>]
-              pgTableClass : Class
-              [<ForeignKey("confrelid")>]
-              pgRelClass : Class
-            }
-
-    and
-        [<Table("pg_index", Schema="pg_catalog")>]
-        [<CLIMutable>]
-        [<NoEquality>]
-        [<NoComparison>]
-        Index =
-            { [<Column(TypeName="oid")>]
-              [<Key>]
-              indexrelid : Oid
-              [<Column(TypeName="oid")>]
-              indrelid : Oid
-              indisunique : bool
-              indisprimary : bool
-              indkey : ColumnNum[]
-
-              [<ForeignKey("indexrelid")>]
-              pgClass : Class
-              [<ForeignKey("indrelid")>]
-              pgTableClass : Class
-            }
-
- open PgCatalog
- open Npgsql
 
 let private publicSchema = SQLName "public"
 
@@ -530,7 +338,7 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) : Task<DatabaseMeta> =
         ignore <| db.Database.UseTransaction(transaction)
 
         let! namespaces =
-            db.Namespace.AsNoTracking().Where(fun ns -> not (ns.nspname.StartsWith("pg_")) && ns.nspname <> "information_schema")
+            db.Namespaces.AsNoTracking().Where(fun ns -> not (ns.nspname.StartsWith("pg_")) && ns.nspname <> "information_schema")
                 .Include("classes")
                 .Include("classes.attributes")
                 .Include("classes.attributes.attrDefs")

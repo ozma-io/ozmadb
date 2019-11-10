@@ -10,7 +10,6 @@ open Npgsql
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
 open FunWithFlags.FunDB.Layout.Resolve
@@ -38,6 +37,7 @@ open FunWithFlags.FunDB.SQL.Migration
 module SQL = FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Operations.Preload
+open FunWithFlags.FunDBSchema.Schema
 
 type ContextException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)

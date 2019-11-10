@@ -8,6 +8,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDBSchema.Schema
 
 type SchemaRolesException (message : string) =
     inherit Exception(message)

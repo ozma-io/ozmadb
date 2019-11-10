@@ -8,6 +8,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDBSchema.Schema
 
 let private makeSourceAttributeField (attrs : FieldAttributes) : SourceAttributesField =
     { allowBroken = attrs.AllowBroken

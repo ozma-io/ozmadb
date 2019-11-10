@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputName>FunDB</OutputName>
     <TargetFramework>netcoreapp3.0</TargetFramework>
 
     <!-- Store generated parsers in intermediate build directory -->
@@ -11,11 +10,6 @@
     <OutputType>Exe</OutputType>
 
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <WarningLevel>5</WarningLevel>
-    <NoWarn>FS0052</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>    
@@ -114,6 +108,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../FunDBSchema/FunDBSchema.csproj" />
+
     <PackageReference Include="Npgsql" Version="4.1.*" />
     <PackageReference Include="Npgsql.Json.NET" Version="4.1.*" />
     <PackageReference Include="FsLexYacc" Version="10.0.*" />

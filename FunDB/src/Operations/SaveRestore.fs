@@ -5,7 +5,6 @@ open Newtonsoft.Json
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Schema
@@ -19,6 +18,7 @@ open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Schema
 open FunWithFlags.FunDB.Attributes.Update
+open FunWithFlags.FunDBSchema.Schema
 
 type SaveSchemaErrorInfo =
     | SENotFound

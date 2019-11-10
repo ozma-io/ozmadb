@@ -7,7 +7,6 @@ open Newtonsoft.Json
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST
@@ -28,6 +27,7 @@ open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Connection
 module SQL = FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDBSchema.Schema
 
 type SourcePreloadedSchema =
     { [<JsonProperty(Required=Required.DisallowNull)>]

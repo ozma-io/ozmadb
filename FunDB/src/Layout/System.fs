@@ -6,45 +6,7 @@ open System.Reflection
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.FunQL.AST
-
-[<AllowNullLiteral>]
-[<AttributeUsage(AttributeTargets.Property)>]
-type EntityAttribute (mainField : string) =
-    inherit Attribute ()
-    member this.MainField = mainField
-    member val ForbidExternalReferences = false with get, set
-    member val Hidden = false with get, set
-    member val IsAbstract = false with get, set
-
-[<AllowNullLiteral>]
-[<AttributeUsage(AttributeTargets.Property, AllowMultiple=true)>]
-type UniqueConstraintAttribute (name : string, columns : string array) =
-    inherit Attribute ()
-    member this.Name = name
-    member this.Columns = columns
-
-[<AllowNullLiteral>]
-[<AttributeUsage(AttributeTargets.Property, AllowMultiple=true)>]
-type CheckConstraintAttribute (name : string, expression : string) =
-    inherit Attribute ()
-    member this.Name = name
-    member this.Expression = expression
-
-[<AllowNullLiteral>]
-[<AttributeUsage(AttributeTargets.Property, AllowMultiple=true)>]
-type ComputedFieldAttribute (name : string, expression : string) =
-    inherit Attribute ()
-    member this.Name = name
-    member this.Expression = expression
-
-[<AllowNullLiteral>]
-[<AttributeUsage(AttributeTargets.Property)>]
-type ColumnFieldAttribute (colType : string) =
-    inherit Attribute ()
-    member this.Type = colType
-    member val Nullable = false with get, set
-    member val Immutable = false with get, set
-    member val Default = null : string with get, set
+open FunWithFlags.FunDBSchema.Attributes
 
 let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * SourceColumnField) option =
     let field = Attribute.GetCustomAttribute(property, typeof<ColumnFieldAttribute>) :?> ColumnFieldAttribute
@@ -99,7 +61,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               forbidExternalReferences = entityAttr.ForbidExternalReferences
               hidden = entityAttr.Hidden
               parent = None
-              isAbstract = entityAttr.IsAbstract
+              isAbstract = entityClass.IsAbstract
             }
         Some (FunQLName prop.Name, entityClass, res)
 

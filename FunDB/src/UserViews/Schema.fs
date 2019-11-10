@@ -8,6 +8,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
+open FunWithFlags.FunDBSchema.Schema
 
 let private makeSourceUserView (uv : UserView) : SourceUserView =
     { allowBroken = uv.AllowBroken

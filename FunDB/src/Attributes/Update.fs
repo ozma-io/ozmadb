@@ -11,6 +11,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Layout.Update
+open FunWithFlags.FunDBSchema.Schema
 
 type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
@@ -43,12 +44,12 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingSchema.FieldsAttributes.Add(newAttrs)
             newAttrs
-        updateDifference db updateFunc createFunc newAttrsMap oldAttrsMap
+        ignore <| updateDifference db updateFunc createFunc newAttrsMap oldAttrsMap
 
-    let updateSchemas : Map<SchemaName, SourceAttributesDatabase> -> Map<SchemaName, Schema> -> unit =
+    let updateSchemas (schemas : Map<SchemaName, SourceAttributesDatabase>) (oldSchemas : Map<SchemaName, Schema>) =
         let updateFunc _ = updateAttributesDatabase
         let createFunc name = failwith <| sprintf "Schema %O doesn't exist" name
-        updateDifference db updateFunc createFunc
+        ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
 
     member this.UpdateSchemas = updateSchemas
 

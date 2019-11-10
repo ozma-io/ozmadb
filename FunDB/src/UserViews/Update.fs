@@ -10,6 +10,7 @@ open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
+open FunWithFlags.FunDBSchema.Schema
 
 type private UserViewsUpdater (db : SystemContext) =
     let updateUserView (uv : SourceUserView) (existingUv : UserView) : unit =
@@ -28,12 +29,12 @@ type private UserViewsUpdater (db : SystemContext) =
                 )
             existingSchema.UserViews.Add(newUv)
             newUv
-        updateDifference db updateFunc createFunc schema.userViews oldUserViewsMap
+        ignore <| updateDifference db updateFunc createFunc schema.userViews oldUserViewsMap
 
-    let updateSchemas : Map<SchemaName, SourceUserViewsSchema> -> Map<SchemaName, Schema> -> unit =
+    let updateSchemas (schemas : Map<SchemaName, SourceUserViewsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
         let updateFunc _ = updateUserViewsSchema
         let createFunc name = failwith <| sprintf "Schema %O doesn't exist" name
-        updateDifference db updateFunc createFunc
+        ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
 
     member this.UpdateSchemas = updateSchemas
 

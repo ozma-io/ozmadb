@@ -8,6 +8,7 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
+open FunWithFlags.FunDBSchema.Schema
 
 let private entityToInfo (entity : Entity) = entity.Id
 let private makeEntity schemaName (entity : Entity) = ({ schema = schemaName; name = FunQLName entity.Name }, entityToInfo entity)
@@ -19,7 +20,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
     let mutable needsParentPass = false
 
-    let updateColumnFields (entity : Entity) : Map<FieldName, SourceColumnField> -> Map<FieldName, ColumnField> -> unit =
+    let updateColumnFields (entity : Entity) : Map<FieldName, SourceColumnField> -> Map<FieldName, ColumnField> -> Map<FieldName, ColumnField> =
         let updateColumnFunc _ (newColumn : SourceColumnField) (oldColumn : ColumnField) =
             let def =
                 match newColumn.defaultValue with
@@ -38,7 +39,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
             newColumn
         updateDifference db updateColumnFunc createColumnFunc
 
-    let updateComputedFields (entity : Entity) : Map<FieldName, SourceComputedField> -> Map<FieldName, ComputedField> -> unit =
+    let updateComputedFields (entity : Entity) : Map<FieldName, SourceComputedField> -> Map<FieldName, ComputedField> -> Map<FieldName, ComputedField> =
         let updateComputedFunc _ (newComputed : SourceComputedField) (oldComputed : ComputedField) =
             oldComputed.Expression <- newComputed.expression
         let createComputedFunc (FunQLName name) =
@@ -50,7 +51,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
             newComputed
         updateDifference db updateComputedFunc createComputedFunc
 
-    let updateUniqueConstraints (entity : Entity) : Map<FieldName, SourceUniqueConstraint> -> Map<FieldName, UniqueConstraint> -> unit =
+    let updateUniqueConstraints (entity : Entity) : Map<FieldName, SourceUniqueConstraint> -> Map<FieldName, UniqueConstraint> -> Map<FieldName, UniqueConstraint> =
         let updateUniqueFunc _ (newUnique : SourceUniqueConstraint) (oldUnique : UniqueConstraint) =
             let columnNames = Array.map (fun x -> x.ToString()) newUnique.columns
             oldUnique.Columns <- columnNames
@@ -63,7 +64,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
             newUnique
         updateDifference db updateUniqueFunc createUniqueFunc
 
-    let updateCheckConstraints (entity : Entity) : Map<FieldName, SourceCheckConstraint> -> Map<FieldName, CheckConstraint> -> unit =
+    let updateCheckConstraints (entity : Entity) : Map<FieldName, SourceCheckConstraint> -> Map<FieldName, CheckConstraint> -> Map<FieldName, CheckConstraint> =
         let updateCheckFunc _ (newCheck : SourceCheckConstraint) (oldCheck : CheckConstraint) =
             oldCheck.Expression <- newCheck.expression
         let createCheckFunc (FunQLName name) =
@@ -81,15 +82,15 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         let uniqueConstraintsMap = existingEntity.UniqueConstraints |> Seq.map (fun unique -> (FunQLName unique.Name, unique)) |> Map.ofSeq
         let checkConstraintsMap = existingEntity.CheckConstraints |> Seq.map (fun check -> (FunQLName check.Name, check)) |> Map.ofSeq
 
-        updateColumnFields existingEntity entity.columnFields columnFieldsMap
-        updateComputedFields existingEntity entity.computedFields computedFieldsMap
-        updateUniqueConstraints existingEntity entity.uniqueConstraints uniqueConstraintsMap
-        updateCheckConstraints existingEntity entity.checkConstraints checkConstraintsMap
+        let columnFields = updateColumnFields existingEntity entity.columnFields columnFieldsMap
+        let computedFields = updateComputedFields existingEntity entity.computedFields computedFieldsMap
+        ignore <| updateUniqueConstraints existingEntity entity.uniqueConstraints uniqueConstraintsMap
+        ignore <| updateCheckConstraints existingEntity entity.checkConstraints checkConstraintsMap
 
         if entity.mainField = funId then
             existingEntity.MainField <- null
         else
-            existingEntity.MainField <- entity.mainField.ToString()
+            existingEntity.MainField <-entity.mainField.ToString()
         existingEntity.ForbidExternalReferences <- entity.forbidExternalReferences
         existingEntity.Hidden <- entity.hidden
         existingEntity.IsAbstract <- entity.isAbstract
@@ -119,9 +120,9 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingSchema.Entities.Add(newEntity)
             newEntity
-        updateDifference db updateFunc createFunc schema.entities entitiesMap
+        ignore <| updateDifference db updateFunc createFunc schema.entities entitiesMap
 
-    let updateSchemas =
+    let updateSchemas schemas existingSchemas =
         let updateFunc _ = updateSchema
         let createFunc (FunQLName name) =
             let newSchema =
@@ -130,7 +131,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             ignore <| db.Schemas.Add(newSchema)
             newSchema
-        updateDifference db updateFunc createFunc
+        ignore <| updateDifference db updateFunc createFunc schemas existingSchemas
 
     member this.UpdateSchemas = updateSchemas
     member this.NeedsParentPass = needsParentPass

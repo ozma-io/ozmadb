@@ -11,6 +11,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Layout.Update
+open FunWithFlags.FunDBSchema.Schema
 
 type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
@@ -33,7 +34,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingEntity.ColumnFields.Add(newField)
             newField
-        updateDifference db updateFunc createFunc entity.fields oldFieldsMap
+        ignore <| updateDifference db updateFunc createFunc entity.fields oldFieldsMap
 
     let updateAllowedEntity (entityRef : ResolvedEntityRef) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) : unit =
         updateAllowedFields entityRef entity existingEntity
@@ -65,7 +66,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingRole.Entities.Add(newEntity)
             newEntity
-        updateDifference db updateFunc createFunc entitiesMap oldEntitiesMap
+        ignore <| updateDifference db updateFunc createFunc entitiesMap oldEntitiesMap
 
     let updatePermissionsSchema (schema : SourcePermissionsSchema) (existingSchema : Schema) : unit =
         let oldRolesMap =
@@ -79,12 +80,12 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingSchema.Roles.Add(newRole)
             newRole
-        updateDifference db updateFunc createFunc schema.roles oldRolesMap
+        ignore <| updateDifference db updateFunc createFunc schema.roles oldRolesMap
 
-    let updateSchemas : Map<SchemaName, SourcePermissionsSchema> -> Map<SchemaName, Schema> -> unit =
+    let updateSchemas (schemas : Map<SchemaName, SourcePermissionsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
         let updateFunc _ = updatePermissionsSchema
         let createFunc name = failwith <| sprintf "Schema %O doesn't exist" name
-        updateDifference db updateFunc createFunc
+        ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
 
     member this.UpdateSchemas = updateSchemas
 

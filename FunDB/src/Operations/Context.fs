@@ -1,7 +1,6 @@
 module FunWithFlags.FunDB.Operations.Context
 
 open System
-open System.Linq
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
@@ -21,11 +20,11 @@ open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Resolve
 open FunWithFlags.FunDB.UserViews.DryRun
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Operations.ContextCache
 open FunWithFlags.FunDB.Operations.SaveRestore
 module SQL = FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDBSchema.Schema
 
 type UserViewErrorInfo =
     | UVENotFound

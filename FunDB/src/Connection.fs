@@ -7,8 +7,8 @@ open Microsoft.EntityFrameworkCore
 open Npgsql
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.SQL.Query
+open FunWithFlags.FunDBSchema.Schema
 
 type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
