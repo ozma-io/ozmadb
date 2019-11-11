@@ -138,7 +138,6 @@ let refField : LinkedRef<ValueRef<'f>> -> LinkedRef<'f> option = function
     | _ -> None
 
 let resultFieldRef : QueryResultExpr<'e, LinkedRef<ValueRef<'f>>> -> LinkedRef<'f> option = function
-    | QRField ref -> refField ref
     | QRExpr (name, FERef ref) -> refField ref
     | QRExpr (name, _) -> None
 
@@ -352,8 +351,8 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         let voidAggr aggr = raisef ViewResolveException "Forbidden aggregate function in LIMIT or OFFSET"
         mapFieldExpr id resolveReference voidQuery voidAggr expr
 
-    let rec resolveResult (mapping : QMapping) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
-        let (exprInfo, expr) = resolveResultExpr mapping result.result
+    let rec resolveResult (inExpression : bool) (mapping : QMapping) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
+        let (exprInfo, expr) = resolveResultExpr inExpression mapping result.result
         let ret = {
             attributes = resolveAttributes mapping result.attributes
             result = expr
@@ -361,15 +360,9 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         (exprInfo, ret)
 
     // Should be in sync with resultField
-    and resolveResultExpr (mapping : QMapping) : ParsedQueryResultExpr -> ResolvedResultInfo * ResolvedQueryResultExpr = function
-        | QRField f ->
-            let (boundField, _, f') = resolveReference true mapping f
-            let info =
-                { subquery = boundField
-                  hasAggregates = false
-                }
-            (info, QRField f')
+    and resolveResultExpr (inExpression : bool) (mapping : QMapping) : ParsedQueryResultExpr -> ResolvedResultInfo * ResolvedQueryResultExpr = function
         | QRExpr (name, FERef f) ->
+            Option.iter checkName name
             let (boundField, _, f') = resolveReference true mapping f
             let info =
                 { subquery = boundField
@@ -377,7 +370,10 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 }
             (info, QRExpr (name, FERef f'))
         | QRExpr (name, e) ->
-            checkName name
+            match name with
+            | Some n -> checkName n
+            | None when not inExpression -> raisef ViewResolveException "Unnamed results are allowed only inside expression queries"
+            | None -> ()
             let (exprInfo, expr) = resolveFieldExpr true mapping e
             let info =
                 { subquery = unboundSubqueryField
@@ -409,7 +405,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
 
             ret
         let resolveQuery query =
-            let (_, res) = resolveSubSelectExpr query
+            let (_, res) = resolveSubSelectExpr true query
             res
         let resolveAggr aggr =
             hasAggregates <- true
@@ -437,9 +433,9 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             }
         (isLocal, ret)
 
-    and resolveSelectExpr : ParsedSelectExpr -> QSelectResults * ResolvedSelectExpr = function
+    and resolveSelectExpr (inExpression : bool) : ParsedSelectExpr -> QSelectResults * ResolvedSelectExpr = function
         | SSelect query ->
-            let (fields, res) = resolveSingleSelectExpr query
+            let (fields, res) = resolveSingleSelectExpr inExpression query
             let results = {
                 fields = fields
                 attributes = res.attributes
@@ -447,8 +443,8 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             }
             (results, SSelect res)
         | SSetOp (op, a, b, limits) ->
-            let (results1, a') = resolveSelectExpr a
-            let (results2, b') = resolveSelectExpr b
+            let (results1, a') = resolveSelectExpr inExpression a
+            let (results2, b') = resolveSelectExpr inExpression b
             if Array.length results1.fieldAttributeNames <> Array.length results2.fieldAttributeNames then
                 raisef ViewResolveException "Different number of columns in a set operation expression"
             for ((name1, attrs1), (name2, attrs2)) in Seq.zip results1.fieldAttributeNames results2.fieldAttributeNames do
@@ -463,8 +459,8 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 raisef ViewResolveException "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.orderBy
             ({ results1 with fields = newFields }, SSetOp (op, a', b', resolvedLimits))
 
-    and resolveSubSelectExpr (query : ParsedSelectExpr) : QSubqueryFields * ResolvedSelectExpr =
-        let (results, res) = resolveSelectExpr query
+    and resolveSubSelectExpr (inExpression : bool) (query : ParsedSelectExpr) : QSubqueryFields * ResolvedSelectExpr =
+        let (results, res) = resolveSelectExpr inExpression query
         if not <| Map.isEmpty results.attributes then
             raisef ViewResolveException "Subqueries cannot have attributes"
         for (name, attrs) in results.fieldAttributeNames do
@@ -472,16 +468,16 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 raisef ViewResolveException "Subquery field %O cannot have attributes" name
         (results.fields, res)
 
-    and resolveSingleSelectExpr (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
+    and resolveSingleSelectExpr (inExpression : bool) (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
         let (fromMapping, qFrom) =
             match query.from with
             | None -> (Map.empty, None)
             | Some from ->
-                let (mapping, res) = resolveFromExpr from
+                let (mapping, res) = resolveFromExpr inExpression from
                 (mapping, Some res)
         let qWhere = Option.map (resolveNonaggrFieldExpr fromMapping) query.where
         let qGroupBy = Array.map (resolveNonaggrFieldExpr fromMapping) query.groupBy
-        let rawResults = Array.map (resolveResult fromMapping) query.results
+        let rawResults = Array.map (resolveResult inExpression fromMapping) query.results
         let hasAggregates = Array.exists (fun (info : ResolvedResultInfo, expr) -> info.hasAggregates) rawResults || not (Array.isEmpty qGroupBy)
         let results = Array.map snd rawResults
         let makeField (info, res) =
@@ -508,7 +504,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         }
         (newFields, newQuery)
 
-    and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
+    and resolveFromExpr (inExpression : bool) : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
         | FEntity (pun, name) ->
             let resName = resolveEntityRef name
             let entity =
@@ -524,8 +520,8 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             let fields = Map.add funMain (QRename entity.mainField) realFields
             (Map.singleton (Some <| Option.defaultValue name.name pun) (Some resName.schema, fields), FEntity (pun, resName))
         | FJoin (jt, e1, e2, where) ->
-            let (newMapping1, newE1) = resolveFromExpr e1
-            let (newMapping2, newE2) = resolveFromExpr e2
+            let (newMapping1, newE1) = resolveFromExpr inExpression e1
+            let (newMapping2, newE2) = resolveFromExpr inExpression e2
 
             let newMapping =
                 try
@@ -541,7 +537,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             (newMapping, FJoin (jt, newE1, newE2, newFieldExpr))
         | FSubExpr (name, q) ->
             checkName name
-            let (fields, newQ) = resolveSubSelectExpr q
+            let (fields, newQ) = resolveSubSelectExpr inExpression q
             (Map.singleton (Some name) (None, fields), FSubExpr (name, newQ))
         | FValues (name, fieldNames, values) ->
             checkName name
@@ -594,7 +590,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
 
 let resolveSelectExpr (layout : Layout) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
     let qualifier = QueryResolver (layout, globalArgumentsMap)
-    let (results, qQuery) = qualifier.ResolveSelectExpr select
+    let (results, qQuery) = qualifier.ResolveSelectExpr true select
     (qualifier.UsedArguments, qQuery)
 
 let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
@@ -602,7 +598,7 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let localArguments = Map.mapKeys PLocal arguments
     let allArguments = Map.union localArguments globalArgumentsMap
     let qualifier = QueryResolver (layout, allArguments)
-    let (results, qQuery) = qualifier.ResolveSelectExpr viewExpr.select
+    let (results, qQuery) = qualifier.ResolveSelectExpr false viewExpr.select
     let mainEntity = Option.map (qualifier.ResolveMainEntity results.fields qQuery) viewExpr.mainEntity
 
     { arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArgumentsMap)

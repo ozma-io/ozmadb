@@ -23,7 +23,7 @@ let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (argumen
     | SQL.FTable _ -> where |> Option.get
     | _ ->
         let select =
-            { columns = [| SQL.SCColumn { table = Some <| compileResolvedEntityRef ref; name = sqlFunId } |]
+            { columns = [| SQL.SCExpr (None, SQL.VEColumn { table = Some <| compileResolvedEntityRef ref; name = sqlFunId }) |]
               from = Some from
               where = where
               groupBy = [||]

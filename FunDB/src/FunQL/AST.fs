@@ -542,23 +542,23 @@ and [<NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLN
             member this.ToFunQLString () = this.ToFunQLString()
 
 and [<NoComparison>] QueryResultExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    | QRField of 'f
-    | QRExpr of FunQLName * FieldExpr<'e, 'f>
+    | QRExpr of FunQLName option * FieldExpr<'e, 'f>
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             match this with
-            | QRField c -> c.ToFunQLString()
-            | QRExpr (name, expr) -> sprintf "%s AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
+            | QRExpr (None, expr) -> expr.ToFunQLString()
+            | QRExpr (Some name, expr) -> sprintf "%s AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
         member this.ToName () =
             match this with
-            | QRField c -> c.ToName ()
-            | QRExpr (name, expr) -> name
+            | QRExpr (None, FERef c) -> c.ToName ()
+            | QRExpr (Some name, expr) -> name
+            | _ -> failwith "Unnamed result expression"
 
         interface IFunQLName with
             member this.ToName () = this.ToName ()

@@ -463,7 +463,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
                     let result =
                         { attributes = Map.empty
-                          result = QRField <| makeColumn firstName remainingPath
+                          result = QRExpr (None, FERef <| makeColumn firstName remainingPath)
                         }
                     let selectClause =
                         { attributes = Map.empty
@@ -501,7 +501,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     and compileAttribute (paths0 : JoinPaths) (attrType : ColumnType) (expr : ResolvedFieldExpr) : JoinPaths * SQL.SelectedColumn =
         let (newPaths, compiled) = compileLinkedFieldExpr paths0 expr
-        (newPaths, SQL.SCExpr (columnName attrType, compiled))
+        (newPaths, SQL.SCExpr (Some <| columnName attrType, compiled))
 
     and compileOrderLimitClause (paths0 : JoinPaths) (clause : ResolvedOrderLimitClause) : JoinPaths * SQL.OrderLimitClause =
         let mutable paths = paths0
@@ -532,7 +532,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     lastId <- lastId + 1
                     let modifiedExpr =
                         { expr with
-                              columns = Array.append [| SQL.SCExpr (domainName, SQL.VEValue <| SQL.VInt id) |] expr.columns
+                              columns = Array.append [| SQL.SCExpr (Some domainName, SQL.VEValue <| SQL.VInt id) |] expr.columns
                         }
                     (info.attributes, info.columns, Map.singleton id info.domains, SQL.SSelect modifiedExpr)
                 | SSetOp (op, a, b, limits) ->
@@ -645,7 +645,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         | None ->
                             ids <- Map.add idStr newName ids
                             let colName = CTIdColumn newName
-                            let column = (colName, SQL.SCExpr (columnName colName, idExpr))
+                            let column = (colName, SQL.SCExpr (Some <| columnName colName, idExpr))
                             (Some newName, Seq.singleton column)
                         | Some idName -> (Some idName, Seq.empty)
 
@@ -678,7 +678,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 | DSingle (id, domain) -> Seq.empty
                 | DMulti (ns, nested) ->
                     let colName = CTDomainColumn ns
-                    let col = (colName, SQL.SCColumn { table = Some tableRef; name = columnName colName })
+                    let col = (colName, SQL.SCExpr (None, SQL.VEColumn { table = Some tableRef; name = columnName colName }))
                     Seq.append (Seq.singleton col) (nested |> Map.values |> Seq.collect getDomainColumns)
                 let domainColumns =
                     if Array.isEmpty resultRef.path
@@ -714,7 +714,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             let punExpr = fromInfoExpression tableRef getPunColumn fromInfo.fromType
                             if foundPun then
                                 let colName = CTPunAttribute newName
-                                let col = (colName, SQL.SCExpr (columnName colName, punExpr))
+                                let col = (colName, SQL.SCExpr (Some <| columnName colName, punExpr))
                                 Seq.singleton col
                             else
                                 Seq.empty
@@ -724,7 +724,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             let (newPaths, punExpr) = compileLinkedFieldRef paths punRef
                             paths <- newPaths
                             let colName = CTPunAttribute newName
-                            let col = (colName, SQL.SCExpr (columnName colName, punExpr))
+                            let col = (colName, SQL.SCExpr (Some <| columnName colName, punExpr))
                             Seq.singleton col
                     else
                         Seq.empty
@@ -756,7 +756,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let allAttrs = Set.union oldAttrs currentAttrs
                         let makeInheritedAttr name =
                             let attrCol = CTCellAttribute (fieldName, name)
-                            (attrCol, SQL.SCColumn { table = Some tableRef; name = columnName attrCol })
+                            (attrCol, SQL.SCExpr (None, SQL.VEColumn { table = Some tableRef; name = columnName attrCol }))
                         let inheritedCols = inheritedAttrs |> Set.toSeq |> Seq.map makeInheritedAttr
                         (allAttrs, inheritedCols)
 
@@ -787,7 +787,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             | Some id -> Some { table = Some { schema = None; name = compileName name }; name = id }
                             | None -> None
                         let mainId = Map.toSeq fromMap |> Seq.mapMaybe findMainId |> Seq.exactlyOne
-                        let col = (CTMainIdColumn, SQL.SCExpr (columnName CTMainIdColumn, SQL.VEColumn mainId))
+                        let col = (CTMainIdColumn, SQL.SCExpr (Some <| columnName CTMainIdColumn, SQL.VEColumn mainId))
                         Seq.singleton col
 
                 let columns = [ mainIdColumns; attributeColumns; resultColumns ] |> Seq.concat |> Array.ofSeq
@@ -826,11 +826,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let (newPaths, newExpr) =
             match result.result with
-            | QRField field -> compileLinkedFieldRef paths field
             | QRExpr (name, expr) -> compileLinkedFieldExpr paths expr
 
         paths <- newPaths
-        let resultColumn = (sqlCol, SQL.SCExpr (columnName sqlCol, newExpr))
+        let resultColumn = (sqlCol, SQL.SCExpr (Some <| columnName sqlCol, newExpr))
 
         let compileAttr (attrName, expr) =
             let attrCol = CTCellAttribute (resultName, attrName)
@@ -874,13 +873,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 | None ->
                     SQL.FTable (Option.map compileName pun, compileResolvedEntityRef entityRef)
                 | Some inheritance ->
-                    let rootEntity = SQL.SCExpr (sqlFunRootEntity, SQL.VEValue (SQL.VString entity.typeName))
+                    let rootEntity = SQL.SCExpr (Some sqlFunRootEntity, SQL.VEValue (SQL.VString entity.typeName))
                     let compileInheritedField (name, field) =
-                        SQL.SCExpr (compileName name, SQL.VEColumn { table = None; name = field.columnName })
+                        SQL.SCExpr (Some <| compileName name, SQL.VEColumn { table = None; name = field.columnName })
                     let systemSeq = [
                         rootEntity
-                        SQL.SCColumn { table = None; name = sqlFunId }
-                        SQL.SCColumn { table = None; name = sqlFunSubEntity }
+                        SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunId })
+                        SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunSubEntity })
                     ]
                     let fieldsSeq = entity.columnFields |> Map.toSeq |> Seq.map compileInheritedField
                     let select =
@@ -993,8 +992,7 @@ let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
 
 let private checkPureColumn : SQL.SelectedColumn -> (SQL.ColumnName * PurityStatus) option = function
     | SQL.SCAll _ -> None
-    | SQL.SCColumn _ -> None
-    | SQL.SCExpr (name, expr) -> Option.map (fun purity -> (name, purity)) (checkPureExpr expr)
+    | SQL.SCExpr (name, expr) -> Option.map (fun purity -> (Option.get name, purity)) (checkPureExpr expr)
 
 [<NoComparison>]
 type private PureColumn =

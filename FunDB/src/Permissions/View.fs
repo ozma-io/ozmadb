@@ -77,7 +77,7 @@ type private AccessCompiler (layout : Layout, initialArguments : QueryArguments)
 let private (|SubEntitySelect|_|) : SingleSelectExpr -> FunQL.ResolvedEntityRef option = function
     | { columns = columns; from = Some (FTable (None, tableRef)) } when not (Array.isEmpty columns) ->
         match columns.[0] with
-        | SCExpr (name, VEValue (VString rootName)) when name = sqlFunRootEntity ->
+        | SCExpr (Some name, VEValue (VString rootName)) when name = sqlFunRootEntity ->
             let rootRef = { schema = decompileName <| Option.get tableRef.schema; name = decompileName tableRef.name } : FunQL.ResolvedEntityRef
             let realRef = parseTypeName rootRef rootName
             Some realRef
@@ -119,7 +119,6 @@ type private PermissionsApplier (access : SchemaAccess) =
 
     and applyToSelectedColumn : SelectedColumn -> SelectedColumn = function
         | SCAll _ -> failwith "Unexpected SELECT *"
-        | SCColumn col -> SCColumn col
         | SCExpr (name, expr) -> SCExpr (name, applyToValueExpr expr)
 
     and applyToValueExpr =

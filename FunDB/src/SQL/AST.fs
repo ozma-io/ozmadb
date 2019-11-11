@@ -512,8 +512,7 @@ and [<NoComparison>] FromExpr =
 
 and [<NoComparison>] SelectedColumn =
     | SCAll of TableRef option
-    | SCColumn of ColumnRef
-    | SCExpr of ColumnName * ValueExpr
+    | SCExpr of ColumnName option * ValueExpr
     with
         override this.ToString () = this.ToSQLString()
 
@@ -521,8 +520,8 @@ and [<NoComparison>] SelectedColumn =
             match this with
             | SCAll None -> "*"
             | SCAll (Some ref) -> sprintf "%s.*" (ref.ToSQLString())
-            | SCColumn c -> c.ToSQLString()
-            | SCExpr (name, expr) -> sprintf "%s AS %s" (expr.ToSQLString()) (name.ToSQLString())
+            | SCExpr (None, expr) -> expr.ToSQLString()
+            | SCExpr (Some name, expr) -> sprintf "%s AS %s" (expr.ToSQLString()) (name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

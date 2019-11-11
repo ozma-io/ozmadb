@@ -37,7 +37,6 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         }
 
     and resolveResultExpr : ResolvedQueryResultExpr -> ResolvedQueryResultExpr = function
-        | QRField f -> QRField f
         | QRExpr (name, e) -> QRExpr (name, resolveFieldExpr e)
 
     and resolveAttributes (attributes : ResolvedAttributeMap) : ResolvedAttributeMap =

@@ -82,7 +82,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             { name = compileResolvedEntityRef entity.root
               columns = columns
               values = SQL.IValues [| valuesWithSys |]
-              returning = [| SQL.SCColumn { table = None; name = sqlFunId } |]
+              returning = [| SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunId }) |]
             } : SQL.InsertExpr
         let query =
             { expression = expr
