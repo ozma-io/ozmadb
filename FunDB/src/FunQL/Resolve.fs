@@ -151,7 +151,7 @@ let rec private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFiel
     | SSelect { results = results; from = Some from } ->
         if findMainEntityRef from = Some ref then
             let getField (result : ResolvedQueryResult) : (FieldName * FieldName) option =
-                let name = result.result.ToName ()
+                let name = result.result.TryToName () |> Option.get
                 match Map.find name fields with
                 | QField (Some { ref = boundRef; field = RColumnField _ }) when boundRef.entity = ref -> Some (name, boundRef.name)
                 | QRename newName -> failwith <| sprintf "Unexpected rename which should have been removed: %O -> %O" name newName
@@ -318,6 +318,8 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
         mapFieldExpr id resolveReference voidQuery voidAggr expr
 
     let rec resolveResult (inExpression : bool) (mapping : QMapping) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
+        if not (Map.isEmpty result.attributes) && inExpression then
+            raisef ViewResolveException "Attributes are not allowed in query expressions"
         let (exprInfo, expr) = resolveResultExpr inExpression mapping result.result
         let ret = {
             attributes = resolveAttributes mapping result.attributes
@@ -405,7 +407,11 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
             let results = {
                 fields = fields
                 attributes = res.attributes
-                fieldAttributeNames = res.results |> Array.map (fun res -> (res.result.ToName (), Map.keysSet res.attributes))
+                fieldAttributeNames =
+                    if inExpression then
+                        Array.empty
+                    else
+                        res.results |> Array.map (fun res -> (res.result.TryToName () |> Option.get, Map.keysSet res.attributes))
             }
             (results, SSelect res)
         | SSetOp (op, a, b, limits) ->
@@ -435,11 +441,15 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
         (results.fields, res)
 
     and resolveSingleSelectExpr (inExpression : bool) (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
+        if inExpression && not (Map.isEmpty query.attributes) then
+            raisef ViewResolveException "Attributes are not allowed in query expressions"
+        if inExpression && Array.length query.results <> 1 then
+            raisef ViewResolveException "Expression queries must have only one resulting column"
         let (fromMapping, qFrom) =
             match query.from with
             | None -> (Map.empty, None)
             | Some from ->
-                let (mapping, res) = resolveFromExpr inExpression from
+                let (mapping, res) = resolveFromExpr from
                 (mapping, Some res)
         let qWhere = Option.map (resolveNonaggrFieldExpr fromMapping) query.where
         let qGroupBy = Array.map (resolveNonaggrFieldExpr fromMapping) query.groupBy
@@ -448,12 +458,15 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
         let results = Array.map snd rawResults
         let makeField (info, res) =
             let bound = if hasAggregates then unboundSubqueryField else info.subquery
-            (res.result.ToName (), bound)
+            (res.result.TryToName () |> Option.get, bound)
         let newFields =
-            try
-                rawResults |> Seq.map makeField |> Map.ofSeqUnique
-            with
-                | Failure msg -> raisef ViewResolveException "Clashing result names: %s" msg
+            if inExpression then
+                Map.empty
+            else
+                try
+                    rawResults |> Seq.map makeField |> Map.ofSeqUnique
+                with
+                    | Failure msg -> raisef ViewResolveException "Clashing result names: %s" msg
 
         let extra =
             { hasAggregates = hasAggregates
@@ -470,7 +483,7 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
         }
         (newFields, newQuery)
 
-    and resolveFromExpr (inExpression : bool) : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
+    and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
         | FEntity (pun, name) ->
             let resName = resolveEntityRef name
             let entity =
@@ -486,8 +499,8 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
             let fields = Map.add funMain (QRename entity.MainField) realFields
             (Map.singleton (Some <| Option.defaultValue name.name pun) (Some resName.schema, fields), FEntity (pun, resName))
         | FJoin (jt, e1, e2, where) ->
-            let (newMapping1, newE1) = resolveFromExpr inExpression e1
-            let (newMapping2, newE2) = resolveFromExpr inExpression e2
+            let (newMapping1, newE1) = resolveFromExpr e1
+            let (newMapping2, newE2) = resolveFromExpr e2
 
             let newMapping =
                 try
@@ -503,7 +516,7 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
             (newMapping, FJoin (jt, newE1, newE2, newFieldExpr))
         | FSubExpr (name, q) ->
             checkName name
-            let (fields, newQ) = resolveSubSelectExpr inExpression q
+            let (fields, newQ) = resolveSubSelectExpr false q
             (Map.singleton (Some name) (None, fields), FSubExpr (name, newQ))
         | FValues (name, fieldNames, values) ->
             checkName name

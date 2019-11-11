@@ -1,6 +1,5 @@
 module FunWithFlags.FunDB.Attributes.Types
 
-open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 module SQL = FunWithFlags.FunDB.SQL.AST

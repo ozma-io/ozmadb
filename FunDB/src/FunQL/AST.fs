@@ -554,14 +554,14 @@ and [<NoComparison>] QueryResultExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFu
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-        member this.ToName () =
+        member this.TryToName () =
             match this with
-            | QRExpr (None, FERef c) -> c.ToName ()
-            | QRExpr (Some name, expr) -> name
-            | _ -> failwith "Unnamed result expression"
+            | QRExpr (None, FERef c) -> Some <| c.ToName ()
+            | QRExpr (Some name, expr) -> Some name
+            | _ -> None
 
         interface IFunQLName with
-            member this.ToName () = this.ToName ()
+            member this.ToName () = this.TryToName () |> Option.get
 
 and [<NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { orderBy : (SortOrder * FieldExpr<'e, 'f>)[]

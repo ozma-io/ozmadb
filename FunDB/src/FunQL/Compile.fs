@@ -597,7 +597,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
             match resultFieldRef result.result with
             | Some ({ ref = { ref = { entity = Some ({ name = entityName } as entityRef); name = fieldName } } } as resultRef) when addMetaColumns ->
-                let newName = result.result.ToName ()
+                let newName = result.result.TryToName () |> Option.get
                 let fromInfo = Map.find entityName fromMap
                 let tableRef : SQL.TableRef = { schema = None; name = compileName entityName }
 
@@ -770,7 +770,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             if addMetaColumns then
                 let resultColumns = resultEntries |> Seq.collect (fun entry -> entry.columns) |> Seq.distinct
                 let newDomains = resultEntries |> Seq.mapMaybe (fun entry -> entry.domains) |> Seq.fold mergeDomains emptyDomains
-                let queryAttrs = Seq.fold2 (fun attrsMap result entry -> Map.add (result.result.ToName ()) entry.attributes attrsMap) Map.empty select.results resultEntries
+                let queryAttrs = Seq.fold2 (fun attrsMap result entry -> Map.add (result.result.TryToName () |> Option.get) entry.attributes attrsMap) Map.empty select.results resultEntries
 
                 let mainIdColumns =
                     if not flags.hasMainEntity then
@@ -814,7 +814,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         (info, query)
 
     and compileResult (paths0 : JoinPaths) (result : ResolvedQueryResult) : JoinPaths * (ColumnType * SQL.SelectedColumn) seq =
-        let resultName = result.result.ToName ()
+        let resultName =
+            match result.result.TryToName () with
+            | Some name -> name
+            | None -> FunQLName "<unnamed>" // This hack is okay because unnamed results are allowed _only_ in expression queries where there is only one column
         let sqlCol = CTColumn resultName
         let mutable paths = paths0
 
@@ -832,8 +835,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             (attrCol, ret)
 
         let attrs = result.attributes |> Map.toSeq |> Seq.map compileAttr
-        let cols = Seq.append (Seq.singleton resultColumn) attrs |> Seq.toArray
-        (paths, Array.toSeq cols)
+        let cols = Seq.append (Seq.singleton resultColumn) attrs |> Seq.cache
+        (paths, cols)
 
     and buildJoins (from : SQL.FromExpr) (paths : JoinPaths) : SQL.FromExpr =
         Map.fold joinPath from paths
