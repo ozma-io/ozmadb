@@ -61,7 +61,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         if entity.isAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
         let (subEntityColumn, subEntityArg, newRawArgs) =
-            if entityHasSubtype entity then
+            if entity.HasSubType then
                 let col = Seq.singleton sqlFunSubEntity
                 let arg = Seq.singleton (PLocal funSubEntity, { argType = FTType (FETScalar SFTString); optional = false })
                 let newArgs = Map.add funSubEntity (FString entity.typeName) rawArgs

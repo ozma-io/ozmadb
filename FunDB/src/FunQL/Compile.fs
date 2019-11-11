@@ -331,25 +331,18 @@ type private SelectFlags =
 type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttributes, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
 
-    let convertLinkedLocalExpr (entityRef : ResolvedEntityRef) (localRef : EntityRef) : LinkedLocalFieldExpr -> ResolvedFieldExpr =
-        let resolveReference (ref : LinkedFieldName) : LinkedBoundFieldRef =
+    let convertLinkedLocalExpr (localRef : EntityRef) : ResolvedFieldExpr -> ResolvedFieldExpr =
+        let resolveReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
             let newRef =
                 match ref.ref with
-                | VRColumn fieldName ->
-                    let bound =
-                        { ref = { entity = entityRef; name = fieldName }
-                          immediate = true
-                        }
-                    VRColumn { ref = ({ entity = Some localRef; name = fieldName } : FieldRef); bound = Some bound }
+                | VRColumn col ->
+                    VRColumn { col with ref = { col.ref with entity = Some localRef } }
                 | VRPlaceholder (PLocal name) -> failwith <| sprintf "Unexpected local argument: %O" name
                 | VRPlaceholder ((PGlobal name) as arg) ->
                     arguments <- addArgument arg (Map.find name globalArgumentTypes) arguments
                     VRPlaceholder arg
             { ref = newRef; path = ref.path }
-        // FIXME: why so? allow it!
-        let foundQuery query = failwith <| sprintf "Unexpected query: %O" query
-        let foundAggr aggr = failwith <| sprintf "Unexpected aggregate"
-        mapFieldExpr id resolveReference foundQuery foundAggr
+        mapFieldExpr id resolveReference id id
 
     let mutable lastDomainNamespaceId = 0
     let newDomainNamespaceId () =
@@ -383,10 +376,11 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (entityRef : ResolvedEntityRef) (field : ResolvedField) (ref : FieldName) : JoinPaths * SQL.ValueExpr =
         match field with
         | RId
+        | RSubEntity
         | RColumnField _ -> (paths, SQL.VEColumn { table = Some tableRef; name = compileName ref })
         | RComputedField comp ->
             let localRef = { schema = Option.map decompileName tableRef.schema; name = decompileName tableRef.name } : EntityRef
-            compileLinkedFieldExpr paths <| convertLinkedLocalExpr entityRef localRef comp.expression
+            compileLinkedFieldExpr paths <| convertLinkedLocalExpr localRef comp.expression
 
     and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (entityRef : ResolvedEntityRef) (field : ResolvedField) (name : FieldName) : FieldName list -> JoinPaths * SQL.ValueExpr = function
         | [] -> compileRef paths tableRef entityRef field name
@@ -740,7 +734,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         | Some attrs ->
                             let makeDefaultAttr name =
                                 let attr = Map.find name attrs
-                                let expr = convertLinkedLocalExpr info.ref.entity entityRef attr.expression
+                                let expr = convertLinkedLocalExpr entityRef attr.expression
                                 let attrCol = CTCellAttribute (fieldName, name)
                                 let (newPaths, ret) = compileAttribute paths attrCol expr
                                 paths <- newPaths

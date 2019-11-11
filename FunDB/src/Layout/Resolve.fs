@@ -6,6 +6,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
+open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
@@ -90,9 +91,30 @@ type private HalfResolvedEntity =
       typeName : string
       root : ResolvedEntityRef
       source : SourceEntity
-    }
-        member this.FindField (name : FieldName) =
+    } with
+        member this.FindField name =
             genericFindField this.columnFields this.computedFields this.source.mainField name
+
+        member this.Fields =
+            let id = Seq.singleton (funId, RId)
+            let subentity =
+                if this.HasSubType then
+                    Seq.singleton (funSubEntity, RSubEntity)
+                else
+                    Seq.empty
+            let columns = this.columnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
+            Seq.concat [id; subentity; columns]
+
+        member this.HasSubType =
+            Option.isSome this.source.parent || this.source.isAbstract || not (Set.isEmpty this.children)
+
+        member this.MainField = this.source.mainField
+
+        interface IEntityFields with
+            member this.FindField name =
+                genericFindField this.columnFields Map.empty this.source.mainField name
+            member this.Fields = this.Fields
+            member this.MainField = this.source.mainField
 
 type private HalfResolvedEntities = Map<ResolvedEntityRef, HalfResolvedEntity>
 
@@ -318,6 +340,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             match entity.FindField fieldRef.name with
             | Some (_, RId) ->
                 { isLocal = true; hasId = true; usedSchemas = usedSchemas }
+            | Some (_, RSubEntity) ->
+                { isLocal = true; hasId = false; usedSchemas = usedSchemas }
             | Some (_, RComputedField comp) ->
                 let field = resolveComputedField stack entity fieldRef comp
                 { isLocal = field.isLocal; hasId = field.hasId; usedSchemas = mergeUsedSchemas usedSchemas field.usedSchemas }
@@ -339,7 +363,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let mutable hasId = false
         let mutable usedSchemas = Map.empty
 
-        let resolveReference : LinkedFieldRef -> LinkedFieldName = function
+        let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
             | { ref = VRColumn { entity = None; name = name }; path = path } ->
                 let res = checkPath stack usedSchemas entity { entity = entityRef; name = name } (Array.toList path)
                 usedSchemas <- res.usedSchemas
@@ -347,16 +371,22 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     isLocal <- false
                 if res.hasId then
                     hasId <- true
-                { ref = VRColumn name; path = path }
+                let bound =
+                    { ref = { entity = entityRef; name = name }
+                      immediate = true
+                    }
+                { ref = VRColumn { ref = ({ entity = None; name = name } : FieldRef); bound = Some bound }; path = path }
             // Placeholders are forbidden because computed fields might be used in check expressions.
             | ref ->
                 raisef ResolveLayoutException "Invalid reference in computed column: %O" ref
-        let voidQuery query =
-            raisef ResolveLayoutException "Queries are not allowed in computed columns: %O" query
+        let resolveQuery query =
+            isLocal <- false
+            let (_, res) = resolveSelectExprGeneric (fun ref -> Map.tryFind ref entities |> Option.map (fun e -> e :> IEntityFields)) query
+            res
         let voidAggr aggr =
             raisef ResolveLayoutException "Aggregate functions are not allowed in computed columns"
 
-        let exprRes = mapFieldExpr id resolveReference voidQuery voidAggr expr
+        let exprRes = mapFieldExpr id resolveReference resolveQuery voidAggr expr
         { expression = exprRes
           isLocal = isLocal
           hasId = hasId

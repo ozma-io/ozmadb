@@ -7,7 +7,7 @@ open FunWithFlags.FunDB.Attributes.Types
 [<NoComparison>]
 type MergedAttribute =
     { priority : int
-      expression : LinkedLocalFieldExpr
+      expression : ResolvedFieldExpr
     }
 
 type MergedAttributeMap = Map<AttributeName, MergedAttribute>

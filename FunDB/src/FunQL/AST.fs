@@ -811,10 +811,39 @@ type ParsedFieldType = FieldType<EntityRef, LinkedFieldRef>
 
 type LocalFieldExpr = FieldExpr<FunQLVoid, ValueRef<FieldName>>
 
-type LinkedLocalFieldExpr = FieldExpr<FunQLVoid, LinkedFieldName>
-type LinkedLocalAttributeMap = AttributeMap<FunQLVoid, LinkedFieldName>
+[<NoComparison>]
+type BoundField =
+    { ref : ResolvedFieldRef
+      immediate : bool // Set if field references value from a table directly, not via a subexpression.
+    }
 
-type PureFieldExpr = FieldExpr<FunQLVoid, FunQLVoid>
+[<NoComparison>]
+type BoundRef<'f> when 'f :> IFunQLName =
+    { ref : 'f
+      bound : BoundField option
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () = this.ref.ToFunQLString()
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+        member this.ToName () = this.ref.ToName ()
+
+        interface IFunQLName with
+            member this.ToName () = this.ToName ()
+
+type LinkedBoundFieldRef = LinkedRef<ValueRef<BoundRef<FieldRef>>>
+
+type ResolvedFieldExpr = FieldExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedSelectExpr = SelectExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedSingleSelectExpr = SingleSelectExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedQueryResult = QueryResult<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedQueryResultExpr = QueryResultExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedFromExpr = FromExpr<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedAttributeMap = AttributeMap<ResolvedEntityRef, LinkedBoundFieldRef>
+type ResolvedOrderLimitClause = OrderLimitClause<ResolvedEntityRef, LinkedBoundFieldRef>
 
 [<NoComparison>]
 type Argument<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =

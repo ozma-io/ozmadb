@@ -9,24 +9,25 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Meta
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-let rec private compileComputedExpr (entity : ResolvedEntity) : LinkedLocalFieldExpr -> SQL.ValueExpr =
-    let makeFullName = function
-        | { ref = col; path = [||] } -> compileComputedName entity col
+let rec private compileComputedExpr (entity : ResolvedEntity) : ResolvedFieldExpr -> SQL.ValueExpr =
+    let makeFullName : LinkedBoundFieldRef -> SQL.ValueExpr = function
+        | { ref = VRColumn { ref = { entity = None; name = name }}; path = [||] } -> compileComputedName entity name
         | c -> failwith <| sprintf "Unexpected reference in computed field expression: %O" c
     let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
     genericCompileFieldExpr makeFullName voidQuery
 
-and compileComputedName (entity : ResolvedEntity) : ValueRef<FieldName> -> SQL.ValueExpr = function
-    | VRColumn name ->
-        let (realName, field) = entity.FindField name |> Option.get
-        match field with
-        | RId
-        | RColumnField _ -> SQL.VEColumn { table = None; name = compileName realName }
-        | RComputedField comp -> compileComputedExpr entity comp.expression
-    | VRPlaceholder arg -> failwith <| sprintf "Unexpected placeholder in computed field expression: %O" arg
+and compileComputedName (entity : ResolvedEntity) (name : FieldName) : SQL.ValueExpr =
+    let (realName, field) = entity.FindField name |> Option.get
+    match field with
+    | RId
+    | RSubEntity
+    | RColumnField _ -> SQL.VEColumn { table = None; name = compileName realName }
+    | RComputedField comp -> compileComputedExpr entity comp.expression
 
 let private compileCheckExpr (entity : ResolvedEntity) : LocalFieldExpr -> SQL.ValueExpr =
-    let compileRef = compileComputedName entity
+    let compileRef = function
+        | VRColumn name -> compileComputedName entity name
+        | arg -> failwith <| sprintf "Unexpected reference in computed field expression: %O" arg
     let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
     // Normalization is needed so that expression will be in same form as ones from pg_catalog.
     normalizeLocalExpr << genericCompileFieldExpr compileRef voidQuery
@@ -90,7 +91,7 @@ type private MetaBuilder (layout : Layout) =
                     } : SQL.ColumnMeta
                 Seq.singleton (SQL.SQLName (funId.ToString()), col)
             let (subEntityColumns, subEntityConstraints, subEntityIndexes) =
-                if not <| entityHasSubtype entity then
+                if not <| entity.HasSubType then
                     (Seq.empty, Seq.empty, Seq.empty)
                 else
                     let col =

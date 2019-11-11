@@ -53,7 +53,7 @@ type ResolvedColumnField =
 
 [<NoComparison>]
 type ResolvedComputedField =
-    { expression : LinkedLocalFieldExpr
+    { expression : ResolvedFieldExpr
       // Set when there's no dereferences in the expression
       isLocal : bool
       // Set when computed field uses Id
@@ -73,6 +73,7 @@ type GenericResolvedField<'col, 'comp> =
     | RColumnField of 'col
     | RComputedField of 'comp
     | RId
+    | RSubEntity
 
 [<NoComparison>]
 type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedField>
@@ -81,6 +82,8 @@ let inline genericFindField (columnFields : Map<FieldName, 'col>) (computedField
     let rec traverse (name : FieldName) =
         if name = funId then
             Some (funId, RId)
+        else if name = funSubEntity then
+            Some (funSubEntity, RSubEntity)
         else if name = funMain then
             traverse mainField
         else
@@ -91,6 +94,11 @@ let inline genericFindField (columnFields : Map<FieldName, 'col>) (computedField
                 | Some comp -> Some (name, RComputedField comp)
                 | None -> None
     traverse
+
+type IEntityFields =
+    abstract member FindField : FieldName -> (FunQLName * ResolvedField) option
+    abstract member Fields : (FieldName * ResolvedField) seq
+    abstract member MainField : FieldName
 
 [<NoComparison>]
 type ResolvedEntity =
@@ -110,6 +118,26 @@ type ResolvedEntity =
     } with
         member this.FindField (name : FieldName) =
             genericFindField this.columnFields this.computedFields this.mainField name
+        member this.Fields =
+            let id = Seq.singleton (funId, RId)
+            let subentity =
+                if this.HasSubType then
+                    Seq.singleton (funSubEntity, RSubEntity)
+                else
+                    Seq.empty
+            let columns = this.columnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
+            let computed = this.computedFields |> Map.toSeq |> Seq.map (fun (name, comp) -> (name, RComputedField comp))
+            Seq.concat [id; subentity; columns; computed]
+
+        member this.HasSubType =
+            Option.isSome this.inheritance || this.isAbstract || not (Set.isEmpty this.children)
+
+        member this.MainField = this.mainField
+
+        interface IEntityFields with
+            member this.FindField name = this.FindField name
+            member this.Fields = this.Fields
+            member this.MainField = this.MainField
 
 // Should be in sync with type names generation in Resolve
 let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntityRef =
@@ -117,9 +145,6 @@ let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntit
     | [| entityName |] -> { root with name = FunQLName entityName }
     | [| schemaName; entityName |] -> { schema = FunQLName schemaName; name = FunQLName entityName }
     | _ -> failwith "Invalid type name"
-
-let entityHasSubtype (entity : ResolvedEntity) : bool =
-    Option.isSome entity.inheritance || entity.isAbstract || not (Set.isEmpty entity.children)
 
 [<NoComparison>]
 type ResolvedSchema =
@@ -142,8 +167,5 @@ type Layout =
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
-let mapAllFields (f : FieldName -> ResolvedField -> 'a) (entity : ResolvedEntity) : Map<FieldName, 'a> =
-    let columns = entity.columnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, f name (RColumnField col)))
-    let computed = entity.computedFields |> Map.toSeq |> Seq.map (fun (name, comp) -> (name, f name (RComputedField comp)))
-    let id = (funId, f funId RId)
-    Map.ofSeq (Seq.append (Seq.singleton id) (Seq.append columns computed))
+let mapAllFields (f : FieldName -> ResolvedField -> 'a) (entity : IEntityFields) : Map<FieldName, 'a> =
+    entity.Fields |> Seq.map (fun (name, field) -> (name, f name field)) |> Map.ofSeq

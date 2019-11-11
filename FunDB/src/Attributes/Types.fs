@@ -9,7 +9,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 type AttributesField =
     { allowBroken : bool
       priority : int
-      attributes : LinkedLocalAttributeMap
+      attributes : ResolvedAttributeMap
       globalArguments : Set<ArgumentName>
     }
 

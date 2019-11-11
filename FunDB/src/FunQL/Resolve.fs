@@ -14,34 +14,9 @@ type ViewResolveException (message : string) =
     inherit Exception(message)
 
 [<NoComparison>]
-type BoundField =
-    { ref : ResolvedFieldRef
-      immediate : bool // Set if field references value from a table directly, not via a subexpression.
-    }
-
-[<NoComparison>]
-type BoundRef<'f> when 'f :> IFunQLName =
-    { ref : 'f
-      bound : BoundField option
-    } with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () = this.ref.ToFunQLString()
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-        member this.ToName () = this.ref.ToName ()
-
-        interface IFunQLName with
-            member this.ToName () = this.ToName ()
-
-type LinkedBoundFieldRef = LinkedRef<ValueRef<BoundRef<FieldRef>>>
-
-[<NoComparison>]
 type private BoundFieldInfo =
     { ref : ResolvedFieldRef
-      entity : ResolvedEntity
+      entity : IEntityFields
       field : ResolvedField
       // Means that field is selected directly from an entity and not from a subexpression.
       immediate : bool
@@ -64,15 +39,6 @@ type private QSubqueryFields = Map<FieldName, QSubqueryField>
 type private QMapping = Map<EntityName option, SchemaName option * QSubqueryFields>
 
 type private SomeArgumentsMap = Map<ArgumentName, ParsedFieldType>
-
-type ResolvedFieldExpr = FieldExpr<ResolvedEntityRef, LinkedBoundFieldRef>
-type ResolvedSelectExpr = SelectExpr<ResolvedEntityRef, LinkedBoundFieldRef>
-type ResolvedSingleSelectExpr = SingleSelectExpr<ResolvedEntityRef, LinkedBoundFieldRef>
-type ResolvedQueryResult = QueryResult<ResolvedEntityRef, LinkedBoundFieldRef>
-type ResolvedQueryResultExpr = QueryResultExpr<ResolvedEntityRef, LinkedBoundFieldRef>
-type ResolvedFromExpr = FromExpr<ResolvedEntityRef, LinkedBoundFieldRef>
-type ResolvedAttributeMap = AttributeMap<ResolvedEntityRef, LinkedBoundFieldRef>
-type ResolvedOrderLimitClause = OrderLimitClause<ResolvedEntityRef, LinkedBoundFieldRef>
 
 [<NoComparison>]
 type private QSelectResults =
@@ -218,19 +184,19 @@ type ResolvedSelectInfo =
     { hasAggregates : bool
     }
 
-type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
+type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields option, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
 
     let rec addUsedFields (useMain : bool) (ref : ResolvedFieldRef) (field : ResolvedField) : unit =
         match field with
-        | RId ->
+        | RId | RSubEntity ->
             usedSchemas <- addUsedEntityRef ref.entity usedSchemas
         | RColumnField col ->
             usedSchemas <- addUsedFieldRef ref usedSchemas
             match col.fieldType with
             | FTReference (entityRef, _) when useMain ->
-                let (realName, newField) = layout.FindField entityRef funMain |> Option.get
+                let (realName, newField) = getEntity entityRef |> Option.bind (fun x -> x.FindField funMain) |> Option.get
                 let newRef = { entity = entityRef; name = realName }
                 addUsedFields true newRef newField
             | _ -> ()
@@ -246,7 +212,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         | (ref :: refs) ->
             match boundField.field with
             | RColumnField { fieldType = FTReference (entityRef, _) } ->
-                let newEntity = layout.FindEntity entityRef |> Option.get
+                let newEntity = getEntity entityRef |> Option.get
                 match newEntity.FindField ref with
                 | Some (newRef, refField) ->
                     let nextBoundField =
@@ -321,7 +287,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                             match Array.toList f.path with
                             | head :: tail -> (head, tail)
                             | _ -> failwith "impossible"
-                        let argEntity = layout.FindEntity entityRef |> Option.get
+                        let argEntity = getEntity entityRef |> Option.get
                         let argField =
                             match argEntity.FindField name with
                             | None -> raisef ViewResolveException "Field doesn't exist in %O: %O" entityRef name
@@ -508,7 +474,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         | FEntity (pun, name) ->
             let resName = resolveEntityRef name
             let entity =
-                match layout.FindEntity resName with
+                match getEntity resName with
                 | None -> raisef ViewResolveException "Entity not found: %O" name
                 | Some entity -> entity
 
@@ -517,7 +483,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 QField <| Some { ref = ref; entity = entity; field = field; immediate = true }
 
             let realFields = mapAllFields makeBoundField entity
-            let fields = Map.add funMain (QRename entity.mainField) realFields
+            let fields = Map.add funMain (QRename entity.MainField) realFields
             (Map.singleton (Some <| Option.defaultValue name.name pun) (Some resName.schema, fields), FEntity (pun, resName))
         | FJoin (jt, e1, e2, where) ->
             let (newMapping1, newE1) = resolveFromExpr inExpression e1
@@ -563,10 +529,11 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     let resolveMainEntity (fields : QSubqueryFields) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
         let ref = resolveEntityRef main.entity
         let entity =
-            match layout.FindEntity ref with
+            match getEntity ref with
             | None -> raisef ViewResolveException "Entity not found: %O" main.entity
-            | Some e when e.isAbstract -> raisef ViewResolveException "Entity is abstract: %O" main.entity
-            | Some e -> e
+            | Some e -> e :?> ResolvedEntity
+        if entity.isAbstract then
+            raisef ViewResolveException "Entity is abstract: %O" main.entity
         let mappedResults =
             match findMainEntity ref fields query with
             | Some fields -> fields
@@ -588,8 +555,13 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     member this.UsedArguments = usedArguments
     member this.UsedSchemas = usedSchemas
 
+let resolveSelectExprGeneric (getEntity : ResolvedEntityRef -> IEntityFields option) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
+    let qualifier = QueryResolver (getEntity, globalArgumentsMap)
+    let (results, qQuery) = qualifier.ResolveSelectExpr true select
+    (qualifier.UsedArguments, qQuery)
+
 let resolveSelectExpr (layout : Layout) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
-    let qualifier = QueryResolver (layout, globalArgumentsMap)
+    let qualifier = QueryResolver (layout.FindEntity >> Option.map (fun x -> x :> IEntityFields), globalArgumentsMap)
     let (results, qQuery) = qualifier.ResolveSelectExpr true select
     (qualifier.UsedArguments, qQuery)
 
@@ -597,7 +569,7 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let arguments = viewExpr.arguments |> Map.map (fun name -> resolveArgument layout)
     let localArguments = Map.mapKeys PLocal arguments
     let allArguments = Map.union localArguments globalArgumentsMap
-    let qualifier = QueryResolver (layout, allArguments)
+    let qualifier = QueryResolver (layout.FindEntity >> Option.map (fun x -> x :> IEntityFields), allArguments)
     let (results, qQuery) = qualifier.ResolveSelectExpr false viewExpr.select
     let mainEntity = Option.map (qualifier.ResolveMainEntity results.fields qQuery) viewExpr.mainEntity
 

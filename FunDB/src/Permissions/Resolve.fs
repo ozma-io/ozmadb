@@ -33,6 +33,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     ()
                 else
                     raisef ResolvePermissionsException "Ids aren't allowed: %O" name
+            | Some (_, RSubEntity)
             | Some (_, RColumnField _) -> ()
             | Some (_, RComputedField comp) ->
                 if allowIds || not comp.hasId then

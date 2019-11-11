@@ -5,6 +5,7 @@ open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
+open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Types
@@ -27,7 +28,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
                 checkPath newEntity ref refs
             | _ -> raisef ResolveAttributesException "Invalid dereference in path: %O" ref
 
-    let resolveAttributesField (entity : ResolvedEntity) (fieldAttrs : SourceAttributesField) : AttributesField =
+    let resolveAttributesField (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (fieldAttrs : SourceAttributesField) : AttributesField =
         let attrsMap =
             match parse tokenizeFunQL attributeMap fieldAttrs.attributes with
             | Ok r -> r
@@ -35,10 +36,14 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
 
         let mutable globalArguments = Set.empty
 
-        let resolveReference : LinkedFieldRef -> LinkedFieldName = function
+        let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
             | { ref = VRColumn { entity = None; name = name }; path = path } ->
                 checkPath entity name (Array.toList path)
-                { ref = VRColumn name; path = path }
+                let bound =
+                    { ref = { entity = entityRef; name = name }
+                      immediate = true
+                    }
+                { ref = VRColumn { ref = ({ entity = None; name = name } : FieldRef); bound = Some bound }; path = path }
             | { ref = VRPlaceholder (PLocal name) } ->
                 raisef ResolveAttributesException "Local argument %O is not allowed" name
             | { ref = VRPlaceholder (PGlobal name as arg); path = path } ->
@@ -59,14 +64,15 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
                 { ref = VRPlaceholder arg; path = path }
             | ref ->
                 raisef ResolveAttributesException "Invalid reference: %O" ref
-        let voidQuery query =
-            raisef ResolveAttributesException "Query is not allowed: %O" query
+        let resolveQuery query =
+            let (_, res) = resolveSelectExpr layout query
+            res
         let voidAggr aggr =
             raisef ResolveAttributesException "Aggregate expressions are not allowed"
 
         let resolveAttribute name expr =
             try
-                mapFieldExpr id resolveReference voidQuery voidAggr expr
+                mapFieldExpr id resolveReference resolveQuery voidAggr expr
             with
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attribute %O: %s" name e.Message
         let resolvedMap = Map.map resolveAttribute attrsMap
@@ -77,7 +83,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
           globalArguments = globalArguments
         }
 
-    let resolveAttributesEntity (entity : ResolvedEntity) (entityAttrs : SourceAttributesEntity) : ErroredAttributesEntity * AttributesEntity =
+    let resolveAttributesEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (entityAttrs : SourceAttributesEntity) : ErroredAttributesEntity * AttributesEntity =
         let mutable errors = Map.empty
 
         let mapField name (fieldAttrs : SourceAttributesField) =
@@ -86,7 +92,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
                     match entity.FindField name with
                     | None -> raisef ResolveAttributesException "Unknown field name"
                     | Some field ->
-                            Ok <| resolveAttributesField entity fieldAttrs
+                            Ok <| resolveAttributesField entityRef entity fieldAttrs
                 with
                 | :? ResolveAttributesException as e when fieldAttrs.allowBroken || forceAllowBroken ->
                     errors <- Map.add name (e :> exn) errors
@@ -99,7 +105,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
             }
         (errors, ret)
 
-    let resolveAttributesSchema (schema : ResolvedSchema) (schemaAttrs : SourceAttributesSchema) : ErroredAttributesSchema * AttributesSchema =
+    let resolveAttributesSchema (schemaName : SchemaName) (schema : ResolvedSchema) (schemaAttrs : SourceAttributesSchema) : ErroredAttributesSchema * AttributesSchema =
         let mutable errors = Map.empty
 
         let mapEntity name entityAttrs =
@@ -108,7 +114,8 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
                     match Map.tryFind name schema.entities with
                     | None -> raisef ResolveAttributesException "Unknown entity name"
                     | Some entity -> entity
-                let (entityErrors, newEntity) = resolveAttributesEntity entity entityAttrs
+                let ref = { schema = schemaName; name = name }
+                let (entityErrors, newEntity) = resolveAttributesEntity ref entity entityAttrs
                 if not <| Map.isEmpty entityErrors then
                     errors <- Map.add name entityErrors errors
                 newEntity
@@ -129,7 +136,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
                     match Map.tryFind name layout.schemas with
                     | None -> raisef ResolveAttributesException "Unknown schema name"
                     | Some schema -> schema
-                let (schemaErrors, newSchema) = resolveAttributesSchema schema schemaAttrs
+                let (schemaErrors, newSchema) = resolveAttributesSchema name schema schemaAttrs
                 if not <| Map.isEmpty schemaErrors then
                     errors <- Map.add name schemaErrors errors
                 newSchema
