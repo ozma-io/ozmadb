@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Layout.Update
 
 open System
+open System.Collections.Generic
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -82,8 +83,8 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         let uniqueConstraintsMap = existingEntity.UniqueConstraints |> Seq.map (fun unique -> (FunQLName unique.Name, unique)) |> Map.ofSeq
         let checkConstraintsMap = existingEntity.CheckConstraints |> Seq.map (fun check -> (FunQLName check.Name, check)) |> Map.ofSeq
 
-        let columnFields = updateColumnFields existingEntity entity.columnFields columnFieldsMap
-        let computedFields = updateComputedFields existingEntity entity.computedFields computedFieldsMap
+        ignore <| updateColumnFields existingEntity entity.columnFields columnFieldsMap
+        ignore <| updateComputedFields existingEntity entity.computedFields computedFieldsMap
         ignore <| updateUniqueConstraints existingEntity entity.uniqueConstraints uniqueConstraintsMap
         ignore <| updateCheckConstraints existingEntity entity.checkConstraints checkConstraintsMap
 
@@ -114,7 +115,11 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         let createFunc (FunQLName name) =
             let newEntity =
                 Entity (
-                    Name = name
+                    Name = name,
+                    ColumnFields = List(),
+                    ComputedFields = List(),
+                    UniqueConstraints = List(),
+                    CheckConstraints = List()
                 )
             existingSchema.Entities.Add(newEntity)
             newEntity
@@ -125,7 +130,8 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         let createFunc (FunQLName name) =
             let newSchema =
                 Schema (
-                    Name = name
+                    Name = name,
+                    Entities = List()
                 )
             ignore <| db.Schemas.Add(newSchema)
             newSchema

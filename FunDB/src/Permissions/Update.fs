@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Permissions.Update
 
-open System.Linq
+open System.Collections.Generic
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -62,7 +62,8 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
             let entityId = Map.find entityRef allEntitiesMap
             let newEntity =
                 RoleEntity (
-                    EntityId = entityId
+                    EntityId = entityId,
+                    ColumnFields = List()
                 )
             existingRole.Entities.Add(newEntity)
             newEntity
@@ -76,7 +77,8 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
         let createFunc (FunQLName name) =
             let newRole =
                 Role (
-                    Name = name
+                    Name = name,
+                    Entities = List()
                 )
             existingSchema.Roles.Add(newRole)
             newRole
