@@ -616,11 +616,12 @@ and [<NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName
 
 and [<NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { attributes : AttributeMap<'e, 'f>
-      results: QueryResult<'e, 'f>[]
-      from: FromExpr<'e, 'f> option
-      where: FieldExpr<'e, 'f> option
-      groupBy: FieldExpr<'e, 'f>[]
-      orderLimit: OrderLimitClause<'e, 'f>
+      results : QueryResult<'e, 'f>[]
+      from : FromExpr<'e, 'f> option
+      where : FieldExpr<'e, 'f> option
+      groupBy : FieldExpr<'e, 'f>[]
+      orderLimit : OrderLimitClause<'e, 'f>
+      extra : obj
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -663,7 +664,7 @@ and [<NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNa
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-let rec mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f2) (queryFunc : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
+let rec mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f2) (queryFunc : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) (aggFunc : AggExpr<'e1, 'f1> -> AggExpr<'e1, 'f1>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
     let rec traverse = function
         | FEValue value -> FEValue (valueFunc value)
         | FERef r -> FERef (refFunc r)
@@ -693,7 +694,7 @@ let rec mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f
         | FEJsonArrow (a, b) -> FEJsonArrow (traverse a, traverse b)
         | FEJsonTextArrow (a, b) -> FEJsonTextArrow (traverse a, traverse b)
         | FEFunc (name, args) -> FEFunc (name, Array.map traverse args)
-        | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse args)
+        | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse (aggFunc args))
         | FESubquery query -> FESubquery (queryFunc query)
     traverse
 
@@ -702,7 +703,7 @@ and mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1
     | AEDistinct expr -> AEDistinct (func expr)
     | AEStar -> AEStar
 
-let rec mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFunc : 'f1 -> Task<'f2>) (queryFunc : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
+let rec mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFunc : 'f1 -> Task<'f2>) (queryFunc : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) (aggFunc : AggExpr<'e1, 'f1> -> Task<AggExpr<'e1, 'f1>>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
     let rec traverse = function
         | FEValue value -> Task.map FEValue (valueFunc value)
         | FERef r -> Task.map FERef (refFunc r)
@@ -738,7 +739,11 @@ let rec mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFu
         | FEJsonArrow (a, b) -> Task.map2Sync (curry FEJsonArrow) (traverse a) (traverse b)
         | FEJsonTextArrow (a, b) -> Task.map2Sync (curry FEJsonTextArrow) (traverse a) (traverse b)
         | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTaskSync traverse args)
-        | FEAggFunc (name, args) -> Task.map (fun x -> FEAggFunc (name, x)) (mapTaskSyncAggExpr traverse args)
+        | FEAggFunc (name, args) ->
+            task {
+                let! args1 = aggFunc args
+                return! Task.map (fun x -> FEAggFunc (name, x)) (mapTaskSyncAggExpr traverse args1)
+            }
         | FESubquery query -> Task.map FESubquery (queryFunc query)
     traverse
 
@@ -747,7 +752,7 @@ and mapTaskSyncAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>)
     | AEDistinct expr -> Task.map AEDistinct (func expr)
     | AEStar -> Task.result AEStar
 
-let rec iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
+let rec iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) (aggFunc : AggExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
     let rec traverse = function
         | FEValue value -> valueFunc value
         | FERef r -> refFunc r
@@ -779,7 +784,9 @@ let rec iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (q
         | FEJsonArrow (a, b) -> traverse a; traverse b
         | FEJsonTextArrow (a, b) -> traverse a; traverse b
         | FEFunc (name, args) -> Array.iter traverse args
-        | FEAggFunc (name, args) -> iterAggExpr traverse args
+        | FEAggFunc (name, args) ->
+            aggFunc args
+            iterAggExpr traverse args
         | FESubquery query -> queryFunc query
     traverse
 
@@ -884,6 +891,9 @@ let allowedAggregateFunctions =
     Set.ofSeq
         [ FunQLName "sum"
           FunQLName "avg"
+          FunQLName "min"
+          FunQLName "max"
+          FunQLName "count"
         ]
 
 let allowedFunctions =

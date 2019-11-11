@@ -61,10 +61,12 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
                 raisef ResolveAttributesException "Invalid reference: %O" ref
         let voidQuery query =
             raisef ResolveAttributesException "Query is not allowed: %O" query
+        let voidAggr aggr =
+            raisef ResolveAttributesException "Aggregate expressions are not allowed"
 
         let resolveAttribute name expr =
             try
-                mapFieldExpr id resolveReference voidQuery expr
+                mapFieldExpr id resolveReference voidQuery voidAggr expr
             with
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attribute %O: %s" name e.Message
         let resolvedMap = Map.map resolveAttribute attrsMap

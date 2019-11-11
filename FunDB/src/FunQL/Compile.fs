@@ -348,7 +348,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             { ref = newRef; path = ref.path }
         // FIXME: why so? allow it!
         let foundQuery query = failwith <| sprintf "Unexpected query: %O" query
-        mapFieldExpr id resolveReference foundQuery
+        let foundAggr aggr = failwith <| sprintf "Unexpected aggregate"
+        mapFieldExpr id resolveReference foundQuery foundAggr
 
     let mutable lastDomainNamespaceId = 0
     let newDomainNamespaceId () =
@@ -471,6 +472,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                           where = Some <| FEEq (FERef idColumn, FERef arg)
                           groupBy = [||]
                           orderLimit = emptyOrderLimitClause
+                          extra = null
                         } : ResolvedSingleSelectExpr
                     let flags =
                         { hasMainEntity = false
@@ -551,6 +553,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     and compileSingleSelectExpr (flags : SelectFlags) (select : ResolvedSingleSelectExpr) : SelectInfo * SQL.SingleSelectExpr =
         let mutable paths = Map.empty
 
+        let extra =
+            if isNull select.extra then
+                { hasAggregates = false
+                }
+            else
+                select.extra :?> ResolvedSelectInfo
+
         let (fromMap, from) =
             match select.from with
             | Some from ->
@@ -582,7 +591,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             |> Map.toSeq
             |> Seq.map compileRowAttr
 
-        let addMetaColumns = flags.metaColumns && Array.isEmpty groupBy
+        let addMetaColumns = flags.metaColumns && not extra.hasAggregates
 
         // We keep Id columns map to remove duplicates.
         let mutable ids = Map.empty

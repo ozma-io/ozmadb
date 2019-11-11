@@ -44,7 +44,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         Map.map (fun name expr -> resolveFieldExpr expr) attributes
 
     and resolveFieldExpr : ResolvedFieldExpr -> ResolvedFieldExpr =
-        mapFieldExpr resolveValue id id
+        mapFieldExpr resolveValue id id id
 
     and resolveOrderLimitClause (limits : ResolvedOrderLimitClause) : ResolvedOrderLimitClause =
         let resolveOrderBy (ord, expr) = (ord, resolveFieldExpr expr)
@@ -77,6 +77,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
               groupBy = groupBy
               results = results
               orderLimit = orderLimit
+              extra = query.extra
             }
 
     and resolveFromExpr : ResolvedFromExpr -> ResolvedFromExpr = function

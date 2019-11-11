@@ -11,7 +11,7 @@ let private namesToRefs =
         | VRPlaceholder p -> VRPlaceholder p
     let resolveReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
         { ref = resolveValueRef ref.ref; path = ref.path }
-    mapFieldExpr id resolveReference id
+    mapFieldExpr id resolveReference id id
 
 let private renderRestriction (e : Restriction) = (namesToRefs e.expression).ToFunQLString()
 

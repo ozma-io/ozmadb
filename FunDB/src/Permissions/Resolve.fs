@@ -91,8 +91,9 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                 | PLocal name ->
                     raisef ResolvePermissionsException "Local argument %O is not allowed" name
             newQuery
+        let voidAggr aggr = raisef ViewResolveException "Forbidden aggregate function in a restriction"
 
-        let expr = mapFieldExpr id resolveReference resolveQuery whereExpr
+        let expr = mapFieldExpr id resolveReference resolveQuery voidAggr whereExpr
         { expression = expr
           globalArguments = globalArguments
         }

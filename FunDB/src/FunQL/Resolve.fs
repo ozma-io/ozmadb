@@ -205,6 +205,20 @@ let rec private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFiel
             )
         )
 
+type private ResolvedExprInfo =
+    { isLocal : bool
+      hasAggregates : bool
+    }
+
+type private ResolvedResultInfo =
+    { subquery : QSubqueryField
+      hasAggregates : bool
+    }
+
+type ResolvedSelectInfo =
+    { hasAggregates : bool
+    }
+
 type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
@@ -334,35 +348,55 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 else
                     raisef ViewResolveException "Undefined placeholder: %O" name
             | ref -> raisef ViewResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
-        let voidQuery query = raisef ViewResolveException "Subquery in LIMIT or OFFSET: %O" query
-        mapFieldExpr id resolveReference voidQuery expr
+        let voidQuery query = raisef ViewResolveException "Forbidden subquery in LIMIT or OFFSET: %O" query
+        let voidAggr aggr = raisef ViewResolveException "Forbidden aggregate function in LIMIT or OFFSET"
+        mapFieldExpr id resolveReference voidQuery voidAggr expr
 
-    let rec resolveResult (mapping : QMapping) (result : ParsedQueryResult) : QSubqueryField * ResolvedQueryResult =
-        let (boundField, expr) = resolveResultExpr mapping result.result
+    let rec resolveResult (mapping : QMapping) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
+        let (exprInfo, expr) = resolveResultExpr mapping result.result
         let ret = {
             attributes = resolveAttributes mapping result.attributes
             result = expr
         }
-        (boundField, ret)
+        (exprInfo, ret)
 
     // Should be in sync with resultField
-    and resolveResultExpr (mapping : QMapping) : ParsedQueryResultExpr -> QSubqueryField * ResolvedQueryResultExpr = function
+    and resolveResultExpr (mapping : QMapping) : ParsedQueryResultExpr -> ResolvedResultInfo * ResolvedQueryResultExpr = function
         | QRField f ->
             let (boundField, _, f') = resolveReference true mapping f
-            (boundField, QRField f')
+            let info =
+                { subquery = boundField
+                  hasAggregates = false
+                }
+            (info, QRField f')
         | QRExpr (name, FERef f) ->
             let (boundField, _, f') = resolveReference true mapping f
-            (boundField, QRExpr (name, FERef f'))
+            let info =
+                { subquery = boundField
+                  hasAggregates = false
+                }
+            (info, QRExpr (name, FERef f'))
         | QRExpr (name, e) ->
             checkName name
-            let (_, e') = resolveFieldExpr true mapping e
-            (unboundSubqueryField, QRExpr (name, e'))
+            let (exprInfo, expr) = resolveFieldExpr true mapping e
+            let info =
+                { subquery = unboundSubqueryField
+                  hasAggregates = exprInfo.hasAggregates
+                }
+            (info, QRExpr (name, expr))
 
     and resolveAttributes (mapping : QMapping) (attributes : ParsedAttributeMap) : ResolvedAttributeMap =
-        Map.map (fun name expr -> snd <| resolveFieldExpr false mapping expr) attributes
+        Map.map (fun name expr -> resolveNonaggrFieldExpr mapping expr) attributes
 
-    and resolveFieldExpr (useMain : bool) (mapping : QMapping) (expr : ParsedFieldExpr) : bool * ResolvedFieldExpr =
+    and resolveNonaggrFieldExpr (mapping : QMapping) (expr : ParsedFieldExpr) : ResolvedFieldExpr =
+        let (info, res) = resolveFieldExpr false mapping expr
+        if info.hasAggregates then
+            raisef ViewResolveException "Aggregate functions are not allowed here"
+        res
+
+    and resolveFieldExpr (useMain : bool) (mapping : QMapping) (expr : ParsedFieldExpr) : ResolvedExprInfo * ResolvedFieldExpr =
         let mutable isLocal = true
+        let mutable hasAggregates = false
         let resolveExprReference col =
             let (_, outer, ret) = resolveReference useMain mapping col
 
@@ -377,14 +411,23 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
         let resolveQuery query =
             let (_, res) = resolveSubSelectExpr query
             res
-        let ret = mapFieldExpr id resolveExprReference resolveQuery expr
-        (isLocal, ret)
+        let resolveAggr aggr =
+            hasAggregates <- true
+            aggr
+        let ret = mapFieldExpr id resolveExprReference resolveQuery resolveAggr expr
+        let info =
+            { isLocal = isLocal
+              hasAggregates = hasAggregates
+            }
+        (info, ret)
 
     and resolveOrderLimitClause (mapping : QMapping) (limits : ParsedOrderLimitClause) : bool * ResolvedOrderLimitClause =
         let mutable isLocal = true
         let resolveOrderBy (ord, expr) =
-            let (thisIsLocal, ret) = resolveFieldExpr false mapping expr
-            if not thisIsLocal then
+            let (info, ret) = resolveFieldExpr false mapping expr
+            if info.hasAggregates then
+                raisef ViewResolveException "Aggregates are not allowed here"
+            if not info.isLocal then
                 isLocal <- false
             (ord, ret)
         let ret =
@@ -436,21 +479,23 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             | Some from ->
                 let (mapping, res) = resolveFromExpr from
                 (mapping, Some res)
-        let qWhere = Option.map (snd << resolveFieldExpr false fromMapping) query.where
-        let qGroupBy = Array.map (snd << resolveFieldExpr false fromMapping) query.groupBy
-        let dropBoundness = not (Array.isEmpty qGroupBy)
-        let rawResults0 = Array.map (resolveResult fromMapping) query.results
-        let rawResults =
-            if not dropBoundness then
-                rawResults0
-            else
-                Array.map (fun (field, result) -> (unboundSubqueryField, result)) rawResults0
+        let qWhere = Option.map (resolveNonaggrFieldExpr fromMapping) query.where
+        let qGroupBy = Array.map (resolveNonaggrFieldExpr fromMapping) query.groupBy
+        let rawResults = Array.map (resolveResult fromMapping) query.results
+        let hasAggregates = Array.exists (fun (info : ResolvedResultInfo, expr) -> info.hasAggregates) rawResults || not (Array.isEmpty qGroupBy)
         let results = Array.map snd rawResults
+        let makeField (info, res) =
+            let bound = if hasAggregates then unboundSubqueryField else info.subquery
+            (res.result.ToName (), bound)
         let newFields =
             try
-                rawResults |> Seq.map (fun (boundField, res) -> (res.result.ToName (), boundField)) |> Map.ofSeqUnique
+                rawResults |> Seq.map makeField |> Map.ofSeqUnique
             with
                 | Failure msg -> raisef ViewResolveException "Clashing result names: %s" msg
+
+        let extra =
+            { hasAggregates = hasAggregates
+            }
 
         let newQuery = {
             attributes = resolveAttributes fromMapping query.attributes
@@ -459,6 +504,7 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
             groupBy = qGroupBy
             results = results
             orderLimit = snd <| resolveOrderLimitClause fromMapping query.orderLimit
+            extra = extra :> obj
         }
         (newFields, newQuery)
 
@@ -487,9 +533,11 @@ type private QueryResolver (layout : Layout, arguments : ResolvedArgumentsMap) =
                 with
                 | Failure msg -> raisef ViewResolveException "Clashing entity names in a join: %s" msg
 
-            let (isLocal, newFieldExpr) = resolveFieldExpr false newMapping where
-            if not isLocal then
+            let (info, newFieldExpr) = resolveFieldExpr false newMapping where
+            if not info.isLocal then
                 raisef ViewResolveException "Cannot use dereferences in join expressions: %O" where
+            if info.hasAggregates then
+                raisef ViewResolveException "Cannot use aggregate functions in join expression"
             (newMapping, FJoin (jt, newE1, newE2, newFieldExpr))
         | FSubExpr (name, q) ->
             checkName name

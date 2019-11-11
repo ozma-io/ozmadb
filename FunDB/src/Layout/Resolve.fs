@@ -56,7 +56,10 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
         | ref -> raisef ResolveLayoutException "Invalid reference in reference condition: %O" ref
     let voidQuery query =
         raisef ResolveLayoutException "Queries are not allowed in reference condition: %O" query
-    mapFieldExpr id resolveReference voidQuery
+    let voidAggr aggr =
+        raisef ResolveLayoutException "Aggregate functions are not allowed in reference conditions"
+
+    mapFieldExpr id resolveReference voidQuery voidAggr
 
 let private resolveUniqueConstraint (entity : SourceEntity) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.columns then
@@ -350,8 +353,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 raisef ResolveLayoutException "Invalid reference in computed column: %O" ref
         let voidQuery query =
             raisef ResolveLayoutException "Queries are not allowed in computed columns: %O" query
+        let voidAggr aggr =
+            raisef ResolveLayoutException "Aggregate functions are not allowed in computed columns"
 
-        let exprRes = mapFieldExpr id resolveReference voidQuery expr
+        let exprRes = mapFieldExpr id resolveReference voidQuery voidAggr expr
         { expression = exprRes
           isLocal = isLocal
           hasId = hasId
@@ -403,8 +408,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 raise (ResolveLayoutException <| sprintf "Invalid reference in check expression: %O" ref)
         let voidQuery query =
             raise (ResolveLayoutException <| sprintf "Queries are not allowed in check expressions: %O" query)
+        let voidAggr aggr =
+            raisef ResolveLayoutException "Aggregate functions are not allowed in check expressions"
 
-        mapFieldExpr id resolveReference voidQuery
+        mapFieldExpr id resolveReference voidQuery voidAggr
 
     let resolveCheckConstraint (entity : ResolvedEntity) (constr : SourceCheckConstraint) : ResolvedCheckConstraint =
         let checkExpr =

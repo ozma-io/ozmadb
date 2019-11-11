@@ -344,6 +344,7 @@ SingleUnlimitedSelectExpr:
       where = $4
       groupBy = $5
       orderLimit = emptyOrderLimitClause
+      extra = null
     }
   }
 
