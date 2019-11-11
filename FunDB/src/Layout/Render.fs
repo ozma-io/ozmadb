@@ -38,7 +38,6 @@ let renderEntity (entity : ResolvedEntity) : SourceEntity =
 
 let renderSchema (schema : ResolvedSchema) : SourceSchema =
     { entities = Map.map (fun name entity -> renderEntity entity) schema.entities
-      forbidExternalInheritance = schema.forbidExternalInheritance
     }
 
 let renderLayout (layout : Layout) : SourceLayout =

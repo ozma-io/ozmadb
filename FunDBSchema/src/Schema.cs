@@ -129,8 +129,6 @@ namespace FunWithFlags.FunDBSchema.Schema
         [ColumnField("string", Immutable=true)]
         [Required]
         public string Name { get; set; }
-        [ColumnField("bool", Default="FALSE")]
-        public bool ForbidExternalInheritance { get; set; }
 
         public List<Entity> Entities { get; set; }
         public List<Role> Roles { get; set; }

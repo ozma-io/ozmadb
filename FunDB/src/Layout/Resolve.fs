@@ -253,19 +253,12 @@ type private Phase1Resolver (layout : SourceLayout) =
                 if Set.contains parentRef newStack then
                     raisef ResolveLayoutException "Inheritance cycle detected"
                 else
-                    let parentSchema =
-                        match Map.tryFind parentRef.schema layout.schemas with
-                        | None -> raisef ResolveLayoutException "Parent entity %O is undefined" parentRef
-                        | Some parent -> parent
-                    let parentEntity =
-                        match Map.tryFind parentRef.name parentSchema.entities with
-                        | None -> raisef ResolveLayoutException "Parent entity %O is undefined" parentRef
-                        | Some parent -> parent
                     if parentRef.schema <> ref.schema then
-                        if parentEntity.forbidExternalReferences then
-                            raisef ResolveLayoutException "Parent entity %O forbids external references" parentRef
-                        if parentSchema.forbidExternalInheritance then
-                            raisef ResolveLayoutException "Parent schema %O forbids external references" parentRef.schema
+                        raisef ResolveLayoutException "Cross-schema inheritance is forbidden" parentRef
+                    let parentEntity =
+                        match layout.FindEntity parentRef with
+                        | None -> raisef ResolveLayoutException "Parent entity %O not found" parentRef
+                        | Some parent -> parent
                     resolveOneEntity newStack (Some ref) parentRef parentEntity
 
             match Map.tryFind ref cachedEntities with
@@ -474,7 +467,6 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let entities = schema.entities |> Map.map mapEntity
         { entities = entities
           roots = roots
-          forbidExternalInheritance = schema.forbidExternalInheritance
         }
 
     let resolveLayout () =

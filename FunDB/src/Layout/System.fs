@@ -78,5 +78,4 @@ let buildSystemSchema (contextClass : Type) : SourceSchema =
 
     let entities = entitiesInfo |> Seq.map (fun (name, propType, entity) -> (name, applyParent entity propType)) |> Map.ofSeq
     { entities = entities
-      forbidExternalInheritance = true
     }

@@ -57,7 +57,6 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
 
 let private makeSourceSchema (schema : Schema) : SourceSchema =
     { entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
-      forbidExternalInheritance = schema.ForbidExternalInheritance
     }
 
 let buildSchemaLayout (db : SystemContext) : Task<SourceLayout> =

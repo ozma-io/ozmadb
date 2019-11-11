@@ -125,7 +125,6 @@ let entityHasSubtype (entity : ResolvedEntity) : bool =
 type ResolvedSchema =
     { entities : Map<EntityName, ResolvedEntity>
       roots : Set<EntityName>
-      forbidExternalInheritance : bool
     }
 
 [<NoComparison>]

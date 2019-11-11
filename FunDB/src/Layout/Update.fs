@@ -108,8 +108,6 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
                         existingEntity.ParentId <- Nullable(id)
 
     let updateSchema (schema : SourceSchema) (existingSchema : Schema) : unit =
-        existingSchema.ForbidExternalInheritance <- schema.forbidExternalInheritance
-
         let entitiesMap = existingSchema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
 
         let updateFunc _ = updateEntity

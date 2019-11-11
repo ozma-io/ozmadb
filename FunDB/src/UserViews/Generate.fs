@@ -60,7 +60,6 @@ type SerializedEntity =
 type SerializedSchema =
     { entities : Map<EntityName, SerializedEntity>
       roots : Set<EntityName>
-      forbidExternalInheritance : bool
     }
 
 [<NoComparison>]
@@ -100,7 +99,6 @@ let private serializeEntity (entity : ResolvedEntity) : SerializedEntity =
 
 let private serializeSchema (schema : ResolvedSchema) : SerializedSchema =
     { entities = Map.map (fun name entity -> serializeEntity entity) schema.entities
-      forbidExternalInheritance = schema.forbidExternalInheritance
       roots = schema.roots
     }
 

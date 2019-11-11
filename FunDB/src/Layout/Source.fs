@@ -66,13 +66,10 @@ type SourceEntity =
 type SourceSchema =
     { [<JsonProperty(Required=Required.DisallowNull)>]
       entities : Map<EntityName, SourceEntity>
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      forbidExternalInheritance : bool
     }
 
 let emptySourceSchema : SourceSchema =
     { entities = Map.empty
-      forbidExternalInheritance = false
     }
 
 type SourceLayout =

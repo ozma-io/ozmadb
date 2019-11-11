@@ -79,7 +79,6 @@ let private normalizeRole (role : SourceRole) =
 let private resolvePreloadedSchema (preload : SourcePreloadedSchema) : PreloadedSchema =
     let schema =
         { entities = preload.entities
-          forbidExternalInheritance = true
         } : SourceSchema
     let permissions = { roles = Map.map (fun name -> normalizeRole) preload.roles }
     let defaultAttributes = { schemas = preload.defaultAttributes } : SourceAttributesDatabase
