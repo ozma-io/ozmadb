@@ -8,6 +8,7 @@ open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Query
@@ -17,13 +18,13 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 [<NoComparison>]
 type MainField =
     { name : FieldName
-      field : ResolvedColumnField
+      field : SerializedColumnField
     }
 
 [<NoComparison>]
 type UVDomainField =
     { ref : ResolvedFieldRef
-      field : ResolvedColumnField option
+      field : SerializedColumnField option
       idColumn : EntityName
     }
 
@@ -106,15 +107,6 @@ let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : Compiled
           columnAttributes = Seq.map2 filterPure (Seq.mapMaybe getColumn compiled.columns) res.columnAttributes |> Seq.toArray
         }
 
-let private mergeDomainField (f : DomainField) : UVDomainField =
-    { ref = f.ref
-      field =
-          match f.field with
-          | RColumnField col -> Some col
-          | _ -> None
-      idColumn = f.idColumn
-    }
-
 let private limitOrderLimit (orderLimit : SQL.OrderLimitClause) : SQL.OrderLimitClause =
     let newLimit =
         match orderLimit.limit with
@@ -130,6 +122,25 @@ let rec private limitView : SQL.SelectExpr -> SQL.SelectExpr = function
     | SQL.SSetOp (op, a, b, limit) -> SQL.SSetOp (op, limitView a, limitView b, limit)
 
 type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option) =
+    let mutable serializedFields : Map<ResolvedFieldRef, SerializedColumnField> = Map.empty
+
+    let getSerializedField (ref : ResolvedFieldRef) =
+        match Map.tryFind ref serializedFields with
+        | Some f -> Some f
+        | None ->
+            match layout.FindField ref.entity ref.name with
+            | Some (_, RColumnField src) ->
+                let res = serializeColumnField src
+                serializedFields <- Map.add ref res serializedFields
+                Some res   
+            | _ -> None
+
+    let mergeDomainField (f : DomainField) : UVDomainField =
+        { ref = f.ref
+          field = getSerializedField f.ref
+          idColumn = f.idColumn
+        }
+
     let withThisBroken (allowBroken : bool) =
         match onlyWithAllowBroken with
         | None -> true
@@ -145,9 +156,8 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                     match Map.tryFind name insertInfo.columnsToFields with
                     | None -> None
                     | Some fieldName ->
-                        let field = Map.find fieldName entity.columnFields
                         Some { name = fieldName
-                               field = field
+                               field = getSerializedField { entity = insertInfo.entity; name = fieldName } |> Option.get
                              }
 
             { name = column.name

@@ -37,6 +37,14 @@ let entitiesApi (settings : APISettings) : HttpHandler =
         | EENotFound -> text "Not found" |> RequestErrors.notFound
         | EEExecute msg -> text msg |> RequestErrors.badRequest
 
+    let getEntityInfo (entityRef : ResolvedEntityRef) (rctx : RequestContext) : HttpHandler =
+        fun next ctx -> task {
+            match! rctx.GetEntityInfo entityRef with
+            | Ok info ->
+                return! Successful.ok (json info) next ctx
+            | Result.Error err -> return! returnError err next ctx
+        }
+
     let insertEntity (entityRef : ResolvedEntityRef) (rctx : RequestContext) : HttpHandler =
         formArgs <| fun rawArgs next ctx -> task {
             match! rctx.InsertEntity entityRef rawArgs with
@@ -66,13 +74,19 @@ let entitiesApi (settings : APISettings) : HttpHandler =
               DELETE >=> guarded (deleteEntity entityRef id)
             ]
 
+    let rootEntityApi (ref : ResolvedEntityRef) =
+        choose
+            [ GET >=> guarded (getEntityInfo ref)
+              POST >=> guarded (insertEntity ref)
+            ]
+
     let entityApi (schema : string, name : string) =
         let entityRef =
             { schema = FunQLName schema
               name = FunQLName name
             }
         choose
-            [ route "" >=> POST >=> guarded (insertEntity entityRef)
+            [ route "" >=> (rootEntityApi entityRef)
               routef "/%i" (recordApi entityRef)
             ]
 

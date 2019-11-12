@@ -5,6 +5,8 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Layout.Info
+open FunWithFlags.FunDB.Layout.Render
 open FunWithFlags.FunDB.Permissions.Flatten
 open FunWithFlags.FunDB.Permissions.Compile
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -76,3 +78,34 @@ let applyRoleDelete (layout : Layout) (role : FlatRole) (entityRef : ResolvedEnt
         { arguments = arguments
           expression = expr
         }
+
+let applyRoleInfo (role : FlatRole) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
+    let entityAccess =
+        match role.FindEntity entityRef with
+        | None -> raisef PermissionsEntityException "Access denied"
+        | Some access -> access
+    let fields1 =
+        match entityAccess.insert with
+        | None -> Set.empty
+        | Some fields -> fields
+    let fields2 =
+        match entityAccess.select with
+        | None -> Set.empty
+        | Some fields -> Map.keysSet fields
+    let allowedFields = Set.union fields1 fields2
+
+    let columnFields = entity.columnFields |> Map.filter (fun name field -> Set.contains name allowedFields) |> Map.map (fun name field -> serializeColumnField field)
+
+    { columnFields = columnFields
+      // FIXME!
+      computedFields = Map.empty
+      uniqueConstraints = Map.empty
+      checkConstraints = Map.empty
+      mainField = entity.mainField
+      forbidExternalReferences = entity.forbidExternalReferences
+      hidden = entity.hidden
+      parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
+      children = entity.children
+      isAbstract = entity.isAbstract
+      root = entity.root
+    }

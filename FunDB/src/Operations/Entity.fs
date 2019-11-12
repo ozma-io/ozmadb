@@ -8,6 +8,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Flatten
 open FunWithFlags.FunDB.Permissions.Entity
 open FunWithFlags.FunDB.SQL.Query
@@ -47,6 +48,19 @@ let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
     | FTEnum vals -> FTEnum vals
     | FTType t -> FTType t
 
+let getEntityInfo (role : FlatRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
+    if entity.hidden then
+        raisef EntityExecutionException "Entity %O is hidden" entityRef
+    
+    match role with
+    | None -> serializeEntity entity
+    | Some role ->
+        try
+            applyRoleInfo role entityRef entity 
+        with
+        | :? PermissionsEntityException as e ->
+            raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
+
 let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) : Task<int> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
@@ -60,6 +74,8 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
         if entity.isAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
+        if entity.hidden then
+            raisef EntityExecutionException "Entity %O is hidden" entityRef        
         let (subEntityColumn, subEntityArg, newRawArgs) =
             if entity.HasSubType then
                 let col = Seq.singleton sqlFunSubEntity
@@ -112,6 +128,9 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | Some arg -> Some (fieldName, field.columnName, { argType = clearFieldType field.fieldType; optional = field.isNullable })
 
         let entity = layout.FindEntity entityRef |> Option.get
+        if entity.hidden then
+            raisef EntityExecutionException "Entity %O is hidden" entityRef     
+            
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments' = argumentTypes |> Seq.map (fun (name, colName, arg) -> (PLocal name, arg)) |> Map.ofSeq |> compileArguments
         let arguments = addArgument (PLocal funId) funIdArg arguments'
@@ -151,6 +170,10 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (id : EntityId) : Task<unit> =
     task {
         let entity = layout.FindEntity entityRef |> Option.get
+
+        if entity.hidden then
+            raisef EntityExecutionException "Entity %O is hidden" entityRef
+
         let arguments = addArgument (PLocal funId) funIdArg emptyArguments
         let whereId = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder arguments.types.[PLocal funId].placeholderId)
         let whereExpr =

@@ -22,7 +22,6 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 [<NoComparison>]
 type DomainField =
     { ref : ResolvedFieldRef
-      field : ResolvedField
       // A field with assigned idEntity of Foo will use ID column "__Id__Foo"
       idColumn : EntityName
     }
@@ -362,8 +361,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         lastJoinId <- lastJoinId + 1
         compileJoinId id
 
-    let rec followPath (fieldRef : ResolvedFieldRef) (field : ResolvedField) : FieldName list -> ResolvedFieldRef * ResolvedField = function
-        | [] -> (fieldRef, field)
+    let rec followPath (fieldRef : ResolvedFieldRef) (field : ResolvedField) : FieldName list -> ResolvedFieldRef = function
+        | [] -> fieldRef
         | (ref :: refs) ->
             match field with
             | RColumnField { fieldType = FTReference (entityRef, _) } ->
@@ -660,10 +659,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         // Pathed refs always have bound fields
                         let oldBound = Option.get resultRef.ref.bound
                         let (_, oldField) = Option.get <| layout.FindField oldBound.ref.entity oldBound.ref.name
-                        let (newRef, newField) = followPath oldBound.ref oldField (List.ofArray resultRef.path)
+                        let newRef = followPath oldBound.ref oldField (List.ofArray resultRef.path)
                         let newInfo =
                             { ref = newRef
-                              field = newField
                               idColumn = newName
                             }
                         DSingle (newGlobalDomainId (), Map.singleton newName newInfo )
@@ -696,8 +694,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                 | None -> SQL.VEValue SQL.VNull
                                 | Some info ->
                                     let entity = Option.getOrFailWith (fun () -> sprintf "Can't find entity: %O" info.ref.entity) <| layout.FindEntity info.ref.entity
-                                    match info.field with
-                                    | RColumnField { fieldType = FTReference (newEntityRef, _) } ->
+                                    match layout.FindField info.ref.entity info.ref.name |> Option.get with
+                                    | (_, RColumnField { fieldType = FTReference (newEntityRef, _) }) ->
                                         let (_, field) = entity.FindField fieldName |> Option.get
                                         let (newPaths, expr) = compilePath paths tableRef info.ref.entity field fieldName [funMain]
                                         paths <- newPaths
@@ -862,7 +860,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
             let makeDomainEntry name field =
                 { ref = { entity = entityRef; name = name }
-                  field = field
                   // Special value which means "use Id"
                   idColumn = funEmpty
                 }

@@ -9,6 +9,7 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Flatten
 open FunWithFlags.FunDB.Permissions.View
@@ -272,7 +273,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 return Error <| printException ex
         }
 
-    member this.GetUserViewInfo (source : UserViewSource) =
+    member this.GetUserViewInfo (source : UserViewSource) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
         task {
             match! resolveSource source with
             | Error e -> return Error e
@@ -311,6 +312,20 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view")
                     return Error UVEAccessDenied
+        }
+
+    member this.GetEntityInfo (entityRef : ResolvedEntityRef) : Task<Result<SerializedEntity, EntityErrorInfo>> =
+        task {
+            match ctx.State.layout.FindEntity(entityRef) with
+            | None -> return Error EENotFound
+            | Some entity ->
+                try
+                    let res = getEntityInfo (getRole roleType) entityRef entity
+                    return Ok res
+                with
+                    | :? EntityDeniedException as ex ->
+                        logger.LogError(ex, "Access denied")
+                        return Error EEAccessDenied
         }
 
     member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<int, EntityErrorInfo>> =
