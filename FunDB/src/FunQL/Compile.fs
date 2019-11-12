@@ -745,7 +745,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             let defaultCols = inheritedAttrs |> Set.toSeq |> Seq.map makeDefaultAttr
                             (allAttrs, defaultCols)
                     | FTSubquery queryInfo ->
-                        let oldAttrs = Map.find fieldName queryInfo.attributes
+                        let oldAttrs =
+                            match Map.tryFind fieldName queryInfo.attributes with
+                            | Some attrs -> attrs
+                            | None -> Set.empty
                         let inheritedAttrs = Set.difference oldAttrs currentAttrs
                         let allAttrs = Set.union oldAttrs currentAttrs
                         let makeInheritedAttr name =
@@ -897,11 +900,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | FJoin (jt, e1, e2, where) ->
             let hasMain1 =
                 match jt with
+                | _ when not hasMainEntity -> false
                 | Left -> true
                 | _ -> false
             let (fromMap1, r1) = compileFromExpr hasMain1 e1
             let hasMain2 =
                 match jt with
+                | _ when not hasMainEntity -> false
                 | Right -> true
                 | _ -> false
             let (fromMap2, r2) = compileFromExpr hasMain2 e2
@@ -921,7 +926,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let ret = SQL.FSubExpr (compileName name, None, expr)
             let fromInfo =
                 { fromType = FTSubquery selectInfo
-                  mainId = Some (columnName CTMainIdColumn)
+                  mainId = if hasMainEntity then Some (columnName CTMainIdColumn) else None
                 }
             (Map.singleton name fromInfo, ret)
         | FValues (name, fieldNames, values) ->
