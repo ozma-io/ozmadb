@@ -372,7 +372,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 followPath newFieldRef newField refs
             | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
 
-    let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (entityRef : ResolvedEntityRef) (field : ResolvedField) (ref : FieldName) : JoinPaths * SQL.ValueExpr =
+    let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedField) (ref : FieldName) : JoinPaths * SQL.ValueExpr =
         match field with
         | RId
         | RSubEntity
@@ -381,23 +381,24 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let localRef = { schema = Option.map decompileName tableRef.schema; name = decompileName tableRef.name } : EntityRef
             compileLinkedFieldExpr paths <| convertLinkedLocalExpr localRef comp.expression
 
-    and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (entityRef : ResolvedEntityRef) (field : ResolvedField) (name : FieldName) : FieldName list -> JoinPaths * SQL.ValueExpr = function
-        | [] -> compileRef paths tableRef entityRef field name
+    and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedField) (name : FieldName) : FieldName list -> JoinPaths * SQL.ValueExpr = function
+        | [] -> compileRef paths tableRef field name
         | (ref :: refs) ->
             match field with
             | RColumnField { fieldType = FTReference (newEntityRef, _) } ->
-                let (realName, newField) = Option.get <| layout.FindField newEntityRef ref
+                let newEntity = Option.get <| layout.FindEntity newEntityRef
+                let (realName, newField) = Option.get <| newEntity.FindField ref
                 let pathKey =
                     { table = tableRef.name
                       column = compileName name
-                      toTable = newEntityRef
+                      toTable = newEntity.root
                     }
                 let (newPath, res) =
                     match Map.tryFind pathKey paths with
                     | None ->
                         let newRealName = newJoinId ()
                         let newTableRef = { schema = None; name = newRealName } : SQL.TableRef
-                        let (nested, res) = compilePath Map.empty newTableRef newEntityRef newField realName refs
+                        let (nested, res) = compilePath Map.empty newTableRef newField realName refs
                         let path =
                             { name = newRealName
                               nested = nested
@@ -405,7 +406,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         (path, res)
                     | Some path ->
                         let newTableRef = { schema = None; name = path.name } : SQL.TableRef
-                        let (nested, res) = compilePath path.nested newTableRef newEntityRef newField realName refs
+                        let (nested, res) = compilePath path.nested newTableRef newField realName refs
                         let newPath = { path with nested = nested }
                         (newPath, res)
                 (Map.add pathKey newPath paths, res)
@@ -428,7 +429,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 // If it's not we need to keep original naming.
                 let newName =
                     if boundRef.immediate then realName else ref.ref.name
-                compilePath paths0 tableRef boundRef.ref.entity field newName (Array.toList linked.path)
+                compilePath paths0 tableRef field newName (Array.toList linked.path)
             | _ -> failwith "Unexpected path with no bound field"
         | VRPlaceholder name ->
             if Array.isEmpty linked.path then
@@ -697,7 +698,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                     match layout.FindField info.ref.entity info.ref.name |> Option.get with
                                     | (_, RColumnField { fieldType = FTReference (newEntityRef, _) }) ->
                                         let (_, field) = entity.FindField fieldName |> Option.get
-                                        let (newPaths, expr) = compilePath paths tableRef info.ref.entity field fieldName [funMain]
+                                        let (newPaths, expr) = compilePath paths tableRef field fieldName [funMain]
                                         paths <- newPaths
                                         foundPun <- true
                                         expr
