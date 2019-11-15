@@ -372,25 +372,36 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 followPath newFieldRef newField refs
             | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
 
-    let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedField) (ref : FieldName) : JoinPaths * SQL.ValueExpr =
+    let rec compileRef (paths : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedField) (forcedName : FieldName option) : JoinPaths * SQL.ValueExpr =
+        let realColumn name =
+            let finalName =
+                match forcedName with
+                | Some n -> compileName n
+                | None -> name
+            (paths, SQL.VEColumn { table = Some tableRef; name = finalName })
+
         match field with
-        | RId
-        | RSubEntity
-        | RColumnField _ -> (paths, SQL.VEColumn { table = Some tableRef; name = compileName ref })
+        | RId -> realColumn sqlFunId
+        | RSubEntity -> realColumn sqlFunSubEntity
+        | RColumnField col -> realColumn col.columnName
         | RComputedField comp ->
             let localRef = { schema = Option.map decompileName tableRef.schema; name = decompileName tableRef.name } : EntityRef
             compileLinkedFieldExpr paths <| convertLinkedLocalExpr localRef comp.expression
 
-    and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedField) (name : FieldName) : FieldName list -> JoinPaths * SQL.ValueExpr = function
-        | [] -> compileRef paths tableRef field name
+    and compilePath (paths : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedField) (forcedName : FieldName option) : FieldName list -> JoinPaths * SQL.ValueExpr = function
+        | [] -> compileRef paths tableRef field forcedName
         | (ref :: refs) ->
             match field with
-            | RColumnField { fieldType = FTReference (newEntityRef, _) } ->
+            | RColumnField ({ fieldType = FTReference (newEntityRef, _) } as col) ->
                 let newEntity = Option.get <| layout.FindEntity newEntityRef
                 let (realName, newField) = Option.get <| newEntity.FindField ref
+                let column =
+                    match forcedName with
+                    | None -> col.columnName
+                    | Some n -> compileName n
                 let pathKey =
                     { table = tableRef.name
-                      column = compileName name
+                      column = column
                       toTable = newEntity.root
                     }
                 let (newPath, res) =
@@ -398,7 +409,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     | None ->
                         let newRealName = newJoinId ()
                         let newTableRef = { schema = None; name = newRealName } : SQL.TableRef
-                        let (nested, res) = compilePath Map.empty newTableRef newField realName refs
+                        let (nested, res) = compilePath Map.empty newTableRef newField None refs
                         let path =
                             { name = newRealName
                               nested = nested
@@ -406,7 +417,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         (path, res)
                     | Some path ->
                         let newTableRef = { schema = None; name = path.name } : SQL.TableRef
-                        let (nested, res) = compilePath path.nested newTableRef newField realName refs
+                        let (nested, res) = compilePath path.nested newTableRef newField None refs
                         let newPath = { path with nested = nested }
                         (newPath, res)
                 (Map.add pathKey newPath paths, res)
@@ -428,7 +439,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 // In case it's an immediate name we need to rename outermost field (i.e. `__main`).
                 // If it's not we need to keep original naming.
                 let newName =
-                    if boundRef.immediate then realName else ref.ref.name
+                    if boundRef.immediate then None else Some ref.ref.name
                 compilePath paths0 tableRef field newName (Array.toList linked.path)
             | _ -> failwith "Unexpected path with no bound field"
         | VRPlaceholder name ->
@@ -441,7 +452,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     let firstName = linked.path.[0]
                     let remainingPath = Array.skip 1 linked.path
                     let argEntityRef' = { schema = Some argEntityRef.schema; name = argEntityRef.name } : EntityRef
-                    let argEntity = layout.FindEntity argEntityRef |> Option.get
 
                     // Subquery
                     let makeColumn name path =
@@ -698,7 +708,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                     match layout.FindField info.ref.entity info.ref.name |> Option.get with
                                     | (_, RColumnField { fieldType = FTReference (newEntityRef, _) }) ->
                                         let (_, field) = entity.FindField fieldName |> Option.get
-                                        let (newPaths, expr) = compilePath paths tableRef field fieldName [funMain]
+                                        let (newPaths, expr) = compilePath paths tableRef field None [funMain]
                                         paths <- newPaths
                                         foundPun <- true
                                         expr
@@ -872,16 +882,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     SQL.FTable (Option.map compileName pun, compileResolvedEntityRef entityRef)
                 | Some inheritance ->
                     let rootEntity = SQL.SCExpr (Some sqlFunRootEntity, SQL.VEValue (SQL.VString entity.typeName))
-                    let compileInheritedField (name, field) =
-                        SQL.SCExpr (Some <| compileName name, SQL.VEColumn { table = None; name = field.columnName })
-                    let systemSeq = [
-                        rootEntity
-                        SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunId })
-                        SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunSubEntity })
-                    ]
-                    let fieldsSeq = entity.columnFields |> Map.toSeq |> Seq.map compileInheritedField
                     let select =
-                        { columns = Seq.append systemSeq fieldsSeq |> Seq.toArray
+                        { columns = [| rootEntity; SQL.SCAll None |]
                           from = Some <| SQL.FTable (None, compileResolvedEntityRef entity.root)
                           where = Some inheritance.checkExpr
                           groupBy = [||]
