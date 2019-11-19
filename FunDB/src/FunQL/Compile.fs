@@ -660,12 +660,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let rec getNewDomains = function
                 | DSingle (id, domain) -> DSingle (id, getNewDomain domain)
                 | DMulti (ns, nested) -> DMulti (ns, nested |> Map.map (fun key domains -> getNewDomains domains))
-                let newDomains =
+                let (pathRef, newDomains) =
                     if Array.isEmpty resultRef.path
                     then
-                        match fromInfo.fromType with
-                        | FTEntity (domainId, domain) -> DSingle (domainId, getNewDomain domain)
-                        | FTSubquery info -> getNewDomains info.domains
+                        let newDomains =
+                            match fromInfo.fromType with
+                            | FTEntity (domainId, domain) -> DSingle (domainId, getNewDomain domain)
+                            | FTSubquery info -> getNewDomains info.domains
+                        (None, newDomains)
                     else
                         // Pathed refs always have bound fields
                         let oldBound = Option.get resultRef.ref.bound
@@ -675,7 +677,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             { ref = newRef
                               idColumn = newName
                             }
-                        DSingle (newGlobalDomainId (), Map.singleton newName newInfo )
+                        let newDomains = DSingle (newGlobalDomainId (), Map.singleton newName newInfo )
+                        (Some newRef, newDomains)
 
                 let rec getDomainColumns = function
                 | DSingle (id, domain) -> Seq.empty
@@ -695,9 +698,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let punColumns =
                     if flags.isTopLevel
                     then
-                        // TODO: algorithm is similar to the one for Ids; generalize?
-                        if Array.isEmpty resultRef.path
-                        then
+                        match pathRef with
+                        | None ->
                             let mutable foundPun = false
 
                             let getPunColumn (domain : Domain) =
@@ -721,14 +723,18 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                 Seq.singleton col
                             else
                                 Seq.empty
-                        else
-                            let punPath = Seq.append (Seq.take (Array.length resultRef.path - 1) resultRef.path) (Seq.singleton funMain) |> Array.ofSeq
-                            let punRef = { ref = VRColumn resultRef.ref; path = punPath }
-                            let (newPaths, punExpr) = compileLinkedFieldRef paths punRef
-                            paths <- newPaths
-                            let colName = CTPunAttribute newName
-                            let col = (colName, SQL.SCExpr (Some <| columnName colName, punExpr))
-                            Seq.singleton col
+                        | Some endRef ->
+                            let endField = layout.FindField endRef.entity endRef.name |> Option.get
+                            match endField with
+                            | (_, RColumnField { fieldType = FTReference (newEntityRef, _) }) ->
+                                let punPath = Seq.append (Seq.take (Array.length resultRef.path - 1) resultRef.path) (Seq.singleton funMain) |> Array.ofSeq
+                                let punRef = { ref = VRColumn resultRef.ref; path = punPath }
+                                let (newPaths, punExpr) = compileLinkedFieldRef paths punRef
+                                paths <- newPaths
+                                let colName = CTPunAttribute newName
+                                let col = (colName, SQL.SCExpr (Some <| columnName colName, punExpr))
+                                Seq.singleton col
+                            | _ -> Seq.empty
                     else
                         Seq.empty
 
