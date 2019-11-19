@@ -127,7 +127,7 @@ type UnionConverter (objectType : Type) =
                         someProperty.PropertyType
                 fun reader serializer ->
                     let arg = serializer.Deserialize(reader, propType)
-                    if arg = null then
+                    if isNull arg then
                         FSharpValue.MakeUnion(noneCase, [||])
                     else
                         FSharpValue.MakeUnion(someCase, [|arg|])
