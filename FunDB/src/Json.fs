@@ -120,12 +120,16 @@ type UnionConverter (objectType : Type) =
             // XXX: We do lose information here is we serialize e.g. ('a option option).
             match isOption cases with
             | Some ((someCase, someProperty), noneCase) ->
+                let propType =
+                    if someProperty.PropertyType.IsValueType then
+                        (typedefof<Nullable<_>>).MakeGenericType([|someProperty.PropertyType|])
+                    else
+                        someProperty.PropertyType
                 fun reader serializer ->
-                    if reader.TokenType = JsonToken.Null then
-                        ignore <| reader.Read()
+                    let arg = serializer.Deserialize(reader, propType)
+                    if arg = null then
                         FSharpValue.MakeUnion(noneCase, [||])
                     else
-                        let arg = serializer.Deserialize(reader, someProperty.PropertyType)
                         FSharpValue.MakeUnion(someCase, [|arg|])
             | None ->
                 if isUnionEnum cases then
