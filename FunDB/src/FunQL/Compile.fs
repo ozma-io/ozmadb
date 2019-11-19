@@ -902,7 +902,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   mainId = if hasMainEntity then Some sqlFunId else None
                 }
 
-            (Map.singleton entityRef.name fromInfo, subquery)
+            let newName = Option.defaultValue entityRef.name pun
+            (Map.singleton newName fromInfo, subquery)
         | FJoin (jt, e1, e2, where) ->
             let hasMain1 =
                 match jt with

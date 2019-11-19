@@ -36,6 +36,7 @@ type private QSubqueryField =
 
 type private QSubqueryFields = Map<FieldName, QSubqueryField>
 
+// None as EntityName is used only for offset/limit expressions in set operations.
 type private QMapping = Map<EntityName option, SchemaName option * QSubqueryFields>
 
 type private SomeArgumentsMap = Map<ArgumentName, ParsedFieldType>
@@ -497,7 +498,8 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
 
             let realFields = mapAllFields makeBoundField entity
             let fields = Map.add funMain (QRename entity.MainField) realFields
-            (Map.singleton (Some <| Option.defaultValue name.name pun) (Some resName.schema, fields), FEntity (pun, resName))
+            let newName = Option.defaultValue name.name pun
+            (Map.singleton (Some newName) (Some resName.schema, fields), FEntity (pun, resName))
         | FJoin (jt, e1, e2, where) ->
             let (newMapping1, newE1) = resolveFromExpr e1
             let (newMapping2, newE2) = resolveFromExpr e2
