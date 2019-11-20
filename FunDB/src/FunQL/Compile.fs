@@ -117,10 +117,11 @@ let private fromInfoExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.Valu
 type JoinKey =
     { table : SQL.TableName
       column : SQL.ColumnName
-      toTable : ResolvedEntityRef
+      toTable : ResolvedEntityRef // Root entity
     }
 type JoinPath =
     { name : SQL.TableName
+      entity : ResolvedEntityRef // Real entity (<> toTable when inheritance is involved)
       nested : JoinPaths
     }
 and JoinPaths = Map<JoinKey, JoinPath>
@@ -327,6 +328,8 @@ type private SelectFlags =
       metaColumns : bool
     }
 
+type RealEntityAnnotation = { realEntity : ResolvedEntityRef }
+
 type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttributes, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
 
@@ -413,6 +416,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let path =
                             { name = newRealName
                               nested = nested
+                              entity = newEntityRef
                             }
                         (path, res)
                     | Some path ->
@@ -822,6 +826,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               where = where
               groupBy = groupBy
               orderLimit = orderLimit
+              extra = null
             } : SQL.SingleSelectExpr
 
         let info =
@@ -862,12 +867,11 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     and joinPath (from : SQL.FromExpr) (joinKey : JoinKey) (path : JoinPath) : SQL.FromExpr =
         let tableRef = { schema = None; name = joinKey.table } : SQL.TableRef
         let toTableRef = { schema = None; name = path.name } : SQL.TableRef
-        let entity = layout.FindEntity joinKey.toTable |> Option.get
 
         let fromColumn = SQL.VEColumn { table = Some tableRef; name = joinKey.column }
         let toColumn = SQL.VEColumn { table = Some toTableRef; name = sqlFunId }
         let joinExpr = SQL.VEEq (fromColumn, toColumn)
-        let subquery = SQL.FTable (Some path.name, compileResolvedEntityRef joinKey.toTable)
+        let subquery = SQL.FTable ({ realEntity = path.entity }, Some path.name, compileResolvedEntityRef joinKey.toTable)
         let currJoin = SQL.FJoin (SQL.Left, from, subquery, joinExpr)
         buildJoins currJoin path.nested
 
@@ -885,15 +889,16 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let subquery =
                 match entity.inheritance with
                 | None ->
-                    SQL.FTable (Option.map compileName pun, compileResolvedEntityRef entityRef)
+                    SQL.FTable ({ realEntity = entityRef }, Option.map compileName pun, compileResolvedEntityRef entityRef)
                 | Some inheritance ->
                     let rootEntity = SQL.SCExpr (Some sqlFunRootEntity, SQL.VEValue (SQL.VString entity.typeName))
                     let select =
                         { columns = [| rootEntity; SQL.SCAll None |]
-                          from = Some <| SQL.FTable (None, compileResolvedEntityRef entity.root)
+                          from = Some <| SQL.FTable (null, None, compileResolvedEntityRef entity.root)
                           where = Some inheritance.checkExpr
                           groupBy = [||]
                           orderLimit = SQL.emptyOrderLimitClause
+                          extra = { realEntity = entityRef }
                         } : SQL.SingleSelectExpr
                     let expr = SQL.SSelect select
                     SQL.FSubExpr (compileName entityRef.name, None, expr)
@@ -1078,7 +1083,14 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
         if Array.isEmpty onlyPureAttrs then
             None
         else
-            let query = SQL.SSelect { columns = Array.map (fun info -> info.result) onlyPureAttrs; from = None; where = None; groupBy = [||]; orderLimit = SQL.emptyOrderLimitClause }
+            let query = SQL.SSelect {
+                    columns = Array.map (fun info -> info.result) onlyPureAttrs
+                    from = None
+                    where = None
+                    groupBy = [||]
+                    orderLimit = SQL.emptyOrderLimitClause
+                    extra = null
+                }
 
             let getPureAttribute (info : PureColumn) =
                 match info.columnType with

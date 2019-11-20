@@ -485,7 +485,7 @@ and [<NoComparison>] AggExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoComparison>] FromExpr =
-    | FTable of TableName option * TableRef
+    | FTable of obj * TableName option * TableRef
     | FJoin of JoinType * FromExpr * FromExpr * ValueExpr
     | FSubExpr of TableName * ColumnName[] option * SelectExpr
     with
@@ -493,7 +493,7 @@ and [<NoComparison>] FromExpr =
 
         member this.ToSQLString () =
             match this with
-            | FTable (name, t) ->
+            | FTable (_, name, t) ->
                 match name with
                 | Some n -> sprintf "%s AS %s" (t.ToSQLString()) (n.ToSQLString())
                 | None -> t.ToSQLString()
@@ -532,6 +532,7 @@ and [<NoComparison>] SingleSelectExpr =
       where : ValueExpr option
       groupBy : ValueExpr[]
       orderLimit : OrderLimitClause
+      extra : obj
     } with
         override this.ToString () = this.ToSQLString()
 

@@ -15,6 +15,7 @@ let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : 
       where = where
       groupBy = [||]
       orderLimit = SQL.emptyOrderLimitClause
+      extra = null
     }
 
 let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.ValueExpr =
@@ -28,6 +29,7 @@ let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (argumen
               where = where
               groupBy = [||]
               orderLimit = SQL.emptyOrderLimitClause
+              extra = null
             } : SQL.SingleSelectExpr
         let subexpr = SQL.SSelect select
         let idColumn = SQL.VEColumn { table = None; name = sqlFunId }

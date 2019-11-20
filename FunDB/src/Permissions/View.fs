@@ -74,14 +74,9 @@ type private AccessCompiler (layout : Layout, initialArguments : QueryArguments)
     member this.Arguments = arguments
     member this.FilterUsedSchemas = filterUsedSchemas
 
-let private (|SubEntitySelect|_|) : SingleSelectExpr -> FunQL.ResolvedEntityRef option = function
-    | { columns = columns; from = Some (FTable (None, tableRef)) } when not (Array.isEmpty columns) ->
-        match columns.[0] with
-        | SCExpr (Some name, VEValue (VString rootName)) when name = sqlFunRootEntity ->
-            let rootRef = { schema = decompileName <| Option.get tableRef.schema; name = decompileName tableRef.name } : FunQL.ResolvedEntityRef
-            let realRef = parseTypeName rootRef rootName
-            Some realRef
-        | _ -> None
+let private (|SubEntitySelect|_|) (expr : SingleSelectExpr) : FunQL.ResolvedEntityRef option =
+    match expr.extra with
+    | :? RealEntityAnnotation as ent -> Some ent.realEntity
     | _ -> None
 
 type private PermissionsApplier (access : SchemaAccess) =
@@ -109,6 +104,7 @@ type private PermissionsApplier (access : SchemaAccess) =
               where = Option.map applyToValueExpr query.where
               groupBy = Array.map applyToValueExpr query.groupBy
               orderLimit = applyToOrderLimitClause query.orderLimit
+              extra = query.extra
             }
 
     and applyToOrderLimitClause (clause : OrderLimitClause) : OrderLimitClause =
@@ -125,11 +121,12 @@ type private PermissionsApplier (access : SchemaAccess) =
         mapValueExpr id id applyToSelectExpr
 
     and applyToFromExpr : FromExpr -> FromExpr = function
-        | FTable (pun, entity) ->
-            let accessSchema = Map.find (decompileName <| Option.get entity.schema) access
-            let accessEntity = Map.find (decompileName entity.name) accessSchema
+        | FTable (extra, pun, entity) ->
+            let entityRef = (extra :?> RealEntityAnnotation).realEntity
+            let accessSchema = Map.find entityRef.schema access
+            let accessEntity = Map.find entityRef.name accessSchema
             match accessEntity with
-            | None -> FTable (pun, entity)
+            | None -> FTable (extra, pun, entity)
             | Some restr ->
                 let name = Option.defaultValue entity.name pun
                 FSubExpr (name, None, SSelect restr)
