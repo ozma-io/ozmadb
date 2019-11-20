@@ -93,7 +93,6 @@ let decompileName (SQL.SQLName name) = FunQLName name
 
 let sqlFunId = compileName funId
 let sqlFunSubEntity = compileName funSubEntity
-let sqlFunRootEntity = SQL.SQLName "__RootEntity"
 let sqlFunView = compileName funView
 let private funEmpty = FunQLName ""
 
@@ -891,9 +890,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 | None ->
                     SQL.FTable ({ realEntity = entityRef }, Option.map compileName pun, compileResolvedEntityRef entityRef)
                 | Some inheritance ->
-                    let rootEntity = SQL.SCExpr (Some sqlFunRootEntity, SQL.VEValue (SQL.VString entity.typeName))
                     let select =
-                        { columns = [| rootEntity; SQL.SCAll None |]
+                        { columns = [| SQL.SCAll None |]
                           from = Some <| SQL.FTable (null, None, compileResolvedEntityRef entity.root)
                           where = Some inheritance.checkExpr
                           groupBy = [||]
