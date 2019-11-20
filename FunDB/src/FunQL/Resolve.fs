@@ -225,7 +225,7 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
                           entity = newEntity
                           immediate = false
                         }
-                    usedSchemas <- addUsedField entityRef.schema entityRef.name newRef usedSchemas
+                    usedSchemas <- addUsedFieldRef boundField.ref usedSchemas
                     resolvePath useMain nextBoundField refs
                 | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
             | _ -> raisef ViewResolveException "Invalid dereference: %O" ref

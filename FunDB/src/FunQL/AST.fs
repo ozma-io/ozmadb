@@ -867,6 +867,14 @@ type ArgumentFieldType = FieldType<ResolvedEntityRef, FunQLVoid>
 type ParsedArgument = Argument<EntityRef, LinkedFieldRef>
 type ResolvedArgument = Argument<ResolvedEntityRef, FunQLVoid>
 
+let funId = FunQLName "Id"
+let funSubEntity = FunQLName "SubEntity"
+let funSchema = FunQLName "public"
+let funView = FunQLName "view"
+let funMain = FunQLName "__main"
+let funUsers = FunQLName "Users"
+let funEvents = FunQLName "Events"
+
 type UsedFields = Set<FieldName>
 type UsedEntities = Map<EntityName, UsedFields>
 type UsedSchemas = Map<SchemaName, UsedEntities>
@@ -880,23 +888,17 @@ let addUsedEntityRef (ref : ResolvedEntityRef) =
     addUsedEntity ref.schema ref.name
 
 let addUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldName : FieldName) (usedSchemas : UsedSchemas) : UsedSchemas =
+    assert (fieldName <> funId && fieldName <> funSubEntity)
     let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
     let oldEntity = Map.findWithDefault entityName (fun () -> Set.empty) oldSchema
-    Map.add schemaName (Map.add entityName (Set.add fieldName oldEntity) oldSchema) usedSchemas
+    let newEntity = Set.add fieldName oldEntity
+    Map.add schemaName (Map.add entityName newEntity oldSchema) usedSchemas
 
 let addUsedFieldRef (ref : ResolvedFieldRef) =
     addUsedField ref.entity.schema ref.entity.name ref.name
 
 let mergeUsedSchemas : UsedSchemas -> UsedSchemas -> UsedSchemas =
     Map.unionWith (fun _ -> Map.unionWith (fun _ -> Set.union))
-
-let funId = FunQLName "Id"
-let funSubEntity = FunQLName "SubEntity"
-let funSchema = FunQLName "public"
-let funView = FunQLName "view"
-let funMain = FunQLName "__main"
-let funUsers = FunQLName "Users"
-let funEvents = FunQLName "Events"
 
 // Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
 let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
