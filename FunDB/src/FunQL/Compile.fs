@@ -602,8 +602,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let getResultEntry (result : ResolvedQueryResult) =
             let currentAttrs = Map.keysSet result.attributes
-            let (newPaths, resultColumns) = compileResult paths result
-            paths <- newPaths
+            let resultColumns =
+                let (newPaths, ret) = compileResult paths result
+                paths <- newPaths
+                Array.toSeq ret
 
             match resultFieldRef result.result with
             | Some ({ ref = { ref = { entity = Some ({ name = entityName } as entityRef); name = fieldName } } } as resultRef) when addMetaColumns ->
@@ -807,14 +809,18 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             else
                 let columns = resultEntries |> Seq.collect (fun entry -> entry.columns) |> Array.ofSeq
                 (Map.empty, emptyDomains, columns)
-        let (newOrderLimitPaths, orderLimit) = compileOrderLimitClause paths select.orderLimit
+        let orderLimit =
+            let (newPaths, ret) = compileOrderLimitClause paths select.orderLimit
+            paths <- newPaths
+            ret
 
+        // At this point we need to ensure there are no lazy sequences left that could mutate paths when computed ;)
         let newFrom =
-            if Map.isEmpty newOrderLimitPaths then
+            if Map.isEmpty paths then
                 from
             else
                 let fromVal = Option.get from
-                Some <| buildJoins fromVal newOrderLimitPaths
+                Some <| buildJoins fromVal paths
 
         let query =
             { columns = Array.map snd columns
@@ -832,7 +838,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SelectInfo
         (info, query)
 
-    and compileResult (paths0 : JoinPaths) (result : ResolvedQueryResult) : JoinPaths * (ColumnType * SQL.SelectedColumn) seq =
+    and compileResult (paths0 : JoinPaths) (result : ResolvedQueryResult) : JoinPaths * (ColumnType * SQL.SelectedColumn) array =
         let resultName =
             match result.result.TryToName () with
             | Some name -> name
@@ -840,11 +846,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let sqlCol = CTColumn resultName
         let mutable paths = paths0
 
-        let (newPaths, newExpr) =
+        let newExpr =
             match result.result with
-            | QRExpr (name, expr) -> compileLinkedFieldExpr paths expr
+            | QRExpr (name, expr) ->
+                let (newPaths, ret) = compileLinkedFieldExpr paths expr
+                paths <- newPaths
+                ret
 
-        paths <- newPaths
         let resultColumn = (sqlCol, SQL.SCExpr (Some <| columnName sqlCol, newExpr))
 
         let compileAttr (attrName, expr) =
@@ -854,7 +862,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             (attrCol, ret)
 
         let attrs = result.attributes |> Map.toSeq |> Seq.map compileAttr
-        let cols = Seq.append (Seq.singleton resultColumn) attrs |> Seq.cache
+        // We need to force computation of columns to calculate paths.
+        let cols = Seq.append (Seq.singleton resultColumn) attrs |> Array.ofSeq
         (paths, cols)
 
     and buildJoins (from : SQL.FromExpr) (paths : JoinPaths) : SQL.FromExpr =
