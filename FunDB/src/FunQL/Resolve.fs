@@ -565,8 +565,8 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
           columnsToFields = mappedResults
         }
 
-    member this.ResolveSelectExpr = resolveSelectExpr
-    member this.ResolveMainEntity = resolveMainEntity
+    member this.ResolveSelectExpr inExpression select = resolveSelectExpr inExpression select
+    member this.ResolveMainEntity fields select main = resolveMainEntity fields select main
     member this.UsedArguments = usedArguments
     member this.UsedSchemas = usedSchemas
 

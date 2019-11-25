@@ -364,6 +364,8 @@ namespace FunWithFlags.FunDBSchema.Schema
         public string EntityName { get; set; }
         [ColumnField("int", Nullable=true, Immutable=true)]
         public int? EntityId { get; set; }
+        [ColumnField("string", Nullable=true, Immutable=true)]
+        public string Error { get; set; }
         [ColumnField("string", Immutable=true)]
         [Required]
         public string Details { get; set; }

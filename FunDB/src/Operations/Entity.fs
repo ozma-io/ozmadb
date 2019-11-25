@@ -51,12 +51,12 @@ let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
 let getEntityInfo (role : FlatRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
     if entity.hidden then
         raisef EntityExecutionException "Entity %O is hidden" entityRef
-    
+
     match role with
     | None -> serializeEntity entity
     | Some role ->
         try
-            applyRoleInfo role entityRef entity 
+            applyRoleInfo role entityRef entity
         with
         | :? PermissionsEntityException as e ->
             raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
@@ -75,7 +75,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         if entity.isAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
         if entity.hidden then
-            raisef EntityExecutionException "Entity %O is hidden" entityRef        
+            raisef EntityExecutionException "Entity %O is hidden" entityRef
         let (subEntityColumn, subEntityArg, newRawArgs) =
             if entity.HasSubType then
                 let col = Seq.singleton sqlFunSubEntity
@@ -129,8 +129,8 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
         let entity = layout.FindEntity entityRef |> Option.get
         if entity.hidden then
-            raisef EntityExecutionException "Entity %O is hidden" entityRef     
-            
+            raisef EntityExecutionException "Entity %O is hidden" entityRef
+
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments' = argumentTypes |> Seq.map (fun (name, colName, arg) -> (PLocal name, arg)) |> Map.ofSeq |> compileArguments
         let arguments = addArgument (PLocal funId) funIdArg arguments'

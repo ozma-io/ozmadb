@@ -91,7 +91,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
             let resolveOne = Array.map resolveFieldExpr
             FValues (name, fieldNames, Array.map resolveOne values)
 
-    member this.ResolveSelectExpr = resolveSelectExpr
+    member this.ResolveSelectExpr expr = resolveSelectExpr expr
 
 // checkViewExists is supposed to throw an exception if the view doesn't exist -- this way we can distinguish between views that aren't found
 // and views that are broken while resolving user views.

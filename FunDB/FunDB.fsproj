@@ -96,6 +96,7 @@
 
     <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/Entity.fs" />
+    <Compile Include="src/Operations/EventLogger.fs" />
     <Compile Include="src/Operations/ContextCache.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
     <Compile Include="src/Operations/Context.fs" />

@@ -132,7 +132,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             | Some (_, RColumnField src) ->
                 let res = serializeColumnField src
                 serializedFields <- Map.add ref res serializedFields
-                Some res   
+                Some res
             | _ -> None
 
     let mergeDomainField (f : DomainField) : UVDomainField =

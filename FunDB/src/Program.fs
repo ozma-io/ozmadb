@@ -6,12 +6,10 @@ open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
-open Microsoft.Extensions.Logging.Console
 open Microsoft.AspNetCore.Cors.Infrastructure
 open Microsoft.AspNetCore.Authentication
 open Microsoft.AspNetCore.Authentication.JwtBearer
 open Microsoft.IdentityModel.Tokens
-open Microsoft.IdentityModel.Logging
 open Giraffe
 open Giraffe.Serialization.Json
 open Npgsql
@@ -23,6 +21,7 @@ open FunWithFlags.FunDB.API.Entity
 open FunWithFlags.FunDB.API.SaveRestore
 open FunWithFlags.FunDB.Operations.ContextCache
 open FunWithFlags.FunDB.Operations.Preload
+open FunWithFlags.FunDB.Operations.EventLogger
 
 type Config =
     { connectionString : string
@@ -111,8 +110,14 @@ let main (args : string[]) : int =
             let logFactory = sp.GetService<ILoggerFactory>()
             ContextCacheStore(logFactory, config.connectionString, preload)
         ignore <| services.AddSingleton<ContextCacheStore>(makeCacheStore)
+        let getEventLogger (sp : IServiceProvider) =
+            let contextCache = sp.GetService<ContextCacheStore>()
+            contextCache.EventLogger
+        // Wrapper lambda to avoid a strange error (Obscure behaviour? F# compiler bug?)
+        ignore <| services.AddHostedService(fun sp -> getEventLogger sp)
 
     let configureLogging (builder : ILoggingBuilder) =
+        ignore <| builder.ClearProviders()
         ignore <| builder.AddConsole()
 
     // IdentityModelEventSource.ShowPII <- true

@@ -24,9 +24,8 @@ type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : stri
     member this.Connection = connection
     member this.LoggerFactory = loggerFactory
 
-type DatabaseTransaction (conn : DatabaseConnection) =
-    // FIXME: Maybe introduce more granular locking?
-    let transaction = conn.Connection.BeginTransaction(IsolationLevel.Serializable)
+type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationLevel) =
+    let transaction = conn.Connection.BeginTransaction(isolationLevel)
 
     let system =
         let systemOptions =
@@ -40,6 +39,10 @@ type DatabaseTransaction (conn : DatabaseConnection) =
 
     interface IDisposable with
         member this.Dispose () = this.Rollback ()
+
+    new (conn : DatabaseConnection) =
+        // FIXME: Maybe introduce more granular locking?
+        new DatabaseTransaction(conn, IsolationLevel.Serializable)
 
     member this.Rollback () =
         transaction.Dispose()

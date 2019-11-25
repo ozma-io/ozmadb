@@ -167,7 +167,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
             }
         (errors, ret)
 
-    member this.ResolveAttributes = resolveAttributes
+    member this.ResolveAttributes () = resolveAttributes ()
 
 let resolveAttributes (layout : Layout) (forceAllowBroken : bool) (source : SourceDefaultAttributes) : ErroredDefaultAttributes * DefaultAttributes =
     let phase1 = Phase1Resolver (layout, forceAllowBroken, source)

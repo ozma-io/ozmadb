@@ -510,7 +510,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         { schemas = Map.map resolveSchema layout.schemas
         } : Layout
 
-    member this.ResolveLayout = resolveLayout
+    member this.ResolveLayout () = resolveLayout ()
 
 let resolveLayout (layout : SourceLayout) : Layout =
     let phase1 = Phase1Resolver layout

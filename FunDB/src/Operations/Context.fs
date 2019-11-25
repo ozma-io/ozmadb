@@ -286,6 +286,17 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 with
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view info")
+                    let event =
+                        EventEntry (
+                            TransactionTimestamp = transactionTime,
+                            Timestamp = DateTimeOffset.UtcNow,
+                            Type = "info",
+                            UserName = userName,
+                            EntityId = Nullable(),
+                            Error = "access_denied",
+                            Details = sprintf "Failed to get info for %O: %s" source (printException err)
+                        )
+                    do! cacheStore.EventLogger.WriteEvent event
                     return Error UVEAccessDenied
         }
 
@@ -311,6 +322,17 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 with
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view")
+                    let event =
+                        EventEntry (
+                            TransactionTimestamp = transactionTime,
+                            Timestamp = DateTimeOffset.UtcNow,
+                            Type = "select",
+                            UserName = userName,
+                            EntityId = Nullable(),
+                            Error = "access_denied",
+                            Details = sprintf "Failed to execute %O: %s" source (printException err)
+                        )
+                    do! cacheStore.EventLogger.WriteEvent event
                     return Error UVEAccessDenied
         }
 
@@ -325,6 +347,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 with
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "entity_info",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable(),
+                                Error = "access_denied",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
                         return Error EEAccessDenied
         }
 
@@ -360,6 +395,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         return Error (EEExecute <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "insert",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable(),
+                                Error = "access_denied",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
                         return Error EEAccessDenied
         }
 
@@ -395,6 +443,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         return Error (EEExecute <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "update",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable id,
+                                Error = "access_denied",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
                         return Error EEAccessDenied
         }
 
@@ -426,6 +487,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         return Error (EEExecute <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "delete",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable id,
+                                Error = "access_denied",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
                         return Error EEAccessDenied
         }
 
@@ -458,7 +532,6 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         Type = "restore_schema",
                         UserName = userName,
                         SchemaName = name.ToString(),
-                        EntityName = null,
                         EntityId = Nullable(),
                         Details = dump.ToString()
                     )

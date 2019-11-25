@@ -1,11 +1,9 @@
 module FunWithFlags.FunDB.UserViews.Types
 
 open FunWithFlags.FunDB.UserViews.Source
-open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
-open FunWithFlags.FunDB.FunQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ViewColumnName = FunQLName

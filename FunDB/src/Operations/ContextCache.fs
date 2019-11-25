@@ -4,11 +4,13 @@ open System
 open System.Linq
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
+open Microsoft.Extensions.Hosting
 open Microsoft.EntityFrameworkCore
 open FluidCaching
 open Npgsql
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
+open FunWithFlags.FunDBSchema.Schema
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
@@ -37,7 +39,7 @@ open FunWithFlags.FunDB.SQL.Migration
 module SQL = FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Operations.Preload
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDB.Operations.EventLogger
 
 type ContextException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -77,6 +79,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
     // FIXME: random values
     let anonymousViewsCache = FluidCache<AnonymousUserView>(64, TimeSpan.FromSeconds(0.0), TimeSpan.FromSeconds(600.0), fun () -> DateTime.Now)
     let anonymousViewsIndex = anonymousViewsCache.AddIndex("byQuery", fun uv -> uv.query)
+
+    let eventLogger = new EventLogger (loggerFactory, connectionString)
 
     let filterSystemViews (views : SourceUserViews) : SourceUserViews =
         { schemas = filterPreloadedSchemas preload views.schemas }
@@ -276,6 +280,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
     member this.LoggerFactory = loggerFactory
     member this.Preload = preload
+
+    member this.EventLogger = eventLogger
 
     member this.GetCache () = task {
         let conn = new DatabaseConnection(loggerFactory, connectionString)
