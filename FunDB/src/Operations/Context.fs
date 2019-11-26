@@ -315,7 +315,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         return (uv, { res with rows = Array.ofSeq res.rows })
                     }
                     match convertViewArguments rawArgs restricted with
-                    | Error msg -> return Error <| UVEArguments msg
+                    | Error msg ->
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "select",
+                                UserName = userName,
+                                EntityId = Nullable(),
+                                Error = "arguments",
+                                Details = sprintf "Invalid arguments for %O: %s" source msg
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
+                        return Error <| UVEArguments msg
                     | Ok arguments ->
                             let! r = runViewExpr ctx.Connection.Query restricted arguments getResult
                             return Ok r
@@ -392,6 +404,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     with
                     | :? EntityExecutionException as ex ->
                         logger.LogError(ex, "Failed to insert entry")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "insert",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable(),
+                                Error = "execution",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
                         return Error (EEExecute <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
@@ -440,6 +465,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     with
                     | :? EntityExecutionException as ex ->
                         logger.LogError(ex, "Failed to update entry")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "update",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable id,
+                                Error = "execution",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
                         return Error (EEExecute <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
@@ -484,6 +522,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 with
                     | :? EntityExecutionException as ex ->
                         logger.LogError(ex, "Failed to delete entry")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "delete",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable id,
+                                Error = "execution",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
                         return Error (EEExecute <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
