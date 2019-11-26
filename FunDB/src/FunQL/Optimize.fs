@@ -41,7 +41,13 @@ let orFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f>
     | (OFEFalse, expr) -> expr
     | (OFEOr ors, expr)
     | (expr, OFEOr ors) -> OFEOr (Map.add (expr.ToFieldExpr().ToString()) expr ors)
-    | (expr1, expr2) -> Map.empty |> Map.add (expr1.ToFieldExpr().ToString()) expr1 |> Map.add (expr2.ToFieldExpr().ToString()) expr2 |> OFEOr
+    | (expr1, expr2) ->
+        let expr1Str = expr1.ToFieldExpr().ToString()
+        let expr2Str = expr2.ToFieldExpr().ToString()
+        if expr1Str = expr2Str then
+            expr1
+        else
+            Map.empty |> Map.add expr1Str expr1 |> Map.add expr2Str expr2 |> OFEOr
 
 let andFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f>) : OptimizedFieldExpr<'e, 'f> =
     match (a, b) with
@@ -52,7 +58,13 @@ let andFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f
     | (OFEFalse, OFEAnd ands) -> OFEFalse
     | (OFEAnd ands, expr)
     | (expr, OFEAnd ands) -> OFEAnd (Map.add (expr.ToFieldExpr().ToString()) expr ands)
-    | (expr1, expr2) -> Map.empty |> Map.add (expr1.ToFieldExpr().ToString()) expr1 |> Map.add (expr2.ToFieldExpr().ToString()) expr2 |> OFEAnd
+    | (expr1, expr2) ->
+        let expr1Str = expr1.ToFieldExpr().ToString()
+        let expr2Str = expr2.ToFieldExpr().ToString()
+        if expr1Str = expr2Str then
+            expr1
+        else
+            Map.empty |> Map.add expr1Str expr1 |> Map.add expr2Str expr2 |> OFEAnd
 
 let optimizeFieldValue : FieldValue -> OptimizedFieldExpr<'e, 'f> = function
     | FBool false -> OFEFalse
@@ -66,13 +78,9 @@ let rec optimizeFieldExpr : FieldExpr<'e, 'f> -> OptimizedFieldExpr<'e, 'f> = fu
     | expr -> OFEExpr expr
 
 let rec mapOptimizedFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) (e : OptimizedFieldExpr<'e1, 'f1>) : OptimizedFieldExpr<'e2, 'f2> =
-    let mapInsides (ie : OptimizedFieldExpr<'e1, 'f1>) =
-        let r = mapOptimizedFieldExpr mapper ie
-        (r.ToFieldExpr().ToString(), r)
-
     match e with
-    | OFEOr ors -> ors |> Map.values |> Seq.map mapInsides |> Map.ofSeq |> OFEOr
-    | OFEAnd ors -> ors |> Map.values |> Seq.map mapInsides |> Map.ofSeq |> OFEAnd
+    | OFEOr ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr mapper) |> Seq.fold1 orFieldExpr
+    | OFEAnd ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr mapper) |> Seq.fold1 andFieldExpr
     | OFETrue -> optimizeFieldValue (mapper.value (FBool true))
     | OFEFalse -> optimizeFieldValue (mapper.value (FBool false))
-    | OFEExpr expr -> mapFieldExpr mapper expr |> OFEExpr
+    | OFEExpr expr -> optimizeFieldExpr (mapFieldExpr mapper expr)
