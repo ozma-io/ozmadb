@@ -56,7 +56,7 @@ let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : Re
     | None -> serializeEntity entity
     | Some role ->
         try
-            applyRoleInfo layout role entityRef entity
+            applyRoleInfo layout role entityRef
         with
         | :? PermissionsEntityException as e ->
             raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
@@ -78,7 +78,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             raisef EntityExecutionException "Entity %O is hidden" entityRef
         let (subEntityColumn, subEntityArg, newRawArgs) =
             if entity.HasSubType then
-                let col = Seq.singleton sqlFunSubEntity
+                let col = Seq.singleton (null, sqlFunSubEntity)
                 let arg = Seq.singleton (PLocal funSubEntity, { argType = FTType (FETScalar SFTString); optional = false })
                 let newArgs = Map.add funSubEntity (FString entity.typeName) rawArgs
                 (col, arg, newArgs)
@@ -89,8 +89,8 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments = argumentTypes |> Seq.map (fun (name, colName, arg) -> (PLocal name, arg)) |> Seq.append subEntityArg |> Map.ofSeq |> compileArguments
         // Id is needed so that we always have at least one value inserted.
-        let insertColumns = argumentTypes |> Seq.map (fun (name, colName, arg) -> colName)
-        let columns = Seq.concat [Seq.singleton sqlFunId; subEntityColumn; insertColumns] |> Array.ofSeq
+        let insertColumns = argumentTypes |> Seq.map (fun (name, colName, arg) -> (({ name = name } : RestrictedColumnInfo) :> obj, colName))
+        let columns = Seq.concat [Seq.singleton (null, sqlFunId); subEntityColumn; insertColumns] |> Array.ofSeq
         let values = arguments.types |> Map.toSeq |> Seq.map (fun (name, arg) -> SQL.IVValue <| SQL.VEPlaceholder arg.placeholderId)
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
@@ -99,6 +99,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
               columns = columns
               values = SQL.IValues [| valuesWithSys |]
               returning = [| SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunId }) |]
+              extra = ({ ref = entityRef } : RestrictedTableInfo)
             } : SQL.InsertExpr
         let query =
             { expression = expr
@@ -109,7 +110,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> query
             | Some role ->
                 try
-                    applyRoleInsert layout role entityRef query
+                    applyRoleInsert layout role query
                 with
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
@@ -134,7 +135,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments' = argumentTypes |> Seq.map (fun (name, colName, arg) -> (PLocal name, arg)) |> Map.ofSeq |> compileArguments
         let arguments = addArgument (PLocal funId) funIdArg arguments'
-        let columns = argumentTypes |> Seq.map (fun (name, colName, arg) -> (colName, SQL.VEPlaceholder arguments.types.[PLocal name].placeholderId)) |> Map.ofSeq
+        let columns = argumentTypes |> Seq.map (fun (name, colName, arg) -> (colName, (({ name = name } : RestrictedColumnInfo) :> obj, SQL.VEPlaceholder arguments.types.[PLocal name].placeholderId))) |> Map.ofSeq
 
         let tableRef = compileResolvedEntityRef entity.root
         let whereId = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder arguments.types.[PLocal funId].placeholderId)
@@ -147,6 +148,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             { name = tableRef
               columns = columns
               where = Some whereExpr
+              extra = ({ ref = entityRef } : RestrictedTableInfo)
             } : SQL.UpdateExpr
         let query =
             { expression = expr
@@ -157,7 +159,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> query
             | Some role ->
                 try
-                    applyRoleUpdate layout role entityRef query
+                    applyRoleUpdate layout role query
                 with
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
@@ -189,6 +191,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let expr =
             { name = tableRef
               where = Some whereExpr
+              extra = ({ ref = entityRef } : RestrictedTableInfo)
             } : SQL.DeleteExpr
         let query =
             { expression = expr
@@ -199,7 +202,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> query
             | Some role ->
                 try
-                    applyRoleDelete layout role entityRef query
+                    applyRoleDelete layout role query
                 with
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message

@@ -18,30 +18,39 @@ type PermissionsEntityException (message : string, innerException : Exception) =
 
     new (message : string) = PermissionsEntityException (message, null)
 
-let applyRoleInsert (layout : Layout)  (role : ResolvedRole) (entityRef : ResolvedEntityRef) (query : Query<SQL.InsertExpr>) : Query<SQL.InsertExpr> =
-    let entity = layout.FindEntity entityRef |> Option.get
+type RestrictedTableInfo =
+    { ref : ResolvedEntityRef
+    }
+
+type RestrictedColumnInfo =
+    { name : FieldName
+    }
+
+let applyRoleInsert (layout : Layout)  (role : ResolvedRole) (query : Query<SQL.InsertExpr>) : Query<SQL.InsertExpr> =
+    let tableInfo = query.expression.extra :?> RestrictedTableInfo
+    let entity = layout.FindEntity tableInfo.ref |> Option.get
     let flattened =
         match Map.tryFind entity.root role.flattened with
         | Some flat -> flat
         | _ -> raisef PermissionsEntityException "Access denied to insert"
-    match Map.tryFind entityRef flattened.children with
+    match Map.tryFind tableInfo.ref flattened.children with
     | Some { insert = true } -> ()
     | _ -> raisef PermissionsEntityException" Access denied to insert"
 
-    for col in query.expression.columns do
-        if col = sqlFunId || col = sqlFunSubEntity then
-            ()
-        else
-            let name = decompileName col
-            let field = Map.find name entity.columnFields
-            let parentEntity = Option.defaultValue entityRef field.inheritedFrom
-            match Map.tryFind { entity = parentEntity; name = name } flattened.fields with
+    for (extra, col) in query.expression.columns do
+        match extra with
+        | :? RestrictedColumnInfo as colInfo ->
+            let field = Map.find colInfo.name entity.columnFields
+            let parentEntity = Option.defaultValue tableInfo.ref field.inheritedFrom
+            match Map.tryFind { entity = parentEntity; name = colInfo.name } flattened.fields with
             | Some { change = true } -> ()
-            | _ -> raisef PermissionsEntityException "Access denied to insert field %O" name
+            | _ -> raisef PermissionsEntityException "Access denied to insert field %O" colInfo.name
+        | _ -> ()
     query
 
-let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) (query : Query<SQL.UpdateExpr>) : Query<SQL.UpdateExpr> =
-    let entity = layout.FindEntity entityRef |> Option.get
+let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.UpdateExpr>) : Query<SQL.UpdateExpr> =
+    let tableInfo = query.expression.extra :?> RestrictedTableInfo
+    let entity = layout.FindEntity tableInfo.ref |> Option.get
     let flattened =
         match Map.tryFind entity.root role.flattened with
         | Some flat -> flat
@@ -49,16 +58,18 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (entityRef : Resolve
 
     let accessor (derived : FlatAllowedDerivedEntity) =
         andRestriction derived.select derived.update
-    let updateRestr = applyRestrictionExpression accessor layout flattened entityRef
+    let updateRestr = applyRestrictionExpression accessor layout flattened tableInfo.ref
 
-    let addRestriction restriction col =
-        let name = decompileName col
-        let field = Map.find name entity.columnFields
-        let parentEntity = Option.defaultValue entityRef field.inheritedFrom
-        match Map.tryFind { entity = parentEntity; name = name } flattened.fields with
-        | Some { change = true; select = select } -> andRestriction restriction select
-        | _ -> raisef PermissionsEntityException "Access denied to update field %O" name
-    let fieldsRestriction = query.expression.columns |> Map.keys |> Seq.fold addRestriction updateRestr
+    let addRestriction restriction (extra : obj, col) =
+        match extra with
+        | :? RestrictedColumnInfo as colInfo ->
+            let field = Map.find colInfo.name entity.columnFields
+            let parentEntity = Option.defaultValue tableInfo.ref field.inheritedFrom
+            match Map.tryFind { entity = parentEntity; name = colInfo.name } flattened.fields with
+            | Some { change = true; select = select } -> andRestriction restriction select
+            | _ -> raisef PermissionsEntityException "Access denied to update field %O" colInfo.name
+        | _ -> restriction
+    let fieldsRestriction = query.expression.columns |> Map.values |> Seq.fold addRestriction updateRestr
 
     match fieldsRestriction.expression with
     | OFEFalse -> raisef PermissionsEntityException "Access denied to update"
@@ -70,7 +81,7 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (entityRef : Resolve
             else
                 args
         let arguments = globalArgumentTypes |> Map.fold findOne query.arguments
-        let newExpr = compileValueRestriction layout entityRef arguments.types fieldsRestriction
+        let newExpr = compileValueRestriction layout tableInfo.ref arguments.types fieldsRestriction
         let expr =
             { query.expression with
                   where = Option.unionWith (curry SQL.VEAnd) query.expression.where (Some newExpr)
@@ -80,19 +91,20 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (entityRef : Resolve
         }
 
 // We don't allow to delete other entities in the inheritance hierarchy, so we don't need to apply restrictions from parents and children.
-let applyRoleDelete (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) (query : Query<SQL.DeleteExpr>) : Query<SQL.DeleteExpr> =
-    let entity = layout.FindEntity entityRef |> Option.get
+let applyRoleDelete (layout : Layout) (role : ResolvedRole) (query : Query<SQL.DeleteExpr>) : Query<SQL.DeleteExpr> =
+    let tableInfo = query.expression.extra :?> RestrictedTableInfo
+    let entity = layout.FindEntity tableInfo.ref |> Option.get
     let flattened =
         match Map.tryFind  entity.root role.flattened with
         | Some flat -> flat
         | _ -> raisef PermissionsEntityException "Access denied to delete"
     let deleteRestr =
-        match Map.tryFind entityRef flattened.children with
+        match Map.tryFind tableInfo.ref flattened.children with
         | Some r -> andRestriction r.select r.delete
         | _ -> raisef PermissionsEntityException" Access denied to delete"
 
     let addRestriction restriction (name, field : ResolvedColumnField) =
-        let parentEntity = Option.defaultValue entityRef field.inheritedFrom
+        let parentEntity = Option.defaultValue tableInfo.ref field.inheritedFrom
         match Map.tryFind { entity = parentEntity; name = name } flattened.fields with
         | Some allowedField -> andRestriction restriction allowedField.select
         | _ -> raisef PermissionsEntityException "Access denied to select field %O" name
@@ -108,7 +120,7 @@ let applyRoleDelete (layout : Layout) (role : ResolvedRole) (entityRef : Resolve
             else
                 args
         let arguments = globalArgumentTypes |> Map.fold findOne query.arguments
-        let newExpr = compileValueRestriction layout entityRef arguments.types fieldsRestriction
+        let newExpr = compileValueRestriction layout tableInfo.ref arguments.types fieldsRestriction
         let expr =
             { query.expression with
                   where = Option.unionWith (curry SQL.VEAnd) query.expression.where (Some newExpr)
@@ -117,7 +129,7 @@ let applyRoleDelete (layout : Layout) (role : ResolvedRole) (entityRef : Resolve
           expression = expr
         }
 
-let applyRoleInfo (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
+let applyRoleInfo (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) : SerializedEntity =
     let entity = layout.FindEntity entityRef |> Option.get
     let flattened =
         match Map.tryFind entity.root role.flattened with

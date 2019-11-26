@@ -485,7 +485,7 @@ and [<NoComparison>] AggExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoComparison>] FromExpr =
-    | FTable of obj * TableName option * TableRef
+    | FTable of obj * TableName option * TableRef // obj is extra meta info
     | FJoin of JoinType * FromExpr * FromExpr * ValueExpr
     | FSubExpr of TableName * ColumnName[] option * SelectExpr
     with
@@ -776,9 +776,10 @@ type InsertValues =
 [<NoComparison>]
 type InsertExpr =
     { name : TableRef
-      columns : ColumnName[]
+      columns : (obj * ColumnName)[] // obj is extra metadata
       values : InsertValues
       returning : SelectedColumn[]
+      extra : obj
     } with
         override this.ToString () = this.ToSQLString()
 
@@ -792,7 +793,7 @@ type InsertExpr =
             let insertStr =
                 sprintf "INSERT INTO %s (%s) %s"
                     (this.name.ToSQLString())
-                    (this.columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+                    (this.columns |> Seq.map (fun (extra, x) -> x.ToSQLString()) |> String.concat ", ")
                     (this.values.ToSQLString())
             concatWithWhitespaces [insertStr; returningStr]
 
@@ -802,15 +803,16 @@ type InsertExpr =
 [<NoComparison>]
 type UpdateExpr =
     { name : TableRef
-      columns : Map<ColumnName, ValueExpr>
+      columns : Map<ColumnName, obj * ValueExpr> // obj is extra metadata
       where : ValueExpr option
+      extra : obj
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
             assert (not <| Map.isEmpty this.columns)
 
-            let valuesExpr = this.columns |> Map.toSeq |> Seq.map (fun (name, expr) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())) |> String.concat ", "
+            let valuesExpr = this.columns |> Map.toSeq |> Seq.map (fun (name, (extra, expr)) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())) |> String.concat ", "
             let condExpr =
                 match this.where with
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
@@ -825,6 +827,7 @@ type UpdateExpr =
 type DeleteExpr =
     { name : TableRef
       where : ValueExpr option
+      extra : obj
     } with
         override this.ToString () = this.ToSQLString()
 
