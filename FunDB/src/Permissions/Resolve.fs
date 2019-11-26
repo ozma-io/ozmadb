@@ -309,7 +309,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let (error1, resolved) = resolveSelfAllowedEntity entityRef entity source
         let myFlat = flattenAllowedEntity entityRef resolved
         let inheritedFlat =
-            match Map.tryFind entityRef flattened with
+            match Map.tryFind entity.root flattened with
             | Some f -> Seq.singleton f
             | None -> Seq.empty
         let resultFlat = Seq.concat [Seq.singleton myFlat; parentFlat; inheritedFlat] |> Seq.fold1 mergeFlatEntity
@@ -321,7 +321,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
               flat = newResultFlat
               error = error
             } : HalfResolvedEntity
-        flattened <- Map.add entityRef newResultFlat flattened
+        flattened <- Map.add entity.root newResultFlat flattened
         ret
 
     and resolveAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : Result<HalfResolvedEntity, AllowedEntityError> =
