@@ -9,7 +9,7 @@ open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
-open FunWithFlags.FunDB.Permissions.Flatten
+open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Entity
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -48,7 +48,7 @@ let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
     | FTEnum vals -> FTEnum vals
     | FTType t -> FTType t
 
-let getEntityInfo (role : FlatRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
+let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
     if entity.hidden then
         raisef EntityExecutionException "Entity %O is hidden" entityRef
 
@@ -56,12 +56,12 @@ let getEntityInfo (role : FlatRole option) (entityRef : ResolvedEntityRef) (enti
     | None -> serializeEntity entity
     | Some role ->
         try
-            applyRoleInfo role entityRef entity
+            applyRoleInfo layout role entityRef entity
         with
         | :? PermissionsEntityException as e ->
             raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) : Task<int> =
+let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) : Task<int> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
@@ -119,7 +119,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
 let private funIdArg = { argType = FTType (FETScalar SFTInt); optional = false }
 
-let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) : Task<unit> =
+let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) : Task<unit> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
@@ -167,19 +167,23 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             raisef EntityDeniedException "Access denied for update"
     }
 
-let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : FlatRole option) (entityRef : ResolvedEntityRef) (id : EntityId) : Task<unit> =
+let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) : Task<unit> =
     task {
         let entity = layout.FindEntity entityRef |> Option.get
 
         if entity.hidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
+        if entity.isAbstract then
+            raisef EntityExecutionException "Entity %O is abstract" entityRef
 
         let arguments = addArgument (PLocal funId) funIdArg emptyArguments
-        let whereId = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder arguments.types.[PLocal funId].placeholderId)
+        let whereExpr = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder arguments.types.[PLocal funId].placeholderId)
         let whereExpr =
-            match entity.inheritance with
-            | Some inheritance -> SQL.VEAnd (inheritance.checkExpr, whereId)
-            | None -> whereId
+            if entity.HasSubType then
+                let subEntityCheck = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunSubEntity }, SQL.VEValue (SQL.VString entity.typeName))
+                SQL.VEAnd (subEntityCheck, whereExpr)
+            else
+                whereExpr
         let tableRef = compileResolvedEntityRef entity.root
 
         let expr =

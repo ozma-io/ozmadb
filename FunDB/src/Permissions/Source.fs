@@ -4,6 +4,8 @@ open Newtonsoft.Json
 
 open FunWithFlags.FunDB.FunQL.AST
 
+type ResolvedRoleRef = ResolvedEntityRef
+
 type SourceAllowedField =
     { [<JsonProperty(Required=Required.DisallowNull)>]
       change: bool
@@ -39,8 +41,10 @@ type SourceAllowedDatabase =
 
 type SourceRole =
     { [<JsonProperty(Required=Required.DisallowNull)>]
-      parents : Set<ResolvedEntityRef>
+      parents : Set<ResolvedRoleRef>
       permissions : SourceAllowedDatabase
+      [<JsonProperty(Required=Required.DisallowNull)>]
+      allowBroken : bool
     }
 
 type SourcePermissionsSchema =

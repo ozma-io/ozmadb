@@ -603,11 +603,25 @@ and [<NoComparison>] SelectExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-let rec mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -> int) (queryFunc : SelectExpr -> SelectExpr) : ValueExpr -> ValueExpr =
+type ValueExprGenericMapper =
+    { value : Value -> ValueExpr
+      columnReference : ColumnRef -> ValueExpr
+      placeholder : int -> ValueExpr
+      query : SelectExpr -> SelectExpr
+    }
+
+let idValueExprGenericMapper =
+    { value = VEValue
+      columnReference = VEColumn
+      placeholder = VEPlaceholder
+      query = id
+    }
+
+let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> ValueExpr =
     let rec traverse = function
-        | VEValue value -> VEValue value
-        | VEColumn c -> VEColumn <| colFunc c
-        | VEPlaceholder i -> VEPlaceholder <| placeholderFunc i
+        | VEValue value -> mapper.value value
+        | VEColumn c -> mapper.columnReference c
+        | VEPlaceholder i -> mapper.placeholder i
         | VENot e -> VENot <| traverse e
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
@@ -623,8 +637,8 @@ let rec mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -
         | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
         | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
         | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
-        | VEInQuery (e, query) -> VEInQuery (traverse e, queryFunc query)
-        | VENotInQuery (e, query) -> VENotInQuery (traverse e, queryFunc query)
+        | VEInQuery (e, query) -> VEInQuery (traverse e, mapper.query query)
+        | VENotInQuery (e, query) -> VENotInQuery (traverse e, mapper.query query)
         | VEIsNull e -> VEIsNull <| traverse e
         | VEIsNotNull e -> VEIsNotNull <| traverse e
         | VEFunc (name, args) -> VEFunc (name, Array.map traverse args)
@@ -638,7 +652,7 @@ let rec mapValueExpr (colFunc : ColumnRef -> ColumnRef) (placeholderFunc : int -
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
         | VEArray vals -> VEArray <| Array.map traverse vals
-        | VESubquery query -> VESubquery (queryFunc query)
+        | VESubquery query -> VESubquery (mapper.query query)
     traverse
 
 and mapAggExpr (func : ValueExpr -> ValueExpr) : AggExpr -> AggExpr = function
@@ -646,11 +660,47 @@ and mapAggExpr (func : ValueExpr -> ValueExpr) : AggExpr -> AggExpr = function
     | AEDistinct expr -> AEDistinct (func expr)
     | AEStar -> AEStar
 
-let rec iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> unit) (queryFunc : SelectExpr -> unit) : ValueExpr -> unit =
+type ValueExprMapper =
+    { value : Value -> Value
+      columnReference : ColumnRef -> ColumnRef
+      placeholder : int -> int
+      query : SelectExpr -> SelectExpr
+    }
+
+let idValueExprMapper =
+    { value = id
+      columnReference = id
+      placeholder = id
+      query = id
+    }
+
+let mapValueExpr (mapper : ValueExprMapper) : ValueExpr -> ValueExpr =
+    genericMapValueExpr
+        { value = mapper.value >> VEValue
+          columnReference = mapper.columnReference >> VEColumn
+          placeholder = mapper.placeholder >> VEPlaceholder
+          query = mapper.query
+        }
+
+type ValueExprIter =
+    { value : Value -> unit
+      columnReference : ColumnRef -> unit
+      placeholder : int -> unit
+      query : SelectExpr -> unit
+    }
+
+let idValueExprIter =
+    { value = fun _ -> ()
+      columnReference = fun _ -> ()
+      placeholder = fun _ -> ()
+      query = fun _ -> ()
+    }
+
+let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
     let rec traverse = function
-        | VEValue value -> ()
-        | VEColumn c -> colFunc c
-        | VEPlaceholder i -> placeholderFunc i
+        | VEValue value -> mapper.value value
+        | VEColumn c -> mapper.columnReference c
+        | VEPlaceholder i -> mapper.placeholder i
         | VENot e -> traverse e
         | VEAnd (a, b) -> traverse a; traverse b
         | VEOr (a, b) -> traverse a; traverse b
@@ -666,8 +716,8 @@ let rec iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> un
         | VEGreaterEq (a, b) -> traverse a; traverse b
         | VEIn (e, vals) -> traverse e; Array.iter traverse vals
         | VENotIn (e, vals) -> traverse e; Array.iter traverse vals
-        | VEInQuery (e, query) -> traverse e; queryFunc query
-        | VENotInQuery (e, query) -> traverse e; queryFunc query
+        | VEInQuery (e, query) -> traverse e; mapper.query query
+        | VENotInQuery (e, query) -> traverse e; mapper.query query
         | VEIsNull e -> traverse e
         | VEIsNotNull e -> traverse e
         | VEFunc (name, args) -> Array.iter traverse args
@@ -680,7 +730,7 @@ let rec iterValueExpr (colFunc : ColumnRef -> unit) (placeholderFunc : int -> un
         | VEJsonArrow (a, b) -> traverse a; traverse b
         | VEJsonTextArrow (a, b) -> traverse a; traverse b
         | VEArray vals -> Array.iter traverse vals
-        | VESubquery query -> queryFunc query
+        | VESubquery query -> mapper.query query
     traverse
 
 and iterAggExpr (func : ValueExpr -> unit) : AggExpr -> unit = function

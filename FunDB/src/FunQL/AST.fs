@@ -82,6 +82,12 @@ type ResolvedEntityRef =
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
+let relaxEntityRef (ref : ResolvedEntityRef) : EntityRef =
+    { schema = Some ref.schema; name = ref.name }
+
+let tryResolveEntityRef (ref : EntityRef) : ResolvedEntityRef option =
+    Option.map (fun schema -> { schema = schema; name = ref.name }) ref.schema
+
 type ResolvedUserViewRef = ResolvedEntityRef
 
 type FieldRef =
@@ -118,6 +124,12 @@ type ResolvedFieldRef =
 
         interface IFunQLName with
             member this.ToName () = this.ToName ()
+
+let relaxFieldRef (ref : ResolvedFieldRef) : FieldRef =
+    { entity = Some <| relaxEntityRef ref.entity; name = ref.name }
+
+let tryResolveFieldRef (ref : FieldRef) : ResolvedFieldRef option =
+    ref.entity |> Option.bind (tryResolveEntityRef >> Option.map (fun entity -> { entity = entity; name = ref.name }))
 
 type Placeholder =
     | PLocal of ArgumentName
@@ -379,6 +391,11 @@ type ValueRef<'f> when 'f :> IFunQLName =
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
+type SubEntityRef =
+    { ref : EntityRef
+      extra : obj
+    }
+
 type [<JsonConverter(typeof<FieldTypeConverter>)>] [<NoComparison>] FieldType<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FTType of FieldExprType
     | FTReference of 'e * FieldExpr<'e, 'f> option
@@ -454,6 +471,7 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
     | FEFunc of FunQLName * FieldExpr<'e, 'f>[]
     | FEAggFunc of FunQLName * AggExpr<'e, 'f>
     | FESubquery of SelectExpr<'e, 'f>
+    | FETypeAssert of 'f * SubEntityRef
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -501,6 +519,7 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
             | FEFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args |> Seq.map (fun arg -> arg.ToFunQLString()) |> String.concat ", ")
             | FEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args.ToFunQLString())
             | FESubquery q -> sprintf "(%s)" (q.ToFunQLString())
+            | FETypeAssert (f, ref) -> sprintf "%s :? %s" (f.ToFunQLString()) (ref.ref.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -664,10 +683,26 @@ and [<NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNa
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-let rec mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f2) (queryFunc : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) (aggFunc : AggExpr<'e1, 'f1> -> AggExpr<'e1, 'f1>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
+type FieldExprMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQLName and 'e2 :> IFunQLName and 'f2 :> IFunQLName =
+    { value : FieldValue -> FieldValue
+      fieldReference : 'f1 -> 'f2
+      query : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>
+      aggregate : AggExpr<'e1, 'f1> -> AggExpr<'e1, 'f1>
+      subEntity : 'f2 -> SubEntityRef -> SubEntityRef
+    }
+
+let idFieldExprMapper (fieldReference : 'f1 -> 'f2) (query : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) =
+    { value = id
+      fieldReference = fieldReference
+      query = query
+      aggregate = id
+      subEntity = fun _ r -> r
+    }
+
+let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
     let rec traverse = function
-        | FEValue value -> FEValue (valueFunc value)
-        | FERef r -> FERef (refFunc r)
+        | FEValue value -> FEValue (mapper.value value)
+        | FERef r -> FERef (mapper.fieldReference r)
         | FENot e -> FENot (traverse e)
         | FEAnd (a, b) -> FEAnd (traverse a, traverse b)
         | FEOr (a, b) -> FEOr (traverse a, traverse b)
@@ -682,8 +717,8 @@ let rec mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f
         | FEGreaterEq (a, b) -> FEGreaterEq (traverse a, traverse b)
         | FEIn (e, vals) -> FEIn (traverse e, Array.map traverse vals)
         | FENotIn (e, vals) -> FENotIn (traverse e, Array.map traverse vals)
-        | FEInQuery (e, query) -> FEInQuery (traverse e, queryFunc query)
-        | FENotInQuery (e, query) -> FENotInQuery (traverse e, queryFunc query)
+        | FEInQuery (e, query) -> FEInQuery (traverse e, mapper.query query)
+        | FENotInQuery (e, query) -> FENotInQuery (traverse e, mapper.query query)
         | FECast (e, typ) -> FECast (traverse e, typ)
         | FEIsNull e -> FEIsNull (traverse e)
         | FEIsNotNull e -> FEIsNotNull (traverse e)
@@ -694,8 +729,11 @@ let rec mapFieldExpr (valueFunc : FieldValue -> FieldValue) (refFunc : 'f1 -> 'f
         | FEJsonArrow (a, b) -> FEJsonArrow (traverse a, traverse b)
         | FEJsonTextArrow (a, b) -> FEJsonTextArrow (traverse a, traverse b)
         | FEFunc (name, args) -> FEFunc (name, Array.map traverse args)
-        | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse (aggFunc args))
-        | FESubquery query -> FESubquery (queryFunc query)
+        | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse (mapper.aggregate args))
+        | FESubquery query -> FESubquery (mapper.query query)
+        | FETypeAssert (f, nam) ->
+            let ref = mapper.fieldReference f
+            FETypeAssert (ref, mapper.subEntity ref nam)
     traverse
 
 and mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1, 'f1> -> AggExpr<'e2, 'f2> = function
@@ -703,10 +741,26 @@ and mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1
     | AEDistinct expr -> AEDistinct (func expr)
     | AEStar -> AEStar
 
-let rec mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFunc : 'f1 -> Task<'f2>) (queryFunc : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) (aggFunc : AggExpr<'e1, 'f1> -> Task<AggExpr<'e1, 'f1>>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
+type FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQLName and 'e2 :> IFunQLName and 'f2 :> IFunQLName =
+    { value : FieldValue -> Task<FieldValue>
+      fieldReference : 'f1 -> Task<'f2>
+      query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>
+      aggregate : AggExpr<'e1, 'f1> -> Task<AggExpr<'e1, 'f1>>
+      subEntity : 'f2 -> SubEntityRef -> Task<SubEntityRef>
+    }
+
+let idFieldExprTaskSyncMapper (fieldReference : 'f1 -> Task<'f2>) (query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) =
+    { value = Task.result
+      fieldReference = fieldReference
+      query = query
+      aggregate = Task.result
+      subEntity = fun _ r -> Task.result r
+    }
+
+let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
     let rec traverse = function
-        | FEValue value -> Task.map FEValue (valueFunc value)
-        | FERef r -> Task.map FERef (refFunc r)
+        | FEValue value -> Task.map FEValue (mapper.value value)
+        | FERef r -> Task.map FERef (mapper.fieldReference r)
         | FENot e -> Task.map FENot (traverse e)
         | FEAnd (a, b) -> Task.map2Sync (curry FEAnd) (traverse a) (traverse b)
         | FEOr (a, b) -> Task.map2Sync (curry FEOr) (traverse a) (traverse b)
@@ -721,8 +775,8 @@ let rec mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFu
         | FEGreaterEq (a, b) -> Task.map2Sync (curry FEGreaterEq) (traverse a) (traverse b)
         | FEIn (e, vals) -> Task.map2Sync (curry FEIn) (traverse e) (Array.mapTaskSync traverse vals)
         | FENotIn (e, vals) -> Task.map2Sync (curry FENotIn) (traverse e) (Array.mapTaskSync traverse vals)
-        | FEInQuery (e, query) -> Task.map2Sync (curry FEInQuery) (traverse e) (queryFunc query)
-        | FENotInQuery (e, query) -> Task.map2Sync (curry FENotInQuery) (traverse e) (queryFunc query)
+        | FEInQuery (e, query) -> Task.map2Sync (curry FEInQuery) (traverse e) (mapper.query query)
+        | FENotInQuery (e, query) -> Task.map2Sync (curry FENotInQuery) (traverse e) (mapper.query query)
         | FECast (e, typ) -> Task.map (fun newE -> FECast (newE, typ)) (traverse e)
         | FEIsNull e -> Task.map FEIsNull (traverse e)
         | FEIsNotNull e -> Task.map FEIsNotNull (traverse e)
@@ -741,10 +795,16 @@ let rec mapTaskSyncFieldExpr (valueFunc : FieldValue -> Task<FieldValue>) (refFu
         | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTaskSync traverse args)
         | FEAggFunc (name, args) ->
             task {
-                let! args1 = aggFunc args
+                let! args1 = mapper.aggregate args
                 return! Task.map (fun x -> FEAggFunc (name, x)) (mapTaskSyncAggExpr traverse args1)
             }
-        | FESubquery query -> Task.map FESubquery (queryFunc query)
+        | FESubquery query -> Task.map FESubquery (mapper.query query)
+        | FETypeAssert (f, nam) ->
+            task {
+                let! field = mapper.fieldReference f
+                let! subEntity = mapper.subEntity field nam
+                return FETypeAssert (field, subEntity)
+            }
     traverse
 
 and mapTaskSyncAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>) : AggExpr<'e1, 'f1> -> Task<AggExpr<'e2, 'f2>> = function
@@ -752,10 +812,26 @@ and mapTaskSyncAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>)
     | AEDistinct expr -> Task.map AEDistinct (func expr)
     | AEStar -> Task.result AEStar
 
-let rec iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (queryFunc : SelectExpr<'e, 'f> -> unit) (aggFunc : AggExpr<'e, 'f> -> unit) : FieldExpr<'e, 'f> -> unit =
+type FieldExprIter<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { value : FieldValue -> unit
+      fieldReference : 'f -> unit
+      query : SelectExpr<'e, 'f> -> unit
+      aggregate : AggExpr<'e, 'f> -> unit
+      subEntity : 'f -> SubEntityRef -> unit
+    }
+
+let idFieldExprIter =
+    { value = fun _ -> ()
+      fieldReference = fun _ -> ()
+      query = fun _ -> ()
+      aggregate = fun _ -> ()
+      subEntity = fun _ _ -> ()
+    }
+
+let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> unit =
     let rec traverse = function
-        | FEValue value -> valueFunc value
-        | FERef r -> refFunc r
+        | FEValue value -> mapper.value value
+        | FERef r -> mapper.fieldReference r
         | FENot e -> traverse e
         | FEAnd (a, b) -> traverse a; traverse b
         | FEOr (a, b) -> traverse a; traverse b
@@ -770,8 +846,8 @@ let rec iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (q
         | FEGreaterEq (a, b) -> traverse a; traverse b
         | FEIn (e, vals) -> traverse e; Array.iter traverse vals
         | FENotIn (e, vals) -> traverse e; Array.iter traverse vals
-        | FEInQuery (e, query) -> traverse e; queryFunc query
-        | FENotInQuery (e, query) -> traverse e; queryFunc query
+        | FEInQuery (e, query) -> traverse e; mapper.query query
+        | FENotInQuery (e, query) -> traverse e; mapper.query query
         | FECast (e, typ) -> traverse e
         | FEIsNull e -> traverse e
         | FEIsNotNull e -> traverse e
@@ -785,9 +861,10 @@ let rec iterFieldExpr (valueFunc : FieldValue -> unit) (refFunc : 'f -> unit) (q
         | FEJsonTextArrow (a, b) -> traverse a; traverse b
         | FEFunc (name, args) -> Array.iter traverse args
         | FEAggFunc (name, args) ->
-            aggFunc args
+            mapper.aggregate args
             iterAggExpr traverse args
-        | FESubquery query -> queryFunc query
+        | FESubquery query -> mapper.query query
+        | FETypeAssert (f, nam) -> mapper.fieldReference f; mapper.subEntity f nam
     traverse
 
 and iterAggExpr (func : FieldExpr<'e, 'f> -> unit) : AggExpr<'e, 'f> -> unit = function
@@ -914,9 +991,6 @@ let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
         ]
 
 let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal
-
-let relaxEntityRef (ref : ResolvedEntityRef) : EntityRef =
-    { schema = Some ref.schema; name = ref.name }
 
 let allowedAggregateFunctions =
     Set.ofSeq

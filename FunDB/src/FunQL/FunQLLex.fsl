@@ -104,6 +104,7 @@ and tokenizeFunQL = parse
     | "/"   { Parse.DIVIDE }
     | "&"   { Parse.AMPERSAND }
     | "->>" { Parse.DOUBLE_ARROW }
+    | ":?"  { Parse.TYPE_ASSERT }
 
     // Keywords
     | t r u e           { Parse.BOOL true }

@@ -60,7 +60,10 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
     let voidAggr aggr =
         raisef ResolveLayoutException "Aggregate functions are not allowed in reference conditions"
 
-    mapFieldExpr id resolveReference voidQuery voidAggr
+    mapFieldExpr
+        { idFieldExprMapper resolveReference voidQuery with
+              aggregate = voidAggr
+        }
 
 let private resolveUniqueConstraint (entity : SourceEntity) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.columns then
@@ -73,9 +76,10 @@ let private resolveUniqueConstraint (entity : SourceEntity) (constr : SourceUniq
 
     { columns = Array.map checkColumn constr.columns }
 
-let private resolveEntityRef : EntityRef -> ResolvedEntityRef = function
-    | { schema = Some schema; name = name } -> { schema = schema; name = name }
-    | ref -> raisef ResolveLayoutException "Unspecified schema for entity %O" ref.name
+let private resolveEntityRef (name : EntityRef) =
+    match tryResolveEntityRef name with
+    | Some ref -> ref
+    | None -> raisef ResolveLayoutException "Unspecified schema for entity %O" name
 
 [<NoComparison>]
 type private HalfResolvedComputedField =
@@ -115,6 +119,8 @@ type private HalfResolvedEntity =
                 genericFindField this.columnFields Map.empty this.source.mainField name
             member this.Fields = this.Fields
             member this.MainField = this.source.mainField
+            member this.Parent = this.source.parent
+            member this.Children = this.children
 
 type private HalfResolvedEntities = Map<ResolvedEntityRef, HalfResolvedEntity>
 
@@ -334,6 +340,11 @@ type private ComputedFieldProperties =
 type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntities) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, ResolvedComputedField> = Map.empty
 
+    let layoutFields =
+        { new ILayoutFields with
+              member this.FindEntity ref = Map.tryFind ref entities |> Option.map (fun e -> e :> IEntityFields)
+        }
+
     let rec checkPath (stack : Set<ResolvedFieldRef>) (usedSchemas : UsedSchemas) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (fields : FieldName list) : ComputedFieldProperties =
         match fields with
         | [] ->
@@ -381,12 +392,16 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 raisef ResolveLayoutException "Invalid reference in computed column: %O" ref
         let resolveQuery query =
             isLocal <- false
-            let (_, res) = resolveSelectExprGeneric (fun ref -> Map.tryFind ref entities |> Option.map (fun e -> e :> IEntityFields)) query
+            let (_, res) = resolveSelectExpr layoutFields query
             res
         let voidAggr aggr =
             raisef ResolveLayoutException "Aggregate functions are not allowed in computed columns"
 
-        let exprRes = mapFieldExpr id resolveReference resolveQuery voidAggr expr
+        let exprRes =
+            mapFieldExpr
+                { idFieldExprMapper resolveReference resolveQuery with
+                      aggregate = voidAggr
+                } expr
         { expression = exprRes
           isLocal = isLocal
           hasId = hasId
@@ -441,7 +456,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let voidAggr aggr =
             raisef ResolveLayoutException "Aggregate functions are not allowed in check expressions"
 
-        mapFieldExpr id resolveReference voidQuery voidAggr
+        mapFieldExpr
+            { idFieldExprMapper resolveReference voidQuery with
+                  aggregate = voidAggr
+            }
 
     let resolveCheckConstraint (entity : ResolvedEntity) (constr : SourceCheckConstraint) : ResolvedCheckConstraint =
         let checkExpr =

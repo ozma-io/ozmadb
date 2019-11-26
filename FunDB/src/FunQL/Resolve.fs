@@ -110,8 +110,8 @@ let resultFieldRef : QueryResultExpr<'e, LinkedRef<ValueRef<'f>>> -> LinkedRef<'
 
 // Copy of that in Layout.Resolve but with a different exception.
 let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
-    match name.schema with
-    | Some schema -> { schema = schema; name = name.name }
+    match tryResolveEntityRef name with
+    | Some ref -> ref
     | None -> raisef ViewResolveException "Unspecified schema in name: %O" name
 
 let private resolveArgumentFieldType (layout : Layout) : ParsedFieldType -> ArgumentFieldType = function
@@ -185,7 +185,11 @@ type ResolvedSelectInfo =
     { hasAggregates : bool
     }
 
-type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields option, arguments : ResolvedArgumentsMap) =
+type ResolvedSubEntityInfo =
+    { alwaysTrue : bool
+    }
+
+type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
 
@@ -197,7 +201,7 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
             usedSchemas <- addUsedFieldRef ref usedSchemas
             match col.fieldType with
             | FTReference (entityRef, _) when useMain ->
-                let (realName, newField) = getEntity entityRef |> Option.bind (fun x -> x.FindField funMain) |> Option.get
+                let (realName, newField) = layout.FindEntity entityRef |> Option.bind (fun x -> x.FindField funMain) |> Option.get
                 let newRef = { entity = entityRef; name = realName }
                 addUsedFields true newRef newField
             | _ -> ()
@@ -213,7 +217,7 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
         | (ref :: refs) ->
             match boundField.field with
             | RColumnField { fieldType = FTReference (entityRef, _) } ->
-                let newEntity = getEntity entityRef |> Option.get
+                let newEntity = layout.FindEntity entityRef |> Option.get
                 match newEntity.FindField ref with
                 | Some (newRef, refField) ->
                     let nextBoundField =
@@ -288,7 +292,7 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
                             match Array.toList f.path with
                             | head :: tail -> (head, tail)
                             | _ -> failwith "impossible"
-                        let argEntity = getEntity entityRef |> Option.get
+                        let argEntity = layout.FindEntity entityRef |> Option.get
                         let argField =
                             match argEntity.FindField name with
                             | None -> raisef ViewResolveException "Field doesn't exist in %O: %O" entityRef name
@@ -316,7 +320,13 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
             | ref -> raisef ViewResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
         let voidQuery query = raisef ViewResolveException "Forbidden subquery in LIMIT or OFFSET: %O" query
         let voidAggr aggr = raisef ViewResolveException "Forbidden aggregate function in LIMIT or OFFSET"
-        mapFieldExpr id resolveReference voidQuery voidAggr expr
+        let voidSubEntity field subEntity = raisef ViewResolveException "Forbidden type assertion in LIMIT or OFFSET"
+        let mapper =
+            { idFieldExprMapper resolveReference voidQuery with
+                  aggregate = voidAggr
+                  subEntity = voidSubEntity
+            }
+        mapFieldExpr mapper expr
 
     let rec resolveResult (inExpression : bool) (mapping : QMapping) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
         if not (Map.isEmpty result.attributes) && inExpression then
@@ -379,7 +389,30 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
         let resolveAggr aggr =
             hasAggregates <- true
             aggr
-        let ret = mapFieldExpr id resolveExprReference resolveQuery resolveAggr expr
+        let resolveSubEntity (field : LinkedBoundFieldRef) (subEntityInfo : SubEntityRef) : SubEntityRef =
+            let boundRef =
+                match field.ref with
+                | VRColumn { bound = Some boundRef } -> boundRef
+                | _ -> raisef ViewResolveException "Unbound field in a type assertion"
+            let fields = layout.FindEntity boundRef.ref.entity |> Option.get
+            match fields.FindField boundRef.ref.name with
+            | Some (_, RSubEntity) -> ()
+            | _ -> raisef ViewResolveException "Bound field in a type assertion is not a SubEntity field"
+            let subEntityRef = { schema = Option.defaultValue boundRef.ref.entity.schema subEntityInfo.ref.schema; name = subEntityInfo.ref.name }
+            let info =
+                if checkInheritance layout boundRef.ref.entity subEntityRef then
+                    { alwaysTrue = false }
+                else if checkInheritance layout subEntityRef boundRef.ref.entity then
+                    { alwaysTrue = true }
+                else
+                    raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
+            { ref = relaxEntityRef subEntityRef; extra = info }
+        let mapper =
+            { idFieldExprMapper resolveExprReference resolveQuery with
+                  aggregate = resolveAggr
+                  subEntity = resolveSubEntity
+            }
+        let ret = mapFieldExpr mapper expr
         let info =
             { isLocal = isLocal
               hasAggregates = hasAggregates
@@ -488,7 +521,7 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
         | FEntity (pun, name) ->
             let resName = resolveEntityRef name
             let entity =
-                match getEntity resName with
+                match layout.FindEntity resName with
                 | None -> raisef ViewResolveException "Entity not found: %O" name
                 | Some entity -> entity
 
@@ -544,7 +577,7 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
     let resolveMainEntity (fields : QSubqueryFields) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
         let ref = resolveEntityRef main.entity
         let entity =
-            match getEntity ref with
+            match layout.FindEntity ref with
             | None -> raisef ViewResolveException "Entity not found: %O" main.entity
             | Some e -> e :?> ResolvedEntity
         if entity.isAbstract then
@@ -570,13 +603,8 @@ type private QueryResolver (getEntity : ResolvedEntityRef -> IEntityFields optio
     member this.UsedArguments = usedArguments
     member this.UsedSchemas = usedSchemas
 
-let resolveSelectExprGeneric (getEntity : ResolvedEntityRef -> IEntityFields option) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
-    let qualifier = QueryResolver (getEntity, globalArgumentsMap)
-    let (results, qQuery) = qualifier.ResolveSelectExpr true select
-    (qualifier.UsedArguments, qQuery)
-
-let resolveSelectExpr (layout : Layout) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
-    let qualifier = QueryResolver (layout.FindEntity >> Option.map (fun x -> x :> IEntityFields), globalArgumentsMap)
+let resolveSelectExpr (layout : ILayoutFields) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
+    let qualifier = QueryResolver (layout, globalArgumentsMap)
     let (results, qQuery) = qualifier.ResolveSelectExpr true select
     (qualifier.UsedArguments, qQuery)
 
@@ -584,7 +612,7 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let arguments = viewExpr.arguments |> Map.map (fun name -> resolveArgument layout)
     let localArguments = Map.mapKeys PLocal arguments
     let allArguments = Map.union localArguments globalArgumentsMap
-    let qualifier = QueryResolver (layout.FindEntity >> Option.map (fun x -> x :> IEntityFields), allArguments)
+    let qualifier = QueryResolver (layout, allArguments)
     let (results, qQuery) = qualifier.ResolveSelectExpr false viewExpr.select
     let mainEntity = Option.map (qualifier.ResolveMainEntity results.fields qQuery) viewExpr.mainEntity
 

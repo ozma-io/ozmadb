@@ -20,7 +20,6 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Schema
 open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.Permissions.Update
-open FunWithFlags.FunDB.Permissions.Flatten
 open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Attributes.Schema
 open FunWithFlags.FunDB.Attributes.Resolve
@@ -50,7 +49,7 @@ type ContextException (message : string, innerException : Exception) =
 type CachedRequestContext =
     { layout : Layout
       userViews : PrefetchedUserViews
-      permissions : FlatPermissions
+      permissions : Permissions
       defaultAttrs : MergedDefaultAttributes
       systemViews : SourceUserViews
       userMeta : SQL.DatabaseMeta
@@ -163,14 +162,21 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     if isSystem then
                         critical <- true
                     for KeyValue(roleName, role) in schema do
-                        for KeyValue(allowedSchemaName, allowedSchema) in role do
-                            for KeyValue(allowedEntityName, err) in allowedSchema do
-                                let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()
-                                let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()
+                        match role with
+                        | EFatal err ->
                                 if isSystem then
-                                    logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
+                                    logger.LogError(err, "System role {role} is broken", roleName)
                                 else
-                                    logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
+                                    logger.LogWarning(err, "Marking {role} as broken", roleName)
+                        | EDatabase errs ->
+                            for KeyValue(allowedSchemaName, allowedSchema) in errs do
+                                for KeyValue(allowedEntityName, err) in allowedSchema do
+                                    let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()
+                                    let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()
+                                    if isSystem then
+                                        logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
+                                    else
+                                        logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
                 if critical then
                     failwith "Broken system roles"
                 do! markBrokenPermissions conn.System brokenPerms
@@ -187,7 +193,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
         let! sourceAttrs = buildSchemaAttributes transaction1.System
         let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
 
-        let mergedAttrs = mergeDefaultAttributes defaultAttrs
+        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
         let! sourceViews = buildSchemaUserViews transaction1.System
         let (brokenViews1, userViews) = resolveUserViews layout mergedAttrs true sourceViews
 
@@ -211,7 +217,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
             let state =
                 { layout = layout
-                  permissions = flattenPermissions layout permissions
+                  permissions = permissions
                   defaultAttrs = mergedAttrs
                   userViews = prefetchedViews
                   systemViews = systemViews
@@ -235,7 +241,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
         let! sourceAttrs = buildSchemaAttributes transaction1.System
         let (_, defaultAttrs) = resolveAttributes layout false sourceAttrs
-        let mergedAttrs = mergeDefaultAttributes defaultAttrs
+        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
         let! sourceUvs = buildSchemaUserViews transaction1.System
         let (_, userViews) = resolveUserViews layout mergedAttrs false sourceUvs
@@ -265,7 +271,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
             let newState =
                 { layout = layout
-                  permissions = flattenPermissions layout permissions
+                  permissions = permissions
                   defaultAttrs = mergedAttrs
                   userViews = prefetchedViews
                   systemViews = systemViews
@@ -328,7 +334,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                         resolveAttributes layout false attrsSource
                     with
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
-                let mergedAttrs = mergeDefaultAttributes defaultAttrs
+                let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
                 let! userViewsSource = buildSchemaUserViews newTransaction.System
                 if filterSystemViews userViewsSource <> oldState.systemViews then
@@ -381,7 +387,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
                 let newState =
                     { layout = layout
-                      permissions = flattenPermissions layout permissions
+                      permissions = permissions
                       defaultAttrs = mergedAttrs
                       userViews = mergePrefetchedUserViews badUserViews goodUserViews
                       systemViews = newSystemViews

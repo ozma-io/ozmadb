@@ -250,7 +250,13 @@ let private validJsonValue = function
     | SQL.VDateTimeArray _ -> true
     | _ -> false
 
-let rec genericCompileFieldExpr (refFunc : 'f -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
+let private rewriteSubEntityCheck (subEntity : SQL.ValueExpr) : SQL.ValueExpr -> SQL.ValueExpr =
+    SQL.genericMapValueExpr
+        { SQL.idValueExprGenericMapper with
+              columnReference = fun _ -> subEntity
+        }
+
+let rec genericCompileFieldExpr (layout : Layout) (refFunc : 'f -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
     let rec traverse = function
         | FEValue v -> compileFieldValue v
         | FERef c -> refFunc c
@@ -306,6 +312,15 @@ let rec genericCompileFieldExpr (refFunc : 'f -> SQL.ValueExpr) (queryFunc : Sel
         | FEFunc (name,  args) -> SQL.VEFunc (compileName name, Array.map traverse args)
         | FEAggFunc (name,  args) -> SQL.VEAggFunc (compileName name, genericCompileAggExpr traverse args)
         | FESubquery query -> SQL.VESubquery (queryFunc query)
+        | FETypeAssert (c, subEntityRef) ->
+            let info = subEntityRef.extra :?> ResolvedSubEntityInfo
+            if info.alwaysTrue then
+                SQL.VEValue (SQL.VBool true)
+            else
+                let col = refFunc c
+                let entity = layout.FindEntity { schema = Option.get subEntityRef.ref.schema; name = subEntityRef.ref.name } |> Option.get
+                let inheritance = entity.inheritance |> Option.get
+                rewriteSubEntityCheck col inheritance.checkExpr
     traverse
 
 and genericCompileAggExpr (func : FieldExpr<'e, 'f> -> SQL.ValueExpr) : AggExpr<'e, 'f> -> SQL.AggExpr = function
@@ -342,7 +357,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     arguments <- addArgument arg (Map.find name globalArgumentTypes) arguments
                     VRPlaceholder arg
             { ref = newRef; path = ref.path }
-        mapFieldExpr id resolveReference id id
+        let mapper = idFieldExprMapper resolveReference id
+        mapFieldExpr mapper
 
     let mutable lastDomainNamespaceId = 0
     let newDomainNamespaceId () =
@@ -500,7 +516,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   metaColumns = false
                 }
             snd << compileSelectExpr flags
-        let ret = genericCompileFieldExpr compileLinkedRef compileSubSelectExpr expr
+        let ret = genericCompileFieldExpr layout compileLinkedRef compileSubSelectExpr expr
         (paths, ret)
 
     and compileAttribute (paths0 : JoinPaths) (attrType : ColumnType) (expr : ResolvedFieldExpr) : JoinPaths * SQL.SelectedColumn =
@@ -1001,7 +1017,13 @@ let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
         noArgumentReferences <- false
     let foundQuery query =
         noReferences <- false
-    SQL.iterValueExpr foundReference foundPlaceholder foundQuery expr
+    SQL.iterValueExpr
+        { SQL.idValueExprIter with
+              columnReference = foundReference
+              placeholder = foundPlaceholder
+              query = foundQuery
+        }
+        expr
     if not noReferences then
         None
     else if not noArgumentReferences then

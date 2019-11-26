@@ -267,6 +267,8 @@ namespace FunWithFlags.FunDBSchema.Schema
         [ColumnField("string")]
         [Required]
         public string Name { get; set; }
+        [ColumnField("bool", Default="FALSE")]
+        public bool AllowBroken { get; set; }
 
         public List<RoleParent> Parents { get; set; }
         public List<RoleParent> Children { get; set; }

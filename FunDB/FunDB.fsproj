@@ -47,6 +47,7 @@
 
     <Compile Include="src/FunQL/Resolve.fs" />
     <Compile Include="src/FunQL/Dereference.fs" />
+    <Compile Include="src/FunQL/Optimize.fs" />
     <Compile Include="src/FunQL/Arguments.fs" />
     <Compile Include="src/FunQL/Compile.fs" />
   
@@ -76,7 +77,7 @@
     <Compile Include="src/Permissions/Schema.fs" />
     <Compile Include="src/Permissions/Render.fs" />
     <Compile Include="src/Permissions/Update.fs" />
-    <Compile Include="src/Permissions/Flatten.fs" />
+    <Compile Include="src/Permissions/Apply.fs" />
     <Compile Include="src/Permissions/Compile.fs" />
     <Compile Include="src/Permissions/View.fs" />
     <Compile Include="src/Permissions/Entity.fs" />

@@ -11,7 +11,6 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Types
-open FunWithFlags.FunDB.Permissions.Flatten
 open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parse
@@ -164,7 +163,7 @@ type RequestParams =
 [<NoComparison>]
 type RoleType =
     | RTRoot
-    | RTRole of FlatRole
+    | RTRole of ResolvedRole
 
 let private getRole = function
     | RTRoot -> None
@@ -240,8 +239,9 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     | Some user when user.IsRoot || opts.disableACL -> RTRoot
                     | Some user when isNull user.Role -> raise <| RequestException RENoRole
                     | Some user ->
-                        let role = ctx.State.permissions.FindRole { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get
-                        RTRole role
+                        match ctx.State.permissions.Find { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get with
+                        | Ok role -> RTRole role
+                        | Error e -> raise <| RequestException RENoRole
             return new RequestContext(opts, ctx, userId, roleType)
         with
         | e ->
@@ -342,7 +342,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
             | None -> return Error EENotFound
             | Some entity ->
                 try
-                    let res = getEntityInfo (getRole roleType) entityRef entity
+                    let res = getEntityInfo ctx.State.layout (getRole roleType) entityRef entity
                     return Ok res
                 with
                     | :? EntityDeniedException as ex ->

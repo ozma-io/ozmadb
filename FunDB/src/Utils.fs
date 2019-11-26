@@ -8,7 +8,6 @@ open System.Threading.Tasks
 open System.Runtime.ExceptionServices
 open Microsoft.FSharp.Reflection
 open FSharp.Control.Tasks.V2.ContextInsensitive
-open System.Diagnostics.Tracing
 
 type Void = private Void of unit
 type Exception = System.Exception
@@ -39,8 +38,8 @@ module Task =
     let awaitSync (t : Task<'a>) : 'a =
         t.GetAwaiter().GetResult()
 
-let curry f a b = f (a, b)
-let uncurry f (a, b) = f a b
+let inline curry f a b = f (a, b)
+let inline uncurry f (a, b) = f a b
 
 module Option =
     let getOrFailWith (errorFunc : unit -> string) : 'a option -> 'a = function

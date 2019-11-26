@@ -43,7 +43,11 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         Map.map (fun name expr -> resolveFieldExpr expr) attributes
 
     and resolveFieldExpr : ResolvedFieldExpr -> ResolvedFieldExpr =
-        mapFieldExpr resolveValue id id id
+        let mapper =
+            { idFieldExprMapper id id with
+                value = resolveValue
+            }
+        mapFieldExpr mapper
 
     and resolveOrderLimitClause (limits : ResolvedOrderLimitClause) : ResolvedOrderLimitClause =
         let resolveOrderBy (ord, expr) = (ord, resolveFieldExpr expr)

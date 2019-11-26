@@ -70,9 +70,14 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
         let voidAggr aggr =
             raisef ResolveAttributesException "Aggregate expressions are not allowed"
 
+        let mapper =
+            { idFieldExprMapper resolveReference resolveQuery with
+                  aggregate = voidAggr
+            }
+
         let resolveAttribute name expr =
             try
-                mapFieldExpr id resolveReference resolveQuery voidAggr expr
+                mapFieldExpr mapper expr
             with
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attribute %O: %s" name e.Message
         let resolvedMap = Map.map resolveAttribute attrsMap

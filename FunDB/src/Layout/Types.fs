@@ -99,6 +99,8 @@ type IEntityFields =
     abstract member FindField : FieldName -> (FunQLName * ResolvedField) option
     abstract member Fields : (FieldName * ResolvedField) seq
     abstract member MainField : FieldName
+    abstract member Parent : ResolvedEntityRef option
+    abstract member Children : Set<ResolvedEntityRef>
 
 [<NoComparison>]
 type ResolvedEntity =
@@ -133,11 +135,15 @@ type ResolvedEntity =
             Option.isSome this.inheritance || this.isAbstract || not (Set.isEmpty this.children)
 
         member this.MainField = this.mainField
+        member this.Parent = this.inheritance |> Option.map (fun i -> i.parent)
+        member this.Children = this.children
 
         interface IEntityFields with
             member this.FindField name = this.FindField name
             member this.Fields = this.Fields
             member this.MainField = this.MainField
+            member this.Parent = this.Parent
+            member this.Children = this.Children
 
 // Should be in sync with type names generation in Resolve
 let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntityRef =
@@ -151,6 +157,9 @@ type ResolvedSchema =
     { entities : Map<EntityName, ResolvedEntity>
       roots : Set<EntityName>
     }
+
+type ILayoutFields =
+    abstract member FindEntity : ResolvedEntityRef -> IEntityFields option
 
 [<NoComparison>]
 type Layout =
@@ -167,5 +176,17 @@ type Layout =
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
+        interface ILayoutFields with
+            member this.FindEntity ref = Option.map (fun e -> e :> IEntityFields) (this.FindEntity ref)
+
 let mapAllFields (f : FieldName -> ResolvedField -> 'a) (entity : IEntityFields) : Map<FieldName, 'a> =
     entity.Fields |> Seq.map (fun (name, field) -> (name, f name field)) |> Map.ofSeq
+
+let rec checkInheritance (layout : ILayoutFields) (parentRef : ResolvedEntityRef) (childRef : ResolvedEntityRef) =
+    if parentRef = childRef then
+        true
+    else
+        let childEntity = layout.FindEntity childRef |> Option.get
+        match childEntity.Parent with
+        | None -> false
+        | Some childParentRef -> checkInheritance layout parentRef childParentRef

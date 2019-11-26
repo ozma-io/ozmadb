@@ -57,6 +57,8 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
             |> Seq.collect (fun (schemaName, entities) -> entities.entities |> Map.toSeq |> Seq.map (fun (entityName, entity) -> ({ schema = schemaName; name = entityName }, entity)))
             |> Map.ofSeq
 
+        existingRole.AllowBroken <- role.allowBroken
+
         let updateFunc = updateAllowedEntity
         let createFunc entityRef =
             let entityId = Map.find entityRef allEntitiesMap
@@ -124,7 +126,9 @@ let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) : Ta
                 for role in schema.Roles do
                     match Map.tryFind (FunQLName role.Name) schemaErrors with
                     | None -> ()
-                    | Some roleErrors ->
+                    | Some (EFatal err) ->
+                        role.AllowBroken <- true
+                    | Some (EDatabase roleErrors) ->
                         for entity in role.Entities do
                             match Map.tryFind (FunQLName entity.Entity.Schema.Name) roleErrors with
                             | None -> ()
