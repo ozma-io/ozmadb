@@ -189,6 +189,37 @@ type ResolvedSubEntityInfo =
     { alwaysTrue : bool
     }
 
+let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : LinkedBoundFieldRef) (subEntityInfo : SubEntityRef) : SubEntityRef =
+    let boundRef =
+        match field.ref with
+        | VRColumn { bound = Some boundRef } -> boundRef
+        | _ -> raisef ViewResolveException "Unbound field in a type assertion"
+    let fields = layout.FindEntity boundRef.ref.entity |> Option.get
+    match fields.FindField boundRef.ref.name with
+    | Some (_, RSubEntity) -> ()
+    | _ -> raisef ViewResolveException "Bound field in a type assertion is not a SubEntity field"
+    let subEntityRef = { schema = Option.defaultValue boundRef.ref.entity.schema subEntityInfo.ref.schema; name = subEntityInfo.ref.name }
+    let info =
+        match ctx with
+        | SECInheritedFrom ->
+            if checkInheritance layout subEntityRef boundRef.ref.entity then
+                { alwaysTrue = true }
+            else if checkInheritance layout boundRef.ref.entity subEntityRef then
+                { alwaysTrue = false }
+            else
+                raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
+        | SECOfType ->
+            let subEntity =
+                match layout.FindEntity subEntityRef with
+                | None -> raisef ViewResolveException "Couldn't find subentity %O" subEntityInfo.ref
+                | Some r -> r
+            if subEntity.IsAbstract then
+                raisef ViewResolveException "Instances of abstract entity %O do not exist" subEntityRef
+            if not <| checkInheritance layout boundRef.ref.entity subEntityRef then
+                raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
+            { alwaysTrue = not <| hasSubType subEntity }
+    { ref = relaxEntityRef subEntityRef; extra = info }
+
 type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
@@ -389,28 +420,10 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         let resolveAggr aggr =
             hasAggregates <- true
             aggr
-        let resolveSubEntity (field : LinkedBoundFieldRef) (subEntityInfo : SubEntityRef) : SubEntityRef =
-            let boundRef =
-                match field.ref with
-                | VRColumn { bound = Some boundRef } -> boundRef
-                | _ -> raisef ViewResolveException "Unbound field in a type assertion"
-            let fields = layout.FindEntity boundRef.ref.entity |> Option.get
-            match fields.FindField boundRef.ref.name with
-            | Some (_, RSubEntity) -> ()
-            | _ -> raisef ViewResolveException "Bound field in a type assertion is not a SubEntity field"
-            let subEntityRef = { schema = Option.defaultValue boundRef.ref.entity.schema subEntityInfo.ref.schema; name = subEntityInfo.ref.name }
-            let info =
-                if checkInheritance layout boundRef.ref.entity subEntityRef then
-                    { alwaysTrue = false }
-                else if checkInheritance layout subEntityRef boundRef.ref.entity then
-                    { alwaysTrue = true }
-                else
-                    raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
-            { ref = relaxEntityRef subEntityRef; extra = info }
         let mapper =
             { idFieldExprMapper resolveExprReference resolveQuery with
                   aggregate = resolveAggr
-                  subEntity = resolveSubEntity
+                  subEntity = resolveSubEntity layout
             }
         let ret = mapFieldExpr mapper expr
         let info =

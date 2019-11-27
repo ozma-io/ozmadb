@@ -58,7 +58,7 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
                         }
                     }
 
-                let typeCheck = FETypeAssert (boundFieldRef, subEntityRef) |> optimizeFieldExpr
+                let typeCheck = FEInheritedFrom (boundFieldRef, subEntityRef) |> optimizeFieldExpr
                 let currCheck = andFieldExpr typeCheck expr
                 orRestriction currRestrs { restrs with expression = currCheck }
 

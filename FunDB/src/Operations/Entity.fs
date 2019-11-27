@@ -104,7 +104,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         if entity.hidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
         let (subEntityColumn, subEntityArg, newRawArgs) =
-            if entity.HasSubType then
+            if hasSubType entity then
                 let col = Seq.singleton (null, sqlFunSubEntity)
                 let arg = Seq.singleton (PLocal funSubEntity, { argType = FTType (FETScalar SFTString); optional = false })
                 let newArgs = Map.add funSubEntity (FString entity.typeName) rawArgs
@@ -208,7 +208,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let arguments = addArgument (PLocal funId) funIdArg emptyArguments
         let whereExpr = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder arguments.types.[PLocal funId].placeholderId)
         let whereExpr =
-            if entity.HasSubType then
+            if hasSubType entity then
                 let subEntityCheck = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunSubEntity }, SQL.VEValue (SQL.VString entity.typeName))
                 SQL.VEAnd (subEntityCheck, whereExpr)
             else

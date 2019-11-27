@@ -9,6 +9,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
+open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -30,23 +31,30 @@ and ExecutedValueConverter () =
         raise <| NotImplementedException ()
 
     override this.WriteJson (writer : JsonWriter, res : ExecutedValue, serializer : JsonSerializer) : unit =
-        let vals1 = Map.singleton "value" (res.value :> obj)
-        let vals2 =
+        let vals = Map.singleton "value" (res.value :> obj)
+        let vals =
             if not <| Map.isEmpty res.attributes then
-                Map.add "attributes" (res.attributes :> obj) vals1
+                Map.add "attributes" (res.attributes :> obj) vals
             else
-                vals1
-        let vals3 =
+                vals
+        let vals =
             match res.pun with
-            | None -> vals2
-            | Some p -> Map.add "pun" (p :> obj) vals2
-        serializer.Serialize(writer, vals3)
+            | None -> vals
+            | Some p -> Map.add "pun" (p :> obj) vals
+        serializer.Serialize(writer, vals)
+
+type [<NoComparison>] ExecutedEntityId =
+    { id : int
+      [<JsonProperty(NullValueHandling=NullValueHandling.Ignore)>]
+      subEntity : ResolvedEntityRef option
+    }
 
 type [<JsonConverter(typeof<ExecutedRowConverter>)>] [<NoComparison>] ExecutedRow =
     { attributes : ExecutedAttributeMap
       values : ExecutedValue array
-      entityIds : Map<EntityName, int>
+      entityIds : Map<EntityName, ExecutedEntityId>
       mainId : int option
+      mainSubEntity : ResolvedEntityRef option
       domainId : GlobalDomainId
     }
 and ExecutedRowConverter () =
@@ -59,22 +67,26 @@ and ExecutedRowConverter () =
 
     override this.WriteJson (writer : JsonWriter, res : ExecutedRow, serializer : JsonSerializer) : unit =
         // TODO: rewrite this to mutable dictionary or use "ignore nulls" policy.
-        let vals1 = [("values", res.values :> obj); ("domainId", res.domainId :> obj)] |> Map.ofSeq
-        let vals2 =
+        let vals = [("values", res.values :> obj); ("domainId", res.domainId :> obj)] |> Map.ofSeq
+        let vals =
             if not <| Map.isEmpty res.attributes then
-                Map.add "attributes" (res.attributes :> obj) vals1
+                Map.add "attributes" (res.attributes :> obj) vals
             else
-                vals1
-        let vals3 =
+                vals
+        let vals =
             if not <| Map.isEmpty res.entityIds then
-                Map.add "entityIds" (res.entityIds :> obj) vals2
+                Map.add "entityIds" (res.entityIds :> obj) vals
             else
-                vals2
-        let vals4 =
+                vals
+        let vals =
             match res.mainId with
-            | None -> vals3
-            | Some id -> Map.add "mainId" (id :> obj) vals3
-        serializer.Serialize(writer, vals4)
+            | None -> vals
+            | Some id -> Map.add "mainId" (id :> obj) vals
+        let vals =
+            match res.mainSubEntity with
+            | None -> vals
+            | Some subEntity -> Map.add "mainSubEntity" (subEntity :> obj) vals
+        serializer.Serialize(writer, vals)
 
 type ExecutedColumnInfo =
     { name : FunQLName
@@ -133,7 +145,7 @@ let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult
       columnAttributes = colAttributes
     }
 
-let private parseResult (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
+let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
     let takeRowAttribute i colType (_, valType) =
         match colType with
         | CTRowAttribute name -> Some (name, (valType, i))
@@ -168,11 +180,23 @@ let private parseResult (domains : Domains) (columns : ColumnType[]) (result : Q
         | _ -> None
     let idColumns = Seq.mapiMaybe takeIdColumn columns |> Map.ofSeq
 
+    let takeSubEntityColumn i colType =
+        match colType with
+        | CTSubEntityColumn entity -> Some (entity, i)
+        | _ -> None
+    let subEntityColumns = Seq.mapiMaybe takeSubEntityColumn columns |> Map.ofSeq
+
     let takeMainIdColumn i colType =
         match colType with
         | CTMainIdColumn -> Some i
         | _ -> None
     let mainIdColumn = Seq.mapiMaybe takeMainIdColumn columns |> Seq.first
+
+    let takeMainSubEntityColumn i colType =
+        match colType with
+        | CTMainSubEntityColumn -> Some i
+        | _ -> None
+    let mainSubEntityColumn = Seq.mapiMaybe takeMainSubEntityColumn columns |> Seq.first
 
     let takeColumn i colType (_, valType) =
         match colType with
@@ -218,26 +242,55 @@ let private parseResult (domains : Domains) (columns : ColumnType[]) (result : Q
         let getMainId i =
             match values.[i] with
             | SQL.VInt id -> id
-            | _ -> failwith "Entity main id not found"
+            | _ -> failwith "Entity main id is not an integer"
 
-        let rowAttrs = Map.map (fun name (valType, i) -> values.[i]) rowAttributes
-        let values = Array.map getCell columnsMeta
+        let getMainSubEntity i =
+            match values.[i] with
+            | SQL.VString subEntityString ->
+                parseTypeName (Option.get mainEntity) subEntityString
+            | _ -> failwith "Main subentity is not a string"
+
         let domainIds = Map.mapMaybe (fun ns i -> getDomainId i) domainColumns
-        let entityIds = Map.mapMaybe (fun name i -> getId i) idColumns
-        let mainId = Option.map getMainId mainIdColumn
 
         let rec getGlobalDomainId = function
-            | DSingle (id, _) -> id
+            | DSingle (id, info) -> (id, info)
             | DMulti (ns, subdoms) ->
                 let localId = Map.findOrFailWith (fun () -> sprintf "No domain namespace value: %i" ns) ns domainIds
                 let doms = Map.findOrFailWith (fun () -> sprintf "Unknown local domain id for namespace %i: %i" ns localId) localId subdoms
                 getGlobalDomainId doms
 
+        let (domainId, domainInfo) = getGlobalDomainId domains
+
+        let getSubEntity name i =
+            match values.[i] with
+                | SQL.VString subEntityString ->
+                    let field = Map.find name domainInfo
+                    Some <| parseTypeName field.ref.entity subEntityString
+                | SQL.VNull -> None
+                | _ -> failwith "Entity subtype is not a string"
+
+        let getEntityId name i =
+            match getId i with
+            | None -> None
+            | Some id ->
+                let subEntity = Option.bind (getSubEntity name) (Map.tryFind name subEntityColumns)
+                Some
+                    { id = id
+                      subEntity = subEntity
+                    }
+
+        let rowAttrs = Map.map (fun name (valType, i) -> values.[i]) rowAttributes
+        let values = Array.map getCell columnsMeta
+        let entityIds = Map.mapMaybe getEntityId idColumns
+        let mainId = Option.map getMainId mainIdColumn
+        let mainSubEntity = Option.map getMainSubEntity mainSubEntityColumn
+
         { attributes = rowAttrs
           values = values
-          domainId = getGlobalDomainId domains
+          domainId = domainId
           entityIds = entityIds
           mainId = mainId
+          mainSubEntity = mainSubEntity
         }
 
     let columns = Array.map (fun (attributes, i, column) -> column) columnsMeta
@@ -279,7 +332,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | Some (attrTypes, attrs) -> attrs
 
         return! connection.ExecuteQuery (viewExpr.query.expression.ToSQLString()) parameters <| fun rawResult ->
-            let (info, rows) = parseResult viewExpr.domains viewExpr.columns rawResult
+            let (info, rows) = parseResult viewExpr.mainEntity viewExpr.domains viewExpr.columns rawResult
 
             let mergedInfo =
                 { info with

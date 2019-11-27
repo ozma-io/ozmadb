@@ -1,5 +1,8 @@
 module FunWithFlags.FunDB.Layout.Resolve
 
+open Newtonsoft.Json
+open Newtonsoft.Json.Linq
+
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.Utils
@@ -59,10 +62,13 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
         raisef ResolveLayoutException "Queries are not allowed in reference condition: %O" query
     let voidAggr aggr =
         raisef ResolveLayoutException "Aggregate functions are not allowed in reference conditions"
+    let voidSubEntity ent q =
+        raisef ResolveLayoutException "Aggregate functions are not allowed in check expressions"
 
     mapFieldExpr
         { idFieldExprMapper resolveReference voidQuery with
               aggregate = voidAggr
+              subEntity = voidSubEntity
         }
 
 let private resolveUniqueConstraint (entity : SourceEntity) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
@@ -119,14 +125,19 @@ type private HalfResolvedEntity =
                 genericFindField this.columnFields Map.empty this.source.mainField name
             member this.Fields = this.Fields
             member this.MainField = this.source.mainField
+            member this.IsAbstract = this.source.isAbstract
             member this.Parent = this.source.parent
+            member this.Children = Map.toSeq this.children
 
 type private HalfResolvedEntities = Map<ResolvedEntityRef, HalfResolvedEntity>
 
 let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : 'a -> bool) (getChildren : 'a -> Map<ResolvedEntityRef, ChildEntity>) (getEntity : ResolvedEntityRef -> 'a) (entity : 'a) =
     let getName entity =
         let isAbstract = getIsAbstract entity
-        if isAbstract then None else Some (getTypeName entity)
+        if isAbstract then
+            None
+        else
+            entity |> getTypeName |> SQL.VString |> SQL.VEValue |> Some
 
     let column = SQL.VEColumn { table = None; name = sqlFunSubEntity }
     let childrenEntities = getChildren entity |> Map.keys |> Seq.map getEntity
@@ -136,10 +147,9 @@ let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : '
     if Array.isEmpty options then
         SQL.VEValue (SQL.VBool false)
     else if Array.length options = 1 then
-        SQL.VEEq (column, SQL.VEValue (SQL.VString options.[0]))
+        SQL.VEEq (column, options.[0])
     else
-        let makeExpr name = SQL.VEValue (SQL.VString name)
-        SQL.VEIn (column, Array.map makeExpr options)
+        SQL.VEIn (column, options)
 
 let private makeCheckHalfExpr = makeCheckExprGeneric (fun (x : HalfResolvedEntity) -> x.typeName) (fun x -> x.source.isAbstract) (fun x -> x.children)
 
@@ -408,6 +418,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             mapFieldExpr
                 { idFieldExprMapper resolveReference resolveQuery with
                       aggregate = voidAggr
+                      subEntity = resolveSubEntity layoutFields
                 } expr
         { expression = exprRes
           isLocal = isLocal
@@ -440,8 +451,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 cachedComputedFields <- Map.add fieldRef field cachedComputedFields
                 field
 
-    let resolveCheckExpr (entity : ResolvedEntity) : ParsedFieldExpr -> LocalFieldExpr =
-        let resolveReference : LinkedFieldRef -> ValueRef<FieldName> = function
+    let resolveCheckExpr (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : ParsedFieldExpr -> LocalFieldExpr =
+        let resolveReference : LinkedFieldRef -> FieldName = function
             | { ref = VRColumn { entity = None; name = name }; path = [||] } ->
                 let res =
                     match Map.tryFind name entity.columnFields with
@@ -454,26 +465,33 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                             else
                                 raise (ResolveLayoutException <| sprintf "Non-local computed field reference in check expression: %O" name)
                         | None when name = funId -> funId
+                        | None when name = funSubEntity -> funSubEntity
                         | None -> raise (ResolveLayoutException <| sprintf "Column not found in check expression: %O" name)
-                VRColumn res
+                res
             | ref ->
                 raise (ResolveLayoutException <| sprintf "Invalid reference in check expression: %O" ref)
         let voidQuery query =
             raise (ResolveLayoutException <| sprintf "Queries are not allowed in check expressions: %O" query)
         let voidAggr aggr =
             raisef ResolveLayoutException "Aggregate functions are not allowed in check expressions"
+        let resolveLocalSubEntity ctx (field : FieldName) subEntity =
+            let fieldRef = { entity = entityRef; name = field }
+            let boundField = { ref = fieldRef; immediate = true }
+            let linkedField = { ref = VRColumn { ref = { entity = None; name = field }; bound = Some boundField }; path = [||] } : LinkedBoundFieldRef
+            resolveSubEntity layoutFields ctx linkedField subEntity
 
         mapFieldExpr
             { idFieldExprMapper resolveReference voidQuery with
                   aggregate = voidAggr
+                  subEntity = resolveLocalSubEntity
             }
 
-    let resolveCheckConstraint (entity : ResolvedEntity) (constr : SourceCheckConstraint) : ResolvedCheckConstraint =
+    let resolveCheckConstraint (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (constr : SourceCheckConstraint) : ResolvedCheckConstraint =
         let checkExpr =
             match parse tokenizeFunQL fieldExpr constr.expression with
             | Ok r -> r
             | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing check constraint expression: %s" msg)
-        { expression = resolveCheckExpr entity checkExpr }
+        { expression = resolveCheckExpr entityRef entity checkExpr }
 
     let resolveEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) : ResolvedEntity =
         let mapComputedField name field =
@@ -490,6 +508,30 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               checkExpr = checkExpr
             }
 
+        let subEntityParseExpr =
+            let getName (ref : ResolvedEntityRef, entity : HalfResolvedEntity) =
+                if entity.source.isAbstract then
+                    None
+                else
+                    let json = JToken.FromObject ref |> SQL.VJson |> SQL.VEValue
+                    Some (entity.typeName, json)
+
+            let column = SQL.VEColumn { table = None; name = sqlFunSubEntity }
+            let childrenEntities = entity.children |> Map.keys |> Seq.map (fun ref -> (ref, Map.tryFind ref entities |> Option.get))
+            let allEntities = Seq.append (Seq.singleton (entityRef, entity)) childrenEntities
+            let options = allEntities |> Seq.mapMaybe getName |> Seq.toArray
+
+            if Array.isEmpty options then
+                SQL.VEValue SQL.VNull
+            else if Array.length options = 1 then
+                let (name, json) = options.[0]
+                json
+            else
+                let makeCase (name, json) =
+                    let check = SQL.VEEq (column, SQL.VEValue (SQL.VString name))
+                    (check, json)
+                SQL.VECase (Array.map makeCase options, None)
+
         let tempEntity =
             { columnFields = entity.columnFields
               computedFields = computedFields
@@ -499,6 +541,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               forbidExternalReferences = entity.source.forbidExternalReferences
               hidden = entity.source.hidden
               inheritance = Option.map makeInheritance entity.source.parent
+              subEntityParseExpr = subEntityParseExpr
               children = entity.children
               root = entity.root
               typeName = entity.typeName
@@ -507,7 +550,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let mapCheckConstraint name constr =
             try
                 checkName name
-                resolveCheckConstraint tempEntity constr
+                resolveCheckConstraint entityRef tempEntity constr
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in check constraint %O: %s" name e.Message
         let checkConstraints = Map.map mapCheckConstraint entity.source.checkConstraints

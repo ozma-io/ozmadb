@@ -43,6 +43,9 @@ function addDefaultViews(views, layout) {
             }
             var sqlName = renderSqlName(schemaName) + "." + renderSqlName(entityName);
             var fields = [];
+            if (entity.children.length > 0) {
+                fields.push(renderSqlName("SubEntity"))
+            }
             for (var columnField in entity.columnFields) {
                 fields.push(renderSqlName(columnField));
             }

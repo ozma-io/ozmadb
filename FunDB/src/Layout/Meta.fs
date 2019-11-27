@@ -11,27 +11,27 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 type private MetaBuilder (layout : Layout) =
     let rec compileComputedExpr (entity : ResolvedEntity) : ResolvedFieldExpr -> SQL.ValueExpr =
-        let makeFullName : LinkedBoundFieldRef -> SQL.ValueExpr = function
-            | { ref = VRColumn { ref = { entity = None; name = name }}; path = [||] } -> compileComputedName entity name
+        let makeFullName (ctx : ReferenceContext) : LinkedBoundFieldRef -> SQL.ValueExpr = function
+            | { ref = VRColumn { ref = { entity = None; name = name }}; path = [||] } -> compileComputedName entity ctx name
             | c -> failwith <| sprintf "Unexpected reference in computed field expression: %O" c
         let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
         genericCompileFieldExpr layout makeFullName voidQuery
 
-    and compileComputedName (entity : ResolvedEntity) (name : FieldName) : SQL.ValueExpr =
+    and compileComputedName (entity : ResolvedEntity) (ctx : ReferenceContext) (name : FieldName) : SQL.ValueExpr =
         let (realName, field) = entity.FindField name |> Option.get
         match field with
         | RId
-        | RSubEntity
         | RColumnField _ -> SQL.VEColumn { table = None; name = compileName realName }
+        | RSubEntity ->
+            match ctx with
+            | RCExpr -> entity.subEntityParseExpr
+            | RCTypeExpr -> SQL.VEColumn { table = None; name = compileName realName }
         | RComputedField comp -> compileComputedExpr entity comp.expression
 
     let compileCheckExpr (entity : ResolvedEntity) : LocalFieldExpr -> SQL.ValueExpr =
-        let compileRef = function
-            | VRColumn name -> compileComputedName entity name
-            | arg -> failwith <| sprintf "Unexpected reference in computed field expression: %O" arg
         let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
         // Normalization is needed so that expression will be in same form as ones from pg_catalog.
-        normalizeLocalExpr << genericCompileFieldExpr layout compileRef voidQuery
+        normalizeLocalExpr << genericCompileFieldExpr layout (compileComputedName entity) voidQuery
 
     let makeUniqueConstraintMeta (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
         SQL.CMUnique <| Array.map (fun name -> SQL.SQLName <| name.ToString()) constr.columns
@@ -91,7 +91,7 @@ type private MetaBuilder (layout : Layout) =
                     } : SQL.ColumnMeta
                 Seq.singleton (SQL.SQLName (funId.ToString()), col)
             let (subEntityColumns, subEntityConstraints, subEntityIndexes) =
-                if not <| entity.HasSubType then
+                if not <| hasSubType entity then
                     (Seq.empty, Seq.empty, Seq.empty)
                 else
                     let col =

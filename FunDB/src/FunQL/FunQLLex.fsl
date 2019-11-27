@@ -104,7 +104,6 @@ and tokenizeFunQL = parse
     | "/"   { Parse.DIVIDE }
     | "&"   { Parse.AMPERSAND }
     | "->>" { Parse.DOUBLE_ARROW }
-    | ":?"  { Parse.TYPE_ASSERT }
 
     // Keywords
     | t r u e           { Parse.BOOL true }
@@ -150,6 +149,8 @@ and tokenizeFunQL = parse
     | d i s t i n c t   { Parse.DISTINCT }
     | g r o u p         { Parse.GROUP }
     | a r r a y         { Parse.ARRAY }
+    | i n h e r i t e d { Parse.INHERITED }
+    | o f t y p e       { Parse.OFTYPE }
 
     // Types
     | i n t             { Parse.INT_TYPE }

@@ -135,7 +135,7 @@ type [<JsonConverter(typeof<ValueConverter>)>] [<NoComparison>] Value =
             match this with
             | VInt i -> renderSqlInt i
             | VDecimal d -> renderSqlDecimal d
-            | VString s -> sprintf "E%s" (renderSqlString s)
+            | VString s -> sprintf "E%s :: text" (renderSqlString s)
             | VRegclass rc -> sprintf "E%s :: regclass" (rc.ToSQLString() |> renderSqlString)
             | VBool b -> renderSqlBool b
             | VDateTime dt -> sprintf "%s :: timestamp" (dt |> renderSqlDateTime |> renderSqlString)

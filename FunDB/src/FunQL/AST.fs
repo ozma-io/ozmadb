@@ -471,7 +471,8 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
     | FEFunc of FunQLName * FieldExpr<'e, 'f>[]
     | FEAggFunc of FunQLName * AggExpr<'e, 'f>
     | FESubquery of SelectExpr<'e, 'f>
-    | FETypeAssert of 'f * SubEntityRef
+    | FEInheritedFrom of 'f * SubEntityRef
+    | FEOfType of 'f * SubEntityRef
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -519,7 +520,8 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
             | FEFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args |> Seq.map (fun arg -> arg.ToFunQLString()) |> String.concat ", ")
             | FEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args.ToFunQLString())
             | FESubquery q -> sprintf "(%s)" (q.ToFunQLString())
-            | FETypeAssert (f, ref) -> sprintf "%s :? %s" (f.ToFunQLString()) (ref.ref.ToFunQLString())
+            | FEInheritedFrom (f, ref) -> sprintf "%s INHERITED FROM %s" (f.ToFunQLString()) (ref.ref.ToFunQLString())
+            | FEOfType (f, ref) -> sprintf "%s OFTYPE %s" (f.ToFunQLString()) (ref.ref.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -683,12 +685,16 @@ and [<NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNa
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+type SubEntityContext =
+    | SECInheritedFrom
+    | SECOfType
+
 type FieldExprMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQLName and 'e2 :> IFunQLName and 'f2 :> IFunQLName =
     { value : FieldValue -> FieldValue
       fieldReference : 'f1 -> 'f2
       query : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>
       aggregate : AggExpr<'e1, 'f1> -> AggExpr<'e1, 'f1>
-      subEntity : 'f2 -> SubEntityRef -> SubEntityRef
+      subEntity : SubEntityContext -> 'f2 -> SubEntityRef -> SubEntityRef
     }
 
 let idFieldExprMapper (fieldReference : 'f1 -> 'f2) (query : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) =
@@ -696,7 +702,7 @@ let idFieldExprMapper (fieldReference : 'f1 -> 'f2) (query : SelectExpr<'e1, 'f1
       fieldReference = fieldReference
       query = query
       aggregate = id
-      subEntity = fun _ r -> r
+      subEntity = fun _ _ r -> r
     }
 
 let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
@@ -731,9 +737,12 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
         | FEFunc (name, args) -> FEFunc (name, Array.map traverse args)
         | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse (mapper.aggregate args))
         | FESubquery query -> FESubquery (mapper.query query)
-        | FETypeAssert (f, nam) ->
+        | FEInheritedFrom (f, nam) ->
             let ref = mapper.fieldReference f
-            FETypeAssert (ref, mapper.subEntity ref nam)
+            FEInheritedFrom (ref, mapper.subEntity SECInheritedFrom ref nam)
+        | FEOfType (f, nam) ->
+            let ref = mapper.fieldReference f
+            FEOfType (ref, mapper.subEntity SECOfType ref nam)
     traverse
 
 and mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1, 'f1> -> AggExpr<'e2, 'f2> = function
@@ -746,7 +755,7 @@ type FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 
       fieldReference : 'f1 -> Task<'f2>
       query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>
       aggregate : AggExpr<'e1, 'f1> -> Task<AggExpr<'e1, 'f1>>
-      subEntity : 'f2 -> SubEntityRef -> Task<SubEntityRef>
+      subEntity : SubEntityContext -> 'f2 -> SubEntityRef -> Task<SubEntityRef>
     }
 
 let idFieldExprTaskSyncMapper (fieldReference : 'f1 -> Task<'f2>) (query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) =
@@ -754,7 +763,7 @@ let idFieldExprTaskSyncMapper (fieldReference : 'f1 -> Task<'f2>) (query : Selec
       fieldReference = fieldReference
       query = query
       aggregate = Task.result
-      subEntity = fun _ r -> Task.result r
+      subEntity = fun _ _ r -> Task.result r
     }
 
 let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
@@ -799,11 +808,17 @@ let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f
                 return! Task.map (fun x -> FEAggFunc (name, x)) (mapTaskSyncAggExpr traverse args1)
             }
         | FESubquery query -> Task.map FESubquery (mapper.query query)
-        | FETypeAssert (f, nam) ->
+        | FEInheritedFrom (f, nam) ->
             task {
                 let! field = mapper.fieldReference f
-                let! subEntity = mapper.subEntity field nam
-                return FETypeAssert (field, subEntity)
+                let! subEntity = mapper.subEntity SECInheritedFrom field nam
+                return FEInheritedFrom (field, subEntity)
+            }
+        | FEOfType (f, nam) ->
+            task {
+                let! field = mapper.fieldReference f
+                let! subEntity = mapper.subEntity SECOfType field nam
+                return FEOfType (field, subEntity)
             }
     traverse
 
@@ -817,7 +832,7 @@ type FieldExprIter<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
       fieldReference : 'f -> unit
       query : SelectExpr<'e, 'f> -> unit
       aggregate : AggExpr<'e, 'f> -> unit
-      subEntity : 'f -> SubEntityRef -> unit
+      subEntity : SubEntityContext -> 'f -> SubEntityRef -> unit
     }
 
 let idFieldExprIter =
@@ -825,7 +840,7 @@ let idFieldExprIter =
       fieldReference = fun _ -> ()
       query = fun _ -> ()
       aggregate = fun _ -> ()
-      subEntity = fun _ _ -> ()
+      subEntity = fun _ _ _ -> ()
     }
 
 let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> unit =
@@ -864,7 +879,8 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
             mapper.aggregate args
             iterAggExpr traverse args
         | FESubquery query -> mapper.query query
-        | FETypeAssert (f, nam) -> mapper.fieldReference f; mapper.subEntity f nam
+        | FEInheritedFrom (f, nam) -> mapper.fieldReference f; mapper.subEntity SECInheritedFrom f nam
+        | FEOfType (f, nam) -> mapper.fieldReference f; mapper.subEntity SECOfType f nam
     traverse
 
 and iterAggExpr (func : FieldExpr<'e, 'f> -> unit) : AggExpr<'e, 'f> -> unit = function
@@ -886,7 +902,7 @@ type LinkedFieldName = LinkedRef<ValueRef<FieldName>>
 
 type ParsedFieldType = FieldType<EntityRef, LinkedFieldRef>
 
-type LocalFieldExpr = FieldExpr<FunQLVoid, ValueRef<FieldName>>
+type LocalFieldExpr = FieldExpr<FunQLVoid, FieldName>
 
 [<NoComparison>]
 type BoundField =

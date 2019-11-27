@@ -237,7 +237,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token ALL
 %token GROUP
 %token ARRAY
-%token TYPE_ASSERT
+%token INHERITED
+%token OFTYPE
 
 // Types
 %token INT_TYPE
@@ -540,7 +541,8 @@ FieldExprOp:
   | FieldExprVal                           { $1 }
 
 FieldExprVal:
-  | LinkedValueRef TYPE_ASSERT EntityRef    { FETypeAssert ($1, { ref = $3; extra = null }) }
+  | LinkedValueRef INHERITED FROM EntityRef { FEInheritedFrom ($1, { ref = $4; extra = null }) }
+  | LinkedValueRef OFTYPE EntityRef         { FEOfType ($1, { ref = $3; extra = null }) }
   | LinkedValueRef                          { FERef $1 }
   | Value                                   { FEValue $1 }
   | Name ParenedExprList                    { makeFunc $1 $2 }

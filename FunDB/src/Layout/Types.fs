@@ -96,16 +96,21 @@ let inline genericFindField (columnFields : Map<FieldName, 'col>) (computedField
                 | None -> None
     traverse
 
+[<NoComparison>]
+type ChildEntity =
+    { direct : bool
+    }
+
 type IEntityFields =
     abstract member FindField : FieldName -> (FunQLName * ResolvedField) option
     abstract member Fields : (FieldName * ResolvedField) seq
     abstract member MainField : FieldName
     abstract member Parent : ResolvedEntityRef option
+    abstract member IsAbstract : bool
+    abstract member Children : (ResolvedEntityRef * ChildEntity) seq
 
-[<NoComparison>]
-type ChildEntity =
-    { direct : bool
-    }
+let hasSubType (entity : IEntityFields) =
+        Option.isSome entity.Parent || entity.IsAbstract || not (Seq.isEmpty entity.Children)
 
 [<NoComparison>]
 type ResolvedEntity =
@@ -117,6 +122,7 @@ type ResolvedEntity =
       forbidExternalReferences : bool
       hidden : bool
       inheritance : EntityInheritance option
+      subEntityParseExpr : SQL.ValueExpr // Parses SubEntity field into JSON
       children : Map<ResolvedEntityRef, ChildEntity>
       typeName : string // SubEntity value for this entity
       isAbstract : bool
@@ -128,7 +134,7 @@ type ResolvedEntity =
         member this.Fields =
             let id = Seq.singleton (funId, RId)
             let subentity =
-                if this.HasSubType then
+                if hasSubType this then
                     Seq.singleton (funSubEntity, RSubEntity)
                 else
                     Seq.empty
@@ -136,17 +142,13 @@ type ResolvedEntity =
             let computed = this.computedFields |> Map.toSeq |> Seq.map (fun (name, comp) -> (name, RComputedField comp))
             Seq.concat [id; subentity; columns; computed]
 
-        member this.HasSubType =
-            Option.isSome this.inheritance || this.isAbstract || not (Map.isEmpty this.children)
-
-        member this.MainField = this.mainField
-        member this.Parent = this.inheritance |> Option.map (fun i -> i.parent)
-
         interface IEntityFields with
             member this.FindField name = this.FindField name
             member this.Fields = this.Fields
-            member this.MainField = this.MainField
-            member this.Parent = this.Parent
+            member this.MainField = this.mainField
+            member this.Parent = this.inheritance |> Option.map (fun i -> i.parent)
+            member this.IsAbstract = this.isAbstract
+            member this.Children = Map.toSeq this.children
 
 // Should be in sync with type names generation in Resolve
 let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntityRef =
