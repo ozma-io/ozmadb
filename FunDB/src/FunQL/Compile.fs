@@ -692,7 +692,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
                 let needsSubEntity (ref : ResolvedFieldRef) =
                     let entity = layout.FindEntity ref.entity |> Option.get
-                    hasSubType entity
+                    not <| Map.isEmpty entity.children
 
                 let maybeIdExpr = makeMaybeSystemColumn (fun _ -> true) CTIdColumn funId
                 let maybeSubEntityExpr = makeMaybeSystemColumn needsSubEntity CTSubEntityColumn funSubEntity
