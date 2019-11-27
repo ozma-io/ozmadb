@@ -479,6 +479,22 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                             )
                         do! cacheStore.EventLogger.WriteEvent event
                         return Error (EEExecute <| printException ex)
+                    | :? EntityNotFoundException as ex ->
+                        logger.LogError(ex, "Not found")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "update",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable id,
+                                Error = "not_found",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
+                        return Error EENotFound
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
                         let event =
@@ -536,6 +552,22 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                             )
                         do! cacheStore.EventLogger.WriteEvent event
                         return Error (EEExecute <| printException ex)
+                    | :? EntityNotFoundException as ex ->
+                        logger.LogError(ex, "Not found")
+                        let event =
+                            EventEntry (
+                                TransactionTimestamp = transactionTime,
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Type = "delete",
+                                UserName = userName,
+                                SchemaName = entityRef.schema.ToString(),
+                                EntityName = entityRef.name.ToString(),
+                                EntityId = Nullable id,
+                                Error = "not_found",
+                                Details = printException ex
+                            )
+                        do! cacheStore.EventLogger.WriteEvent event
+                        return Error EENotFound
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
                         let event =

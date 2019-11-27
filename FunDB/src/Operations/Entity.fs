@@ -19,6 +19,11 @@ type EntityExecutionException (message : string, innerException : Exception) =
 
     new (message : string) = EntityExecutionException (message, null)
 
+type EntityNotFoundException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = EntityNotFoundException (message, null)
+
 type EntityDeniedException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
 
@@ -41,7 +46,7 @@ let private runQuery (runFunc : string -> ExprParameters -> Task<'a>) (globalArg
 
 let private runNonQuery (connection : QueryConnection) = runQuery connection.ExecuteNonQuery
 
-let private runIdQuery (connection : QueryConnection) = runQuery connection.ExecuteIdQuery
+let private runIntQuery (connection : QueryConnection) = runQuery connection.ExecuteIntQuery
 
 let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
     | FTReference (r, _) -> FTReference (r, None)
@@ -60,6 +65,28 @@ let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : Re
         with
         | :? PermissionsEntityException as e ->
             raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
+
+let countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (whereExpr : SQL.ValueExpr) =
+    task {
+        let testExpr =
+            SQL.SSelect
+                { columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
+                  from = Some <| SQL.FTable (null, None, tableRef)
+                  where = Some whereExpr
+                  groupBy = [||]
+                  orderLimit = SQL.emptyOrderLimitClause
+                  extra = null
+                }
+        let testQuery =
+            { expression = testExpr
+              arguments = emptyArguments
+            }
+        let! count = runIntQuery connection Map.empty testQuery Map.empty
+        if count > 0 then
+            raisef EntityDeniedException "Access denied"
+        else
+            raisef EntityNotFoundException "Entry not found"
+    }
 
 let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) : Task<int> =
     task {
@@ -115,7 +142,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-        return! runIdQuery connection globalArgs restricted newRawArgs
+        return! runIntQuery connection globalArgs restricted newRawArgs
     }
 
 let private funIdArg = { argType = FTType (FETScalar SFTInt); optional = false }
@@ -166,7 +193,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
         let! affected = runNonQuery connection globalArgs restricted (Map.add funId (FInt id) rawArgs)
         if affected = 0 then
-            raisef EntityDeniedException "Access denied for update"
+            do! countAndThrow connection tableRef whereExpr
     }
 
 let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) : Task<unit> =
@@ -209,5 +236,5 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
         let! affected = runNonQuery connection globalArgs restricted (Map.singleton funId (FInt id))
         if affected = 0 then
-            raisef EntityDeniedException "Access denied to delete"
+            do! countAndThrow connection tableRef whereExpr
     }
