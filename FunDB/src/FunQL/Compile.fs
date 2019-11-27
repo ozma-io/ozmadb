@@ -402,17 +402,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         lastJoinId <- lastJoinId + 1
         compileJoinId id
 
-    let rec followPath (fieldRef : ResolvedFieldRef) (field : ResolvedField) : FieldName list -> ResolvedFieldRef = function
-        | [] -> fieldRef
-        | (ref :: refs) ->
-            match field with
-            | RColumnField { fieldType = FTReference (entityRef, _) } ->
-                let newEntity = Option.get <| layout.FindEntity entityRef
-                let (_, newField) = Option.get <| newEntity.FindField ref
-                let newFieldRef = { entity = entityRef; name = ref }
-                followPath newFieldRef newField refs
-            | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
-
     let rec compileRef (ctx : ReferenceContext) (paths : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedFieldRef) (forcedName : FieldName option) : JoinPaths * SQL.ValueExpr =
         let realColumn name : SQL.ColumnRef =
             let finalName =
@@ -662,6 +651,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let fromInfo = Map.find entityName fromMap
                 let tableRef : SQL.TableRef = { schema = None; name = compileName entityName }
 
+                let finalRef = resultRef.ref.bound |> Option.map (fun bound -> followPath layout bound.ref (List.ofArray resultRef.path))
+
                 let makeMaybeSystemColumn (needColumn : ResolvedFieldRef -> bool) (columnConstr : EntityName -> ColumnType) (name : FieldName) =
                     let sqlName = compileName name
                     if Array.isEmpty resultRef.path
@@ -689,11 +680,15 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         else
                             None
                     else
-                        let systemPath = Seq.append (Seq.take (Array.length resultRef.path - 1) resultRef.path) (Seq.singleton name) |> Array.ofSeq
-                        let systemRef = { ref = VRColumn resultRef.ref; path = systemPath }
-                        let (newPaths, systemExpr) = compileLinkedFieldRef RCTypeExpr paths systemRef
-                        paths <- newPaths
-                        Some systemExpr
+                        let newRef = Option.get finalRef
+                        if needColumn newRef then
+                            let systemPath = Seq.append (Seq.take (Array.length resultRef.path - 1) resultRef.path) (Seq.singleton name) |> Array.ofSeq
+                            let systemRef = { ref = VRColumn resultRef.ref; path = systemPath }
+                            let (newPaths, systemExpr) = compileLinkedFieldRef RCTypeExpr paths systemRef
+                            paths <- newPaths
+                            Some systemExpr
+                        else
+                            None
 
                 let needsSubEntity (ref : ResolvedFieldRef) =
                     let entity = layout.FindEntity ref.entity |> Option.get
@@ -737,9 +732,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         (None, newDomains)
                     else
                         // Pathed refs always have bound fields
-                        let oldBound = Option.get resultRef.ref.bound
-                        let (_, oldField) = Option.get <| layout.FindField oldBound.ref.entity oldBound.ref.name
-                        let newRef = followPath oldBound.ref oldField (List.ofArray resultRef.path)
+                        let newRef = Option.get finalRef
                         let newInfo =
                             { ref = newRef
                               idColumn = newName

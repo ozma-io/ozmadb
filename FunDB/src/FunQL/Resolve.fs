@@ -189,22 +189,35 @@ type ResolvedSubEntityInfo =
     { alwaysTrue : bool
     }
 
+let rec followPath (layout : ILayoutFields) (fieldRef : ResolvedFieldRef) : FieldName list -> ResolvedFieldRef = function
+    | [] -> fieldRef
+    | (ref :: refs) ->
+        let entity = layout.FindEntity fieldRef.entity |> Option.get
+        let (_, field) = entity.FindField fieldRef.name |> Option.get
+        match field with
+        | RColumnField { fieldType = FTReference (entityRef, _) } ->
+            let newFieldRef = { entity = entityRef; name = ref }
+            followPath layout newFieldRef refs
+        | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
+
 let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : LinkedBoundFieldRef) (subEntityInfo : SubEntityRef) : SubEntityRef =
-    let boundRef =
-        match field.ref with
-        | VRColumn { bound = Some boundRef } -> boundRef
-        | _ -> raisef ViewResolveException "Unbound field in a type assertion"
-    let fields = layout.FindEntity boundRef.ref.entity |> Option.get
-    match fields.FindField boundRef.ref.name with
+    let fieldRef =
+        let bound =
+            match field.ref with
+            | VRColumn { bound = Some bound } -> bound
+            | _ -> raisef ViewResolveException "Unbound field in a type assertion"
+        followPath layout bound.ref (Array.toList field.path)
+    let fields = layout.FindEntity fieldRef.entity |> Option.get
+    match fields.FindField fieldRef.name with
     | Some (_, RSubEntity) -> ()
     | _ -> raisef ViewResolveException "Bound field in a type assertion is not a SubEntity field"
-    let subEntityRef = { schema = Option.defaultValue boundRef.ref.entity.schema subEntityInfo.ref.schema; name = subEntityInfo.ref.name }
+    let subEntityRef = { schema = Option.defaultValue fieldRef.entity.schema subEntityInfo.ref.schema; name = subEntityInfo.ref.name }
     let info =
         match ctx with
         | SECInheritedFrom ->
-            if checkInheritance layout subEntityRef boundRef.ref.entity then
+            if checkInheritance layout subEntityRef fieldRef.entity then
                 { alwaysTrue = true }
-            else if checkInheritance layout boundRef.ref.entity subEntityRef then
+            else if checkInheritance layout fieldRef.entity subEntityRef then
                 { alwaysTrue = false }
             else
                 raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
@@ -215,7 +228,7 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
                 | Some r -> r
             if subEntity.IsAbstract then
                 raisef ViewResolveException "Instances of abstract entity %O do not exist" subEntityRef
-            if not <| checkInheritance layout boundRef.ref.entity subEntityRef then
+            if not <| checkInheritance layout fieldRef.entity subEntityRef then
                 raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
             { alwaysTrue = not <| hasSubType subEntity }
     { ref = relaxEntityRef subEntityRef; extra = info }
