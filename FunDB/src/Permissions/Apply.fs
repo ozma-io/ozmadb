@@ -38,35 +38,30 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
         | Some inheritance -> buildParentRestrictions newRestrs inheritance.parent
 
     // We allow any child too.
-    let rec buildChildRestrictions (currRestrs : Restriction) (currRef : ResolvedEntityRef) =
+    let buildChildRestrictions (currRestrs : Restriction) (currRef : ResolvedEntityRef) =
         let entity = layout.FindEntity currRef |> Option.get
-        let newRestrs =
-            match Map.tryFind currRef allowedEntity.children with
-            | None -> currRestrs
-            | Some child ->
-                let restrs = accessor child
-                if restrs.expression = OFEFalse then
-                    currRestrs
-                else
-                    let expr = renameRestriction currRef restrs.expression
-                    let fieldRef = { entity = entityRef; name = funSubEntity }
-                    let bound = { ref = fieldRef; immediate = true }
-                    let boundFieldRef = { ref = VRColumn { ref = relaxFieldRef fieldRef; bound = Some bound }; path = [||] }
-                    let subEntityRef =
-                        { ref = relaxEntityRef currRef
-                          extra =
-                            { alwaysTrue = false
-                            }
+        match Map.tryFind currRef allowedEntity.children with
+        | None -> currRestrs
+        | Some child ->
+            let restrs = accessor child
+            if restrs.expression = OFEFalse then
+                currRestrs
+            else
+                let expr = renameRestriction currRef restrs.expression
+                let fieldRef = { entity = entityRef; name = funSubEntity }
+                let bound = { ref = fieldRef; immediate = true }
+                let boundFieldRef = { ref = VRColumn { ref = relaxFieldRef fieldRef; bound = Some bound }; path = [||] }
+                let subEntityRef =
+                    { ref = relaxEntityRef currRef
+                      extra =
+                        { alwaysTrue = false
                         }
+                    }
 
-                    let typeCheck = FETypeAssert (boundFieldRef, subEntityRef) |> optimizeFieldExpr
-                    let currCheck = andFieldExpr typeCheck expr
-                    orRestriction currRestrs { restrs with expression = currCheck }
-        buildChildrenRestrictions newRestrs entity
-    and buildChildrenRestrictions (currRestrs : Restriction) (entity : ResolvedEntity) =
-        entity.children |> Set.toSeq |> Seq.fold buildChildRestrictions currRestrs
+                let typeCheck = FETypeAssert (boundFieldRef, subEntityRef) |> optimizeFieldExpr
+                let currCheck = andFieldExpr typeCheck expr
+                orRestriction currRestrs { restrs with expression = currCheck }
 
     let parentRestrs = buildParentRestrictions emptyRestriction entityRef
     let selfEntity = layout.FindEntity entityRef |> Option.get
-    let childrenRestrs = buildChildrenRestrictions emptyRestriction selfEntity
-    orRestriction parentRestrs childrenRestrs
+    selfEntity.children |> Map.keys |> Seq.fold buildChildRestrictions parentRestrs

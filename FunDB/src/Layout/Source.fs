@@ -7,7 +7,7 @@ open FunWithFlags.FunDB.FunQL.AST
 // Source Layout; various layout sources, like database or system layout, are converted into this.
 
 type SourceUniqueConstraint =
-    { columns : FunQLName[]
+    { columns : FieldName[]
     }
 
 type SourceCheckConstraint =

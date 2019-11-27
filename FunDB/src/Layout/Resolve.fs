@@ -91,7 +91,7 @@ type private HalfResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
       computedFields : Map<FieldName, HalfResolvedComputedField>
       uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
-      children : Set<ResolvedEntityRef>
+      children : Map<ResolvedEntityRef, ChildEntity>
       typeName : string
       root : ResolvedEntityRef
       source : SourceEntity
@@ -110,7 +110,7 @@ type private HalfResolvedEntity =
             Seq.concat [id; subentity; columns]
 
         member this.HasSubType =
-            Option.isSome this.source.parent || this.source.isAbstract || not (Set.isEmpty this.children)
+            Option.isSome this.source.parent || this.source.isAbstract || not (Map.isEmpty this.children)
 
         member this.MainField = this.source.mainField
 
@@ -120,23 +120,19 @@ type private HalfResolvedEntity =
             member this.Fields = this.Fields
             member this.MainField = this.source.mainField
             member this.Parent = this.source.parent
-            member this.Children = this.children
 
 type private HalfResolvedEntities = Map<ResolvedEntityRef, HalfResolvedEntity>
 
-let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : 'a -> bool) (getChildren : 'a -> Set<ResolvedEntityRef>) (getEntity : ResolvedEntityRef -> 'a) (entity : 'a) =
-    let column = SQL.VEColumn { table = None; name = sqlFunSubEntity }
-    let rec recur entity =
-        let typeName = getTypeName entity
+let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : 'a -> bool) (getChildren : 'a -> Map<ResolvedEntityRef, ChildEntity>) (getEntity : ResolvedEntityRef -> 'a) (entity : 'a) =
+    let getName entity =
         let isAbstract = getIsAbstract entity
-        let children = getChildren entity
-        let myName =
-            if isAbstract then Seq.empty else Seq.singleton typeName
-        let getEntityName childRef =
-            let childEntity = getEntity childRef
-            recur childEntity
-        Seq.append myName (Seq.collect getEntityName children)
-    let options = recur entity |> Seq.toArray
+        if isAbstract then None else Some (getTypeName entity)
+
+    let column = SQL.VEColumn { table = None; name = sqlFunSubEntity }
+    let childrenEntities = getChildren entity |> Map.keys |> Seq.map getEntity
+    let allEntities = Seq.append (Seq.singleton entity) childrenEntities
+    let options = allEntities |> Seq.mapMaybe getName |> Seq.toArray
+
     if Array.isEmpty options then
         SQL.VEValue (SQL.VBool false)
     else if Array.length options = 1 then
@@ -271,11 +267,19 @@ type private Phase1Resolver (layout : SourceLayout) =
         { columnFields = columnFields
           computedFields = computedFields
           uniqueConstraints = uniqueConstraints
-          children = Set.empty
+          children = Map.empty
           root = root
           typeName = typeName
           source = entity
         }
+
+    let rec addIndirectChildren (childRef : ResolvedEntityRef) (entity : HalfResolvedEntity) =
+        match entity.source.parent with
+        | None -> ()
+        | Some parentRef ->
+            let oldParent = Map.find parentRef cachedEntities
+            cachedEntities <- Map.add parentRef { oldParent with children = Map.add childRef { direct = false } oldParent.children } cachedEntities
+            addIndirectChildren childRef oldParent
 
     let rec resolveOneEntity (stack : Set<ResolvedEntityRef>) (child : ResolvedEntityRef option) (ref : ResolvedEntityRef) (entity : SourceEntity) : HalfResolvedEntity =
         try
@@ -297,7 +301,8 @@ type private Phase1Resolver (layout : SourceLayout) =
                 match child with
                 | None -> ()
                 | Some childRef ->
-                    cachedEntities <- Map.add ref { cached with children = Set.add childRef cached.children } cachedEntities
+                    cachedEntities <- Map.add ref { cached with children = Map.add childRef { direct = true } cached.children } cachedEntities
+                    addIndirectChildren childRef cached
                 cached
             | None ->
                 checkName ref.name
@@ -306,7 +311,9 @@ type private Phase1Resolver (layout : SourceLayout) =
                 let entityWithChild =
                     match child with
                     | None -> entity
-                    | Some childRef -> { entity with children = Set.singleton childRef }
+                    | Some childRef ->
+                        addIndirectChildren childRef entity
+                        { entity with children = Map.singleton childRef { direct = true } }
                 cachedEntities <- Map.add ref entityWithChild cachedEntities
                 entity
         with

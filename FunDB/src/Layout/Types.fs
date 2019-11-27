@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Layout.Types
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Utils
@@ -100,7 +101,11 @@ type IEntityFields =
     abstract member Fields : (FieldName * ResolvedField) seq
     abstract member MainField : FieldName
     abstract member Parent : ResolvedEntityRef option
-    abstract member Children : Set<ResolvedEntityRef>
+
+[<NoComparison>]
+type ChildEntity =
+    { direct : bool
+    }
 
 [<NoComparison>]
 type ResolvedEntity =
@@ -112,7 +117,7 @@ type ResolvedEntity =
       forbidExternalReferences : bool
       hidden : bool
       inheritance : EntityInheritance option
-      children : Set<ResolvedEntityRef>
+      children : Map<ResolvedEntityRef, ChildEntity>
       typeName : string // SubEntity value for this entity
       isAbstract : bool
       // Hierarchy root
@@ -132,18 +137,16 @@ type ResolvedEntity =
             Seq.concat [id; subentity; columns; computed]
 
         member this.HasSubType =
-            Option.isSome this.inheritance || this.isAbstract || not (Set.isEmpty this.children)
+            Option.isSome this.inheritance || this.isAbstract || not (Map.isEmpty this.children)
 
         member this.MainField = this.mainField
         member this.Parent = this.inheritance |> Option.map (fun i -> i.parent)
-        member this.Children = this.children
 
         interface IEntityFields with
             member this.FindField name = this.FindField name
             member this.Fields = this.Fields
             member this.MainField = this.MainField
             member this.Parent = this.Parent
-            member this.Children = this.Children
 
 // Should be in sync with type names generation in Resolve
 let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntityRef =

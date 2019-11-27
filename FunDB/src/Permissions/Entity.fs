@@ -156,7 +156,7 @@ let applyRoleInfo (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedE
       forbidExternalReferences = entity.forbidExternalReferences
       hidden = entity.hidden
       parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
-      children = entity.children
+      children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { ref = ref; direct = info.direct })
       isAbstract = entity.isAbstract
       root = entity.root
     }

@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Layout.Info
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
@@ -28,6 +29,12 @@ type SerializedComputedField =
     }
 
 [<NoComparison>]
+type SerializedChildEntity =
+    { ref : ResolvedEntityRef
+      direct : bool
+    }
+
+[<NoComparison>]
 type SerializedEntity =
     { columnFields : Map<FieldName, SerializedColumnField>
       computedFields : Map<FieldName, SerializedComputedField>
@@ -37,7 +44,7 @@ type SerializedEntity =
       forbidExternalReferences : bool
       hidden : bool
       parent : ResolvedEntityRef option
-      children : Set<ResolvedEntityRef>
+      children : SerializedChildEntity seq
       isAbstract : bool
       root : ResolvedEntityRef
     }
@@ -80,7 +87,7 @@ let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
       hidden = entity.hidden
       parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
       isAbstract = entity.isAbstract
-      children = entity.children
+      children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { ref = ref; direct = info.direct })
       root = entity.root
     }
 
