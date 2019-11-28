@@ -186,18 +186,18 @@ let private compileSetOp : SetOperation -> SQL.SetOperation = function
     | Except -> SQL.Except
     | Intersect -> SQL.Intersect
 
-let private compileEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema = Option.map compileName entityRef.schema; name = compileName entityRef.name }
+let compileEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema = Option.map compileName entityRef.schema; name = compileName entityRef.name }
 
-let private compileNoSchemaEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema = None; name = compileName entityRef.name }
+let compileNoSchemaEntityRef (entityRef : EntityRef) : SQL.TableRef = { schema = None; name = compileName entityRef.name }
 
 let compileResolvedEntityRef (entityRef : ResolvedEntityRef) : SQL.TableRef = { schema = Some (compileName entityRef.schema); name = compileName entityRef.name }
 
-let private compileNoSchemaResolvedEntityRef (entityRef : ResolvedEntityRef) : SQL.TableRef = { schema = None; name = compileName entityRef.name }
+let compileNoSchemaResolvedEntityRef (entityRef : ResolvedEntityRef) : SQL.TableRef = { schema = None; name = compileName entityRef.name }
 
-let private compileFieldRef (fieldRef : FieldRef) : SQL.ColumnRef =
+let compileFieldRef (fieldRef : FieldRef) : SQL.ColumnRef =
     { table = Option.map compileNoSchemaEntityRef fieldRef.entity; name = compileName fieldRef.name }
 
-let private compileResolvedFieldRef (fieldRef : ResolvedFieldRef) : SQL.ColumnRef =
+let compileResolvedFieldRef (fieldRef : ResolvedFieldRef) : SQL.ColumnRef =
     { table = Some <| compileResolvedEntityRef fieldRef.entity; name = compileName fieldRef.name }
 
 let compileFieldValue (v : FieldValue) : SQL.ValueExpr =
@@ -562,35 +562,42 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | SSelect query ->
             let (info, expr) = compileSingleSelectExpr flags query
             (info, SQL.SSelect expr)
-        | SSetOp _ as select ->
-            let ns = newDomainNamespaceId ()
-            let domainColumn = CTDomainColumn ns
-            let domainName = columnName domainColumn
-            let mutable lastId = 0
-            let rec compileDomained = function
-                | SSelect query ->
-                    let (info, expr) = compileSingleSelectExpr flags query
-                    let id = lastId
-                    lastId <- lastId + 1
-                    let modifiedExpr =
-                        { expr with
-                              columns = Array.append [| SQL.SCExpr (Some domainName, SQL.VEValue <| SQL.VInt id) |] expr.columns
-                        }
-                    (info.attributes, info.columns, Map.singleton id info.domains, SQL.SSelect modifiedExpr)
-                | SSetOp (op, a, b, limits) ->
-                    let (attrs1, columns1, domainsMap1, expr1) = compileDomained a
-                    let (attrs2, columns2, domainsMap2, expr2) = compileDomained b
-                    let (limitPaths, compiledLimits) = compileOrderLimitClause Map.empty limits
-                    assert Map.isEmpty limitPaths
-                    assert (attrs1 = attrs2)
-                    (attrs1, columns1, Map.unionUnique domainsMap1 domainsMap2, SQL.SSetOp (compileSetOp op, expr1, expr2, compiledLimits))
-            let (attrs, columns, domainsMap, expr) = compileDomained select
-            let info =
-                { attributes = attrs
-                  domains = DMulti (ns, domainsMap)
-                  columns = Array.append [| domainColumn |] columns
-                } : SelectInfo
-            (info, expr)
+        | SSetOp (startOp, startA, startB, startLimits) as select ->
+            if not flags.metaColumns then
+                let (info1, expr1) = compileSelectExpr flags startA
+                let (info2, expr2) = compileSelectExpr flags startB
+                let (limitPaths, compiledLimits) = compileOrderLimitClause Map.empty startLimits
+                assert Map.isEmpty limitPaths
+                (info1, SQL.SSetOp (compileSetOp startOp, expr1, expr2, compiledLimits))
+            else
+                let ns = newDomainNamespaceId ()
+                let domainColumn = CTDomainColumn ns
+                let domainName = columnName domainColumn
+                let mutable lastId = 0
+                let rec compileDomained = function
+                    | SSelect query ->
+                        let (info, expr) = compileSingleSelectExpr flags query
+                        let id = lastId
+                        lastId <- lastId + 1
+                        let modifiedExpr =
+                            { expr with
+                                  columns = Array.append [| SQL.SCExpr (Some domainName, SQL.VEValue <| SQL.VInt id) |] expr.columns
+                            }
+                        (info.attributes, info.columns, Map.singleton id info.domains, SQL.SSelect modifiedExpr)
+                    | SSetOp (op, a, b, limits) ->
+                        let (attrs1, columns1, domainsMap1, expr1) = compileDomained a
+                        let (attrs2, columns2, domainsMap2, expr2) = compileDomained b
+                        let (limitPaths, compiledLimits) = compileOrderLimitClause Map.empty limits
+                        assert Map.isEmpty limitPaths
+                        assert (attrs1 = attrs2)
+                        (attrs1, columns1, Map.unionUnique domainsMap1 domainsMap2, SQL.SSetOp (compileSetOp op, expr1, expr2, compiledLimits))
+                let (attrs, columns, domainsMap, expr) = compileDomained select
+                let info =
+                    { attributes = attrs
+                      domains = DMulti (ns, domainsMap)
+                      columns = Array.append [| domainColumn |] columns
+                    } : SelectInfo
+                (info, expr)
 
     and compileSingleSelectExpr (flags : SelectFlags) (select : ResolvedSingleSelectExpr) : SelectInfo * SQL.SingleSelectExpr =
         let mutable paths = Map.empty

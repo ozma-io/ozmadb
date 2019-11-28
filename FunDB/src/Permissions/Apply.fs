@@ -10,13 +10,13 @@ open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 // Rename top-level entities in a restriction expression
-let private renameRestriction (entityRef : ResolvedEntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
+let private renameRestriction (boundRef : ResolvedEntityRef) (entityRef : ResolvedEntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
     let renameBound (bound : BoundField) : BoundField =
-        { bound with ref = { entity = entityRef; name = bound.ref.name } }
+        { bound with ref = { entity = boundRef; name = bound.ref.name } }
     let resetReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
         let link =
             match ref.ref with
-            | VRColumn c -> VRColumn { bound = Option.map renameBound c.bound; ref = ({ entity = Some (relaxEntityRef entityRef); name = c.ref.name } : FieldRef) }
+            | VRColumn c -> VRColumn { bound = Option.map renameBound c.bound; ref = ({ entity = Some { schema = None; name = entityRef.name }; name = c.ref.name } : FieldRef) }
             | VRPlaceholder p -> VRPlaceholder p
         { ref = link; path = ref.path }
     let mapper = idFieldExprMapper resetReference id
@@ -30,7 +30,7 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
             | None -> oldRestrs
             | Some child ->
                 let currRestr = accessor child
-                let currExpr = renameRestriction entityRef currRestr.expression
+                let currExpr = renameRestriction entityRef entityRef currRestr.expression
                 orRestriction oldRestrs { currRestr with expression = currExpr }
         let entity = layout.FindEntity currRef |> Option.get
         match entity.inheritance with
@@ -47,7 +47,7 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
             if restrs.expression = OFEFalse then
                 currRestrs
             else
-                let expr = renameRestriction currRef restrs.expression
+                let expr = renameRestriction currRef entityRef restrs.expression
                 let fieldRef = { entity = entityRef; name = funSubEntity }
                 let bound = { ref = fieldRef; immediate = true }
                 let boundFieldRef = { ref = VRColumn { ref = relaxFieldRef fieldRef; bound = Some bound }; path = [||] }

@@ -11,7 +11,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.SingleSelectExpr =
     let entity = layout.FindEntity ref |> Option.get
     let (from, where) = compileSingleFromClause layout arguments (FEntity (None, ref)) (Some <| restr.expression.ToFieldExpr())
-    { columns = [| compileResolvedEntityRef entity.root |> Some |> SQL.SCAll |]
+    { columns = [| compileNoSchemaResolvedEntityRef ref |> Some |> SQL.SCAll |]
       from = Some from
       where = where
       groupBy = [||]
@@ -26,7 +26,7 @@ let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (argumen
     | SQL.FTable _ -> where |> Option.get
     | _ ->
         let select =
-            { columns = [| SQL.SCExpr (None, SQL.VEColumn { table = Some <| compileResolvedEntityRef entity.root; name = sqlFunId }) |]
+            { columns = [| SQL.SCExpr (None, SQL.VEColumn { table = Some <| compileNoSchemaResolvedEntityRef ref; name = sqlFunId }) |]
               from = Some from
               where = where
               groupBy = [||]
