@@ -195,10 +195,16 @@ let compileResolvedEntityRef (entityRef : ResolvedEntityRef) : SQL.TableRef = { 
 let compileNoSchemaResolvedEntityRef (entityRef : ResolvedEntityRef) : SQL.TableRef = { schema = None; name = compileName entityRef.name }
 
 let compileFieldRef (fieldRef : FieldRef) : SQL.ColumnRef =
-    { table = Option.map compileNoSchemaEntityRef fieldRef.entity; name = compileName fieldRef.name }
+    { table = Option.map compileEntityRef fieldRef.entity; name = compileName fieldRef.name }
 
 let compileResolvedFieldRef (fieldRef : ResolvedFieldRef) : SQL.ColumnRef =
     { table = Some <| compileResolvedEntityRef fieldRef.entity; name = compileName fieldRef.name }
+
+let compileNoSchemaFieldRef (fieldRef : FieldRef) : SQL.ColumnRef =
+    { table = Option.map compileNoSchemaEntityRef fieldRef.entity; name = compileName fieldRef.name }
+
+let compileNoSchemaResolvedFieldRef (fieldRef : ResolvedFieldRef) : SQL.ColumnRef =
+    { table = Some <| compileNoSchemaResolvedEntityRef fieldRef.entity; name = compileName fieldRef.name }
 
 let compileFieldValue (v : FieldValue) : SQL.ValueExpr =
     let ret = compileFieldValueSingle v
@@ -467,12 +473,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | VRColumn ref ->
             match (linked.path, ref.bound) with
             | ([||], None) ->
-                let columnRef = compileFieldRef ref.ref
+                let columnRef = compileNoSchemaFieldRef ref.ref
                 (paths0, SQL.VEColumn columnRef)
             | (_, Some boundRef) ->
                 let tableRef =
                     match ref.ref.entity with
-                    | Some renamedTable -> compileEntityRef renamedTable
+                    | Some renamedTable -> compileNoSchemaEntityRef renamedTable
                     | None -> compileNoSchemaResolvedEntityRef boundRef.ref.entity
                 // In case it's an immediate name we need to rename outermost field (i.e. `__main`).
                 // If it's not we need to keep original naming.
