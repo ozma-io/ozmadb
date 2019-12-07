@@ -9,7 +9,8 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDBSchema.System
 
 let private entityToInfo (entity : Entity) = entity.Id
 let private makeEntity schemaName (entity : Entity) = ({ schema = schemaName; name = FunQLName entity.Name }, entityToInfo entity)
@@ -43,6 +44,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
     let updateComputedFields (entity : Entity) : Map<FieldName, SourceComputedField> -> Map<FieldName, ComputedField> -> Map<FieldName, ComputedField> =
         let updateComputedFunc _ (newComputed : SourceComputedField) (oldComputed : ComputedField) =
             oldComputed.Expression <- newComputed.expression
+            oldComputed.AllowBroken <- newComputed.allowBroken
         let createComputedFunc (FunQLName name) =
             let newComputed =
                 ComputedField (
@@ -142,7 +144,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
 
 let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) : Task<unit> =
     task {
-        let currentSchemas = getLayoutObjects db.Schemas
+        let currentSchemas = db.GetLayoutObjects ()
         let! schemas = currentSchemas.AsTracking().ToListAsync()
 
         let allEntitiesMap = makeAllEntitiesMap schemas
@@ -167,7 +169,7 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) : Task<bool> =
     task {
         let! _ = db.SaveChangesAsync()
 
-        let currentSchemas = getLayoutObjects db.Schemas
+        let currentSchemas = db.GetLayoutObjects ()
         let! schemas = currentSchemas.AsTracking().ToListAsync()
 
         // We don't touch in any way schemas not in layout.
@@ -185,4 +187,26 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) : Task<bool> =
             do! updateLayoutParents db layout
 
         return changedEntries > 0
+    }
+
+let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) : Task<unit> =
+    task {
+        let currentSchemas = db.GetLayoutObjects ()
+
+        let! schemas = currentSchemas.AsTracking().ToListAsync()
+
+        for schema in schemas do
+            match Map.tryFind (FunQLName schema.Name) layout with
+            | None -> ()
+            | Some schemaErrors ->
+                for entity in schema.Entities do
+                    match Map.tryFind (FunQLName entity.Name) schemaErrors with
+                    | None -> ()
+                    | Some errors ->
+                        for comp in entity.ComputedFields do
+                            if Map.containsKey (FunQLName comp.Name) errors.computedFields then
+                                comp.AllowBroken <- true
+
+        let! _ = db.SaveChangesAsync()
+        return ()
     }

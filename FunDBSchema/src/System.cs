@@ -1,92 +1,93 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
-using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using Microsoft.EntityFrameworkCore;
+using Npgsql.NameTranslation;
 
 using FunWithFlags.FunDBSchema.Attributes;
 
-namespace FunWithFlags.FunDBSchema.Schema
+namespace FunWithFlags.FunDBSchema.System
 {
     public class SystemContext : DbContext
     {
-        [Entity("Name", ForbidExternalReferences=true, Hidden=true)]
-        [UniqueConstraint("Name", new [] {"Name"})]
-        [CheckConstraint("NotEmpty", "\"Name\" <> ''")]
+        [Entity("name", ForbidExternalReferences=true, Hidden=true)]
+        [UniqueConstraint("name", new [] {"name"})]
+        [CheckConstraint("not_empty", "name <> ''")]
         public DbSet<StateValue> State { get; set; }
 
-        [Entity("Name", ForbidExternalReferences=true)]
-        [UniqueConstraint("Name", new [] {"Name"})]
+        [Entity("name", ForbidExternalReferences=true)]
+        [UniqueConstraint("name", new [] {"name"})]
         public DbSet<Schema> Schemas { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"Name\"")]
-        [UniqueConstraint("Name", new [] {"SchemaId", "Name"})]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "schema_id=>__main || '.' || name")]
+        [UniqueConstraint("name", new [] {"schema_id", "name"})]
         public DbSet<Entity> Entities { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")]
-        [UniqueConstraint("Name", new [] {"EntityId", "Name"})]
-        [CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "entity_id=>__main || '.' || name")]
+        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> '' AND name <> 'id' AND name <> 'sub_entity'")]
         public DbSet<ColumnField> ColumnFields { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")]
-        [UniqueConstraint("Name", new [] {"EntityId", "Name"})]
-        [CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> '' AND \"Name\" <> 'Id' AND \"Name\" <> 'SubEntity'")]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "entity_id=>__main || '.' || name")]
+        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> '' AND name <> 'id' AND name <> 'sub_entity'")]
         public DbSet<ComputedField> ComputedFields { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")]
-        [UniqueConstraint("Name", new [] {"EntityId", "Name"})]
-        [CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")]
-        [CheckConstraint("NotEmpty", "\"Columns\" <> ([] :: array(string))")]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "entity_id=>__main || '.' || name")]
+        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
+        [CheckConstraint("not_empty", "columns <> ([] :: array(string))")]
         public DbSet<UniqueConstraint> UniqueConstraints { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"EntityId\"=>\"__main\" || '.' || \"Name\"")]
-        [UniqueConstraint("Name", new [] {"EntityId", "Name"})]
-        [CheckConstraint("NotReserved", "\"Name\" NOT LIKE '%\\\\_\\\\_%' AND \"Name\" <> ''")]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "entity_id=>__main || '.' || name")]
+        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         public DbSet<CheckConstraint> CheckConstraints { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"Name\"")]
-        [UniqueConstraint("Name", new [] {"SchemaId", "Name"})]
-        [CheckConstraint("NotReserved", "\"Name\" <> ''")]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "schema_id=>__main || '.' || name")]
+        [UniqueConstraint("name", new [] {"schema_id", "name"})]
+        [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<UserView> UserViews { get; set; }
 
-        [Entity("Name")]
-        [UniqueConstraint("Name", new [] {"Name"})]
-        [CheckConstraint("NotReserved", "\"Name\" <> ''")]
+        [Entity("name")]
+        [UniqueConstraint("name", new [] {"name"})]
+        [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<User> Users { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"Name\"")]
-        [UniqueConstraint("Name", new [] {"SchemaId", "Name"})]
-        [CheckConstraint("NotReserved", "\"Name\" <> ''")]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "schema_id=>__main || '.' || name")]
+        [UniqueConstraint("name", new [] {"schema_id", "name"})]
+        [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<Role> Roles { get; set; }
 
-        [Entity("Id", ForbidExternalReferences=true)]
-        [UniqueConstraint("Role", new [] {"RoleId", "ParentId"})]
+        [Entity("id", ForbidExternalReferences=true)]
+        [UniqueConstraint("role", new [] {"role_id", "parent_id"})]
         public DbSet<RoleParent> RoleParents { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"RoleId\"=>\"__main\" || '.' || \"EntityId\"=>\"__main\"")]
-        [UniqueConstraint("Entry", new [] {"RoleId", "EntityId"})]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "role_id=>__main || '.' || entity_id=>__main")]
+        [UniqueConstraint("entry", new [] {"role_id", "entity_id"})]
         public DbSet<RoleEntity> RoleEntities { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"RoleEntityId\"=>\"__main\" || '.' || \"ColumnName\"")]
-        [UniqueConstraint("Entry", new [] {"RoleEntityId", "ColumnName"})]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "role_entity_id=>__main || '.' || column_name")]
+        [UniqueConstraint("entry", new [] {"role_entity_id", "column_name"})]
         public DbSet<RoleColumnField> RoleColumnFields { get; set; }
 
-        [Entity("FullName", ForbidExternalReferences=true)]
-        [ComputedField("FullName", "\"SchemaId\"=>\"__main\" || '.' || \"FieldEntityId\"=>\"__main\" || '.' || \"FieldName\"")]
-        [UniqueConstraint("Entry", new [] {"SchemaId", "FieldEntityId", "FieldName"})]
+        [Entity("full_name", ForbidExternalReferences=true)]
+        [ComputedField("full_name", "schema_id=>__main || '.' || field_entity_id=>__main || '.' || field_name")]
+        [UniqueConstraint("entry", new [] {"schema_id", "field_entity_id", "field_name"})]
         public DbSet<FieldAttributes> FieldsAttributes { get; set; }
 
-        [Entity("Id")]
+        [Entity("id")]
         public DbSet<EventEntry> Events { get; set; }
 
         public SystemContext()
@@ -109,6 +110,50 @@ namespace FunWithFlags.FunDBSchema.Schema
             modelBuilder.Entity<RoleParent>()
                 .HasOne(roleParent => roleParent.Parent)
                 .WithMany(role => role.Children);
+            
+            foreach (var table in modelBuilder.Model.GetEntityTypes())
+            {
+                table.SetTableName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(table.GetTableName()));
+                foreach (var property in table.GetProperties())
+                {
+                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName()));
+                }
+            }
+        }
+
+        private static IQueryable<Schema> IncludeFieldsObjects(IQueryable<Schema> schemas)
+        {
+            return schemas
+                .Include(sch => sch.Entities).ThenInclude(ent => ent.ColumnFields);
+        }
+
+        public IQueryable<Schema> GetLayoutObjects()
+        {
+            return IncludeFieldsObjects(this.Schemas)
+                .Include(sch => sch.Entities).ThenInclude(ent => ent.ComputedFields)
+                .Include(sch => sch.Entities).ThenInclude(ent => ent.UniqueConstraints)
+                .Include(sch => sch.Entities).ThenInclude(ent => ent.CheckConstraints)
+                .Include(sch => sch.Entities).ThenInclude(ent => ent.Parent).ThenInclude(ent => ent.Schema);
+        }
+
+        public IQueryable<Schema> GetRolesObjects()
+        {
+            return IncludeFieldsObjects(this.Schemas)
+                .Include(sch => sch.Roles).ThenInclude(role => role.Parents).ThenInclude(roleParent => roleParent.Parent).ThenInclude(role => role.Schema)
+                .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.Entity).ThenInclude(ent => ent.Schema)
+                .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.ColumnFields);
+        }
+
+        public IQueryable<Schema> GetAttributesObjects()
+        {
+            return IncludeFieldsObjects(this.Schemas)
+                .Include(sch => sch.FieldsAttributes).ThenInclude(attr => attr.FieldEntity).ThenInclude(ent => ent.Schema);
+        }
+
+        public IQueryable<Schema> GetUserViewsObjects()
+        {
+            return this.Schemas
+                .Include(sch => sch.UserViews);
         }
     }
 
@@ -142,10 +187,10 @@ namespace FunWithFlags.FunDBSchema.Schema
         [ColumnField("string", Immutable=true)]
         [Required]
         public string Name { get; set; }
-        [ColumnField("reference(\"public\".\"Schemas\")", Immutable=true)]
+        [ColumnField("reference(public.schemas)", Immutable=true)]
         public int SchemaId { get; set; }
         public Schema Schema { get; set; }
-        [ColumnField("string", Nullable=true)]
+        [ColumnField("string")]
         public string MainField { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool ForbidExternalReferences { get; set; }
@@ -153,7 +198,7 @@ namespace FunWithFlags.FunDBSchema.Schema
         public bool Hidden { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool IsAbstract { get; set; }
-        [ColumnField("reference(\"public\".\"Entities\")", Nullable=true, Immutable=true)]
+        [ColumnField("reference(public.entities)", Immutable=true)]
         public int? ParentId { get; set; }
         public Entity Parent { get; set; }
 
@@ -169,14 +214,14 @@ namespace FunWithFlags.FunDBSchema.Schema
         [ColumnField("string", Immutable=true)]
         [Required]
         public string Name { get; set; }
-        [ColumnField("reference(\"public\".\"Entities\")", Immutable=true)]
+        [ColumnField("reference(public.entities)", Immutable=true)]
         public int EntityId { get; set; }
         public Entity Entity { get; set; }
 
         [ColumnField("string")]
         [Required]
         public string Type { get; set; }
-        [ColumnField("string", Nullable=true)]
+        [ColumnField("string")]
         public string Default { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool Nullable { get; set; }
@@ -190,9 +235,11 @@ namespace FunWithFlags.FunDBSchema.Schema
         [ColumnField("string", Immutable=true)]
         [Required]
         public string Name { get; set; }
-        [ColumnField("reference(\"public\".\"Entities\")", Immutable=true)]
+        [ColumnField("reference(public.entities)", Immutable=true)]
         public int EntityId { get; set; }
         public Entity Entity { get; set; }
+        [ColumnField("bool", Default="FALSE")]
+        public bool AllowBroken { get; set; }
 
         [ColumnField("string")]
         [Required]
@@ -205,7 +252,7 @@ namespace FunWithFlags.FunDBSchema.Schema
         [ColumnField("string")]
         [Required]
         public string Name { get; set; }
-        [ColumnField("reference(\"public\".\"Entities\")")]
+        [ColumnField("reference(public.entities)")]
         public int EntityId { get; set; }
         public Entity Entity { get; set; }
         // Order is important here
@@ -221,7 +268,7 @@ namespace FunWithFlags.FunDBSchema.Schema
         [ColumnField("string")]
         [Required]
         public string Name { get; set; }
-        [ColumnField("reference(\"public\".\"Entities\")")]
+        [ColumnField("reference(public.entities)")]
         public int EntityId { get; set; }
         public Entity Entity { get; set; }
         [ColumnField("string")]
@@ -232,7 +279,7 @@ namespace FunWithFlags.FunDBSchema.Schema
     public class UserView
     {
         public int Id { get; set; }
-        [ColumnField("reference(\"public\".\"Schemas\")")]
+        [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema Schema { get; set; }
         [ColumnField("string")]
@@ -253,7 +300,7 @@ namespace FunWithFlags.FunDBSchema.Schema
         public string Name { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool IsRoot { get; set; }
-        [ColumnField("reference(\"public\".\"Roles\")", Nullable=true)]
+        [ColumnField("reference(public.roles)")]
         public int? RoleId { get; set; }
         public Role Role { get; set; }
     }
@@ -261,7 +308,7 @@ namespace FunWithFlags.FunDBSchema.Schema
     public class Role
     {
         public int Id { get; set; }
-        [ColumnField("reference(\"public\".\"Schemas\")")]
+        [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema Schema { get; set; }
         [ColumnField("string")]
@@ -278,10 +325,10 @@ namespace FunWithFlags.FunDBSchema.Schema
     public class RoleParent
     {
         public int Id { get; set; }
-        [ColumnField("reference(\"public\".\"Roles\")")]
+        [ColumnField("reference(public.roles)")]
         public int RoleId { get; set; }
         public Role Role { get; set; }
-        [ColumnField("reference(\"public\".\"Roles\")")]
+        [ColumnField("reference(public.roles)")]
         public int ParentId { get; set; }
         public Role Parent { get; set; }
     }
@@ -289,23 +336,23 @@ namespace FunWithFlags.FunDBSchema.Schema
     public class RoleEntity
     {
         public int Id { get; set; }
-        [ColumnField("reference(\"public\".\"Roles\")")]
+        [ColumnField("reference(public.roles)")]
         public int RoleId { get; set; }
         public Role Role { get; set; }
-        [ColumnField("reference(\"public\".\"Entities\")")]
+        [ColumnField("reference(public.entities)")]
         public int EntityId { get; set; }
         public Entity Entity { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool AllowBroken { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool Insert { get; set; }
-        [ColumnField("string", Nullable=true)]
+        [ColumnField("string")]
         public string Check { get; set; }
-        [ColumnField("string", Nullable=true)]
+        [ColumnField("string")]
         public string Select { get; set; }
-        [ColumnField("string", Nullable=true)]
+        [ColumnField("string")]
         public string Update { get; set; }
-        [ColumnField("string", Nullable=true)]
+        [ColumnField("string")]
         public string Delete { get; set; }
 
         public List<RoleColumnField> ColumnFields { get; set; }
@@ -314,7 +361,7 @@ namespace FunWithFlags.FunDBSchema.Schema
     public class RoleColumnField
     {
         public int Id { get; set; }
-        [ColumnField("reference(\"public\".\"RoleEntities\")")]
+        [ColumnField("reference(public.role_entities)")]
         public int RoleEntityId { get; set; }
         public RoleEntity RoleEntity { get; set; }
         // FIXME: Make this ColumnField relation when we implement reference constraints.
@@ -323,17 +370,17 @@ namespace FunWithFlags.FunDBSchema.Schema
         public string ColumnName { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool Change { get; set; }
-        [ColumnField("string", Nullable=true)]
+        [ColumnField("string")]
         public string Select { get; set; }
     }
 
     public class FieldAttributes
     {
         public int Id { get; set; }
-        [ColumnField("reference(\"public\".\"Schemas\")")]
+        [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema Schema { get; set; }
-        [ColumnField("reference(\"public\".\"Entities\")")]
+        [ColumnField("reference(public.entities)")]
         public int FieldEntityId { get; set; }
         public Entity FieldEntity { get; set; }
         [ColumnField("string")]
@@ -358,15 +405,15 @@ namespace FunWithFlags.FunDBSchema.Schema
         [ColumnField("string", Immutable=true)]
         [Required]
         public string Type { get; set; }
-        [ColumnField("string", Nullable=true, Immutable=true)]
+        [ColumnField("string", Immutable=true)]
         public string UserName { get; set; }
-        [ColumnField("string", Nullable=true, Immutable=true)]
+        [ColumnField("string", Immutable=true)]
         public string SchemaName { get; set; }
-        [ColumnField("string", Nullable=true, Immutable=true)]
+        [ColumnField("string", Immutable=true)]
         public string EntityName { get; set; }
-        [ColumnField("int", Nullable=true, Immutable=true)]
+        [ColumnField("int", Immutable=true)]
         public int? EntityId { get; set; }
-        [ColumnField("string", Nullable=true, Immutable=true)]
+        [ColumnField("string", Immutable=true)]
         public string Error { get; set; }
         [ColumnField("string", Immutable=true)]
         [Required]

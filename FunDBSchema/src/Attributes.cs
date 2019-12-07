@@ -58,7 +58,6 @@ namespace FunWithFlags.FunDBSchema.Attributes
     public class ColumnFieldAttribute : Attribute
     {
         public string Type { get; }
-        public bool Nullable { get; set; }
         public bool Immutable { get; set; }
         public string Default { get; set; }
 

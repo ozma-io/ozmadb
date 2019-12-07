@@ -20,11 +20,7 @@ type SerializedColumnField =
 [<NoComparison>]
 type SerializedComputedField =
     { expression : string
-      // Set when there's no dereferences in the expression
-      isLocal : bool
-      // Set when computed field uses Id
-      hasId : bool
-      usedSchemas : UsedSchemas
+      allowBroken : bool
       inheritedFrom : ResolvedEntityRef option
     }
 
@@ -62,10 +58,14 @@ type SerializedLayout =
 
 let serializeComputedField (comp : ResolvedComputedField) : SerializedComputedField =
     { expression = comp.expression.ToFunQLString()
-      isLocal = comp.isLocal
-      hasId = comp.hasId
-      usedSchemas = comp.usedSchemas
       inheritedFrom = comp.inheritedFrom
+      allowBroken = comp.allowBroken
+    }
+
+let serializeComputedFieldError (comp : ComputedFieldError) : SerializedComputedField =
+    { expression = comp.source.expression
+      inheritedFrom = comp.inheritedFrom
+      allowBroken = comp.source.allowBroken
     }
 
 let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField =
@@ -78,8 +78,11 @@ let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField 
     }
 
 let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
+    let mapComputed name = function
+        | Ok f -> serializeComputedField f
+        | Error e -> serializeComputedFieldError e
     { columnFields = Map.map (fun name col -> serializeColumnField col) entity.columnFields
-      computedFields = Map.map (fun name comp -> serializeComputedField comp) entity.computedFields
+      computedFields = Map.map mapComputed entity.computedFields
       uniqueConstraints = Map.map (fun name constr -> renderUniqueConstraint constr) entity.uniqueConstraints
       checkConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
       mainField = entity.mainField

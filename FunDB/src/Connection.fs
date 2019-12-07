@@ -8,7 +8,7 @@ open Npgsql
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.SQL.Query
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
@@ -36,6 +36,9 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
     do
         system.ChangeTracker.QueryTrackingBehavior <- QueryTrackingBehavior.NoTracking
         ignore <| system.Database.UseTransaction(transaction)
+
+        use command = new NpgsqlCommand("SET CONSTRAINTS ALL DEFERRED", conn.Connection)
+        ignore <| command.ExecuteNonQuery()
 
     interface IDisposable with
         member this.Dispose () = this.Rollback ()

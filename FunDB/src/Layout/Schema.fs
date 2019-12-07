@@ -5,10 +5,9 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 type SchemaLayoutException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -27,6 +26,7 @@ let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
 
 let private makeSourceComputedField (field : ComputedField) : SourceComputedField =
     { expression = field.Expression
+      allowBroken = field.AllowBroken
     }
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraint) : SourceUniqueConstraint =
@@ -61,7 +61,7 @@ let private makeSourceSchema (schema : Schema) : SourceSchema =
 
 let buildSchemaLayout (db : SystemContext) : Task<SourceLayout> =
     task {
-        let currentSchemas = getLayoutObjects db.Schemas
+        let currentSchemas = db.GetLayoutObjects ()
         let! schemas = currentSchemas.ToListAsync()
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
 

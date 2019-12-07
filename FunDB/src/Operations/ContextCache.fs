@@ -10,7 +10,7 @@ open FluidCaching
 open Npgsql
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
@@ -36,9 +36,11 @@ open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 module SQL = FunWithFlags.FunDB.SQL.AST
+module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.EventLogger
+open FunWithFlags.FunDBSchema.System
 
 type ContextException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -237,7 +239,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
         // Clear prepared statements so that things don't break if e.g. database types have changed.
         transaction1.Connection.Connection.UnprepareAll ()
         let! sourceLayout = buildSchemaLayout transaction1.System
-        let layout = resolveLayout sourceLayout
+        let (_, layout) = resolveLayout sourceLayout false
 
         let! sourceAttrs = buildSchemaAttributes transaction1.System
         let (_, defaultAttrs) = resolveAttributes layout false sourceAttrs
@@ -311,9 +313,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                 let! layoutSource = buildSchemaLayout newTransaction.System
                 if not <| preloadLayoutIsUnchanged layoutSource preload then
                     raisef ContextException "Cannot modify system layout"
-                let layout =
+                let (_, layout) =
                     try
-                        resolveLayout layoutSource
+                        resolveLayout layoutSource false
                     with
                     | :? ResolveLayoutException as err -> raisefWithInner ContextException err "Failed to resolve layout"
 

@@ -74,6 +74,9 @@ module Option =
         | (None, Some v) -> Some v
         | (Some v1, Some v2) -> Some (f v1 v2)
 
+    let unionUnique (a : 'a option) (b : 'a option) : 'a option =
+        unionWith (fun v1 v2 -> failwith "Value exists in both") a b
+
 module Result =
     let isOk : Result<'a, 'e> -> bool = function
         | Ok _ -> true

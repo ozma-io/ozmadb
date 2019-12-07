@@ -2,35 +2,35 @@
 
 var commonViews = {
     // Internal APIs
-    "Settings":
+    "settings":
         "SELECT\n" +
-        "  \"Name\",\n" +
-        "  \"Value\"\n" +
+        "  name,\n" +
+        "  value\n" +
         "FROM\n" +
-        "  \"funapp\".\"Settings\"",
+        "  funapp.settings",
     // Public APIs
-    "SystemMenu":
+    "system_menu":
         "SELECT\n" +
         "  @\"Type\" = 'Menu',\n" +
-        "  \"Schemas\".\"Name\" AS \"CategoryName\",\n" +
-        "  \"Entities\".\"Name\" AS \"Name\" @{ \"LinkedView\" = { schema: 'funapp', name: 'Table-' || \"Schemas\".\"Name\" || '-' || \"Entities\".\"Name\" } }\n" +
+        "  schemas.name AS category_name,\n" +
+        "  entities.name AS name @{ \"LinkedView\" = { schema: 'funapp', name: 'table-' || schemas.name || '-' || entities.name } }\n" +
         "FROM\n" +
-        "  \"public\".\"Entities\"\n" +
-        "  LEFT JOIN \"public\".\"Schemas\" ON \"Schemas\".\"Id\" = \"Entities\".\"SchemaId\"\n" +
-        "WHERE NOT \"Entities\".\"Hidden\"\n" +
-        "ORDER BY \"Entities\".\"Id\"",
-    "UserViewByName":
+        "  public.entities\n" +
+        "  LEFT JOIN public.schemas ON schemas.id = entities.schema_id\n" +
+        "WHERE NOT entities.hidden\n" +
+        "ORDER BY entities.id",
+    "user_view_by_name":
         "{ $schema string, $name string }:\n" +
         "SELECT\n" +
         "  @\"Type\" = 'Form',\n" +
-        "  \"SchemaId\",\n" +
-        "  \"Name\",\n" +
-        "  \"AllowBroken\",\n" +
-        "  \"Query\" @{ \"TextType\" = 'codeeditor' }\n" +
+        "  schema_id,\n" +
+        "  name,\n" +
+        "  allow_broken,\n" +
+        "  query @{ \"TextType\" = 'codeeditor' }\n" +
         "FROM\n" +
-        "  \"public\".\"UserViews\"\n" +
-        "WHERE \"SchemaId\"=>\"Name\" = $schema AND \"Name\" = $name\n" +
-        "FOR INSERT INTO \"public\".\"UserViews\""
+        "  public.user_views\n" +
+        "WHERE schema_id=>name = $schema AND name = $name\n" +
+        "FOR INSERT INTO public.user_views"
 };
 
 function addDefaultViews(views, layout) {
@@ -44,7 +44,7 @@ function addDefaultViews(views, layout) {
             var sqlName = renderSqlName(schemaName) + "." + renderSqlName(entityName);
             var fields = [];
             if (entity.children.length > 0) {
-                fields.push(renderSqlName("SubEntity"))
+                fields.push(renderSqlName("sub_entity"))
             }
             for (var columnField in entity.columnFields) {
                 fields.push(renderSqlName(columnField));
@@ -53,24 +53,24 @@ function addDefaultViews(views, layout) {
                 fields.push(renderSqlName(computedField));
             }
 
-            var formName = "Form-" + schemaName + "-" + entityName;
+            var formName = "form-" + schemaName + "-" + entityName;
             var formQuery =
                 "{ $id reference(" + sqlName + ") }:\n\n" +
                 "SELECT\n  " +
                 ["@\"Type\" = 'Form'"].concat(fields).join(",\n  ") +
                 "\nFROM " + sqlName + " " +
-                "WHERE \"Id\" = $id" +
+                "WHERE id = $id" +
                 "\nFOR INSERT INTO " + sqlName;
             views[formName] = formQuery;
 
-            var tableName = "Table-" + schemaName + "-" + entityName;
+            var tableName = "table-" + schemaName + "-" + entityName;
             var tableQuery =
                 "SELECT\n  " +
                 [ "@\"CreateView\" = &\"" + formName + "\"",
-                  "\"Id\" @{ \"RowLinkedView\" = &\"" + formName + "\" }"
+                  "id @{ \"RowLinkedView\" = &\"" + formName + "\" }"
                 ].concat(fields).join(",\n  ") +
                 "\nFROM " + sqlName +
-                "\nORDER BY \"Id\"\n" +
+                "\nORDER BY id\n" +
                 "FOR INSERT INTO " + sqlName;
             views[tableName] = tableQuery;
         }

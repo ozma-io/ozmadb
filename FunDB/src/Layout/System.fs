@@ -2,8 +2,10 @@ module FunWithFlags.FunDB.Layout.System
 
 open System
 open System.Reflection
+open System.ComponentModel.DataAnnotations
 
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDBSchema.Attributes
@@ -14,19 +16,24 @@ let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * Sourc
     if property.DeclaringType <> property.ReflectedType || isNull field
     then None
     else
+        let name = FunQLName (snakeCaseName property.Name)
+        let requiredAttr = Attribute.GetCustomAttribute(property, typeof<RequiredAttribute>) :?> RequiredAttribute
         let res =
             { fieldType = field.Type
               defaultValue =
-                  if field.Default = null
+                  if isNull field.Default
                   then None
                   else Some field.Default
-              isNullable = field.Nullable
+              isNullable = isNull requiredAttr && not property.PropertyType.IsPrimitive
               isImmutable = field.Immutable
             }
-        Some (FunQLName property.Name, res)
+        Some (name, res)
 
 let private makeSourceComputedField (field : ComputedFieldAttribute) : FunQLName * SourceComputedField =
-    let res = { expression = field.Expression }
+    let res =
+        { expression = field.Expression
+          allowBroken = false
+        }
     (FunQLName field.Name, res)
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraintAttribute) : FunQLName * SourceUniqueConstraint =
@@ -45,6 +52,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
     if isNull entityAttr
     then None
     else
+        let name = FunQLName (snakeCaseName prop.Name)
         // Should be DbSet<Foo>
         let entityClass = prop.PropertyType.GetGenericArguments().[0]
         let columnFields = entityClass.GetProperties() |> Seq.mapMaybe makeSourceColumnField |> Map.ofSeq
@@ -63,7 +71,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               parent = None
               isAbstract = entityClass.IsAbstract
             }
-        Some (FunQLName prop.Name, entityClass, res)
+        Some (name, entityClass, res)
 
 // Build entities map using mish-mash of our custom attributes and Entity Framework Core declarations.
 let buildSystemSchema (contextClass : Type) : SourceSchema =

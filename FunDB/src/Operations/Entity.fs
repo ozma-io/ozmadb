@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Entity
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
+module SQL = FunWithFlags.FunDB.SQL.DDL
 
 type EntityExecutionException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)

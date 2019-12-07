@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.Permissions.Update
 
 open System.Collections.Generic
 open System.Threading.Tasks
-open Microsoft.EntityFrameworkCore
+open Microsoft.EntityFrameworkCore;
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
@@ -11,7 +11,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Layout.Update
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
@@ -97,7 +97,7 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) : Task<bo
     task {
         let! _ = db.SaveChangesAsync()
 
-        let currentSchemas = db.Schemas |> getFieldsObjects |> getRolesObjects
+        let currentSchemas = db.GetRolesObjects ()
 
         let! allSchemas = currentSchemas.AsTracking().ToListAsync()
         // We don't touch in any way schemas not in layout.
@@ -115,7 +115,7 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) : Task<bo
 
 let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) : Task<unit> =
     task {
-        let currentSchemas = db.Schemas |> getFieldsObjects |> getRolesObjects
+        let currentSchemas = db.GetRolesObjects ()
 
         let! schemas = currentSchemas.AsTracking().ToListAsync()
 

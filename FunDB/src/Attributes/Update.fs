@@ -1,6 +1,5 @@
 module FunWithFlags.FunDB.Attributes.Update
 
-open System.Linq
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -11,7 +10,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Layout.Update
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
@@ -57,7 +56,7 @@ let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) : Ta
     task {
         let! _ = db.SaveChangesAsync()
 
-        let currentSchemas = db.Schemas |> getFieldsObjects |> getAttributesObjects
+        let currentSchemas = db.GetAttributesObjects ()
 
         let! allSchemas = currentSchemas.AsTracking().ToListAsync()
         // We don't touch in any way schemas not in layout.
@@ -75,7 +74,7 @@ let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) : Ta
 
 let markBrokenAttributes (db : SystemContext) (attrs : ErroredDefaultAttributes) : Task<unit> =
     task {
-        let currentSchemas = db.Schemas |> getFieldsObjects |> getAttributesObjects
+        let currentSchemas = db.GetAttributesObjects ()
 
         let! schemas = currentSchemas.AsTracking().ToListAsync()
 

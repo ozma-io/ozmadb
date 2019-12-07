@@ -4,6 +4,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Utils
+open FunWithFlags.FunDB.Layout.Source
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ReferenceRef =
@@ -61,6 +62,7 @@ type ResolvedComputedField =
       hasId : bool
       usedSchemas : UsedSchemas
       inheritedFrom : ResolvedEntityRef option
+      allowBroken : bool
     }
 
 [<NoComparison>]
@@ -79,7 +81,14 @@ type GenericResolvedField<'col, 'comp> =
 [<NoComparison>]
 type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedField>
 
-let inline genericFindField (columnFields : Map<FieldName, 'col>) (computedFields : Map<FieldName, 'comp>) (mainField : FieldName) =
+[<NoComparison>]
+type ComputedFieldError =
+    { source : SourceComputedField
+      inheritedFrom : ResolvedEntityRef option
+      error : exn
+    }
+
+let inline genericFindField (getColumnField : FieldName -> 'col option) (getComputedField : FieldName -> 'comp option) (mainField : FieldName) =
     let rec traverse (name : FieldName) =
         if name = funId then
             Some (funId, RId)
@@ -88,10 +97,10 @@ let inline genericFindField (columnFields : Map<FieldName, 'col>) (computedField
         else if name = funMain then
             traverse mainField
         else
-            match Map.tryFind name columnFields with
+            match getColumnField name with
             | Some col -> Some (name, RColumnField col)
             | None ->
-                match Map.tryFind name computedFields with
+                match getComputedField name with
                 | Some comp -> Some (name, RComputedField comp)
                 | None -> None
     traverse
@@ -115,7 +124,7 @@ let hasSubType (entity : IEntityFields) =
 [<NoComparison>]
 type ResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
-      computedFields : Map<FieldName, ResolvedComputedField>
+      computedFields : Map<FieldName, Result<ResolvedComputedField, ComputedFieldError>>
       uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
       checkConstraints : Map<ConstraintName, ResolvedCheckConstraint>
       mainField : FieldName
@@ -130,7 +139,7 @@ type ResolvedEntity =
       root : ResolvedEntityRef
     } with
         member this.FindField (name : FieldName) =
-            genericFindField this.columnFields this.computedFields this.mainField name
+            genericFindField (fun name -> Map.tryFind name this.columnFields) (fun name -> Map.tryFind name this.computedFields |> Option.bind Result.getOption) this.mainField name
         member this.Fields =
             let id = Seq.singleton (funId, RId)
             let subentity =
@@ -139,7 +148,10 @@ type ResolvedEntity =
                 else
                     Seq.empty
             let columns = this.columnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
-            let computed = this.computedFields |> Map.toSeq |> Seq.map (fun (name, comp) -> (name, RComputedField comp))
+            let getComputed = function
+            | (name, Error e) -> None
+            | (name, Ok comp) -> Some (name, RComputedField comp)
+            let computed = this.computedFields |> Map.toSeq |> Seq.mapMaybe getComputed
             Seq.concat [id; subentity; columns; computed]
 
         interface IEntityFields with
@@ -195,3 +207,9 @@ let rec checkInheritance (layout : ILayoutFields) (parentRef : ResolvedEntityRef
         match childEntity.Parent with
         | None -> false
         | Some childParentRef -> checkInheritance layout parentRef childParentRef
+
+type ErroredEntity =
+    { computedFields : Map<FieldName, exn>
+    }
+type ErroredSchema = Map<EntityName, ErroredEntity>
+type ErroredLayout = Map<SchemaName, ErroredSchema>

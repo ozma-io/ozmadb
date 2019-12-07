@@ -10,7 +10,7 @@ open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 type private UserViewsUpdater (db : SystemContext) =
     let updateUserView (uv : SourceUserView) (existingUv : UserView) : unit =
@@ -42,7 +42,7 @@ let updateUserViews (db : SystemContext) (uvs : SourceUserViews) : Task<bool> =
     task {
         let! _ = db.SaveChangesAsync()
 
-        let currentSchemas = db.Schemas |> getUserViewsObjects
+        let currentSchemas = db.GetUserViewsObjects ()
 
         // We don't touch in any way schemas not in layout.
         let wantedSchemas = uvs.schemas |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
@@ -59,7 +59,7 @@ let updateUserViews (db : SystemContext) (uvs : SourceUserViews) : Task<bool> =
 
 let markBrokenUserViews (db : SystemContext) (uvs : ErroredUserViews) : Task<unit> =
     task {
-        let currentSchemas = db.Schemas |> getUserViewsObjects
+        let currentSchemas = db.GetUserViewsObjects ()
 
         let wantedSchemas = uvs |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
         let! schemasMap =

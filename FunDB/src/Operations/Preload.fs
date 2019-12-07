@@ -27,7 +27,8 @@ open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Connection
 module SQL = FunWithFlags.FunDB.SQL.AST
-open FunWithFlags.FunDBSchema.Schema
+module SQL = FunWithFlags.FunDB.SQL.DDL
+open FunWithFlags.FunDBSchema.System
 
 type SourcePreloadedSchema =
     { [<JsonProperty(Required=Required.DisallowNull)>]
@@ -162,7 +163,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
     task {
         logger.LogInformation("Migrating system entities to the current version")
         let sourceLayout = preloadLayout preload
-        let layout = resolveLayout sourceLayout
+        let (_, layout) = resolveLayout sourceLayout false
         let newSystemMeta = buildLayoutMeta layout layout
         let! currentMeta = buildDatabaseMeta conn.Transaction
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
@@ -204,7 +205,14 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
                 reraise ()
 
         let! newLayoutSource = buildSchemaLayout conn.System
-        let newLayout = resolveLayout newLayoutSource
+        let (brokenLayout, newLayout) = resolveLayout newLayoutSource true
+
+        for KeyValue(schemaName, schema) in brokenLayout do
+            for KeyValue(entityName, entity) in schema do
+                for KeyValue(compName, err) in entity.computedFields do
+                    logger.LogWarning(err, "Marking computed field {ref} as broken", { entity = { schema = schemaName; name = entityName }; name = compName })
+
+        do! markBrokenLayout conn.System brokenLayout
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
 

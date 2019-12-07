@@ -5,10 +5,9 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 type SchemaRolesException (message : string) =
     inherit Exception(message)
@@ -54,7 +53,7 @@ let private makeSourcePermissionsSchema (schema : Schema) : SourcePermissionsSch
 
 let buildSchemaPermissions (db : SystemContext) : Task<SourcePermissions> =
     task {
-        let currentSchemas = getRolesObjects db.Schemas
+        let currentSchemas = db.GetRolesObjects ()
         let! schemas = currentSchemas.ToListAsync()
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourcePermissionsSchema schema)) |> Map.ofSeqUnique
 

@@ -25,6 +25,7 @@ type SourceColumnField =
 
 type SourceComputedField =
     { expression : string
+      allowBroken : bool
     }
 
 type SourceField =

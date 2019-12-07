@@ -960,13 +960,13 @@ type ArgumentFieldType = FieldType<ResolvedEntityRef, FunQLVoid>
 type ParsedArgument = Argument<EntityRef, LinkedFieldRef>
 type ResolvedArgument = Argument<ResolvedEntityRef, FunQLVoid>
 
-let funId = FunQLName "Id"
-let funSubEntity = FunQLName "SubEntity"
+let funId = FunQLName "id"
+let funSubEntity = FunQLName "sub_entity"
 let funSchema = FunQLName "public"
 let funView = FunQLName "view"
 let funMain = FunQLName "__main"
-let funUsers = FunQLName "Users"
-let funEvents = FunQLName "Events"
+let funUsers = FunQLName "users"
+let funEvents = FunQLName "events"
 
 type UsedFields = Set<FieldName>
 type UsedEntities = Map<EntityName, UsedFields>

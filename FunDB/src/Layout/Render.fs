@@ -15,6 +15,7 @@ let renderUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUniqueCon
 
 let renderComputedField (comp : ResolvedComputedField) : SourceComputedField =
     { expression = comp.expression.ToFunQLString()
+      allowBroken = comp.allowBroken
     }
 
 let renderColumnField (column : ResolvedColumnField) : SourceColumnField =
@@ -25,8 +26,12 @@ let renderColumnField (column : ResolvedColumnField) : SourceColumnField =
     }
 
 let renderEntity (entity : ResolvedEntity) : SourceEntity =
+    let mapComputed name : Result<ResolvedComputedField, ComputedFieldError> -> SourceComputedField option = function
+        | Error { inheritedFrom = None; source = source } -> Some source
+        | Ok ({ inheritedFrom = None } as comp) -> Some (renderComputedField comp)
+        | _ -> None
     { columnFields = Map.mapMaybe (fun name (col : ResolvedColumnField) -> if Option.isNone col.inheritedFrom then Some (renderColumnField col) else None) entity.columnFields
-      computedFields = Map.mapMaybe (fun name comp -> if Option.isNone comp.inheritedFrom then Some (renderComputedField comp) else None) entity.computedFields
+      computedFields = Map.mapMaybe mapComputed entity.computedFields
       uniqueConstraints = Map.map (fun name constr -> renderUniqueConstraint constr) entity.uniqueConstraints
       checkConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
       mainField = entity.mainField

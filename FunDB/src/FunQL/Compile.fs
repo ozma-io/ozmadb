@@ -46,14 +46,14 @@ type ColumnType =
     | CTColumn of FunQLName
 
 let columnName : ColumnType -> SQL.SQLName = function
-    | CTRowAttribute (FunQLName name) -> SQL.SQLName (sprintf "__RowAttribute__%s" name)
-    | CTCellAttribute (FunQLName field, FunQLName name) -> SQL.SQLName (sprintf "__CellAttribute__%s__%s" field name)
-    | CTPunAttribute (FunQLName field) -> SQL.SQLName (sprintf "__Pun__%s" field)
-    | CTDomainColumn id -> SQL.SQLName (sprintf "__Domain__%i" id)
-    | CTIdColumn (FunQLName entity) -> SQL.SQLName (sprintf "__Id__%s" entity)
-    | CTSubEntityColumn (FunQLName entity) -> SQL.SQLName (sprintf "__SubEntity__%s" entity)
-    | CTMainIdColumn -> SQL.SQLName "__MainId"
-    | CTMainSubEntityColumn -> SQL.SQLName "__MainSubEntity"
+    | CTRowAttribute (FunQLName name) -> SQL.SQLName (sprintf "__row_attribute_%s" name)
+    | CTCellAttribute (FunQLName field, FunQLName name) -> SQL.SQLName (sprintf "__cell_attribute_%s_%s" field name)
+    | CTPunAttribute (FunQLName field) -> SQL.SQLName (sprintf "__pun_%s" field)
+    | CTDomainColumn id -> SQL.SQLName (sprintf "__domain_%i" id)
+    | CTIdColumn (FunQLName entity) -> SQL.SQLName (sprintf "__id_%s" entity)
+    | CTSubEntityColumn (FunQLName entity) -> SQL.SQLName (sprintf "__sub_entity_%s" entity)
+    | CTMainIdColumn -> SQL.SQLName "__main_id"
+    | CTMainSubEntityColumn -> SQL.SQLName "__main_sub_entity"
     | CTColumn (FunQLName column) -> SQL.SQLName column
 
 [<NoComparison>]

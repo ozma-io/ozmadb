@@ -8,7 +8,7 @@ open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Connection
 

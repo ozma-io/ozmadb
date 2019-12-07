@@ -5,10 +5,9 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 let private makeSourceUserView (uv : UserView) : SourceUserView =
     { allowBroken = uv.AllowBroken
@@ -21,7 +20,7 @@ let private makeSourceSchema (schema : Schema) : SourceUserViewsSchema =
 
 let buildSchemaUserViews (db : SystemContext) : Task<SourceUserViews> =
     task {
-        let currentSchemas = getUserViewsObjects db.Schemas
+        let currentSchemas = db.GetUserViewsObjects ()
         let! schemas = currentSchemas.ToListAsync()
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
 

@@ -49,6 +49,7 @@ open FunWithFlags.FunDB.SQL.AST
 %token ARRAY
 %token ANY
 %token SOME
+%token ALL
 
 // Misc
 %token EOF
@@ -82,12 +83,13 @@ schemaObject : SchemaObject EOF { $1 }
 // Expressions
 
 ValueExpr:
-  | ValueExpr OR ValueExpr                            { VEOr ($1, $3) }
-  | ValueExpr AND ValueExpr                           { VEAnd ($1, $3) }
-  | NOT ValueExpr                                     { VENot $2 }
-  | ValueExpr EQ ValueExpr                            { VEEq ($1, $3) }
-  | ValueExpr EQ Any LEFT_PAREN ValueExpr RIGHT_PAREN { VEEqAny ($1, $5) }
-  | ValueExprLess                                     { $1 }
+  | ValueExpr OR ValueExpr                                { VEOr ($1, $3) }
+  | ValueExpr AND ValueExpr                               { VEAnd ($1, $3) }
+  | NOT ValueExpr                                         { VENot $2 }
+  | ValueExpr EQ ValueExpr                                { VEEq ($1, $3) }
+  | ValueExpr EQ Any LEFT_PAREN ValueExpr RIGHT_PAREN     { VEEqAny ($1, $5) }
+  | ValueExpr NOT_EQ ALL LEFT_PAREN ValueExpr RIGHT_PAREN { VENotEqAll ($1, $5) }
+  | ValueExprLess                                         { $1 }
 
 ValueExprLess:
   | ValueExprMisc LESS ValueExprMisc             { VELess ($1, $3) }

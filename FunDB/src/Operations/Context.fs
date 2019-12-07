@@ -24,7 +24,7 @@ open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Operations.ContextCache
 open FunWithFlags.FunDB.Operations.SaveRestore
 module SQL = FunWithFlags.FunDB.SQL.AST
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 type UserViewErrorInfo =
     | UVENotFound

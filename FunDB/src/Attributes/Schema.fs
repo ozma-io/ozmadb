@@ -5,10 +5,9 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 let private makeSourceAttributeField (attrs : FieldAttributes) : SourceAttributesField =
     { allowBroken = attrs.AllowBroken
@@ -39,7 +38,7 @@ let private makeSourceAttributesDatabase (schema : Schema) : SourceAttributesDat
 
 let buildSchemaAttributes (db : SystemContext) : Task<SourceDefaultAttributes> =
     task {
-        let currentSchemas = getAttributesObjects db.Schemas
+        let currentSchemas = db.GetAttributesObjects ()
         let! schemas = currentSchemas.ToListAsync()
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceAttributesDatabase schema)) |> Map.ofSeqUnique
 

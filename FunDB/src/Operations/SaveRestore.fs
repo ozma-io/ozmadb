@@ -18,7 +18,7 @@ open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Schema
 open FunWithFlags.FunDB.Attributes.Update
-open FunWithFlags.FunDBSchema.Schema
+open FunWithFlags.FunDBSchema.System
 
 type SaveSchemaErrorInfo =
     | SENotFound

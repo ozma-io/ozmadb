@@ -5,45 +5,45 @@
       "userViewGenerator": "./funapp_migration.js",
 
       "entities": {
-        "Settings": {
+        "settings": {
           "columnFields": {
-            "Name": { "fieldType": "string" },
-            "Value": { "fieldType": "string" }
+            "name": { "fieldType": "string" },
+            "value": { "fieldType": "string" }
           },
           "uniqueConstraints": {
-            "UniqueName": { "columns": [ "Name" ] }
+            "unique_name": { "columns": [ "name" ] }
           },
           "checkConstraints": {
-            "NonEmptyName": { "expression": "\"Name\" <> ''" }
+            "non_empty_name": { "expression": "name <> ''" }
           },
-          "mainField": "Name"
+          "mainField": "name"
         }
       },
 
       "roles": {
-        "Observer": {
+        "observer": {
           "permissions": {
             "schemas": {
 
               "public": {
                 "entities": {
 
-                  "Schemas": {
+                  "schemas": {
                     "select": "true",
                     "fields": {
-                      "Name": {
+                      "name": {
                         "select": "true"
                       }
                     }
                   },
 
-                  "UserViews": {
+                  "user_views": {
                     "select": "true",
                     "fields": {
-                      "SchemaId": {
+                      "schema_id": {
                         "select": "true"
                       },
-                      "Name": {
+                      "name": {
                         "select": "true"
                       }
                     }
@@ -55,13 +55,13 @@
               "funapp": {
                 "entities": {
 
-                  "Settings": {
+                  "settings": {
                     "select": "true",
                     "fields": {
-                      "Name": {
+                      "name": {
                         "select": "true"
                       },
-                      "Value": {
+                      "value": {
                         "select": "true"
                       }
                     }
@@ -78,17 +78,17 @@
       "defaultAttributes": {
         "public": {
           "entities": {
-            "UserViews": {
+            "user_views": {
               "fields": {
-                "Query": {
+                "query": {
                   "attributes": "@{ \"TextType\" = 'codeeditor' }"
                 }
               }
             },
 
-            "FieldsAttributes": {
+            "fields_attributes": {
               "fields": {
-                "Attributes": {
+                "attributes": {
                   "attributes": "@{ \"TextType\" = 'codeeditor' }"
                 }
               }

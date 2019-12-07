@@ -1,7 +1,5 @@
 module FunWithFlags.FunDB.SQL.Meta
 
-open System
-open System.Linq
 open Npgsql
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -12,6 +10,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.SQL.Lex
 open FunWithFlags.FunDB.SQL.Parse
 open FunWithFlags.FunDB.SQL.Array.Lex
@@ -49,9 +48,24 @@ let private makeColumnFromName (schema : string) (table : string) (column : stri
       name = SQLName column
     }
 
-// Convert string-cast and array-cast patterns into actual types so that we reverse lost type information.
+let private runCast castFunc str =
+    match castFunc str with
+    | Some v -> v
+    | None -> raisef SQLMetaException "Cannot cast scalar value: %s" str
+
+let private parseToSimpleType : SimpleType -> (string -> Value) = function
+    | STString -> VString
+    | STInt -> runCast tryIntInvariant >> VInt
+    | STDecimal -> runCast tryDecimalInvariant >> VDecimal
+    | STBool -> runCast tryBool >> VBool
+    | STDateTime -> runCast tryDateTimeOffsetInvariant >> VDateTime
+    | STDate -> runCast tryDateInvariant >> VDate
+    | STRegclass -> runCast tryRegclass >> VRegclass
+    | STJson -> runCast tryJson >> VJson
+
+// Convert string-cast patterns into actual values so that we reverse lost type information.
 // Don't reduce the expressions beyond that!
-let normalizeLocalExpr : ValueExpr -> ValueExpr =
+let private castLocalExpr : ValueExpr -> ValueExpr =
     let omitArrayCast (valType : SimpleType) (value : ValueExpr) (typ : DBValueType) =
         match typ with
         | VTArray scalarType ->
@@ -62,38 +76,15 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
     let rec traverse = function
         | VECast (v, typ) ->
             match traverse v with
-            | VEValue (VStringArray arr) as value -> omitArrayCast STString value typ
-            | VEValue (VIntArray arr) as value -> omitArrayCast STInt value typ
-            | VEValue (VDecimalArray arr) as value -> omitArrayCast STDecimal value typ
-            | VEValue (VBoolArray arr) as value -> omitArrayCast STBool value typ
-            | VEValue (VDateTimeArray arr) as value -> omitArrayCast STDateTime value typ
-            | VEValue (VDateArray arr) as value -> omitArrayCast STDate value typ
-            | VEValue (VRegclassArray arr) as value -> omitArrayCast STRegclass value typ
-            | VEValue (VJsonArray arr) as value -> omitArrayCast STJson value typ
-
             | VEValue (VString str) as value ->
                 match typ with
                 | VTArray scalarType ->
                     match parse tokenizeArray stringArray str with
                     | Error msg -> raisef SQLMetaException "Cannot parse array: %s" msg
                     | Ok array ->
-                        let runArrayCast (castFunc : string -> 'a option) : ValueArray<'a> =
-                            let runCast (str : string) =
-                                match castFunc str with
-                                | Some v -> v
-                                | None -> raisef SQLMetaException "Cannot cast array value to type %O: %s" scalarType str
-                            mapValueArray runCast array
-
                         match findSimpleType scalarType with
-                        | None -> VECast (value, typ)
-                        | Some STString -> VEValue <| VStringArray array
-                        | Some STInt -> VEValue (VIntArray <| runArrayCast tryIntInvariant)
-                        | Some STDecimal -> VEValue (VDecimalArray <| runArrayCast tryDecimalInvariant)
-                        | Some STBool -> VEValue (VBoolArray <| runArrayCast tryBool)
-                        | Some STDateTime -> VEValue (VDateTimeArray <| runArrayCast tryDateTimeOffsetInvariant)
-                        | Some STDate -> VEValue (VDateArray <| runArrayCast tryDateInvariant)
-                        | Some STRegclass -> VEValue (VRegclassArray <| runArrayCast tryRegclass)
-                        | Some STJson -> VEValue (VJsonArray <| runArrayCast tryJson)
+                        | None -> VECast (normalizeArray VString array, typ)
+                        | Some typ -> normalizeArray (parseToSimpleType typ) array
                 | VTScalar scalarType ->
                     let runCast castFunc =
                         match castFunc str with
@@ -102,18 +93,7 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
 
                     match findSimpleType scalarType with
                     | None -> VECast (value, typ)
-                    | Some STString -> VEValue (VString str)
-                    | Some STInt -> VEValue (VInt <| runCast tryIntInvariant)
-                    | Some STDecimal -> VEValue (VDecimal <| runCast tryDecimalInvariant)
-                    | Some STBool -> VEValue (VBool <| runCast tryBool)
-                    | Some STDateTime -> VEValue (VDateTime <| runCast tryDateTimeOffsetInvariant)
-                    | Some STDate -> VEValue (VDate <| runCast tryDateInvariant)
-                    | Some STRegclass -> VEValue (VRegclass <| runCast tryRegclass)
-                    | Some STJson -> VEValue (VJson <| runCast tryJson)
-            | VEValue v as value ->
-                match findSimpleValueType typ with
-                | Some styp when valueSimpleType v = Some styp -> VEValue v
-                | _ -> VECast (value, typ)
+                    | Some typ -> VEValue (parseToSimpleType typ str)
             | value -> VECast (value, typ)
         | VEValue _ as node -> node
         | VEColumn ({ table = None } as c) -> VEColumn c
@@ -124,25 +104,9 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
         | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
         | VEEq (a, b) -> VEEq (traverse a, traverse b)
-        | VEEqAny (e, arr) ->
-            let newE = traverse e
-            let rec expandArrayValue (expandOne : 'a -> Value) = function
-                | AVValue v -> VEValue (expandOne v)
-                | AVArray vals -> VEArray (Array.map (expandArrayValue expandOne) vals)
-                | AVNull -> VEValue VNull
-            let buildIn (expandOne : 'a -> Value) (arr : ArrayValue<'a>[]) =
-                VEIn (e, Array.map (expandArrayValue expandOne) arr)
-            match traverse arr with
-            | VEValue (VStringArray arr) -> buildIn VString arr
-            | VEValue (VIntArray arr) -> buildIn VInt arr
-            | VEValue (VDecimalArray arr) -> buildIn VDecimal arr
-            | VEValue (VBoolArray arr) -> buildIn VBool arr
-            | VEValue (VDateTimeArray arr) -> buildIn VDateTime arr
-            | VEValue (VDateArray arr) -> buildIn VDate arr
-            | VEValue (VRegclassArray arr) -> buildIn VRegclass arr
-            | VEValue (VJsonArray arr) -> buildIn VJson arr
-            | newArr -> VEEqAny (newE, newArr)
+        | VEEqAny (e, arr) -> VEEqAny (traverse e, traverse arr)
         | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
+        | VENotEqAll (e, arr) -> VENotEqAll (traverse e, traverse arr)
         | VELike (e, pat) -> VELike (traverse e, traverse pat)
         | VENotLike (e, pat) -> VENotLike (traverse e, traverse pat)
         | VEIsNull e -> VEIsNull (traverse e)
@@ -161,42 +125,13 @@ let normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VECoalesce vals -> VECoalesce (Array.map traverse vals)
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
-        | VEArray vals ->
-            let newVals = Array.map traverse vals
-            let tryValue = function
-                | VEValue (VString v) -> Some (v :> obj, STString)
-                | VEValue (VInt v) -> Some (v :> obj, STInt)
-                | VEValue (VDecimal v) -> Some (v :> obj, STDecimal)
-                | VEValue (VBool v) -> Some (v :> obj, STBool)
-                | VEValue (VDateTime v) -> Some (v :> obj, STDateTime)
-                | VEValue (VDate v) -> Some (v :> obj, STDate)
-                | VEValue (VRegclass v) -> Some (v :> obj, STRegclass)
-                | VEValue (VJson v) -> Some (v :> obj, STJson)
-                | _ -> None
-            match Seq.traverseOption tryValue newVals |> Option.map Seq.toArray with
-            | None -> VEArray newVals
-            | Some conVals when Array.isEmpty conVals -> VEValue (VStringArray [||])
-            | Some conVals ->
-                let (_, firstType) = conVals.[0]
-                if Array.forall (fun (_, typ) -> typ = firstType) conVals then
-                    let makeArray constr castFunc = VEValue <| constr (Array.map (fun (v, typ) -> AVValue (castFunc v)) conVals)
-                    match firstType with
-                    | STString -> makeArray VStringArray (fun x -> x :?> string)
-                    | STInt -> makeArray VIntArray (fun x -> x :?> int)
-                    | STDecimal -> makeArray VDecimalArray (fun x -> x :?> decimal)
-                    | STBool -> makeArray VBoolArray (fun x -> x :?> bool)
-                    | STDateTime -> makeArray VDateTimeArray (fun x -> x :?> DateTimeOffset)
-                    | STDate -> makeArray VDateArray (fun x -> x :?> DateTimeOffset)
-                    | STRegclass -> makeArray VRegclassArray (fun x -> x :?> SchemaObject)
-                    | STJson -> makeArray VJsonArray (fun x -> x :?> JToken)
-                else
-                    VEArray newVals
+        | VEArray vals -> VEArray (Array.map traverse vals)
         | VESubquery query -> raisef SQLMetaException "Invalid subquery in local expression: %O" query
     traverse
 
 let parseLocalExpr (raw : string) : ValueExpr =
     match parse tokenizeSQL valueExpr raw with
-    | Ok expr -> normalizeLocalExpr expr
+    | Ok expr -> castLocalExpr expr
     | Error msg -> raisef SQLMetaException "Cannot parse local expression %s: %s" raw msg
 
 let parseUdtName (str : string) =
@@ -208,18 +143,18 @@ let parseUdtName (str : string) =
 let private makeColumnMeta (attr : Attribute) : ColumnName * ColumnMeta =
     try
         let columnType =
-            if attr.pgType.typtype <> 'b' then
-                raisef SQLMetaException "Unsupported non-base type: %s" attr.pgType.typname
-            parseUdtName attr.pgType.typname
-        let defaultExpr = attr.attrDefs |> Seq.first |> Option.map (fun def -> parseLocalExpr def.adsrc)
+            if attr.Type.TypType <> 'b' then
+                raisef SQLMetaException "Unsupported non-base type: %s" attr.Type.TypName
+            parseUdtName attr.Type.TypName
+        let defaultExpr = attr.AttrDefs |> Seq.first |> Option.map (fun def -> parseLocalExpr def.Source)
         let res =
             { columnType = columnType
-              isNullable = not attr.attnotnull
+              isNullable = not attr.AttNotNull
               defaultExpr = defaultExpr
             }
-        (SQLName attr.attname, res)
+        (SQLName attr.AttName, res)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in column %s: %s" attr.attname e.Message
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in column %s: %s" attr.AttName e.Message
 
 type private TableColumnIds = Map<ColumnNum, ColumnName>
 
@@ -239,47 +174,46 @@ type private PgSchemas = Map<SchemaName, PgSchemaMeta>
 
 let private makeUnconstrainedTableMeta (cl : Class) : TableName * (TableMeta * PgTableMeta) =
     try
-        let filteredAttrs = cl.attributes |> Seq.filter (fun attr -> attr.attnum > 0s && not attr.attisdropped)
-        let columnIds = filteredAttrs |> Seq.map (fun attr -> (attr.attnum, SQLName attr.attname)) |> Map.ofSeqUnique
-        let columns = filteredAttrs |> Seq.map makeColumnMeta |> Map.ofSeqUnique
+        let columnIds = cl.Attributes |> Seq.map (fun attr -> (attr.AttNum, SQLName attr.AttName)) |> Map.ofSeqUnique
+        let columns = cl.Attributes |> Seq.map makeColumnMeta |> Map.ofSeqUnique
         let res = { columns = columns }
         let meta =
             { columns = columnIds
-              constraints = cl.constraints
-              indexes = cl.indexes
+              constraints = cl.Constraints
+              indexes = cl.Indexes
             }
-        (SQLName cl.relname, (res, meta))
+        (SQLName cl.RelName, (res, meta))
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in table %s: %s" cl.relname e.Message
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in table %s: %s" cl.RelName e.Message
 
 let private makeSequenceMeta (cl : Class) : TableName =
-    SQLName cl.relname
+    SQLName cl.RelName
 
 let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchemaMeta =
     try
-        let tableObjects = ns.classes |> Seq.filter (fun cl -> cl.relkind = 'r') |> Seq.map makeUnconstrainedTableMeta |> Map.ofSeqUnique
+        let tableObjects = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'r') |> Seq.map makeUnconstrainedTableMeta |> Map.ofSeqUnique
         let tablesMeta = tableObjects |> Map.map (fun name (table, meta) -> meta)
         let tables = tableObjects |> Map.map (fun name (table, meta) -> OMTable table)
-        let sequences = ns.classes |> Seq.filter (fun cl -> cl.relkind = 'S') |> Seq.map (fun cl -> (makeSequenceMeta cl, OMSequence)) |> Map.ofSeqUnique
+        let sequences = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'S') |> Seq.map (fun cl -> (makeSequenceMeta cl, OMSequence)) |> Map.ofSeqUnique
         let res =
             { objects = Map.unionUnique tables sequences
               tables = tablesMeta
             }
-        (SQLName ns.nspname, res)
+        (SQLName ns.NspName, res)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in schema %s: %s" ns.nspname e.Message
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in schema %s: %s" ns.NspName e.Message
 
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =
     let makeConstraintMeta (tableName : TableName) (columnIds : TableColumnIds) (constr : Constraint) : (ConstraintName * ConstraintMeta) option =
         let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
         let ret =
-            match constr.contype with
+            match constr.ConType with
             | 'c' ->
-                Some <| CMCheck (parseLocalExpr constr.consrc)
+                Some <| CMCheck (parseLocalExpr constr.Source)
             | 'f' ->
-                let refSchema = SQLName constr.pgRelClass.pgNamespace.nspname
-                let refName = SQLName constr.pgRelClass.relname
+                let refSchema = SQLName constr.FRelClass.Namespace.NspName
+                let refName = SQLName constr.FRelClass.RelName
                 let refTable = Map.find refName (Map.find refSchema schemaIds).tables
                 let makeRefColumn (fromNum : ColumnNum) (toNum : ColumnNum) =
                     let fromName = makeLocalColumn fromNum
@@ -287,26 +221,26 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                     (fromName, toName)
 
                 let tableRef = { schema = Some refSchema; name = refName }
-                let cols = Seq.map2 makeRefColumn constr.conkey constr.confkey |> Seq.toArray
+                let cols = Seq.map2 makeRefColumn constr.ConKey constr.ConFKey |> Seq.toArray
                 Some <| CMForeignKey (tableRef, cols)
             | 'p' ->
-                Some <| CMPrimaryKey (Array.map makeLocalColumn constr.conkey)
+                Some <| CMPrimaryKey (Array.map makeLocalColumn constr.ConKey)
             | 'u' ->
-                Some <| CMUnique (Array.map makeLocalColumn constr.conkey)
+                Some <| CMUnique (Array.map makeLocalColumn constr.ConKey)
             | _ -> None
 
-        Option.map (fun r -> (SQLName constr.conname, r)) ret
+        Option.map (fun r -> (SQLName constr.ConName, r)) ret
 
     let makeIndexMeta (tableName : TableName) (columnIds : TableColumnIds) (index : Index) : (IndexName * IndexMeta) option =
         let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
-        if index.indisunique || index.indisprimary then
+        if index.IndIsUnique || index.IndIsPrimary then
             None
         else
-            let cols = Array.map makeLocalColumn index.indkey
+            let cols = Array.map makeLocalColumn index.IndKey
             let ret =
                 { columns = cols
                 } : IndexMeta
-            Some (SQLName index.pgClass.relname, ret)
+            Some (SQLName index.Class.RelName, ret)
 
     let finishSchemaMeta (schemaName : SchemaName) (schema : PgSchemaMeta) : SchemaMeta =
         let makeConstraints (tableName : TableName, table : PgTableMeta) =
@@ -337,18 +271,7 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) : Task<DatabaseMeta> =
         use db = new PgCatalogContext(dbOptions.Options)
         ignore <| db.Database.UseTransaction(transaction)
 
-        let! namespaces =
-            db.Namespaces.AsNoTracking().Where(fun ns -> not (ns.nspname.StartsWith("pg_")) && ns.nspname <> "information_schema")
-                .Include("classes")
-                .Include("classes.attributes")
-                .Include("classes.attributes.attrDefs")
-                .Include("classes.attributes.pgType")
-                .Include("classes.constraints")
-                .Include("classes.constraints.pgRelClass")
-                .Include("classes.constraints.pgRelClass.pgNamespace")
-                .Include("classes.indexes")
-                .Include("classes.indexes.pgClass")
-                .ToListAsync()
+        let! namespaces = db.GetObjects()
 
         let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
         let phase2 = Phase2Resolver(unconstrainedSchemas)

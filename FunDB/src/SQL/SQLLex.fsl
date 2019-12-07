@@ -88,6 +88,7 @@ rule tokenizeSQL = parse
     | i n             { Parse.IN }
     | a n y           { Parse.ANY }
     | s o m e         { Parse.SOME }
+    | a l l           { Parse.ALL }
     | a r r a y       { Parse.ARRAY }
 
     // Unescaped ids

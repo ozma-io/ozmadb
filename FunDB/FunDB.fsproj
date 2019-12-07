@@ -16,10 +16,13 @@
     <Compile Include="src/Utils.fs" />
     <Compile Include="src/Json.fs" />
     <Compile Include="src/Parsing.fs" />
+    <Compile Include="src/Schema.fs" />
 
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/Parsing.fs" />
     <Compile Include="src/SQL/AST.fs" />
+    <Compile Include="src/SQL/DDL.fs" />
+    <Compile Include="src/SQL/PlPgsql.fs" />
     <FsYacc Include="src/SQL/SQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParse.fs" />
     <FsLex Include="src/SQL/SQLLex.fsl" OtherFlags="--unicode" />
@@ -39,6 +42,7 @@
     <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
 
+    <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Types.fs" />
 
     <Compile Include="src/Attributes/Source.fs" />
@@ -51,11 +55,9 @@
     <Compile Include="src/FunQL/Arguments.fs" />
     <Compile Include="src/FunQL/Compile.fs" />
   
-    <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Resolve.fs" />
     <Compile Include="src/Layout/System.fs" />
   
-    <Compile Include="src/Schema.fs" />
     <Compile Include="src/Connection.fs" />
 
     <Compile Include="src/FunQL/Query.fs" />
@@ -117,7 +119,7 @@
     <PackageReference Include="Npgsql.Json.NET" Version="4.1.*" />
     <PackageReference Include="FsLexYacc" Version="10.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="3.0.*" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="3.0.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="3.1.*" />
     <PackageReference Include="Microsoft.AspNetCore.Hosting" Version="2.2.*" />
     <PackageReference Include="Microsoft.AspNetCore.Server.Kestrel" Version="2.2.*" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="3.0.*" />
