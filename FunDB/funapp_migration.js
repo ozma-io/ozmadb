@@ -50,7 +50,10 @@ function addDefaultViews(views, layout) {
                 fields.push(renderSqlName(columnField));
             }
             for (var computedField in entity.computedFields) {
-                fields.push(renderSqlName(computedField));
+                var comp = entity.computedFields[computedField];
+                if (!comp.broken) {
+                    fields.push(renderSqlName(computedField));
+                }
             }
 
             var formName = "form-" + schemaName + "-" + entityName;

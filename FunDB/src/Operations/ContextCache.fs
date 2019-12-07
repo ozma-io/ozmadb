@@ -4,7 +4,6 @@ open System
 open System.Linq
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
-open Microsoft.Extensions.Hosting
 open Microsoft.EntityFrameworkCore
 open FluidCaching
 open Npgsql
@@ -40,7 +39,6 @@ module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.EventLogger
-open FunWithFlags.FunDBSchema.System
 
 type ContextException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -184,38 +182,38 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                 do! markBrokenPermissions conn.System brokenPerms
         }
 
-    let rec getCachedState (transaction1 : DatabaseTransaction) = task {
-        let! (isChanged1, layout, userMeta) = initialMigratePreload logger transaction1 preload
+    let rec getCachedState (transaction : DatabaseTransaction) = task {
+        let! (isChanged1, layout, userMeta) = initialMigratePreload logger transaction preload
         let systemViews = preloadUserViews layout preload
-        let! isChanged2 = updateUserViews transaction1.System systemViews
+        let! isChanged2 = updateUserViews transaction.System systemViews
         let isChanged = isChanged1 || isChanged2
-        let! (_, currentVersion) = getCurrentVersion transaction1 isChanged
+        let! (_, currentVersion) = getCurrentVersion transaction isChanged
         // We don't do commit here and instead resolve as much as possible first to fail early.
 
-        let! sourceAttrs = buildSchemaAttributes transaction1.System
+        let! sourceAttrs = buildSchemaAttributes transaction.System
         let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
 
         let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
-        let! sourceViews = buildSchemaUserViews transaction1.System
+        let! sourceViews = buildSchemaUserViews transaction.System
         let (brokenViews1, userViews) = resolveUserViews layout mergedAttrs true sourceViews
 
         // To dry-run user views we need to stop the transaction.
-        do! transaction1.Commit ()
-        let! (brokenViews2, prefetchedViews) = dryRunUserViews transaction1.Connection.Query layout true None sourceViews userViews
-        let transaction2 = new DatabaseTransaction (transaction1.Connection)
-        let! (_, currentVersion2) = getCurrentVersion transaction2 false
+        do! transaction.Commit ()
+        let! (brokenViews2, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews
+        let transaction = new DatabaseTransaction (transaction.Connection)
+        let! (_, currentVersion2) = getCurrentVersion transaction false
         if currentVersion2 <> currentVersion then
-            return! getCachedState transaction2
+            return! getCachedState transaction
         else
-            do! checkBrokenAttributes transaction2 brokenAttrs
-            do! checkBrokenUserViews transaction2 brokenViews1
-            do! checkBrokenUserViews transaction2 brokenViews2
+            do! checkBrokenAttributes transaction brokenAttrs
+            do! checkBrokenUserViews transaction brokenViews1
+            do! checkBrokenUserViews transaction brokenViews2
 
-            let! sourcePermissions = buildSchemaPermissions transaction2.System
+            let! sourcePermissions = buildSchemaPermissions transaction.System
             let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
-            do! checkBrokenPermissions transaction2 brokenPerms
+            do! checkBrokenPermissions transaction brokenPerms
 
-            do! transaction2.Commit ()
+            do! transaction.Commit ()
 
             let state =
                 { layout = layout
@@ -235,40 +233,40 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
         Task.awaitSync <| getCachedState transaction
 
     // Called when state update by another instance is detected.
-    let rec rebuildFromDatabase (transaction1 : DatabaseTransaction) (currentVersion : int) = task {
+    let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) = task {
         // Clear prepared statements so that things don't break if e.g. database types have changed.
-        transaction1.Connection.Connection.UnprepareAll ()
-        let! sourceLayout = buildSchemaLayout transaction1.System
+        transaction.Connection.Connection.UnprepareAll ()
+        let! sourceLayout = buildSchemaLayout transaction.System
         let (_, layout) = resolveLayout sourceLayout false
 
-        let! sourceAttrs = buildSchemaAttributes transaction1.System
+        let! sourceAttrs = buildSchemaAttributes transaction.System
         let (_, defaultAttrs) = resolveAttributes layout false sourceAttrs
         let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
-        let! sourceUvs = buildSchemaUserViews transaction1.System
+        let! sourceUvs = buildSchemaUserViews transaction.System
         let (_, userViews) = resolveUserViews layout mergedAttrs false sourceUvs
 
         // To dry-run user views we need to stop the transaction.
-        do! transaction1.Commit ()
+        do! transaction.Commit ()
         // We dry-run those views that _can_ be failed here, outside of a transaction.
-        let! (_, prefetchedBadViews) = dryRunUserViews transaction1.Connection.Query layout false (Some true) sourceUvs userViews
-        let transaction2 = new DatabaseTransaction(transaction1.Connection)
-        let! (_, currentVersion2) = getCurrentVersion transaction2 false
+        let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews
+        let transaction = new DatabaseTransaction(transaction.Connection)
+        let! (_, currentVersion2) = getCurrentVersion transaction false
         if currentVersion2 <> currentVersion then
-            return! rebuildFromDatabase transaction2 currentVersion2
+            return! rebuildFromDatabase transaction currentVersion2
         else
             // Now dry-run those views that _cannot_ fail - we can get an exception here and stop, which is the point -
             // views with `allowBroken = true` fail on first error and so can be dry-run inside a transaction.
-            let! (_, prefetchedGoodViews) = dryRunUserViews transaction2.Connection.Query layout false (Some false) sourceUvs userViews
+            let! (_, prefetchedGoodViews) = dryRunUserViews transaction.Connection.Query layout false (Some false) sourceUvs userViews
             let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
 
             // Another instance has already rebuilt them, so just load them from the database.
             let systemViews = filterSystemViews sourceUvs
 
-            let! sourcePermissions = buildSchemaPermissions transaction2.System
+            let! sourcePermissions = buildSchemaPermissions transaction.System
             let (_, permissions) = resolvePermissions layout false sourcePermissions
 
-            let! meta = buildDatabaseMeta transaction2.Transaction
+            let! meta = buildDatabaseMeta transaction.Transaction
             let userMeta = filterUserMeta preload meta
 
             let newState =
@@ -283,7 +281,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
             anonymousViewsCache.Clear()
             cachedState <- (currentVersion2, newState)
 
-            return (currentVersion2, transaction2, newState)
+            return (currentVersion2, transaction, newState)
     }
 
     member this.LoggerFactory = loggerFactory
@@ -294,23 +292,23 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
     member this.GetCache () = task {
         let conn = new DatabaseConnection(loggerFactory, connectionString)
         try
-            let (veryOldVersion, veryOldState) = cachedState
-            let oldTransaction = new DatabaseTransaction(conn)
-            let! (newTransaction, oldVersion, oldState) =
+            let (oldVersion, oldState) = cachedState
+            let transaction = new DatabaseTransaction(conn)
+            let! (transaction, oldVersion, oldState) =
                 task {
-                    let! (forceRebuild, currentVersion) = getCurrentVersion oldTransaction false
-                    if forceRebuild || veryOldVersion <> currentVersion then
-                        let! (newVersion, newTransaction, newState) = rebuildFromDatabase oldTransaction currentVersion
+                    let! (forceRebuild, currentVersion) = getCurrentVersion transaction false
+                    if forceRebuild || oldVersion <> currentVersion then
+                        let! (newVersion, newTransaction, newState) = rebuildFromDatabase transaction currentVersion
                         return (newTransaction, newVersion, newState)
                     else
-                        return (oldTransaction, currentVersion, veryOldState)
+                        return (transaction, currentVersion, oldState)
                 }
 
             let migrate () = task {
                 logger.LogInformation("Starting migration")
                 // Careful here not to evaluate user views before we do migration
 
-                let! layoutSource = buildSchemaLayout newTransaction.System
+                let! layoutSource = buildSchemaLayout transaction.System
                 if not <| preloadLayoutIsUnchanged layoutSource preload then
                     raisef ContextException "Cannot modify system layout"
                 let (_, layout) =
@@ -319,7 +317,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     with
                     | :? ResolveLayoutException as err -> raisefWithInner ContextException err "Failed to resolve layout"
 
-                let! permissionsSource = buildSchemaPermissions newTransaction.System
+                let! permissionsSource = buildSchemaPermissions transaction.System
                 if not <| preloadPermissionsAreUnchanged permissionsSource preload then
                     raisef ResolveLayoutException "Cannot modify system permissions"
                 let (_, permissions) =
@@ -328,7 +326,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     with
                     | :? ResolvePermissionsException as err -> raisefWithInner ContextException err "Failed to resolve permissions"
 
-                let! attrsSource = buildSchemaAttributes newTransaction.System
+                let! attrsSource = buildSchemaAttributes transaction.System
                 if not <| preloadAttributesAreUnchanged attrsSource preload then
                     raisef ResolveLayoutException "Cannot modify system default attributes"
                 let (_, defaultAttrs) =
@@ -338,25 +336,25 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
                 let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
-                let! userViewsSource = buildSchemaUserViews newTransaction.System
+                let! userViewsSource = buildSchemaUserViews transaction.System
                 if filterSystemViews userViewsSource <> oldState.systemViews then
                     raisef ContextException "Cannot modify system user views"
 
                 // Actually migrate.
                 let wantedUserMeta = buildLayoutMeta layout (filterUserLayout layout)
                 let migration = planDatabaseMigration oldState.userMeta wantedUserMeta
-                let! migrared = task {
+                let! migrated = task {
                     try
-                        return! migrateDatabase newTransaction.Connection.Query migration
+                        return! migrateDatabase transaction.Connection.Query migration
                     with
                     | :? QueryException as err -> return raisefWithInner ContextException err "Migration error"
                 }
 
                 logger.LogInformation("Updating system user views")
                 let newSystemViews = preloadUserViews layout preload
-                let! _ = updateUserViews newTransaction.System newSystemViews
+                let! _ = updateUserViews transaction.System newSystemViews
 
-                let! newUserViewsSource = buildSchemaUserViews newTransaction.System
+                let! newUserViewsSource = buildSchemaUserViews transaction.System
                 let (_, userViews) =
                     try
                         resolveUserViews layout mergedAttrs false newUserViewsSource
@@ -372,16 +370,16 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                 // We update state now and check user views _after_ that.
                 // At this point we are sure there is a valid versionEntry because GetCache should have been called.
                 let newVersion = oldVersion + 1
-                let! versionEntry = newTransaction.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstAsync()
+                let! versionEntry = transaction.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstAsync()
                 versionEntry.Value <- string newVersion
                 // Serialized access error: 40001, may need to process it differently later (retry with fallback?)
                 try
-                    let! _ = newTransaction.System.SaveChangesAsync()
+                    let! _ = transaction.System.SaveChangesAsync()
                     ()
                 with
                 | :? DbUpdateException as err -> raisefWithInner ContextException err "State update error"
 
-                do! newTransaction.Commit()
+                do! transaction.Commit()
 
                 let! (_, goodUserViews) = dryRunUserViews conn.Query layout false (Some true) newUserViewsSource userViews
 
@@ -397,9 +395,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     }
 
                 anonymousViewsCache.Clear()
-                if migrared then
+                if migrated then
                     // There is no way to force-clear prepared statements for all connections in the pool, so we clear the pool itself instead.
-                    NpgsqlConnection.ClearPool(newTransaction.Connection.Connection)
+                    NpgsqlConnection.ClearPool(transaction.Connection.Connection)
                 cachedState <- (newVersion, newState)
                 return ()
             }
@@ -421,13 +419,13 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
 
             return
                 { new IContext with
-                      member this.Transaction = newTransaction
+                      member this.Transaction = transaction
                       member this.Connection = conn
                       member this.State = oldState
                       member this.Migrate () = migrate ()
                       member this.GetAnonymousView query = getAnonymousView query
                       member this.Dispose () =
-                          (newTransaction :> IDisposable).Dispose()
+                          (transaction :> IDisposable).Dispose()
                           (conn :> IDisposable).Dispose()
                 }
         with

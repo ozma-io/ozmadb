@@ -212,8 +212,6 @@ let planDatabaseMigration (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : Mi
 
 let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) : Task<bool> =
     task {
-        for action in plan do
-            eprintfn "Migration step: %O" action
         let mutable touched = false
         for action in plan do
             let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty

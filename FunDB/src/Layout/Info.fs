@@ -21,6 +21,7 @@ type SerializedColumnField =
 type SerializedComputedField =
     { expression : string
       allowBroken : bool
+      broken : bool
       inheritedFrom : ResolvedEntityRef option
     }
 
@@ -60,12 +61,14 @@ let serializeComputedField (comp : ResolvedComputedField) : SerializedComputedFi
     { expression = comp.expression.ToFunQLString()
       inheritedFrom = comp.inheritedFrom
       allowBroken = comp.allowBroken
+      broken = false
     }
 
 let serializeComputedFieldError (comp : ComputedFieldError) : SerializedComputedField =
     { expression = comp.source.expression
       inheritedFrom = comp.inheritedFrom
       allowBroken = comp.source.allowBroken
+      broken = true
     }
 
 let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField =
