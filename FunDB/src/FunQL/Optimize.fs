@@ -42,8 +42,8 @@ let orFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f>
     | (OFEOr ors, expr)
     | (expr, OFEOr ors) -> OFEOr (Map.add (expr.ToFieldExpr().ToString()) expr ors)
     | (expr1, expr2) ->
-        let expr1Str = expr1.ToFieldExpr().ToString()
-        let expr2Str = expr2.ToFieldExpr().ToString()
+        let expr1Str = expr1.ToString()
+        let expr2Str = expr2.ToString()
         if expr1Str = expr2Str then
             expr1
         else
@@ -57,10 +57,10 @@ let andFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f
     | (OFEAnd ands, OFEFalse)
     | (OFEFalse, OFEAnd ands) -> OFEFalse
     | (OFEAnd ands, expr)
-    | (expr, OFEAnd ands) -> OFEAnd (Map.add (expr.ToFieldExpr().ToString()) expr ands)
+    | (expr, OFEAnd ands) -> OFEAnd (Map.add (expr.ToString()) expr ands)
     | (expr1, expr2) ->
-        let expr1Str = expr1.ToFieldExpr().ToString()
-        let expr2Str = expr2.ToFieldExpr().ToString()
+        let expr1Str = expr1.ToString()
+        let expr2Str = expr2.ToString()
         if expr1Str = expr2Str then
             expr1
         else

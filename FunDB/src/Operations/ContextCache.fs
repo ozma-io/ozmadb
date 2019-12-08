@@ -31,6 +31,7 @@ open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.UserViews.Schema
 open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.Layout.Meta
+open FunWithFlags.FunDB.Layout.Integrity
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
@@ -366,6 +367,15 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     with
                     | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                 }
+
+                let oldAssertions = buildAssertions oldState.layout
+                let newAssertions = buildAssertions layout
+                for check in Set.difference newAssertions oldAssertions do
+                    logger.LogInformation("Running integrity check {check}", check)
+                    try
+                        do! checkAssertion transaction.Connection.Query layout check
+                    with
+                    | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity check"
 
                 // We update state now and check user views _after_ that.
                 // At this point we are sure there is a valid versionEntry because GetCache should have been called.

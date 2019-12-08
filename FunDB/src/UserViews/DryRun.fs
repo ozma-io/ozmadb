@@ -265,3 +265,18 @@ let dryRunUserViews (conn : QueryConnection) (layout : Layout) (forceAllowBroken
 let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (q: ResolvedUserView) : Task<PrefetchedUserView> =
     let runner = DryRunner(layout, conn, false, None)
     runner.DryRunAnonymousUserView q
+
+let private renderPrefetchedUserView : Result<PrefetchedUserView, UserViewError> -> SourceUserView = function
+    | Ok uv ->
+        { query = uv.uv.resolved.ToFunQLString()
+          allowBroken = uv.uv.allowBroken
+        }
+    | Error e -> e.source
+
+let renderPrefetchedUserViewsSchema (schema : PrefetchedViewsSchema) : SourceUserViewsSchema =
+    { userViews = Map.map (fun name -> renderPrefetchedUserView) schema.userViews
+    }
+
+let renderPrefetchedUserViews (uvs : PrefetchedUserViews) : SourceUserViews =
+    { schemas = Map.map (fun schemaName -> renderPrefetchedUserViewsSchema) uvs.schemas
+    }

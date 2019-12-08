@@ -46,7 +46,8 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
         | OFETrue -> None
         | _ ->
             for arg in fieldsRestriction.globalArguments do
-                arguments <- addArgument (FunQL.PGlobal arg) FunQL.globalArgumentTypes.[arg] arguments
+                let (argPlaceholder, newArguments) = addArgument (FunQL.PGlobal arg) FunQL.globalArgumentTypes.[arg] arguments
+                arguments <- newArguments
             compileRestriction layout ref arguments.types fieldsRestriction |> Some
 
     let filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =

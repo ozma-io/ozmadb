@@ -161,19 +161,20 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
     member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) : Task<int> =
         withCommand queryStr pars <| fun command -> command.ExecuteNonQueryAsync()
 
-    member this.ExecuteIntQuery (queryStr : string) (pars : ExprParameters) : Task<int> =
+    member this.ExecuteValueQuery (queryStr : string) (pars : ExprParameters) : Task<Value> =
         withCommand queryStr pars <| fun command -> task {
             use! reader = command.ExecuteReaderAsync()
             if reader.FieldCount <> 1 then
                 raisef QueryException "Not one column"
+            let typ = parseType (reader.GetDataTypeName(0))
             let! hasRow0 = reader.ReadAsync()
             if not hasRow0 then
                 raisef QueryException "No first row"
-            let resultInt = reader.GetInt32(0)
+            let result = reader.[0] |> convertValue typ
             let! hasRow1 = reader.ReadAsync()
             if hasRow1 then
                 raisef QueryException "Has a second row"
-            return resultInt
+            return result
         }
 
     member this.ExecuteQuery (queryStr : string) (pars : ExprParameters) (queryFunc : QueryResult -> Task<'a>) : Task<'a> =

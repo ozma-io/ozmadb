@@ -68,6 +68,8 @@ type ResolvedComputedField =
 [<NoComparison>]
 type EntityInheritance =
     { parent : ResolvedEntityRef
+      // Expression that verifies that given entry's sub_entity is valid for this type.
+      // Column is used unqualified.
       checkExpr : SQL.ValueExpr
     }
 
