@@ -195,13 +195,15 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 let! anon = ctx.GetAnonymousView query
                 return Ok anon
             with
-            | :? UserViewResolveException as err -> return Error <| UVEResolve err.Message
+            | :? UserViewResolveException as err ->
+                logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
+                return Error <| UVEResolve (printException err)
         | UVNamed ref ->
             match ctx.State.userViews.Find ref with
             | None -> return Error UVENotFound
             | Some (Error err) ->
                 logger.LogError(err.error, "Requested user view {uv} is broken", ref.ToString())
-                return Error (UVEResolve err.error.Message)
+                return Error <| UVEResolve (printException err.error)
             | Some (Ok cached) -> return Ok cached
     }
 

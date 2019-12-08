@@ -63,7 +63,7 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
     let voidAggr aggr =
         raisef ResolveLayoutException "Aggregate functions are not allowed in reference conditions"
     let voidSubEntity ent q =
-        raisef ResolveLayoutException "Aggregate functions are not allowed in check expressions"
+        raisef ResolveLayoutException "Aggregate functions are not allowed in reference conditions"
 
     mapFieldExpr
         { idFieldExprMapper resolveReference voidQuery with
@@ -168,6 +168,8 @@ type private Phase1Resolver (layout : SourceLayout) =
                 | Some refEntity -> refEntity
             if refEntity.forbidExternalReferences && ref.schema <> resolvedRef.schema then
                 raisef ResolveLayoutException "References from other schemas to entity %O are forbidden" entityRef
+            if Option.isSome where then
+                raisef ResolveLayoutException "Reference conditions are not yet implemented"
             let resolvedWhere = Option.map (resolveReferenceExpr entity refEntity) where
             FTReference (resolvedRef, resolvedWhere)
         | FTEnum vals ->

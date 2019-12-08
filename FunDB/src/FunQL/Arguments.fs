@@ -68,14 +68,16 @@ let emptyArguments =
       lastPlaceholderId = 0
     }
 
-let addArgument (name : Placeholder) (arg : ResolvedArgument) (args : QueryArguments) : QueryArguments =
+let addArgument (name : Placeholder) (arg : ResolvedArgument) (args : QueryArguments) : PlaceholderId * QueryArguments =
     match Map.tryFind name args.types with
-    | Some oldArg -> args
+    | Some oldArg -> (oldArg.placeholderId, args)
     | None ->
         let nextArg = args.lastPlaceholderId + 1
-        { types = Map.add name (compileArgument nextArg arg) args.types
-          lastPlaceholderId = nextArg
-        }
+        let ret =
+            { types = Map.add name (compileArgument nextArg arg) args.types
+              lastPlaceholderId = nextArg
+            }
+        (nextArg, ret)
 
 let mergeArguments (a : QueryArguments) (b : QueryArguments) : QueryArguments =
     { types = Map.unionUnique a.types b.types

@@ -21,6 +21,7 @@
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/Parsing.fs" />
     <Compile Include="src/SQL/AST.fs" />
+    <Compile Include="src/SQL/DML.fs" />
     <Compile Include="src/SQL/DDL.fs" />
     <Compile Include="src/SQL/PlPgsql.fs" />
     <FsYacc Include="src/SQL/SQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parse -v" />
@@ -35,6 +36,8 @@
     <Compile Include="src/SQL/Migration.fs" />
     <Compile Include="src/SQL/Meta.fs" />
 
+    <Compile Include="src/Connection.fs" />
+
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />
     <FsYacc Include="src/FunQL/FunQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parse -v" />
@@ -42,9 +45,11 @@
     <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
 
+    <!-- Needed early for verious other parts -->
     <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Types.fs" />
 
+    <!-- Needed early for FunQL compilation -->
     <Compile Include="src/Attributes/Source.fs" />
     <Compile Include="src/Attributes/Types.fs" />
     <Compile Include="src/Attributes/Merge.fs" />
@@ -54,19 +59,16 @@
     <Compile Include="src/FunQL/Optimize.fs" />
     <Compile Include="src/FunQL/Arguments.fs" />
     <Compile Include="src/FunQL/Compile.fs" />
-  
-    <Compile Include="src/Layout/Resolve.fs" />
-    <Compile Include="src/Layout/System.fs" />
-  
-    <Compile Include="src/Connection.fs" />
-
     <Compile Include="src/FunQL/Query.fs" />
 
     <Compile Include="src/Layout/Schema.fs" />
     <Compile Include="src/Layout/Render.fs" />
     <Compile Include="src/Layout/Update.fs" />
-    <Compile Include="src/Layout/Meta.fs" />
     <Compile Include="src/Layout/Info.fs" />
+    <Compile Include="src/Layout/Resolve.fs" />
+    <Compile Include="src/Layout/System.fs" />
+    <Compile Include="src/Layout/Meta.fs" />
+    <Compile Include="src/Layout/Integrity.fs" />
   
     <Compile Include="src/Attributes/Resolve.fs" />
     <Compile Include="src/Attributes/Schema.fs" />
