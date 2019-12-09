@@ -68,7 +68,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
         let field = Map.find fromFieldRef.name entity.columnFields
         let refEntity = layout.FindEntity toEntityRef |> Option.get
         let inheritance = Option.get refEntity.inheritance
-        
+
         let toRef = compileResolvedEntityRef refEntity.root
         let fromSchema = compileName entity.root.schema
         let fromTable = compileName entity.root.name
@@ -126,7 +126,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
               condition = Some checkUpdateTriggerCondition
               functionName = { schema = Some fromSchema; name = checkFunctionName }
               functionArgs = [||]
-            } : SQL.TriggerDefinition  
+            } : SQL.TriggerDefinition
         let checkUpdateTriggerName = SQL.SQLName <| sprintf "__%O_%O_reference_update_sub_entity_valid" fromFieldRef.entity.name fromFieldRef.name
         let checkUpdateTriggerObject = SQL.OMTrigger (fromTable, checkUpdateTriggerDefinition)
 
@@ -156,10 +156,10 @@ let buildAssertionsMeta (layout : Layout) : LayoutAssertion seq -> SQL.DatabaseM
 let private compileAssertionCheck (layout : Layout) : LayoutAssertion -> SQL.SelectExpr = function
     | LAColumnOfType (fromFieldRef, toEntityRef) ->
         let entity = layout.FindEntity fromFieldRef.entity |> Option.get
-        let field = Map.find fromFieldRef.name entity.columnFields    
+        let field = Map.find fromFieldRef.name entity.columnFields
         let refEntity = layout.FindEntity toEntityRef |> Option.get
         let inheritance = Option.get refEntity.inheritance
-    
+
         let fromRef = compileResolvedEntityRef entity.root
         let toRef = compileResolvedEntityRef refEntity.root
         let fromColumn = SQL.VEColumn { table = Some fromRef; name = field.columnName }

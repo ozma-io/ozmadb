@@ -85,7 +85,7 @@ type Statement =
             stmts |> Seq.map (fun s -> s.ToPLPgSQLString()) |> String.concat " "
 
         member this.ToPLPgSQLString () =
-            let stmtsToString = Statement.StatementsToString        
+            let stmtsToString = Statement.StatementsToString
             let str =
                 match this with
                 | StDefinition op -> op.ToSQLString()

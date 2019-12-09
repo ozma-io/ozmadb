@@ -780,7 +780,7 @@ let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f
         | FEOr (a, b) -> Task.map2Sync (curry FEOr) (traverse a) (traverse b)
         | FEConcat (a, b) -> Task.map2Sync (curry FEConcat) (traverse a) (traverse b)
         | FEDistinct (a, b) -> Task.map2Sync (curry FEDistinct) (traverse a) (traverse b)
-        | FENotDistinct (a, b) -> Task.map2Sync (curry FENotDistinct) (traverse a) (traverse b)    
+        | FENotDistinct (a, b) -> Task.map2Sync (curry FENotDistinct) (traverse a) (traverse b)
         | FEEq (a, b) -> Task.map2Sync (curry FEEq) (traverse a) (traverse b)
         | FENotEq (a, b) -> Task.map2Sync (curry FENotEq) (traverse a) (traverse b)
         | FELike (e, pat) -> Task.map2Sync (curry FELike) (traverse e) (traverse pat)

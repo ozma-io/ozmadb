@@ -104,7 +104,7 @@ let private castLocalExpr : ValueExpr -> ValueExpr =
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
         | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
         | VEDistinct (a, b) -> VEDistinct (traverse a, traverse b)
-        | VENotDistinct (a, b) -> VENotDistinct (traverse a, traverse b)  
+        | VENotDistinct (a, b) -> VENotDistinct (traverse a, traverse b)
         | VEEq (a, b) -> VEEq (traverse a, traverse b)
         | VEEqAny (e, arr) -> VEEqAny (traverse e, traverse arr)
         | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
@@ -285,7 +285,7 @@ let private makeFunctionMeta (proc : Proc) : FunctionName * Map<FunctionSignatur
             }
         (SQLName proc.ProName, Map.singleton signature def)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in function %s: %s" proc.ProName e.Message    
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in function %s: %s" proc.ProName e.Message
 
 let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchemaMeta =
     try

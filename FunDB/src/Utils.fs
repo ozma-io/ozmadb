@@ -540,7 +540,7 @@ let tryGetValue (dict: IReadOnlyDictionary<'K, 'V>) (key: 'K) : 'V option =
 type ComparableArray<'t> when 't : comparison =
     { items : 't[]
     } with
-        override x.Equals yobj = 
+        override x.Equals yobj =
             match yobj with
             | :? ComparableArray<'t> as y -> Seq.areEqual x.items y.items
             | _ -> false

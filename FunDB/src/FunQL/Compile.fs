@@ -280,7 +280,7 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
         | FEOr (a, b) -> SQL.VEOr (traverse a, traverse b)
         | FEConcat (a, b) -> SQL.VEConcat (traverse a, traverse b)
         | FEDistinct (a, b) -> SQL.VEDistinct (traverse a, traverse b)
-        | FENotDistinct (a, b) -> SQL.VENotDistinct (traverse a, traverse b)    
+        | FENotDistinct (a, b) -> SQL.VENotDistinct (traverse a, traverse b)
         | FEEq (a, b) -> SQL.VEEq (traverse a, traverse b)
         | FENotEq (a, b) -> SQL.VENotEq (traverse a, traverse b)
         | FELike (e, pat) -> SQL.VELike (traverse e, traverse pat)
@@ -1145,7 +1145,7 @@ let rec private findPureAttributes (columnTypes : ColumnType[]) : SQL.SelectExpr
         Array.map2 assignPure columnTypes query.columns
     | SQL.SValues vals -> Array.create (Array.length vals.[0]) None
     | SQL.SSetOp (op, a, b, limits) -> Array.create (findPureAttributes columnTypes a |> Array.length) None
-    
+
 let rec private filterExprColumns (cols : (PureColumn option)[]) : SQL.SelectExpr -> SQL.SelectExpr = function
     | SQL.SSelect query ->
         let checkColumn i _ = Option.isNone cols.[i]

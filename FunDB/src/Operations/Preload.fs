@@ -242,7 +242,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
             else
                 eprintfn "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
                 false
-        assert sanityCheck ()    
+        assert sanityCheck ()
 
         return (changed1 || changed2 || changed3, newLayout, newUserMeta)
     }

@@ -470,7 +470,7 @@ type [<CustomEquality; NoComparison>] ValueExpr =
             | VESubquery query -> sprintf "(%s)" (query.ToSQLString())
 
         // VERY SLOW!!! Use equality only when you know what are you doing.
-        override x.Equals yobj = 
+        override x.Equals yobj =
             match yobj with
             | :? ValueExpr as y -> (x.ToSQLString()) = (y.ToSQLString())
             | _ -> false
