@@ -220,7 +220,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let iterField (ref : ResolvedFieldRef) (allowedField : AllowedField) =
             if ref.entity = entityRef then
                 try
-                    if allowedField.change && myPerms.check.expression = OFEFalse then
+                    if allowedField.change && optimizedIsFalse myPerms.check.expression then
                         raisef ResolvePermissionsException "Cannot allow to change without providing check expression"
                 with
                 | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed field %O: %s" ref e.Message
@@ -233,7 +233,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     if entity.isAbstract then
                         raisef ResolvePermissionsException "Cannot allow insertion of abstract entities"
                     // Check that we can change all required fields.
-                    if myPerms.check.expression = OFEFalse then
+                    if optimizedIsFalse myPerms.check.expression then
                         raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
                     for KeyValue(fieldName, field) in entity.columnFields do
                         if Option.isNone field.defaultValue && not field.isNullable then
@@ -249,25 +249,25 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             else
                 myPerms
 
-        if myPerms.update.expression <> OFEFalse then
+        if not (optimizedIsFalse myPerms.update.expression) then
             // Check that we can change all required fields.
-            if myPerms.check.expression = OFEFalse then
+            if optimizedIsFalse myPerms.check.expression then
                 raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
-            if myPerms.select.expression = OFEFalse then
+            if optimizedIsFalse myPerms.select.expression then
                 raisef ResolvePermissionsException "Cannot allow to update without allowing to select"
 
         let myPerms =
-            if myPerms.delete.expression <> OFEFalse then
+            if not (optimizedIsFalse myPerms.delete.expression) then
                 try
                     // Check that we can can view all column fields.
                     if entity.isAbstract then
                         raisef ResolvePermissionsException "Cannot allow deletion of abstract entities"
-                    if myPerms.select.expression = OFEFalse then
+                    if optimizedIsFalse myPerms.select.expression then
                         raisef ResolvePermissionsException "Cannot allow to delete without allowing to select"
                     for KeyValue(fieldName, field) in entity.columnFields do
                         let parentEntity = Option.defaultValue entityRef field.inheritedFrom
                         match Map.tryFind { entity = parentEntity; name = fieldName } flat.fields with
-                        | Some f when f.select.expression <> OFEFalse -> ()
+                        | Some f when not (optimizedIsFalse f.select.expression) -> ()
                         | _ -> raisef ResolvePermissionsException "Field %O is not allowed for selection, which is required for deletion" fieldName
                     myPerms
                 with

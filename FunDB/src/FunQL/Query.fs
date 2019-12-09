@@ -16,7 +16,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
 type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
 
-type [<JsonConverter(typeof<ExecutedValueConverter>)>] [<NoComparison>] ExecutedValue =
+type [<JsonConverter(typeof<ExecutedValueConverter>); NoEquality; NoComparison>] ExecutedValue =
     { attributes : ExecutedAttributeMap
       value : SQL.Value
       pun : SQL.Value option
@@ -43,13 +43,13 @@ and ExecutedValueConverter () =
             | Some p -> Map.add "pun" (p :> obj) vals
         serializer.Serialize(writer, vals)
 
-type [<NoComparison>] ExecutedEntityId =
+type [<NoEquality; NoComparison>] ExecutedEntityId =
     { id : int
       [<JsonProperty(NullValueHandling=NullValueHandling.Ignore)>]
       subEntity : ResolvedEntityRef option
     }
 
-type [<JsonConverter(typeof<ExecutedRowConverter>)>] [<NoComparison>] ExecutedRow =
+type [<JsonConverter(typeof<ExecutedRowConverter>); NoEquality; NoComparison>] ExecutedRow =
     { attributes : ExecutedAttributeMap
       values : ExecutedValue array
       entityIds : Map<EntityName, ExecutedEntityId>
@@ -102,14 +102,14 @@ type ExecutedViewInfo =
       columns : ExecutedColumnInfo array
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ExecutedViewExpr =
     { attributes : ExecutedAttributeMap
       columnAttributes : ExecutedAttributeMap array
       rows : ExecutedRow seq
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private ExecutedAttributes =
     { attributes : ExecutedAttributeMap
       attributeTypes : ExecutedAttributeTypes

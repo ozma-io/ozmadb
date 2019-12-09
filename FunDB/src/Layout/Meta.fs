@@ -39,10 +39,14 @@ type private MetaBuilder (layout : Layout) =
         SQL.CMCheck <| compileCheckExpr entity constr.expression
 
     let makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.ConstraintName * SQL.ConstraintMeta) seq =
+        let makeDefaultValue def =
+            match compileFieldValue def with
+            | SQL.VEValue SQL.VNull -> None
+            | ret -> Some ret
         let res =
             { columnType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType field.fieldType)
               isNullable = field.isNullable
-              defaultExpr = Option.map (compileFieldValue) field.defaultValue
+              defaultExpr = Option.bind makeDefaultValue field.defaultValue
             } : SQL.ColumnMeta
         let constr =
             match field.fieldType with

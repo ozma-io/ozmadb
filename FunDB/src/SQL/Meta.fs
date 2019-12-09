@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.SQL.Meta
 
 open Npgsql
 open System.Threading.Tasks
+open System.Text.RegularExpressions
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -96,13 +97,14 @@ let private castLocalExpr : ValueExpr -> ValueExpr =
                     | Some typ -> VEValue (parseToSimpleType typ str)
             | value -> VECast (value, typ)
         | VEValue _ as node -> node
-        | VEColumn ({ table = None } as c) -> VEColumn c
-        | VEColumn c -> raisef SQLMetaException "Invalid non-local reference in local expression: %O" c
+        | VEColumn _ as node -> node
         | VEPlaceholder i -> raisef SQLMetaException "Invalid placeholder in local expression: %i" i
         | VENot e -> VENot (traverse e)
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
         | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
+        | VEDistinct (a, b) -> VEDistinct (traverse a, traverse b)
+        | VENotDistinct (a, b) -> VENotDistinct (traverse a, traverse b)  
         | VEEq (a, b) -> VEEq (traverse a, traverse b)
         | VEEqAny (e, arr) -> VEEqAny (traverse e, traverse arr)
         | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
@@ -134,7 +136,7 @@ let parseLocalExpr (raw : string) : ValueExpr =
     | Ok expr -> castLocalExpr expr
     | Error msg -> raisef SQLMetaException "Cannot parse local expression %s: %s" raw msg
 
-let parseUdtName (str : string) =
+let parseUdtName (str : string) : DBValueType =
     if str.StartsWith("_") then
         VTArray <| SQLRawString (str.Substring(1))
     else
@@ -158,45 +160,143 @@ let private makeColumnMeta (attr : Attribute) : ColumnName * ColumnMeta =
 
 type private TableColumnIds = Map<ColumnNum, ColumnName>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private PgTableMeta =
     { columns : TableColumnIds
       constraints : Constraint seq
       indexes : Index seq
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private PgSchemaMeta =
     { objects : Map<SQLName, ObjectMeta>
       tables : Map<TableName, PgTableMeta>
     }
 type private PgSchemas = Map<SchemaName, PgSchemaMeta>
 
-let private makeUnconstrainedTableMeta (cl : Class) : TableName * (TableMeta * PgTableMeta) =
+// https://stackoverflow.com/questions/23634550/meanings-of-bits-in-trigger-type-field-tgtype-of-postgres-pg-trigger
+let private triggerTypeRow = 1s <<< 0
+let private triggerTypeBefore = 1s <<< 1
+let private triggerTypeInsert = 1s <<< 2
+let private triggerTypeDelete = 1s <<< 3
+let private triggerTypeUpdate = 1s <<< 4
+let private triggerTypeTruncate = 1s <<< 5
+let private triggerTypeInstead = 1s <<< 6
+let private triggerWhenRegex = Regex "WHEN \\((.*)\\) EXECUTE PROCEDURE"
+
+let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : TriggerName * TriggerDefinition =
+    try
+        if not (Array.isEmpty trigger.TgArgs) then
+            raisef SQLMetaException "Arguments for trigger functions are not supported"
+        let order =
+            if trigger.TgType &&& triggerTypeBefore <> 0s then
+                TOBefore
+            else if trigger.TgType &&& triggerTypeInstead <> 0s then
+                TOInsteadOf
+            else
+                TOAfter
+        let mode =
+            if trigger.TgType &&& triggerTypeRow <> 0s then
+                TMEachRow
+            else
+                TMEachStatement
+        let events =
+            seq {
+                if trigger.TgType &&& triggerTypeInsert <> 0s then
+                    yield TEInsert
+                if trigger.TgType &&& triggerTypeDelete <> 0s then
+                    yield TEDelete
+                if trigger.TgType &&& triggerTypeUpdate <> 0s then
+                    let columns = trigger.TgAttr |> Array.map (fun num -> Map.find num columnIds)
+                    if Array.isEmpty columns then
+                        yield TEUpdate None
+                    else
+                        yield TEUpdate (Some columns)
+                if trigger.TgType &&& triggerTypeTruncate <> 0s then
+                    yield TETruncate
+            }
+        let condition =
+            // Any better way???
+            // See https://postgrespro.com/list/thread-id/1558141
+            let res = triggerWhenRegex.Match(trigger.Source)
+            if res.Success then
+                Some <| parseLocalExpr res.Groups.[1].Value
+            else
+                None
+        let functionName =
+            { schema = Some <| SQLName trigger.Function.Namespace.NspName
+              name = SQLName trigger.Function.ProName
+            }
+        let def =
+            { isConstraint = trigger.TgConstraint.HasValue
+              order = order
+              events = events |> Array.ofSeq
+              mode = mode
+              condition = condition
+              functionName = functionName
+              functionArgs = [||]
+            }
+        (SQLName trigger.TgName, def)
+    with
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in trigger %s: %s" trigger.TgName e.Message
+
+let private makeUnconstrainedTableMeta (cl : Class) : TableName * (Map<SQLName, ObjectMeta> * TableMeta * PgTableMeta) =
     try
         let columnIds = cl.Attributes |> Seq.map (fun attr -> (attr.AttNum, SQLName attr.AttName)) |> Map.ofSeqUnique
         let columns = cl.Attributes |> Seq.map makeColumnMeta |> Map.ofSeqUnique
+        let tableName = SQLName cl.RelName
+        let makeTrigger trig =
+            let (name, def) =  makeTriggerMeta columnIds trig
+            (name, OMTrigger (tableName, def))
+        let triggers = cl.Triggers |> Seq.map makeTrigger |> Map.ofSeqUnique
         let res = { columns = columns }
         let meta =
             { columns = columnIds
               constraints = cl.Constraints
               indexes = cl.Indexes
             }
-        (SQLName cl.RelName, (res, meta))
+        (tableName, (triggers, res, meta))
     with
     | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in table %s: %s" cl.RelName e.Message
 
-let private makeSequenceMeta (cl : Class) : TableName =
-    SQLName cl.RelName
+let private makeSequenceMeta (cl : Class) : SequenceName * ObjectMeta =
+    (SQLName cl.RelName, OMSequence)
+
+let private makeFunctionMeta (proc : Proc) : FunctionName * Map<FunctionSignature, FunctionDefinition> =
+    try
+        if proc.ProNArgs <> 0s then
+            raisef SQLMetaException "Function with arguments is not supported"
+        if proc.ProRetSet then
+            raisef SQLMetaException "Function which return tables are not supported"
+        let behaviour =
+            match proc.ProVolatile with
+            | 'i' -> FBImmutable
+            | 's' -> FBStable
+            | 'v' -> FBVolatile
+            | _ -> raisef SQLMetaException "Unknown volatile specifier %c" proc.ProVolatile
+
+        let signature = { items = [||] }
+        let def =
+            { arguments = [||]
+              returnValue = FRValue <| SQLRawString proc.RetType.TypName
+              behaviour = behaviour
+              language = SQLName proc.Language.LanName
+              definition = proc.ProSrc
+            }
+        (SQLName proc.ProName, Map.singleton signature def)
+    with
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in function %s: %s" proc.ProName e.Message    
 
 let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchemaMeta =
     try
         let tableObjects = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'r') |> Seq.map makeUnconstrainedTableMeta |> Map.ofSeqUnique
-        let tablesMeta = tableObjects |> Map.map (fun name (table, meta) -> meta)
-        let tables = tableObjects |> Map.map (fun name (table, meta) -> OMTable table)
-        let sequences = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'S') |> Seq.map (fun cl -> (makeSequenceMeta cl, OMSequence)) |> Map.ofSeqUnique
+        let tablesMeta = tableObjects |> Map.map (fun name (triggers, table, meta) -> meta)
+        let tables = tableObjects |> Map.map (fun name (triggers, table, meta) -> OMTable table)
+        let triggers = tableObjects |> Map.toSeq |> Seq.map (fun (name, (triggers, table, meta)) -> triggers) |> Seq.fold Map.unionUnique Map.empty
+        let sequences = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'S') |> Seq.map makeSequenceMeta |> Map.ofSeqUnique
+        let functions = ns.Procs |> Seq.map makeFunctionMeta |> Map.ofSeqWith (fun name -> Map.unionUnique) |> Map.map (fun name overloads -> OMFunction overloads)
         let res =
-            { objects = Map.unionUnique tables sequences
+            { objects = List.fold Map.unionUnique Map.empty [tables; sequences; triggers; functions]
               tables = tablesMeta
             }
         (SQLName ns.NspName, res)

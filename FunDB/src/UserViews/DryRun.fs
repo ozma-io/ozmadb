@@ -15,13 +15,13 @@ open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type MainField =
     { name : FieldName
       field : SerializedColumnField
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type UVDomainField =
     { ref : ResolvedFieldRef
       field : SerializedColumnField option
@@ -31,7 +31,7 @@ type UVDomainField =
 type UVDomain = Map<FieldName, UVDomainField>
 type UVDomains = Map<GlobalDomainId, UVDomain>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type UserViewColumn =
     { name : ViewColumnName
       attributeTypes : ExecutedAttributeTypes
@@ -41,7 +41,7 @@ type UserViewColumn =
       mainField : MainField option
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type UserViewInfo =
     { attributeTypes : ExecutedAttributeTypes
       rowAttributeTypes : ExecutedAttributeTypes
@@ -50,25 +50,25 @@ type UserViewInfo =
       columns : UserViewColumn[]
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type PureAttributes =
     { attributes : ExecutedAttributeMap
       columnAttributes : ExecutedAttributeMap[]
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type PrefetchedUserView =
     { info : UserViewInfo
       pureAttributes : PureAttributes
       uv : ResolvedUserView
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type PrefetchedViewsSchema =
     { userViews : Map<UserViewName, Result<PrefetchedUserView, UserViewError>>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type PrefetchedUserViews =
     { schemas : Map<SchemaName, PrefetchedViewsSchema>
     } with

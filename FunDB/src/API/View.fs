@@ -11,13 +11,13 @@ open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.API.Utils
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ViewEntriesGetResponse =
     { info : UserViewInfo
       result : ExecutedViewExpr
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ViewInfoGetResponse =
     { info : UserViewInfo
       pureAttributes : ExecutedAttributeMap

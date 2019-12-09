@@ -9,8 +9,7 @@ open Newtonsoft.Json.Linq
 let escapeSqlDoubleQuotes (str : string) : string = sprintf "\"%s\"" (str.Replace("\"", "\"\""))
 
 // PostgreSQL C-style escape string constants but without E
-let escapeSqlSingleQuotes (str : string) : string =
-    let strBuilder = StringBuilder (2 * str.Length)
+let private genericEscapeSqlSingleQuotes (strBuilder : StringBuilder) (str : string) : string =
     ignore <| strBuilder.Append('\'')
     for c in str do
         match c with
@@ -35,8 +34,16 @@ let escapeSqlSingleQuotes (str : string) : string =
     ignore <| strBuilder.Append('\'')
     strBuilder.ToString()
 
+let escapeSqlSingleQuotes (str : string) =
+    let strBuilder = StringBuilder (2 * str.Length)
+    genericEscapeSqlSingleQuotes strBuilder str
+
 let renderSqlName = escapeSqlDoubleQuotes
-let renderSqlString = escapeSqlSingleQuotes
+
+let renderSqlString (str : string) =
+    let strBuilder = StringBuilder (2 * str.Length)
+    ignore <| strBuilder.Append('E')
+    genericEscapeSqlSingleQuotes strBuilder str
 
 let renderSqlBool : bool -> string = function
     | true -> "TRUE"

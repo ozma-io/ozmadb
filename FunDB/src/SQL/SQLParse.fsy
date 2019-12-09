@@ -50,6 +50,8 @@ open FunWithFlags.FunDB.SQL.AST
 %token ANY
 %token SOME
 %token ALL
+%token DISTINCT
+%token FROM
 
 // Misc
 %token EOF
@@ -83,117 +85,120 @@ schemaObject : SchemaObject EOF { $1 }
 // Expressions
 
 ValueExpr:
-  | ValueExpr OR ValueExpr                                { VEOr ($1, $3) }
-  | ValueExpr AND ValueExpr                               { VEAnd ($1, $3) }
-  | NOT ValueExpr                                         { VENot $2 }
-  | ValueExpr EQ ValueExpr                                { VEEq ($1, $3) }
-  | ValueExpr EQ Any LEFT_PAREN ValueExpr RIGHT_PAREN     { VEEqAny ($1, $5) }
-  | ValueExpr NOT_EQ ALL LEFT_PAREN ValueExpr RIGHT_PAREN { VENotEqAll ($1, $5) }
-  | ValueExprLess                                         { $1 }
+    | ValueExpr OR ValueExpr                                { VEOr ($1, $3) }
+    | ValueExpr AND ValueExpr                               { VEAnd ($1, $3) }
+    | NOT ValueExpr                                         { VENot $2 }
+    | ValueExpr EQ ValueExpr                                { VEEq ($1, $3) }
+    | ValueExpr EQ Any LEFT_PAREN ValueExpr RIGHT_PAREN     { VEEqAny ($1, $5) }
+    | ValueExpr NOT_EQ ALL LEFT_PAREN ValueExpr RIGHT_PAREN { VENotEqAll ($1, $5) }
+    | ValueExprLess                                         { $1 }
 
 ValueExprLess:
-  | ValueExprMisc LESS ValueExprMisc             { VELess ($1, $3) }
-  | ValueExprMisc GREATER ValueExprMisc          { VEGreater ($1, $3) }
-  | ValueExprMisc LIKE ValueExprMisc             { VELike ($1, $3) }
-  | ValueExprMisc NOT LIKE ValueExprMisc         { VENotLike ($1, $4) }
-  | ValueExprMisc LIKE_OP ValueExprMisc          { VELike ($1, $3) }
-  | ValueExprMisc NOT_LIKE_OP ValueExprMisc      { VENotLike ($1, $3) }
-  | ValueExprMisc IN ParenedNonEmptyExprList     { VEIn ($1, $3) }
-  | ValueExprMisc NOT IN ParenedNonEmptyExprList { VENotIn ($1, $4) }
-  | ValueExprMisc                                { $1 }
+    | ValueExprMisc LESS ValueExprMisc             { VELess ($1, $3) }
+    | ValueExprMisc GREATER ValueExprMisc          { VEGreater ($1, $3) }
+    | ValueExprMisc LIKE ValueExprMisc             { VELike ($1, $3) }
+    | ValueExprMisc NOT LIKE ValueExprMisc         { VENotLike ($1, $4) }
+    | ValueExprMisc LIKE_OP ValueExprMisc          { VELike ($1, $3) }
+    | ValueExprMisc NOT_LIKE_OP ValueExprMisc      { VENotLike ($1, $3) }
+    | ValueExprMisc IN ParenedNonEmptyExprList     { VEIn ($1, $3) }
+    | ValueExprMisc NOT IN ParenedNonEmptyExprList { VENotIn ($1, $4) }
+    | ValueExprMisc                                { $1 }
 
 ValueExprMisc:
-  | ValueExprMisc CONCAT ValueExprMisc        { VEConcat ($1, $3) }
-  | ValueExprMisc ARROW ValueExprMisc         { VEJsonArrow ($1, $3) }
-  | ValueExprMisc NOT_EQ ValueExprMisc        { VENotEq ($1, $3) }
-  | ValueExprMisc LESS_EQ ValueExprMisc       { VELessEq ($1, $3) }
-  | ValueExprMisc GREATER_EQ ValueExprMisc    { VEGreaterEq ($1, $3) }
-  | ValueExprMisc IS NULL                     { VEIsNull $1 }
-  | ValueExprMisc IS NOT NULL                 { VEIsNotNull $1 }
-  | ValueExprMisc DOUBLE_COLON ValueType      { VECast ($1, $3) }
-  | COALESCE ParenedNonEmptyExprList          { VECoalesce $2 }
-  | CaseExpr                                  { $1 }
-  | Name ParenedExprList                      { VEFunc ($1, $2) }
-  | ColumnRef                                 { VEColumn $1 }
-  | Value                                     { VEValue $1 }
-  | ARRAY LEFT_BRACKET ExprList RIGHT_BRACKET { VEArray $3 }
-  | LEFT_PAREN ValueExpr RIGHT_PAREN          { $2 }
+    | ValueExprMisc CONCAT ValueExprMisc               { VEConcat ($1, $3) }
+    | ValueExprMisc ARROW ValueExprMisc                { VEJsonArrow ($1, $3) }
+    | ValueExprMisc NOT_EQ ValueExprMisc               { VENotEq ($1, $3) }
+    | ValueExprMisc LESS_EQ ValueExprMisc              { VELessEq ($1, $3) }
+    | ValueExprMisc GREATER_EQ ValueExprMisc           { VEGreaterEq ($1, $3) }
+    | ValueExprMisc IS NULL                            { VEIsNull $1 }
+    | ValueExprMisc IS NOT NULL                        { VEIsNotNull $1 }
+    | ValueExprMisc IS DISTINCT FROM ValueExprMisc     { VEDistinct ($1, $5) }
+    | ValueExprMisc IS NOT DISTINCT FROM ValueExprMisc { VENotDistinct ($1, $6) }
+    | ValueExprMisc IS NOT NULL                        { VEIsNotNull $1 }
+    | ValueExprMisc DOUBLE_COLON ValueType             { VECast ($1, $3) }
+    | COALESCE ParenedNonEmptyExprList                 { VECoalesce $2 }
+    | CaseExpr                                         { $1 }
+    | Name ParenedExprList                             { VEFunc ($1, $2) }
+    | ColumnRef                                        { VEColumn $1 }
+    | Value                                            { VEValue $1 }
+    | ARRAY LEFT_BRACKET ExprList RIGHT_BRACKET        { VEArray $3 }
+    | LEFT_PAREN ValueExpr RIGHT_PAREN                 { $2 }
 
 Any:
-  | ANY  { () }
-  | SOME { () }
+    | ANY  { () }
+    | SOME { () }
 
 NonEmptyExprs:
-  | ValueExpr                     { [ $1 ] }
-  | ValueExpr COMMA NonEmptyExprs { $1 :: $3 }
+    | ValueExpr                     { [ $1 ] }
+    | ValueExpr COMMA NonEmptyExprs { $1 :: $3 }
 
 NonEmptyExprList:
-  | NonEmptyExprs { List.toArray $1 }
+    | NonEmptyExprs { List.toArray $1 }
 
 ParenedNonEmptyExprList:
-  | LEFT_PAREN NonEmptyExprList RIGHT_PAREN { $2 }
+    | LEFT_PAREN NonEmptyExprList RIGHT_PAREN { $2 }
 
 ExprList:
-  |                  { [||] }
-  | NonEmptyExprList { $1 }
+    |                  { [||] }
+    | NonEmptyExprList { $1 }
 
 ParenedExprList:
-  | LEFT_PAREN ExprList RIGHT_PAREN { $2 }
+    | LEFT_PAREN ExprList RIGHT_PAREN { $2 }
 
 CaseExpr:
-  | CASE CaseWhenList CaseElse END { VECase (List.toArray $2, $3) }
+    | CASE CaseWhenList CaseElse END { VECase (List.toArray $2, $3) }
 
 CaseWhenList:
-  | WHEN ValueExpr THEN ValueExpr CaseWhenList { ($2, $4) :: $5 }
-  | WHEN ValueExpr THEN ValueExpr              { [($2, $4)] }
+    | WHEN ValueExpr THEN ValueExpr CaseWhenList { ($2, $4) :: $5 }
+    | WHEN ValueExpr THEN ValueExpr              { [($2, $4)] }
 
 CaseElse:
-  |                { None }
-  | ELSE ValueExpr { Some $2 }
+    |                { None }
+    | ELSE ValueExpr { Some $2 }
 
 ColumnRef:
-  | Name DOT Name DOT Name { { table = Some { schema = Some $1; name = $3 }; name = $5 } }
-  | Name DOT Name          { { table = Some { schema = None; name = $1 }; name = $3 } }
-  | Name                   { { table = None; name = $1 } }
+    | Name DOT Name DOT Name { { table = Some { schema = Some $1; name = $3 }; name = $5 } }
+    | Name DOT Name          { { table = Some { schema = None; name = $1 }; name = $3 } }
+    | Name                   { { table = None; name = $1 } }
 
 NameString:
-  | ID        { $1 }
-  | QUOTED_ID { $1 }
-  | AND       { "and" }
-  | OR        { "or" }
-  | LIKE      { "like" }
-  | IN        { "in" }
+    | ID        { $1 }
+    | QUOTED_ID { $1 }
+    | AND       { "and" }
+    | OR        { "or" }
+    | LIKE      { "like" }
+    | IN        { "in" }
 
 Name:
-  | NameString { SQLName $1 }
+     NameString { SQLName $1 }
 
 ArrayDim:
-  | LEFT_BRACKET RIGHT_BRACKET     { () }
-  | LEFT_BRACKET INT RIGHT_BRACKET { () }
+    | LEFT_BRACKET RIGHT_BRACKET     { () }
+    | LEFT_BRACKET INT RIGHT_BRACKET { () }
 
 ArrayDims:
-  | ArrayDim           { () }
-  | ArrayDim ArrayDims { () }
+    | ArrayDim           { () }
+    | ArrayDim ArrayDims { () }
 
 ValueType:
-  | ScalarType ArrayDims { VTArray $1 }
-  | ScalarType           { VTScalar $1 }
+    | ScalarType ArrayDims { VTArray $1 }
+    | ScalarType           { VTScalar $1 }
 
 ScalarType:
-  | ScalarTypeParts { SQLRawString (String.concat " " $1) }
-  | QUOTED_ID       { SQLRawString $1 }
+    | ScalarTypeParts { SQLRawString (String.concat " " $1) }
+    | QUOTED_ID       { SQLRawString $1 }
 
 ScalarTypeParts:
-  | ID ScalarTypeParts { $1 :: $2 }
-  | ID                 { [ $1 ] }
+    | ID ScalarTypeParts { $1 :: $2 }
+    | ID                 { [ $1 ] }
 
 Value:
-  | INT     { VInt $1 }
-  | DECIMAL { VDecimal $1 }
-  | STRING  { VString $1 }
-  | BOOL    { VBool $1 }
-  | NULL    { VNull }
+    | INT     { VInt $1 }
+    | DECIMAL { VDecimal $1 }
+    | STRING  { VString $1 }
+    | BOOL    { VBool $1 }
+    | NULL    { VNull }
 
 SchemaObject:
-  | Name DOT Name { { schema = Some $1; name = $3 } }
-  | Name          { { schema = None; name = $1 } }
+    | Name DOT Name { { schema = Some $1; name = $3 } }
+    | Name          { { schema = None; name = $1 } }

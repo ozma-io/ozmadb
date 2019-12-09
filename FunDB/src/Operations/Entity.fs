@@ -113,7 +113,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | Some arg ->
                 Some
                     { placeholder = PLocal fieldName
-                      argument = { argType = clearFieldType field.fieldType; optional = false }
+                      argument = { argType = clearFieldType field.fieldType; optional = isOptional }
                       column = field.columnName
                       extra = ({ name = fieldName } : RestrictedColumnInfo)
                     }
@@ -180,7 +180,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | Some arg ->
                 Some
                     { placeholder = PLocal fieldName
-                      argument = { argType = clearFieldType field.fieldType; optional = false }
+                      argument = { argType = clearFieldType field.fieldType; optional = fieldIsOptional field }
                       column = field.columnName
                       extra = ({ name = fieldName } : RestrictedColumnInfo)
                     }

@@ -13,7 +13,7 @@ type ArgumentCheckException (message : string) =
 
 type PlaceholderId = int
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type CompiledArgument =
     { placeholderId : PlaceholderId
       fieldType : ArgumentFieldType
@@ -25,13 +25,13 @@ type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
 type CompiledArgumentsMap = Map<Placeholder, CompiledArgument>
 type ArgumentValues = Map<Placeholder, FieldValue>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type QueryArguments =
     { types : CompiledArgumentsMap
       lastPlaceholderId : PlaceholderId
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type Query<'e when 'e :> ISQLString> =
     { expression : 'e
       arguments : QueryArguments
@@ -128,15 +128,15 @@ let compileFieldValueSingle : FieldValue -> SQL.Value = function
 
 let prepareArguments (args : QueryArguments) (values : ArgumentValues) : ExprParameters =
     let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
-        let value =
+        let (notFound, value) =
             match Map.tryFind name values with
             | None ->
                 if mapping.optional then
-                    FNull
+                    (true, FNull)
                 else
                     raisef ArgumentCheckException "Argument not found: %O" name
-            | Some value -> value
-        if not (mapping.optional && value = FNull) then
+            | Some value -> (false, value)
+        if not (mapping.optional && notFound) then
             typecheckArgument mapping.fieldType value
         (mapping.placeholderId, (mapping.valueType, compileFieldValueSingle value))
     args.types |> Map.mapWithKeys makeParameter

@@ -297,6 +297,8 @@ module Seq =
             | Some e -> return Error e
         }
 
+    let hash (s : seq<'a>) : int = Seq.fold (curry HashCode.Combine) 0 s
+
 module Map =
     let ofSeqWith (resolve : 'k -> 'v -> 'v -> 'v) (items : seq<'k * 'v>) : Map<'k, 'v> =
         let addOrResolve m (k, v) =
@@ -533,3 +535,26 @@ let inline reraise' (e : exn) =
 let tryGetValue (dict: IReadOnlyDictionary<'K, 'V>) (key: 'K) : 'V option =
     let (success, v) = dict.TryGetValue(key)
     if success then Some v else None
+
+[<CustomEquality; CustomComparison>]
+type ComparableArray<'t> when 't : comparison =
+    { items : 't[]
+    } with
+        override x.Equals yobj = 
+            match yobj with
+            | :? ComparableArray<'t> as y -> Seq.areEqual x.items y.items
+            | _ -> false
+
+        override this.GetHashCode () = Seq.hash this.items
+
+        interface IComparable with
+            member x.CompareTo yobj =
+                match yobj with
+                | :? ComparableArray<'t> as y -> Seq.compareWith compare x.items y.items
+                | _ -> invalidArg "yobj" "Cannot compare value of different types"
+
+        interface Collections.IEnumerable with
+            member this.GetEnumerator () = (this.items :> Collections.IEnumerable).GetEnumerator ()
+
+        interface IEnumerable<'t> with
+            member this.GetEnumerator () = (this.items :> IEnumerable<'t>).GetEnumerator ()

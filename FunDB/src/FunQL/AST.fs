@@ -8,7 +8,6 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
-open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 
 type IFunQLName =
@@ -26,7 +25,7 @@ and [<TypeConverter(typeof<NewtypeConverter<FunQLName>>)>] FunQLName = FunQLName
 
         member this.ToFunQLString () =
             match this with
-            | FunQLName c -> renderSqlName c
+            | FunQLName c -> renderFunQLName c
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -152,7 +151,7 @@ type Placeholder =
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
-type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue =
+type [<JsonConverter(typeof<FieldValueConverter>); NoEquality; NoComparison>] FieldValue =
     | FInt of int
     | FDecimal of decimal
     | FString of string
@@ -181,20 +180,20 @@ type [<JsonConverter(typeof<FieldValueConverter>)>] [<NoComparison>] FieldValue 
                 else
                     arrStr
             match this with
-            | FInt i -> renderSqlInt i
-            | FDecimal d -> renderSqlDecimal d
-            | FString s -> renderSqlString s
-            | FBool b -> renderSqlBool b
-            | FDateTime dt -> sprintf "%s :: datetime" (dt |> renderSqlDateTime |> renderSqlString)
-            | FDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
+            | FInt i -> renderFunQLInt i
+            | FDecimal d -> renderFunQLDecimal d
+            | FString s -> renderFunQLString s
+            | FBool b -> renderFunQLBool b
+            | FDateTime dt -> sprintf "%s :: datetime" (dt |> renderFunQLDateTime |> renderFunQLString)
+            | FDate d -> sprintf "%s :: date" (d |> renderFunQLDate |> renderFunQLString)
             | FJson j -> renderFunQLJson j
             | FUserViewRef r -> sprintf "&%s" (r.ToFunQLString())
-            | FIntArray vals -> renderArray renderSqlInt "int" vals
-            | FDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
-            | FStringArray vals -> renderArray escapeSqlDoubleQuotes "string" vals
-            | FBoolArray vals -> renderArray renderSqlBool "bool" vals
-            | FDateTimeArray vals -> renderArray (renderSqlDateTime >> renderSqlString) "datetime" vals
-            | FDateArray vals -> renderArray (renderSqlDate >> renderSqlString) "date" vals
+            | FIntArray vals -> renderArray renderFunQLInt "int" vals
+            | FDecimalArray vals -> renderArray renderFunQLDecimal "decimal" vals
+            | FStringArray vals -> renderArray renderFunQLString "string" vals
+            | FBoolArray vals -> renderArray renderFunQLBool "bool" vals
+            | FDateTimeArray vals -> renderArray (renderFunQLDateTime >> renderFunQLString) "datetime" vals
+            | FDateArray vals -> renderArray (renderFunQLDate >> renderFunQLString) "date" vals
             | FJsonArray vals -> renderArray renderFunQLJson "json" vals
             | FUserViewRefArray vals -> renderArray (fun (r : EntityRef) -> sprintf "&%s" (r.ToFunQLString())) "uvref" vals
             | FNull -> "NULL"
@@ -396,7 +395,7 @@ type SubEntityRef =
       extra : obj
     }
 
-type [<JsonConverter(typeof<FieldTypeConverter>)>] [<NoComparison>] FieldType<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+type [<JsonConverter(typeof<FieldTypeConverter>); NoEquality; NoComparison>] FieldType<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FTType of FieldExprType
     | FTReference of 'e * FieldExpr<'e, 'f> option
     | FTEnum of Set<string>
@@ -408,7 +407,7 @@ type [<JsonConverter(typeof<FieldTypeConverter>)>] [<NoComparison>] FieldType<'e
             | FTType t -> t.ToFunQLString()
             | FTReference (e, None) -> sprintf "reference(%s)" (e.ToFunQLString())
             | FTReference (e, Some check) -> sprintf "reference(%s, %s)" (e.ToFunQLString()) (check.ToFunQLString())
-            | FTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map (sprintf "\"%s\"" << renderSqlString) |> String.concat ", ")
+            | FTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map renderFunQLString |> String.concat ", ")
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -440,13 +439,15 @@ and FieldTypeConverter () =
 
 and AttributeMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, FieldExpr<'e, 'f>>
 
-and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FEValue of FieldValue
     | FERef of 'f
     | FENot of FieldExpr<'e, 'f>
     | FEAnd of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEOr of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEConcat of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEDistinct of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FENotDistinct of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FENotEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FELike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
@@ -484,6 +485,8 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
             | FEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FEDistinct (a, b) -> sprintf "(%s) IS DISTINCT FROM (%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FENotDistinct (a, b) -> sprintf "(%s) IS NOT DISTINCT FROM (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
@@ -526,7 +529,7 @@ and [<NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLNam
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and [<NoComparison>] AggExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] AggExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | AEAll of FieldExpr<'e, 'f>[]
     | AEDistinct of FieldExpr<'e, 'f>
     | AEStar
@@ -544,7 +547,7 @@ and [<NoComparison>] AggExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and [<NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { attributes : AttributeMap<'e, 'f>
       result : QueryResultExpr<'e, 'f>
     }
@@ -562,7 +565,7 @@ and [<NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLN
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and [<NoComparison>] QueryResultExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] QueryResultExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | QRExpr of FunQLName option * FieldExpr<'e, 'f>
     with
         override this.ToString () = this.ToFunQLString()
@@ -584,7 +587,7 @@ and [<NoComparison>] QueryResultExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFu
         interface IFunQLName with
             member this.ToName () = this.TryToName () |> Option.get
 
-and [<NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { orderBy : (SortOrder * FieldExpr<'e, 'f>)[]
       limit : FieldExpr<'e, 'f> option
       offset : FieldExpr<'e, 'f> option
@@ -609,7 +612,7 @@ and [<NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLName and 'f :> IF
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and [<NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FEntity of EntityName option * 'e
     | FJoin of JoinType * FromExpr<'e, 'f> * FromExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FSubExpr of EntityName * SelectExpr<'e, 'f>
@@ -635,7 +638,7 @@ and [<NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and [<NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { attributes : AttributeMap<'e, 'f>
       results : QueryResult<'e, 'f>[]
       from : FromExpr<'e, 'f> option
@@ -669,7 +672,7 @@ and [<NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IF
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-and [<NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | SSelect of SingleSelectExpr<'e, 'f>
     | SSetOp of SetOperation * SelectExpr<'e, 'f> * SelectExpr<'e, 'f> * OrderLimitClause<'e, 'f>
     with
@@ -713,6 +716,8 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
         | FEAnd (a, b) -> FEAnd (traverse a, traverse b)
         | FEOr (a, b) -> FEOr (traverse a, traverse b)
         | FEConcat (a, b) -> FEConcat (traverse a, traverse b)
+        | FEDistinct (a, b) -> FEDistinct (traverse a, traverse b)
+        | FENotDistinct (a, b) -> FENotDistinct (traverse a, traverse b)
         | FEEq (a, b) -> FEEq (traverse a, traverse b)
         | FENotEq (a, b) -> FENotEq (traverse a, traverse b)
         | FELike (e, pat) -> FELike (traverse e, traverse pat)
@@ -774,6 +779,8 @@ let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f
         | FEAnd (a, b) -> Task.map2Sync (curry FEAnd) (traverse a) (traverse b)
         | FEOr (a, b) -> Task.map2Sync (curry FEOr) (traverse a) (traverse b)
         | FEConcat (a, b) -> Task.map2Sync (curry FEConcat) (traverse a) (traverse b)
+        | FEDistinct (a, b) -> Task.map2Sync (curry FEDistinct) (traverse a) (traverse b)
+        | FENotDistinct (a, b) -> Task.map2Sync (curry FENotDistinct) (traverse a) (traverse b)    
         | FEEq (a, b) -> Task.map2Sync (curry FEEq) (traverse a) (traverse b)
         | FENotEq (a, b) -> Task.map2Sync (curry FENotEq) (traverse a) (traverse b)
         | FELike (e, pat) -> Task.map2Sync (curry FELike) (traverse e) (traverse pat)
@@ -851,6 +858,8 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FEAnd (a, b) -> traverse a; traverse b
         | FEOr (a, b) -> traverse a; traverse b
         | FEConcat (a, b) -> traverse a; traverse b
+        | FEDistinct (a, b) -> traverse a; traverse b
+        | FENotDistinct (a, b) -> traverse a; traverse b
         | FEEq (a, b) -> traverse a; traverse b
         | FENotEq (a, b) -> traverse a; traverse b
         | FELike (e, pat) -> traverse e; traverse pat
@@ -904,13 +913,13 @@ type ParsedFieldType = FieldType<EntityRef, LinkedFieldRef>
 
 type LocalFieldExpr = FieldExpr<FunQLVoid, FieldName>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type BoundField =
     { ref : ResolvedFieldRef
       immediate : bool // Set if field references value from a table directly, not via a subexpression.
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type BoundRef<'f> when 'f :> IFunQLName =
     { ref : 'f
       bound : BoundField option
@@ -938,7 +947,7 @@ type ResolvedFromExpr = FromExpr<ResolvedEntityRef, LinkedBoundFieldRef>
 type ResolvedAttributeMap = AttributeMap<ResolvedEntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<ResolvedEntityRef, LinkedBoundFieldRef>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type Argument<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { argType: FieldType<'e, 'f>
       optional: bool
@@ -1015,6 +1024,7 @@ let allowedAggregateFunctions =
           FunQLName "min"
           FunQLName "max"
           FunQLName "count"
+          FunQLName "bool_and"
         ]
 
 let allowedFunctions =

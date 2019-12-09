@@ -22,18 +22,22 @@ let private tableOperationOrder = function
 let private schemaOperationOrder = function
     | SODeleteConstraint _ -> 1
     | SODeleteIndex _ -> 2
-    | SODeleteTable _ -> 3
-    | SODeleteSequence _ -> 4
-    | SODeleteSchema _ -> 5
-    | SOCreateSchema _ -> 6
-    | SOCreateTable _ -> 7
-    | SOCreateSequence _ -> 8
-    | SOAlterTable _ -> 9
-    | SOCreateConstraint (_, _, CMPrimaryKey _) -> 10
-    | SOCreateConstraint (_, _, CMUnique _) -> 11
-    | SOCreateConstraint (_, _, CMForeignKey _) -> 12
-    | SOCreateConstraint (_, _, CMCheck _) -> 13
-    | SOCreateIndex _ -> 14
+    | SODropTrigger _ -> 3
+    | SODropFunction _ -> 4
+    | SODeleteTable _ -> 5
+    | SODeleteSequence _ -> 6
+    | SODeleteSchema _ -> 7
+    | SOCreateSchema _ -> 8
+    | SOCreateTable _ -> 9
+    | SOCreateSequence _ -> 10
+    | SOAlterTable _ -> 11
+    | SOCreateOrReplaceFunction _ -> 12
+    | SOCreateTrigger _ -> 13
+    | SOCreateConstraint (_, _, CMPrimaryKey _) -> 14
+    | SOCreateConstraint (_, _, CMUnique _) -> 15
+    | SOCreateConstraint (_, _, CMForeignKey _) -> 16
+    | SOCreateConstraint (_, _, CMCheck _) -> 17
+    | SOCreateIndex _ -> 18
 
 let private deleteBuildTable (table : TableRef) (tableMeta : TableMeta) : SchemaOperation seq =
     seq {
@@ -53,10 +57,15 @@ let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta
                 yield SODeleteConstraint (objRef, tableName)
             | OMIndex (tableName, indexMeta) ->
                 yield SODeleteIndex objRef
+            | OMFunction overloads ->
+                for KeyValue (signature, def) in overloads do
+                    yield SODropFunction (objRef, signature)
+            | OMTrigger (table, def) ->
+                yield SODropTrigger (objRef, table)
         yield SODeleteSchema schemaName
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AColumnMeta =
     { columnType : DBValueType
       isNullable : bool
@@ -84,6 +93,8 @@ let private normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
         | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
+        | VEDistinct (a, b) -> VEDistinct (traverse a, traverse b)
+        | VENotDistinct (a, b) -> VENotDistinct (traverse a, traverse b)
         | VEEq (a, b) -> VEEq (traverse a, traverse b)
         | VEEqAny (e, arr) -> VEEqAny (traverse e, traverse arr)
         | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
@@ -141,6 +152,18 @@ let private normalizeConstraint : ConstraintMeta -> ConstraintMeta = function
     | CMPrimaryKey p -> CMPrimaryKey p
     | CMUnique u -> CMUnique u
 
+let private migrateOverloads (objRef : SchemaObject) (oldOverloads : Map<FunctionSignature, FunctionDefinition>) (newOverloads : Map<FunctionSignature, FunctionDefinition>) : SchemaOperation seq =
+    seq {
+        for KeyValue (signature, newDefinition) in newOverloads do
+            match Map.tryFind signature oldOverloads with
+            | Some oldDefinition when oldDefinition = newDefinition -> ()
+            | _ -> yield SOCreateOrReplaceFunction (objRef, signature, newDefinition)
+        for KeyValue (signature, definition) in oldOverloads do
+            match Map.tryFind signature newOverloads with
+            | Some _ -> ()
+            | None -> yield SODropFunction (objRef, signature)
+    }
+
 let private migrateBuildSchema (schema : SchemaName) (fromMeta : SchemaMeta) (toMeta : SchemaMeta) : SchemaOperation seq =
     seq {
         for KeyValue (objectName, obj) in toMeta.objects do
@@ -171,6 +194,17 @@ let private migrateBuildSchema (schema : SchemaName) (fromMeta : SchemaMeta) (to
                         yield SODeleteIndex objRef
                         yield SOCreateIndex (objRef, tableName, index)
                 | _ -> yield SOCreateIndex (objRef, tableName, index)
+            | OMFunction newOverloads ->
+                match Map.tryFind objectName fromMeta.objects with
+                | Some (OMFunction oldOverloads) -> yield! migrateOverloads objRef oldOverloads newOverloads
+                | _ -> yield! migrateOverloads objRef Map.empty newOverloads
+            | OMTrigger (tableName, trigger) ->
+                match Map.tryFind objectName fromMeta.objects with
+                | Some (OMTrigger (oldTableName, oldTrigger)) ->
+                    if tableName <> oldTableName || trigger <> oldTrigger then
+                        yield SODropTrigger (objRef, oldTableName)
+                        yield SOCreateTrigger (objRef, tableName, trigger)
+                | _ -> yield SOCreateTrigger (objRef, tableName, trigger)
 
         for KeyValue (objectName, obj) in fromMeta.objects do
             let objRef = { schema = Some schema; name = objectName }
@@ -191,7 +225,17 @@ let private migrateBuildSchema (schema : SchemaName) (fromMeta : SchemaMeta) (to
                 match Map.tryFind objectName toMeta.objects with
                 | Some (OMIndex _) -> ()
                 | _ -> yield SODeleteIndex objRef
-    }
+            | OMFunction overloads ->
+                match Map.tryFind objectName toMeta.objects with
+                | Some (OMFunction _) -> ()
+                | _ ->
+                    for KeyValue (signature, def) in overloads do
+                        yield SODropFunction (objRef, signature)
+            | OMTrigger (tableName, _) ->
+                match Map.tryFind objectName toMeta.objects with
+                | Some (OMTrigger _) -> ()
+                | _ -> yield SODropTrigger (objRef, tableName)
+        }
 
 let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : SchemaOperation seq =
     seq {

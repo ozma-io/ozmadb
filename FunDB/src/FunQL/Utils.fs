@@ -11,17 +11,25 @@ type IFunQLString =
 let goodName (name : string) : bool =
     not (name = "" || name.Contains(' ') || name.Contains('/') || name.Contains("__"))
 
+let renderFunQLName = escapeSqlDoubleQuotes
+let renderFunQLString = escapeSqlSingleQuotes
+let renderFunQLInt = renderSqlInt
+let renderFunQLBool = renderSqlBool
+let renderFunQLDecimal = renderSqlDecimal
+let renderFunQLDateTime = renderSqlDateTime
+let renderFunQLDate = renderSqlDate
+
 let rec renderFunQLJson (j : JToken) : string =
     match j.Type with
     | JTokenType.Object ->
         let obj = j :?> JObject :> KeyValuePair<string, JToken> seq
-        obj |> Seq.map (fun (KeyValue (k, v)) -> sprintf "%s:%s" (renderSqlName k) (renderFunQLJson v)) |> String.concat "," |> sprintf "{%s}"
+        obj |> Seq.map (fun (KeyValue (k, v)) -> sprintf "%s:%s" (escapeSqlDoubleQuotes k) (renderFunQLJson v)) |> String.concat "," |> sprintf "{%s}"
     | JTokenType.Array ->
         let arr = j :?> JArray :> JToken seq
         arr |> Seq.map renderFunQLJson |> String.concat "," |> sprintf "[%s]"
     | JTokenType.Integer -> renderSqlInt <| JToken.op_Explicit j
     | JTokenType.Float -> renderSqlDecimal <| JToken.op_Explicit j
-    | JTokenType.String -> renderSqlString <| JToken.op_Explicit j
+    | JTokenType.String -> escapeSqlSingleQuotes <| JToken.op_Explicit j
     | JTokenType.Boolean -> renderSqlBool <| JToken.op_Explicit j
     | JTokenType.Null -> "null"
     | typ -> failwith <| sprintf "Unknown JSON token type %O" typ

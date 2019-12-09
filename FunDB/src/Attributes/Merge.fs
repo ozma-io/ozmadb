@@ -5,7 +5,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Layout.Types
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type MergedAttribute =
     { priority : int
       expression : ResolvedFieldExpr
@@ -13,19 +13,19 @@ type MergedAttribute =
 
 type MergedAttributeMap = Map<AttributeName, MergedAttribute>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type MergedAttributesEntity =
     { fields : Map<FieldName, MergedAttributeMap>
     } with
         member this.FindField (name : FieldName) =
             Map.tryFind name this.fields
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type MergedAttributesSchema =
     { entities : Map<EntityName, MergedAttributesEntity>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type MergedDefaultAttributes =
     { schemas : Map<SchemaName, MergedAttributesSchema>
     } with

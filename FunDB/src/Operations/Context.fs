@@ -151,7 +151,7 @@ type UserViewSource =
     | UVAnonymous of string
     | UVNamed of ResolvedUserViewRef
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type RequestParams =
     { cacheStore : ContextCacheStore
       userName : UserName
@@ -160,10 +160,14 @@ type RequestParams =
       language : string
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type RoleType =
     | RTRoot
     | RTRole of ResolvedRole
+
+let isRootRole : RoleType -> bool = function
+    | RTRoot -> true
+    | RTRole _ -> false
 
 let private getRole = function
     | RTRoot -> None
@@ -590,7 +594,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
 
     member this.SaveSchema (name : SchemaName) : Task<Result<SchemaDump, SaveErrorInfo>> =
         task {
-            if roleType <> RTRoot then
+            if not (isRootRole roleType) then
                 return Error SEAccessDenied
             else
                 try
@@ -604,7 +608,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
 
     member this.RestoreSchema (name : SchemaName) (dump : SchemaDump) : Task<Result<unit, RestoreErrorInfo>> =
         task {
-            if roleType <> RTRoot then
+            if not (isRootRole roleType) then
                 return Error REAccessDenied
             else if Map.containsKey name cacheStore.Preload.schemas then
                 return Error REPreloaded

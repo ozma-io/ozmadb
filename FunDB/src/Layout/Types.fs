@@ -3,7 +3,6 @@ module FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.Layout.Source
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -15,8 +14,8 @@ type ReferenceRef =
 
         member this.ToFunQLString () =
             match this with
-            | RThis name -> sprintf "%s.%s" (renderSqlName "this") (name.ToFunQLString())
-            | RRef name -> sprintf "%s.%s" (renderSqlName "ref") (name.ToFunQLString())
+            | RThis name -> sprintf "%s.%s" (renderFunQLName "this") (name.ToFunQLString())
+            | RRef name -> sprintf "%s.%s" (renderFunQLName "ref") (name.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString() = this.ToFunQLString()
@@ -37,12 +36,12 @@ type ResolvedUniqueConstraint =
     { columns : FunQLName array
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ResolvedCheckConstraint =
     { expression : LocalFieldExpr
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ResolvedColumnField =
     { fieldType : ResolvedFieldType
       valueType : SQL.SimpleValueType
@@ -53,7 +52,7 @@ type ResolvedColumnField =
       columnName : SQL.ColumnName
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ResolvedComputedField =
     { expression : ResolvedFieldExpr
       // Set when there's no dereferences in the expression
@@ -65,7 +64,7 @@ type ResolvedComputedField =
       allowBroken : bool
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type EntityInheritance =
     { parent : ResolvedEntityRef
       // Expression that verifies that given entry's sub_entity is valid for this type.
@@ -73,17 +72,16 @@ type EntityInheritance =
       checkExpr : SQL.ValueExpr
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type GenericResolvedField<'col, 'comp> =
     | RColumnField of 'col
     | RComputedField of 'comp
     | RId
     | RSubEntity
 
-[<NoComparison>]
 type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedField>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ComputedFieldError =
     { source : SourceComputedField
       inheritedFrom : ResolvedEntityRef option
@@ -107,7 +105,7 @@ let inline genericFindField (getColumnField : FieldName -> 'col option) (getComp
                 | None -> None
     traverse
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ChildEntity =
     { direct : bool
     }
@@ -123,7 +121,7 @@ type IEntityFields =
 let hasSubType (entity : IEntityFields) =
         Option.isSome entity.Parent || entity.IsAbstract || not (Seq.isEmpty entity.Children)
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
       computedFields : Map<FieldName, Result<ResolvedComputedField, ComputedFieldError>>
@@ -171,7 +169,7 @@ let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntit
     | [| schemaName; entityName |] -> { schema = FunQLName schemaName; name = FunQLName entityName }
     | _ -> failwith "Invalid type name"
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ResolvedSchema =
     { entities : Map<EntityName, ResolvedEntity>
       roots : Set<EntityName>
@@ -180,7 +178,7 @@ type ResolvedSchema =
 type ILayoutFields =
     abstract member FindEntity : ResolvedEntityRef -> IEntityFields option
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type Layout =
     { schemas : Map<SchemaName, ResolvedSchema>
     } with

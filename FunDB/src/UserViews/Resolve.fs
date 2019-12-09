@@ -28,7 +28,7 @@ let private getColumn : ColumnType -> FunQLName option = function
     | CTColumn c -> Some c
     | _ -> None
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private HalfResolvedView =
     { source : SourceUserView
       resolved : ResolvedViewExpr

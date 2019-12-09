@@ -24,14 +24,14 @@ stringArray : StringArray EOF { $1 }
 // Expressions
 
 StringArrayValue:
-  | STRING        { AVValue $1 }
-  | NULL          { AVNull }
-  | StringArray   { AVArray $1 }
+    | STRING      { AVValue $1 }
+    | NULL        { AVNull }
+    | StringArray { AVArray $1 }
 
 StringArray:
-  | LEFT_BRACE RIGHT_BRACE                     { [||] }
-  | LEFT_BRACE StringArrayNonEmpty RIGHT_BRACE { List.toArray $2 }
+    | LEFT_BRACE RIGHT_BRACE                     { [||] }
+    | LEFT_BRACE StringArrayNonEmpty RIGHT_BRACE { List.toArray $2 }
 
 StringArrayNonEmpty:
-  | StringArrayValue                           { [ $1 ] }
-  | StringArrayValue COMMA StringArrayNonEmpty { $1 :: $3 }
+    | StringArrayValue                           { [ $1 ] }
+    | StringArrayValue COMMA StringArrayNonEmpty { $1 :: $3 }

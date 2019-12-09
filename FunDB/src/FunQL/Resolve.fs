@@ -13,7 +13,7 @@ open FunWithFlags.FunDB.Layout.Types
 type ViewResolveException (message : string) =
     inherit Exception(message)
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private BoundFieldInfo =
     { ref : ResolvedFieldRef
       entity : IEntityFields
@@ -22,7 +22,7 @@ type private BoundFieldInfo =
       immediate : bool
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private QSubqueryField =
     | QRename of FieldName
     // BoundFieldInfo exists only for fields that are bound to one and only one field.
@@ -41,7 +41,7 @@ type private QMapping = Map<EntityName option, SchemaName option * QSubqueryFiel
 
 type private SomeArgumentsMap = Map<ArgumentName, ParsedFieldType>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private QSelectResults =
     { fields : QSubqueryFields
       fieldAttributeNames : (FieldName * Set<FieldName>)[]
@@ -59,7 +59,7 @@ type ResolvedMainEntity =
 
 type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ResolvedViewExpr =
     { arguments : ResolvedArgumentsMap
       select : ResolvedSelectExpr

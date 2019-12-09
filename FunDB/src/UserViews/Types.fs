@@ -11,25 +11,25 @@ type ViewColumnName = FunQLName
 type UserViewRef = FunWithFlags.FunDB.FunQL.AST.UserViewRef
 type ResolvedUserViewRef = FunWithFlags.FunDB.FunQL.AST.ResolvedUserViewRef
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ResolvedUserView =
     { resolved : ResolvedViewExpr
       allowBroken : bool
       compiled : CompiledViewExpr
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type UserViewError =
   { source : SourceUserView
     error : exn
   }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type UserViewsSchema =
     { userViews : Map<UserViewName, Result<ResolvedUserView, UserViewError>>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type UserViews =
     { schemas : Map<SchemaName, UserViewsSchema>
     } with

@@ -18,7 +18,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 // Local domain ids get assigned to all sets in a set operation.
 // Each row has a different domain key assigned, so half of rows may come from entity A and half from entity B.
 // This way one can make use if IDs assigned to cells to reference and update them.
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type DomainField =
     { ref : ResolvedFieldRef
       // A field with assigned idColumn of Foo will use ID column "__Id__Foo" and SubEntity column "__SubEntity__Foo"
@@ -29,7 +29,7 @@ type Domain = Map<FieldName, DomainField>
 type GlobalDomainId = int
 type DomainNamespaceId = int
 type LocalDomainId = int
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type Domains =
     | DSingle of GlobalDomainId * Domain
     | DMulti of DomainNamespaceId * Map<LocalDomainId, Domains>
@@ -56,7 +56,7 @@ let columnName : ColumnType -> SQL.SQLName = function
     | CTMainSubEntityColumn -> SQL.SQLName "__main_sub_entity"
     | CTColumn (FunQLName column) -> SQL.SQLName column
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private SelectInfo =
     { attributes : Map<FieldName, Set<AttributeName>>
       domains : Domains
@@ -66,11 +66,11 @@ type private SelectInfo =
 
 type FlattenedDomains = Map<GlobalDomainId, Domain>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private FromType = FTEntity of GlobalDomainId * Domain // Domain ID is used for merging.
                       | FTSubquery of SelectInfo
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private FromInfo =
     { fromType : FromType
       mainId : SQL.ColumnName option
@@ -160,7 +160,7 @@ type CompiledAttributesExpr =
       pureColumnAttributes : Map<FieldName, Set<AttributeName>>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type CompiledViewExpr =
     { attributesQuery : CompiledAttributesExpr option
       query : Query<SQL.SelectExpr>
@@ -279,6 +279,8 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
         | FEAnd (a, b) -> SQL.VEAnd (traverse a, traverse b)
         | FEOr (a, b) -> SQL.VEOr (traverse a, traverse b)
         | FEConcat (a, b) -> SQL.VEConcat (traverse a, traverse b)
+        | FEDistinct (a, b) -> SQL.VEDistinct (traverse a, traverse b)
+        | FENotDistinct (a, b) -> SQL.VENotDistinct (traverse a, traverse b)    
         | FEEq (a, b) -> SQL.VEEq (traverse a, traverse b)
         | FENotEq (a, b) -> SQL.VENotEq (traverse a, traverse b)
         | FELike (e, pat) -> SQL.VELike (traverse e, traverse pat)
@@ -358,7 +360,7 @@ let replaceColumnRefs (columnRef : SQL.ColumnRef) : SQL.ValueExpr -> SQL.ValueEx
         }
     SQL.mapValueExpr mapper
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private ResultColumn =
     { domains : Domains option
       attributes : Set<AttributeName>
@@ -859,7 +861,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let emptyDomains = DSingle (newGlobalDomainId (), Map.empty)
         let (attributes, newDomains, columns) =
             if addMetaColumns then
-                let resultColumns = resultEntries |> Seq.collect (fun entry -> entry.columns) |> Seq.distinct
+                let resultColumns = resultEntries |> Seq.collect (fun entry -> entry.columns) |> Seq.distinctBy (fun (typ, col) -> typ)
                 let newDomains = resultEntries |> Seq.mapMaybe (fun entry -> entry.domains) |> Seq.fold mergeDomains emptyDomains
                 let queryAttrs = Seq.fold2 (fun attrsMap result entry -> Map.add (result.result.TryToName () |> Option.get) entry.attributes attrsMap) Map.empty select.results resultEntries
 
@@ -1113,7 +1115,7 @@ let private checkPureColumn : SQL.SelectedColumn -> (SQL.ColumnName * PurityStat
     | SQL.SCAll _ -> None
     | SQL.SCExpr (name, expr) -> Option.map (fun purity -> (Option.get name, purity)) (checkPureExpr expr)
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private PureColumn =
     { columnType : ColumnType
       purity : PurityStatus
@@ -1142,17 +1144,8 @@ let rec private findPureAttributes (columnTypes : ColumnType[]) : SQL.SelectExpr
             | _ -> None
         Array.map2 assignPure columnTypes query.columns
     | SQL.SValues vals -> Array.create (Array.length vals.[0]) None
-    | SQL.SSetOp (op, a, b, limits) ->
-        let addPure minfo1 minfo2 =
-            match (minfo1, minfo2) with
-            | (Some info1, Some info2) when info1.result = info2.result ->
-                Some { columnType = info1.columnType
-                       purity = addPurity info1.purity info2.purity
-                       result = info1.result
-                     }
-            | _ -> None
-        Array.map2 addPure (findPureAttributes columnTypes a) (findPureAttributes columnTypes b)
-
+    | SQL.SSetOp (op, a, b, limits) -> Array.create (findPureAttributes columnTypes a |> Array.length) None
+    
 let rec private filterExprColumns (cols : (PureColumn option)[]) : SQL.SelectExpr -> SQL.SelectExpr = function
     | SQL.SSelect query ->
         let checkColumn i _ = Option.isNone cols.[i]

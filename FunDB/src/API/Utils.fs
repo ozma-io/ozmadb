@@ -55,7 +55,7 @@ type RealmAccess =
     { roles : string[]
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type APISettings =
     { cacheStore : ContextCacheStore
       disableSecurity : bool

@@ -4,7 +4,12 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 
-[<NoComparison>]
+type ConstraintName = SQLName
+type IndexName = SQLName
+type SequenceName = SQLName
+type TriggerName = SQLName
+
+[<NoEquality; NoComparison>]
 type ColumnMeta =
     { columnType : DBValueType
       isNullable : bool
@@ -17,19 +22,19 @@ type ConstraintType =
     | CTPrimaryKey
     | CTForeignKey
 
-[<NoComparison>]
+[<StructuralEquality; NoComparison>]
 type ConstraintMeta =
     | CMUnique of ColumnName[]
     | CMCheck of ValueExpr
     | CMPrimaryKey of ColumnName[]
     | CMForeignKey of TableRef * (ColumnName * ColumnName)[]
 
-[<NoComparison>]
+[<StructuralEquality; NoComparison>]
 type IndexMeta =
     { columns : ColumnName[]
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type TableMeta =
     { columns : Map<ColumnName, ColumnMeta>
     }
@@ -42,14 +47,167 @@ let unionTableMeta (a : TableMeta) (b : TableMeta) =
     { columns = Map.unionUnique a.columns b.columns
     }
 
-[<NoComparison>]
+type FunctionMode =
+    | FMIn
+    | FMOut
+    | FMInOut
+    | FMVariadic
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | FMIn -> "IN"
+            | FMOut -> "OUT"
+            | FMInOut -> "INOUT"
+            | FMVariadic -> "VARIADIC"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
+type FunctionArgument =
+    { name : SQLName option
+      defaultValue : ValueExpr option // Do not set to NULL
+    }
+
+type FunctionArgumentSignature =
+    { typeName : TypeName
+      mode : FunctionMode
+    }
+
+let private functionSignatureToString (signature : FunctionArgumentSignature) =
+    sprintf "%s %s" (signature.mode.ToSQLString()) (signature.typeName.ToSQLString())
+
+let private functionArgumentToString (signature : FunctionArgumentSignature) (arg : FunctionArgument) =
+    let nameStr =
+        match arg.name with
+        | None -> ""
+        | Some n -> n.ToSQLString()
+    let defaultStr =
+        match arg.defaultValue with
+        | None -> ""
+        | Some d -> sprintf "= %s" (d.ToSQLString())
+    concatWithWhitespaces [signature.mode.ToSQLString(); nameStr; signature.typeName.ToSQLString(); defaultStr]
+
+[<StructuralEquality; NoComparison>]
+type FunctionReturn =
+    | FRTable of (TypeName * ColumnName)[]
+    | FRValue of TypeName
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | FRTable cols ->
+                cols
+                    |> Seq.map (fun (typ, name) -> sprintf "%s %s" (name.ToSQLString()) (typ.ToSQLString()))
+                    |> String.concat ", "
+                    |> sprintf "TABLE (%s)"
+            | FRValue typ -> typ.ToSQLString()
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
+type FunctionBehaviour =
+    | FBImmutable
+    | FBStable
+    | FBVolatile
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | FBImmutable -> "IMMUTABLE"
+            | FBStable -> "STABLE"
+            | FBVolatile -> "VOLATILE"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
+type FunctionDefinition =
+    { arguments : FunctionArgument[]
+      returnValue : FunctionReturn
+      behaviour : FunctionBehaviour
+      language : SQLName
+      definition : string
+    }
+
+type TriggerOrder =
+    | TOBefore
+    | TOAfter
+    | TOInsteadOf
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | TOBefore -> "BEFORE"
+            | TOAfter -> "AFTER"
+            | TOInsteadOf -> "INSTEAD OF"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
+type TriggerEvent =
+    | TEInsert
+    | TEUpdate of ColumnName[] option
+    | TEDelete
+    | TETruncate
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | TEInsert -> "INSERT"
+            | TEUpdate None -> "UPDATE"
+            | TEUpdate (Some cols) ->
+                assert (not <| Array.isEmpty cols)
+                cols |> Seq.map (fun c -> c.ToSQLString()) |> String.concat ", " |> sprintf "UPDATE OF %s"
+            | TEDelete -> "DELETE"
+            | TETruncate -> "TRUNCATE"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+type TriggerMode =
+    | TMEachRow
+    | TMEachStatement
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | TMEachRow -> "FOR EACH ROW"
+            | TMEachStatement -> "FOR EACH STATEMENT"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
+type TriggerDefinition =
+    { isConstraint : bool
+      order : TriggerOrder
+      events : TriggerEvent[]
+      mode : TriggerMode
+      condition : ValueExpr option
+      functionName : SchemaObject
+      functionArgs : string[]
+    }
+
+type FunctionSignature = ComparableArray<FunctionArgumentSignature>
+
+[<NoEquality; NoComparison>]
 type ObjectMeta =
     | OMTable of TableMeta
     | OMSequence
     | OMConstraint of TableName * ConstraintMeta
     | OMIndex of TableName * IndexMeta
+    | OMFunction of Map<FunctionSignature, FunctionDefinition>
+    | OMTrigger of TableName * TriggerDefinition
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type SchemaMeta =
     { objects : Map<SQLName, ObjectMeta>
     }
@@ -58,12 +216,24 @@ let emptySchemaMeta =
     { objects = Map.empty
     }
 
-[<NoComparison>]
+let unionSchemaMeta (a : SchemaMeta) (b : SchemaMeta) =
+    { objects = Map.unionUnique a.objects b.objects
+    }
+
+[<NoEquality; NoComparison>]
 type DatabaseMeta =
     { schemas : Map<SchemaName, SchemaMeta>
     }
 
-[<NoComparison>]
+let emptyDatabaseMeta =
+    { schemas = Map.empty
+    }
+
+let unionDatabaseMeta (a : DatabaseMeta) (b : DatabaseMeta) =
+    { schemas = Map.unionWith (fun name -> unionSchemaMeta) a.schemas b.schemas
+    }
+
+[<NoEquality; NoComparison>]
 type TableOperation =
     | TOCreateColumn of ColumnName * ColumnMeta
     | TODeleteColumn of ColumnName
@@ -91,7 +261,7 @@ type TableOperation =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type SchemaOperation =
     | SOCreateSchema of SchemaName
     | SODeleteSchema of SchemaName
@@ -105,6 +275,10 @@ type SchemaOperation =
     | SOCreateIndex of SchemaObject * TableName * IndexMeta
     | SODeleteIndex of SchemaObject
     | SOAlterTable of TableRef * TableOperation[]
+    | SOCreateOrReplaceFunction of SchemaObject * FunctionSignature * FunctionDefinition
+    | SODropFunction of SchemaObject * FunctionSignature
+    | SOCreateTrigger of SchemaObject * TableName * TriggerDefinition
+    | SODropTrigger of SchemaObject * TableName
     with
         override this.ToString () = this.ToSQLString()
 
@@ -139,6 +313,39 @@ type SchemaOperation =
                 sprintf "CREATE INDEX %s ON %s (%s)" (index.name.ToSQLString()) ({ index with name = table }.ToSQLString()) cols
             | SODeleteIndex index -> sprintf "DROP INDEX %s" (index.ToSQLString())
             | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+            | SOCreateOrReplaceFunction (func, args, def) ->
+                assert (Array.length args.items = Array.length def.arguments)
+                let argsStr = Seq.map2 functionArgumentToString args def.arguments |> String.concat ", "
+                sprintf "CREATE OR REPLACE FUNCTION %s (%s) RETURNS %s LANGUAGE %s %s AS %s"
+                    (func.ToSQLString())
+                    argsStr
+                    (def.returnValue.ToSQLString())
+                    (def.language.ToSQLString())
+                    (def.behaviour.ToSQLString())
+                    (renderSqlString def.definition)
+            | SODropFunction (func, args) ->
+                let argsStr = args.items |> Seq.map functionSignatureToString |> String.concat ", "
+                sprintf "DROP FUNCTION %s (%s)" (func.ToSQLString()) argsStr
+            | SOCreateTrigger (trigger, table, def) ->
+                assert (not <| Array.isEmpty def.events)
+                let constraintStr = if def.isConstraint then "CONSTRAINT" else ""
+                let eventsStr = def.events |> Seq.map (fun e -> e.ToSQLString()) |> String.concat " OR "
+                let triggerStr =
+                    sprintf "TRIGGER %s %s %s ON %s %s"
+                        (trigger.name.ToSQLString())
+                        (def.order.ToSQLString())
+                        eventsStr
+                        ({ schema = trigger.schema; name = table }.ToSQLString())
+                        (def.mode.ToSQLString())
+                let whenStr =
+                    match def.condition with
+                    | None -> ""
+                    | Some cond -> sprintf "WHEN (%s)" (cond.ToSQLString())
+                let argsStr = def.functionArgs |> Seq.map renderSqlString |> String.concat ", "
+                let tailStr = sprintf "EXECUTE PROCEDURE %s (%s)" (def.functionName.ToSQLString()) argsStr
+                concatWithWhitespaces ["CREATE"; constraintStr; triggerStr; whenStr; tailStr]
+            | SODropTrigger (trigger, table) ->
+                sprintf "DROP TRIGGER %s ON %s" (trigger.name.ToSQLString()) ({ schema = trigger.schema; name = table }.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

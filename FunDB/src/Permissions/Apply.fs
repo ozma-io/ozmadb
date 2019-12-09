@@ -44,7 +44,7 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
         | None -> currRestrs
         | Some child ->
             let restrs = accessor child
-            if restrs.expression = OFEFalse then
+            if optimizedIsFalse restrs.expression then
                 currRestrs
             else
                 let expr = renameRestriction currRef entityRef restrs.expression

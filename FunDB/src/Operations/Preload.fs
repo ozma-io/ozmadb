@@ -16,6 +16,7 @@ open FunWithFlags.FunDB.Layout.Schema
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Resolve
 open FunWithFlags.FunDB.Layout.Update
+open FunWithFlags.FunDB.Layout.Integrity
 open FunWithFlags.FunDB.Layout.Meta
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Generate
@@ -49,7 +50,7 @@ let emptySourcePreload : SourcePreload =
     { schemas = Map.empty
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type PreloadedSchema =
     { schema : SourceSchema
       permissions : SourcePermissionsSchema
@@ -57,7 +58,7 @@ type PreloadedSchema =
       userViewGenerator : UserViewGenerator option
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type Preload =
     { schemas : Map<SchemaName, PreloadedSchema>
     }
@@ -158,13 +159,20 @@ let filterUserMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
     { schemas = Map.filter (fun (SQL.SQLName name) _ -> not <| Map.containsKey (FunQLName name) preload.schemas) meta.schemas
     } : SQL.DatabaseMeta
 
+let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : Set<LayoutAssertion> * SQL.DatabaseMeta =
+    let meta1 = buildLayoutMeta layout subLayout
+    let assertions = buildAssertions layout subLayout
+    let meta2 = buildAssertionsMeta layout assertions
+    let meta = SQL.unionDatabaseMeta meta1 meta2
+    (assertions, meta)
+
 // Returns only user meta
 let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preload : Preload) : Task<bool * Layout * SQL.DatabaseMeta> =
     task {
         logger.LogInformation("Migrating system entities to the current version")
         let sourceLayout = preloadLayout preload
         let (_, layout) = resolveLayout sourceLayout false
-        let newSystemMeta = buildLayoutMeta layout layout
+        let (_, newSystemMeta) = buildFullLayoutMeta layout layout
         let! currentMeta = buildDatabaseMeta conn.Transaction
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
 
@@ -216,13 +224,25 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
 
-        let newMeta = buildLayoutMeta newLayout newLayout
+        let (_, newMeta) = buildFullLayoutMeta newLayout newLayout
         let newUserMeta = filterUserMeta preload newMeta
         let! currentMeta2 = buildDatabaseMeta conn.Transaction
         let currentUserMeta2 = filterUserMeta preload currentMeta2
 
         let userMigration = planDatabaseMigration currentUserMeta2 newUserMeta
         let! _ = migrateDatabase conn.Connection.Query userMigration
+
+        // Second migration shouldn't produce any changes.
+        let sanityCheck () =
+            let currentMeta = Task.awaitSync <| buildDatabaseMeta conn.Transaction
+            let currentUserMeta = filterUserMeta preload currentMeta
+            let systemMigration = planDatabaseMigration currentUserMeta newUserMeta |> Seq.toArray
+            if Array.isEmpty systemMigration then
+                true
+            else
+                eprintfn "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
+                false
+        assert sanityCheck ()    
 
         return (changed1 || changed2 || changed3, newLayout, newUserMeta)
     }

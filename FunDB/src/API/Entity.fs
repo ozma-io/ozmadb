@@ -11,7 +11,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Operations.Context
 
 [<SerializeAsObject("type")>]
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type TransactionOp =
     | [<CaseName("insert")>] TInsertEntity of entity : ResolvedEntityRef * entries : RawArguments
     | [<CaseName("update")>] TUpdateEntity of entity : ResolvedEntityRef * id : int * entries : RawArguments
@@ -23,7 +23,7 @@ type TransactionResult =
     | [<CaseName("update")>] TRUpdateEntity
     | [<CaseName("delete")>] TRDeleteEntity
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type Transaction =
     { operations: TransactionOp[]
     }

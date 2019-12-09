@@ -7,7 +7,7 @@ open FunWithFlags.FunDB.FunQL.AST
 // Actually stringified expression, used for deduplication.
 type ExpressionKey = string
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type OptimizedFieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | OFEOr of Map<ExpressionKey, OptimizedFieldExpr<'e, 'f>>
     | OFEAnd of Map<ExpressionKey, OptimizedFieldExpr<'e, 'f>>
@@ -70,6 +70,14 @@ let optimizeFieldValue : FieldValue -> OptimizedFieldExpr<'e, 'f> = function
     | FBool false -> OFEFalse
     | FBool true -> OFETrue
     | v -> OFEExpr (FEValue v)
+
+let optimizedIsFalse : OptimizedFieldExpr<'e, 'f> -> bool = function
+    | OFEFalse -> true
+    | _ -> false
+
+let optimizedIsTrue : OptimizedFieldExpr<'e, 'f> -> bool = function
+    | OFETrue -> true
+    | _ -> false
 
 let rec optimizeFieldExpr : FieldExpr<'e, 'f> -> OptimizedFieldExpr<'e, 'f> = function
     | FEOr (a, b) -> orFieldExpr (optimizeFieldExpr a) (optimizeFieldExpr b)

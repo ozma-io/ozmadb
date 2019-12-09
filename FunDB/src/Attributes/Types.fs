@@ -4,7 +4,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AttributesField =
     { allowBroken : bool
       priority : int
@@ -12,25 +12,25 @@ type AttributesField =
       globalArguments : Set<ArgumentName>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AttributesError =
     { source : SourceAttributesField
       error : exn
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AttributesEntity =
     { fields : Map<FieldName, Result<AttributesField, AttributesError>>
     } with
         member this.FindField (name : FieldName) =
             Map.tryFind name this.fields
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AttributesSchema =
     { entities : Map<EntityName, AttributesEntity>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AttributesDatabase =
     { schemas : Map<SchemaName, AttributesSchema>
     } with
@@ -42,7 +42,7 @@ type AttributesDatabase =
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type DefaultAttributes =
     { schemas : Map<SchemaName, AttributesDatabase>
     }

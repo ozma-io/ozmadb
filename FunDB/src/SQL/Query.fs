@@ -23,7 +23,7 @@ type QueryException (message : string, innerException : Exception) =
 
 type ExprParameters = Map<int, SimpleValueType * Value>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type QueryResult =
     { columns : (SQLName * SimpleValueType)[]
       rows : seq<Value[]>

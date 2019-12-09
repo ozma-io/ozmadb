@@ -38,9 +38,9 @@ type SQLRawString = SQLRawString of string
 type SchemaName = SQLName
 type TableName = SQLName
 type ColumnName = SQLName
-type ConstraintName = SQLName
-type IndexName = SQLName
-type SequenceName = SQLName
+// Because '"character varying(1)"' is not a type but 'character varying(1)' is!
+type TypeName = SQLRawString
+type FunctionName = SQLName
 
 // Values
 
@@ -101,7 +101,7 @@ let rec mapArrayValue (func : 'a -> 'b) : ArrayValue<'a> -> ArrayValue<'b> = fun
 and mapValueArray (func : 'a -> 'b) (vals : ValueArray<'a>) : ValueArray<'b> =
     Array.map (mapArrayValue func) vals
 
-type [<JsonConverter(typeof<ValueConverter>)>] [<NoComparison>] Value =
+type [<JsonConverter(typeof<ValueConverter>); NoEquality; NoComparison>] Value =
     | VInt of int
     | VDecimal of decimal
     | VString of string
@@ -135,8 +135,8 @@ type [<JsonConverter(typeof<ValueConverter>)>] [<NoComparison>] Value =
             match this with
             | VInt i -> renderSqlInt i
             | VDecimal d -> renderSqlDecimal d
-            | VString s -> sprintf "E%s :: text" (renderSqlString s)
-            | VRegclass rc -> sprintf "E%s :: regclass" (rc.ToSQLString() |> renderSqlString)
+            | VString s -> sprintf "%s :: text" (renderSqlString s)
+            | VRegclass rc -> sprintf "%s :: regclass" (rc.ToSQLString() |> renderSqlString)
             | VBool b -> renderSqlBool b
             | VDateTime dt -> sprintf "%s :: timestamp" (dt |> renderSqlDateTime |> renderSqlString)
             | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
@@ -229,7 +229,7 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
             | STRegclass -> "regclass"
             | STJson -> "json"
 
-        member this.ToSQLRawString () = SQLRawString (this.ToSQLString ())
+        member this.ToSQLRawString () = SQLRawString (this.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -246,7 +246,7 @@ and SimpleTypeConverter () =
         serializer.Serialize(writer, value.ToJSONString())
 
 // Find the closest simple type to a given.
-let findSimpleType (str : SQLRawString) : SimpleType option =
+let findSimpleType (str : TypeName) : SimpleType option =
     match str.ToString() with
     | "int4" -> Some STInt
     | "integer" -> Some STInt
@@ -304,7 +304,7 @@ let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
     | VTScalar a -> VTScalar (func a)
     | VTArray a -> VTArray (func a)
 
-type DBValueType = ValueType<SQLRawString>
+type DBValueType = ValueType<TypeName>
 type SimpleValueType = ValueType<SimpleType>
 
 let valueSimpleType : Value -> SimpleValueType option = function
@@ -379,7 +379,7 @@ type SetOperation =
             member this.ToSQLString () = this.ToSQLString()
 
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
-type [<NoComparison>] ValueExpr =
+type [<CustomEquality; NoComparison>] ValueExpr =
     | VEValue of Value
     | VEColumn of ColumnRef
     | VEPlaceholder of int
@@ -387,6 +387,8 @@ type [<NoComparison>] ValueExpr =
     | VEAnd of ValueExpr * ValueExpr
     | VEOr of ValueExpr * ValueExpr
     | VEConcat of ValueExpr * ValueExpr
+    | VEDistinct of ValueExpr * ValueExpr
+    | VENotDistinct of ValueExpr * ValueExpr
     | VEEq of ValueExpr * ValueExpr
     | VEEqAny of ValueExpr * ValueExpr
     | VENotEq of ValueExpr * ValueExpr
@@ -403,8 +405,8 @@ type [<NoComparison>] ValueExpr =
     | VENotInQuery of ValueExpr * SelectExpr
     | VEIsNull of ValueExpr
     | VEIsNotNull of ValueExpr
-    | VEFunc of SQLName * ValueExpr[]
-    | VEAggFunc of SQLName * AggExpr
+    | VEFunc of FunctionName * ValueExpr[]
+    | VEAggFunc of FunctionName * AggExpr
     | VECast of ValueExpr * DBValueType
     | VECase of (ValueExpr * ValueExpr)[] * (ValueExpr option)
     | VECoalesce of ValueExpr[]
@@ -427,6 +429,8 @@ type [<NoComparison>] ValueExpr =
             | VEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEDistinct (a, b) -> sprintf "(%s) IS DISTINCT FROM (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VENotDistinct (a, b) -> sprintf "(%s) IS NOT DISTINCT FROM (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEEqAny (e, arr) -> sprintf "(%s) = ANY (%s)" (e.ToSQLString()) (arr.ToSQLString())
             | VENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToSQLString()) (b.ToSQLString())
@@ -465,10 +469,18 @@ type [<NoComparison>] ValueExpr =
             | VEArray vals -> sprintf "ARRAY[%s]" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VESubquery query -> sprintf "(%s)" (query.ToSQLString())
 
+        // VERY SLOW!!! Use equality only when you know what are you doing.
+        override x.Equals yobj = 
+            match yobj with
+            | :? ValueExpr as y -> (x.ToSQLString()) = (y.ToSQLString())
+            | _ -> false
+
+        override this.GetHashCode () = hash (this.ToSQLString())
+
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
 
-and [<NoComparison>] AggExpr =
+and [<NoEquality; NoComparison>] AggExpr =
     | AEAll of ValueExpr[]
     | AEDistinct of ValueExpr
     | AEStar
@@ -486,7 +498,7 @@ and [<NoComparison>] AggExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and [<NoComparison>] FromExpr =
+and [<NoEquality; NoComparison>] FromExpr =
     | FTable of obj * TableName option * TableRef // obj is extra meta info
     | FJoin of JoinType * FromExpr * FromExpr * ValueExpr
     | FSubExpr of TableName * ColumnName[] option * SelectExpr
@@ -512,7 +524,7 @@ and [<NoComparison>] FromExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and [<NoComparison>] SelectedColumn =
+and [<NoEquality; NoComparison>] SelectedColumn =
     | SCAll of TableRef option
     | SCExpr of ColumnName option * ValueExpr
     with
@@ -528,7 +540,7 @@ and [<NoComparison>] SelectedColumn =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and [<NoComparison>] SingleSelectExpr =
+and [<NoEquality; NoComparison>] SingleSelectExpr =
     { columns : SelectedColumn[]
       from : FromExpr option
       where : ValueExpr option
@@ -559,7 +571,7 @@ and [<NoComparison>] SingleSelectExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and [<NoComparison>] OrderLimitClause =
+and [<NoEquality; NoComparison>] OrderLimitClause =
     { orderBy : (SortOrder * ValueExpr)[]
       limit : ValueExpr option
       offset : ValueExpr option
@@ -584,7 +596,7 @@ and [<NoComparison>] OrderLimitClause =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and [<NoComparison>] SelectExpr =
+and [<NoEquality; NoComparison>] SelectExpr =
     | SSelect of SingleSelectExpr
     | SValues of ValueExpr[][]
     | SSetOp of SetOperation * SelectExpr * SelectExpr * OrderLimitClause
@@ -628,6 +640,8 @@ let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> Val
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
         | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
+        | VEDistinct (a, b) -> VEDistinct (traverse a, traverse b)
+        | VENotDistinct (a, b) -> VENotDistinct (traverse a, traverse b)
         | VEEq (a, b) -> VEEq (traverse a, traverse b)
         | VEEqAny (e, arr) -> VEEqAny (traverse e, traverse arr)
         | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
@@ -708,6 +722,8 @@ let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
         | VEAnd (a, b) -> traverse a; traverse b
         | VEOr (a, b) -> traverse a; traverse b
         | VEConcat (a, b) -> traverse a; traverse b
+        | VEDistinct (a, b) -> traverse a; traverse b
+        | VENotDistinct (a, b) -> traverse a; traverse b
         | VEEq (a, b) -> traverse a; traverse b
         | VEEqAny (e, arr) -> traverse e; traverse arr
         | VENotEq (a, b) -> traverse a; traverse b

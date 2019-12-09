@@ -94,6 +94,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
             // Instead we avoid `Include` and manually merge related entries.
             var ret = await this.Namespaces
                 .AsNoTracking()
+                .Include(ns => ns.Procs).ThenInclude(proc => proc.RetType)
+                .Include(ns => ns.Procs).ThenInclude(proc => proc.Language)
                 .Where(ns => !ns.NspName.StartsWith("pg_") && ns.NspName != "information_schema")
                 .Select(ns => new
                     {
@@ -127,8 +129,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                                     {
                                         Trigger = tg,
                                         Func = tg.Function,
-                                        FuncRetType = tg.Function.RetType,
-                                        FuncLanguage = tg.Function.Language,
+                                        FuncNamespace = tg.Function.Namespace,
                                         Source = PgGetTriggerDef(tg.Oid),
                                     }).ToList(),
                             }).ToList(),
@@ -169,8 +170,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                                     {
                                         trig.Trigger.Source = trig.Source;
                                         trig.Trigger.Function = trig.Func;
-                                        trig.Trigger.Function.RetType = trig.FuncRetType;
-                                        trig.Trigger.Function.Language = trig.FuncLanguage;
+                                        trig.Trigger.Function.Namespace = trig.FuncNamespace;
                                         return trig.Trigger;
                                     }).ToList();
                                 return cl.Class;
@@ -312,6 +312,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Column(TypeName="oid")]
         public int? TgConstraint { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN
         public Int16[] TgAttr { get; set; }
+        [Required]
+        public byte[] TgArgs { get; set; }
 
         [NotMapped]
         public string Source { get; set; }
@@ -335,11 +337,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public int ProNamespace { get; set; }
         [Column(TypeName="oid")]
         public int ProLang { get; set; }
-        [Column(TypeName="oid")]
-        public int? ProVariadic { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN
         public Int16 ProNArgs { get; set; }
         [Column(TypeName="oid")]
         public int ProRetType { get; set; }
+        public char ProVolatile { get; set; }
+        public bool ProRetSet { get; set; }
         [Required]
         public string ProSrc { get; set; }
 
@@ -347,8 +349,6 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Namespace Namespace { get; set; }
         [ForeignKey("ProLang")]
         public Language Language { get; set; }
-        [ForeignKey("ProVariadic")]
-        public Type Variadic { get; set; }
         [ForeignKey("ProRetType")]
         public Type RetType { get; set; }
     }

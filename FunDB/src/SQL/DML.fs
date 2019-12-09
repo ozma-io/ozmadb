@@ -4,7 +4,7 @@ open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type InsertValue =
     | IVValue of ValueExpr
     | IVDefault
@@ -19,7 +19,7 @@ type InsertValue =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type InsertValues =
     | IValues of InsertValue[][]
     | IDefaults
@@ -39,7 +39,7 @@ type InsertValues =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type InsertExpr =
     { name : TableRef
       columns : (obj * ColumnName)[] // obj is extra metadata
@@ -66,7 +66,7 @@ type InsertExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type UpdateExpr =
     { name : TableRef
       columns : Map<ColumnName, obj * ValueExpr> // obj is extra metadata
@@ -89,7 +89,7 @@ type UpdateExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type DeleteExpr =
     { name : TableRef
       where : ValueExpr option

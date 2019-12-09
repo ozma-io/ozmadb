@@ -7,7 +7,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Render
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type SerializedColumnField =
     { fieldType : ResolvedFieldType
       valueType : SQL.SimpleValueType
@@ -17,7 +17,7 @@ type SerializedColumnField =
       inheritedFrom : ResolvedEntityRef option
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type SerializedComputedField =
     { expression : string
       allowBroken : bool
@@ -25,13 +25,13 @@ type SerializedComputedField =
       inheritedFrom : ResolvedEntityRef option
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type SerializedChildEntity =
     { ref : ResolvedEntityRef
       direct : bool
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type SerializedEntity =
     { columnFields : Map<FieldName, SerializedColumnField>
       computedFields : Map<FieldName, SerializedComputedField>
@@ -46,13 +46,13 @@ type SerializedEntity =
       root : ResolvedEntityRef
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type SerializedSchema =
     { entities : Map<EntityName, SerializedEntity>
       roots : Set<EntityName>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type SerializedLayout =
     { schemas : Map<SchemaName, SerializedSchema>
     }

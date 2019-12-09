@@ -46,7 +46,7 @@ type ContextException (message : string, innerException : Exception) =
 
     new (message : string) = ContextException (message, null)
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type CachedRequestContext =
     { layout : Layout
       userViews : PrefetchedUserViews
@@ -65,7 +65,7 @@ type IContext =
     abstract Transaction : DatabaseTransaction with get
     abstract State : CachedRequestContext with get
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private AnonymousUserView =
     { query : string
       uv : PrefetchedUserView
@@ -342,7 +342,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     raisef ContextException "Cannot modify system user views"
 
                 // Actually migrate.
-                let wantedUserMeta = buildLayoutMeta layout (filterUserLayout layout)
+                let (newAssertions, wantedUserMeta) = buildFullLayoutMeta layout (filterUserLayout layout)
                 let migration = planDatabaseMigration oldState.userMeta wantedUserMeta
                 let! migrated = task {
                     try
@@ -368,8 +368,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, connectionString : strin
                     | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                 }
 
-                let oldAssertions = buildAssertions oldState.layout
-                let newAssertions = buildAssertions layout
+                let oldAssertions = buildAssertions oldState.layout (filterUserLayout oldState.layout)
                 for check in Set.difference newAssertions oldAssertions do
                     logger.LogInformation("Running integrity check {check}", check)
                     try

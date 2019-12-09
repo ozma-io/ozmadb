@@ -87,12 +87,12 @@ let private resolveEntityRef (name : EntityRef) =
     | Some ref -> ref
     | None -> raisef ResolveLayoutException "Unspecified schema for entity %O" name
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private HalfResolvedComputedField =
     | HRInherited of ResolvedEntityRef
     | HRSource of SourceComputedField
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private HalfResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
       computedFields : Map<FieldName, HalfResolvedComputedField>
@@ -189,6 +189,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 match parse tokenizeFunQL fieldExpr def with
                 | Ok r ->
                     match reduceDefaultExpr r with
+                    | Some FNull -> raisef ResolveLayoutException "Default expression cannot be NULL"
                     | Some v -> Some v
                     | None -> raisef ResolveLayoutException "Default expression is not trivial: %s" def
                 | Error msg -> raisef ResolveLayoutException "Error parsing column field default expression: %s" msg

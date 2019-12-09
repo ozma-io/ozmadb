@@ -70,15 +70,15 @@ let private splitResults (results : Result seq) : ParsedAttributeMap * QueryResu
 // We restrict casts to work only on values to clarify their types. This is because arbitrary casting breaks abstraction
 let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : unit =
     match expr with
-        | FEValue v ->
-            match (v, exprType) with
-                | (FStringArray _, FETArray _) -> ()
-                | (FString _, FETScalar _) -> ()
-                | (FInt _, FETScalar _) -> ()
-                | (FBool _, FETScalar _) -> ()
-                | (FNull, _) -> ()
-                | _ -> failwith "Casting cannot be performed between arrays and scalars"
-        | _ -> failwith <| sprintf "Casting can only be performed on values: %O :: %O" expr exprType
+    | FEValue v ->
+        match (v, exprType) with
+        | (FStringArray _, FETArray _) -> ()
+        | (FString _, FETScalar _) -> ()
+        | (FInt _, FETScalar _) -> ()
+        | (FBool _, FETScalar _) -> ()
+        | (FNull, _) -> ()
+        | _ -> failwith "Casting cannot be performed between arrays and scalars"
+    | _ -> failwith <| sprintf "Casting can only be performed on values: %O :: %O" expr exprType
 
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
@@ -294,382 +294,385 @@ attributeMap : AttributeMap EOF { $1 }
 // Expressions
 
 ViewExpr:
-  | MaybeArguments UnparenSelectExpr InsertEntityClause { { arguments = $1; select = $2; mainEntity = $3 } }
+    | MaybeArguments UnparenSelectExpr InsertEntityClause { { arguments = $1; select = $2; mainEntity = $3 } }
 
 MaybeArguments:
-  |                                            { Map.empty }
-  | LEFT_BRACE ArgumentsList RIGHT_BRACE COLON { $2 }
+    |                                            { Map.empty }
+    | LEFT_BRACE ArgumentsList RIGHT_BRACE COLON { $2 }
 
 ArgumentsList:
-  |                       { Map.empty }
-  | ArgumentsListNonEmpty { parseMap "Clashing argument names" $1 }
+    |                       { Map.empty }
+    | ArgumentsListNonEmpty { parseMap "Clashing argument names" $1 }
 
 ArgumentsListNonEmpty:
-  | ArgumentEntry COMMA ArgumentsListNonEmpty { $1 :: $3 }
-  | ArgumentEntry                             { [ $1 ] }
+    | ArgumentEntry COMMA ArgumentsListNonEmpty { $1 :: $3 }
+    | ArgumentEntry                             { [ $1 ] }
 
 ArgumentEntry:
-  | ARGUMENT_ID Argument { (FunQLName $1, $2) }
+    | ARGUMENT_ID Argument { (FunQLName $1, $2) }
 
 Argument:
-  | ArgumentFieldType      { { argType = $1; optional = false } }
-  | ArgumentFieldType NULL { { argType = $1; optional = true } }
+    | ArgumentFieldType      { { argType = $1; optional = false } }
+    | ArgumentFieldType NULL { { argType = $1; optional = true } }
 
 SelectVal:
-  | SingleUnlimitedSelectExpr { SSelect $1 }
-  | SubSelectExpr             { $1 }
+    | SingleUnlimitedSelectExpr { SSelect $1 }
+    | SubSelectExpr             { $1 }
 
 // We don't allow select expressions with nested parentheses now because it's difficult to implement as LALR(1) for all our cases (or I'm missing something obvious).
 UnparenSelectExpr:
-  | SingleSelectExpr                           { SSelect $1 }
-  | SelectVal SetOp SetOpExpr OrderLimitClause { SSetOp ($2, $1, $3, $4) }
+    | SingleSelectExpr                           { SSelect $1 }
+    | SelectVal SetOp SetOpExpr OrderLimitClause { SSetOp ($2, $1, $3, $4) }
 
 SubSelectExpr:
-  | LEFT_PAREN UnparenSelectExpr RIGHT_PAREN { $2 }
+    | LEFT_PAREN UnparenSelectExpr RIGHT_PAREN { $2 }
 
 SetOp:
-  | UNION     { Union }
-  | INTERSECT { Intersect }
-  | EXCEPT    { Except }
+    | UNION     { Union }
+    | INTERSECT { Intersect }
+    | EXCEPT    { Except }
 
 SetOpExpr:
-  | SelectVal                 { $1 }
-  | SelectVal SetOp SetOpExpr { SSetOp ($2, $1, $3, emptyOrderLimitClause) }
+    | SelectVal                 { $1 }
+    | SelectVal SetOp SetOpExpr { SSetOp ($2, $1, $3, emptyOrderLimitClause) }
 
 SingleSelectExpr:
-  | SingleUnlimitedSelectExpr OrderLimitClause { { $1 with orderLimit = $2 } }
+    | SingleUnlimitedSelectExpr OrderLimitClause { { $1 with orderLimit = $2 } }
 
 SingleUnlimitedSelectExpr:
-  | SELECT QueryResults FromClause WhereClause GroupByClause {
-    let (attributes, results) = splitResults $2
-    { attributes = attributes
-      results = results
-      from = $3
-      where = $4
-      groupBy = $5
-      orderLimit = emptyOrderLimitClause
-      extra = null
+    | SELECT QueryResults FromClause WhereClause GroupByClause {
+        let (attributes, results) = splitResults $2
+        { attributes = attributes
+          results = results
+          from = $3
+          where = $4
+          groupBy = $5
+          orderLimit = emptyOrderLimitClause
+          extra = null
+        }
     }
-  }
 
 OrderLimitClause:
-  | OrderByClause LimitClause OffsetClause { { orderBy = $1; limit = $2; offset = $3 } }
+    | OrderByClause LimitClause OffsetClause { { orderBy = $1; limit = $2; offset = $3 } }
 
 OrderByClause:
-  |                      { [||] }
-  | ORDER BY OrderByList { List.toArray $3 }
+    |                      { [||] }
+    | ORDER BY OrderByList { List.toArray $3 }
 
 OrderByList:
-  | OrderByExpr                   { [ $1 ] }
-  | OrderByExpr COMMA             { [ $1 ] }
-  | OrderByExpr COMMA OrderByList { $1 :: $3 }
+    | OrderByExpr                   { [ $1 ] }
+    | OrderByExpr COMMA             { [ $1 ] }
+    | OrderByExpr COMMA OrderByList { $1 :: $3 }
 
 OrderByExpr:
-  | FieldExpr OrderByDirection { ($2, $1) }
+    | FieldExpr OrderByDirection { ($2, $1) }
 
 OrderByDirection:
-  |      { Asc }
-  | ASC  { Asc }
-  | DESC { Desc }
+    |      { Asc }
+    | ASC  { Asc }
+    | DESC { Desc }
 
 LimitClause:
-  |                 { None }
-  | LIMIT FieldExpr { Some $2 }
+    |                 { None }
+    | LIMIT FieldExpr { Some $2 }
 
 OffsetClause:
-  |                  { None }
-  | OFFSET FieldExpr { Some $2 }
+    |                  { None }
+    | OFFSET FieldExpr { Some $2 }
 
 FromClause:
-  |               { None }
-  | FROM FromExpr { Some $2 }
+    |               { None }
+    | FROM FromExpr { Some $2 }
 
 InsertEntityClause:
-  |                           { None }
-  | FOR INSERT INTO EntityRef { Some { entity = $4 } }
+    |                           { None }
+    | FOR INSERT INTO EntityRef { Some { entity = $4 } }
 
 QueryResults:
-  | QueryResult COMMA QueryResults { $1 :: $3 }
-  | QueryResult                    { [ $1 ] }
-  |                                { [] }
+    | QueryResult COMMA QueryResults { $1 :: $3 }
+    | QueryResult                    { [ $1 ] }
+    |                                { [] }
 
 QueryResult:
-  | AT Name EQ FieldExpr                { AAttribute ($2, $4) }
-  | QueryResultExpr MaybeAttributeMap   { AResult { attributes = $2; result = $1 } }
+    | AT Name EQ FieldExpr                { AAttribute ($2, $4) }
+    | QueryResultExpr MaybeAttributeMap   { AResult { attributes = $2; result = $1 } }
 
 QueryResultExpr:
-  | FieldExpr         { QRExpr (None, $1) }
-  | FieldExpr AS Name { QRExpr (Some $3, $1) }
+    | FieldExpr         { QRExpr (None, $1) }
+    | FieldExpr AS Name { QRExpr (Some $3, $1) }
 
 MaybeAttributeMap:
-  |                                                   { Map.empty }
-  | AttributeMap                                      { $1 }
+    |                                                   { Map.empty }
+    | AttributeMap                                      { $1 }
 
 AttributeMap:
-  | AT_LEFT_BRACE RIGHT_BRACE                         { Map.empty }
-  | AT_LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
+    | AT_LEFT_BRACE RIGHT_BRACE                         { Map.empty }
+    | AT_LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
 
 AttributeValuesNonEmpty:
-  | Name EQ FieldExpr                               { [($1, $3)] }
-  | Name EQ FieldExpr COMMA                         { [($1, $3)] }
-  | Name EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
+    | Name EQ FieldExpr                               { [($1, $3)] }
+    | Name EQ FieldExpr COMMA                         { [($1, $3)] }
+    | Name EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
 
 QuerySource:
-  | SubSelectExpr AS Name                               { FSubExpr ($3, $1) }
-  | LEFT_PAREN Values RIGHT_PAREN AS Name ColumnAliases { FValues ($5, $6, $2) }
-  | EntityRef                                           { FEntity (None, $1) }
-  | EntityRef AS Name                                   { FEntity (Some $3, $1) }
-  | LEFT_PAREN FromExpr RIGHT_PAREN                     { $2 }
+    | SubSelectExpr AS Name                               { FSubExpr ($3, $1) }
+    | LEFT_PAREN Values RIGHT_PAREN AS Name ColumnAliases { FValues ($5, $6, $2) }
+    | EntityRef                                           { FEntity (None, $1) }
+    | EntityRef AS Name                                   { FEntity (Some $3, $1) }
+    | LEFT_PAREN FromExpr RIGHT_PAREN                     { $2 }
 
 ColumnAliases:
-  | LEFT_PAREN ColumnAliasesList RIGHT_PAREN { List.toArray $2 }
+    | LEFT_PAREN ColumnAliasesList RIGHT_PAREN { List.toArray $2 }
 
 ColumnAliasesList:
-  | Name                         { [$1] }
-  | Name COMMA ColumnAliasesList { $1 :: $3 }
+    | Name                         { [$1] }
+    | Name COMMA ColumnAliasesList { $1 :: $3 }
 
 Values:
-  | VALUES ValuesEntryList { List.toArray $2 }
+    | VALUES ValuesEntryList { List.toArray $2 }
 
 ValuesEntryList:
-  | ValuesEntry                       { [$1] }
-  | ValuesEntry COMMA ValuesEntryList { $1 :: $3 }
+    | ValuesEntry                       { [$1] }
+| ValuesEntry COMMA ValuesEntryList { $1 :: $3 }
 
 ValuesEntry:
-  | LEFT_PAREN ValueItemsList RIGHT_PAREN { List.toArray $2 }
+    | LEFT_PAREN ValueItemsList RIGHT_PAREN { List.toArray $2 }
 
 ValueItemsList:
-  | FieldExpr                      { [$1]  }
-  | FieldExpr COMMA ValueItemsList { $1 :: $3 }
+    | FieldExpr                      { [$1]  }
+    | FieldExpr COMMA ValueItemsList { $1 :: $3 }
 
 JoinType:
-  |       { Inner }
-  | INNER { Inner }
-  | OUTER { Outer }
-  | LEFT  { Left  }
-  | RIGHT { Right }
+    |       { Inner }
+    | INNER { Inner }
+    | OUTER { Outer }
+    | LEFT  { Left  }
+    | RIGHT { Right }
 
 JoinChain:
-  |                                                  { [] }
-  | JoinType JOIN QuerySource ON FieldExpr JoinChain { ($1, $3, $5) :: $6 }
+    |                                                  { [] }
+    | JoinType JOIN QuerySource ON FieldExpr JoinChain { ($1, $3, $5) :: $6 }
 
 FromExpr:
-  | QuerySource JoinChain { List.fold applyJoin $1 $2 }
+    | QuerySource JoinChain { List.fold applyJoin $1 $2 }
 
 EntityRef:
-  | Name DOT Name { { schema = Some $1; name = $3; } }
-  | Name          { { schema = None; name = $1; } }
+    | Name DOT Name { { schema = Some $1; name = $3; } }
+| Name          { { schema = None; name = $1; } }
 
 ValueRef:
-  | FieldRef           { VRColumn $1 }
-  | ARGUMENT_ID        { VRPlaceholder (PLocal <| FunQLName $1) }
-  | GLOBAL_ARGUMENT_ID { VRPlaceholder (PGlobal <| FunQLName $1) }
+    | FieldRef           { VRColumn $1 }
+    | ARGUMENT_ID        { VRPlaceholder (PLocal <| FunQLName $1) }
+    | GLOBAL_ARGUMENT_ID { VRPlaceholder (PGlobal <| FunQLName $1) }
 
 LinkedValueRef:
-  | ValueRef LinkedFieldsList { { ref = $1; path = List.toArray $2 } }
+    | ValueRef LinkedFieldsList { { ref = $1; path = List.toArray $2 } }
 
 LinkedFieldsList:
-  |                                  { List.empty }
-  | BOLD_ARROW Name LinkedFieldsList { $2 :: $3 }
+    |                                  { List.empty }
+    | BOLD_ARROW Name LinkedFieldsList { $2 :: $3 }
 
 FieldRef:
-  | Name DOT Name DOT Name { { entity = Some { schema = Some $1; name = $3 }; name = $5 } }
-  | Name DOT Name          { { entity = Some { schema = None; name = $1 }; name = $3 } }
-  | Name                   { { entity = None; name = $1 } }
+    | Name DOT Name DOT Name { { entity = Some { schema = Some $1; name = $3 }; name = $5 } }
+    | Name DOT Name          { { entity = Some { schema = None; name = $1 }; name = $3 } }
+    | Name                   { { entity = None; name = $1 } }
 
 WhereClause:
-  |                 { None }
-  | WHERE FieldExpr { Some $2 }
+    |                 { None }
+    | WHERE FieldExpr { Some $2 }
 
 GroupByClause:
-  |                           { [||] }
-  | GROUP BY NonEmptyExprList { $3 }
+    |                           { [||] }
+    | GROUP BY NonEmptyExprList { $3 }
 
 NonEmptyExprs:
-  | FieldExpr { [ $1 ] }
-  | FieldExpr COMMA { [ $1 ] }
-  | FieldExpr COMMA NonEmptyExprs { $1 :: $3 }
+    | FieldExpr { [ $1 ] }
+    | FieldExpr COMMA { [ $1 ] }
+    | FieldExpr COMMA NonEmptyExprs { $1 :: $3 }
 
 NonEmptyExprList:
-  | NonEmptyExprs { List.toArray $1 }
+    | NonEmptyExprs { List.toArray $1 }
 
 ParenedNonEmptyExprList:
-  | LEFT_PAREN NonEmptyExprList RIGHT_PAREN { $2 }
+    | LEFT_PAREN NonEmptyExprList RIGHT_PAREN { $2 }
 
 ExprList:
-  |                  { [||] }
-  | NonEmptyExprList { $1 }
+    |                  { [||] }
+    | NonEmptyExprList { $1 }
 
 ParenedExprList:
-  | LEFT_PAREN ExprList RIGHT_PAREN { $2 }
+    | LEFT_PAREN ExprList RIGHT_PAREN { $2 }
 
 FieldExpr:
-  | FieldExpr OR FieldExpr  { FEOr ($1, $3) }
-  | FieldExpr AND FieldExpr { FEAnd ($1, $3) }
-  | NOT FieldExpr           { FENot $2 }
-  | FieldExprEq             { $1 }
+    | FieldExpr OR FieldExpr  { FEOr ($1, $3) }
+    | FieldExpr AND FieldExpr { FEAnd ($1, $3) }
+    | NOT FieldExpr           { FENot $2 }
+    | FieldExprEq             { $1 }
 
 // Implemented in this way because there is a conflict between multi-paren-ed SelectExpr and FieldExpr with a SelectExpr inside.
 FieldInSource:
-  | SubSelectExpr           { ISSelect $1 }
-  | ParenedNonEmptyExprList { extractInOneSource $1 }
+    | SubSelectExpr           { ISSelect $1 }
+    | ParenedNonEmptyExprList { extractInOneSource $1 }
 
 FieldExprEq:
-  | FieldExprOp EQ FieldExprOp          { FEEq ($1, $3) }
-  | FieldExprOp NOT_EQ FieldExprOp      { FENotEq ($1, $3) }
-  | FieldExprOp LESS FieldExprOp        { FELess ($1, $3) }
-  | FieldExprOp LESS_EQ FieldExprOp     { FELessEq ($1, $3) }
-  | FieldExprOp GREATER FieldExprOp     { FEGreater ($1, $3) }
-  | FieldExprOp GREATER_EQ FieldExprOp  { FEGreaterEq ($1, $3) }
-  | FieldExprOp IS NULL                 { FEIsNull $1 }
-  | FieldExprOp IS NOT NULL             { FEIsNotNull $1 }
-  | FieldExprOp LIKE FieldExprOp        { FELike ($1, $3) }
-  | FieldExprOp NOT LIKE FieldExprOp    { FENotLike ($1, $4) }
-  | FieldExprOp LIKE_OP FieldExprOp     { FELike ($1, $3) }
-  | FieldExprOp NOT_LIKE_OP FieldExprOp { FENotLike ($1, $3) }
-  | FieldExprOp IN FieldInSource        { inExpr FEIn FEInQuery $1 $3 }
-  | FieldExprOp NOT IN FieldInSource    { inExpr FENotIn FENotInQuery $1 $4 }
-  | FieldExprOp                         { $1 }
+    | FieldExprOp EQ FieldExprOp                   { FEEq ($1, $3) }
+    | FieldExprOp NOT_EQ FieldExprOp               { FENotEq ($1, $3) }
+    | FieldExprOp LESS FieldExprOp                 { FELess ($1, $3) }
+    | FieldExprOp LESS_EQ FieldExprOp              { FELessEq ($1, $3) }
+    | FieldExprOp GREATER FieldExprOp              { FEGreater ($1, $3) }
+    | FieldExprOp GREATER_EQ FieldExprOp           { FEGreaterEq ($1, $3) }
+    | FieldExprOp IS NULL                          { FEIsNull $1 }
+    | FieldExprOp IS NOT NULL                      { FEIsNotNull $1 }
+    | FieldExprOp IS DISTINCT FROM FieldExprOp     { FEDistinct ($1, $5) }
+    | FieldExprOp IS NOT DISTINCT FROM FieldExprOp { FENotDistinct ($1, $6) }
+    | FieldExprOp IS NOT NULL                      { FEIsNotNull $1 }
+    | FieldExprOp LIKE FieldExprOp                 { FELike ($1, $3) }
+    | FieldExprOp NOT LIKE FieldExprOp             { FENotLike ($1, $4) }
+    | FieldExprOp LIKE_OP FieldExprOp              { FELike ($1, $3) }
+    | FieldExprOp NOT_LIKE_OP FieldExprOp          { FENotLike ($1, $3) }
+    | FieldExprOp IN FieldInSource                 { inExpr FEIn FEInQuery $1 $3 }
+    | FieldExprOp NOT IN FieldInSource             { inExpr FENotIn FENotInQuery $1 $4 }
+    | FieldExprOp                                  { $1 }
 
 FieldExprOp:
-  | FieldExprOp CONCAT FieldExprOp         { FEConcat ($1, $3) }
-  | FieldExprOp ARROW FieldExprOp          { FEJsonArrow ($1, $3) }
-  | FieldExprOp DOUBLE_ARROW FieldExprOp   { FEJsonTextArrow ($1, $3) }
-  | FieldExprOp DOUBLE_COLON FieldExprType { restrictCast $1 $3; FECast ($1, $3) }
-  | COALESCE ParenedNonEmptyExprList       { FECoalesce $2 }
-  | CaseExpr                               { $1 }
-  | FieldExprVal                           { $1 }
+    | FieldExprOp CONCAT FieldExprOp         { FEConcat ($1, $3) }
+    | FieldExprOp ARROW FieldExprOp          { FEJsonArrow ($1, $3) }
+    | FieldExprOp DOUBLE_ARROW FieldExprOp   { FEJsonTextArrow ($1, $3) }
+    | FieldExprOp DOUBLE_COLON FieldExprType { restrictCast $1 $3; FECast ($1, $3) }
+    | COALESCE ParenedNonEmptyExprList       { FECoalesce $2 }
+    | CaseExpr                               { $1 }
+    | FieldExprVal                           { $1 }
 
 FieldExprVal:
-  | LinkedValueRef INHERITED FROM EntityRef { FEInheritedFrom ($1, { ref = $4; extra = null }) }
-  | LinkedValueRef OFTYPE EntityRef         { FEOfType ($1, { ref = $3; extra = null }) }
-  | LinkedValueRef                          { FERef $1 }
-  | Value                                   { FEValue $1 }
-  | Name ParenedExprList                    { makeFunc $1 $2 }
-  | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN { makeAggFunc $1 $3 }
-  | JsonObject                              { $1 }
-  | SubSelectExpr                           { FESubquery $1 }
-  | LEFT_PAREN FieldExpr RIGHT_PAREN        { $2 }
+    | LinkedValueRef INHERITED FROM EntityRef { FEInheritedFrom ($1, { ref = $4; extra = null }) }
+    | LinkedValueRef OFTYPE EntityRef         { FEOfType ($1, { ref = $3; extra = null }) }
+    | LinkedValueRef                          { FERef $1 }
+    | Value                                   { FEValue $1 }
+    | Name ParenedExprList                    { makeFunc $1 $2 }
+    | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN { makeAggFunc $1 $3 }
+    | JsonObject                              { $1 }
+    | SubSelectExpr                           { FESubquery $1 }
+    | LEFT_PAREN FieldExpr RIGHT_PAREN        { $2 }
 
 AggFuncArgs:
-  | ALL ExprList       { AEAll $2 }
-  | DISTINCT FieldExpr { AEDistinct $2 }
-  | STAR               { AEStar }
+    | ALL ExprList       { AEAll $2 }
+    | DISTINCT FieldExpr { AEDistinct $2 }
+    | STAR               { AEStar }
 
 CaseExpr:
-  | CASE CaseWhenList CaseElse END { FECase (List.toArray $2, $3) }
+    | CASE CaseWhenList CaseElse END { FECase (List.toArray $2, $3) }
 
 CaseWhenList:
-  | WHEN FieldExpr THEN FieldExpr CaseWhenList { ($2, $4) :: $5 }
-  | WHEN FieldExpr THEN FieldExpr              { [($2, $4)] }
+    | WHEN FieldExpr THEN FieldExpr CaseWhenList { ($2, $4) :: $5 }
+    | WHEN FieldExpr THEN FieldExpr              { [($2, $4)] }
 
 CaseElse:
-  |                { None }
-  | ELSE FieldExpr { Some $2 }
+    |                { None }
+    | ELSE FieldExpr { Some $2 }
 
 IntArrayList:
-  | INT                    { [ $1 ] }
-  | INT COMMA IntArrayList { $1 :: $3 }
+    | INT                    { [ $1 ] }
+    | INT COMMA IntArrayList { $1 :: $3 }
 
 IntArrayNonEmpty:
-  | IntArrayList { List.toArray $1 }
+    | IntArrayList { List.toArray $1 }
 
 StringArrayList:
-  | STRING                       { [ $1 ] }
-  | STRING COMMA StringArrayList { $1 :: $3 }
+    | STRING                       { [ $1 ] }
+    | STRING COMMA StringArrayList { $1 :: $3 }
 
 StringArrayNonEmpty:
-  | StringArrayList { List.toArray $1 }
+    | StringArrayList { List.toArray $1 }
 
 BoolArrayList:
-  | BOOL                     { [ $1 ] }
-  | BOOL COMMA BoolArrayList { $1 :: $3 }
+    | BOOL                     { [ $1 ] }
+    | BOOL COMMA BoolArrayList { $1 :: $3 }
 
 BoolArrayNonEmpty:
-  | BoolArrayList { List.toArray $1 }
+    | BoolArrayList { List.toArray $1 }
 
 DecimalArrayList:
-  | DECIMAL                        { [ $1 ] }
-  | DECIMAL COMMA DecimalArrayList { $1 :: $3 }
+    | DECIMAL                        { [ $1 ] }
+    | DECIMAL COMMA DecimalArrayList { $1 :: $3 }
 
 DecimalArrayNonEmpty:
-  | DecimalArrayList { List.toArray $1 }
+    | DecimalArrayList { List.toArray $1 }
 
 UserViewRefArrayList:
-  | UserViewRef                            { [ $1 ] }
-  | UserViewRef COMMA UserViewRefArrayList { $1 :: $3 }
+    | UserViewRef                            { [ $1 ] }
+    | UserViewRef COMMA UserViewRefArrayList { $1 :: $3 }
 
 UserViewRefArrayNonEmpty:
-  | UserViewRefArrayList { List.toArray $1 }
+    | UserViewRefArrayList { List.toArray $1 }
 
 Value:
-  | INT                                    { FInt $1 }
-  | DECIMAL                                { FDecimal $1 }
-  | STRING                                 { FString $1 }
-  | BOOL                                   { FBool $1 }
-  | UserViewRef                            { FUserViewRef $1 }
-  | LEFT_BRACKET Array RIGHT_BRACKET       { $2 } // Deprecated syntax
-  | ARRAY LEFT_BRACKET Array RIGHT_BRACKET { $3 }
-  | NULL                                   { FNull }
+    | INT                                    { FInt $1 }
+    | DECIMAL                                { FDecimal $1 }
+    | STRING                                 { FString $1 }
+    | BOOL                                   { FBool $1 }
+    | UserViewRef                            { FUserViewRef $1 }
+    | LEFT_BRACKET Array RIGHT_BRACKET       { $2 } // Deprecated syntax
+    | ARRAY LEFT_BRACKET Array RIGHT_BRACKET { $3 }
+    | NULL                                   { FNull }
 
 Array:
-  |                          { FStringArray [||] }
-  | StringArrayNonEmpty      { FStringArray $1 }
-  | IntArrayNonEmpty         { FIntArray $1 }
-  | BoolArrayNonEmpty        { FBoolArray $1 }
-  | DecimalArrayNonEmpty     { FDecimalArray $1 }
-  | UserViewRefArrayNonEmpty { FUserViewRefArray $1 }
+    |                          { FStringArray [||] }
+    | StringArrayNonEmpty      { FStringArray $1 }
+    | IntArrayNonEmpty         { FIntArray $1 }
+    | BoolArrayNonEmpty        { FBoolArray $1 }
+    | DecimalArrayNonEmpty     { FDecimalArray $1 }
+    | UserViewRefArrayNonEmpty { FUserViewRefArray $1 }
 
 UserViewRef:
-  | AMPERSAND EntityRef { $2 }
+    | AMPERSAND EntityRef { $2 }
 
 JsonObject:
-  | LEFT_BRACE JsonFields RIGHT_BRACE { coalesceJsonObject $2 }
+    | LEFT_BRACE JsonFields RIGHT_BRACE { coalesceJsonObject $2 }
 
 JsonFields:
-  |                            { [] }
-  | JsonField                  { [$1] }
-  | JsonField COMMA JsonFields { $1 :: $3 }
+    |                            { [] }
+    | JsonField                  { [$1] }
+    | JsonField COMMA JsonFields { $1 :: $3 }
 
 JsonField:
-  | ID COLON FieldExpr { ($1, $3) }
+    | ID COLON FieldExpr { ($1, $3) }
 
 JsonArray:
-  | LEFT_BRACKET JsonItems RIGHT_BRACKET { coalesceJsonArray $2 }
+    | LEFT_BRACKET JsonItems RIGHT_BRACKET { coalesceJsonArray $2 }
 
 JsonItems:
-  |                           { [] }
-  | FieldExpr                 { [$1] }
-  | FieldExpr COMMA JsonItems { $1 :: $3 }
+    |                           { [] }
+    | FieldExpr                 { [$1] }
+    | FieldExpr COMMA JsonItems { $1 :: $3 }
 
 ScalarType:
-  | INT_TYPE      { SFTInt }
-  | DECIMAL_TYPE  { SFTDecimal }
-  | STRING_TYPE   { SFTString }
-  | BOOL_TYPE     { SFTBool }
-  | DATETIME_TYPE { SFTDateTime }
-  | DATE_TYPE     { SFTDate }
-  | JSON_TYPE     { SFTJson }
-  | UVREF_TYPE    { SFTUserViewRef }
+    | INT_TYPE      { SFTInt }
+    | DECIMAL_TYPE  { SFTDecimal }
+    | STRING_TYPE   { SFTString }
+    | BOOL_TYPE     { SFTBool }
+    | DATETIME_TYPE { SFTDateTime }
+    | DATE_TYPE     { SFTDate }
+    | JSON_TYPE     { SFTJson }
+    | UVREF_TYPE    { SFTUserViewRef }
 
 FieldExprType:
-  | ScalarType                               { FETScalar $1 }
-  | ARRAY LEFT_PAREN ScalarType RIGHT_PAREN  { FETArray $3 }
+    | ScalarType                               { FETScalar $1 }
+    | ARRAY LEFT_PAREN ScalarType RIGHT_PAREN  { FETArray $3 }
 
 FieldType:
-  | FieldExprType                                                   { FTType $1 }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference ($3, None) }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef COMMA FieldExpr RIGHT_PAREN { FTReference ($3, Some $5) }
-  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
+    | FieldExprType                                                   { FTType $1 }
+    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference ($3, None) }
+    | REFERENCE_TYPE LEFT_PAREN EntityRef COMMA FieldExpr RIGHT_PAREN { FTReference ($3, Some $5) }
+    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 ArgumentFieldType:
-  | FieldExprType                                   { FTType $1 }
-  | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { FTReference ($3, None) }
-  | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
+    | FieldExprType                                   { FTType $1 }
+    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { FTReference ($3, None) }
+    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 EnumList:
-  | STRING                { [ $1 ] }
-  | STRING COMMA EnumList { $1 :: $3 }
+    | STRING                { [ $1 ] }
+    | STRING COMMA EnumList { $1 :: $3 }
 
 Name:
-  | ID { FunQLName $1 }
+    | ID { FunQLName $1 }

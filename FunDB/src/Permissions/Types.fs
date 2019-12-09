@@ -10,7 +10,7 @@ type UserName = string
 
 type ResolvedRoleRef = Source.ResolvedRoleRef
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type Restriction =
     { expression : ResolvedOptimizedFieldExpr
       globalArguments : Set<ArgumentName>
@@ -22,7 +22,7 @@ type Restriction =
     interface IFunQLString with
         member this.ToFunQLString () = this.ToFunQLString()
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AllowedField =
     { // Are you allowed to change (UPDATE/INSERT) this field?
       change : bool
@@ -30,13 +30,13 @@ type AllowedField =
       select : Restriction
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AllowedOperationError =
     { source : string
       error : exn
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AllowedEntity =
     { allowBroken : bool
       // Post-UPDATE/INSERT check expression.
@@ -52,18 +52,18 @@ type AllowedEntity =
       fields : Map<FieldName, AllowedField>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AllowedEntityError =
     { source : SourceAllowedEntity
       error : exn
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AllowedSchema =
     { entities : Map<EntityName, Result<AllowedEntity, AllowedEntityError>>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type AllowedDatabase =
     { schemas : Map<SchemaName, AllowedSchema>
     } with
@@ -72,7 +72,7 @@ type AllowedDatabase =
                 | None -> None
                 | Some schema -> Map.tryFind entity.name schema.entities
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type FlatAllowedDerivedEntity =
     { insert : bool
       check : Restriction
@@ -81,7 +81,7 @@ type FlatAllowedDerivedEntity =
       delete : Restriction
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type FlatAllowedEntity =
     { children : Map<ResolvedEntityRef, FlatAllowedDerivedEntity>
       fields : Map<ResolvedFieldRef, AllowedField>
@@ -89,7 +89,7 @@ type FlatAllowedEntity =
 
 type FlatAllowedDatabase = Map<ResolvedEntityRef, FlatAllowedEntity>
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ResolvedRole =
     { parents : Set<ResolvedRoleRef>
       permissions : AllowedDatabase
@@ -97,18 +97,18 @@ type ResolvedRole =
       allowBroken : bool
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type RoleError =
     { source : SourceRole
       error : exn
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type PermissionsSchema =
     { roles : Map<RoleName, Result<ResolvedRole, RoleError>>
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type Permissions =
     { schemas : Map<SchemaName, PermissionsSchema>
     } with
