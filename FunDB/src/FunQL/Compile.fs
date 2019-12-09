@@ -351,7 +351,7 @@ and genericCompileAggExpr (func : FieldExpr<'e, 'f> -> SQL.ValueExpr) : AggExpr<
     | AEDistinct expr -> SQL.AEDistinct (func expr)
     | AEStar -> SQL.AEStar
 
-let replaceColumnRefs (columnRef : SQL.ColumnRef) : SQL.ValueExpr -> SQL.ValueExpr =
+let private replaceColumnRefs (columnRef : SQL.ColumnRef) : SQL.ValueExpr -> SQL.ValueExpr =
     let mapper =
         { SQL.idValueExprMapper with
               columnReference = fun _ -> columnRef
@@ -384,8 +384,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     VRColumn { col with ref = { col.ref with entity = Some localRef } }
                 | VRPlaceholder (PLocal name) -> failwith <| sprintf "Unexpected local argument: %O" name
                 | VRPlaceholder ((PGlobal name) as arg) ->
-                    let (argPlaceholder, newArguments) = addArgument arg (Map.find name globalArgumentTypes) arguments
-                    arguments <- newArguments
+                    arguments <- addArgument arg (Map.find name globalArgumentTypes) arguments
                     VRPlaceholder arg
             { ref = newRef; path = ref.path }
         let mapper = idFieldExprMapper resolveReference id

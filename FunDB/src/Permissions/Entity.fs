@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Permissions.Entity
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Layout.Types
@@ -11,7 +12,7 @@ open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.Compile
 module SQL = FunWithFlags.FunDB.SQL.AST
-module SQL = FunWithFlags.FunDB.SQL.DML
+module SQL = FunWithFlags.FunDB.SQL.DDL
 
 type PermissionsEntityException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -75,13 +76,12 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.U
     | OFEFalse -> raisef PermissionsEntityException "Access denied to update"
     | OFETrue -> query
     | _ ->
-        let findOrAddOne args name typ =
+        let findOne args name typ =
             if Set.contains name fieldsRestriction.globalArguments then
-                let (newArg, args) = addArgument (PGlobal name) typ args
-                args
+                addArgument (PGlobal name) typ args
             else
                 args
-        let arguments = globalArgumentTypes |> Map.fold findOrAddOne query.arguments
+        let arguments = globalArgumentTypes |> Map.fold findOne query.arguments
         let newExpr = compileValueRestriction layout tableInfo.ref arguments.types fieldsRestriction
         let expr =
             { query.expression with
@@ -115,13 +115,12 @@ let applyRoleDelete (layout : Layout) (role : ResolvedRole) (query : Query<SQL.D
     | OFEFalse -> raisef PermissionsEntityException "Access denied to delete"
     | OFETrue -> query
     | _ ->
-        let findOrAddOne args name typ =
+        let findOne args name typ =
             if Set.contains name fieldsRestriction.globalArguments then
-                let (newArg, args) = addArgument (PGlobal name) typ args
-                args
+                addArgument (PGlobal name) typ args
             else
                 args
-        let arguments = globalArgumentTypes |> Map.fold findOrAddOne query.arguments
+        let arguments = globalArgumentTypes |> Map.fold findOne query.arguments
         let newExpr = compileValueRestriction layout tableInfo.ref arguments.types fieldsRestriction
         let expr =
             { query.expression with
