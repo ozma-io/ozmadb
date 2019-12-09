@@ -79,6 +79,14 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
             newCheck
         updateDifference db updateCheckFunc createCheckFunc
 
+    let setParent (existingEntity : Entity) (ref : ResolvedEntityRef) =
+        match Map.tryFind ref allEntitiesMap with
+        | None ->
+            existingEntity.ParentId <- Nullable()
+            needsParentPass <- true
+        | Some id ->
+            existingEntity.ParentId <- Nullable(id)
+
     let updateEntity (entity : SourceEntity) (existingEntity : Entity) : unit =
         let columnFieldsMap = existingEntity.ColumnFields |> Seq.map (fun col -> (FunQLName col.Name, col)) |> Map.ofSeq
         let computedFieldsMap = existingEntity.ComputedFields |> Seq.map (fun comp -> (FunQLName comp.Name, comp)) |> Map.ofSeq
@@ -103,12 +111,9 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         | Some ref ->
             if not <| isNull existingEntity.Parent then
                 if not (FunQLName existingEntity.Parent.Schema.Name = ref.schema && FunQLName existingEntity.Parent.Name = ref.name) then
-                    match Map.tryFind ref allEntitiesMap with
-                    | None ->
-                        existingEntity.ParentId <- Nullable()
-                        needsParentPass <- true
-                    | Some id ->
-                        existingEntity.ParentId <- Nullable(id)
+                    setParent existingEntity ref
+            else
+                setParent existingEntity ref
 
     let updateSchema (schema : SourceSchema) (existingSchema : Schema) : unit =
         let entitiesMap = existingSchema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
