@@ -23,10 +23,17 @@ var commonViews = {
         "{ $schema string, $name string }:\n" +
         "SELECT\n" +
         "  @\"Type\" = 'Form',\n" +
+        "  @\"BlockSizes\" = [\n" +
+        "    6, 6,\n" +
+        "    12\n" +
+        "  ],\n" +
         "  schema_id,\n" +
         "  name,\n" +
         "  allow_broken,\n" +
-        "  query @{ \"TextType\" = 'codeeditor' }\n" +
+        "  query @{\n" +
+	"    \"FormBlock\" = 2,\n" +
+	"    \"TextType\" = 'codeeditor',\n" +
+        "  }\n" +
         "FROM\n" +
         "  public.user_views\n" +
         "WHERE schema_id=>name = $schema AND name = $name\n" +
