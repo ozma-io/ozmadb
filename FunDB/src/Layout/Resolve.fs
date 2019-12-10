@@ -14,6 +14,7 @@ open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Source
+module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ResolveLayoutException (message : string, innerException : Exception) =
@@ -22,12 +23,13 @@ type ResolveLayoutException (message : string, innerException : Exception) =
     new (message : string) = ResolveLayoutException (message, null)
 
 let private checkName (FunQLName name) : unit =
-    if not (goodName name) then
+    if not (goodName name) || String.length name > SQL.sqlIdentifierLength then
         raisef ResolveLayoutException "Invalid name"
 
-let private checkSchemaName (FunQLName name) : unit =
-    if name.StartsWith("pg_") || name = "information_schema" then
+let private checkSchemaName (FunQLName str as name) : unit =
+    if str.StartsWith("pg_") || str = "information_schema" then
         raisef ResolveLayoutException "Invalid schema name"
+    else checkName name
 
 let private checkFieldName (name : FunQLName) : unit =
     if name = funId || name = funSubEntity
@@ -359,7 +361,7 @@ type private Phase1Resolver (layout : SourceLayout) =
     let resolveLayout () =
         let iterSchema name schema =
             try
-                checkName name
+                checkSchemaName name
                 resolveSchema name schema
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in schema %O: %s" name e.Message

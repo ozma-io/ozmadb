@@ -42,8 +42,8 @@ let escapeSqlSingleQuotes (str : string) =
     genericEscapeSqlSingleQuotes strBuilder str
 
 let renderSqlName str =
-    // if String.length str > sqlIdentifierLength then
-    //     failwith <| sprintf "SQL identifier %s is too long" str
+    if String.length str > sqlIdentifierLength then
+        failwith <| sprintf "SQL identifier %s is too long" str
     escapeSqlDoubleQuotes str
 
 let renderSqlString (str : string) =

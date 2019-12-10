@@ -5,6 +5,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.Layout.Types
+module SQL = FunWithFlags.FunDB.SQL.Utils
 
 // Validates fields and expressions to the point where database can catch all the remaining problems
 // and all further processing code can avoid any checks.
@@ -97,7 +98,7 @@ let rec private findRootField (name : FieldName) (fields : QSubqueryFields) : (F
     | Some (QField field) -> Some (name, field)
 
 let private checkName (FunQLName name) : unit =
-    if not (goodName name) then
+    if not (goodName name) || String.length name > SQL.sqlIdentifierLength then
         raisef ViewResolveException "Invalid name: %s" name
 
 let refField : LinkedRef<ValueRef<'f>> -> LinkedRef<'f> option = function

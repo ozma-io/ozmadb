@@ -10,6 +10,7 @@ open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Attributes.Merge
+module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 // Domains is a way to distinguish rows after set operations so that row types and IDs can be traced back.
@@ -45,16 +46,23 @@ type ColumnType =
     | CTMainSubEntityColumn
     | CTColumn of FunQLName
 
-let columnName : ColumnType -> SQL.SQLName = function
-    | CTRowAttribute (FunQLName name) -> SQL.SQLName (sprintf "__row_attribute_%s" name)
-    | CTCellAttribute (FunQLName field, FunQLName name) -> SQL.SQLName (sprintf "__cell_attribute_%s_%s" field name)
-    | CTPunAttribute (FunQLName field) -> SQL.SQLName (sprintf "__pun_%s" field)
-    | CTDomainColumn id -> SQL.SQLName (sprintf "__domain_%i" id)
-    | CTIdColumn (FunQLName entity) -> SQL.SQLName (sprintf "__id_%s" entity)
-    | CTSubEntityColumn (FunQLName entity) -> SQL.SQLName (sprintf "__sub_entity_%s" entity)
-    | CTMainIdColumn -> SQL.SQLName "__main_id"
-    | CTMainSubEntityColumn -> SQL.SQLName "__main_sub_entity"
-    | CTColumn (FunQLName column) -> SQL.SQLName column
+type private NameReplacer () =
+    let mutable lastIds : Map<string, int> = Map.empty
+    let mutable existing : Map<string, SQL.SQLName> = Map.empty
+
+    member this.ConvertName (name : string) =
+        if String.length name <= SQL.sqlIdentifierLength then
+            SQL.SQLName name
+        else
+            match Map.tryFind name existing with
+            | Some n -> n
+            | None ->
+                let trimmed = String.truncate (SQL.sqlIdentifierLength - 12) name
+                let num = Map.findWithDefault trimmed (fun () -> 0) lastIds + 1
+                let newName = SQL.SQLName <| sprintf "%s%i" trimmed num
+                lastIds <- Map.add trimmed num lastIds
+                existing <- Map.add name newName existing
+                newName
 
 [<NoEquality; NoComparison>]
 type private SelectInfo =
@@ -104,18 +112,6 @@ type private JoinId = int
 
 let compileJoinId (jid : JoinId) : SQL.TableName =
     SQL.SQLName <| sprintf "__Join__%i" jid
-
-let rec private domainExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.ValueExpr) = function
-    | DSingle (id, dom) -> f dom
-    | DMulti (ns, nested) ->
-        let makeCase (localId, subcase) =
-            let case = SQL.VEEq (SQL.VEColumn { table = Some tableRef; name = columnName (CTDomainColumn ns) }, SQL.VEValue (SQL.VInt localId))
-            (case, domainExpression tableRef f subcase)
-        SQL.VECase (nested |> Map.toSeq |> Seq.map makeCase |> Seq.toArray, None)
-
-let private fromInfoExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.ValueExpr) = function
-    | FTEntity (id, dom) -> f dom
-    | FTSubquery info -> domainExpression tableRef f info.domains
 
 type JoinKey =
     { table : SQL.TableName
@@ -377,6 +373,30 @@ type RealEntityAnnotation = { realEntity : ResolvedEntityRef }
 
 type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttributes, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
+    let replacer = NameReplacer ()
+
+    let columnName : ColumnType -> SQL.SQLName = function
+        | CTRowAttribute (FunQLName name) -> replacer.ConvertName <| sprintf "__row_attr__%s" name
+        | CTCellAttribute (FunQLName field, FunQLName name) -> replacer.ConvertName <| sprintf "__cell_attr__%s__%s" field name
+        | CTPunAttribute (FunQLName field) -> replacer.ConvertName <| sprintf "__pun__%s" field
+        | CTDomainColumn id -> replacer.ConvertName <| sprintf "__domain__%i" id
+        | CTIdColumn (FunQLName entity) -> replacer.ConvertName <| sprintf "__id__%s" entity
+        | CTSubEntityColumn (FunQLName entity) -> replacer.ConvertName <| sprintf "__sub_entity__%s" entity
+        | CTMainIdColumn -> SQL.SQLName "__main_id"
+        | CTMainSubEntityColumn -> SQL.SQLName "__main_sub_entity"
+        | CTColumn (FunQLName column) -> SQL.SQLName column
+
+    let rec domainExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.ValueExpr) = function
+        | DSingle (id, dom) -> f dom
+        | DMulti (ns, nested) ->
+            let makeCase (localId, subcase) =
+                let case = SQL.VEEq (SQL.VEColumn { table = Some tableRef; name = columnName (CTDomainColumn ns) }, SQL.VEValue (SQL.VInt localId))
+                (case, domainExpression tableRef f subcase)
+            SQL.VECase (nested |> Map.toSeq |> Seq.map makeCase |> Seq.toArray, None)
+
+    let fromInfoExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.ValueExpr) = function
+        | FTEntity (id, dom) -> f dom
+        | FTSubquery info -> domainExpression tableRef f info.domains
 
     let convertLinkedLocalExpr (localRef : EntityRef) : ResolvedFieldExpr -> ResolvedFieldExpr =
         let resolveReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
@@ -978,10 +998,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             let domain = mapAllFields makeDomainEntry entity
 
+            let compiledPun = Option.map compileName pun
+            let newName = Option.defaultValue entityRef.name pun
+            let compiledName = Option.defaultValue (compileName entityRef.name) compiledPun
             let subquery =
                 match entity.inheritance with
                 | None ->
-                    SQL.FTable ({ realEntity = entityRef }, Option.map compileName pun, compileResolvedEntityRef entityRef)
+                    SQL.FTable ({ realEntity = entityRef }, compiledPun, compileResolvedEntityRef entityRef)
                 | Some inheritance ->
                     let select =
                         { columns = [| SQL.SCAll None |]
@@ -992,7 +1015,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                           extra = { realEntity = entityRef }
                         } : SQL.SingleSelectExpr
                     let expr = { ctes = Map.empty; tree = SQL.SSelect select } : SQL.SelectExpr
-                    SQL.FSubExpr (compileName entityRef.name, None, expr)
+                    SQL.FSubExpr (compiledName, None, expr)
             let (mainId, mainSubEntity) =
                 match mainEntity with
                 | None -> (None, None)
@@ -1005,7 +1028,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   mainSubEntity = mainSubEntity
                 }
 
-            let newName = Option.defaultValue entityRef.name pun
             (Map.singleton newName fromInfo, subquery)
         | FJoin (jt, e1, e2, where) ->
             let main1 =
