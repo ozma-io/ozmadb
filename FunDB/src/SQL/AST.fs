@@ -596,10 +596,10 @@ and [<NoEquality; NoComparison>] OrderLimitClause =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and [<NoEquality; NoComparison>] SelectExpr =
+and [<NoEquality; NoComparison>] SelectTreeExpr =
     | SSelect of SingleSelectExpr
     | SValues of ValueExpr[][]
-    | SSetOp of SetOperation * SelectExpr * SelectExpr * OrderLimitClause
+    | SSetOp of SetOperation * SelectTreeExpr * SelectTreeExpr * OrderLimitClause
     with
         override this.ToString () = this.ToSQLString()
 
@@ -613,6 +613,28 @@ and [<NoEquality; NoComparison>] SelectExpr =
             | SSetOp (op, a, b, order) ->
                 let setStr = sprintf "(%s) %s (%s)" (a.ToSQLString()) (op.ToSQLString()) (b.ToSQLString())
                 concatWithWhitespaces [setStr; order.ToSQLString()]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] SelectExpr =
+    { ctes : Map<TableName, SelectExpr>
+      tree : SelectTreeExpr
+    }
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let ctesStr =
+                if Map.isEmpty this.ctes then
+                    ""
+                else
+                    this.ctes
+                        |> Map.toSeq
+                        |> Seq.map (fun (name, expr) -> sprintf "%s as (%s)" (name.ToSQLString()) (expr.ToSQLString()))
+                        |> String.concat ", "
+                        |> sprintf "WITH %s"
+            concatWithWhitespaces [ctesStr; this.tree.ToSQLString()]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

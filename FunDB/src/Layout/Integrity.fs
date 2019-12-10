@@ -75,7 +75,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
         let fromColumn = SQL.VEColumn { table = Some sqlNewRow; name = field.columnName }
         let toColumn = SQL.VEColumn { table = Some toRef; name = sqlFunId }
         let whereExpr = SQL.VEEq (fromColumn, toColumn)
-        let selectExpr =
+        let singleSelect =
             { columns = [| SQL.SCExpr (None, inheritance.checkExpr) |]
               from = Some <| SQL.FTable (null, None, toRef)
               where = Some whereExpr
@@ -94,7 +94,8 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
                       (PLPgSQL.ROSchema, SQL.VEValue (SQL.VString <| fromFieldRef.entity.schema.ToString()))
                     ]
             } : PLPgSQL.RaiseStatement
-        let checkStmt = PLPgSQL.StIfThenElse ([| (SQL.VENot (SQL.VESubquery (SQL.SSelect selectExpr)), [| PLPgSQL.StRaise raiseCall |]) |], None)
+        let selectExpr = { ctes = Map.empty; tree = SQL.SSelect singleSelect } : SQL.SelectExpr
+        let checkStmt = PLPgSQL.StIfThenElse ([| (SQL.VENot (SQL.VESubquery selectExpr), [| PLPgSQL.StRaise raiseCall |]) |], None)
         // A small hack; we don't return a "column" but a full row.
         let returnStmt = PLPgSQL.StReturn (SQL.VEColumn { table = None; name = SQL.SQLName "new" })
 
@@ -109,7 +110,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
               definition = checkProgram.ToPLPgSQLString()
             } : SQL.FunctionDefinition
         let checkFunctionObject = SQL.OMFunction <| Map.singleton { items = [||] } checkFunctionDefinition
-        let checkFunctionName = SQL.SQLName <| sprintf "__%O_%O_check_reference_sub_entity" fromFieldRef.entity.name fromFieldRef.name
+        let checkFunctionName = SQL.SQLName <| sprintf "__ref_type_check__%s__%s" entity.hashName field.hashName
 
         let checkOldColumn = SQL.VEColumn { table = Some sqlOldRow; name = field.columnName }
         let checkNewColumn = SQL.VEColumn { table = Some sqlNewRow; name = field.columnName }
@@ -127,7 +128,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
               functionName = { schema = Some fromSchema; name = checkFunctionName }
               functionArgs = [||]
             } : SQL.TriggerDefinition
-        let checkUpdateTriggerName = SQL.SQLName <| sprintf "__%O_%O_reference_update_sub_entity_valid" fromFieldRef.entity.name fromFieldRef.name
+        let checkUpdateTriggerName = SQL.SQLName <| sprintf "__ref_type_update__%s__%s" entity.hashName field.hashName
         let checkUpdateTriggerObject = SQL.OMTrigger (fromTable, checkUpdateTriggerDefinition)
 
         let checkInsertTriggerDefinition =
@@ -139,7 +140,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
               functionName = { schema = Some fromSchema; name = checkFunctionName }
               functionArgs = [||]
             } : SQL.TriggerDefinition
-        let checkInsertTriggerName = SQL.SQLName <| sprintf "__%O_%O_reference_insert_sub_entity_valid" fromFieldRef.entity.name fromFieldRef.name
+        let checkInsertTriggerName = SQL.SQLName <| sprintf "__ref_type_insert__%s__%s" entity.hashName field.hashName
         let checkInsertTriggerObject = SQL.OMTrigger (fromTable, checkInsertTriggerDefinition)
 
         let objects =
@@ -168,7 +169,7 @@ let private compileAssertionCheck (layout : Layout) : LayoutAssertion -> SQL.Sel
         let join = SQL.FJoin (SQL.JoinType.Left, SQL.FTable (null, None, fromRef), SQL.FTable (null, None, toRef), joinExpr)
         let subEntityRef = { table = Some toRef; name = sqlFunSubEntity } : SQL.ColumnRef
         let checkExpr = replaceColumnRefs subEntityRef inheritance.checkExpr
-        let selectExpr =
+        let singleSelect =
             { columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "bool_and", SQL.AEAll [| checkExpr |])) |]
               from = Some join
               where = None
@@ -176,7 +177,7 @@ let private compileAssertionCheck (layout : Layout) : LayoutAssertion -> SQL.Sel
               orderLimit = SQL.emptyOrderLimitClause
               extra = null
             } : SQL.SingleSelectExpr
-        SQL.SSelect selectExpr
+        { ctes = Map.empty; tree = SQL.SSelect singleSelect }
 
 let checkAssertion (conn : QueryConnection) (layout : Layout) (assertion : LayoutAssertion) : Task<unit> =
     task {

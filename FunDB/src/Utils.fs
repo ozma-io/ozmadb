@@ -310,7 +310,7 @@ module Map =
         Seq.fold addOrResolve Map.empty items
 
     let ofSeqUnique (items : seq<'k * 'v>) : Map<'k, 'v> =
-        ofSeqWith (fun k v1 v2 -> failwith (sprintf "Key '%s' already exists" (k.ToString ()))) items
+        ofSeqWith (fun k v1 v2 -> failwith (sprintf "Key '%O' already exists" k)) items
 
     let getWithDefault (k : 'k) (def : 'v) (m : Map<'k, 'v>) : 'v =
         match Map.tryFind k m with
@@ -410,11 +410,15 @@ module Set =
     let getSingle (s : Set<'k>) : 'k = s |> Set.toSeq |> Seq.exactlyOne
 
     let ofSeqUnique (items : seq<'a>) : Set<'a> =
-        Seq.fold (fun s x -> if Set.contains x s then failwith (sprintf "Item '%s' already exists" (x.ToString ())) else Set.add x s) Set.empty items
+        Seq.fold (fun s x -> if Set.contains x s then failwith (sprintf "Item '%O' already exists" x) else Set.add x s) Set.empty items
 
 module Array =
     let mapTaskSync (f : 'a -> Task<'b>) (arr : 'a[]) : Task<'b[]> =
         Task.map Seq.toArray (Seq.mapTaskSync f arr)
+
+module String =
+    let truncate (len : int) (s : string) =
+        if String.length s <= len then s else s.Substring(0, len)
 
 let tryInt (culture : CultureInfo) (str : string) : int option =
     match Int32.TryParse(str, NumberStyles.Integer ||| NumberStyles.AllowDecimalPoint, culture) with

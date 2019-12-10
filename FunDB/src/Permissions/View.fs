@@ -80,14 +80,19 @@ let private (|SubEntitySelect|_|) (expr : SingleSelectExpr) : FunQL.ResolvedEnti
     | _ -> None
 
 type private PermissionsApplier (access : SchemaAccess) =
-    let rec applyToSelectExpr : SelectExpr -> SelectExpr = function
+    let rec applyToSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
         | SSelect query -> SSelect <| applyToSingleSelectExpr query
         | SSetOp (op, a, b, limits) ->
-            let a' = applyToSelectExpr a
-            let b' = applyToSelectExpr b
+            let a' = applyToSelectTreeExpr a
+            let b' = applyToSelectTreeExpr b
             let limits' = applyToOrderLimitClause limits
             SSetOp (op, a', b', limits')
         | SValues values -> SValues values
+
+    and applyToSelectExpr (select : SelectExpr) : SelectExpr =
+        { ctes = Map.map (fun name -> applyToSelectExpr) select.ctes
+          tree = applyToSelectTreeExpr select.tree
+        }
 
     and applyToSingleSelectExpr (query : SingleSelectExpr) : SingleSelectExpr =
         match query with
@@ -130,7 +135,8 @@ type private PermissionsApplier (access : SchemaAccess) =
             | None -> FTable (extra, pun, entity)
             | Some restr ->
                 let name = Option.defaultValue entity.name pun
-                FSubExpr (name, None, SSelect restr)
+                let select = { ctes = Map.empty; tree = SSelect restr }
+                FSubExpr (name, None, select)
         | FJoin (jt, e1, e2, where) ->
             let e1' = applyToFromExpr e1
             let e2' = applyToFromExpr e2

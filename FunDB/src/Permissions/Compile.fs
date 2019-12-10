@@ -33,6 +33,6 @@ let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (argumen
               orderLimit = SQL.emptyOrderLimitClause
               extra = null
             } : SQL.SingleSelectExpr
-        let subexpr = SQL.SSelect select
+        let subexpr = { ctes = Map.empty; tree = SQL.SSelect select } : SQL.SelectExpr
         let idColumn = SQL.VEColumn { table = None; name = sqlFunId }
         SQL.VEInQuery (idColumn, subexpr)

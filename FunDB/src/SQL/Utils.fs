@@ -8,6 +8,9 @@ open Newtonsoft.Json.Linq
 
 let escapeSqlDoubleQuotes (str : string) : string = sprintf "\"%s\"" (str.Replace("\"", "\"\""))
 
+// Internal restriction of PostgreSQL; any identifier longer is truncated. Try to create table with long name, for example.
+let sqlIdentifierLength = 63
+
 // PostgreSQL C-style escape string constants but without E
 let private genericEscapeSqlSingleQuotes (strBuilder : StringBuilder) (str : string) : string =
     ignore <| strBuilder.Append('\'')
@@ -38,7 +41,10 @@ let escapeSqlSingleQuotes (str : string) =
     let strBuilder = StringBuilder (2 * str.Length)
     genericEscapeSqlSingleQuotes strBuilder str
 
-let renderSqlName = escapeSqlDoubleQuotes
+let renderSqlName str =
+    if String.length str > sqlIdentifierLength then
+        failwith <| sprintf "SQL identifier %s is too long" str
+    escapeSqlDoubleQuotes str
 
 let renderSqlString (str : string) =
     let strBuilder = StringBuilder (2 * str.Length)

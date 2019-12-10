@@ -116,10 +116,15 @@ let private limitOrderLimit (orderLimit : SQL.OrderLimitClause) : SQL.OrderLimit
             oldLimit
     { orderLimit with limit = Some newLimit }
 
-let rec private limitView : SQL.SelectExpr -> SQL.SelectExpr = function
+let rec private limitTreeView : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
     | SQL.SSelect sel -> SQL.SSelect { sel with orderLimit = limitOrderLimit sel.orderLimit }
     | SQL.SValues values -> SQL.SValues values
-    | SQL.SSetOp (op, a, b, limit) -> SQL.SSetOp (op, limitView a, limitView b, limit)
+    | SQL.SSetOp (op, a, b, limit) -> SQL.SSetOp (op, limitTreeView a, limitTreeView b, limit)
+
+let rec private limitView (select : SQL.SelectExpr) : SQL.SelectExpr =
+    { ctes = Map.map (fun name -> limitView) select.ctes
+      tree = limitTreeView select.tree
+    }
 
 type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option) =
     let mutable serializedFields : Map<ResolvedFieldRef, SerializedColumnField> = Map.empty

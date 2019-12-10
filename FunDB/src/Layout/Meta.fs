@@ -35,10 +35,7 @@ type private MetaBuilder (layout : Layout) =
     let makeUniqueConstraintMeta (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
         SQL.CMUnique <| Array.map (fun name -> SQL.SQLName <| name.ToString()) constr.columns
 
-    let makeCheckConstraintMeta (entity : ResolvedEntity) (constr : ResolvedCheckConstraint) : SQL.ConstraintMeta =
-        SQL.CMCheck <| compileCheckExpr entity constr.expression
-
-    let makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.ConstraintName * SQL.ConstraintMeta) seq =
+    let makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (entity : ResolvedEntity) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.ConstraintName * SQL.ConstraintMeta) seq =
         let makeDefaultValue def =
             match compileFieldValue def with
             | SQL.VEValue SQL.VNull -> None
@@ -54,7 +51,7 @@ type private MetaBuilder (layout : Layout) =
                     // FIXME: support restrictions!
                     let refEntity = layout.FindEntity entityRef |> Option.get
                     let tableRef = compileResolvedEntityRef refEntity.root
-                    Seq.singleton (SQL.SQLName <| sprintf "__%O_foreign_%O" columnName.table.name columnName.name, SQL.CMForeignKey (tableRef, [| (columnName.name, sqlFunId) |]))
+                    Seq.singleton (SQL.SQLName <| sprintf "__foreign__%s__%s"  entity.hashName field.hashName, SQL.CMForeignKey (tableRef, [| (columnName.name, sqlFunId) |]))
                 | FTEnum vals ->
                     let expr =
                         let col = SQL.VEColumn { table = None; name = columnName.name }
@@ -69,20 +66,21 @@ type private MetaBuilder (layout : Layout) =
                             SQL.VEEq (col, exprs.[0])
                         else
                             SQL.VEIn (col, exprs)
-                    Seq.singleton (SQL.SQLName <| sprintf "__%O_enum_%O" columnName.table.name columnName.name, SQL.CMCheck expr)
+                    Seq.singleton (SQL.SQLName <| sprintf "__enum__%s__%s" entity.hashName field.hashName, SQL.CMCheck expr)
                 | _ -> Seq.empty
         (res, constr)
 
     let makeEntityMeta (ref : ResolvedEntityRef) (entity : ResolvedEntity) : SQL.TableMeta * (SQL.SQLName * SQL.ObjectMeta) seq =
-        let makeUniqueConstraint (name, constr) = (SQL.SQLName <| sprintf "__%O_unique_%O" ref.name name, makeUniqueConstraintMeta constr)
+        let makeUniqueConstraint (name, constr : ResolvedUniqueConstraint) =
+            (SQL.SQLName <| sprintf "__unique__%s__%s" entity.hashName constr.hashName, makeUniqueConstraintMeta constr)
         let uniqueConstraints = entity.uniqueConstraints |> Map.toSeq |> Seq.map makeUniqueConstraint
         let tableName = compileResolvedEntityRef entity.root
 
         match entity.inheritance with
         | None ->
-            let idSeq = SQL.SQLName <| sprintf "__%O_seq_id" ref.name
+            let idSeq = SQL.SQLName <| sprintf "__id__%s" entity.hashName
             let idConstraints =
-                let name = SQL.SQLName <| sprintf "__%O_primary_id" ref.name
+                let name = SQL.SQLName <| sprintf "__primary__%s" entity.hashName
                 let constr = SQL.CMPrimaryKey [| sqlFunId |]
                 Seq.singleton (name, constr)
 
@@ -106,14 +104,16 @@ type private MetaBuilder (layout : Layout) =
 
                     let checkExpr = makeCheckExpr (layout.FindEntity >> Option.get) entity
 
-                    let constrs = Seq.singleton (SQL.SQLName <| sprintf "__%O_sub_entity_valid" ref.name, SQL.CMCheck checkExpr)
-                    let indexes = Seq.singleton (SQL.SQLName <| sprintf "__%O_sub_entity_index" ref.name, ({ columns = [| sqlFunSubEntity |] } : SQL.IndexMeta))
+                    let constrs = Seq.singleton (SQL.SQLName <| sprintf "__type_check__%s" entity.hashName, SQL.CMCheck checkExpr)
+                    let indexes = Seq.singleton (SQL.SQLName <| sprintf "__type_index__%s" entity.hashName, ({ columns = [| sqlFunSubEntity |] } : SQL.IndexMeta))
 
                     (columns, constrs, indexes)
 
             let makeColumn (name, field) =
-                (field.columnName, makeColumnFieldMeta { table = tableName; name = field.columnName } field)
-            let makeCheckConstraint (name, constr) = (SQL.SQLName <| sprintf "__%O_check_%O" ref.name name, makeCheckConstraintMeta entity constr)
+                (field.columnName, makeColumnFieldMeta { table = tableName; name = field.columnName } entity field)
+            let makeCheckConstraint (name, constr : ResolvedCheckConstraint) =
+                let meta = SQL.CMCheck <| compileCheckExpr entity constr.expression
+                (SQL.SQLName <| sprintf "__check__%s__%s" entity.hashName constr.hashName, meta)
 
             let columnObjects = entity.columnFields |> Map.toSeq |> Seq.map makeColumn |> Seq.cache
             let userColumns = columnObjects |> Seq.map (fun (name, (column, constrs)) -> (name, column))
@@ -134,18 +134,20 @@ type private MetaBuilder (layout : Layout) =
                 if Option.isSome field.inheritedFrom then
                     None
                 else
-                    let (meta, constrs) = makeColumnFieldMeta { table = tableName; name = field.columnName } field
+                    let (meta, constrs) = makeColumnFieldMeta { table = tableName; name = field.columnName } entity field
                     let extraConstrs =
                         if meta.isNullable then
                             Seq.empty
                         else
                             let checkNull = SQL.VEIsNull (SQL.VEColumn { table = None; name = field.columnName })
                             let expr = SQL.VENot (SQL.VEAnd (inheritance.checkExpr, checkNull))
-                            Seq.singleton (SQL.SQLName <| sprintf "__%O_not_null_%O" ref.name name, SQL.CMCheck expr)
+                            Seq.singleton (SQL.SQLName <| sprintf "__notnull__%s__%s" entity.hashName field.hashName, SQL.CMCheck expr)
                     Some (field.columnName, ({ meta with isNullable = true }, Seq.append constrs extraConstrs))
-            let makeUniqueConstraint (name, constr) = (SQL.SQLName <| sprintf "__%O_unique_%O" ref.name name, makeUniqueConstraintMeta constr)
-            let makeCheckConstraint (name, constr) =
-                (SQL.SQLName <| sprintf "__%O_check_%O" ref.name name, makeCheckConstraintMeta entity constr)
+            let makeCheckConstraint (name, constr : ResolvedCheckConstraint) =
+                let expr = compileCheckExpr entity constr.expression
+                let check = SQL.VEOr (SQL.VENot (inheritance.checkExpr), expr)
+                let meta = SQL.CMCheck check
+                (SQL.SQLName <| sprintf "__check__%s__%s" entity.hashName constr.hashName, meta)
 
             let columnObjects = entity.columnFields |> Map.toSeq |> Seq.mapMaybe makeColumn |> Seq.cache
             let userColumns = columnObjects |> Seq.map (fun (name, (column, constrs)) -> (name, column))

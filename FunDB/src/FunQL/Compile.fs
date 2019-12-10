@@ -567,14 +567,19 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.OrderLimitClause
         (paths, ret)
 
-    and compileSelectExpr (flags : SelectFlags) : ResolvedSelectExpr -> SelectInfo * SQL.SelectExpr = function
+    and compileSelectExpr (flags : SelectFlags) (expr : ResolvedSelectExpr) : SelectInfo * SQL.SelectExpr =
+        let (info, tree) = compileSelectTreeExpr flags expr
+        let ret = { ctes = Map.empty; tree = tree } : SQL.SelectExpr
+        (info, ret)
+
+    and compileSelectTreeExpr (flags : SelectFlags) : ResolvedSelectExpr -> SelectInfo * SQL.SelectTreeExpr = function
         | SSelect query ->
             let (info, expr) = compileSingleSelectExpr flags query
             (info, SQL.SSelect expr)
         | SSetOp (startOp, startA, startB, startLimits) as select ->
             if not flags.metaColumns then
-                let (info1, expr1) = compileSelectExpr flags startA
-                let (info2, expr2) = compileSelectExpr flags startB
+                let (info1, expr1) = compileSelectTreeExpr flags startA
+                let (info2, expr2) = compileSelectTreeExpr flags startB
                 let (limitPaths, compiledLimits) = compileOrderLimitClause Map.empty startLimits
                 assert Map.isEmpty limitPaths
                 (info1, SQL.SSetOp (compileSetOp startOp, expr1, expr2, compiledLimits))
@@ -986,7 +991,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                           orderLimit = SQL.emptyOrderLimitClause
                           extra = { realEntity = entityRef }
                         } : SQL.SingleSelectExpr
-                    let expr = SQL.SSelect select
+                    let expr = { ctes = Map.empty; tree = SQL.SSelect select } : SQL.SelectExpr
                     SQL.FSubExpr (compileName entityRef.name, None, expr)
             let (mainId, mainSubEntity) =
                 match mainEntity with
@@ -1051,7 +1056,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   domains = domainsMap
                 } : SelectInfo
             let compiledValues = values |> Array.map (Array.map (compileLinkedFieldExpr Map.empty >> snd))
-            let ret = SQL.FSubExpr (compileName name, Some (Array.map compileName fieldNames), SQL.SValues compiledValues)
+            let select = { ctes = Map.empty; tree = SQL.SValues compiledValues } : SQL.SelectExpr
+            let ret = SQL.FSubExpr (compileName name, Some (Array.map compileName fieldNames), select)
             let fromInfo =
                 { fromType = FTSubquery selectInfo
                   mainId = None
@@ -1122,7 +1128,7 @@ type private PureColumn =
       result : SQL.SelectedColumn
     }
 
-let rec private findPureAttributes (columnTypes : ColumnType[]) : SQL.SelectExpr -> (PureColumn option)[] = function
+let rec private findPureAttributes (columnTypes : ColumnType[]) : SQL.SelectTreeExpr -> (PureColumn option)[] = function
     | SQL.SSelect query ->
         let assignPure colType res =
             match checkPureColumn res with
@@ -1146,7 +1152,7 @@ let rec private findPureAttributes (columnTypes : ColumnType[]) : SQL.SelectExpr
     | SQL.SValues vals -> Array.create (Array.length vals.[0]) None
     | SQL.SSetOp (op, a, b, limits) -> Array.create (findPureAttributes columnTypes a |> Array.length) None
 
-let rec private filterExprColumns (cols : (PureColumn option)[]) : SQL.SelectExpr -> SQL.SelectExpr = function
+let rec private filterExprColumns (cols : (PureColumn option)[]) : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
     | SQL.SSelect query ->
         let checkColumn i _ = Option.isNone cols.[i]
         SQL.SSelect { query with columns = Seq.filteri checkColumn query.columns |> Seq.toArray }
@@ -1171,8 +1177,8 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let compiler = QueryCompiler (layout, defaultAttrs, compileArguments viewExpr.arguments)
     let (info, expr) = compiler.CompileSelectExpr mainEntityRef viewExpr.select
 
-    let allPureAttrs = findPureAttributes info.columns expr
-    let newExpr = filterExprColumns allPureAttrs expr
+    let allPureAttrs = findPureAttributes info.columns expr.tree
+    let newExpr = { expr with tree = filterExprColumns allPureAttrs expr.tree }
 
     let checkColumn i _ = Option.isNone allPureAttrs.[i]
     let newColumns = Seq.filteri checkColumn info.columns |> Seq.toArray

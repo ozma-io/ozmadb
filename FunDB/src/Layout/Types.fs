@@ -28,17 +28,25 @@ type ReferenceRef =
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
+// Used instead of names in system generated identifiers to ensure that they do not exceed PostgreSQL identifier length restrictions.
+type HashName = string
+
+let hashNameLength = 20
+
 type ResolvedFieldType = FieldType<ResolvedEntityRef, ReferenceRef>
 
 type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>
 
+[<NoEquality; NoComparison>]
 type ResolvedUniqueConstraint =
     { columns : FunQLName array
+      hashName : HashName // Guaranteed to be unique in an entity
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedCheckConstraint =
     { expression : LocalFieldExpr
+      hashName : HashName // Guaranteed to be unique in an entity
     }
 
 [<NoEquality; NoComparison>]
@@ -50,6 +58,7 @@ type ResolvedColumnField =
       isImmutable : bool
       inheritedFrom : ResolvedEntityRef option
       columnName : SQL.ColumnName
+      hashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
     }
 
 [<NoEquality; NoComparison>]
@@ -62,6 +71,7 @@ type ResolvedComputedField =
       usedSchemas : UsedSchemas
       inheritedFrom : ResolvedEntityRef option
       allowBroken : bool
+      hashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
     }
 
 [<NoEquality; NoComparison>]
@@ -88,23 +98,6 @@ type ComputedFieldError =
       error : exn
     }
 
-let inline genericFindField (getColumnField : FieldName -> 'col option) (getComputedField : FieldName -> 'comp option) (mainField : FieldName) =
-    let rec traverse (name : FieldName) =
-        if name = funId then
-            Some (funId, RId)
-        else if name = funSubEntity then
-            Some (funSubEntity, RSubEntity)
-        else if name = funMain then
-            traverse mainField
-        else
-            match getColumnField name with
-            | Some col -> Some (name, RColumnField col)
-            | None ->
-                match getComputedField name with
-                | Some comp -> Some (name, RComputedField comp)
-                | None -> None
-    traverse
-
 [<NoEquality; NoComparison>]
 type ChildEntity =
     { direct : bool
@@ -121,6 +114,23 @@ type IEntityFields =
 let hasSubType (entity : IEntityFields) =
         Option.isSome entity.Parent || entity.IsAbstract || not (Seq.isEmpty entity.Children)
 
+let inline genericFindField (getColumnField : FieldName -> 'col option) (getComputedField : FieldName -> 'comp option) (fields : IEntityFields) =
+    let rec traverse (name : FieldName) =
+        if name = funId then
+            Some (funId, RId)
+        else if name = funSubEntity && hasSubType fields then
+            Some (funSubEntity, RSubEntity)
+        else if name = funMain then
+            traverse fields.MainField
+        else
+            match getColumnField name with
+            | Some col -> Some (name, RColumnField col)
+            | None ->
+                match getComputedField name with
+                | Some comp -> Some (name, RComputedField comp)
+                | None -> None
+    traverse
+
 [<NoEquality; NoComparison>]
 type ResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
@@ -134,29 +144,29 @@ type ResolvedEntity =
       subEntityParseExpr : SQL.ValueExpr // Parses SubEntity field into JSON
       children : Map<ResolvedEntityRef, ChildEntity>
       typeName : string // SubEntity value for this entity
+      hashName : HashName // Guaranteed to be unique for any entity in a schema
       isAbstract : bool
       // Hierarchy root
       root : ResolvedEntityRef
     } with
         member this.FindField (name : FieldName) =
-            genericFindField (fun name -> Map.tryFind name this.columnFields) (fun name -> Map.tryFind name this.computedFields |> Option.bind Result.getOption) this.mainField name
-        member this.Fields =
-            let id = Seq.singleton (funId, RId)
-            let subentity =
-                if hasSubType this then
-                    Seq.singleton (funSubEntity, RSubEntity)
-                else
-                    Seq.empty
-            let columns = this.columnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
-            let getComputed = function
-            | (name, Error e) -> None
-            | (name, Ok comp) -> Some (name, RComputedField comp)
-            let computed = this.computedFields |> Map.toSeq |> Seq.mapMaybe getComputed
-            Seq.concat [id; subentity; columns; computed]
+            genericFindField (fun name -> Map.tryFind name this.columnFields) (fun name -> Map.tryFind name this.computedFields |> Option.bind Result.getOption) this name
 
         interface IEntityFields with
             member this.FindField name = this.FindField name
-            member this.Fields = this.Fields
+            member this.Fields =
+                let id = Seq.singleton (funId, RId)
+                let subentity =
+                    if hasSubType this then
+                        Seq.singleton (funSubEntity, RSubEntity)
+                    else
+                        Seq.empty
+                let columns = this.columnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
+                let getComputed = function
+                | (name, Error e) -> None
+                | (name, Ok comp) -> Some (name, RComputedField comp)
+                let computed = this.computedFields |> Map.toSeq |> Seq.mapMaybe getComputed
+                Seq.concat [id; subentity; columns; computed]
             member this.MainField = this.mainField
             member this.Parent = this.inheritance |> Option.map (fun i -> i.parent)
             member this.IsAbstract = this.isAbstract
