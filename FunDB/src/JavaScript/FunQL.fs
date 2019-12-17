@@ -10,9 +10,9 @@ type JSCompileException (message : string) =
     inherit Exception(message)
 
 // FIXME: may not take offset into consideration
-let jsDateTime (dt : DateTimeOffset) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour; dt.Minute; dt.Second; dt.Millisecond |] |> Array.map (double >> JSNumber >> JSValue))
+let jsDateTime (dt : DateTime) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour; dt.Minute; dt.Second; dt.Millisecond |] |> Array.map (double >> JSNumber >> JSValue))
 
-let jsDate (dt : DateTimeOffset) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour |] |> Array.map (double >> JSNumber >> JSValue))
+let jsDate (dt : DateTime) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour |] |> Array.map (double >> JSNumber >> JSValue))
 
 let jsFieldValue : FieldValue -> JSExpr = function
     | FInt i -> JSValue <| JSNumber (double i)

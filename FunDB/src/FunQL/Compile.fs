@@ -137,8 +137,8 @@ let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETScalar SFTInt -> FInt 0
     | FETScalar SFTDecimal -> FDecimal 0m
     | FETScalar SFTBool -> FBool false
-    | FETScalar SFTDateTime -> FDateTime DateTimeOffset.UnixEpoch
-    | FETScalar SFTDate -> FDateTime DateTimeOffset.UnixEpoch
+    | FETScalar SFTDateTime -> FDateTime DateTime.UnixEpoch
+    | FETScalar SFTDate -> FDateTime DateTime.UnixEpoch
     | FETScalar SFTJson -> FJson (JObject ())
     | FETScalar SFTUserViewRef -> FUserViewRef { schema = None; name = FunQLName "" }
 

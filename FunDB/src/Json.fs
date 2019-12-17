@@ -14,26 +14,6 @@ open FunWithFlags.FunDB.Utils
 
 type JToken = Newtonsoft.Json.Linq.JToken
 
-type UnixDateTimeOffsetConverter () =
-    inherit JsonConverter<DateTimeOffset> ()
-
-    override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : DateTimeOffset =
-        let secs = serializer.Deserialize<int64>(reader)
-        DateTimeOffset.FromUnixTimeSeconds(secs)
-
-    override this.WriteJson (writer : JsonWriter, value : DateTimeOffset, serializer : JsonSerializer) : unit =
-        serializer.Serialize(writer, value.ToUnixTimeSeconds())
-
-type UnixDateTimeConverter () =
-    inherit JsonConverter<DateTime> ()
-
-    override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : DateTime =
-        let secs = serializer.Deserialize<int64>(reader)
-        DateTimeOffset.FromUnixTimeSeconds(secs).UtcDateTime
-
-    override this.WriteJson (writer : JsonWriter, value : DateTime, serializer : JsonSerializer) : unit =
-        serializer.Serialize(writer, DateTimeOffset(value).ToUnixTimeSeconds())
-
 type private UnionCases = (UnionCaseInfo * PropertyInfo[])[]
 
 let private unionCases (objectType : Type) : UnionCases =
@@ -241,10 +221,6 @@ type ConverterContractResolver () =
         if isNull contract.Converter then
             if FSharpType.IsUnion objectType then
                 contract.Converter <- UnionConverter objectType
-            if objectType = typeof<DateTime> then
-                contract.Converter <- UnixDateTimeConverter ()
-            else if objectType = typeof<DateTimeOffset> then
-                contract.Converter <- UnixDateTimeOffsetConverter ()
 
         contract
 

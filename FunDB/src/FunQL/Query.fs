@@ -21,6 +21,7 @@ type [<JsonConverter(typeof<ExecutedValueConverter>); NoEquality; NoComparison>]
       value : SQL.Value
       pun : SQL.Value option
     }
+
 // Implemented by hand to make output smaller when there are no attributes.
 and ExecutedValueConverter () =
     inherit JsonConverter<ExecutedValue> ()
@@ -31,17 +32,18 @@ and ExecutedValueConverter () =
         raise <| NotImplementedException ()
 
     override this.WriteJson (writer : JsonWriter, res : ExecutedValue, serializer : JsonSerializer) : unit =
-        let vals = Map.singleton "value" (res.value :> obj)
-        let vals =
-            if not <| Map.isEmpty res.attributes then
-                Map.add "attributes" (res.attributes :> obj) vals
-            else
-                vals
-        let vals =
-            match res.pun with
-            | None -> vals
-            | Some p -> Map.add "pun" (p :> obj) vals
-        serializer.Serialize(writer, vals)
+        writer.WriteStartObject()
+        writer.WritePropertyName("value")
+        serializer.Serialize(writer, res.value)
+        if not <| Map.isEmpty res.attributes then
+            writer.WritePropertyName("attributes")
+            serializer.Serialize(writer, res.attributes)
+        match res.pun with
+        | None -> ()
+        | Some pun ->
+            writer.WritePropertyName("pun")
+            serializer.Serialize(writer, pun)
+        writer.WriteEndObject()
 
 type [<NoEquality; NoComparison>] ExecutedEntityId =
     { id : int
@@ -66,28 +68,30 @@ and ExecutedRowConverter () =
         raise <| NotImplementedException ()
 
     override this.WriteJson (writer : JsonWriter, res : ExecutedRow, serializer : JsonSerializer) : unit =
-        // TODO: rewrite this to mutable dictionary or use "ignore nulls" policy.
-        let vals = [("values", res.values :> obj); ("domainId", res.domainId :> obj)] |> Map.ofSeq
-        let vals =
-            if not <| Map.isEmpty res.attributes then
-                Map.add "attributes" (res.attributes :> obj) vals
-            else
-                vals
-        let vals =
-            if not <| Map.isEmpty res.entityIds then
-                Map.add "entityIds" (res.entityIds :> obj) vals
-            else
-                vals
-        let vals =
-            match res.mainId with
-            | None -> vals
-            | Some id -> Map.add "mainId" (id :> obj) vals
-        let vals =
-            match res.mainSubEntity with
-            | None -> vals
-            | Some subEntity -> Map.add "mainSubEntity" (subEntity :> obj) vals
-        serializer.Serialize(writer, vals)
+        writer.WriteStartObject()
+        writer.WritePropertyName("values")
+        serializer.Serialize(writer, res.values)
+        writer.WritePropertyName("domainId")
+        serializer.Serialize(writer, res.domainId)
+        if not <| Map.isEmpty res.attributes then
+            writer.WritePropertyName("attributes")
+            serializer.Serialize(writer, res.attributes)
+        if not <| Map.isEmpty res.entityIds then
+            writer.WritePropertyName("entityIds")
+            serializer.Serialize(writer, res.entityIds)
+        match res.mainId with
+        | None -> ()
+        | Some mainId ->
+            writer.WritePropertyName("mainId")
+            serializer.Serialize(writer, mainId)
+        match res.mainSubEntity with
+        | None -> ()
+        | Some mainSubEntity ->
+            writer.WritePropertyName("mainSubEntity")
+            serializer.Serialize(writer, mainSubEntity)
+        writer.WriteEndObject()
 
+[<NoEquality; NoComparison>]
 type ExecutedColumnInfo =
     { name : FunQLName
       attributeTypes : ExecutedAttributeTypes
@@ -96,6 +100,7 @@ type ExecutedColumnInfo =
       punType : SQL.SimpleValueType option
     }
 
+[<NoEquality; NoComparison>]
 type ExecutedViewInfo =
     { attributeTypes : ExecutedAttributeTypes
       rowAttributeTypes : ExecutedAttributeTypes

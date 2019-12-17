@@ -178,7 +178,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
     let logger = cacheStore.LoggerFactory.CreateLogger<RequestContext>()
     let mutable needMigration = false
 
-    let transactionTime = DateTimeOffset.UtcNow
+    let transactionTime = DateTime.UtcNow
     let userId =
         match rawUserId with
         | None -> FNull
@@ -295,7 +295,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     let event =
                         EventEntry (
                             TransactionTimestamp = transactionTime,
-                            Timestamp = DateTimeOffset.UtcNow,
+                            Timestamp = DateTime.UtcNow,
                             Type = "info",
                             UserName = userName,
                             EntityId = Nullable(),
@@ -325,7 +325,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "select",
                                 UserName = userName,
                                 EntityId = Nullable(),
@@ -343,7 +343,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     let event =
                         EventEntry (
                             TransactionTimestamp = transactionTime,
-                            Timestamp = DateTimeOffset.UtcNow,
+                            Timestamp = DateTime.UtcNow,
                             Type = "select",
                             UserName = userName,
                             EntityId = Nullable(),
@@ -368,7 +368,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "entity_info",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -394,7 +394,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "insert",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -413,7 +413,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "insert",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -429,7 +429,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "insert",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -456,7 +456,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "update",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -474,7 +474,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "update",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -490,7 +490,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "update",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -506,7 +506,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "update",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -529,7 +529,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     let event =
                         EventEntry (
                             TransactionTimestamp = transactionTime,
-                            Timestamp = DateTimeOffset.UtcNow,
+                            Timestamp = DateTime.UtcNow,
                             Type = "delete",
                             UserName = userName,
                             SchemaName = entityRef.schema.ToString(),
@@ -547,7 +547,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "delete",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -563,7 +563,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "delete",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -579,7 +579,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
-                                Timestamp = DateTimeOffset.UtcNow,
+                                Timestamp = DateTime.UtcNow,
                                 Type = "delete",
                                 UserName = userName,
                                 SchemaName = entityRef.schema.ToString(),
@@ -617,7 +617,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 let event =
                     EventEntry (
                         TransactionTimestamp = transactionTime,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = DateTime.UtcNow,
                         Type = "restore_schema",
                         UserName = userName,
                         SchemaName = name.ToString(),

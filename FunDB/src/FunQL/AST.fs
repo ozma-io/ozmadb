@@ -156,16 +156,16 @@ type [<JsonConverter(typeof<FieldValueConverter>); NoEquality; NoComparison>] Fi
     | FDecimal of decimal
     | FString of string
     | FBool of bool
-    | FDateTime of DateTimeOffset
-    | FDate of DateTimeOffset
+    | FDateTime of DateTime
+    | FDate of DateTime
     | FJson of JToken
     | FUserViewRef of UserViewRef
     | FIntArray of int[]
     | FDecimalArray of decimal[]
     | FStringArray of string[]
     | FBoolArray of bool[]
-    | FDateTimeArray of DateTimeOffset[]
-    | FDateArray of DateTimeOffset[]
+    | FDateTimeArray of DateTime[]
+    | FDateArray of DateTime[]
     | FJsonArray of JToken[]
     | FUserViewRefArray of UserViewRef[]
     | FNull
@@ -217,16 +217,16 @@ and FieldValueConverter () =
         | FDecimal d -> serialize d
         | FString s -> serialize s
         | FBool b -> serialize b
-        | FDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
-        | FDate dt -> serialize <| dt.ToUnixTimeSeconds()
+        | FDateTime dt -> serialize dt
+        | FDate dt -> serialize dt
         | FJson j -> j.WriteTo(writer)
         | FUserViewRef r -> serialize r
         | FIntArray vals -> serialize vals
         | FDecimalArray vals -> serialize vals
         | FStringArray vals -> serialize vals
         | FBoolArray vals -> serialize vals
-        | FDateTimeArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
-        | FDateArray vals -> serialize <| Array.map (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+        | FDateTimeArray vals -> serialize vals
+        | FDateArray vals -> serialize vals
         | FJsonArray vals -> serialize vals
         | FUserViewRefArray vals -> serialize vals
         | FNull -> serialize null

@@ -59,9 +59,9 @@ let renderSqlDecimal (f : decimal) = f.ToString(CultureInfo.InvariantCulture)
 
 let renderSqlInt (i : int) : string = i.ToString(CultureInfo.InvariantCulture)
 
-let renderSqlDateTime (dt : DateTimeOffset) : string = dt.ToString("O", CultureInfo.InvariantCulture)
+let renderSqlDateTime (dt : DateTime) : string = dt.ToString("O", CultureInfo.InvariantCulture)
 
-let renderSqlDate (dt : DateTimeOffset) : string = dt.ToString("d", CultureInfo.InvariantCulture)
+let renderSqlDate (dt : DateTime) : string = dt.ToString("d", CultureInfo.InvariantCulture)
 
 let renderSqlJson (j : JToken) : string = j.ToString(Formatting.None)
 

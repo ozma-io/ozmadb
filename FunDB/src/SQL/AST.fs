@@ -107,15 +107,15 @@ type [<JsonConverter(typeof<ValueConverter>); NoEquality; NoComparison>] Value =
     | VString of string
     | VRegclass of SchemaObject
     | VBool of bool
-    | VDateTime of DateTimeOffset
-    | VDate of DateTimeOffset
+    | VDateTime of DateTime
+    | VDate of DateTime
     | VJson of JToken
     | VIntArray of ValueArray<int>
     | VDecimalArray of ValueArray<decimal>
     | VStringArray of ValueArray<string>
     | VBoolArray of ValueArray<bool>
-    | VDateTimeArray of ValueArray<DateTimeOffset>
-    | VDateArray of ValueArray<DateTimeOffset>
+    | VDateTimeArray of ValueArray<DateTime>
+    | VDateArray of ValueArray<DateTime>
     | VRegclassArray of ValueArray<SchemaObject>
     | VJsonArray of ValueArray<JToken>
     | VNull
@@ -179,16 +179,16 @@ and ValueConverter () =
         | VDecimal d -> serialize d
         | VString s -> serialize s
         | VBool b -> serialize b
-        | VDateTime dt -> serialize <| dt.ToUnixTimeSeconds()
-        | VDate dt -> serialize <| dt.ToUnixTimeSeconds()
+        | VDateTime dt -> serialize dt
+        | VDate dt -> serialize dt
         | VJson j -> j.WriteTo(writer)
         | VRegclass rc -> serialize <| string rc
         | VIntArray vals -> serializeArray id vals
         | VDecimalArray vals -> serializeArray id vals
         | VStringArray vals -> serializeArray id vals
         | VBoolArray vals -> serializeArray id vals
-        | VDateTimeArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
-        | VDateArray vals -> serializeArray (fun (dt : DateTimeOffset) -> dt.ToUnixTimeSeconds()) vals
+        | VDateTimeArray vals -> serializeArray id vals
+        | VDateArray vals -> serializeArray id vals
         | VRegclassArray vals -> serializeArray string vals
         | VJsonArray vals -> serializeArray id vals
         | VNull -> serialize null

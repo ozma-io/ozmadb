@@ -59,7 +59,7 @@ let private parseToSimpleType : SimpleType -> (string -> Value) = function
     | STInt -> runCast tryIntInvariant >> VInt
     | STDecimal -> runCast tryDecimalInvariant >> VDecimal
     | STBool -> runCast tryBool >> VBool
-    | STDateTime -> runCast tryDateTimeOffsetInvariant >> VDateTime
+    | STDateTime -> runCast tryDateTimeInvariant >> VDateTime
     | STDate -> runCast tryDateInvariant >> VDate
     | STRegclass -> runCast tryRegclass >> VRegclass
     | STJson -> runCast tryJson >> VJson

@@ -399,9 +399,9 @@ namespace FunWithFlags.FunDBSchema.System
     {
         public int Id { get; set; }
         [ColumnField("datetime", Immutable=true)]
-        public DateTimeOffset TransactionTimestamp { get; set; }
+        public DateTime TransactionTimestamp { get; set; }
         [ColumnField("datetime", Immutable=true)]
-        public DateTimeOffset Timestamp { get; set; }
+        public DateTime Timestamp { get; set; }
         [ColumnField("string", Immutable=true)]
         [Required]
         public string Type { get; set; }

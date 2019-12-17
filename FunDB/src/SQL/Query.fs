@@ -53,7 +53,8 @@ let private convertInt : obj -> int option = function
 
 let private convertDate (rawDt : obj) =
     match rawDt with
-    | :? DateTime as dt -> Some (DateTimeOffset dt)
+    | :? DateTime as dt -> Some dt
+    | :? DateTimeOffset as dt -> Some dt.UtcDateTime
     | _ -> None
 
 let private convertValue valType (rawValue : obj) =
@@ -66,9 +67,11 @@ let private convertValue valType (rawValue : obj) =
     | (VTScalar STDecimal, (:? decimal as value)) -> VDecimal value
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
-    | (VTScalar STDateTime, (:? DateTimeOffset as value)) -> VDateTime value
-    | (VTScalar STDateTime, (:? DateTime as value)) -> VDateTime (DateTimeOffset (value, TimeSpan.Zero))
-    | (VTScalar STDate, (:? DateTime as value)) -> VDate (DateTimeOffset (value, TimeSpan.Zero))
+    | (VTScalar STDateTime, value) ->
+        match convertDate value with
+        | Some dt -> VDateTime dt
+        | None -> raisef QueryException "Invalid datetime type: %s" (value.GetType().FullName)
+    | (VTScalar STDate, (:? DateTime as value)) -> VDate value
     | (VTScalar STJson, (:? string as value)) ->
         match tryJson value with
         | Some j -> VJson j
@@ -89,8 +92,8 @@ let private convertValue valType (rawValue : obj) =
         | STDecimal -> VDecimalArray (convertArray tryCast<decimal> rootVals)
         | STString -> VStringArray (convertArray tryCast<string> rootVals)
         | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
-        | STDateTime -> VDateTimeArray (convertArray tryCast<DateTimeOffset> rootVals)
-        | STDate -> VDateArray (convertArray convertDate rootVals)
+        | STDateTime -> VDateTimeArray (convertArray convertDate rootVals)
+        | STDate -> VDateArray (convertArray tryCast<DateTime> rootVals)
         | STRegclass -> raisef QueryException "Regclass arrays are not supported: %O" rootVals
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
     | (typ, value) -> raisef QueryException "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName)
@@ -122,8 +125,8 @@ let private npgsqlValue : Value -> obj = function
     | VString s -> upcast s
     | VRegclass name -> raisef QueryException "Regclass arguments are not supported: %O" name
     | VBool b -> upcast b
-    | VDateTime dt -> upcast dt.UtcDateTime
-    | VDate dt -> upcast dt.UtcDateTime
+    | VDateTime dt -> upcast dt
+    | VDate dt -> upcast dt
     | VJson j -> upcast j
     | VIntArray vals -> npgsqlArrayValue vals
     | VDecimalArray vals -> npgsqlArrayValue vals

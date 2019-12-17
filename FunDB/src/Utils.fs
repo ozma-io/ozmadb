@@ -452,13 +452,21 @@ let tryDateTimeOffset (culture : CultureInfo) (dateTimeStr : string) : DateTimeO
 let tryDateTimeOffsetInvariant : string -> DateTimeOffset option = tryDateTimeOffset CultureInfo.InvariantCulture
 let tryDateTimeOffsetCurrent : string -> DateTimeOffset option = tryDateTimeOffset CultureInfo.CurrentCulture
 
-let tryDate (culture : CultureInfo) (dateStr : string) : DateTimeOffset option =
+let tryDate (culture : CultureInfo) (dateStr : string) : DateTime option =
+    match tryDateTime culture dateStr with
+    | Some date when date.Hour = 0 && date.Minute = 0 && date.Second = 0 && date.Millisecond = 0 -> Some date
+    | _ -> None
+
+let tryDateInvariant : string -> DateTime option = tryDate CultureInfo.InvariantCulture
+let tryDateCurrent : string -> DateTime option = tryDate CultureInfo.CurrentCulture
+
+let tryDateOffset (culture : CultureInfo) (dateStr : string) : DateTimeOffset option =
     match tryDateTimeOffset culture dateStr with
     | Some date when date.Hour = 0 && date.Minute = 0 && date.Second = 0 && date.Millisecond = 0 -> Some date
     | _ -> None
 
-let tryDateInvariant : string -> DateTimeOffset option = tryDate CultureInfo.InvariantCulture
-let tryDateCurrent : string -> DateTimeOffset option = tryDate CultureInfo.CurrentCulture
+let tryDateOffsetInvariant : string -> DateTimeOffset option = tryDateOffset CultureInfo.InvariantCulture
+let tryDateOffsetCurrent : string -> DateTimeOffset option = tryDateOffset CultureInfo.CurrentCulture
 
 let (|Regex|_|) (regex : string) (str : string) : (string list) option =
    let m = System.Text.RegularExpressions.Regex.Match(str, regex)
