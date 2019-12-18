@@ -25,7 +25,7 @@ type [<NoEquality; NoComparison>] ExecutedValue =
 // Implemented by hand to make output smaller when there are no attributes.
 type ExecutedValuePrettyConverter () =
     inherit JsonConverter<ExecutedValue> ()
-    
+
     override this.CanRead = false
 
     override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : ExecutedValue =

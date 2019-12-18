@@ -70,7 +70,7 @@ let anonymousUsername = "anonymous@example.com"
 
 let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
     let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
-        let host = ctx.Request.Host.Host    
+        let host = ctx.Request.Host.Host
         use instances =
             let loggerFactory = ctx.GetService<ILoggerFactory>()
             let systemOptions =
@@ -95,7 +95,7 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
                 match specifiedLang with
                 | Some l -> l.Value.Value
                 | None -> "en-US"
-            
+
             try
                 use! rctx =
                     RequestContext.Create

@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.UserViews.Types
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
@@ -40,3 +41,6 @@ type UserViews =
 
 type ErroredUserViewsSchema = Map<UserViewName, exn>
 type ErroredUserViews = Map<SchemaName, ErroredUserViewsSchema>
+
+let unionErroredUserViews (a : ErroredUserViews) (b : ErroredUserViews) =
+    Map.unionWith (fun name -> Map.unionUnique) a b

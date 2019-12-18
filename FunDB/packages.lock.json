@@ -43,16 +43,6 @@
           "Esprima": "1.0.1251"
         }
       },
-      "LiteDB": {
-        "type": "Direct",
-        "requested": "[4.1.*, )",
-        "resolved": "4.1.4",
-        "contentHash": "g4g9JlHzRBZl+Gd2UbiRdszZ7t8wozU2wX7+5xY5uE79tmcgcDhha+ubAP84G1VLbwQmhBGCzRfIx+epLmJciQ==",
-        "dependencies": {
-          "System.Reflection": "4.3.0",
-          "System.Reflection.TypeExtensions": "4.3.0"
-        }
-      },
       "Microsoft.AspNetCore.Authentication.JwtBearer": {
         "type": "Direct",
         "requested": "[3.0.*, )",

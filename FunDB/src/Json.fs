@@ -139,10 +139,10 @@ type UnionConverter (objectType : Type) =
                             if nameToken.Type <> JTokenType.String then
                                 raise <| JsonException("Invalid union name")
                             let name = JToken.op_Explicit nameToken : string
-                            searchCases name <| fun (case, fields) ->   
+                            searchCases name <| fun (case, fields) ->
                                 if Array.length fields <> array.Count - 1 then
                                     raise <| JsonException(sprintf "Case \"%s\" has %i arguments but %i given" name (Array.length fields) (array.Count - 1))
-                                
+
                                 let args = fields |> Array.mapi (fun i field -> array.[i + 1].ToObject(field.PropertyType, serializer))
                                 FSharpValue.MakeUnion(case, args)
 
@@ -223,13 +223,22 @@ type UnionConverter (objectType : Type) =
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
         let method = writeJsonMethod.MakeGenericMethod(value.GetType().GetGenericArguments())
         ignore <| method.Invoke(null, [| writer; value; serializer |])*)
-    
+
 // Default converters for several types
-type ConverterContractResolver () =
+type ConverterContractResolver (converterConstructors : (Type -> JsonConverter option) array) =
     inherit DefaultContractResolver ()
 
     override this.CreateContract (objectType : Type) : JsonContract =
         let contract = base.CreateContract objectType
+
+        if isNull contract.Converter then
+            let applyConverter (converter : JsonConverter) =
+                if converter.CanConvert objectType then
+                    contract.Converter <- converter
+                    false
+                else
+                    true
+            converterConstructors |> Seq.mapMaybe (fun getConv -> getConv objectType) |> Seq.iterStop applyConverter
 
         if isNull contract.Converter then
             if FSharpType.IsUnion objectType then
@@ -252,7 +261,7 @@ type ConverterContractResolver () =
                 let setDefault v =
                     if isNull prop.DefaultValue then
                         prop.DefaultValue <- v
-                    
+
                 let isRequired =
                     if ftype.IsArray then
                         setDefault (Array.CreateInstance(ftype.GetElementType(), 0))
@@ -301,7 +310,7 @@ type SpecificMapKeyValueConverter<'K, 'V when 'K : comparison> () =
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : Map<'K, 'V> =
         SpecificMapKeyValueConverter.StaticReadJson (reader, serializer)
 
-    override this.WriteJson (writer : JsonWriter, value : Map<'K, 'V>, serializer : JsonSerializer) : unit =    
+    override this.WriteJson (writer : JsonWriter, value : Map<'K, 'V>, serializer : JsonSerializer) : unit =
         SpecificMapKeyValueConverter.StaticWriteJson (writer, value, serializer)
 
 type MapKeyValueConverter () =
@@ -315,7 +324,7 @@ type MapKeyValueConverter () =
 
     static member StaticWriteJson<'K, 'V when 'K : comparison>  (writer : JsonWriter, value : Map<'K, 'V>, serializer : JsonSerializer) =
         SpecificMapKeyValueConverter.StaticWriteJson (writer, value, serializer)
-    
+
     override this.CanConvert (someType : Type) : bool =
         someType.IsGenericType && someType.GetGenericTypeDefinition() = typedefof<Map<_, _>>
 
@@ -331,13 +340,13 @@ type MapKeyValueConverter () =
    * All fields are always required, unless type is Option;
    * Default values for containers are provided.
 *)
-let makeDefaultJsonSerializerSettings () =
+let makeDefaultJsonSerializerSettings (converterConstructors : (Type -> JsonConverter option) array) =
     JsonSerializerSettings(
-        ContractResolver = ConverterContractResolver (),
+        ContractResolver = ConverterContractResolver (converterConstructors),
         DefaultValueHandling = DefaultValueHandling.Populate
     )
 
-let defaultJsonSerializerSettings = makeDefaultJsonSerializerSettings ()
+let defaultJsonSerializerSettings = makeDefaultJsonSerializerSettings [||]
 
 let tryJson (str : string) : JToken option =
     try

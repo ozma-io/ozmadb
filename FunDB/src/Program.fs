@@ -29,6 +29,21 @@ open FunWithFlags.FunDB.FunQL.Query
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
+let httpJsonSettings =
+    let converters : JsonConverter[] = [|
+        FunQL.FieldValuePrettyConverter ()
+        FunQL.ScalarFieldTypePrettyConverter ()
+        FunQL.FieldExprTypePrettyConverter ()
+        SQL.ValuePrettyConverter ()
+        SQL.SimpleTypePrettyConverter ()
+        SQL.ValueTypePrettyConverter ()
+        ExecutedValuePrettyConverter ()
+        ExecutedRowPrettyConverter ()
+    |]
+    let constructors = Array.map (fun conv -> fun _ -> Some <| conv) converters
+    let jsonSettings = makeDefaultJsonSerializerSettings constructors
+    jsonSettings
+
 type Startup (config : IConfiguration) =
     let fundbSection = config.GetSection("FunDB")
 
@@ -79,7 +94,7 @@ type Startup (config : IConfiguration) =
 
     let configureCors (cfg : CorsPolicyBuilder) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
-    
+
     member this.Configure (app : IApplicationBuilder, env : IWebHostEnvironment) =
         if not disableSecurity then
             ignore <| app.UseAuthentication()
@@ -99,22 +114,11 @@ type Startup (config : IConfiguration) =
                     .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
         ignore <| services.AddCors()
 
-        let jsonSettings = makeDefaultJsonSerializerSettings ()
-        // Add all pretty converters here.
-        jsonSettings.Converters.Add(FunQL.FieldValuePrettyConverter ())
-        jsonSettings.Converters.Add(FunQL.ScalarFieldTypePrettyConverter ())
-        jsonSettings.Converters.Add(FunQL.FieldExprTypePrettyConverter ())
-        jsonSettings.Converters.Add(SQL.ValuePrettyConverter ())
-        jsonSettings.Converters.Add(SQL.SimpleTypePrettyConverter ())
-        jsonSettings.Converters.Add(SQL.ValueTypePrettyConverter ())
-        jsonSettings.Converters.Add(ExecutedValuePrettyConverter ())
-        jsonSettings.Converters.Add(ExecutedRowPrettyConverter ())
-
-        ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer jsonSettings)
+        ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer httpJsonSettings)
         let makeInstancesStore (sp : IServiceProvider) =
             let eventLogger = sp.GetService<EventLogger>()
             let logFactory = sp.GetService<ILoggerFactory>()
-            new InstancesCacheStore(logFactory, preload, eventLogger)
+            InstancesCacheStore(logFactory, preload, eventLogger)
         ignore <| services.AddSingleton<InstancesCacheStore>(makeInstancesStore)
         let getEventLogger (sp : IServiceProvider) =
             let logFactory = sp.GetService<ILoggerFactory>()
@@ -124,7 +128,7 @@ type Startup (config : IConfiguration) =
 [<EntryPoint>]
 let main (args : string[]) : int =
     // Register a global converter to have nicer native F# types JSON conversion.
-    JsonConvert.DefaultSettings <- fun () -> defaultJsonSerializerSettings
+    JsonConvert.DefaultSettings <- fun () -> httpJsonSettings
     // Enable JSON for PostgreSQL.
     ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
 
