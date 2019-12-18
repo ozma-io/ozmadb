@@ -103,6 +103,7 @@
     <Compile Include="src/Operations/Entity.fs" />
     <Compile Include="src/Operations/EventLogger.fs" />
     <Compile Include="src/Operations/ContextCache.fs" />
+    <Compile Include="src/Operations/InstancesCache.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
     <Compile Include="src/Operations/Context.fs" />
 
@@ -117,6 +118,8 @@
   <ItemGroup>
     <ProjectReference Include="../FunDBSchema/FunDBSchema.csproj" />
 
+    <ProjectReference Include="../3rdparty/FluidCaching/Src/FluidCaching/FluidCaching.csproj" />
+
     <PackageReference Include="Npgsql" Version="4.1.*" />
     <PackageReference Include="Npgsql.Json.NET" Version="4.1.*" />
     <PackageReference Include="FsLexYacc" Version="10.0.*" />
@@ -128,10 +131,12 @@
     <PackageReference Include="Microsoft.AspNetCore.Cors" Version="2.2.*" />
     <PackageReference Include="Microsoft.AspNetCore.HttpOverrides" Version="2.2.*" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="3.0.*" />
-    <PackageReference Include="FluidCaching" Version="1.3.*" />
+    <!-- <PackageReference Include="FluidCaching" Version="1.3.*" /> -->
     <PackageReference Include="Giraffe" Version="4.0.*" />
     <PackageReference Include="Jint" Version="3.0.0-beta-*" />
     <PackageReference Include="Newtonsoft.Json" Version="12.0.*" />
+    <PackageReference Include="Newtonsoft.Json.Bson" Version="1.0.*" />
+    <PackageReference Include="LiteDB" Version="4.1.*" />
   </ItemGroup>
 
 </Project>

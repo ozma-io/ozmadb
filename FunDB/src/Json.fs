@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Json
 
 open System
+open System.Collections.Generic
 open System.Reflection
 open System.ComponentModel
 open System.Globalization
@@ -100,16 +101,12 @@ type UnionConverter (objectType : Type) =
             // XXX: We do lose information here is we serialize e.g. ('a option option).
             match isOption cases with
             | Some ((someCase, someProperty), noneCase) ->
-                let propType =
-                    if someProperty.PropertyType.IsValueType then
-                        (typedefof<Nullable<_>>).MakeGenericType([|someProperty.PropertyType|])
-                    else
-                        someProperty.PropertyType
                 fun reader serializer ->
-                    let arg = serializer.Deserialize(reader, propType)
-                    if isNull arg then
+                    if reader.TokenType = JsonToken.Null then
+                        reader.Skip()
                         FSharpValue.MakeUnion(noneCase, [||])
                     else
+                        let arg = serializer.Deserialize(reader, someProperty.PropertyType)
                         FSharpValue.MakeUnion(someCase, [|arg|])
             | None ->
                 if isUnionEnum cases then
@@ -130,7 +127,7 @@ type UnionConverter (objectType : Type) =
                             | Some (case, fields) ->
                                 let getField (prop : PropertyInfo) =
                                     match obj.TryGetValue(prop.Name) with
-                                    | (true, valueToken) -> valueToken.ToObject(prop.PropertyType)
+                                    | (true, valueToken) -> valueToken.ToObject(prop.PropertyType, serializer)
                                     | (false, _) -> raise <| JsonException(sprintf "Couldn't find required field \"%s\"" prop.Name)
                                 let args = fields |> Array.map getField
                                 FSharpValue.MakeUnion (case, args)
@@ -142,8 +139,11 @@ type UnionConverter (objectType : Type) =
                             if nameToken.Type <> JTokenType.String then
                                 raise <| JsonException("Invalid union name")
                             let name = JToken.op_Explicit nameToken : string
-                            searchCases name <| fun (case, fields) ->
-                                let args = fields |> Array.mapi (fun i field -> array.[i + 1].ToObject(field.PropertyType))
+                            searchCases name <| fun (case, fields) ->   
+                                if Array.length fields <> array.Count - 1 then
+                                    raise <| JsonException(sprintf "Case \"%s\" has %i arguments but %i given" name (Array.length fields) (array.Count - 1))
+                                
+                                let args = fields |> Array.mapi (fun i field -> array.[i + 1].ToObject(field.PropertyType, serializer))
                                 FSharpValue.MakeUnion(case, args)
 
     let writeJson : UnionCaseInfo -> obj[] -> JsonWriter -> JsonSerializer -> unit =
@@ -164,7 +164,7 @@ type UnionConverter (objectType : Type) =
             | None ->
                 if isUnionEnum cases then
                     fun case args writer serializer ->
-                        serializer.Serialize(writer, case.Name)
+                        writer.WriteValue(case.Name)
                 else
                     match unionAsObject objectType with
                     | Some (caseFieldName, caseNames) ->
@@ -180,7 +180,7 @@ type UnionConverter (objectType : Type) =
                             writer.WriteEndObject()
                     | None ->
                         fun case args writer serializer ->
-                            serializer.Serialize(writer, Array.append [|case.Name :> obj|] args)
+                            serializer.Serialize(writer, Seq.append (Seq.singleton (case.Name :> obj)) args)
 
     override this.CanConvert (someType : Type) : bool =
         someType = objectType
@@ -211,6 +211,19 @@ type UnionConverter (objectType : Type) =
     override this.ConvertFrom (context : ITypeDescriptorContext, culture : CultureInfo, value : obj) : obj =
         FSharpValue.MakeUnion(case, [|value|])
 
+ (*type NewtypeJsonConverter<'nt> () =
+    inherit JsonConverter<'nt> ()
+
+    let (case, argType) = unionCases typeof<'nt> |> isNewtype |> Option.get
+
+    override this.ReadJson (reader : JsonReader, someType : Type, existingValue, serializer : JsonSerializer) : obj =
+        let method = readJsonMethod.MakeGenericMethod(someType.GetGenericArguments())
+        method.Invoke(null, [| reader; serializer |])
+
+    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
+        let method = writeJsonMethod.MakeGenericMethod(value.GetType().GetGenericArguments())
+        ignore <| method.Invoke(null, [| writer; value; serializer |])*)
+    
 // Default converters for several types
 type ConverterContractResolver () =
     inherit DefaultContractResolver ()
@@ -228,22 +241,22 @@ type ConverterContractResolver () =
         let prop = base.CreateProperty (memberInfo, serialization)
 
         if FSharpType.IsRecord memberInfo.DeclaringType || FSharpType.IsUnion memberInfo.DeclaringType then
-            let fieldType =
+            let maybeFieldType =
                 match memberInfo.MemberType with
                 | MemberTypes.Property -> Some (memberInfo :?> PropertyInfo).PropertyType
                 | MemberTypes.Field -> Some (memberInfo :?> FieldInfo).FieldType
                 | _ -> None
-
-            let setDefault v =
-                if isNull prop.DefaultValue then
-                    prop.DefaultValue <- v
-            let (hasDefault, isOption) =
-                match fieldType with
-                | None -> (false, false)
-                | Some ftype ->
+            match maybeFieldType with
+            | None -> ()
+            | Some ftype ->
+                let setDefault v =
+                    if isNull prop.DefaultValue then
+                        prop.DefaultValue <- v
+                    
+                let isRequired =
                     if ftype.IsArray then
                         setDefault (Array.CreateInstance(ftype.GetElementType(), 0))
-                        (true, false)
+                        true
                     else if ftype.IsGenericType then
                         let genType = ftype.GetGenericTypeDefinition ()
                         if genType = typedefof<Map<_, _>> then
@@ -252,37 +265,79 @@ type ConverterContractResolver () =
                             let emptyArray = Array.CreateInstance(tupleType, 0)
                             let emptyMap = Activator.CreateInstance(ftype, emptyArray)
                             setDefault emptyMap
-                            (true, false)
+                            true
                         else if genType = typedefof<Set<_>> then
                             let typePars = ftype.GetGenericArguments()
                             let emptyArray = Array.CreateInstance(typePars.[0], 0)
                             let emptySet = Activator.CreateInstance(ftype, emptyArray)
                             setDefault emptySet
-                            (true, false)
+                            true
                         else if genType = typedefof<_ list> then
                             let emptyCase = FSharpType.GetUnionCases(ftype) |> Array.find (fun case -> case.Name = "Empty")
                             let emptyList = FSharpValue.MakeUnion(emptyCase, [||])
                             setDefault emptyList
-                            (true, false)
+                            true
                         else
-                            (false, genType = typedefof<_ option>)
+                            genType <> typedefof<_ option>
                     else
-                        (false, false)
+                        ftype <> typeof<obj>
 
-            if prop.Required = Required.Default && not isOption then
-                prop.Required <- Required.Always
+                if not prop.IsRequiredSpecified && isRequired then
+                    prop.Required <- Required.Always
 
         prop
+
+type SpecificMapKeyValueConverter<'K, 'V when 'K : comparison> () =
+    inherit JsonConverter<Map<'K, 'V>> ()
+
+    static member StaticReadJson (reader : JsonReader, serializer : JsonSerializer) : Map<'K, 'V> =
+        let seq = serializer.Deserialize<KeyValuePair<'K, 'V> seq>(reader)
+        seq |> Seq.map (function KeyValue(k, v) -> (k, v)) |> Map.ofSeq
+
+    static member StaticWriteJson (writer : JsonWriter, value : Map<'K, 'V>, serializer : JsonSerializer) =
+        let seq = value |> Map.toSeq |> Seq.map (fun (k, v) -> KeyValuePair(k, v))
+        serializer.Serialize(writer, seq)
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : Map<'K, 'V> =
+        SpecificMapKeyValueConverter.StaticReadJson (reader, serializer)
+
+    override this.WriteJson (writer : JsonWriter, value : Map<'K, 'V>, serializer : JsonSerializer) : unit =    
+        SpecificMapKeyValueConverter.StaticWriteJson (writer, value, serializer)
+
+type MapKeyValueConverter () =
+    inherit JsonConverter ()
+
+    let readJsonMethod = typeof<MapKeyValueConverter>.GetMethod("StaticReadJson")
+    let writeJsonMethod = typeof<MapKeyValueConverter>.GetMethod("StaticWriteJson")
+
+    static member StaticReadJson<'K, 'V when 'K : comparison>  (reader : JsonReader, serializer : JsonSerializer) : Map<'K, 'V> =
+        SpecificMapKeyValueConverter.StaticReadJson (reader, serializer)
+
+    static member StaticWriteJson<'K, 'V when 'K : comparison>  (writer : JsonWriter, value : Map<'K, 'V>, serializer : JsonSerializer) =
+        SpecificMapKeyValueConverter.StaticWriteJson (writer, value, serializer)
+    
+    override this.CanConvert (someType : Type) : bool =
+        someType.IsGenericType && someType.GetGenericTypeDefinition() = typedefof<Map<_, _>>
+
+    override this.ReadJson (reader : JsonReader, someType : Type, existingValue, serializer : JsonSerializer) : obj =
+        let method = readJsonMethod.MakeGenericMethod(someType.GetGenericArguments())
+        method.Invoke(null, [| reader; serializer |])
+
+    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
+        let method = writeJsonMethod.MakeGenericMethod(value.GetType().GetGenericArguments())
+        ignore <| method.Invoke(null, [| writer; value; serializer |])
 
 (* Default settings for F# types:
    * All fields are always required, unless type is Option;
    * Default values for containers are provided.
 *)
-let defaultJsonSerializerSettings =
+let makeDefaultJsonSerializerSettings () =
     JsonSerializerSettings(
         ContractResolver = ConverterContractResolver (),
         DefaultValueHandling = DefaultValueHandling.Populate
     )
+
+let defaultJsonSerializerSettings = makeDefaultJsonSerializerSettings ()
 
 let tryJson (str : string) : JToken option =
     try

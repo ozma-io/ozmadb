@@ -16,16 +16,16 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
 type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
 
-type [<JsonConverter(typeof<ExecutedValueConverter>); NoEquality; NoComparison>] ExecutedValue =
+type [<NoEquality; NoComparison>] ExecutedValue =
     { attributes : ExecutedAttributeMap
       value : SQL.Value
       pun : SQL.Value option
     }
 
 // Implemented by hand to make output smaller when there are no attributes.
-and ExecutedValueConverter () =
+type ExecutedValuePrettyConverter () =
     inherit JsonConverter<ExecutedValue> ()
-
+    
     override this.CanRead = false
 
     override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : ExecutedValue =
@@ -51,7 +51,7 @@ type [<NoEquality; NoComparison>] ExecutedEntityId =
       subEntity : ResolvedEntityRef option
     }
 
-type [<JsonConverter(typeof<ExecutedRowConverter>); NoEquality; NoComparison>] ExecutedRow =
+type [<NoEquality; NoComparison>] ExecutedRow =
     { attributes : ExecutedAttributeMap
       values : ExecutedValue array
       entityIds : Map<EntityName, ExecutedEntityId>
@@ -59,7 +59,8 @@ type [<JsonConverter(typeof<ExecutedRowConverter>); NoEquality; NoComparison>] E
       mainSubEntity : ResolvedEntityRef option
       domainId : GlobalDomainId
     }
-and ExecutedRowConverter () =
+
+type ExecutedRowPrettyConverter () =
     inherit JsonConverter<ExecutedRow> ()
 
     override this.CanRead = false
@@ -72,7 +73,7 @@ and ExecutedRowConverter () =
         writer.WritePropertyName("values")
         serializer.Serialize(writer, res.values)
         writer.WritePropertyName("domainId")
-        serializer.Serialize(writer, res.domainId)
+        writer.WriteValue(res.domainId)
         if not <| Map.isEmpty res.attributes then
             writer.WritePropertyName("attributes")
             serializer.Serialize(writer, res.attributes)
@@ -83,12 +84,12 @@ and ExecutedRowConverter () =
         | None -> ()
         | Some mainId ->
             writer.WritePropertyName("mainId")
-            serializer.Serialize(writer, mainId)
+            writer.WriteValue(mainId)
         match res.mainSubEntity with
         | None -> ()
         | Some mainSubEntity ->
             writer.WritePropertyName("mainSubEntity")
-            serializer.Serialize(writer, mainSubEntity)
+            writer.WriteValue(mainSubEntity)
         writer.WriteEndObject()
 
 [<NoEquality; NoComparison>]

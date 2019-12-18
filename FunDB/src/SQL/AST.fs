@@ -101,7 +101,7 @@ let rec mapArrayValue (func : 'a -> 'b) : ArrayValue<'a> -> ArrayValue<'b> = fun
 and mapValueArray (func : 'a -> 'b) (vals : ValueArray<'a>) : ValueArray<'b> =
     Array.map (mapArrayValue func) vals
 
-type [<JsonConverter(typeof<ValueConverter>); NoEquality; NoComparison>] Value =
+type [<NoEquality; NoComparison>] Value =
     | VInt of int
     | VDecimal of decimal
     | VString of string
@@ -154,7 +154,7 @@ type [<JsonConverter(typeof<ValueConverter>); NoEquality; NoComparison>] Value =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
 
-and ValueConverter () =
+type ValuePrettyConverter () =
     inherit JsonConverter<Value> ()
 
     override this.CanRead = false
@@ -175,14 +175,14 @@ and ValueConverter () =
             serialize <| convertValueArray convertFunc vals
 
         match value with
-        | VInt i -> serialize i
-        | VDecimal d -> serialize d
-        | VString s -> serialize s
-        | VBool b -> serialize b
-        | VDateTime dt -> serialize dt
-        | VDate dt -> serialize dt
+        | VInt i -> writer.WriteValue(i)
+        | VDecimal d -> writer.WriteValue(d)
+        | VString s -> writer.WriteValue(s)
+        | VBool b -> writer.WriteValue(b)
+        | VDateTime dt -> writer.WriteValue(dt)
+        | VDate dt -> writer.WriteValue(dt)
         | VJson j -> j.WriteTo(writer)
-        | VRegclass rc -> serialize <| string rc
+        | VRegclass rc -> writer.WriteValue(string rc)
         | VIntArray vals -> serializeArray id vals
         | VDecimalArray vals -> serializeArray id vals
         | VStringArray vals -> serializeArray id vals
@@ -191,11 +191,11 @@ and ValueConverter () =
         | VDateArray vals -> serializeArray id vals
         | VRegclassArray vals -> serializeArray string vals
         | VJsonArray vals -> serializeArray id vals
-        | VNull -> serialize null
+        | VNull -> writer.WriteNull()
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
 // Used when interpreting query results and for compiling FunQL.
-type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
+type SimpleType =
     | STInt
     | STString
     | STDecimal
@@ -205,7 +205,7 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
     | STRegclass
     | STJson
     with
-        override this.ToString () = this.ToJSONString()
+        override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
             match this with
@@ -218,24 +218,23 @@ type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
             | STRegclass -> "regclass"
             | STJson -> "jsonb"
 
-        member this.ToJSONString () =
-            match this with
-            | STInt -> "int"
-            | STString -> "string"
-            | STDecimal -> "numeric"
-            | STBool -> "bool"
-            | STDateTime -> "datetime"
-            | STDate -> "date"
-            | STRegclass -> "regclass"
-            | STJson -> "json"
-
         member this.ToSQLRawString () = SQLRawString (this.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and SimpleTypeConverter () =
+type SimpleTypePrettyConverter () =
     inherit JsonConverter<SimpleType> ()
+
+    let simpleTypeString = function
+        | STInt -> "int"
+        | STString -> "string"
+        | STDecimal -> "numeric"
+        | STBool -> "bool"
+        | STDateTime -> "datetime"
+        | STDate -> "date"
+        | STRegclass -> "regclass"
+        | STJson -> "json"
 
     override this.CanRead = false
 
@@ -243,7 +242,7 @@ and SimpleTypeConverter () =
         raise <| NotImplementedException ()
 
     override this.WriteJson (writer : JsonWriter, value : SimpleType, serializer : JsonSerializer) : unit =
-        serializer.Serialize(writer, value.ToJSONString())
+        writer.WriteValue(simpleTypeString value)
 
 // Find the closest simple type to a given.
 let findSimpleType (str : TypeName) : SimpleType option =
@@ -267,7 +266,7 @@ let findSimpleType (str : TypeName) : SimpleType option =
     | "json" -> Some STJson
     | _ -> None
 
-type [<JsonConverter(typeof<ValueTypeConverter>)>] ValueType<'t> when 't :> ISQLString =
+type ValueType<'t> when 't :> ISQLString =
     | VTScalar of 't
     | VTArray of 't
     with
@@ -281,11 +280,11 @@ type [<JsonConverter(typeof<ValueTypeConverter>)>] ValueType<'t> when 't :> ISQL
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and ValueTypeConverter () =
+type ValueTypePrettyConverter () =
     inherit JsonConverter ()
 
     override this.CanConvert (objectType : Type) =
-        objectType.GetGenericTypeDefinition() = typeof<ValueType<_>>
+        objectType.IsGenericType && objectType.GetGenericTypeDefinition() = typedefof<ValueType<_>>
 
     override this.CanRead = false
 
@@ -293,12 +292,17 @@ and ValueTypeConverter () =
         raise <| NotImplementedException ()
 
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
-        let dict =
-            match castUnion<ValueType<ISQLString>> value with
-            | Some (VTScalar st) -> [("type", st :> obj)]
-            | Some (VTArray st) -> [("type", "array" :> obj); ("subtype", st :> obj)]
-            | None -> failwith "impossible"
-        serializer.Serialize(writer, Map.ofList dict)
+        writer.WriteStartObject()
+        writer.WritePropertyName("type")
+        match castUnion<ValueType<ISQLString>> value with
+        | Some (VTScalar st) ->
+            serializer.Serialize(writer, st)
+        | Some (VTArray st) ->
+            writer.WriteValue("array")
+            writer.WritePropertyName("subtype")
+            serializer.Serialize(writer, st)
+        | None -> failwith "impossible"
+        writer.WriteEndObject()
 
 let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
     | VTScalar a -> VTScalar (func a)
