@@ -64,13 +64,14 @@ type APISettings =
       instancesConnectionString : string
       disableSecurity : bool
       disableACL : bool
+      forceHost : string option
     }
 
 let anonymousUsername = "anonymous@example.com"
 
 let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
     let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
-        let host = ctx.Request.Host.Host
+        let host = Option.defaultValue ctx.Request.Host.Host settings.forceHost
         use instances =
             let loggerFactory = ctx.GetService<ILoggerFactory>()
             let systemOptions =

@@ -52,6 +52,7 @@ type Startup (config : IConfiguration) =
     let authAuthority = fundbSection.GetValue("AuthAuthority") |> Option.ofNull
     let disableSecurity = fundbSection.GetValue("DisableSecurity", false)
     let disableACL = fundbSection.GetValue("DisableACL", false)
+    let forceHost = fundbSection.GetValue("ForceHost") |> Option.ofNull
 
     let sourcePreload =
         match preloads with
@@ -66,6 +67,7 @@ type Startup (config : IConfiguration) =
               disableSecurity = disableSecurity
               disableACL = disableACL
               instancesConnectionString = instancesConnectionString
+              forceHost = forceHost
             }
 
         choose

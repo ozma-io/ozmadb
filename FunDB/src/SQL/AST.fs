@@ -635,7 +635,7 @@ and [<NoEquality; NoComparison>] SelectExpr =
                 else
                     this.ctes
                         |> Map.toSeq
-                        |> Seq.map (fun (name, expr) -> sprintf "%s as (%s)" (name.ToSQLString()) (expr.ToSQLString()))
+                        |> Seq.map (fun (name, expr) -> sprintf "%s AS (%s)" (name.ToSQLString()) (expr.ToSQLString()))
                         |> String.concat ", "
                         |> sprintf "WITH %s"
             concatWithWhitespaces [ctesStr; this.tree.ToSQLString()]
