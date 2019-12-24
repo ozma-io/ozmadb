@@ -1,12 +1,10 @@
 open System
 open System.IO
 open Newtonsoft.Json
-open Microsoft.AspNetCore
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
 open Microsoft.Extensions.Logging
-open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Cors.Infrastructure
 open Microsoft.AspNetCore.Authentication
@@ -17,57 +15,49 @@ open Giraffe.Serialization.Json
 open Npgsql
 
 open FunWithFlags.FunDB.Json
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.API.Utils
 open FunWithFlags.FunDB.API.View
 open FunWithFlags.FunDB.API.Entity
 open FunWithFlags.FunDB.API.SaveRestore
-open FunWithFlags.FunDB.API.Utils
-open FunWithFlags.FunDB.Operations.InstancesCache
+open FunWithFlags.FunDB.Operations.ContextCache
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.EventLogger
-open FunWithFlags.FunDB.FunQL.Query
-module FunQL = FunWithFlags.FunDB.FunQL.AST
-module SQL = FunWithFlags.FunDB.SQL.AST
 
-let httpJsonSettings =
-    let converters : JsonConverter[] = [|
-        FunQL.FieldValuePrettyConverter ()
-        FunQL.ScalarFieldTypePrettyConverter ()
-        FunQL.FieldExprTypePrettyConverter ()
-        SQL.ValuePrettyConverter ()
-        SQL.SimpleTypePrettyConverter ()
-        SQL.ValueTypePrettyConverter ()
-        ExecutedValuePrettyConverter ()
-        ExecutedRowPrettyConverter ()
-    |]
-    let constructors = Array.map (fun conv -> fun _ -> Some <| conv) converters
-    let jsonSettings = makeDefaultJsonSerializerSettings constructors
-    jsonSettings
+type Config =
+    { connectionString : string
+      url : string
+      preloads : string option
+      authAuthority : string option
+      // Disables auth completely
+      disableSecurity : bool option
+      // Disables permissions model, e.g. one should be in Users table but everyone is local root
+      disableACL : bool option
+    }
 
-type Startup (config : IConfiguration) =
-    let fundbSection = config.GetSection("FunDB")
+[<EntryPoint>]
+let main (args : string[]) : int =
+    // Register a global converter to have nicer native F# types JSON conversion
+    JsonConvert.DefaultSettings <- fun () -> defaultJsonSerializerSettings
+    // Enable JSON for PostgreSQL
+    ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
 
-    let instancesConnectionString = config.GetConnectionString("Instances")
-    let preloads = fundbSection.GetValue("Preloads") |> Option.ofNull
-    let authAuthority = fundbSection.GetValue("AuthAuthority") |> Option.ofNull
-    let disableSecurity = fundbSection.GetValue("DisableSecurity", false)
-    let disableACL = fundbSection.GetValue("DisableACL", false)
-    let forceHost = fundbSection.GetValue("ForceHost") |> Option.ofNull
+    let configPath = args.[0]
+    let rawConfig = File.ReadAllText(configPath)
+    let config = JsonConvert.DeserializeObject<Config>(rawConfig)
+    let disableSecurity = Option.defaultValue false config.disableSecurity
 
     let sourcePreload =
-        match preloads with
+        match config.preloads with
         | Some path -> readSourcePreload path
         | None -> emptySourcePreload
     let preload = resolvePreload sourcePreload
 
     let webApp (next : HttpFunc) (ctx : HttpContext) =
-        let instancesStore = ctx.GetService<InstancesCacheStore>()
+        let cacheStore = ctx.GetService<ContextCacheStore>()
         let apiSettings =
-            { instancesStore = instancesStore
+            { cacheStore = cacheStore
               disableSecurity = disableSecurity
-              disableACL = disableACL
-              instancesConnectionString = instancesConnectionString
-              forceHost = forceHost
+              disableACL = Option.defaultValue false config.disableACL
             }
 
         choose
@@ -87,7 +77,7 @@ type Startup (config : IConfiguration) =
 
     let jwtBearerOptions (cfg : JwtBearerOptions) =
         cfg.Authority <-
-            match authAuthority with
+            match config.authAuthority with
             | None -> failwith "authAuthority is not set in configuration file"
             | Some aut -> aut
         cfg.TokenValidationParameters <- TokenValidationParameters (
@@ -97,7 +87,7 @@ type Startup (config : IConfiguration) =
     let configureCors (cfg : CorsPolicyBuilder) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
 
-    member this.Configure (app : IApplicationBuilder, env : IWebHostEnvironment) =
+    let configureApp (app : IApplicationBuilder) =
         if not disableSecurity then
             ignore <| app.UseAuthentication()
         ignore <|
@@ -107,7 +97,7 @@ type Startup (config : IConfiguration) =
                 .UseGiraffeErrorHandler(errorHandler)
                 .UseGiraffe(webApp)
 
-    member this.ConfigureServices (services : IServiceCollection) =
+    let configureServices (services : IServiceCollection) =
         ignore <| services.AddGiraffe()
         if not disableSecurity then
             ignore <|
@@ -115,46 +105,29 @@ type Startup (config : IConfiguration) =
                     .AddAuthentication(authenticationOptions)
                     .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
         ignore <| services.AddCors()
-
-        ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer httpJsonSettings)
-        let makeInstancesStore (sp : IServiceProvider) =
-            let eventLogger = sp.GetService<EventLogger>()
+        ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer defaultJsonSerializerSettings)
+        let makeCacheStore (sp : IServiceProvider) =
             let logFactory = sp.GetService<ILoggerFactory>()
-            InstancesCacheStore(logFactory, preload, eventLogger)
-        ignore <| services.AddSingleton<InstancesCacheStore>(makeInstancesStore)
+            ContextCacheStore(logFactory, config.connectionString, preload)
+        ignore <| services.AddSingleton<ContextCacheStore>(makeCacheStore)
         let getEventLogger (sp : IServiceProvider) =
-            let logFactory = sp.GetService<ILoggerFactory>()
-            new EventLogger(logFactory)
-        ignore <| services.AddHostedService(Func<IServiceProvider, EventLogger> getEventLogger)
+            let contextCache = sp.GetService<ContextCacheStore>()
+            contextCache.EventLogger
+        // Wrapper lambda to avoid a strange error (Obscure behaviour? F# compiler bug?)
+        ignore <| services.AddHostedService(fun sp -> getEventLogger sp)
 
-[<EntryPoint>]
-let main (args : string[]) : int =
-    // Register a global converter to have nicer native F# types JSON conversion.
-    JsonConvert.DefaultSettings <- fun () -> httpJsonSettings
-    // Enable JSON for PostgreSQL.
-    ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
-
-    let configPath = args.[0]
-
-    let configuration =
-        ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile(configPath)
-            .AddEnvironmentVariables()
-            .Build()
-
-    let configureLogging (logging : ILoggingBuilder) =
-        //ignore <| logging.ClearProviders()
-        //ignore <| logging.AddConsole()
-        ()
+    let configureLogging (builder : ILoggingBuilder) =
+        ignore <| builder.ClearProviders()
+        ignore <| builder.AddConsole()
 
     // IdentityModelEventSource.ShowPII <- true
 
-    WebHost
-        .CreateDefaultBuilder()
-        .UseConfiguration(configuration)
+    WebHostBuilder()
+        .UseKestrel()
+        .Configure(Action<IApplicationBuilder> configureApp)
+        .ConfigureServices(configureServices)
         .ConfigureLogging(configureLogging)
-        .UseStartup<Startup>()
+        .UseUrls(config.url)
         .Build()
         .Run()
 

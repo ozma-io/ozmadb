@@ -101,7 +101,7 @@ let rec mapArrayValue (func : 'a -> 'b) : ArrayValue<'a> -> ArrayValue<'b> = fun
 and mapValueArray (func : 'a -> 'b) (vals : ValueArray<'a>) : ValueArray<'b> =
     Array.map (mapArrayValue func) vals
 
-type [<NoEquality; NoComparison>] Value =
+type [<JsonConverter(typeof<ValueConverter>); NoEquality; NoComparison>] Value =
     | VInt of int
     | VDecimal of decimal
     | VString of string
@@ -154,7 +154,7 @@ type [<NoEquality; NoComparison>] Value =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
 
-type ValuePrettyConverter () =
+and ValueConverter () =
     inherit JsonConverter<Value> ()
 
     override this.CanRead = false
@@ -175,14 +175,14 @@ type ValuePrettyConverter () =
             serialize <| convertValueArray convertFunc vals
 
         match value with
-        | VInt i -> writer.WriteValue(i)
-        | VDecimal d -> writer.WriteValue(d)
-        | VString s -> writer.WriteValue(s)
-        | VBool b -> writer.WriteValue(b)
-        | VDateTime dt -> writer.WriteValue(dt)
-        | VDate dt -> writer.WriteValue(dt)
+        | VInt i -> serialize i
+        | VDecimal d -> serialize d
+        | VString s -> serialize s
+        | VBool b -> serialize b
+        | VDateTime dt -> serialize dt
+        | VDate dt -> serialize dt
         | VJson j -> j.WriteTo(writer)
-        | VRegclass rc -> writer.WriteValue(string rc)
+        | VRegclass rc -> serialize <| string rc
         | VIntArray vals -> serializeArray id vals
         | VDecimalArray vals -> serializeArray id vals
         | VStringArray vals -> serializeArray id vals
@@ -191,11 +191,11 @@ type ValuePrettyConverter () =
         | VDateArray vals -> serializeArray id vals
         | VRegclassArray vals -> serializeArray string vals
         | VJsonArray vals -> serializeArray id vals
-        | VNull -> writer.WriteNull()
+        | VNull -> serialize null
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
 // Used when interpreting query results and for compiling FunQL.
-type SimpleType =
+type [<JsonConverter(typeof<SimpleTypeConverter>)>] SimpleType =
     | STInt
     | STString
     | STDecimal
@@ -205,7 +205,7 @@ type SimpleType =
     | STRegclass
     | STJson
     with
-        override this.ToString () = this.ToSQLString()
+        override this.ToString () = this.ToJSONString()
 
         member this.ToSQLString () =
             match this with
@@ -218,23 +218,24 @@ type SimpleType =
             | STRegclass -> "regclass"
             | STJson -> "jsonb"
 
+        member this.ToJSONString () =
+            match this with
+            | STInt -> "int"
+            | STString -> "string"
+            | STDecimal -> "numeric"
+            | STBool -> "bool"
+            | STDateTime -> "datetime"
+            | STDate -> "date"
+            | STRegclass -> "regclass"
+            | STJson -> "json"
+
         member this.ToSQLRawString () = SQLRawString (this.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-type SimpleTypePrettyConverter () =
+and SimpleTypeConverter () =
     inherit JsonConverter<SimpleType> ()
-
-    let simpleTypeString = function
-        | STInt -> "int"
-        | STString -> "string"
-        | STDecimal -> "numeric"
-        | STBool -> "bool"
-        | STDateTime -> "datetime"
-        | STDate -> "date"
-        | STRegclass -> "regclass"
-        | STJson -> "json"
 
     override this.CanRead = false
 
@@ -242,7 +243,7 @@ type SimpleTypePrettyConverter () =
         raise <| NotImplementedException ()
 
     override this.WriteJson (writer : JsonWriter, value : SimpleType, serializer : JsonSerializer) : unit =
-        writer.WriteValue(simpleTypeString value)
+        serializer.Serialize(writer, value.ToJSONString())
 
 // Find the closest simple type to a given.
 let findSimpleType (str : TypeName) : SimpleType option =
@@ -266,7 +267,7 @@ let findSimpleType (str : TypeName) : SimpleType option =
     | "json" -> Some STJson
     | _ -> None
 
-type ValueType<'t> when 't :> ISQLString =
+type [<JsonConverter(typeof<ValueTypeConverter>)>] ValueType<'t> when 't :> ISQLString =
     | VTScalar of 't
     | VTArray of 't
     with
@@ -280,11 +281,11 @@ type ValueType<'t> when 't :> ISQLString =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-type ValueTypePrettyConverter () =
+and ValueTypeConverter () =
     inherit JsonConverter ()
 
     override this.CanConvert (objectType : Type) =
-        objectType.IsGenericType && objectType.GetGenericTypeDefinition() = typedefof<ValueType<_>>
+        objectType.GetGenericTypeDefinition() = typeof<ValueType<_>>
 
     override this.CanRead = false
 
@@ -292,17 +293,12 @@ type ValueTypePrettyConverter () =
         raise <| NotImplementedException ()
 
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
-        writer.WriteStartObject()
-        writer.WritePropertyName("type")
-        match castUnion<ValueType<ISQLString>> value with
-        | Some (VTScalar st) ->
-            serializer.Serialize(writer, st)
-        | Some (VTArray st) ->
-            writer.WriteValue("array")
-            writer.WritePropertyName("subtype")
-            serializer.Serialize(writer, st)
-        | None -> failwith "impossible"
-        writer.WriteEndObject()
+        let dict =
+            match castUnion<ValueType<ISQLString>> value with
+            | Some (VTScalar st) -> [("type", st :> obj)]
+            | Some (VTArray st) -> [("type", "array" :> obj); ("subtype", st :> obj)]
+            | None -> failwith "impossible"
+        serializer.Serialize(writer, Map.ofList dict)
 
 let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
     | VTScalar a -> VTScalar (func a)
@@ -635,7 +631,7 @@ and [<NoEquality; NoComparison>] SelectExpr =
                 else
                     this.ctes
                         |> Map.toSeq
-                        |> Seq.map (fun (name, expr) -> sprintf "%s AS (%s)" (name.ToSQLString()) (expr.ToSQLString()))
+                        |> Seq.map (fun (name, expr) -> sprintf "%s as (%s)" (name.ToSQLString()) (expr.ToSQLString()))
                         |> String.concat ", "
                         |> sprintf "WITH %s"
             concatWithWhitespaces [ctesStr; this.tree.ToSQLString()]

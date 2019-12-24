@@ -7,14 +7,11 @@ open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Newtonsoft.Json
 open Giraffe
-open Microsoft.EntityFrameworkCore
-open Microsoft.Extensions.Logging
 
-open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Operations.Context
-open FunWithFlags.FunDB.Operations.InstancesCache
+open FunWithFlags.FunDB.Operations.ContextCache
 
 let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
     let getArg (KeyValue(name : string, par)) =
@@ -60,58 +57,42 @@ type RealmAccess =
 
 [<NoEquality; NoComparison>]
 type APISettings =
-    { instancesStore : InstancesCacheStore
-      instancesConnectionString : string
+    { cacheStore : ContextCacheStore
       disableSecurity : bool
       disableACL : bool
-      forceHost : string option
     }
 
 let anonymousUsername = "anonymous@example.com"
 
 let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
     let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
-        let host = Option.defaultValue ctx.Request.Host.Host settings.forceHost
-        use instances =
-            let loggerFactory = ctx.GetService<ILoggerFactory>()
-            let systemOptions =
-                (DbContextOptionsBuilder<InstancesContext> ())
-                    .UseLoggerFactory(loggerFactory)
-                    .UseNpgsql(settings.instancesConnectionString)
-            new InstancesContext(systemOptions.Options)
-        match! instances.Instances.FirstOrDefaultAsync(fun x -> x.Name = host) with
-        | null -> return! RequestErrors.notFound (text (sprintf "Instance %s not found" host)) next ctx
-        | instance->
-            let! cacheStore = settings.instancesStore.GetContextCache(instance.ConnectionString)
-
-            let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
-            let specifiedLang =
-                if isNull acceptLanguage then
-                    None
-                else
-                    acceptLanguage
-                    |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
-                    |> Seq.first
-            let lang =
-                match specifiedLang with
-                | Some l -> l.Value.Value
-                | None -> "en-US"
-
-            try
-                use! rctx =
-                    RequestContext.Create
-                        { cacheStore = cacheStore
-                          userName = userName
-                          isRoot = isRoot
-                          language = lang
-                          disableACL = settings.disableACL
-                        }
-                return! f rctx next ctx
-            with
-            | :? RequestException as e ->
-                match e.Info with
-                | REUserNotFound
-                | RENoRole -> return! RequestErrors.forbidden (text "") next ctx
+        let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
+        let specifiedLang =
+            if isNull acceptLanguage then
+                None
+            else
+                acceptLanguage
+                |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
+                |> Seq.first
+        let lang =
+            match specifiedLang with
+            | Some l -> l.Value.Value
+            | None -> "en-US"
+        try
+            use! rctx =
+                RequestContext.Create
+                    { cacheStore = settings.cacheStore
+                      userName = userName
+                      isRoot = isRoot
+                      language = lang
+                      disableACL = settings.disableACL
+                    }
+            return! f rctx next ctx
+        with
+        | :? RequestException as e ->
+            match e.Info with
+            | REUserNotFound
+            | RENoRole -> return! RequestErrors.forbidden (text "") next ctx
     }
 
     let protectedApi (next : HttpFunc) (ctx : HttpContext) =
