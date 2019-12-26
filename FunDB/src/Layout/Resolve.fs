@@ -418,7 +418,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
             | { ref = VRColumn { entity = None; name = name }; path = path } ->
                 let res = checkPath stack usedSchemas entity { entity = entityRef; name = name } (Array.toList path)
-                usedSchemas <- res.usedSchemas
+                usedSchemas <- mergeUsedSchemas usedSchemas res.usedSchemas
                 if not res.isLocal then
                     isLocal <- false
                 if res.hasId then
