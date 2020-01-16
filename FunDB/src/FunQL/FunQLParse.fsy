@@ -525,7 +525,6 @@ FieldExprEq:
     | FieldExprOp IS NOT NULL                      { FEIsNotNull $1 }
     | FieldExprOp IS DISTINCT FROM FieldExprOp     { FEDistinct ($1, $5) }
     | FieldExprOp IS NOT DISTINCT FROM FieldExprOp { FENotDistinct ($1, $6) }
-    | FieldExprOp IS NOT NULL                      { FEIsNotNull $1 }
     | FieldExprOp LIKE FieldExprOp                 { FELike ($1, $3) }
     | FieldExprOp NOT LIKE FieldExprOp             { FENotLike ($1, $4) }
     | FieldExprOp LIKE_OP FieldExprOp              { FELike ($1, $3) }
