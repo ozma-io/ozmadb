@@ -365,7 +365,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     }
                     if forceRebuild || oldState.version <> currentVersion then
                         let! (newTransaction, newState) = rebuildFromDatabase transaction currentVersion
-                        do! anonymousViewsCache.Clear()
+                        anonymousViewsCache.Clear()
                         cachedState <- newState
                         return (newTransaction, newState)
                     else
@@ -470,7 +470,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                       userMeta = wantedUserMeta
                     }
 
-                do! anonymousViewsCache.Clear()
+                anonymousViewsCache.Clear()
                 if migrated then
                     // There is no way to force-clear prepared statements for all connections in the pool, so we clear the pool itself instead.
                     NpgsqlConnection.ClearPool(transaction.Connection.Connection)

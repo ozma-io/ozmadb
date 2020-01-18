@@ -2,6 +2,12 @@
   "version": 1,
   "dependencies": {
     ".NETCoreApp,Version=v3.0": {
+      "FluidCaching": {
+        "type": "Direct",
+        "requested": "[1.3.*, )",
+        "resolved": "1.3.2",
+        "contentHash": "9W3e6GBZltecew8tBvPb5VGYHxETVagkaH7hQb3gZPFZ6WNX6lLeYM8W9Oqt88s4ESoT1vTLH0vdDTmW9G6i5A=="
+      },
       "FSharp.Core": {
         "type": "Direct",
         "requested": "[4.7.0, )",
@@ -572,42 +578,15 @@
           "System.Buffers": "4.5.0"
         }
       },
-      "Microsoft.NETCore.Jit": {
-        "type": "Transitive",
-        "resolved": "1.0.2",
-        "contentHash": "Ok2vWofa6X8WD9vc4pfLHwvJz1/B6t3gOAoZcjrjrQf7lQOlNIuZIZtLn3wnWX28DuQGpPJkRlBxFj7Z5txNqw=="
-      },
       "Microsoft.NETCore.Platforms": {
         "type": "Transitive",
         "resolved": "1.1.1",
         "contentHash": "TMBuzAHpTenGbGgk0SMTwyEkyijY/Eae4ZGsFNYJvAr/LDn1ku3Etp3FPxChmDp5HHF3kzJuoaa08N0xjqAJfQ=="
       },
-      "Microsoft.NETCore.Portable.Compatibility": {
-        "type": "Transitive",
-        "resolved": "1.0.1",
-        "contentHash": "Vd+lvLcGwvkedxtKn0U8s9uR4p0Lm+0U2QvDsLaw7g4S1W4KfPDbaW+ROhhLCSOx/gMYC72/b+z+o4fqS/oxVg==",
-        "dependencies": {
-          "Microsoft.NETCore.Runtime.CoreCLR": "1.0.2"
-        }
-      },
-      "Microsoft.NETCore.Runtime.CoreCLR": {
-        "type": "Transitive",
-        "resolved": "1.0.2",
-        "contentHash": "A0x1xtTjYJWZr2DRzgfCOXgB0JkQg8twnmtTJ79wFje+IihlLbXtx6Z2AxyVokBM5ruwTedR6YdCmHk39QJdtQ==",
-        "dependencies": {
-          "Microsoft.NETCore.Jit": "1.0.2",
-          "Microsoft.NETCore.Windows.ApiSets": "1.0.1"
-        }
-      },
       "Microsoft.NETCore.Targets": {
         "type": "Transitive",
         "resolved": "1.1.3",
         "contentHash": "3Wrmi0kJDzClwAC+iBdUBpEKmEle8FQNsCs77fkiOIw/9oYA07bL1EZNX0kQ2OMN3xpwvl0vAtOCYY3ndDNlhQ=="
-      },
-      "Microsoft.NETCore.Windows.ApiSets": {
-        "type": "Transitive",
-        "resolved": "1.0.1",
-        "contentHash": "SaToCvvsGMxTgtLv/BrFQ5IFMPRE1zpWbnqbpwykJa8W5XiX82CXI6K2o7yf5xS7EP6t/JzFLV0SIDuWpvBZVw=="
       },
       "Microsoft.Win32.Primitives": {
         "type": "Transitive",
@@ -1580,13 +1559,6 @@
           "System.Reflection.Emit.Lightweight": "4.3.0",
           "System.Threading.Tasks.Extensions": "4.4.0",
           "System.ValueTuple": "4.4.0"
-        }
-      },
-      "fluidcaching": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.NETCore.Portable.Compatibility": "1.0.1",
-          "NETStandard.Library": "1.6.0"
         }
       },
       "fundbschema": {

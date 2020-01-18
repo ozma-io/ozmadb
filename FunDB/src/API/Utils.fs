@@ -1,14 +1,13 @@
 module FunWithFlags.FunDB.API.Utils
 
 open System.Collections.Generic
+open System.Threading.Tasks
 open Microsoft.Extensions.Primitives
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Newtonsoft.Json
 open Giraffe
-open Microsoft.EntityFrameworkCore
-open Microsoft.Extensions.Logging
 
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunDB.Utils
@@ -58,63 +57,47 @@ type RealmAccess =
     { roles : string[]
     }
 
-[<NoEquality; NoComparison>]
-type APISettings =
-    { instancesStore : InstancesCacheStore
-      instancesConnectionString : string
-      disableSecurity : bool
-      disableACL : bool
-      forceHost : string option
-    }
+type IInstancesSource =
+    abstract member GetInstance : string -> Task<Instance option>
 
 let anonymousUsername = "anonymous@example.com"
 
-let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
-    let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
-        let host = Option.defaultValue ctx.Request.Host.Host settings.forceHost
-        use instances =
-            let loggerFactory = ctx.GetService<ILoggerFactory>()
-            let systemOptions =
-                (DbContextOptionsBuilder<InstancesContext> ())
-                    .UseLoggerFactory(loggerFactory)
-                    .UseNpgsql(settings.instancesConnectionString)
-            new InstancesContext(systemOptions.Options)
-        match! instances.Instances.FirstOrDefaultAsync(fun x -> x.Name = host) with
-        | null -> return! RequestErrors.notFound (text (sprintf "Instance %s not found" host)) next ctx
-        | instance->
-            let! cacheStore = settings.instancesStore.GetContextCache(instance.ConnectionString)
+let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
+    let makeContext (instance : Instance) (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
+        let connectionString = sprintf "Host=%s; Port=%i; Database=%s; Username=%s; Password=%s" instance.Host instance.Port instance.Database instance.Username instance.Password
+        let contextCache = ctx.GetService<InstancesCacheStore>()
+        let! cacheStore = contextCache.GetContextCache(connectionString)
 
-            let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
-            let specifiedLang =
-                if isNull acceptLanguage then
-                    None
-                else
-                    acceptLanguage
-                    |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
-                    |> Seq.first
-            let lang =
-                match specifiedLang with
-                | Some l -> l.Value.Value
-                | None -> "en-US"
+        let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
+        let specifiedLang =
+            if isNull acceptLanguage then
+                None
+            else
+                acceptLanguage
+                |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
+                |> Seq.first
+        let lang =
+            match specifiedLang with
+            | Some l -> l.Value.Value
+            | None -> "en-US"
 
-            try
-                use! rctx =
-                    RequestContext.Create
-                        { cacheStore = cacheStore
-                          userName = userName
-                          isRoot = isRoot
-                          language = lang
-                          disableACL = settings.disableACL
-                        }
-                return! f rctx next ctx
-            with
-            | :? RequestException as e ->
-                match e.Info with
-                | REUserNotFound
-                | RENoRole -> return! RequestErrors.forbidden (text "") next ctx
+        try
+            use! rctx =
+                RequestContext.Create
+                    { cacheStore = cacheStore
+                      userName = userName
+                      isRoot = isRoot
+                      language = lang
+                    }
+            return! f rctx next ctx
+        with
+        | :? RequestException as e ->
+            match e.Info with
+            | REUserNotFound
+            | RENoRole -> return! RequestErrors.forbidden (text "") next ctx
     }
 
-    let protectedApi (next : HttpFunc) (ctx : HttpContext) =
+    let protectedApi (instance : Instance) (next : HttpFunc) (ctx : HttpContext) =
         let userClaim = ctx.User.FindFirst "preferred_username"
         let userName = userClaim.Value
         let userRoles = ctx.User.FindFirst "realm_access"
@@ -124,11 +107,19 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
                 roles.roles |> Seq.contains "fundb_admin"
             else
                 false
-        makeContext userName isRoot next ctx
+        makeContext instance userName isRoot next ctx
 
-    let unprotectedApi = makeContext anonymousUsername true
+    let unprotectedApi instance = makeContext instance anonymousUsername true
 
-    if settings.disableSecurity then
-        unprotectedApi
-    else
-        authorize >=> protectedApi
+    let lookupInstance (next : HttpFunc) (ctx : HttpContext) = task {
+        let instancesSource = ctx.GetService<IInstancesSource>()
+        match! instancesSource.GetInstance ctx.Request.Host.Host with
+        | None -> return! RequestErrors.notFound (text (sprintf "Instance %s not found" ctx.Request.Host.Host)) next ctx
+        | Some instance ->
+            if instance.DisableSecurity then
+                return! unprotectedApi instance next ctx
+            else
+                return! (authorize >=> protectedApi instance) next ctx
+    }
+
+    lookupInstance

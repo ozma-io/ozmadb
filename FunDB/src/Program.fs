@@ -2,7 +2,6 @@ open System
 open System.IO
 open Newtonsoft.Json
 open Microsoft.AspNetCore
-open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
 open Microsoft.Extensions.Logging
@@ -11,11 +10,14 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Cors.Infrastructure
 open Microsoft.AspNetCore.Authentication
 open Microsoft.AspNetCore.Authentication.JwtBearer
+open FSharp.Control.Tasks.V2.ContextInsensitive
 open Microsoft.IdentityModel.Tokens
+open Microsoft.EntityFrameworkCore
 open Giraffe
 open Giraffe.Serialization.Json
 open Npgsql
 
+open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.API.View
@@ -44,38 +46,40 @@ let httpJsonSettings =
     let jsonSettings = makeDefaultJsonSerializerSettings constructors
     jsonSettings
 
+type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
+    interface IInstancesSource with
+        member this.GetInstance (host : string) = task {
+            use instances =
+                let systemOptions =
+                    (DbContextOptionsBuilder<InstancesContext> ())
+                        .UseLoggerFactory(loggerFactory)
+                        .UseNpgsql(connectionString)
+                new InstancesContext(systemOptions.Options)
+            match! instances.Instances.FirstOrDefaultAsync(fun x -> x.Name = host) with
+            | null -> return None
+            | instance -> return Some instance
+        }
+
+type StaticInstance (instance : Instance) =
+    interface IInstancesSource with
+        member this.GetInstance (host : string) = Task.result (Some instance)
+
 type Startup (config : IConfiguration) =
     let fundbSection = config.GetSection("FunDB")
 
-    let instancesConnectionString = config.GetConnectionString("Instances")
-    let preloads = fundbSection.GetValue("Preloads") |> Option.ofNull
-    let authAuthority = fundbSection.GetValue("AuthAuthority") |> Option.ofNull
-    let disableSecurity = fundbSection.GetValue("DisableSecurity", false)
-    let disableACL = fundbSection.GetValue("DisableACL", false)
-    let forceHost = fundbSection.GetValue("ForceHost") |> Option.ofNull
-
     let sourcePreload =
-        match preloads with
-        | Some path -> readSourcePreload path
-        | None -> emptySourcePreload
+        match fundbSection.GetValue("Preloads") with
+        | null -> emptySourcePreload
+        | path -> readSourcePreload path
     let preload = resolvePreload sourcePreload
 
-    let webApp (next : HttpFunc) (ctx : HttpContext) =
-        let instancesStore = ctx.GetService<InstancesCacheStore>()
-        let apiSettings =
-            { instancesStore = instancesStore
-              disableSecurity = disableSecurity
-              disableACL = disableACL
-              instancesConnectionString = instancesConnectionString
-              forceHost = forceHost
-            }
-
+    let webApp =
         choose
-            [ viewsApi apiSettings
-              entitiesApi apiSettings
-              saveRestoreApi apiSettings
+            [ viewsApi
+              entitiesApi
+              saveRestoreApi
               (setStatusCode 404 >=> text "Not Found")
-            ] next ctx
+            ]
 
     let errorHandler (ex : Exception) (logger : ILogger) =
         logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
@@ -86,10 +90,7 @@ type Startup (config : IConfiguration) =
         o.DefaultChallengeScheme <- JwtBearerDefaults.AuthenticationScheme
 
     let jwtBearerOptions (cfg : JwtBearerOptions) =
-        cfg.Authority <-
-            match authAuthority with
-            | None -> failwith "authAuthority is not set in configuration file"
-            | Some aut -> aut
+        cfg.Authority <- fundbSection.["AuthAuthority"]
         cfg.TokenValidationParameters <- TokenValidationParameters (
             ValidateAudience = false
         )
@@ -98,23 +99,23 @@ type Startup (config : IConfiguration) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
 
     member this.Configure (app : IApplicationBuilder, env : IWebHostEnvironment) =
-        if not disableSecurity then
-            ignore <| app.UseAuthentication()
         ignore <|
             app
                 .UseHttpMethodOverride()
                 .UseCors(configureCors)
+                .UseAuthentication()
                 .UseGiraffeErrorHandler(errorHandler)
                 .UseGiraffe(webApp)
 
     member this.ConfigureServices (services : IServiceCollection) =
-        ignore <| services.AddGiraffe()
-        if not disableSecurity then
-            ignore <|
-                services
-                    .AddAuthentication(authenticationOptions)
-                    .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
-        ignore <| services.AddCors()
+        ignore <|
+            services
+                .AddGiraffe()
+                .AddCors()
+        ignore <|
+            services
+                .AddAuthentication(authenticationOptions)
+                .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
 
         ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer httpJsonSettings)
         let makeInstancesStore (sp : IServiceProvider) =
@@ -126,6 +127,26 @@ type Startup (config : IConfiguration) =
             let logFactory = sp.GetService<ILoggerFactory>()
             new EventLogger(logFactory)
         ignore <| services.AddHostedService(Func<IServiceProvider, EventLogger> getEventLogger)
+        let getInstancesSource (sp : IServiceProvider) : IInstancesSource =
+            match fundbSection.["InstancesSource"] with
+            | "database" ->
+                let instancesConnectionString = config.GetConnectionString("Instances")
+                let logFactory = sp.GetService<ILoggerFactory>()
+                DatabaseInstances(logFactory, instancesConnectionString) :> IInstancesSource
+            | "static" ->
+                let instanceSection = config.GetSection("Instance")
+                let username = instanceSection.["Username"]
+                let instance =
+                    Instance(
+                        Host = instanceSection.["Host"],
+                        Port = instanceSection.GetValue("Port", 5432),
+                        Database = instanceSection.GetValue("Database", username),
+                        Username = username,
+                        Password = instanceSection.["Password"]
+                    )
+                StaticInstance(instance) :> IInstancesSource
+            | _ -> failwith "Invalid InstancesSource"
+        ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
 
 [<EntryPoint>]
 let main (args : string[]) : int =

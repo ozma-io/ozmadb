@@ -28,9 +28,7 @@ type Transaction =
     { operations: TransactionOp[]
     }
 
-let entitiesApi (settings : APISettings) : HttpHandler =
-    let guarded = withContext settings
-
+let entitiesApi : HttpHandler =
     let returnError = function
         | EEArguments msg -> sprintf "Invalid arguments: %s" msg |> text |> RequestErrors.badRequest
         | EEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
@@ -70,14 +68,14 @@ let entitiesApi (settings : APISettings) : HttpHandler =
 
     let recordApi (entityRef : ResolvedEntityRef) (id : int) =
         choose
-            [ PUT >=> guarded (updateEntity entityRef id)
-              DELETE >=> guarded (deleteEntity entityRef id)
+            [ PUT >=> withContext (updateEntity entityRef id)
+              DELETE >=> withContext (deleteEntity entityRef id)
             ]
 
     let rootEntityApi (ref : ResolvedEntityRef) =
         choose
-            [ GET >=> guarded (getEntityInfo ref)
-              POST >=> guarded (insertEntity ref)
+            [ GET >=> withContext (getEntityInfo ref)
+              POST >=> withContext (insertEntity ref)
             ]
 
     let entityApi (schema : string, name : string) =
@@ -112,7 +110,7 @@ let entitiesApi (settings : APISettings) : HttpHandler =
         }
 
     let transactionApi =
-        POST >=> guarded performTransaction
+        POST >=> withContext performTransaction
 
     choose
         [ subRoutef "/entity/%s/%s" entityApi

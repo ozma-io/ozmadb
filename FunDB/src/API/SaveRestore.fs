@@ -9,9 +9,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.Operations.Context
 
-let saveRestoreApi (settings : APISettings) : HttpHandler =
-    let guarded = withContext settings
-
+let saveRestoreApi : HttpHandler =
     let returnSaveError = function
         | SENotFound -> text "Not found" |> RequestErrors.notFound
         | SEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
@@ -36,8 +34,8 @@ let saveRestoreApi (settings : APISettings) : HttpHandler =
     let saveRestoreApi (schema : string) =
         let schemaName = FunQLName schema
         choose
-            [ GET >=> guarded (saveSchema schemaName)
-              PUT >=> guarded (restoreSchema schemaName)
+            [ GET >=> withContext (saveSchema schemaName)
+              PUT >=> withContext (restoreSchema schemaName)
             ]
 
     choose

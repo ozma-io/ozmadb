@@ -39,6 +39,14 @@ namespace FunWithFlags.FunDBSchema.Instances
         [Required]
         public string Name { get; set; }
         [Required]
-        public string ConnectionString { get; set; }
+        public string Host { get; set; }
+        public int Port { get; set; }
+        [Required]
+        public string Username { get; set; }
+        [Required]
+        public string Password { get; set; }
+        [Required]
+        public string Database { get; set; }
+        public bool DisableSecurity { get; set; }
     }
 }
