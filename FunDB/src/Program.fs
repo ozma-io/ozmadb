@@ -20,6 +20,7 @@ open Npgsql
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.API.Info
 open FunWithFlags.FunDB.API.View
 open FunWithFlags.FunDB.API.Entity
 open FunWithFlags.FunDB.API.SaveRestore
@@ -78,6 +79,7 @@ type Startup (config : IConfiguration) =
             [ viewsApi
               entitiesApi
               saveRestoreApi
+              infoApi
               (setStatusCode 404 >=> text "Not Found")
             ]
 
@@ -112,10 +114,11 @@ type Startup (config : IConfiguration) =
             services
                 .AddGiraffe()
                 .AddCors()
-        ignore <|
-            services
-                .AddAuthentication(authenticationOptions)
-                .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
+        if not <| fundbSection.GetValue("DisableSecurity", false) then
+            ignore <|
+                services
+                    .AddAuthentication(authenticationOptions)
+                    .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
 
         ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer httpJsonSettings)
         let makeInstancesStore (sp : IServiceProvider) =
@@ -138,11 +141,13 @@ type Startup (config : IConfiguration) =
                 let username = instanceSection.["Username"]
                 let instance =
                     Instance(
+                        Name = "static",
                         Host = instanceSection.["Host"],
                         Port = instanceSection.GetValue("Port", 5432),
                         Database = instanceSection.GetValue("Database", username),
                         Username = username,
-                        Password = instanceSection.["Password"]
+                        Password = instanceSection.["Password"],
+                        DisableSecurity = instanceSection.GetValue("DisableSecurity", false)
                     )
                 StaticInstance(instance) :> IInstancesSource
             | _ -> failwith "Invalid InstancesSource"

@@ -108,6 +108,7 @@
     <Compile Include="src/Operations/Context.fs" />
 
     <Compile Include="src/API/Utils.fs" />
+    <Compile Include="src/API/Info.fs" />
     <Compile Include="src/API/View.fs" />
     <Compile Include="src/API/Entity.fs" />
     <Compile Include="src/API/SaveRestore.fs" />
