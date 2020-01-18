@@ -70,7 +70,7 @@ type Startup (config : IConfiguration) =
 
     let sourcePreload =
         match fundbSection.GetValue("Preloads") with
-        | null -> emptySourcePreload
+        | null -> emptySourcePreloadFile
         | path -> readSourcePreload path
     let preload = resolvePreload sourcePreload
 
