@@ -302,7 +302,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                             Error = "access_denied",
                             Details = sprintf "Failed to get info for %O: %s" source (printException err)
                         )
-                    do! cacheStore.EventLogger.WriteEvent event
+                    do! cacheStore.WriteEvent event
                     return Error UVEAccessDenied
         }
 
@@ -332,7 +332,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "arguments",
                                 Details = sprintf "Invalid arguments for %O: %s" source msg
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error <| UVEArguments msg
                     | Ok arguments ->
                             let! r = runViewExpr ctx.Connection.Query restricted arguments getResult
@@ -350,7 +350,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                             Error = "access_denied",
                             Details = sprintf "Failed to execute %O: %s" source (printException err)
                         )
-                    do! cacheStore.EventLogger.WriteEvent event
+                    do! cacheStore.WriteEvent event
                     return Error UVEAccessDenied
         }
 
@@ -377,7 +377,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "access_denied",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error EEAccessDenied
         }
 
@@ -422,7 +422,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "execution",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error (EEExecute <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
@@ -438,7 +438,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "access_denied",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error EEAccessDenied
         }
 
@@ -483,7 +483,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "execution",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error (EEExecute <| printException ex)
                     | :? EntityNotFoundException as ex ->
                         logger.LogError(ex, "Not found")
@@ -499,7 +499,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "not_found",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error EENotFound
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
@@ -515,7 +515,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "access_denied",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error EEAccessDenied
         }
 
@@ -556,7 +556,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "execution",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error (EEExecute <| printException ex)
                     | :? EntityNotFoundException as ex ->
                         logger.LogError(ex, "Not found")
@@ -572,7 +572,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "not_found",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error EENotFound
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
@@ -588,7 +588,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "access_denied",
                                 Details = printException ex
                             )
-                        do! cacheStore.EventLogger.WriteEvent event
+                        do! cacheStore.WriteEvent event
                         return Error EEAccessDenied
         }
 

@@ -226,10 +226,14 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
 
         let (_, newMeta) = buildFullLayoutMeta newLayout newLayout
         let newUserMeta = filterUserMeta preload newMeta
-        let! currentMeta2 = buildDatabaseMeta conn.Transaction
-        let currentUserMeta2 = filterUserMeta preload currentMeta2
+        let! currentMeta =
+            if Array.isEmpty systemMigration then
+                Task.result currentMeta
+            else
+                buildDatabaseMeta conn.Transaction
+        let currentUserMeta = filterUserMeta preload currentMeta
 
-        let userMigration = planDatabaseMigration currentUserMeta2 newUserMeta
+        let userMigration = planDatabaseMigration currentUserMeta newUserMeta
         let! _ = migrateDatabase conn.Connection.Query userMigration
 
         // Second migration shouldn't produce any changes.

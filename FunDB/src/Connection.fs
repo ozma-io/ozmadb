@@ -37,22 +37,22 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
         system.ChangeTracker.QueryTrackingBehavior <- QueryTrackingBehavior.NoTracking
         ignore <| system.Database.UseTransaction(transaction)
 
-    interface IDisposable with
-        member this.Dispose () = this.Rollback ()
-
     new (conn : DatabaseConnection) =
         // FIXME: Maybe introduce more granular locking?
         new DatabaseTransaction(conn, IsolationLevel.Serializable)
 
     member this.Rollback () =
-        transaction.Dispose()
-        system.Dispose()
+        transaction.Dispose ()
+        system.Dispose ()
 
     member this.Commit () = task {
         let! _ = system.SaveChangesAsync ()
         do! transaction.CommitAsync ()
-        this.Rollback()
+        this.Rollback ()
     }
+
+    interface IDisposable with
+        member this.Dispose () = this.Rollback ()
 
     member this.System = system
     member this.Transaction = transaction
