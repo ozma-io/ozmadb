@@ -166,7 +166,7 @@ let private compileAssertionCheck (layout : Layout) : LayoutAssertion -> SQL.Sel
         let fromColumn = SQL.VEColumn { table = Some fromRef; name = field.columnName }
         let toColumn = SQL.VEColumn { table = Some toRef; name = sqlFunId }
         let joinExpr = SQL.VEEq (fromColumn, toColumn)
-        let join = SQL.FJoin (SQL.JoinType.Left, SQL.FTable (null, None, fromRef), SQL.FTable (null, None, toRef), joinExpr)
+        let join = SQL.FJoin (SQL.JoinType.Left, SQL.FTable (null, None, fromRef), SQL.FTable (null, Some (SQL.SQLName "__joined"), toRef), joinExpr)
         let subEntityRef = { table = Some toRef; name = sqlFunSubEntity } : SQL.ColumnRef
         let checkExpr = replaceColumnRefs subEntityRef inheritance.checkExpr
         let singleSelect =
