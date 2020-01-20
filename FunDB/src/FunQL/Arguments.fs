@@ -101,6 +101,7 @@ let private typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue)
     | FTEnum vals ->
         match value with
         | FString str when Set.contains str vals -> ()
+        | FNull -> ()
         | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
     // Most casting/typechecking will be done by database or Npgsql
     | _ -> ()
