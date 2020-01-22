@@ -127,6 +127,10 @@ let private castLocalExpr : ValueExpr -> ValueExpr =
         | VECoalesce vals -> VECoalesce (Array.map traverse vals)
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
+        | VEPlus (a, b) -> VEPlus (traverse a, traverse b)
+        | VEMinus (a, b) -> VEMinus (traverse a, traverse b)
+        | VEMultiply (a, b) -> VEMultiply (traverse a, traverse b)
+        | VEDivide (a, b) -> VEDivide (traverse a, traverse b)
         | VEArray vals -> VEArray (Array.map traverse vals)
         | VESubquery query -> raisef SQLMetaException "Invalid subquery in local expression: %O" query
     traverse

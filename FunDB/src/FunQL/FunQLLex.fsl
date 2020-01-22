@@ -61,10 +61,10 @@ and lineCommentFunQL = parse
 
 and tokenizeFunQL = parse
     // Atoms
-    | ['+' '-']? ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parse.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
-    | ['+' '-']? ['0'-'9'] ['0'-'9']*                { Parse.INT (lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
-    | escapedId                                      { Parse.ID (escapedId 0 lexbuf) }
-    | string                                         { Parse.STRING (escapedString 0 lexbuf) }
+    | ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parse.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
+    | ['0'-'9'] ['0'-'9']*                { Parse.INT (lexbuf.Lexeme |> String |> tryIntInvariant |> Option.get) }
+    | escapedId                           { Parse.ID (escapedId 0 lexbuf) }
+    | string                              { Parse.STRING (escapedString 0 lexbuf) }
 
     // Argument IDs
     | "$$" escapedId   { Parse.GLOBAL_ARGUMENT_ID (escapedId 2 lexbuf) }
@@ -94,7 +94,6 @@ and tokenizeFunQL = parse
     | "@"   { Parse.AT }
     | "=>"  { Parse.BOLD_ARROW }
     | "||"  { Parse.CONCAT }
-    | "*"   { Parse.STAR }
     | "~~"  { Parse.LIKE_OP }
     | "!~~" { Parse.NOT_LIKE_OP }
     | "->"  { Parse.ARROW }
@@ -174,5 +173,5 @@ and tokenizeFunQL = parse
     | newline    { newline lexbuf; tokenizeFunQL lexbuf }
 
     // Misc
-    | _   { failwith <| sprintf "Lexical error: %s" (LexBuffer<_>.LexemeString lexbuf) }
+    | _   { failwith "Lexical error" }
     | eof { Parse.EOF }

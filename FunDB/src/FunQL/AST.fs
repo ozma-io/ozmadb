@@ -469,6 +469,10 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
     | FEJsonObject of Map<FunQLName, FieldExpr<'e, 'f>>
     | FEJsonArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEJsonTextArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEPlus of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEMinus of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEMultiply of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEDivide of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEFunc of FunQLName * FieldExpr<'e, 'f>[]
     | FEAggFunc of FunQLName * AggExpr<'e, 'f>
     | FESubquery of SelectExpr<'e, 'f>
@@ -520,6 +524,10 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
             | FEJsonObject obj -> obj |> Map.toSeq |> Seq.map (fun (k, v) -> sprintf "%s: %s" (k.ToFunQLString()) (v.ToFunQLString())) |> String.concat ", " |> sprintf "{%s}"
             | FEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FEPlus (a, b) -> sprintf "(%s) + (%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FEMinus (a, b) -> sprintf "(%s) - (%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FEMultiply (a, b) -> sprintf "(%s) * (%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FEDivide (a, b) -> sprintf "(%s) / (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args |> Seq.map (fun arg -> arg.ToFunQLString()) |> String.concat ", ")
             | FEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args.ToFunQLString())
             | FESubquery q -> sprintf "(%s)" (q.ToFunQLString())
@@ -739,6 +747,10 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
         | FEJsonObject obj -> FEJsonObject (Map.map (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> FEJsonArrow (traverse a, traverse b)
         | FEJsonTextArrow (a, b) -> FEJsonTextArrow (traverse a, traverse b)
+        | FEPlus (a, b) -> FEPlus (traverse a, traverse b)
+        | FEMinus (a, b) -> FEMinus (traverse a, traverse b)
+        | FEMultiply (a, b) -> FEMultiply (traverse a, traverse b)
+        | FEDivide (a, b) -> FEDivide (traverse a, traverse b)
         | FEFunc (name, args) -> FEFunc (name, Array.map traverse args)
         | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse (mapper.aggregate args))
         | FESubquery query -> FESubquery (mapper.query query)
@@ -808,6 +820,10 @@ let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f
         | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTaskSync (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> Task.map2Sync (curry FEJsonArrow) (traverse a) (traverse b)
         | FEJsonTextArrow (a, b) -> Task.map2Sync (curry FEJsonTextArrow) (traverse a) (traverse b)
+        | FEPlus (a, b) -> Task.map2Sync (curry FEPlus) (traverse a) (traverse b)
+        | FEMinus (a, b) -> Task.map2Sync (curry FEMinus) (traverse a) (traverse b)
+        | FEMultiply (a, b) -> Task.map2Sync (curry FEMultiply) (traverse a) (traverse b)
+        | FEDivide (a, b) -> Task.map2Sync (curry FEDivide) (traverse a) (traverse b)
         | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTaskSync traverse args)
         | FEAggFunc (name, args) ->
             task {
@@ -883,6 +899,10 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FEJsonObject obj -> Map.iter (fun name -> traverse) obj
         | FEJsonArrow (a, b) -> traverse a; traverse b
         | FEJsonTextArrow (a, b) -> traverse a; traverse b
+        | FEPlus (a, b) -> traverse a; traverse b
+        | FEMinus (a, b) -> traverse a; traverse b
+        | FEMultiply (a, b) -> traverse a; traverse b
+        | FEDivide (a, b) -> traverse a; traverse b
         | FEFunc (name, args) -> Array.iter traverse args
         | FEAggFunc (name, args) ->
             mapper.aggregate args

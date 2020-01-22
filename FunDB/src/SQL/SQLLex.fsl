@@ -44,8 +44,8 @@ let z = ['Z' 'z']
 
 rule tokenizeSQL = parse
     // Atoms
-    | ['+' '-']? ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parse.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
-    | ['+' '-']? ['0'-'9'] ['0'-'9']* { Parse.INT (lexbuf.Lexeme |> String |> int) }
+    | ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parse.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
+    | ['0'-'9'] ['0'-'9']* { Parse.INT (lexbuf.Lexeme |> String |> int) }
     | "\"" ( [^ '"'] | "\"\"" )* "\"" { Parse.QUOTED_ID (escapedId 0 lexbuf) }
     | e "'" ( [^ '\\' '\''] | "\\" _ )* "'" { Parse.STRING (escapedString 1 lexbuf) }
     | "'" ( [^ '\''] | "''" )* "'" { Parse.STRING (sqlString 0 lexbuf) }
@@ -69,6 +69,10 @@ rule tokenizeSQL = parse
     | "~~"  { Parse.LIKE_OP }
     | "!~~" { Parse.NOT_LIKE_OP }
     | "->"  { Parse.ARROW }
+    | "+"   { Parse.PLUS }
+    | "-"   { Parse.MINUS }
+    | "*"   { Parse.MULTIPLY }
+    | "/"   { Parse.DIVIDE }
 
     // Keywords
     | t r u e         { Parse.BOOL true }
@@ -101,5 +105,5 @@ rule tokenizeSQL = parse
     | newline    { newline lexbuf; tokenizeSQL lexbuf }
 
     // Misc
-    | _    	  { failwith <| sprintf "Parse error: %s" (LexBuffer<_>.LexemeString lexbuf) }
+    | _    	  { failwith "Lexical error" }
     | eof     { Parse.EOF }

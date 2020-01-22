@@ -10,4 +10,8 @@ let parse (tokenstream : LexBuffer<char> -> 'tok) (parser : (LexBuffer<char> -> 
     try
         Ok (parser tokenstream lexbuf)
     with
-    | Failure msg -> Error msg
+    | Failure msg ->
+        if lexbuf.StartPos.Line <> lexbuf.EndPos.Line then
+            Error <| sprintf "Error at position %i.%i-%i.%i: %s" lexbuf.StartPos.Line lexbuf.StartPos.Column lexbuf.EndPos.Line lexbuf.EndPos.Column msg
+        else
+            Error <| sprintf "Error at line %i, position %i-%i, token %s: %s" lexbuf.StartPos.Line lexbuf.StartPos.Column lexbuf.EndPos.Column (LexBuffer<_>.LexemeString lexbuf) msg

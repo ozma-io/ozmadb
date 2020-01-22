@@ -412,6 +412,10 @@ type [<CustomEquality; NoComparison>] ValueExpr =
     | VECoalesce of ValueExpr[]
     | VEJsonArrow of ValueExpr * ValueExpr
     | VEJsonTextArrow of ValueExpr * ValueExpr
+    | VEPlus of ValueExpr * ValueExpr
+    | VEMinus of ValueExpr * ValueExpr
+    | VEMultiply of ValueExpr * ValueExpr
+    | VEDivide of ValueExpr * ValueExpr
     | VEArray of ValueExpr[]
     | VESubquery of SelectExpr
     with
@@ -466,6 +470,10 @@ type [<CustomEquality; NoComparison>] ValueExpr =
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEPlus (a, b) -> sprintf "(%s) + (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEMinus (a, b) -> sprintf "(%s) - (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEMultiply (a, b) -> sprintf "(%s) * (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEDivide (a, b) -> sprintf "(%s) / (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEArray vals -> sprintf "ARRAY[%s]" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VESubquery query -> sprintf "(%s)" (query.ToSQLString())
 
@@ -690,6 +698,10 @@ let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> Val
         | VECoalesce vals -> VECoalesce <| Array.map traverse vals
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
+        | VEPlus (a, b) -> VEPlus (traverse a, traverse b)
+        | VEMinus (a, b) -> VEMinus (traverse a, traverse b)
+        | VEMultiply (a, b) -> VEMultiply (traverse a, traverse b)
+        | VEDivide (a, b) -> VEDivide (traverse a, traverse b)
         | VEArray vals -> VEArray <| Array.map traverse vals
         | VESubquery query -> VESubquery (mapper.query query)
     traverse
@@ -771,6 +783,10 @@ let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
         | VECoalesce vals -> Array.iter traverse vals
         | VEJsonArrow (a, b) -> traverse a; traverse b
         | VEJsonTextArrow (a, b) -> traverse a; traverse b
+        | VEPlus (a, b) -> traverse a; traverse b
+        | VEMinus (a, b) -> traverse a; traverse b
+        | VEMultiply (a, b) -> traverse a; traverse b
+        | VEDivide (a, b) -> traverse a; traverse b
         | VEArray vals -> Array.iter traverse vals
         | VESubquery query -> mapper.query query
     traverse

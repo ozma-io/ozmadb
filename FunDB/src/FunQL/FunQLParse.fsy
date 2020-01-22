@@ -183,7 +183,6 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token GREATER_EQ
 %token BOLD_ARROW
 %token CONCAT
-%token STAR
 %token AT_LEFT_BRACE
 %token LIKE_OP
 %token NOT_LIKE_OP
@@ -538,6 +537,10 @@ FieldExprOp:
     | FieldExprOp ARROW FieldExprOp          { FEJsonArrow ($1, $3) }
     | FieldExprOp DOUBLE_ARROW FieldExprOp   { FEJsonTextArrow ($1, $3) }
     | FieldExprOp DOUBLE_COLON FieldExprType { restrictCast $1 $3; FECast ($1, $3) }
+    | FieldExprOp PLUS FieldExprOp           { FEPlus ($1, $3) }
+    | FieldExprOp MINUS FieldExprOp          { FEMinus ($1, $3) }
+    | FieldExprOp MULTIPLY FieldExprOp       { FEMultiply ($1, $3) }
+    | FieldExprOp DIVIDE FieldExprOp         { FEDivide ($1, $3) }
     | COALESCE ParenedNonEmptyExprList       { FECoalesce $2 }
     | CaseExpr                               { $1 }
     | FieldExprVal                           { $1 }
@@ -556,7 +559,7 @@ FieldExprVal:
 AggFuncArgs:
     | ALL ExprList       { AEAll $2 }
     | DISTINCT FieldExpr { AEDistinct $2 }
-    | STAR               { AEStar }
+    | MULTIPLY           { AEStar }
 
 CaseExpr:
     | CASE CaseWhenList CaseElse END { FECase (List.toArray $2, $3) }
@@ -607,6 +610,10 @@ UserViewRefArrayNonEmpty:
 Value:
     | INT                                    { FInt $1 }
     | DECIMAL                                { FDecimal $1 }
+    | PLUS INT                               { FInt $2 }
+    | PLUS DECIMAL                           { FDecimal $2 }
+    | MINUS INT                              { FInt (-$2) }
+    | MINUS DECIMAL                          { FDecimal (-$2) }
     | STRING                                 { FString $1 }
     | BOOL                                   { FBool $1 }
     | UserViewRef                            { FUserViewRef $1 }
