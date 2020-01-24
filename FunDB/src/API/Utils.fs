@@ -113,8 +113,14 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
 
     let lookupInstance (next : HttpFunc) (ctx : HttpContext) = task {
         let instancesSource = ctx.GetService<IInstancesSource>()
-        match! instancesSource.GetInstance ctx.Request.Host.Host with
-        | None -> return! RequestErrors.notFound (text (sprintf "Instance %s not found" ctx.Request.Host.Host)) next ctx
+        let xInstance = ctx.Request.Headers.["X-Instance"]
+        let instanceName =
+            if xInstance.Count = 0 then
+                ctx.Request.Host.Host
+            else
+                xInstance.[0]
+        match! instancesSource.GetInstance instanceName with
+        | None -> return! RequestErrors.notFound (text (sprintf "Instance %s not found" instanceName)) next ctx
         | Some instance ->
             if instance.DisableSecurity then
                 return! unprotectedApi instance next ctx
