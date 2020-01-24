@@ -56,7 +56,7 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
                         .UseLoggerFactory(loggerFactory)
                         .UseNpgsql(connectionString)
                 new InstancesContext(systemOptions.Options)
-            match! instances.Instances.FirstOrDefaultAsync(fun x -> x.Name = host) with
+            match! instances.Instances.FirstOrDefaultAsync(fun x -> x.Name = host && x.Enabled) with
             | null -> return None
             | instance -> return Some instance
         }

@@ -38,6 +38,7 @@ namespace FunWithFlags.FunDBSchema.Instances
         public int Id { get; set; }
         [Required]
         public string Name { get; set; }
+        public bool Enabled { get; set; }
         [Required]
         public string Host { get; set; }
         public int Port { get; set; }
