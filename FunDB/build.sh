@@ -5,4 +5,4 @@ set -x
 
 rm -rf bin publish
 dotnet publish -c Release
-cp -r bin/*/*/publish publish
+ln -s bin/*/*/publish publish
