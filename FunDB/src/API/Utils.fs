@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.API.Utils
 
 open System.Collections.Generic
+open System.Threading.Tasks
 open Microsoft.Extensions.Primitives
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
@@ -8,10 +9,11 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open Newtonsoft.Json
 open Giraffe
 
+open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Operations.Context
-open FunWithFlags.FunDB.Operations.ContextCache
+open FunWithFlags.FunDB.Operations.InstancesCache
 
 let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
     let getArg (KeyValue(name : string, par)) =
@@ -55,17 +57,17 @@ type RealmAccess =
     { roles : string[]
     }
 
-[<NoEquality; NoComparison>]
-type APISettings =
-    { cacheStore : ContextCacheStore
-      disableSecurity : bool
-      disableACL : bool
-    }
+type IInstancesSource =
+    abstract member GetInstance : string -> Task<Instance option>
 
 let anonymousUsername = "anonymous@example.com"
 
-let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : HttpHandler =
-    let makeContext (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
+let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
+    let makeContext (instance : Instance) (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
+        let connectionString = sprintf "Host=%s; Port=%i; Database=%s; Username=%s; Password=%s" instance.Host instance.Port instance.Database instance.Username instance.Password
+        let contextCache = ctx.GetService<InstancesCacheStore>()
+        let! cacheStore = contextCache.GetContextCache(connectionString)
+
         let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
         let specifiedLang =
             if isNull acceptLanguage then
@@ -78,14 +80,14 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
             match specifiedLang with
             | Some l -> l.Value.Value
             | None -> "en-US"
+
         try
             use! rctx =
                 RequestContext.Create
-                    { cacheStore = settings.cacheStore
+                    { cacheStore = cacheStore
                       userName = userName
                       isRoot = isRoot
                       language = lang
-                      disableACL = settings.disableACL
                     }
             return! f rctx next ctx
         with
@@ -95,7 +97,7 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
             | RENoRole -> return! RequestErrors.forbidden (text "") next ctx
     }
 
-    let protectedApi (next : HttpFunc) (ctx : HttpContext) =
+    let protectedApi (instance : Instance) (next : HttpFunc) (ctx : HttpContext) =
         let userClaim = ctx.User.FindFirst "preferred_username"
         let userName = userClaim.Value
         let userRoles = ctx.User.FindFirst "realm_access"
@@ -105,11 +107,19 @@ let withContext (settings : APISettings) (f : RequestContext -> HttpHandler) : H
                 roles.roles |> Seq.contains "fundb_admin"
             else
                 false
-        makeContext userName isRoot next ctx
+        makeContext instance userName isRoot next ctx
 
-    let unprotectedApi = makeContext anonymousUsername true
+    let unprotectedApi instance = makeContext instance anonymousUsername true
 
-    if settings.disableSecurity then
-        unprotectedApi
-    else
-        authorize >=> protectedApi
+    let lookupInstance (next : HttpFunc) (ctx : HttpContext) = task {
+        let instancesSource = ctx.GetService<IInstancesSource>()
+        match! instancesSource.GetInstance ctx.Request.Host.Host with
+        | None -> return! RequestErrors.notFound (text (sprintf "Instance %s not found" ctx.Request.Host.Host)) next ctx
+        | Some instance ->
+            if instance.DisableSecurity then
+                return! unprotectedApi instance next ctx
+            else
+                return! (authorize >=> protectedApi instance) next ctx
+    }
+
+    lookupInstance

@@ -46,8 +46,14 @@ type SourcePreload =
       schemas : Map<SchemaName, SourcePreloadedSchema>
     }
 
-let emptySourcePreload : SourcePreload =
-    { schemas = Map.empty
+type SourcePreloadFile =
+    { preload : SourcePreload
+      dirname : string
+    }
+
+let emptySourcePreloadFile : SourcePreloadFile =
+    { preload = { schemas = Map.empty }
+      dirname = ""
     }
 
 [<NoEquality; NoComparison>]
@@ -63,11 +69,14 @@ type Preload =
     { schemas : Map<SchemaName, PreloadedSchema>
     }
 
-let readSourcePreload (path : string) : SourcePreload =
+let readSourcePreload (path : string) : SourcePreloadFile =
     use stream = File.OpenText path
     use jsonStream = new JsonTextReader(stream)
     let serializer = JsonSerializer.CreateDefault()
-    serializer.Deserialize<SourcePreload>(jsonStream)
+    let preload = serializer.Deserialize<SourcePreload>(jsonStream)
+    { preload = preload
+      dirname = Path.GetDirectoryName path
+    }
 
 // Empty schemas in Roles aren't reflected in the database so we need to remove them -- otherwise a "change" will always be detected.
 let private normalizeRole (role : SourceRole) =
@@ -78,15 +87,20 @@ let private normalizeRole (role : SourceRole) =
               }
     }
 
-let private resolvePreloadedSchema (preload : SourcePreloadedSchema) : PreloadedSchema =
+let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloadedSchema) : PreloadedSchema =
     let schema =
         { entities = preload.entities
         } : SourceSchema
     let permissions = { roles = Map.map (fun name -> normalizeRole) preload.roles }
     let defaultAttributes = { schemas = preload.defaultAttributes } : SourceAttributesDatabase
 
-    let readUserViewGenerator path =
-        let program = File.ReadAllText path
+    let readUserViewGenerator (path : string) =
+        let realPath =
+            if Path.IsPathRooted(path) then
+                path
+            else
+                Path.Join(dirname, path)
+        let program = File.ReadAllText realPath
         UserViewGenerator program
     let userViewGen = Option.map readUserViewGenerator preload.userViewGenerator
 
@@ -113,8 +127,8 @@ let preloadUserViews (fullLayout : Layout) (preload : Preload) : SourceUserViews
     { schemas = preload.schemas |> Map.map (fun name schema -> generateUvs schema.userViewGenerator)
     }
 
-let resolvePreload (source : SourcePreload) : Preload =
-    let preloadedSchemas = source.schemas |> Map.map (fun name -> resolvePreloadedSchema)
+let resolvePreload (source : SourcePreloadFile) : Preload =
+    let preloadedSchemas = source.preload.schemas |> Map.map (fun name -> resolvePreloadedSchema source.dirname)
     if Map.containsKey funSchema preloadedSchemas then
         failwith "Preload cannot contain public schema"
     let systemPreload =
@@ -226,10 +240,14 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
 
         let (_, newMeta) = buildFullLayoutMeta newLayout newLayout
         let newUserMeta = filterUserMeta preload newMeta
-        let! currentMeta2 = buildDatabaseMeta conn.Transaction
-        let currentUserMeta2 = filterUserMeta preload currentMeta2
+        let! currentMeta =
+            if Array.isEmpty systemMigration then
+                Task.result currentMeta
+            else
+                buildDatabaseMeta conn.Transaction
+        let currentUserMeta = filterUserMeta preload currentMeta
 
-        let userMigration = planDatabaseMigration currentUserMeta2 newUserMeta
+        let userMigration = planDatabaseMigration currentUserMeta newUserMeta
         let! _ = migrateDatabase conn.Connection.Query userMigration
 
         // Second migration shouldn't produce any changes.

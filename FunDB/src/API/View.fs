@@ -6,7 +6,6 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Query
-open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.API.Utils
@@ -24,9 +23,7 @@ type ViewInfoGetResponse =
       pureColumnAttributes : ExecutedAttributeMap array
     }
 
-let viewsApi (settings : APISettings) : HttpHandler =
-    let guarded = withContext settings
-
+let viewsApi : HttpHandler =
     let returnError = function
         | UVEArguments msg -> sprintf "Invalid arguments: %s" msg |> text |> RequestErrors.badRequest
         | UVEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
@@ -60,8 +57,8 @@ let viewsApi (settings : APISettings) : HttpHandler =
 
     let viewApi (viewRef : UserViewSource) =
         choose
-            [ route "/entries" >=> GET >=> guarded (selectFromView viewRef)
-              route "/info" >=> GET >=> guarded (infoView viewRef)
+            [ route "/entries" >=> GET >=> withContext (selectFromView viewRef)
+              route "/info" >=> GET >=> withContext (infoView viewRef)
             ]
 
     let anonymousView (next : HttpFunc) (ctx : HttpContext) =
