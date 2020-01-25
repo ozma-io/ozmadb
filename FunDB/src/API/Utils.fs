@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.API.Utils
 open System.Collections.Generic
 open System.Threading.Tasks
 open Microsoft.Extensions.Primitives
+open Microsoft.Extensions.Logging
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -64,6 +65,8 @@ let anonymousUsername = "anonymous@example.com"
 
 let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
     let makeContext (instance : Instance) (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
+        let logger = ctx.GetLogger("withContext")
+        logger.LogInformation("Creating context for instance {}, user {} (is_root: {})", instance.Name, userName, isRoot)
         let connectionString = sprintf "Host=%s; Port=%i; Database=%s; Username=%s; Password=%s" instance.Host instance.Port instance.Database instance.Username instance.Password
         let contextCache = ctx.GetService<InstancesCacheStore>()
         let! cacheStore = contextCache.GetContextCache(connectionString)
