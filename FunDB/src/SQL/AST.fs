@@ -284,7 +284,7 @@ type ValueTypePrettyConverter () =
     inherit JsonConverter ()
 
     override this.CanConvert (objectType : Type) =
-        objectType.IsGenericType && objectType.GetGenericTypeDefinition() = typedefof<ValueType<_>>
+        isUnionCase<ValueType<_>> objectType
 
     override this.CanRead = false
 

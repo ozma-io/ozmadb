@@ -36,6 +36,7 @@ let httpJsonSettings =
     let converters : JsonConverter[] = [|
         FunQL.FieldValuePrettyConverter ()
         FunQL.ScalarFieldTypePrettyConverter ()
+        FunQL.FieldTypePrettyConverter ()
         FunQL.FieldExprTypePrettyConverter ()
         SQL.ValuePrettyConverter ()
         SQL.SimpleTypePrettyConverter ()
@@ -43,7 +44,7 @@ let httpJsonSettings =
         ExecutedValuePrettyConverter ()
         ExecutedRowPrettyConverter ()
     |]
-    let constructors = Array.map (fun conv -> fun _ -> Some <| conv) converters
+    let constructors = Array.map (fun conv -> fun _ -> Some conv) converters
     let jsonSettings = makeDefaultJsonSerializerSettings constructors
     jsonSettings
 

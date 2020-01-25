@@ -211,19 +211,6 @@ type UnionConverter (objectType : Type) =
     override this.ConvertFrom (context : ITypeDescriptorContext, culture : CultureInfo, value : obj) : obj =
         FSharpValue.MakeUnion(case, [|value|])
 
- (*type NewtypeJsonConverter<'nt> () =
-    inherit JsonConverter<'nt> ()
-
-    let (case, argType) = unionCases typeof<'nt> |> isNewtype |> Option.get
-
-    override this.ReadJson (reader : JsonReader, someType : Type, existingValue, serializer : JsonSerializer) : obj =
-        let method = readJsonMethod.MakeGenericMethod(someType.GetGenericArguments())
-        method.Invoke(null, [| reader; serializer |])
-
-    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
-        let method = writeJsonMethod.MakeGenericMethod(value.GetType().GetGenericArguments())
-        ignore <| method.Invoke(null, [| writer; value; serializer |])*)
-
 // Default converters for several types
 type ConverterContractResolver (converterConstructors : (Type -> JsonConverter option) array) =
     inherit DefaultContractResolver ()

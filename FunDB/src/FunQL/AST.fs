@@ -674,11 +674,11 @@ and [<NoEquality; NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type FieldTypeConverter () =
+type FieldTypePrettyConverter () =
     inherit JsonConverter ()
 
     override this.CanConvert (objectType : Type) =
-        objectType.IsGenericType && objectType.GetGenericTypeDefinition() = typedefof<FieldType<_, _>>
+        isUnionCase<FieldType<_, _>> objectType
 
     override this.CanRead = false
 
