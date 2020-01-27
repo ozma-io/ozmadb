@@ -89,7 +89,7 @@ type ExecutedRowPrettyConverter () =
         | None -> ()
         | Some mainSubEntity ->
             writer.WritePropertyName("mainSubEntity")
-            writer.WriteValue(mainSubEntity)
+            serializer.Serialize(writer, mainSubEntity)
         writer.WriteEndObject()
 
 [<NoEquality; NoComparison>]
