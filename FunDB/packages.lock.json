@@ -162,8 +162,8 @@
       "Npgsql": {
         "type": "Direct",
         "requested": "[4.1.*, )",
-        "resolved": "4.1.2",
-        "contentHash": "41Nht/GnC/cRCA/2T9vq5NAv8m24RDp3paRhJCMc8ipOURH6zDZAQFe8mcLq1hAgMkK1Wy8VoRYL/8Op+L6OCg==",
+        "resolved": "4.1.3",
+        "contentHash": "sWTXCb6WPPO7WEw4+1XoRqE49EdWmuyMA15LVbzV6jZgRxYWK8TbdniWMjguzmAgOZVYTmrCf+jsqPYoSqACvA==",
         "dependencies": {
           "System.Runtime.CompilerServices.Unsafe": "4.6.0"
         }
@@ -183,11 +183,11 @@
       "Npgsql.Json.NET": {
         "type": "Direct",
         "requested": "[4.1.*, )",
-        "resolved": "4.1.2",
-        "contentHash": "hs0fwCKk6dTX2Ey+B0cuQJfWDY0PzbNzM8ktji9aaeA+tyI+xmWdsC8GLSSl59TLlYLNTcEZara4mFFuFMAhOw==",
+        "resolved": "4.1.3",
+        "contentHash": "0zKfxkgaDtDAlQYdVLG38SWS1pNdN26UHc5uE7nCivaDiEq58oLpmL6hhSvVFdic/oW2qgq3G3dQYuFmWOcLqg==",
         "dependencies": {
           "Newtonsoft.Json": "11.0.2",
-          "Npgsql": "4.1.2"
+          "Npgsql": "4.1.3"
         }
       },
       "Esprima": {

@@ -122,20 +122,22 @@ type Startup (config : IConfiguration) =
                     .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
 
         ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer httpJsonSettings)
+        let getEventLogger (sp : IServiceProvider) =
+            let logFactory = sp.GetRequiredService<ILoggerFactory>()
+            new EventLogger(logFactory)
+        // https://stackoverflow.com/a/59089881
+        ignore <| services.AddSingleton<EventLogger>(getEventLogger)
+        ignore <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
         let makeInstancesStore (sp : IServiceProvider) =
-            let eventLogger = sp.GetService<EventLogger>()
-            let logFactory = sp.GetService<ILoggerFactory>()
+            let eventLogger = sp.GetRequiredService<EventLogger>()
+            let logFactory = sp.GetRequiredService<ILoggerFactory>()
             InstancesCacheStore(logFactory, preload, eventLogger)
         ignore <| services.AddSingleton<InstancesCacheStore>(makeInstancesStore)
-        let getEventLogger (sp : IServiceProvider) =
-            let logFactory = sp.GetService<ILoggerFactory>()
-            new EventLogger(logFactory)
-        ignore <| services.AddHostedService(Func<IServiceProvider, EventLogger> getEventLogger)
         let getInstancesSource (sp : IServiceProvider) : IInstancesSource =
             match fundbSection.["InstancesSource"] with
             | "database" ->
                 let instancesConnectionString = config.GetConnectionString("Instances")
-                let logFactory = sp.GetService<ILoggerFactory>()
+                let logFactory = sp.GetRequiredService<ILoggerFactory>()
                 DatabaseInstances(logFactory, instancesConnectionString) :> IInstancesSource
             | "static" ->
                 let instanceSection = config.GetSection("Instance")
