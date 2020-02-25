@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.API.Utils
 
 open System.Collections.Generic
 open System.Threading.Tasks
+open System.Security.Claims
 open Microsoft.Extensions.Primitives
 open Microsoft.Extensions.Logging
 open Microsoft.AspNetCore.Http
@@ -101,16 +102,18 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
     }
 
     let protectedApi (instance : Instance) (next : HttpFunc) (ctx : HttpContext) =
-        let userClaim = ctx.User.FindFirst "preferred_username"
-        let userName = userClaim.Value
-        let userRoles = ctx.User.FindFirst "realm_access"
-        let isRoot =
-            if not <| isNull userRoles then
-                let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
-                roles.roles |> Seq.contains "fundb_admin"
-            else
-                false
-        makeContext instance userName isRoot next ctx
+        let userClaim = ctx.User.FindFirst ClaimTypes.Email
+        if isNull userClaim then
+            RequestErrors.badRequest (text "No email claim in security token") next ctx
+        else
+            let userRoles = ctx.User.FindFirst "realm_access"
+            let isRoot =
+                if not <| isNull userRoles then
+                    let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
+                    roles.roles |> Seq.contains "fundb_admin"
+                else
+                    false
+            makeContext instance userClaim.Value isRoot next ctx
 
     let unprotectedApi instance = makeContext instance anonymousUsername true
 
