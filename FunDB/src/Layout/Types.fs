@@ -62,6 +62,12 @@ type ResolvedColumnField =
     }
 
 [<NoEquality; NoComparison>]
+type VirtualFieldCase =
+    { check : SQL.ValueExpr
+      expression : ResolvedFieldExpr
+    }
+
+[<NoEquality; NoComparison>]
 type ResolvedComputedField =
     { expression : ResolvedFieldExpr
       // Set when there's no dereferences in the expression
@@ -72,6 +78,7 @@ type ResolvedComputedField =
       inheritedFrom : ResolvedEntityRef option
       allowBroken : bool
       hashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
+      virtualCases : (VirtualFieldCase array) option
     }
 
 [<NoEquality; NoComparison>]
@@ -139,7 +146,7 @@ type ResolvedEntity =
       checkConstraints : Map<ConstraintName, ResolvedCheckConstraint>
       mainField : FieldName
       forbidExternalReferences : bool
-      hidden : bool
+      isHidden : bool
       inheritance : EntityInheritance option
       subEntityParseExpr : SQL.ValueExpr // Parses SubEntity field into JSON
       children : Map<ResolvedEntityRef, ChildEntity>
@@ -197,7 +204,7 @@ type Layout =
             | None -> None
             | Some schema ->
                 match Map.tryFind ref.name schema.entities with
-                | Some entity when not entity.hidden -> Some entity
+                | Some entity when not entity.isHidden -> Some entity
                 | _ -> None
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =

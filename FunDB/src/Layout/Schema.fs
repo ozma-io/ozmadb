@@ -20,13 +20,14 @@ let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
           if field.Default = null
           then None
           else Some field.Default
-      isNullable = field.Nullable
-      isImmutable = field.Immutable
+      isNullable = field.IsNullable
+      isImmutable = field.IsImmutable
     }
 
 let private makeSourceComputedField (field : ComputedField) : SourceComputedField =
     { expression = field.Expression
       allowBroken = field.AllowBroken
+      isVirtual = field.IsVirtual
     }
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraint) : SourceUniqueConstraint =
@@ -47,7 +48,7 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         then funId
         else FunQLName entity.MainField
       forbidExternalReferences = entity.ForbidExternalReferences
-      hidden = entity.Hidden
+      isHidden = entity.IsHidden
       parent =
         if entity.Parent = null
         then None

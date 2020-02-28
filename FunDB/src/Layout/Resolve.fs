@@ -131,6 +131,8 @@ type private HalfResolvedEntity =
 
 type private HalfResolvedEntities = Map<ResolvedEntityRef, HalfResolvedEntity>
 
+let private subEntityColumn = SQL.VEColumn { table = None; name = sqlFunSubEntity }
+
 let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : 'a -> bool) (getChildren : 'a -> Map<ResolvedEntityRef, ChildEntity>) (getEntity : ResolvedEntityRef -> 'a) (entity : 'a) =
     let getName entity =
         let isAbstract = getIsAbstract entity
@@ -139,7 +141,6 @@ let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : '
         else
             entity |> getTypeName |> SQL.VString |> SQL.VEValue |> Some
 
-    let column = SQL.VEColumn { table = None; name = sqlFunSubEntity }
     let childrenEntities = getChildren entity |> Map.keys |> Seq.map getEntity
     let allEntities = Seq.append (Seq.singleton entity) childrenEntities
     let options = allEntities |> Seq.mapMaybe getName |> Seq.toArray
@@ -147,16 +148,37 @@ let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : '
     if Array.isEmpty options then
         SQL.VEValue (SQL.VBool false)
     else if Array.length options = 1 then
-        SQL.VEEq (column, options.[0])
+        SQL.VEEq (subEntityColumn, options.[0])
     else
-        SQL.VEIn (column, options)
+        SQL.VEIn (subEntityColumn, options)
 
 let private makeCheckHalfExpr = makeCheckExprGeneric (fun (x : HalfResolvedEntity) -> x.typeName) (fun x -> x.source.isAbstract) (fun x -> x.children)
 
 let makeCheckExpr = makeCheckExprGeneric (fun (x : ResolvedEntity) -> x.typeName) (fun x -> x.isAbstract) (fun x -> x.children)
 
+//
+// PHASE 1: Building column fields.
+//
+
 type private Phase1Resolver (layout : SourceLayout) =
     let mutable cachedEntities : HalfResolvedEntities = Map.empty
+
+    let unionComputedField (name : FieldName) (parent : HalfResolvedComputedField) (child : HalfResolvedComputedField) =
+        let (nameHash, childSource) =
+            match child with
+            | HRInherited _ -> failwith "Impossible"
+            | HRSource (nameHash, childSource) -> (nameHash, childSource)
+        let parentRef =
+            match parent with
+            | HRSource _ -> failwith "Impossible"
+            | HRInherited parentRef -> parentRef
+        let parentEntity = layout.FindEntity parentRef |> Option.get
+        let parentSource = Map.find name parentEntity.computedFields
+                
+        if parentSource.isVirtual && childSource.isVirtual then
+            child
+        else
+            raisef ResolveLayoutException "Computed field names clash: %O" name
 
     let resolveFieldType (ref : ResolvedEntityRef) (entity : SourceEntity) : ParsedFieldType -> ResolvedFieldType = function
         | FTType ft -> FTType ft
@@ -254,6 +276,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                     Map.unionUnique inheritedFields selfColumnFields
                 with
                 | Failure msg -> raisef ResolveLayoutException "Column field names clash: %s" msg
+            
         let selfComputedFields = Map.map mapComputedField entity.computedFields
         let computedFields =
             match parent with
@@ -265,10 +288,7 @@ type private Phase1Resolver (layout : SourceLayout) =
 
                     | HRInherited pref -> HRInherited pref
                 let inheritedFields = Map.map (fun name field -> addParent field) p.computedFields
-                try
-                    Map.unionUnique inheritedFields selfComputedFields
-                with
-                | Failure msg -> raisef ResolveLayoutException "Computed field names clash: %s" msg
+                Map.unionWith unionComputedField inheritedFields selfComputedFields
 
         try
             let columnNames = selfColumnFields |> Map.values |> Seq.map (fun field -> field.hashName)
@@ -377,6 +397,10 @@ type private ComputedFieldProperties =
       usedSchemas : UsedSchemas
     }
 
+//
+// PHASE 2: Building computed fields, sub entity parse expressions and other stuff.
+//
+
 type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntities, forceAllowBroken : bool) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, Result<ResolvedComputedField, ComputedFieldError>> = Map.empty
 
@@ -410,7 +434,12 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 { ret with isLocal = false }
             | _ -> raisef ResolveLayoutException "Invalid dereference in path: %O" ref
 
-    and resolveComputedExpr (stack : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) (allowBroken : bool) (hashName : HashName) (expr : ParsedFieldExpr) : ResolvedComputedField =
+    and resolveOneComputedExpr (stack : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) (hashName : HashName) (comp : SourceComputedField) : ResolvedComputedField =
+        let expr =
+            match parse tokenizeFunQL fieldExpr comp.expression with
+            | Ok r -> r
+            | Error msg -> raisef ResolveLayoutException "Error parsing computed field expression: %s" msg        
+        
         let mutable isLocal = true
         let mutable hasId = false
         let mutable usedSchemas = Map.empty
@@ -452,8 +481,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           hasId = hasId
           usedSchemas = usedSchemas
           inheritedFrom = None
-          allowBroken = allowBroken
+          allowBroken = comp.allowBroken
           hashName = hashName
+          // Place random stuff there for now, we calculate virtual cases in a later phase.
+          virtualCases = if comp.isVirtual then Some [||] else None
         }
 
     and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) : HalfResolvedComputedField -> Result<ResolvedComputedField, ComputedFieldError> = function
@@ -473,13 +504,9 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | None ->
                 if Set.contains fieldRef stack then
                     raisef ResolveLayoutException "Cycle detected in computed fields: %O" stack
-                let computedExpr =
-                    match parse tokenizeFunQL fieldExpr comp.expression with
-                    | Ok r -> r
-                    | Error msg -> raisef ResolveLayoutException "Error parsing computed field expression: %s" msg
                 let newStack = Set.add fieldRef stack
                 try
-                    let field = Ok <| resolveComputedExpr newStack fieldRef.entity entity comp.allowBroken hashName computedExpr
+                    let field = Ok <| resolveOneComputedExpr newStack fieldRef.entity entity hashName comp
                     cachedComputedFields <- Map.add fieldRef field cachedComputedFields
                     field
                 with
@@ -558,23 +585,16 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     None
                 else
                     let json = JToken.FromObject ref |> SQL.VJson |> SQL.VEValue
-                    Some (entity.typeName, json)
+                    Some (entity, json)
 
             let column = SQL.VEColumn { table = None; name = sqlFunSubEntity }
             let childrenEntities = entity.children |> Map.keys |> Seq.map (fun ref -> (ref, Map.tryFind ref entities |> Option.get))
             let allEntities = Seq.append (Seq.singleton (entityRef, entity)) childrenEntities
             let options = allEntities |> Seq.mapMaybe getName |> Seq.toArray
 
-            if Array.isEmpty options then
-                SQL.VEValue SQL.VNull
-            else if Array.length options = 1 then
-                let (name, json) = options.[0]
-                json
-            else
-                let makeCase (name, json) =
-                    let check = SQL.VEEq (column, SQL.VEValue (SQL.VString name))
-                    (check, json)
-                SQL.VECase (Array.map makeCase options, None)
+            let compileTag (entity : HalfResolvedEntity) =
+                SQL.VEEq (column, SQL.VEValue (SQL.VString entity.typeName))
+            composeExhaustingIf compileTag options
 
         let tempEntity =
             { columnFields = entity.columnFields
@@ -583,7 +603,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               checkConstraints = Map.empty
               mainField = entity.source.mainField
               forbidExternalReferences = entity.source.forbidExternalReferences
-              hidden = entity.source.hidden
+              isHidden = entity.source.isHidden
               inheritance = Option.map makeInheritance entity.source.parent
               subEntityParseExpr = subEntityParseExpr
               children = entity.children
@@ -663,9 +683,126 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
     member this.ResolveLayout () = resolveLayout ()
 
+//
+// PHASE 3: Building cases for virtual computed fields.
+//
+
+type private HalfVirtualFieldCase =
+    { case : VirtualFieldCase
+      entities : Set<ResolvedEntityRef> // includes all children for a given case
+    }
+
+type private Phase3Resolver (layout : Layout) =
+    let mutable cachedComputedFields : Map<ResolvedFieldRef, ResolvedComputedField> = Map.empty
+    let mutable cachedCaseExpressions : Map<ResolvedFieldRef, HalfVirtualFieldCase array> = Map.empty
+
+    let rec resolveMyVirtualCases (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : HalfVirtualFieldCase array =
+        let childVirtualCases = findVirtualChildren entity fieldRef.name |> Seq.toArray
+        let handledChildren = childVirtualCases |> Seq.map (fun c -> c.entities) |> Set.unionMany
+
+        let getName (ref, entity : ResolvedEntity) =
+            if entity.isAbstract || Set.contains ref handledChildren then
+                None
+            else
+                Some (ref, entity.typeName |> SQL.VString |> SQL.VEValue)
+
+        let childrenEntities = entity.children |> Map.keys |> Seq.map (fun ref -> (ref, layout.FindEntity ref |> Option.get))
+        let allEntities = Seq.append (Seq.singleton (fieldRef.entity, entity)) childrenEntities
+        let options = allEntities |> Seq.mapMaybe getName |> Seq.toArray
+
+        if Array.isEmpty options then
+            childVirtualCases
+        else
+            let checkExpr =
+                if Array.length options = 1 then
+                    let (_, entityValue) = options.[0]
+                    SQL.VEEq (subEntityColumn, entityValue)
+                else
+                    SQL.VEIn (subEntityColumn, Array.map snd options)
+            let myCase =
+                { check = checkExpr
+                  expression = comp.expression
+                }
+            let myHalf =
+                { case = myCase
+                  entities = options |> Seq.map fst |> Set.ofSeq
+                }
+            Array.append childVirtualCases [|myHalf|]
+
+    and resolveVirtualCases (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : HalfVirtualFieldCase array =
+        match Map.tryFind fieldRef cachedCaseExpressions with
+        | Some cached -> cached
+        | None ->
+            let cases = resolveMyVirtualCases entity fieldRef comp
+            cachedCaseExpressions <- Map.add fieldRef cases cachedCaseExpressions
+            cases
+
+    and findVirtualChildren (entity : ResolvedEntity) (fieldName : FieldName) : HalfVirtualFieldCase seq =
+        entity.children |> Map.toSeq |> Seq.collect (fun (ref, child) -> findVirtualChild fieldName ref child)
+
+    and findVirtualChild (fieldName : FieldName) (entityRef : ResolvedEntityRef) (child : ChildEntity) : HalfVirtualFieldCase seq =
+        if not child.direct then
+            Seq.empty
+        else
+            let childEntity = layout.FindEntity entityRef |> Option.get
+            let childField = Map.find fieldName childEntity.computedFields
+            match childField with
+            | Ok f when Option.isNone f.inheritedFrom ->
+                resolveVirtualCases childEntity { entity = entityRef; name = fieldName } f |> Array.toSeq
+            | _ -> findVirtualChildren childEntity fieldName
+
+    let resolveOneComputedField (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedComputedField =
+        match comp.virtualCases with
+        | None -> comp
+        | Some _ ->
+            let cases = resolveVirtualCases entity fieldRef comp |> Array.map (fun c -> c.case)
+            { comp with virtualCases = Some cases }
+
+    let resolveComputedField (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedComputedField =
+        match Map.tryFind fieldRef cachedComputedFields with
+        | Some f -> f
+        | None ->
+            let newField =
+                match comp.inheritedFrom with
+                | None -> resolveOneComputedField entity fieldRef comp
+                | Some parentRef ->
+                    let parentFieldRef = { fieldRef with entity = parentRef }
+                    let parentField =
+                        match Map.tryFind parentFieldRef cachedComputedFields with
+                        | Some f -> f
+                        | None ->
+                            let parentEntity = layout.FindEntity parentRef |> Option.get
+                            let parentField = Map.find parentFieldRef.name parentEntity.computedFields |> Result.get
+                            let field = resolveOneComputedField parentEntity parentFieldRef parentField
+                            cachedComputedFields <- Map.add fieldRef field cachedComputedFields
+                            field
+                    { parentField with inheritedFrom = comp.inheritedFrom }
+            cachedComputedFields <- Map.add fieldRef newField cachedComputedFields
+            newField
+
+    let resolveEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : ResolvedEntity =
+        let mapComputedField name = function
+            | Ok comp -> Ok <| resolveComputedField entity { entity = entityRef; name = name } comp
+            | Error err -> Error err
+        { entity with computedFields = Map.map mapComputedField entity.computedFields }
+
+    let resolveSchema (schemaName : SchemaName) (schema : ResolvedSchema) : ResolvedSchema =
+        let mapEntity name entity = resolveEntity { schema = schemaName; name = name } entity
+        { entities = Map.map mapEntity schema.entities
+          roots = schema.roots
+        }
+
+    let resolveLayout () : Layout =
+        { schemas = Map.map resolveSchema layout.schemas
+        } : Layout
+
+    member this.ResolveLayout () = resolveLayout ()
+
 let resolveLayout (layout : SourceLayout) (forceAllowBroken : bool) : ErroredLayout * Layout =
     let phase1 = Phase1Resolver layout
     let entities = phase1.ResolveLayout ()
     let phase2 = Phase2Resolver (layout, entities, forceAllowBroken)
     let (errors, layout2) = phase2.ResolveLayout ()
-    (errors, layout2)
+    let phase3 = Phase3Resolver layout2
+    let layout3 = phase3.ResolveLayout ()
+    (errors, layout3)

@@ -60,7 +60,7 @@ let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
     | FTType t -> FTType t
 
 let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
-    if entity.hidden then
+    if entity.isHidden then
         raisef EntityExecutionException "Entity %O is hidden" entityRef
 
     match role with
@@ -122,7 +122,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
         if entity.isAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
-        if entity.hidden then
+        if entity.isHidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
         let (subEntityValue, rawArgs) =
             if hasSubType entity then
@@ -186,7 +186,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
-        if entity.hidden then
+        if entity.isHidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
 
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
@@ -231,7 +231,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
     task {
         let entity = layout.FindEntity entityRef |> Option.get
 
-        if entity.hidden then
+        if entity.isHidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
         if entity.isAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef

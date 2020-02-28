@@ -21,8 +21,9 @@ type SerializedColumnField =
 type SerializedComputedField =
     { expression : string
       allowBroken : bool
-      broken : bool
+      isBroken : bool
       inheritedFrom : ResolvedEntityRef option
+      isVirtual : bool
     }
 
 [<NoEquality; NoComparison>]
@@ -39,7 +40,7 @@ type SerializedEntity =
       checkConstraints : Map<ConstraintName, SourceCheckConstraint>
       mainField : FieldName
       forbidExternalReferences : bool
-      hidden : bool
+      isHidden : bool
       parent : ResolvedEntityRef option
       children : SerializedChildEntity seq
       isAbstract : bool
@@ -61,14 +62,16 @@ let serializeComputedField (comp : ResolvedComputedField) : SerializedComputedFi
     { expression = comp.expression.ToFunQLString()
       inheritedFrom = comp.inheritedFrom
       allowBroken = comp.allowBroken
-      broken = false
+      isBroken = false
+      isVirtual = Option.isSome comp.virtualCases
     }
 
 let serializeComputedFieldError (comp : ComputedFieldError) : SerializedComputedField =
     { expression = comp.source.expression
       inheritedFrom = comp.inheritedFrom
       allowBroken = comp.source.allowBroken
-      broken = true
+      isBroken = true
+      isVirtual = comp.source.isVirtual
     }
 
 let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField =
@@ -90,7 +93,7 @@ let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
       checkConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
       mainField = entity.mainField
       forbidExternalReferences = entity.forbidExternalReferences
-      hidden = entity.hidden
+      isHidden = entity.isHidden
       parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
       isAbstract = entity.isAbstract
       children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { ref = ref; direct = info.direct })

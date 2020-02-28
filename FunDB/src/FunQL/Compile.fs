@@ -218,6 +218,19 @@ let inline sqlJsonArray< ^a, ^b when ^b :> JToken and ^b : (static member op_Imp
         vals |> Seq.map traverseOne |> jsonArray :> JToken
     traverse initialVals
 
+let composeExhaustingIf (compileTag : 'tag -> SQL.ValueExpr) (options : ('tag * SQL.ValueExpr) array) : SQL.ValueExpr =
+    if Array.isEmpty options then
+        SQL.VEValue SQL.VNull
+    else if Array.length options = 1 then
+        let (tag, expr) = options.[0]
+        expr
+    else
+        let last = Array.length options - 1
+        let makeCase (tag, expr) = (compileTag tag, expr)
+        let cases = options |> Seq.take last |> Seq.map makeCase |> Array.ofSeq
+        let (lastTag, lastExpr) = options.[last]
+        SQL.VECase (cases, Some lastExpr)
+
 let private valueToJson : SQL.Value -> JToken = function
     | SQL.VInt i -> JToken.op_Implicit i
     | SQL.VDecimal d -> JToken.op_Implicit d
@@ -396,7 +409,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let makeCase (localId, subcase) =
                 let case = SQL.VEEq (SQL.VEColumn { table = Some tableRef; name = columnName (CTDomainColumn ns) }, SQL.VEValue (SQL.VInt localId))
                 (case, domainExpression tableRef f subcase)
-            SQL.VECase (nested |> Map.toSeq |> Seq.map makeCase |> Seq.toArray, None)
+            SQL.VECase (nested |> Map.toSeq |> Seq.map makeCase |> Seq.toArray, None)   
 
     let fromInfoExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.ValueExpr) = function
         | FTEntity (id, dom) -> f dom
@@ -435,7 +448,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         lastJoinId <- lastJoinId + 1
         compileJoinId id
 
-    let rec compileRef (ctx : ReferenceContext) (paths : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedFieldRef) (forcedName : FieldName option) : JoinPaths * SQL.ValueExpr =
+    let rec compileRef (ctx : ReferenceContext) (paths0 : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedFieldRef) (forcedName : FieldName option) : JoinPaths * SQL.ValueExpr =
         let realColumn name : SQL.ColumnRef =
             let finalName =
                 match forcedName with
@@ -447,18 +460,34 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let (_, field) = entity.FindField field.name |> Option.get
 
         match field with
-        | RId -> (paths, SQL.VEColumn <| realColumn sqlFunId)
+        | RId -> (paths0, SQL.VEColumn <| realColumn sqlFunId)
         | RSubEntity ->
             match ctx with
             | RCExpr ->
                 let newColumn = realColumn sqlFunSubEntity
-                (paths, replaceColumnRefs newColumn entity.subEntityParseExpr)
+                (paths0, replaceColumnRefs newColumn entity.subEntityParseExpr)
             | RCTypeExpr ->
-                (paths, SQL.VEColumn <| realColumn sqlFunSubEntity)
-        | RColumnField col -> (paths, SQL.VEColumn  <| realColumn col.columnName)
+                (paths0, SQL.VEColumn <| realColumn sqlFunSubEntity)
+        | RColumnField col -> (paths0, SQL.VEColumn  <| realColumn col.columnName)
         | RComputedField comp ->
             let localRef = { schema = Option.map decompileName tableRef.schema; name = decompileName tableRef.name } : EntityRef
-            compileLinkedFieldExpr paths <| convertLinkedLocalExpr localRef comp.expression
+            match comp.virtualCases with
+            | None -> compileLinkedFieldExpr paths0 <| convertLinkedLocalExpr localRef comp.expression
+            | Some cases ->
+                let subEntityRef = { table = Some tableRef; name = sqlFunSubEntity } : SQL.ColumnRef
+                let mutable paths = paths0
+
+                let compileCase (case : VirtualFieldCase) =
+                    let (newPaths, compiled) = compileLinkedFieldExpr paths <| convertLinkedLocalExpr localRef case.expression
+                    paths <- newPaths
+                    (case, compiled)
+                let options = Array.map compileCase cases
+                assert not (Array.isEmpty options)
+
+                let compileTag (case : VirtualFieldCase) =
+                    replaceColumnRefs subEntityRef case.check
+                let compiled = composeExhaustingIf compileTag options
+                (paths, compiled)
 
     and compilePath (ctx : ReferenceContext) (paths : JoinPaths) (tableRef : SQL.TableRef) (fieldRef : ResolvedFieldRef) (forcedName : FieldName option) : FieldName list -> JoinPaths * SQL.ValueExpr = function
         | [] -> compileRef ctx paths tableRef fieldRef forcedName

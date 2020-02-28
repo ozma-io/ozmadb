@@ -7,7 +7,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
     {
         public string MainField { get; }
         public bool ForbidExternalReferences { get; set; }
-        public bool Hidden { get; set; }
+        public bool IsHidden { get; set; }
 
         public EntityAttribute(string mainField)
         {
@@ -46,6 +46,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
     {
         public string Name { get; }
         public string Expression { get; }
+        public bool IsVirtual { get; set; }
 
         public ComputedFieldAttribute(string name, string expression)
         {
@@ -58,7 +59,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
     public class ColumnFieldAttribute : Attribute
     {
         public string Type { get; }
-        public bool Immutable { get; set; }
+        public bool IsImmutable { get; set; }
         public string Default { get; set; }
 
         public ColumnFieldAttribute(string type)

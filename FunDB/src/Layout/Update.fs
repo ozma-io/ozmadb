@@ -28,8 +28,8 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
                 match newColumn.defaultValue with
                 | None -> null
                 | Some def -> def
-            oldColumn.Nullable <- newColumn.isNullable
-            oldColumn.Immutable <- newColumn.isImmutable
+            oldColumn.IsNullable <- newColumn.isNullable
+            oldColumn.IsImmutable <- newColumn.isImmutable
             oldColumn.Default <- def
             oldColumn.Type <- newColumn.fieldType
         let createColumnFunc (FunQLName name) =
@@ -45,6 +45,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         let updateComputedFunc _ (newComputed : SourceComputedField) (oldComputed : ComputedField) =
             oldComputed.Expression <- newComputed.expression
             oldComputed.AllowBroken <- newComputed.allowBroken
+            oldComputed.IsVirtual <- newComputed.isVirtual
         let createComputedFunc (FunQLName name) =
             let newComputed =
                 ComputedField (
@@ -103,7 +104,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         else
             existingEntity.MainField <-entity.mainField.ToString()
         existingEntity.ForbidExternalReferences <- entity.forbidExternalReferences
-        existingEntity.Hidden <- entity.hidden
+        existingEntity.IsHidden <- entity.isHidden
         existingEntity.IsAbstract <- entity.isAbstract
         match entity.parent with
         | None ->

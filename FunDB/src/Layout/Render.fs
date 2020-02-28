@@ -16,6 +16,7 @@ let renderUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUniqueCon
 let renderComputedField (comp : ResolvedComputedField) : SourceComputedField =
     { expression = comp.expression.ToFunQLString()
       allowBroken = comp.allowBroken
+      isVirtual = Option.isSome comp.virtualCases
     }
 
 let renderColumnField (column : ResolvedColumnField) : SourceColumnField =
@@ -36,7 +37,7 @@ let renderEntity (entity : ResolvedEntity) : SourceEntity =
       checkConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
       mainField = entity.mainField
       forbidExternalReferences = entity.forbidExternalReferences
-      hidden = entity.hidden
+      isHidden = entity.isHidden
       parent = Option.map (fun inher -> inher.parent) entity.inheritance
       isAbstract = entity.isAbstract
     }

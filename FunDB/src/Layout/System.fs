@@ -25,7 +25,7 @@ let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * Sourc
                   then None
                   else Some field.Default
               isNullable = isNull requiredAttr && not property.PropertyType.IsPrimitive
-              isImmutable = field.Immutable
+              isImmutable = field.IsImmutable
             }
         Some (name, res)
 
@@ -33,6 +33,7 @@ let private makeSourceComputedField (field : ComputedFieldAttribute) : FunQLName
     let res =
         { expression = field.Expression
           allowBroken = false
+          isVirtual = field.IsVirtual
         }
     (FunQLName field.Name, res)
 
@@ -67,7 +68,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               checkConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
               mainField = FunQLName entityAttr.MainField
               forbidExternalReferences = entityAttr.ForbidExternalReferences
-              hidden = entityAttr.Hidden
+              isHidden = entityAttr.IsHidden
               parent = None
               isAbstract = entityClass.IsAbstract
             }

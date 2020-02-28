@@ -17,7 +17,7 @@ var commonViews = {
         "FROM\n" +
         "  public.entities\n" +
         "  LEFT JOIN public.schemas ON schemas.id = entities.schema_id\n" +
-        "WHERE NOT entities.hidden\n" +
+        "WHERE NOT entities.is_hidden\n" +
         "ORDER BY entities.id",
     "user_view_by_name":
         "{ $schema string, $name string }:\n" +
@@ -45,7 +45,7 @@ function addDefaultViews(views, layout) {
         var schema = layout.schemas[schemaName]
         for (var entityName in schema.entities) {
             var entity = schema.entities[entityName];
-            if (entity.hidden) {
+            if (entity.isHidden) {
                 continue;
             }
             var sqlName = renderSqlName(schemaName) + "." + renderSqlName(entityName);
@@ -69,8 +69,10 @@ function addDefaultViews(views, layout) {
                 "SELECT\n  " +
                 ["@\"Type\" = 'Form'"].concat(fields).join(",\n  ") +
                 "\nFROM " + sqlName + " " +
-                "WHERE id = $id" +
-                "\nFOR INSERT INTO " + sqlName;
+                "WHERE id = $id";
+            if (!entity.isAbstract) {
+                formQuery = formQuery + "\nFOR INSERT INTO " + sqlName;
+            }
             views[formName] = formQuery;
 
             var tableName = "table-" + schemaName + "-" + entityName;
@@ -80,8 +82,10 @@ function addDefaultViews(views, layout) {
                   "id @{ \"RowLinkedView\" = &\"" + formName + "\" }"
                 ].concat(fields).join(",\n  ") +
                 "\nFROM " + sqlName +
-                "\nORDER BY id\n" +
-                "FOR INSERT INTO " + sqlName;
+                "\nORDER BY id";
+            if (!entity.isAbstract) {
+                formQuery = formQuery + "\nFOR INSERT INTO " + sqlName;
+            }
             views[tableName] = tableQuery;
         }
     }

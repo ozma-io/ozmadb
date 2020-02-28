@@ -26,6 +26,7 @@ type SourceColumnField =
 type SourceComputedField =
     { expression : string
       allowBroken : bool
+      isVirtual : bool
     }
 
 type SourceField =
@@ -46,7 +47,7 @@ type SourceEntity =
       [<JsonProperty(Required=Required.DisallowNull)>]
       forbidExternalReferences : bool
       [<JsonProperty(Required=Required.DisallowNull)>]
-      hidden : bool
+      isHidden : bool
       [<JsonProperty(Required=Required.DisallowNull)>]
       isAbstract : bool
       parent : ResolvedEntityRef option

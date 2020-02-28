@@ -11,7 +11,7 @@ namespace FunWithFlags.FunDBSchema.System
 {
     public class SystemContext : DbContext
     {
-        [Entity("name", ForbidExternalReferences=true, Hidden=true)]
+        [Entity("name", ForbidExternalReferences=true, IsHidden=true)]
         [UniqueConstraint("name", new [] {"name"})]
         [CheckConstraint("not_empty", "name <> ''")]
         public DbSet<StateValue> State { get; set; }
@@ -170,7 +170,7 @@ namespace FunWithFlags.FunDBSchema.System
     public class Schema
     {
         public int Id { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; }
 
@@ -183,10 +183,10 @@ namespace FunWithFlags.FunDBSchema.System
     public class Entity
     {
         public int Id { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; }
-        [ColumnField("reference(public.schemas)", Immutable=true)]
+        [ColumnField("reference(public.schemas)", IsImmutable=true)]
         public int SchemaId { get; set; }
         public Schema Schema { get; set; }
         [ColumnField("string")]
@@ -194,10 +194,10 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("bool", Default="FALSE")]
         public bool ForbidExternalReferences { get; set; }
         [ColumnField("bool", Default="FALSE")]
-        public bool Hidden { get; set; }
+        public bool IsHidden { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool IsAbstract { get; set; }
-        [ColumnField("reference(public.entities)", Immutable=true)]
+        [ColumnField("reference(public.entities)", IsImmutable=true)]
         public int? ParentId { get; set; }
         public Entity Parent { get; set; }
 
@@ -210,10 +210,10 @@ namespace FunWithFlags.FunDBSchema.System
     public class ColumnField
     {
         public int Id { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; }
-        [ColumnField("reference(public.entities)", Immutable=true)]
+        [ColumnField("reference(public.entities)", IsImmutable=true)]
         public int EntityId { get; set; }
         public Entity Entity { get; set; }
 
@@ -223,22 +223,24 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         public string Default { get; set; }
         [ColumnField("bool", Default="FALSE")]
-        public bool Nullable { get; set; }
+        public bool IsNullable { get; set; }
         [ColumnField("bool", Default="FALSE")]
-        public bool Immutable { get; set; }
+        public bool IsImmutable { get; set; }
     }
 
     public class ComputedField
     {
         public int Id { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; }
-        [ColumnField("reference(public.entities)", Immutable=true)]
+        [ColumnField("reference(public.entities)", IsImmutable=true)]
         public int EntityId { get; set; }
         public Entity Entity { get; set; }
         [ColumnField("bool", Default="FALSE")]
         public bool AllowBroken { get; set; }
+        [ColumnField("bool", Default="FALSE")]
+        public bool IsVirtual { get; set; }
 
         [ColumnField("string")]
         [Required]
@@ -397,24 +399,24 @@ namespace FunWithFlags.FunDBSchema.System
     public class EventEntry
     {
         public int Id { get; set; }
-        [ColumnField("datetime", Immutable=true)]
+        [ColumnField("datetime", IsImmutable=true)]
         public DateTime TransactionTimestamp { get; set; }
-        [ColumnField("datetime", Immutable=true)]
+        [ColumnField("datetime", IsImmutable=true)]
         public DateTime Timestamp { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Type { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         public string UserName { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         public string SchemaName { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         public string EntityName { get; set; }
-        [ColumnField("int", Immutable=true)]
+        [ColumnField("int", IsImmutable=true)]
         public int? EntityId { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         public string Error { get; set; }
-        [ColumnField("string", Immutable=true)]
+        [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Details { get; set; }
      }
