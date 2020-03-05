@@ -90,7 +90,7 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
                 RequestContext.Create
                     { cacheStore = cacheStore
                       userName = userName
-                      isRoot = isRoot
+                      isRoot = (userName = instance.Owner || isRoot)
                       language = lang
                     }
             return! f rctx next ctx

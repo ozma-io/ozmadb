@@ -40,6 +40,8 @@ namespace FunWithFlags.FunDBSchema.Instances
         public string Name { get; set; }
         public bool Enabled { get; set; }
         [Required]
+        public string Owner { get; set; }
+        [Required]
         public string Host { get; set; }
         public int Port { get; set; }
         [Required]

@@ -147,6 +147,7 @@ type Startup (config : IConfiguration) =
                         Name = "static",
                         Host = instanceSection.["Host"],
                         Port = instanceSection.GetValue("Port", 5432),
+                        Owner = "owner@example.com",
                         Database = instanceSection.GetValue("Database", username),
                         Username = username,
                         Password = instanceSection.["Password"],
