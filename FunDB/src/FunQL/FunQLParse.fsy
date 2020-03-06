@@ -553,6 +553,7 @@ FieldExprVal:
     | Name ParenedExprList                    { makeFunc $1 $2 }
     | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN { makeAggFunc $1 $3 }
     | JsonObject                              { $1 }
+    | JsonArray                               { $1 }
     | SubSelectExpr                           { FESubquery $1 }
     | LEFT_PAREN FieldExpr RIGHT_PAREN        { $2 }
 
@@ -617,7 +618,6 @@ Value:
     | STRING                                 { FString $1 }
     | BOOL                                   { FBool $1 }
     | UserViewRef                            { FUserViewRef $1 }
-    | LEFT_BRACKET Array RIGHT_BRACKET       { $2 } // Deprecated syntax
     | ARRAY LEFT_BRACKET Array RIGHT_BRACKET { $3 }
     | NULL                                   { FNull }
 

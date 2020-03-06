@@ -41,7 +41,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"entity_id", "name"})]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
-        [CheckConstraint("not_empty", "columns <> ([] :: array(string))")]
+        [CheckConstraint("not_empty", "columns <> (array[] :: array(string))")]
         public DbSet<UniqueConstraint> UniqueConstraints { get; set; }
 
         [Entity("full_name", ForbidExternalReferences=true)]
