@@ -24,7 +24,7 @@ type MainField =
 [<NoEquality; NoComparison>]
 type UVDomainField =
     { ref : ResolvedFieldRef
-      field : SerializedColumnField option
+      field : SerializedColumnField option // Can be None for `id` or `sub_entity`.
       idColumn : EntityName
     }
 
