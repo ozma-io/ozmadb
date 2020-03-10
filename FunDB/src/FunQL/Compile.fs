@@ -1141,23 +1141,24 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     member this.Arguments = arguments
 
-type private PurityStatus = Pure | NonArgumentPure
+type private PurityStatus = Pure | RowPure
 
 let private addPurity (a : PurityStatus) (b : PurityStatus) : PurityStatus =
     match (a, b) with
     | (Pure, Pure) -> Pure
-    | (NonArgumentPure, _) -> NonArgumentPure
-    | (_, NonArgumentPure) -> NonArgumentPure
+    | (RowPure, _) -> RowPure
+    | (_, RowPure) -> RowPure
 
 let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
     let mutable noReferences = true
-    let mutable noArgumentReferences = true
+    let mutable noRowReferences = true
     let foundReference column =
         noReferences <- false
     let foundPlaceholder placeholder =
-        noArgumentReferences <- false
+        noRowReferences <- false
     let foundQuery query =
-        noReferences <- false
+        // FIXME: make sure we check for unbound references here when we add support for external references in subexpressions.
+        noRowReferences <- false
     SQL.iterValueExpr
         { SQL.idValueExprIter with
               columnReference = foundReference
@@ -1167,8 +1168,8 @@ let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
         expr
     if not noReferences then
         None
-    else if not noArgumentReferences then
-        Some NonArgumentPure
+    else if not noRowReferences then
+        Some RowPure
     else
         Some Pure
 
