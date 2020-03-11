@@ -414,9 +414,11 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         | [] ->
             match entity.FindField fieldRef.name with
             | Some (_, RId) ->
-                { isLocal = true; hasId = true; usedSchemas = usedSchemas }
+                let newUsed = addUsedEntityRef fieldRef.entity usedSchemas
+                { isLocal = true; hasId = true; usedSchemas = newUsed }
             | Some (_, RSubEntity) ->
-                { isLocal = true; hasId = false; usedSchemas = usedSchemas }
+                let newUsed = addUsedEntityRef fieldRef.entity usedSchemas
+                { isLocal = true; hasId = false; usedSchemas = newUsed }
             | Some (_, RComputedField comp) ->
                 match resolveComputedField stack entity fieldRef comp with
                 | Ok field -> { isLocal = field.isLocal; hasId = field.hasId; usedSchemas = mergeUsedSchemas usedSchemas field.usedSchemas }
@@ -722,6 +724,7 @@ type private Phase3Resolver (layout : Layout) =
             let myCase =
                 { check = checkExpr
                   expression = comp.expression
+                  ref = fieldRef
                 }
             let myHalf =
                 { case = myCase
@@ -756,7 +759,13 @@ type private Phase3Resolver (layout : Layout) =
         | None -> comp
         | Some _ ->
             let cases = resolveVirtualCases entity fieldRef comp |> Array.map (fun c -> c.case)
-            { comp with virtualCases = Some cases }
+            let getUsedSchemas (case : VirtualFieldCase) =
+                let entity = layout.FindEntity case.ref.entity |> Option.get
+                let field = Map.find case.ref.name entity.computedFields |> Result.get
+                field.usedSchemas
+            // Add all fields used by virtual children as used fields for this field.
+            let newUsed = cases |> Seq.map getUsedSchemas |> Seq.fold mergeUsedSchemas comp.usedSchemas
+            { comp with virtualCases = Some cases; usedSchemas = newUsed }
 
     let resolveComputedField (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedComputedField =
         match Map.tryFind fieldRef cachedComputedFields with

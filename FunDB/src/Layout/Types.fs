@@ -65,6 +65,7 @@ type ResolvedColumnField =
 type VirtualFieldCase =
     { check : SQL.ValueExpr
       expression : ResolvedFieldExpr
+      ref : ResolvedFieldRef
     }
 
 [<NoEquality; NoComparison>]

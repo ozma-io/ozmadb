@@ -248,9 +248,11 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             | FTReference (entityRef, _) when useMain ->
                 let (realName, newField) = layout.FindEntity entityRef |> Option.bind (fun x -> x.FindField funMain) |> Option.get
                 let newRef = { entity = entityRef; name = realName }
-                addUsedFields true newRef newField
+                addUsedFields false newRef newField
             | _ -> ()
         | RComputedField comp ->
+            // Add the original entity to used ones; needed in cases of virtual inheritance.
+            usedSchemas <- addUsedEntityRef ref.entity usedSchemas
             usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
 
     // Returns innermost bound field. It has sense only for result expressions in subexpressions,
