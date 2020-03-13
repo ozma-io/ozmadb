@@ -65,7 +65,6 @@ type ResolvedViewExpr =
     { arguments : ResolvedArgumentsMap
       select : ResolvedSelectExpr
       mainEntity : ResolvedMainEntity option
-      usedSchemas : UsedSchemas
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -236,31 +235,11 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
 
 type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
-    let mutable usedSchemas : UsedSchemas = Map.empty
-
-    let rec addUsedFields (useMain : bool) (ref : ResolvedFieldRef) (field : ResolvedField) : unit =
-        match field with
-        | RId | RSubEntity ->
-            usedSchemas <- addUsedEntityRef ref.entity usedSchemas
-        | RColumnField col ->
-            usedSchemas <- addUsedFieldRef ref usedSchemas
-            match col.fieldType with
-            | FTReference (entityRef, _) when useMain ->
-                let (realName, newField) = layout.FindEntity entityRef |> Option.bind (fun x -> x.FindField funMain) |> Option.get
-                let newRef = { entity = entityRef; name = realName }
-                addUsedFields false newRef newField
-            | _ -> ()
-        | RComputedField comp ->
-            // Add the original entity to used ones; needed in cases of virtual inheritance.
-            usedSchemas <- addUsedEntityRef ref.entity usedSchemas
-            usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
 
     // Returns innermost bound field. It has sense only for result expressions in subexpressions,
     // where it will be bound to the result name.
     let rec resolvePath (useMain : bool) (boundField : BoundFieldInfo) : FieldName list -> BoundFieldInfo = function
-        | [] ->
-            addUsedFields useMain boundField.ref boundField.field
-            boundField
+        | [] -> boundField
         | (ref :: refs) ->
             match boundField.field with
             | RColumnField { fieldType = FTReference (entityRef, _) } ->
@@ -276,7 +255,6 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                           entity = newEntity
                           immediate = false
                         }
-                    usedSchemas <- addUsedFieldRef boundField.ref usedSchemas
                     resolvePath useMain nextBoundField refs
                 | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
             | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
@@ -630,7 +608,6 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
     member this.ResolveSelectExpr inExpression select = resolveSelectExpr inExpression select
     member this.ResolveMainEntity fields select main = resolveMainEntity fields select main
     member this.UsedArguments = usedArguments
-    member this.UsedSchemas = usedSchemas
 
 let resolveSelectExpr (layout : ILayoutFields) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
     let qualifier = QueryResolver (layout, globalArgumentsMap)
@@ -648,5 +625,4 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     { arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArgumentsMap)
       select = qQuery
       mainEntity = mainEntity
-      usedSchemas = qualifier.UsedSchemas
     }

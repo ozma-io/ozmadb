@@ -414,25 +414,25 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         | [] ->
             match entity.FindField fieldRef.name with
             | Some (_, RId) ->
-                let newUsed = addUsedEntityRef fieldRef.entity usedSchemas
-                { isLocal = true; hasId = true; usedSchemas = newUsed }
+                let usedSchemas = addUsedEntityRef fieldRef.entity usedSchemas
+                { isLocal = true; hasId = true; usedSchemas = usedSchemas }
             | Some (_, RSubEntity) ->
-                let newUsed = addUsedEntityRef fieldRef.entity usedSchemas
-                { isLocal = true; hasId = false; usedSchemas = newUsed }
+                let usedSchemas = addUsedEntityRef fieldRef.entity usedSchemas
+                { isLocal = true; hasId = false; usedSchemas = usedSchemas }
             | Some (_, RComputedField comp) ->
                 match resolveComputedField stack entity fieldRef comp with
                 | Ok field -> { isLocal = field.isLocal; hasId = field.hasId; usedSchemas = mergeUsedSchemas usedSchemas field.usedSchemas }
                 | Error e -> raisefWithInner ResolveLayoutException e.error "Computed field %O is broken" fieldRef
             | Some (newName, RColumnField _) ->
-                let newUsed = addUsedField fieldRef.entity.schema fieldRef.entity.name newName usedSchemas
-                { isLocal = true; hasId = false; usedSchemas = newUsed }
+                let usedSchemas = addUsedField fieldRef.entity.schema fieldRef.entity.name newName usedSchemas
+                { isLocal = true; hasId = false; usedSchemas = usedSchemas }
             | None -> raisef ResolveLayoutException "Column field not found in path: %O" fieldRef.name
         | (ref :: refs) ->
             match Map.tryFind fieldRef.name entity.columnFields with
             | Some { fieldType = FTReference (refEntity, _) } ->
                 let newEntity = Map.find refEntity entities
-                let newUsed = addUsedFieldRef fieldRef usedSchemas
-                let ret = checkPath stack newUsed newEntity { entity = refEntity; name = ref } refs
+                let usedSchemas = addUsedFieldRef fieldRef usedSchemas
+                let ret = checkPath stack usedSchemas newEntity { entity = refEntity; name = ref } refs
                 { ret with isLocal = false }
             | _ -> raisef ResolveLayoutException "Invalid dereference in path: %O" ref
 

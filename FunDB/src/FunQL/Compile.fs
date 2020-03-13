@@ -111,7 +111,7 @@ let private funEmpty = FunQLName ""
 type private JoinId = int
 
 let compileJoinId (jid : JoinId) : SQL.TableName =
-    SQL.SQLName <| sprintf "__Join__%i" jid
+    SQL.SQLName <| sprintf "__join__%i" jid
 
 type JoinKey =
     { table : SQL.TableName
@@ -390,6 +390,7 @@ type RealEntityAnnotation = { realEntity : ResolvedEntityRef }
 
 type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttributes, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
+    let mutable usedSchemas : UsedSchemas = Map.empty
     let replacer = NameReplacer ()
 
     let columnName : ColumnType -> SQL.SQLName = function
@@ -448,7 +449,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         lastJoinId <- lastJoinId + 1
         compileJoinId id
 
-    let rec compileRef (ctx : ReferenceContext) (paths0 : JoinPaths) (tableRef : SQL.TableRef) (field : ResolvedFieldRef) (forcedName : FieldName option) : JoinPaths * SQL.ValueExpr =
+    let rec compileRef (ctx : ReferenceContext) (paths0 : JoinPaths) (tableRef : SQL.TableRef) (fieldRef : ResolvedFieldRef) (forcedName : FieldName option) : JoinPaths * SQL.ValueExpr =
         let realColumn name : SQL.ColumnRef =
             let finalName =
                 match forcedName with
@@ -456,21 +457,27 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 | None -> name
             { table = Some tableRef; name = finalName }
 
-        let entity = layout.FindEntity field.entity |> Option.get
-        let (_, field) = entity.FindField field.name |> Option.get
+        let entity = layout.FindEntity fieldRef.entity |> Option.get
+        let (_, field) = entity.FindField fieldRef.name |> Option.get
 
         match field with
-        | RId -> (paths0, SQL.VEColumn <| realColumn sqlFunId)
+        | RId ->
+            usedSchemas <- addUsedEntityRef fieldRef.entity usedSchemas
+            (paths0, SQL.VEColumn <| realColumn sqlFunId)
         | RSubEntity ->
+            usedSchemas <- addUsedEntityRef fieldRef.entity usedSchemas
             match ctx with
             | RCExpr ->
                 let newColumn = realColumn sqlFunSubEntity
                 (paths0, replaceColumnRefs newColumn entity.subEntityParseExpr)
             | RCTypeExpr ->
                 (paths0, SQL.VEColumn <| realColumn sqlFunSubEntity)
-        | RColumnField col -> (paths0, SQL.VEColumn  <| realColumn col.columnName)
+        | RColumnField col ->
+            usedSchemas <- addUsedFieldRef fieldRef usedSchemas
+            (paths0, SQL.VEColumn  <| realColumn col.columnName)
         | RComputedField comp ->
             let localRef = { schema = Option.map decompileName tableRef.schema; name = decompileName tableRef.name } : EntityRef
+            usedSchemas <- mergeUsedSchemas comp.usedSchemas usedSchemas
             match comp.virtualCases with
             | None -> compileLinkedFieldExpr paths0 <| convertLinkedLocalExpr localRef comp.expression
             | Some cases ->
@@ -521,6 +528,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let (nested, res) = compilePath ctx path.nested newTableRef newFieldRef None refs
                         let newPath = { path with nested = nested }
                         (newPath, res)
+                usedSchemas <- addUsedFieldRef fieldRef usedSchemas
                 (Map.add pathKey newPath paths, res)
             | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
 
@@ -1018,6 +1026,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let joinExpr = SQL.VEEq (fromColumn, toColumn)
         let subquery = SQL.FTable ({ realEntity = joinKey.toEntity }, Some path.name, compileResolvedEntityRef entity.root)
         let currJoin = SQL.FJoin (SQL.Left, from, subquery, joinExpr)
+        usedSchemas <- addUsedEntityRef joinKey.toEntity usedSchemas
         buildJoins currJoin path.nested
 
     and compileFromExpr (mainEntity : ResolvedEntityRef option) : ResolvedFromExpr -> FromMap * SQL.FromExpr = function
@@ -1061,6 +1070,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   mainSubEntity = mainSubEntity
                 }
 
+            usedSchemas <- addUsedEntityRef entityRef usedSchemas
             (Map.singleton newName fromInfo, subquery)
         | FJoin (jt, e1, e2, where) ->
             let main1 =
@@ -1140,6 +1150,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         compileSelectExpr flags
 
     member this.Arguments = arguments
+    member this.UsedSchemas = usedSchemas
 
 type private PurityStatus = Pure | RowPure
 
@@ -1274,6 +1285,6 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
       columns = newColumns
       domains = info.domains
       flattenedDomains = flattenDomains info.domains
-      usedSchemas = viewExpr.usedSchemas
+      usedSchemas = compiler.UsedSchemas
       mainEntity = mainEntityRef
     }
