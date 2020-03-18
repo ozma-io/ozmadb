@@ -458,7 +458,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             { table = Some tableRef; name = finalName }
 
         let entity = layout.FindEntity fieldRef.entity |> Option.get
-        let (_, field) = entity.FindField fieldRef.name |> Option.get
+        let (realName, field) = entity.FindField fieldRef.name |> Option.get
 
         match field with
         | RId ->
@@ -473,7 +473,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | RCTypeExpr ->
                 (paths0, SQL.VEColumn <| realColumn sqlFunSubEntity)
         | RColumnField col ->
-            usedSchemas <- addUsedFieldRef fieldRef usedSchemas
+            usedSchemas <- addUsedField fieldRef.entity.schema fieldRef.entity.name realName usedSchemas
             (paths0, SQL.VEColumn  <| realColumn col.columnName)
         | RComputedField comp ->
             let localRef = { schema = Option.map decompileName tableRef.schema; name = decompileName tableRef.name } : EntityRef
@@ -499,7 +499,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     and compilePath (ctx : ReferenceContext) (paths : JoinPaths) (tableRef : SQL.TableRef) (fieldRef : ResolvedFieldRef) (forcedName : FieldName option) : FieldName list -> JoinPaths * SQL.ValueExpr = function
         | [] -> compileRef ctx paths tableRef fieldRef forcedName
         | (ref :: refs) ->
-            let (_, field) = layout.FindField fieldRef.entity fieldRef.name |> Option.get
+            let (realName, field) = layout.FindField fieldRef.entity fieldRef.name |> Option.get
             match field with
             | RColumnField ({ fieldType = FTReference (newEntityRef, _) } as col) ->
                 let newFieldRef = { entity = newEntityRef; name = ref }
@@ -528,7 +528,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let (nested, res) = compilePath ctx path.nested newTableRef newFieldRef None refs
                         let newPath = { path with nested = nested }
                         (newPath, res)
-                usedSchemas <- addUsedFieldRef fieldRef usedSchemas
+                usedSchemas <- addUsedField fieldRef.entity.schema fieldRef.entity.name realName usedSchemas
                 (Map.add pathKey newPath paths, res)
             | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
 
