@@ -32,8 +32,11 @@ type private MetaBuilder (layout : Layout) =
         let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
         genericCompileFieldExpr layout (compileComputedName entity) voidQuery
 
-    let makeUniqueConstraintMeta (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
-        SQL.CMUnique <| Array.map (fun name -> SQL.SQLName <| name.ToString()) constr.columns
+    let makeUniqueConstraintMeta (entity : ResolvedEntity) (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
+        let compileColumn name =
+            let col = Map.find name entity.columnFields
+            col.columnName
+        SQL.CMUnique <| Array.map compileColumn constr.columns
 
     let makeColumnFieldMeta (columnName : SQL.ResolvedColumnRef) (entity : ResolvedEntity) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.ConstraintName * SQL.ConstraintMeta) seq =
         let makeDefaultValue def =
@@ -72,7 +75,7 @@ type private MetaBuilder (layout : Layout) =
 
     let makeEntityMeta (ref : ResolvedEntityRef) (entity : ResolvedEntity) : SQL.TableMeta * (SQL.SQLName * SQL.ObjectMeta) seq =
         let makeUniqueConstraint (name, constr : ResolvedUniqueConstraint) =
-            (SQL.SQLName <| sprintf "__unique__%s__%s" entity.hashName constr.hashName, makeUniqueConstraintMeta constr)
+            (SQL.SQLName <| sprintf "__unique__%s__%s" entity.hashName constr.hashName, makeUniqueConstraintMeta entity constr)
         let uniqueConstraints = entity.uniqueConstraints |> Map.toSeq |> Seq.map makeUniqueConstraint
         let tableName = compileResolvedEntityRef entity.root
 
