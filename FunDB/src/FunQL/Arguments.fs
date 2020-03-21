@@ -17,7 +17,6 @@ type PlaceholderId = int
 type CompiledArgument =
     { placeholderId : PlaceholderId
       fieldType : ArgumentFieldType
-      valueType : SQL.SimpleValueType
       optional : bool
     }
 
@@ -59,7 +58,6 @@ let compileFieldType : FieldType<_, _> -> SQL.SimpleValueType = function
 let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgument) : CompiledArgument =
     { placeholderId = placeholderId
       fieldType = arg.argType
-      valueType = compileFieldType arg.argType
       optional = arg.optional
     }
 
@@ -139,5 +137,5 @@ let prepareArguments (args : QueryArguments) (values : ArgumentValues) : ExprPar
             | Some value -> (false, value)
         if not (mapping.optional && notFound) then
             typecheckArgument mapping.fieldType value
-        (mapping.placeholderId, (mapping.valueType, compileFieldValueSingle value))
+        (mapping.placeholderId, compileFieldValueSingle value)
     args.types |> Map.mapWithKeys makeParameter

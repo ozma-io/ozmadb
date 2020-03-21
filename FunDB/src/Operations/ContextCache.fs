@@ -72,6 +72,7 @@ type private AnonymousUserView =
 
 let private versionField = "StateVersion"
 let private fallbackVersion = 0
+let private migrationLockNumber = 0
 
 [<NoEquality; NoComparison>]
 type CachedState =
@@ -91,29 +92,45 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
     let filterUserLayout (layout : Layout) : Layout =
         { schemas = filterUserSchemas preload layout.schemas }
 
-    // Returns a version and whether a rebuild should be force-performed.
-    let getCurrentVersion (conn : DatabaseTransaction) (bump : bool) : Task<bool * int> = task {
-        let! state = conn.System.State.AsTracking().ToDictionaryAsync(fun x -> x.Name)
-        match tryGetValue state versionField with
-        | None ->
+    // If `None` cold rebuild if needed.
+    let getCurrentVersion (transaction : DatabaseTransaction) : Task<DatabaseTransaction * int option> = task {
+        let! (transaction, versionEntry) = task {
+            try
+                let! versionEntry = transaction.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstOrDefaultAsync()
+                return (transaction, versionEntry)
+            with
+            | :? PostgresException ->
+                transaction.Rollback ()
+                let transaction = new DatabaseTransaction (transaction.Connection)
+                return (transaction, null)
+        }
+        match versionEntry with
+        | null -> return (transaction, None)
+        | entry -> return (transaction, tryIntInvariant entry.Value)
+    }
+
+    let ensureCurrentVersion (conn : DatabaseTransaction) (bump : bool) : Task<int> = task {
+        let! versionEntry = conn.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstOrDefaultAsync()
+        match versionEntry with
+        | null ->
             let newEntry = StateValue (Name = versionField, Value = string fallbackVersion)
             ignore <| conn.System.State.Add(newEntry)
             let! _ = conn.System.SaveChangesAsync()
-            return (true, fallbackVersion)
-        | Some entry ->
+            return fallbackVersion
+        | entry ->
             match tryIntInvariant entry.Value with
             | Some v ->
                 if bump then
                     let newVersion = v + 1
                     entry.Value <- string newVersion
                     let! _ = conn.System.SaveChangesAsync()
-                    return (true, newVersion)
+                    return newVersion
                 else
-                    return (false, v)
+                    return v
             | None ->
                 entry.Value <- string fallbackVersion
                 let! _ = conn.System.SaveChangesAsync()
-                return (true, fallbackVersion)
+                return fallbackVersion
     }
 
     let checkBrokenAttributes (conn : DatabaseTransaction) (brokenAttrs : ErroredDefaultAttributes) =
@@ -185,15 +202,11 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     failwith "Broken system roles"
                 do! markBrokenPermissions conn.System brokenPerms
         }
-
-    let rec getCachedState (transaction : DatabaseTransaction) : Task<CachedState> = task {
-        let! (transaction, currentVersion, layout, brokenViews, mergedAttrs, brokenAttrs, prefetchedViews, systemViews, userMeta) = task {
+    
+    let rec finishGetCachedState (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) : Task<CachedState> = task {
+        let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, prefetchedViews, sourceViews) = task {
             try
-                let! (isChanged1, layout, userMeta) = initialMigratePreload logger transaction preload
-                let systemViews = preloadUserViews layout preload
-                let! isChanged2 = updateUserViews transaction.System systemViews
-                let isChanged = isChanged1 || isChanged2
-                let! (_, currentVersion) = getCurrentVersion transaction isChanged
+                let! currentVersion = ensureCurrentVersion transaction isChanged
                 // We don't do commit here and instead resolve as much as possible first to fail early.
 
                 let! sourceAttrs = buildSchemaAttributes transaction.System
@@ -208,22 +221,27 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 let! (brokenViews2, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews
                 let transaction = new DatabaseTransaction (transaction.Connection)
                 let brokenViews = unionErroredUserViews brokenViews1 brokenViews2
-                return (transaction, currentVersion, layout, brokenViews, mergedAttrs, brokenAttrs, prefetchedViews, systemViews, userMeta)
+                return (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, prefetchedViews, sourceViews)
             with
             | ex ->
                 transaction.Rollback ()
-                return reraise' ex
+                return reraise' ex            
         }
-        let! (_, currentVersion2) = task {
+        let! currentVersion2 = task {
             try
-                return! getCurrentVersion transaction false
+                return! ensureCurrentVersion transaction false
             with
             | ex ->
                 transaction.Rollback ()
                 return reraise' ex
-        }
+        }    
         if currentVersion2 <> currentVersion then
-            return! getCachedState transaction
+            let! sourceLayout = buildSchemaLayout transaction.System
+            let (_, layout) = resolveLayout sourceLayout false
+            let! state = finishGetCachedState transaction layout userMeta false
+            let! meta = buildDatabaseMeta transaction.Transaction
+            let userMeta = filterUserMeta preload meta
+            return { state with context = { state.context with userMeta = userMeta } }
         else
             try
                 do! checkBrokenAttributes transaction brokenAttrs
@@ -232,6 +250,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 let! sourcePermissions = buildSchemaPermissions transaction.System
                 let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
                 do! checkBrokenPermissions transaction brokenPerms
+
+                let systemViews = filterSystemViews sourceViews
 
                 do! transaction.Commit ()
 
@@ -248,15 +268,57 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             with
             | ex ->
                 transaction.Rollback ()
+                return reraise' ex    
+    }
+
+    let rec getMigrationLock (transaction : DatabaseTransaction) : Task<DatabaseTransaction> = task {
+        // Try to get a lock. If we fail, wait till someone else releases it and then _restart the transaction and try again_.
+        // This is because otherwise transaction gets to see older state of the database.
+        let migrationLockParams = Map.singleton 0 (SQL.VInt migrationLockNumber)
+        let! ret = task {
+            try
+                return! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams
+            with
+            | ex ->
+                transaction.Rollback ()
                 return reraise' ex
+        }
+        match ret with
+        | SQL.VBool true -> return transaction
+        | _ ->
+            try
+                let! _ = transaction.Connection.Query.ExecuteNonQuery "SELECT pg_advisory_xact_lock(@0)" migrationLockParams
+                ()
+            with
+            | ex ->
+                transaction.Rollback ()
+                return reraise' ex
+            transaction.Rollback ()
+            let transaction = new DatabaseTransaction (transaction.Connection)
+            return! getMigrationLock transaction            
+    }
+
+    let getCachedState (transaction : DatabaseTransaction) : Task<CachedState> = task {       
+        let! transaction = getMigrationLock transaction 
+        let! (userMeta, layout, isChanged) = task {
+            try
+                let! (isChanged1, layout, userMeta) = initialMigratePreload logger transaction preload
+                let systemViews = preloadUserViews layout preload
+                let! isChanged2 = updateUserViews transaction.System systemViews
+                let isChanged = isChanged1 || isChanged2
+                return (userMeta, layout, isChanged)
+            with
+            | ex ->
+                transaction.Rollback ()
+                return reraise' ex
+        }
+        return! finishGetCachedState transaction layout userMeta isChanged
     }
 
     // Called when state update by another instance is detected.
     let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) : Task<DatabaseTransaction * CachedState> = task {
-        // Clear prepared statements so that things don't break if e.g. database types have changed.
         let! (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews) = task {
             try
-                transaction.Connection.Connection.UnprepareAll ()
                 let! sourceLayout = buildSchemaLayout transaction.System
                 let (_, layout) = resolveLayout sourceLayout false
 
@@ -278,9 +340,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 transaction.Rollback ()
                 return reraise' ex
         }
-        let! (_, currentVersion2) = task {
+        let! currentVersion2 = task {
             try
-                return! getCurrentVersion transaction false
+                return! ensureCurrentVersion transaction false
             with
             | ex ->
                 transaction.Rollback ()
@@ -325,17 +387,14 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
         let transaction = new DatabaseTransaction(conn)
         if warmStartup then
             Task.awaitSync <| task {
-                let! (forceRebuild, currentVersion) = task {
-                    try
-                        return! getCurrentVersion transaction false
-                    with
-                    | ex ->
-                        transaction.Rollback ()
-                        return reraise' ex
-                }
-                let! (newTransaction, newState) = rebuildFromDatabase transaction currentVersion
-                newTransaction.Rollback ()
-                return newState
+                let! (transaction, ret) = getCurrentVersion transaction
+                match ret with
+                | None ->
+                    return! getCachedState transaction
+                | Some ver ->
+                    let! (transaction, newState) = rebuildFromDatabase transaction ver
+                    transaction.Rollback ()
+                    return newState
             }
         else
             Task.awaitSync <| getCachedState transaction
@@ -355,21 +414,24 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             let transaction = new DatabaseTransaction(conn)
             let! (transaction, oldState) =
                 task {
-                    let! (forceRebuild, currentVersion) = task {
-                        try
-                            return! getCurrentVersion transaction false
-                        with
-                        | ex ->
-                            transaction.Rollback ()
-                            return reraise' ex
-                    }
-                    if forceRebuild || oldState.version <> currentVersion then
-                        let! (newTransaction, newState) = rebuildFromDatabase transaction currentVersion
+                    let! (transaction, ret) = getCurrentVersion transaction
+                    match ret with
+                    | None ->
+                        transaction.Connection.Connection.UnprepareAll ()
+                        let! newState = getCachedState transaction
                         anonymousViewsCache.Clear()
                         cachedState <- newState
-                        return (newTransaction, newState)
-                    else
-                        return (transaction, oldState)
+                        let transaction = new DatabaseTransaction (transaction.Connection)
+                        return (transaction, newState)
+                    | Some ver ->
+                        if oldState.version <> ver then
+                            transaction.Connection.Connection.UnprepareAll ()
+                            let! (transaction, newState) = rebuildFromDatabase transaction ver
+                            anonymousViewsCache.Clear()
+                            cachedState <- newState
+                            return (transaction, newState)
+                        else
+                            return (transaction, oldState)
                 }
 
             let migrate () = task {

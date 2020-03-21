@@ -21,7 +21,7 @@ type QueryException (message : string, innerException : Exception) =
 
     new (message : string) = QueryException (message, null)
 
-type ExprParameters = Map<int, SimpleValueType * Value>
+type ExprParameters = Map<int, Value>
 
 [<NoEquality; NoComparison>]
 type QueryResult =
@@ -98,20 +98,6 @@ let private convertValue valType (rawValue : obj) =
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
     | (typ, value) -> raisef QueryException "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName)
 
-let private npgsqlSimpleType : SimpleType -> NpgsqlDbType = function
-    | STInt -> NpgsqlDbType.Integer
-    | STDecimal -> NpgsqlDbType.Numeric
-    | STString -> NpgsqlDbType.Text
-    | STBool -> NpgsqlDbType.Boolean
-    | STDateTime -> NpgsqlDbType.Timestamp
-    | STDate -> NpgsqlDbType.Date
-    | STRegclass -> raisef QueryException "Regclass type is not supported"
-    | STJson -> NpgsqlDbType.Jsonb
-
-let private npgsqlType : SimpleValueType -> NpgsqlDbType = function
-    | VTScalar s -> npgsqlSimpleType s
-    | VTArray s -> npgsqlSimpleType s ||| NpgsqlDbType.Array
-
 let rec private npgsqlArrayValue (vals : ArrayValue<'a> array) : obj =
     let convertOne : ArrayValue<'a> -> obj = function
         | AVValue v -> upcast v
@@ -119,24 +105,27 @@ let rec private npgsqlArrayValue (vals : ArrayValue<'a> array) : obj =
         | AVNull -> upcast DBNull.Value
     upcast (Array.map convertOne vals)
 
-let private npgsqlValue : Value -> obj = function
-    | VInt i -> upcast i
-    | VDecimal d -> upcast d
-    | VString s -> upcast s
+let private npgsqlArray (typ : NpgsqlDbType) (vals : ArrayValue<'a> array) : NpgsqlDbType option * obj =
+    (Some (typ ||| NpgsqlDbType.Array), npgsqlArrayValue vals)
+
+let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
+    | VInt i -> (Some NpgsqlDbType.Integer, upcast i)
+    | VDecimal d -> (Some NpgsqlDbType.Numeric, upcast d)
+    | VString s -> (Some NpgsqlDbType.Text, upcast s)
     | VRegclass name -> raisef QueryException "Regclass arguments are not supported: %O" name
-    | VBool b -> upcast b
-    | VDateTime dt -> upcast dt
-    | VDate dt -> upcast dt
-    | VJson j -> upcast j
-    | VIntArray vals -> npgsqlArrayValue vals
-    | VDecimalArray vals -> npgsqlArrayValue vals
-    | VStringArray vals -> npgsqlArrayValue vals
-    | VBoolArray vals -> npgsqlArrayValue vals
-    | VDateTimeArray vals -> npgsqlArrayValue vals
-    | VDateArray vals -> npgsqlArrayValue vals
+    | VBool b -> (Some NpgsqlDbType.Boolean, upcast b)
+    | VDateTime dt -> (Some NpgsqlDbType.Timestamp, upcast dt)
+    | VDate dt -> (Some NpgsqlDbType.Date, upcast dt)
+    | VJson j -> (Some NpgsqlDbType.Jsonb, upcast j)
+    | VIntArray vals -> npgsqlArray NpgsqlDbType.Integer vals
+    | VDecimalArray vals -> npgsqlArray NpgsqlDbType.Numeric vals
+    | VStringArray vals -> npgsqlArray NpgsqlDbType.Text vals
+    | VBoolArray vals -> npgsqlArray NpgsqlDbType.Boolean vals
+    | VDateTimeArray vals -> npgsqlArray NpgsqlDbType.Timestamp vals
+    | VDateArray vals -> npgsqlArray NpgsqlDbType.Date vals
     | VRegclassArray vals -> raisef QueryException "Regclass arguments are not supported: %O" vals
-    | VJsonArray vals -> npgsqlArrayValue vals
-    | VNull -> upcast DBNull.Value
+    | VJsonArray vals -> npgsqlArray NpgsqlDbType.Jsonb vals
+    | VNull -> (None, upcast DBNull.Value)
 
 type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnection) =
     let logger = loggerFactory.CreateLogger<QueryConnection> ()
@@ -144,8 +133,12 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
     let withCommand (queryStr : string) (pars : ExprParameters) (runFunc : NpgsqlCommand -> Task<'a>) : Task<'a> =
         task {
             use command = new NpgsqlCommand(queryStr, connection)
-            for KeyValue (name, (valueType, value)) in pars do
-                ignore <| command.Parameters.AddWithValue(name.ToString(), npgsqlType valueType, npgsqlValue value)
+            for KeyValue (name, value) in pars do
+                match npgsqlValue value with
+                | (None, obj) ->
+                    ignore <| command.Parameters.AddWithValue(name.ToString(), obj)
+                | (Some typ, obj) ->
+                    ignore <| command.Parameters.AddWithValue(name.ToString(), typ, obj)
             logger.LogInformation("Executing query with args {args}: {query}", pars, queryStr)
             try
                 try
