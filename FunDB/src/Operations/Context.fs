@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Operations.Context
 
 open System
 open System.Threading.Tasks
+open System.Linq
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json.Linq
@@ -191,23 +192,48 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
     do
         assert (globalArgumentTypes |> Map.toSeq |> Seq.forall (fun (name, _) -> Map.containsKey name globalArguments))
 
-    let resolveSource (source : UserViewSource) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> = task {
+    let resolveSource (source : UserViewSource) (recompileQuery : bool) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> = task {
         match source with
         | UVAnonymous query ->
             try
-                let! anon = ctx.GetAnonymousView query
+                let! anon =
+                    if not recompileQuery then
+                        ctx.GetAnonymousView query
+                    else
+                        ctx.ResolveAnonymousView None query
                 return Ok anon
             with
             | :? UserViewResolveException as err ->
                 logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
                 return Error <| UVEResolve (printException err)
         | UVNamed ref ->
+            let recompileView query = task {
+                try
+                    let! anon = ctx.ResolveAnonymousView (Some ref.schema) query
+                    return Ok anon
+                with
+                | :? UserViewResolveException as err ->
+                    logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
+                    return Error <| UVEResolve (printException err)
+            }
             match ctx.State.userViews.Find ref with
             | None -> return Error UVENotFound
             | Some (Error err) ->
-                logger.LogError(err.error, "Requested user view {uv} is broken", ref.ToString())
-                return Error <| UVEResolve (printException err.error)
-            | Some (Ok cached) -> return Ok cached
+                if not recompileQuery then
+                    logger.LogError(err.error, "Requested user view {uv} is broken", ref.ToString())
+                    return Error <| UVEResolve (printException err.error)
+                else
+                    return! recompileView err.source.query
+            | Some (Ok cached) ->
+                if not recompileQuery then
+                    return Ok cached
+                else
+                    let! query =
+                        ctx.Transaction.System.UserViews
+                            .Where(fun uv -> uv.Schema.Name = ref.schema.ToString() && uv.Name = ref.name.ToString())
+                            .Select(fun uv -> uv.Query)
+                            .FirstAsync()
+                    return! recompileView query
     }
 
     let convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValues, string> =
@@ -278,9 +304,9 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 return Error <| printException ex
         }
 
-    member this.GetUserViewInfo (source : UserViewSource) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
+    member this.GetUserViewInfo (source : UserViewSource) (recompileQuery : bool) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
         task {
-            match! resolveSource source with
+            match! resolveSource source recompileQuery with
             | Error e -> return Error e
             | Ok uv ->
                 try
@@ -305,9 +331,9 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) : Task<Result<PrefetchedUserView * ExecutedViewExpr, UserViewErrorInfo>> =
+    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (recompileQuery : bool) : Task<Result<PrefetchedUserView * ExecutedViewExpr, UserViewErrorInfo>> =
         task {
-            match! resolveSource source with
+            match! resolveSource source recompileQuery with
             | Error e -> return Error e
             | Ok uv ->
                 try

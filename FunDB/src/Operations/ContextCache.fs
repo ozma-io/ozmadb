@@ -60,6 +60,7 @@ type IContext =
 
     abstract member Migrate : unit -> Task<unit>
     abstract member GetAnonymousView : string -> Task<PrefetchedUserView>
+    abstract member ResolveAnonymousView : SchemaName option -> string -> Task<PrefetchedUserView>
     abstract Connection : DatabaseConnection with get
     abstract Transaction : DatabaseTransaction with get
     abstract State : CachedRequestContext with get
@@ -540,12 +541,17 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return ()
             }
 
+            let resolveAnonymousView homeSchema query = task {
+                let findExistingView =
+                    oldState.context.userViews.Find >> Option.map (Result.map (fun pref -> pref.uv))
+                let uv = resolveAnonymousUserView oldState.context.layout oldState.context.defaultAttrs findExistingView homeSchema query
+                return! dryRunAnonymousUserView conn.Query oldState.context.layout uv
+            }
+
             let createNewAnonymousView query = task {
-                let findExistingView = oldState.context.userViews.Find >> Option.map (Result.map (fun pref -> pref.uv))
-                let uv = resolveAnonymousUserView oldState.context.layout oldState.context.defaultAttrs findExistingView query
-                let! prefetched = dryRunAnonymousUserView conn.Query oldState.context.layout uv
+                let! uv = resolveAnonymousView None query
                 let ret =
-                    { uv = prefetched
+                    { uv = uv
                       query = query
                     }
                 return ret
@@ -564,6 +570,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                       member this.State = oldState.context
                       member this.Migrate () = migrate ()
                       member this.GetAnonymousView query = getAnonymousView query
+                      member this.ResolveAnonymousView homeSchema query = resolveAnonymousView homeSchema query
                       member this.Dispose () =
                           (transaction :> IDisposable).Dispose()
                           (conn :> IDisposable).Dispose()

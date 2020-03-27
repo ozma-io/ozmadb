@@ -729,12 +729,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
             match resultFieldRef result.result with
             | Some ({ ref = { ref = { entity = Some ({ name = entityName } as entityRef); name = fieldName } } } as resultRef) when addMetaColumns ->
+                // Add columns for tracking (id, sub_entity etc.)
                 let newName = result.result.TryToName () |> Option.get
                 let fromInfo = Map.find entityName fromMap
                 let tableRef : SQL.TableRef = { schema = None; name = compileName entityName }
 
                 let finalRef = resultRef.ref.bound |> Option.map (fun bound -> followPath layout bound.ref (List.ofArray resultRef.path))
 
+                // Add system columns (id or sub_entity - this is a generic function).
                 let makeMaybeSystemColumn (needColumn : ResolvedFieldRef -> bool) (columnConstr : EntityName -> ColumnType) (name : FieldName) =
                     let sqlName = compileName name
                     if Array.isEmpty resultRef.path
@@ -779,6 +781,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let maybeIdExpr = makeMaybeSystemColumn (fun _ -> true) CTIdColumn funId
                 let maybeSubEntityExpr = makeMaybeSystemColumn needsSubEntity CTSubEntityColumn funSubEntity
 
+                // Maybe we already have a fitting `id` column added for a similar column.
                 let (maybeSystemName, systemColumns) =
                     match maybeIdExpr with
                     | None -> (None, Seq.empty)

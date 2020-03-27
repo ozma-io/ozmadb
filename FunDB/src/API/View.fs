@@ -4,6 +4,7 @@ open Microsoft.AspNetCore.Http
 open Giraffe
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.UserViews.DryRun
@@ -30,10 +31,17 @@ let viewsApi : HttpHandler =
         | UVENotFound -> text "Not found" |> RequestErrors.notFound
         | UVEResolve msg -> text msg |> RequestErrors.badRequest
         | UVEExecute msg -> text msg |> RequestErrors.badRequest
+       
+    let getRecompile (ctx : HttpContext) =
+#if DEBUG
+            ctx.GetQueryStringValue "__recompile" |> Result.getOption |> Option.bind tryBool |> Option.defaultValue false
+#else
+            false
+#endif
 
     let selectFromView (viewRef : UserViewSource) (rctx : RequestContext) =
         queryArgs <| fun rawArgs next ctx -> task {
-            match! rctx.GetUserView viewRef rawArgs with
+            match! rctx.GetUserView viewRef rawArgs (getRecompile ctx) with
             | Ok (cached, res) ->
                 let ret =
                     { info = cached.info
@@ -44,7 +52,7 @@ let viewsApi : HttpHandler =
         }
 
     let infoView (viewRef : UserViewSource) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        match! rctx.GetUserViewInfo viewRef with
+        match! rctx.GetUserViewInfo viewRef (getRecompile ctx) with
             | Ok cached ->
                 let res =
                     { info = cached.info

@@ -99,12 +99,15 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
 
     let rec resolveUserView (stack : Set<ResolvedUserViewRef>) (homeSchema : SchemaName option) (uv : HalfResolvedView) : ResolvedUserView =
         let checkView ref =
-            let schema =
-                match Map.tryFind ref.schema halfResolved with
-                | None -> raisef UserViewResolveException "Referenced view not found: %O" ref
-                | Some r -> r
-            if not <| Map.containsKey ref.name schema then
-                raisef UserViewResolveException "Referenced view not found: %O" ref
+            match findExistingView ref with
+            | Some _ -> ()
+            | None ->
+                let schema =
+                    match Map.tryFind ref.schema halfResolved with
+                    | None -> raisef UserViewResolveException "Referenced view not found: %O" ref
+                    | Some r -> r
+                if not <| Map.containsKey ref.name schema then
+                    raisef UserViewResolveException "Referenced view not found: %O" ref
 
         let dereferenced =
             try
@@ -177,10 +180,10 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
         let ret = { schemas = schemas } : UserViews
         (errors, ret)
 
-    member this.ResolveAnonymousUserView uv =
+    member this.ResolveAnonymousUserView homeSchema uv =
         assert (Map.isEmpty halfResolved)
-        resolveUserView Set.empty None uv
-    member this.ResolveUserViews = resolveUserViews
+        resolveUserView Set.empty homeSchema uv
+    member this.ResolveUserViews () = resolveUserViews ()
 
 // Warning: this should be executed outside of any transactions because of test runs.
 let resolveUserViews (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (forceAllowBroken : bool) (userViews : SourceUserViews) : ErroredUserViews * UserViews =
@@ -190,8 +193,8 @@ let resolveUserViews (layout : Layout) (defaultAttrs : MergedDefaultAttributes) 
     let (errors, ret) = phase2.ResolveUserViews ()
     (errors, ret)
 
-let resolveAnonymousUserView (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (findExistingView : FindExistingView) (q: string) : ResolvedUserView =
+let resolveAnonymousUserView (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (findExistingView : FindExistingView) (homeSchema : SchemaName option) (q: string) : ResolvedUserView =
     let phase1 = Phase1Resolver(layout, false)
     let resolvedView = phase1.ResolveUserView { query = q; allowBroken = false }
     let phase2 = Phase2Resolver(layout, defaultAttrs, findExistingView, Map.empty, false)
-    phase2.ResolveAnonymousUserView resolvedView
+    phase2.ResolveAnonymousUserView homeSchema resolvedView
