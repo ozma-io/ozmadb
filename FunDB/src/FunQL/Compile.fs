@@ -820,7 +820,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let newRef = Option.get finalRef
                         let newInfo =
                             { ref = newRef
-                              idColumn = newName
+                              idColumn = Option.get maybeSystemName
                             }
                         let newDomains = DSingle (newGlobalDomainId (), Map.singleton newName newInfo )
                         (Some newRef, newDomains)
