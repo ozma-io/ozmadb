@@ -78,7 +78,7 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
 let private makeHashName (name : FunQLName) =
     name |> string |> String.truncate hashNameLength
 
-let private resolveUniqueConstraint (entity : SourceEntity) (constrName : ConstraintName) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
+let private resolveUniqueConstraint (entity : ResolvedEntity) (constrName : ConstraintName) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.columns then
         raise <| ResolveLayoutException "Empty unique constraint"
 
@@ -105,7 +105,6 @@ type private HalfResolvedComputedField =
 type private HalfResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
       computedFields : Map<FieldName, HalfResolvedComputedField>
-      uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
       children : Map<ResolvedEntityRef, ChildEntity>
       typeName : string
       root : ResolvedEntityRef
@@ -249,19 +248,6 @@ type private Phase1Resolver (layout : SourceLayout) =
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in computed field %O: %s" name e.Message
 
-        let mapUniqueConstraint name constr =
-            try
-                checkName name
-                resolveUniqueConstraint entity name constr
-            with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in unique constraint %O: %s" name e.Message
-        let uniqueConstraints = Map.map mapUniqueConstraint entity.uniqueConstraints
-
-        try
-            uniqueConstraints |> Map.values |> Seq.map (fun c -> c.hashName) |> Set.ofSeqUnique |> ignore
-        with
-        | Failure msg -> raisef ResolveLayoutException "Unique constraint names clash (first %i characters): %s" hashNameLength msg
-
         let selfColumnFields = Map.map mapColumnField entity.columnFields
         let columnFields =
             match parent with
@@ -313,7 +299,6 @@ type private Phase1Resolver (layout : SourceLayout) =
         let ret =
             { columnFields = columnFields
               computedFields = computedFields
-              uniqueConstraints = uniqueConstraints
               children = Map.empty
               root = root
               typeName = typeName
@@ -603,7 +588,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let tempEntity =
             { columnFields = entity.columnFields
               computedFields = computedFields
-              uniqueConstraints = entity.uniqueConstraints
+              uniqueConstraints = Map.empty
               checkConstraints = Map.empty
               mainField = entity.source.mainField
               forbidExternalReferences = entity.source.forbidExternalReferences
@@ -616,6 +601,20 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               isAbstract = entity.source.isAbstract
               hashName = makeHashName entityRef.name
             } : ResolvedEntity
+
+        let mapUniqueConstraint name constr =
+            try
+                checkName name
+                resolveUniqueConstraint tempEntity name constr
+            with
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in unique constraint %O: %s" name e.Message
+        let uniqueConstraints = Map.map mapUniqueConstraint entity.source.uniqueConstraints
+
+        try
+            uniqueConstraints |> Map.values |> Seq.map (fun c -> c.hashName) |> Set.ofSeqUnique |> ignore
+        with
+        | Failure msg -> raisef ResolveLayoutException "Unique constraint names clash (first %i characters): %s" hashNameLength msg
+
         let mapCheckConstraint name constr =
             try
                 checkName name
