@@ -40,10 +40,12 @@ let private reduceDefaultExpr : ParsedFieldExpr -> FieldValue option = function
     | FEValue value -> Some value
     | FECast (FEValue value, typ) ->
         match (value, typ) with
-        | (FString s, FETScalar SFTDate) -> Option.map FDate <| tryDateInvariant s
-        | (FString s, FETScalar SFTDateTime) -> Option.map FDateTime <| tryDateTimeInvariant s
-        | (FStringArray vals, FETArray SFTDate) -> Option.map (FDateArray << Array.ofSeq) (Seq.traverseOption tryDateInvariant vals)
-        | (FStringArray vals, FETArray SFTDateTime) -> Option.map (FDateTimeArray << Array.ofSeq) (Seq.traverseOption tryDateTimeInvariant vals)
+        | (FString s, FETScalar SFTDate) -> Option.map FDate <| SQL.trySqlDate s
+        | (FString s, FETScalar SFTDateTime) -> Option.map FDateTime <| SQL.trySqlDateTime s
+        | (FString s, FETScalar SFTInterval) -> Option.map FInterval <| SQL.trySqlInterval s
+        | (FStringArray vals, FETArray SFTDate) -> Option.map (FDateArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlDate vals)
+        | (FStringArray vals, FETArray SFTDateTime) -> Option.map (FDateTimeArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlDateTime vals)
+        | (FStringArray vals, FETArray SFTInterval) -> Option.map (FIntervalArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlInterval vals)
         | _ -> None
     | _ -> None
 

@@ -51,12 +51,6 @@ let private convertInt : obj -> int option = function
     | :? uint64 as value -> Some <| int value
     | value -> None
 
-let private convertDate (rawDt : obj) =
-    match rawDt with
-    | :? DateTime as dt -> Some dt
-    | :? DateTimeOffset as dt -> Some dt.UtcDateTime
-    | _ -> None
-
 let private convertValue valType (rawValue : obj) =
     match (valType, rawValue) with
     | (_, (:? DBNull as value)) -> VNull
@@ -67,11 +61,9 @@ let private convertValue valType (rawValue : obj) =
     | (VTScalar STDecimal, (:? decimal as value)) -> VDecimal value
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
-    | (VTScalar STDateTime, value) ->
-        match convertDate value with
-        | Some dt -> VDateTime dt
-        | None -> raisef QueryException "Invalid datetime type: %s" (value.GetType().FullName)
-    | (VTScalar STDate, (:? DateTime as value)) -> VDate value
+    | (VTScalar STDateTime, (:? NpgsqlDateTime as value)) -> VDateTime value
+    | (VTScalar STDate, (:? NpgsqlDate as value)) -> VDate value
+    | (VTScalar STInterval, (:? NpgsqlTimeSpan as value)) -> VInterval value
     | (VTScalar STJson, (:? string as value)) ->
         match tryJson value with
         | Some j -> VJson j
@@ -92,8 +84,9 @@ let private convertValue valType (rawValue : obj) =
         | STDecimal -> VDecimalArray (convertArray tryCast<decimal> rootVals)
         | STString -> VStringArray (convertArray tryCast<string> rootVals)
         | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
-        | STDateTime -> VDateTimeArray (convertArray convertDate rootVals)
-        | STDate -> VDateArray (convertArray tryCast<DateTime> rootVals)
+        | STDateTime -> VDateTimeArray (convertArray tryCast<NpgsqlDateTime> rootVals)
+        | STDate -> VDateArray (convertArray tryCast<NpgsqlDate> rootVals)
+        | STInterval -> VIntervalArray (convertArray tryCast<NpgsqlTimeSpan> rootVals)
         | STRegclass -> raisef QueryException "Regclass arrays are not supported: %O" rootVals
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
     | (typ, value) -> raisef QueryException "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName)
@@ -116,6 +109,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VBool b -> (Some NpgsqlDbType.Boolean, upcast b)
     | VDateTime dt -> (Some NpgsqlDbType.Timestamp, upcast dt)
     | VDate dt -> (Some NpgsqlDbType.Date, upcast dt)
+    | VInterval int -> (Some NpgsqlDbType.Interval, upcast int)
     | VJson j -> (Some NpgsqlDbType.Jsonb, upcast j)
     | VIntArray vals -> npgsqlArray NpgsqlDbType.Integer vals
     | VDecimalArray vals -> npgsqlArray NpgsqlDbType.Numeric vals
@@ -123,6 +117,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VBoolArray vals -> npgsqlArray NpgsqlDbType.Boolean vals
     | VDateTimeArray vals -> npgsqlArray NpgsqlDbType.Timestamp vals
     | VDateArray vals -> npgsqlArray NpgsqlDbType.Date vals
+    | VIntervalArray vals -> npgsqlArray NpgsqlDbType.Interval vals
     | VRegclassArray vals -> raisef QueryException "Regclass arguments are not supported: %O" vals
     | VJsonArray vals -> npgsqlArray NpgsqlDbType.Jsonb vals
     | VNull -> (None, upcast DBNull.Value)
@@ -183,7 +178,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             let columns = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getColumn |> Seq.toArray
             let getRow i =
                 let (_, typ) = columns.[i]
-                reader.[i] |> convertValue typ
+                reader.GetProviderSpecificValue(i) |> convertValue typ
 
             let rows = List()
             // ??? F# ???

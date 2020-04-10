@@ -100,8 +100,10 @@ let private valueToJson : FieldValue -> JToken = function
     | (FUserViewRefArray _ as v)
     | (FDate _ as v)
     | (FDateTime _ as v)
+    | (FInterval _ as v)
     | (FDateArray _ as v)
-    | (FDateTimeArray _ as v) ->
+    | (FDateTimeArray _ as v)
+    | (FIntervalArray _ as v) ->
       failwith <| sprintf "Encountered impossible value %O while converting to JSON in parser" v
 
 let private validJsonValue = function
@@ -110,8 +112,10 @@ let private validJsonValue = function
     | FUserViewRefArray _
     | FDate _
     | FDateTime _
+    | FInterval _
     | FDateArray _
-    | FDateTimeArray _ -> false
+    | FDateTimeArray _
+    | FIntervalArray _ -> false
     | _ -> true
 
 let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : ParsedFieldExpr =
@@ -246,6 +250,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token BOOL_TYPE
 %token DATETIME_TYPE
 %token DATE_TYPE
+%token INTERVAL_TYPE
 %token REFERENCE_TYPE
 %token ENUM_TYPE
 %token JSON_TYPE
@@ -658,6 +663,7 @@ ScalarType:
     | BOOL_TYPE     { SFTBool }
     | DATETIME_TYPE { SFTDateTime }
     | DATE_TYPE     { SFTDate }
+    | INTERVAL_TYPE { SFTInterval }
     | JSON_TYPE     { SFTJson }
     | UVREF_TYPE    { SFTUserViewRef }
 

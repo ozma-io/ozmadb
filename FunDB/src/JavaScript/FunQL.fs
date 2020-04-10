@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.JavaScript.FunQL
 
 open System
+open NpgsqlTypes
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.JavaScript.AST
@@ -10,9 +11,9 @@ type JSCompileException (message : string) =
     inherit Exception(message)
 
 // FIXME: may not take offset into consideration
-let jsDateTime (dt : DateTime) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour; dt.Minute; dt.Second; dt.Millisecond |] |> Array.map (double >> JSNumber >> JSValue))
+let jsDateTime (dt : NpgsqlDateTime) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour; dt.Minute; dt.Second; dt.Millisecond |] |> Array.map (double >> JSNumber >> JSValue))
 
-let jsDate (dt : DateTime) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour |] |> Array.map (double >> JSNumber >> JSValue))
+let jsDate (dt : NpgsqlDate) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day |] |> Array.map (double >> JSNumber >> JSValue))
 
 let jsFieldValue : FieldValue -> JSExpr = function
     | FInt i -> JSValue <| JSNumber (double i)
@@ -21,6 +22,7 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FBool b -> JSValue <| JSBool b
     | FDateTime dt -> jsDateTime dt
     | FDate dt -> jsDate dt
+    | FInterval int -> failwith "Not implemented"
     | FJson j -> failwith "Not implemented"
     | FUserViewRef r -> failwith "Not implemented"
     | FIntArray ints -> JSArray <| Array.map (double >> JSNumber >> JSValue) ints
@@ -29,6 +31,7 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FBoolArray bools -> JSArray <| Array.map (JSBool >> JSValue) bools
     | FDateTimeArray dts -> JSArray <| Array.map jsDateTime dts
     | FDateArray dts -> JSArray <| Array.map jsDate dts
+    | FIntervalArray ints -> failwith "Not implemented"
     | FJsonArray jss -> failwith "Not implemented"
     | FUserViewRefArray refs -> failwith "Not implemented"
     | FNull -> JSValue JSNull

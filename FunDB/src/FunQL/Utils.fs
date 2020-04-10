@@ -16,8 +16,6 @@ let renderFunQLString = escapeSqlSingleQuotes
 let renderFunQLInt = renderSqlInt
 let renderFunQLBool = renderSqlBool
 let renderFunQLDecimal = renderSqlDecimal
-let renderFunQLDateTime = renderSqlDateTime
-let renderFunQLDate = renderSqlDate
 
 let rec renderFunQLJson (j : JToken) : string =
     match j.Type with

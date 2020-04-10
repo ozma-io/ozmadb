@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.FunQL.Compile
 
 open System
+open NpgsqlTypes
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils
@@ -131,14 +132,16 @@ let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETArray SFTBool -> FBoolArray [||]
     | FETArray SFTDateTime -> FDateTimeArray [||]
     | FETArray SFTDate -> FDateArray [||]
+    | FETArray SFTInterval -> FIntervalArray [||]
     | FETArray SFTJson -> FJsonArray [||]
     | FETArray SFTUserViewRef -> FUserViewRefArray [||]
     | FETScalar SFTString -> FString ""
     | FETScalar SFTInt -> FInt 0
     | FETScalar SFTDecimal -> FDecimal 0m
     | FETScalar SFTBool -> FBool false
-    | FETScalar SFTDateTime -> FDateTime DateTime.UnixEpoch
-    | FETScalar SFTDate -> FDateTime DateTime.UnixEpoch
+    | FETScalar SFTDateTime -> FDateTime NpgsqlDateTime.Epoch
+    | FETScalar SFTDate -> FDate NpgsqlDate.Epoch
+    | FETScalar SFTInterval -> FInterval NpgsqlTimeSpan.Zero
     | FETScalar SFTJson -> FJson (JObject ())
     | FETScalar SFTUserViewRef -> FUserViewRef { schema = None; name = FunQLName "" }
 
@@ -256,8 +259,10 @@ let private valueToJson : SQL.Value -> JToken = function
     | SQL.VNull -> JValue.CreateNull() :> JToken
     | (SQL.VDate _ as v)
     | (SQL.VDateTime _ as v)
+    | (SQL.VInterval _ as v)
     | (SQL.VDateArray _ as v)
     | (SQL.VDateTimeArray _ as v)
+    | (SQL.VIntervalArray _ as v)
     | (SQL.VRegclass _ as v)
     | (SQL.VRegclassArray _ as v) ->
         failwith <| sprintf "Encountered impossible value %O while converting to JSON in parser" v

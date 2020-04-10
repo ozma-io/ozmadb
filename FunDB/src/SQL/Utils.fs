@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.SQL.Utils
 open System
 open System.Text
 open System.Globalization
+open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 
@@ -59,11 +60,26 @@ let renderSqlDecimal (f : decimal) = f.ToString(CultureInfo.InvariantCulture)
 
 let renderSqlInt (i : int) : string = i.ToString(CultureInfo.InvariantCulture)
 
-let renderSqlDateTime (dt : DateTime) : string = dt.ToString("O", CultureInfo.InvariantCulture)
-
-let renderSqlDate (dt : DateTime) : string = dt.ToString("d", CultureInfo.InvariantCulture)
-
 let renderSqlJson (j : JToken) : string = j.ToString(Formatting.None)
+
+let trySqlDateTime (s : string) : NpgsqlDateTime option =
+    try
+        Some <| NpgsqlDateTime.Parse s
+    with
+    | :? FormatException as e -> None
+    | :? OverflowException as e -> None
+
+let trySqlDate (s : string) : NpgsqlDate option =
+    match NpgsqlDate.TryParse(s) with
+    | (false, _) -> None
+    | (true, ret) -> Some ret
+
+let trySqlInterval (s : string) : NpgsqlTimeSpan option =
+    match NpgsqlTimeSpan.TryParse(s) with
+    | (false, _) -> None
+    | (true, ret) -> Some ret
+
+let convertDateTime (dt : DateTime) = NpgsqlDateTime dt
 
 type ISQLString =
     abstract member ToSQLString : unit -> string

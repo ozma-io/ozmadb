@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.SQL.AST
 // SQL module does not attempt to restrict SQL in any way apart from type safety for values (explicit strings, integers etc.).
 
 open System
+open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 
@@ -107,15 +108,17 @@ type [<NoEquality; NoComparison>] Value =
     | VString of string
     | VRegclass of SchemaObject
     | VBool of bool
-    | VDateTime of DateTime
-    | VDate of DateTime
+    | VDateTime of NpgsqlDateTime
+    | VDate of NpgsqlDate
+    | VInterval of NpgsqlTimeSpan
     | VJson of JToken
     | VIntArray of ValueArray<int>
     | VDecimalArray of ValueArray<decimal>
     | VStringArray of ValueArray<string>
     | VBoolArray of ValueArray<bool>
-    | VDateTimeArray of ValueArray<DateTime>
-    | VDateArray of ValueArray<DateTime>
+    | VDateTimeArray of ValueArray<NpgsqlDateTime>
+    | VDateArray of ValueArray<NpgsqlDate>
+    | VIntervalArray of ValueArray<NpgsqlTimeSpan>
     | VRegclassArray of ValueArray<SchemaObject>
     | VJsonArray of ValueArray<JToken>
     | VNull
@@ -138,15 +141,17 @@ type [<NoEquality; NoComparison>] Value =
             | VString s -> sprintf "%s :: text" (renderSqlString s)
             | VRegclass rc -> sprintf "%s :: regclass" (rc.ToSQLString() |> renderSqlString)
             | VBool b -> renderSqlBool b
-            | VDateTime dt -> sprintf "%s :: timestamp" (dt |> renderSqlDateTime |> renderSqlString)
-            | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
+            | VDateTime dt -> sprintf "%s :: timestamp" (dt |> string |> renderSqlString)
+            | VDate d -> sprintf "%s :: date" (d |> string |> renderSqlString)
+            | VInterval d -> sprintf "%s :: interval" (d |> string |> renderSqlString)
             | VJson j -> sprintf "%s :: jsonb" (j |> renderSqlJson |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | VStringArray vals -> renderArray renderSqlString "text" vals
             | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-            | VDateTimeArray vals -> renderArray renderSqlDateTime "timestamp" vals
-            | VDateArray vals -> renderArray renderSqlDate "date" vals
+            | VDateTimeArray vals -> renderArray string "timestamp" vals
+            | VDateArray vals -> renderArray string "date" vals
+            | VIntervalArray vals -> renderArray string "interval" vals
             | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
             | VJsonArray vals -> renderArray renderSqlJson "jsonb" vals
             | VNull -> "NULL"
@@ -179,16 +184,18 @@ type ValuePrettyConverter () =
         | VDecimal d -> writer.WriteValue(d)
         | VString s -> writer.WriteValue(s)
         | VBool b -> writer.WriteValue(b)
-        | VDateTime dt -> writer.WriteValue(dt)
-        | VDate dt -> writer.WriteValue(dt)
+        | VDateTime dt -> writer.WriteValue(dt.ToDateTime())
+        | VDate dt -> writer.WriteValue(dt.ToString())
+        | VInterval int -> writer.WriteValue(int.ToString())
         | VJson j -> j.WriteTo(writer)
         | VRegclass rc -> writer.WriteValue(string rc)
         | VIntArray vals -> serializeArray id vals
         | VDecimalArray vals -> serializeArray id vals
         | VStringArray vals -> serializeArray id vals
         | VBoolArray vals -> serializeArray id vals
-        | VDateTimeArray vals -> serializeArray id vals
-        | VDateArray vals -> serializeArray id vals
+        | VDateTimeArray vals -> serializeArray (fun (dt : NpgsqlDateTime) -> dt.ToDateTime()) vals
+        | VDateArray vals -> serializeArray string vals
+        | VIntervalArray vals -> serializeArray string vals
         | VRegclassArray vals -> serializeArray string vals
         | VJsonArray vals -> serializeArray id vals
         | VNull -> writer.WriteNull()
@@ -202,6 +209,7 @@ type SimpleType =
     | STBool
     | STDateTime
     | STDate
+    | STInterval
     | STRegclass
     | STJson
     with
@@ -215,6 +223,7 @@ type SimpleType =
             | STBool -> "bool"
             | STDateTime -> "timestamp"
             | STDate -> "date"
+            | STInterval -> "interval"
             | STRegclass -> "regclass"
             | STJson -> "jsonb"
 
@@ -233,6 +242,7 @@ type SimpleTypePrettyConverter () =
         | STBool -> "bool"
         | STDateTime -> "datetime"
         | STDate -> "date"
+        | STInterval -> "interval"
         | STRegclass -> "regclass"
         | STJson -> "json"
 
@@ -261,6 +271,7 @@ let findSimpleType (str : TypeName) : SimpleType option =
     | "timestamp without time zone" -> Some STDateTime
     | "timestamp" -> Some STDateTime
     | "date" -> Some STDate
+    | "interval" -> Some STInterval
     | "regclass" -> Some STRegclass
     | "jsonb" -> Some STJson
     | "json" -> Some STJson
@@ -318,6 +329,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VBool b -> Some <| VTScalar STBool
     | VDateTime dt -> Some <| VTScalar STDateTime
     | VDate dt -> Some <| VTScalar STDate
+    | VInterval int -> Some <| VTScalar STInterval
     | VRegclass rc -> Some <| VTScalar STRegclass
     | VJson j -> Some <| VTScalar STJson
     | VIntArray vals -> Some <| VTArray STInt
@@ -326,6 +338,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VBoolArray vals -> Some <| VTArray STBool
     | VDateTimeArray vals -> Some <| VTArray STDateTime
     | VDateArray vals -> Some <| VTArray STDate
+    | VIntervalArray vals -> Some <| VTArray STInterval
     | VRegclassArray vals -> Some <| VTArray STRegclass
     | VJsonArray vals -> Some <| VTArray STJson
     | VNull -> None

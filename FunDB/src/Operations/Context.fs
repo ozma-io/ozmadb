@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Threading.Tasks
 open System.Linq
+open NpgsqlTypes
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json.Linq
@@ -96,55 +97,14 @@ let rec private printException (e : exn) : string =
     else
         sprintf "%s: %s" e.Message (printException e.InnerException)
 
-let private decodeValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
-    if tok.Type = JTokenType.Null then
-        if isNullable then
-            Some FNull
-        else
-            None
-    else
-        constrFunc <| tok.ToObject()
-
-let private parseExprArgument (fieldExprType : FieldExprType) : bool -> JToken -> FieldValue option =
-    let decodeValueStrict f = decodeValue (f >> Some)
-    match fieldExprType with
-    | FETArray SFTString -> decodeValueStrict FStringArray
-    | FETArray SFTInt -> decodeValueStrict FIntArray
-    | FETArray SFTDecimal -> decodeValueStrict FDecimalArray
-    | FETArray SFTBool -> decodeValueStrict FBoolArray
-    | FETArray SFTDateTime -> decodeValueStrict FDateTimeArray
-    | FETArray SFTDate -> decodeValueStrict FDateArray
-    | FETArray SFTJson -> decodeValueStrict FJsonArray
-    | FETArray SFTUserViewRef -> decodeValueStrict FUserViewRefArray
-    | FETScalar SFTString -> decodeValueStrict FString
-    | FETScalar SFTInt -> decodeValueStrict FInt
-    | FETScalar SFTDecimal -> decodeValueStrict FDecimal
-    | FETScalar SFTBool -> decodeValueStrict FBool
-    | FETScalar SFTDateTime -> decodeValueStrict FDateTime
-    | FETScalar SFTDate -> decodeValueStrict FDate
-    | FETScalar SFTJson -> decodeValueStrict FJson
-    | FETScalar SFTUserViewRef -> decodeValueStrict FUserViewRef
-
 type RawArguments = Map<string, JToken>
-
-let private convertArgument (fieldType : FieldType<_, _>) (isNullable : bool) (tok : JToken) : FieldValue option =
-    match fieldType with
-    | FTType feType -> parseExprArgument feType isNullable tok
-    | FTReference (ref, where) -> decodeValue (FInt >> Some) isNullable tok
-    | FTEnum values ->
-        let checkAndEncode v =
-            if Set.contains v values then
-                Some <| FString v
-            else
-                None
-        decodeValue checkAndEncode isNullable tok
 
 let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<EntityArguments, string> =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind (fieldName.ToString()) rawArgs with
         | None -> Ok None
         | Some value ->
-            match convertArgument field.fieldType field.isNullable value with
+            match parseValueFromJson field.fieldType field.isNullable value with
             | None -> Error <| sprintf "Cannot convert field to expected type %O: %O" field.fieldType fieldName
             | Some arg -> Ok (Some (fieldName, arg))
     match entity.columnFields |> Map.toSeq |> Seq.traverseResult getValue with
@@ -190,8 +150,8 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
         [ (FunQLName "lang", FString language)
           (FunQLName "user", FString userName)
           (FunQLName "user_id", userId)
-          (FunQLName "transaction_time", FDateTime transactionTime)
-        ] |> Map.ofSeq
+          (FunQLName "transaction_time", FDateTime <| NpgsqlDateTime transactionTime)
+        ] |> Map.ofList
     do
         assert (globalArgumentTypes |> Map.toSeq |> Seq.forall (fun (name, _) -> Map.containsKey name globalArguments))
 
@@ -245,7 +205,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
             | PLocal (FunQLName lname) ->
                 match Map.tryFind lname rawArgs with
                 | Some argStr ->
-                    match convertArgument arg.fieldType false argStr with
+                    match parseValueFromJson arg.fieldType false argStr with
                     | None -> Error <| sprintf "Cannot convert argument %O to type %O" name fieldType
                     | Some arg -> Ok (Some (name, arg))
                 | _ -> Ok None

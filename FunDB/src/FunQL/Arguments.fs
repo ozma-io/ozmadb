@@ -43,6 +43,7 @@ let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
     | SFTBool -> SQL.STBool
     | SFTDateTime -> SQL.STDateTime
     | SFTDate -> SQL.STDate
+    | SFTInterval -> SQL.STInterval
     | SFTJson -> SQL.STJson
     | SFTUserViewRef -> SQL.STJson
 
@@ -113,6 +114,7 @@ let compileFieldValueSingle : FieldValue -> SQL.Value = function
     | FBool b -> SQL.VBool b
     | FDateTime dt -> SQL.VDateTime dt
     | FDate d -> SQL.VDate d
+    | FInterval int -> SQL.VInterval int
     | FJson j -> SQL.VJson j
     | FUserViewRef r -> SQL.VJson <| JToken.FromObject(r)
     | FIntArray vals -> SQL.VIntArray (compileArray vals)
@@ -121,6 +123,7 @@ let compileFieldValueSingle : FieldValue -> SQL.Value = function
     | FBoolArray vals -> SQL.VBoolArray (compileArray vals)
     | FDateTimeArray vals -> SQL.VDateTimeArray (compileArray vals)
     | FDateArray vals -> SQL.VDateArray (compileArray vals)
+    | FIntervalArray vals -> SQL.VIntervalArray (compileArray vals)
     | FJsonArray vals -> SQL.VJsonArray (compileArray vals)
     | FUserViewRefArray vals -> SQL.VJsonArray (vals |> Array.map (fun x -> JToken.FromObject(x)) |> compileArray)
     | FNull -> SQL.VNull

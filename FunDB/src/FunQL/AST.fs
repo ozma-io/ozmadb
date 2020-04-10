@@ -3,12 +3,15 @@ module FunWithFlags.FunDB.FunQL.AST
 open System
 open System.ComponentModel
 open System.Threading.Tasks
+open NpgsqlTypes
 open Newtonsoft.Json
+open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.FunQL.Utils
+open FunWithFlags.FunDB.SQL.Utils
 
 type IFunQLName =
     interface
@@ -156,16 +159,18 @@ type [<NoEquality; NoComparison>] FieldValue =
     | FDecimal of decimal
     | FString of string
     | FBool of bool
-    | FDateTime of DateTime
-    | FDate of DateTime
+    | FDateTime of NpgsqlDateTime
+    | FDate of NpgsqlDate
+    | FInterval of NpgsqlTimeSpan
     | FJson of JToken
     | FUserViewRef of UserViewRef
     | FIntArray of int[]
     | FDecimalArray of decimal[]
     | FStringArray of string[]
     | FBoolArray of bool[]
-    | FDateTimeArray of DateTime[]
-    | FDateArray of DateTime[]
+    | FDateTimeArray of NpgsqlDateTime[]
+    | FDateArray of NpgsqlDate[]
+    | FIntervalArray of NpgsqlTimeSpan[]
     | FJsonArray of JToken[]
     | FUserViewRefArray of UserViewRef[]
     | FNull
@@ -184,16 +189,18 @@ type [<NoEquality; NoComparison>] FieldValue =
             | FDecimal d -> renderFunQLDecimal d
             | FString s -> renderFunQLString s
             | FBool b -> renderFunQLBool b
-            | FDateTime dt -> sprintf "%s :: datetime" (dt |> renderFunQLDateTime |> renderFunQLString)
-            | FDate d -> sprintf "%s :: date" (d |> renderFunQLDate |> renderFunQLString)
+            | FDateTime dt -> sprintf "%s :: datetime" (dt |> string |> renderFunQLString)
+            | FDate d -> sprintf "%s :: date" (d |> string |> renderFunQLString)
+            | FInterval int -> sprintf "%s :: interval" (int |> string |> renderFunQLString)
             | FJson j -> renderFunQLJson j
             | FUserViewRef r -> sprintf "&%s" (r.ToFunQLString())
             | FIntArray vals -> renderArray renderFunQLInt "int" vals
             | FDecimalArray vals -> renderArray renderFunQLDecimal "decimal" vals
             | FStringArray vals -> renderArray renderFunQLString "string" vals
             | FBoolArray vals -> renderArray renderFunQLBool "bool" vals
-            | FDateTimeArray vals -> renderArray (renderFunQLDateTime >> renderFunQLString) "datetime" vals
-            | FDateArray vals -> renderArray (renderFunQLDate >> renderFunQLString) "date" vals
+            | FDateTimeArray vals -> renderArray (string >> renderFunQLString) "datetime" vals
+            | FDateArray vals -> renderArray (string >> renderFunQLString) "date" vals
+            | FIntervalArray vals -> renderArray (string >> renderFunQLString) "interval" vals
             | FJsonArray vals -> renderArray renderFunQLJson "json" vals
             | FUserViewRefArray vals -> renderArray (fun (r : EntityRef) -> sprintf "&%s" (r.ToFunQLString())) "uvref" vals
             | FNull -> "NULL"
@@ -217,8 +224,9 @@ type FieldValuePrettyConverter () =
         | FDecimal d -> writer.WriteValue(d)
         | FString s -> writer.WriteValue(s)
         | FBool b -> writer.WriteValue(b)
-        | FDateTime dt -> writer.WriteValue(dt)
-        | FDate dt -> writer.WriteValue(dt)
+        | FDateTime dt -> writer.WriteValue(dt.ToDateTime())
+        | FDate dt -> writer.WriteValue(dt.ToString())
+        | FInterval int -> writer.WriteValue(int.ToString())
         | FJson j -> j.WriteTo(writer)
         | FUserViewRef r -> serialize r
         | FIntArray vals -> serialize vals
@@ -227,6 +235,7 @@ type FieldValuePrettyConverter () =
         | FBoolArray vals -> serialize vals
         | FDateTimeArray vals -> serialize vals
         | FDateArray vals -> serialize vals
+        | FIntervalArray vals -> serialize vals
         | FJsonArray vals -> serialize vals
         | FUserViewRefArray vals -> serialize vals
         | FNull -> writer.WriteNull()
@@ -238,6 +247,7 @@ type ScalarFieldType =
     | SFTBool
     | SFTDateTime
     | SFTDate
+    | SFTInterval
     | SFTJson
     | SFTUserViewRef
     with
@@ -251,6 +261,7 @@ type ScalarFieldType =
             | SFTBool -> "bool"
             | SFTDateTime -> "datetime"
             | SFTDate -> "date"
+            | SFTInterval -> "interval"
             | SFTJson -> "json"
             | SFTUserViewRef -> "uvref"
 
@@ -301,7 +312,7 @@ type FieldExprTypePrettyConverter () =
             writer.WritePropertyName("subtype")
             serializer.Serialize(writer, st)
         writer.WriteEndObject()
-
+        
 type JoinType =
     | Inner
     | Left
@@ -1056,3 +1067,49 @@ let allowedFunctions =
     Set.ofSeq
         [ FunQLName "abs"
         ]
+
+let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
+    if tok.Type = JTokenType.Null then
+        if isNullable then
+            Some FNull
+        else
+            None
+    else
+        try
+            constrFunc <| tok.ToObject()
+        with
+        | :? JsonSerializationException -> None
+
+let private parseValueFromJson' (fieldExprType : FieldExprType) : bool -> JToken -> FieldValue option =
+    let parseSingleValueStrict f = parseSingleValue (f >> Some)
+    match fieldExprType with
+    | FETArray SFTString -> parseSingleValueStrict FStringArray
+    | FETArray SFTInt -> parseSingleValueStrict FIntArray
+    | FETArray SFTDecimal -> parseSingleValueStrict FDecimalArray
+    | FETArray SFTBool -> parseSingleValueStrict FBoolArray
+    | FETArray SFTDateTime -> parseSingleValue (Array.map convertDateTime >> FDateTimeArray >> Some)
+    | FETArray SFTDate -> parseSingleValue (Seq.traverseOption trySqlDate >> Option.map (Array.ofSeq >> FDateArray))
+    | FETArray SFTInterval -> parseSingleValue (Seq.traverseOption trySqlInterval >> Option.map (Array.ofSeq >> FIntervalArray))
+    | FETArray SFTJson -> parseSingleValueStrict FJsonArray
+    | FETArray SFTUserViewRef -> parseSingleValueStrict FUserViewRefArray
+    | FETScalar SFTString -> parseSingleValueStrict FString
+    | FETScalar SFTInt -> parseSingleValueStrict FInt
+    | FETScalar SFTDecimal -> parseSingleValueStrict FDecimal
+    | FETScalar SFTBool -> parseSingleValueStrict FBool
+    | FETScalar SFTDateTime -> parseSingleValue (convertDateTime >> FDateTime >> Some)
+    | FETScalar SFTDate -> parseSingleValue (trySqlDate >> Option.map FDate)
+    | FETScalar SFTInterval -> parseSingleValue (trySqlInterval >> Option.map FInterval)
+    | FETScalar SFTJson -> parseSingleValueStrict FJson
+    | FETScalar SFTUserViewRef -> parseSingleValueStrict FUserViewRef
+
+let parseValueFromJson (fieldType : FieldType<_, _>) (isNullable : bool) (tok : JToken) : FieldValue option =
+    match fieldType with
+    | FTType feType -> parseValueFromJson' feType isNullable tok
+    | FTReference (ref, where) -> parseSingleValue (FInt >> Some) isNullable tok
+    | FTEnum values ->
+        let checkAndEncode v =
+            if Set.contains v values then
+                Some <| FString v
+            else
+                None
+        parseSingleValue checkAndEncode isNullable tok

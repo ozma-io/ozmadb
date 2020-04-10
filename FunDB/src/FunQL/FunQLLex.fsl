@@ -158,6 +158,7 @@ and tokenizeFunQL = parse
     | b o o l           { Parse.BOOL_TYPE }
     | d a t e t i m e   { Parse.DATETIME_TYPE }
     | d a t e           { Parse.DATE_TYPE }
+    | i n t e r v a l   { Parse.INTERVAL_TYPE }
     | r e f e r e n c e { Parse.REFERENCE_TYPE }
     | e n u m           { Parse.ENUM_TYPE }
     | j s o n           { Parse.JSON_TYPE }

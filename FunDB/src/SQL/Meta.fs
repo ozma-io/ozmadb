@@ -10,6 +10,7 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Parsing
+open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.SQL.Lex
@@ -59,8 +60,9 @@ let private parseToSimpleType : SimpleType -> (string -> Value) = function
     | STInt -> runCast tryIntInvariant >> VInt
     | STDecimal -> runCast tryDecimalInvariant >> VDecimal
     | STBool -> runCast tryBool >> VBool
-    | STDateTime -> runCast tryDateTimeInvariant >> VDateTime
-    | STDate -> runCast tryDateInvariant >> VDate
+    | STDateTime -> runCast trySqlDateTime >> VDateTime
+    | STDate -> runCast trySqlDate >> VDate
+    | STInterval -> runCast trySqlInterval >> VInterval
     | STRegclass -> runCast tryRegclass >> VRegclass
     | STJson -> runCast tryJson >> VJson
 
