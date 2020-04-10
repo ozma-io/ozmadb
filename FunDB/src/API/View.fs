@@ -30,7 +30,7 @@ let viewsApi : HttpHandler =
         | UVEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
         | UVENotFound -> text "Not found" |> RequestErrors.notFound
         | UVEResolve msg -> text msg |> RequestErrors.badRequest
-        | UVEExecute msg -> text msg |> RequestErrors.badRequest
+        | UVEExecute msg -> text msg |> RequestErrors.unprocessableEntity
        
     let getRecompile (ctx : HttpContext) =
 #if DEBUG

@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Attributes.Source
 
 open Newtonsoft.Json
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceAttributesField =
@@ -18,10 +19,21 @@ type SourceAttributesEntity =
     } with
         member this.FindField (name : FieldName) =
             Map.tryFind name this.fields
+          
+let emptySourceAttributesEntity : SourceAttributesEntity =
+    { fields = Map.empty }
+
+let mergeSourceAttributesEntity (a : SourceAttributesEntity) (b : SourceAttributesEntity) : SourceAttributesEntity =
+    { fields = Map.unionUnique a.fields b.fields
+    }
 
 type SourceAttributesSchema =
     { [<JsonProperty(Required=Required.DisallowNull)>]
       entities : Map<EntityName, SourceAttributesEntity>
+    }
+
+let mergeSourceAttributesSchema (a : SourceAttributesSchema) (b : SourceAttributesSchema) : SourceAttributesSchema =
+    { entities = Map.unionWith (fun name -> mergeSourceAttributesEntity) a.entities b.entities
     }
 
 type SourceAttributesDatabase =
@@ -37,8 +49,12 @@ type SourceAttributesDatabase =
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
-let emptySourceAttributesSchema : SourceAttributesDatabase =
+let emptySourceAttributesDatabase : SourceAttributesDatabase =
     { schemas = Map.empty }
+
+let mergeSourceAttributesDatabase (a : SourceAttributesDatabase) (b : SourceAttributesDatabase) : SourceAttributesDatabase =
+    { schemas = Map.unionWith (fun name -> mergeSourceAttributesSchema) a.schemas b.schemas
+    }
 
 type SourceDefaultAttributes =
     { [<JsonProperty(Required=Required.DisallowNull)>]

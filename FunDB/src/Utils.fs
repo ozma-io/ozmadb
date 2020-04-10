@@ -2,6 +2,8 @@ module FunWithFlags.FunDB.Utils
 
 open Printf
 open System
+open System.IO
+open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Globalization
 open System.Threading.Tasks
@@ -468,11 +470,20 @@ let tryDateOffset (culture : CultureInfo) (dateStr : string) : DateTimeOffset op
 let tryDateOffsetInvariant : string -> DateTimeOffset option = tryDateOffset CultureInfo.InvariantCulture
 let tryDateOffsetCurrent : string -> DateTimeOffset option = tryDateOffset CultureInfo.CurrentCulture
 
+let regexMatch (regex : string) (flags : RegexOptions) (str : string) : (string list) option =
+    let m = Regex.Match(str, regex, flags)
+    if m.Success
+    then Some <| List.tail [ for x in m.Groups -> x.Value ]
+    else None
+
 let (|Regex|_|) (regex : string) (str : string) : (string list) option =
-   let m = System.Text.RegularExpressions.Regex.Match(str, regex)
-   if m.Success
-   then Some <| List.tail [ for x in m.Groups -> x.Value ]
-   else None
+    regexMatch regex RegexOptions.None str
+
+let (|CIRegex|_|) (regex : string) (str : string) : (string list) option =
+    regexMatch regex RegexOptions.IgnoreCase str
+
+let (|RegexOpts|_|) (regex : string) (flags : RegexOptions) (str : string) : (string list) option =
+    regexMatch regex flags str
 
 let dictUnique (items : IEnumerable<'k * 'v>) : IDictionary<'k, 'v> = items |> Map.ofSeqUnique |> Map.toSeq |> dict
 
@@ -579,3 +590,39 @@ let isUnionCase<'t> (objectType : Type) : bool =
         not (isNull objectType.BaseType) && objectType.BaseType.IsGenericType && objectType.BaseType.GetGenericTypeDefinition() = typedefof<'t>
     else
         not (isNull objectType.BaseType) && objectType.BaseType = typeof<'t>
+
+let private normalizeNewlinesRegex = Regex("\r\n|\n|\r", RegexOptions.Compiled)
+
+let normalizeNewlines (str : string) : string =
+    normalizeNewlinesRegex.Replace(str, "\n")
+
+// https://www.meziantou.net/prevent-zip-bombs-in-dotnet.htm
+type MaxLengthStream(stream : Stream, maxLength : int64) =
+    inherit Stream()
+
+    let mutable length = 0L
+
+    member this.BytesRead = length
+
+    override this.CanRead = stream.CanRead
+    override this.CanSeek = false
+    override this.CanWrite = false
+    override this.Length = stream.Length
+    override this.Position
+        with get () = stream.Position
+        and set _ = raise <| NotSupportedException()
+
+    override this.Read (buffer, offset, count) =
+        let result = stream.Read(buffer, offset, count)
+        length <- length + int64 result
+        if length > maxLength then
+            raise <| IOException("File is too large")
+        result
+
+    override this.Flush () = raise <| NotSupportedException()
+    override this.Seek (offset, origin) = raise <| NotSupportedException()
+    override this.SetLength (value) = raise <| NotSupportedException()
+    override this.Write (buffer, offset, count) = raise <| NotSupportedException()
+    override this.Dispose (disposing) =
+        stream.Dispose()
+        base.Dispose(disposing)

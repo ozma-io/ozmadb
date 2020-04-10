@@ -1000,6 +1000,8 @@ let funMain = FunQLName "__main"
 let funUsers = FunQLName "users"
 let funEvents = FunQLName "events"
 
+let systemColumns = Set.ofList [funId; funSubEntity]
+
 type UsedFields = Set<FieldName>
 type UsedEntities = Map<EntityName, UsedFields>
 type UsedSchemas = Map<SchemaName, UsedEntities>

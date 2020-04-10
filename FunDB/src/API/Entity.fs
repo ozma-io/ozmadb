@@ -33,7 +33,7 @@ let entitiesApi : HttpHandler =
         | EEArguments msg -> sprintf "Invalid arguments: %s" msg |> text |> RequestErrors.badRequest
         | EEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
         | EENotFound -> text "Not found" |> RequestErrors.notFound
-        | EEExecute msg -> text msg |> RequestErrors.badRequest
+        | EEExecute msg -> text msg |> RequestErrors.unprocessableEntity
 
     let getEntityInfo (entityRef : ResolvedEntityRef) (rctx : RequestContext) : HttpHandler =
         fun next ctx -> task {

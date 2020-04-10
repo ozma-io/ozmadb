@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Layout.Source
 
 open Newtonsoft.Json
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 // Source Layout; various layout sources, like database or system layout, are converted into this.
@@ -25,7 +26,9 @@ type SourceColumnField =
 
 type SourceComputedField =
     { expression : string
+      [<JsonProperty(Required=Required.DisallowNull)>]
       allowBroken : bool
+      [<JsonProperty(Required=Required.DisallowNull)>]
       isVirtual : bool
     }
 
@@ -72,6 +75,10 @@ type SourceSchema =
 
 let emptySourceSchema : SourceSchema =
     { entities = Map.empty
+    }
+
+let mergeSourceSchema (a : SourceSchema) (b : SourceSchema) : SourceSchema =
+    { entities = Map.unionUnique a.entities b.entities
     }
 
 type SourceLayout =

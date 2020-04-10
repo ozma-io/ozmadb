@@ -186,7 +186,6 @@ let private triggerTypeDelete = 1s <<< 3
 let private triggerTypeUpdate = 1s <<< 4
 let private triggerTypeTruncate = 1s <<< 5
 let private triggerTypeInstead = 1s <<< 6
-let private triggerWhenRegex = Regex "WHEN \\((.*)\\) EXECUTE PROCEDURE"
 
 let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : TriggerName * TriggerDefinition =
     try
@@ -220,13 +219,11 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
                     yield TETruncate
             }
         let condition =
-            // Any better way???
+            // FIXME: Any better way???
             // See https://postgrespro.com/list/thread-id/1558141
-            let res = triggerWhenRegex.Match(trigger.Source)
-            if res.Success then
-                Some <| parseLocalExpr res.Groups.[1].Value
-            else
-                None
+            match trigger.Source with
+            | Regex @"WHEN \((.*)\) EXECUTE PROCEDURE" [cond] -> Some <| parseLocalExpr cond
+            | _ -> None
         let functionName =
             { schema = Some <| SQLName trigger.Function.Namespace.NspName
               name = SQLName trigger.Function.ProName

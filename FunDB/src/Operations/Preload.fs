@@ -134,7 +134,7 @@ let resolvePreload (source : SourcePreloadFile) : Preload =
     let systemPreload =
         { schema = buildSystemSchema typeof<SystemContext>
           permissions = emptySourcePermissionsSchema
-          defaultAttributes = emptySourceAttributesSchema
+          defaultAttributes = emptySourceAttributesDatabase
           userViewGenerator = None
         }
     { schemas = Map.add funSchema systemPreload preloadedSchemas

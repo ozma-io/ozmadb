@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Permissions.Source
 
 open Newtonsoft.Json
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type ResolvedRoleRef = ResolvedEntityRef
@@ -54,6 +55,10 @@ type SourcePermissionsSchema =
 
 let emptySourcePermissionsSchema : SourcePermissionsSchema =
     { roles = Map.empty }
+
+let mergeSourcePermissionsSchema (a : SourcePermissionsSchema) (b : SourcePermissionsSchema) : SourcePermissionsSchema =
+    { roles = Map.unionUnique a.roles b.roles
+    }  
 
 type SourcePermissions =
     { [<JsonProperty(Required=Required.DisallowNull)>]

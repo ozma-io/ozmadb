@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Operations.Context
 
 open System
+open System.IO
 open System.Threading.Tasks
 open System.Linq
 open Microsoft.EntityFrameworkCore
@@ -67,11 +68,13 @@ type SaveErrorInfo =
 type RestoreErrorInfo =
     | REAccessDenied
     | REPreloaded
+    | REInvalidFormat of string
     with
         member this.Message =
             match this with
             | REAccessDenied -> "Restore access denied"
             | REPreloaded -> "Cannot restore preloaded schemas"
+            | REInvalidFormat msg -> msg
 
 type RequestErrorInfo =
     | REUserNotFound
@@ -631,6 +634,17 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     | SaveRestore.SENotFound -> return Error SENotFound
         }
 
+    member this.SaveZipSchema (name : SchemaName) : Task<Result<Stream, SaveErrorInfo>> =
+        task {
+            match! this.SaveSchema name with
+            | Error e -> return Error e
+            | Ok dump ->
+                let stream = new MemoryStream()
+                schemaToZipFile name dump stream
+                ignore <| stream.Seek(0L, SeekOrigin.Begin)
+                return Ok (stream :> Stream)
+        }
+
     member this.RestoreSchema (name : SchemaName) (dump : SchemaDump) : Task<Result<unit, RestoreErrorInfo>> =
         task {
             if not (isRootRole roleType) then
@@ -653,4 +667,16 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 if modified then
                     needMigration <- true
                 return Ok ()
+        }
+
+    member this.RestoreZipSchema (name : SchemaName) (stream : Stream) : Task<Result<unit, RestoreErrorInfo>> =
+        task {
+            let dump =
+                try
+                    Ok <| schemaFromZipFile name stream
+                with
+                | :? RestoreSchemaException as e -> Error (REInvalidFormat <| printException e)
+            match dump with
+            | Error e -> return Error e
+            | Ok dump -> return! this.RestoreSchema name dump
         }

@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.UserViews.Source
 
 open Newtonsoft.Json
 
+open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceUserView =
@@ -16,6 +17,10 @@ type SourceUserViewsSchema =
 
 let emptySourceUserViewsSchema : SourceUserViewsSchema =
     { userViews = Map.empty }
+
+let mergeSourceUserViewsSchema (a : SourceUserViewsSchema) (b : SourceUserViewsSchema) =
+    { userViews = Map.unionUnique a.userViews b.userViews
+    }
 
 type SourceUserViews =
     { [<JsonProperty(Required=Required.DisallowNull)>]
