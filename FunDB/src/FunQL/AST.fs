@@ -46,6 +46,7 @@ type AttributeName = FunQLName
 type ArgumentName = FunQLName
 type UserViewName = FunQLName
 type RoleName = FunQLName
+type FunctionName = FunQLName
 
 type EntityRef =
     { schema : SchemaName option
@@ -1053,8 +1054,8 @@ let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
 
 let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal
 
-let allowedAggregateFunctions =
-    Set.ofSeq
+let allowedAggregateFunctions : Set<FunctionName> =
+    Set.ofList
         [ FunQLName "sum"
           FunQLName "avg"
           FunQLName "min"
@@ -1063,9 +1064,14 @@ let allowedAggregateFunctions =
           FunQLName "bool_and"
         ]
 
-let allowedFunctions =
-    Set.ofSeq
+// int is number of arguments
+let allowedFunctions : Set<FunctionName> =
+    Set.ofList
         [ FunQLName "abs"
+          FunQLName "isfinite"
+          FunQLName "age"
+          FunQLName "date_part"
+          FunQLName "date_trunc"
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
