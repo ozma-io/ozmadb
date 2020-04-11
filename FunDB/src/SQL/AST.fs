@@ -259,8 +259,10 @@ let findSimpleType (str : TypeName) : SimpleType option =
     match str.ToString() with
     | "int4" -> Some STInt
     | "integer" -> Some STInt
+    // XXX: Loss of data!
     | "bigint" -> Some STInt
     | "text" -> Some STString
+    | "double precision" -> Some STDecimal
     | "decimal" -> Some STDecimal
     | "numeric" -> Some STDecimal
     | "varchar" -> Some STString

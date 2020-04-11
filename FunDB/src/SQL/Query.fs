@@ -45,7 +45,7 @@ let private convertInt : obj -> int option = function
     | :? int16 as value -> Some <| int value
     | :? uint16 as value -> Some <| int value
     | :? int32 as value -> Some <| int value
-    // XXX: possible casting problem
+    // XXX: possible loss of data
     | :? uint32 as value -> Some <| int value
     | :? int64 as value -> Some <| int value
     | :? uint64 as value -> Some <| int value
@@ -59,6 +59,7 @@ let private convertValue valType (rawValue : obj) =
         | Some i -> VInt i
         | None -> raisef QueryException "Unknown integer type: %s" (value.GetType().FullName)
     | (VTScalar STDecimal, (:? decimal as value)) -> VDecimal value
+    | (VTScalar STDecimal, (:? double as value)) -> VDecimal (decimal value)
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
     | (VTScalar STDateTime, (:? NpgsqlDateTime as value)) -> VDateTime value
