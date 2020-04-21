@@ -11,9 +11,9 @@ var commonViews = {
     // Public APIs
     "system_menu":
         "SELECT\n" +
-        "  @\"Type\" = 'Menu',\n" +
+        "  @type = 'menu',\n" +
         "  schemas.name AS category_name,\n" +
-        "  entities.name AS name @{ \"LinkedView\" = { schema: 'funapp', name: 'table-' || schemas.name || '-' || entities.name } }\n" +
+        "  entities.name AS name @{ linked_view = { schema: 'funapp', name: 'table-' || schemas.name || '-' || entities.name } }\n" +
         "FROM\n" +
         "  public.entities\n" +
         "  LEFT JOIN public.schemas ON schemas.id = entities.schema_id\n" +
@@ -22,8 +22,8 @@ var commonViews = {
     "user_view_by_name":
         "{ $schema string, $name string }:\n" +
         "SELECT\n" +
-        "  @\"Type\" = 'Form',\n" +
-        "  @\"BlockSizes\" = [\n" +
+        "  @type = 'form',\n" +
+        "  @block_sizes = [\n" +
         "    6, 6,\n" +
         "    12\n" +
         "  ],\n" +
@@ -31,8 +31,8 @@ var commonViews = {
         "  name,\n" +
         "  allow_broken,\n" +
         "  query @{\n" +
-	"    \"FormBlock\" = 2,\n" +
-	"    \"TextType\" = 'codeeditor',\n" +
+	"    form_block = 2,\n" +
+	"    text_type = 'codeeditor',\n" +
         "  }\n" +
         "FROM\n" +
         "  public.user_views\n" +
@@ -67,7 +67,7 @@ function addDefaultViews(views, layout) {
             var formQuery =
                 "{ $id reference(" + sqlName + ") }:\n\n" +
                 "SELECT\n  " +
-                ["@\"Type\" = 'Form'"].concat(fields).join(",\n  ") +
+                ["@type = 'form'"].concat(fields).join(",\n  ") +
                 "\nFROM " + sqlName + " " +
                 "WHERE id = $id";
             if (!entity.isAbstract) {
@@ -78,8 +78,8 @@ function addDefaultViews(views, layout) {
             var tableName = "table-" + schemaName + "-" + entityName;
             var tableQuery =
                 "SELECT\n  " +
-                [ "@\"CreateView\" = &\"" + formName + "\"",
-                  "id @{ \"RowLinkedView\" = &\"" + formName + "\" }"
+                [ "@create_view = &\"" + formName + "\"",
+                  "id @{ row_linked_view = &\"" + formName + "\" }"
                 ].concat(fields).join(",\n  ") +
                 "\nFROM " + sqlName +
                 "\nORDER BY id";

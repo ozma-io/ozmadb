@@ -81,7 +81,7 @@
             "user_views": {
               "fields": {
                 "query": {
-                  "attributes": "@{ \"TextType\" = 'codeeditor' }"
+                  "attributes": "@{ text_type = 'codeeditor' }"
                 }
               }
             },
@@ -89,7 +89,7 @@
             "fields_attributes": {
               "fields": {
                 "attributes": {
-                  "attributes": "@{ \"TextType\" = 'codeeditor' }"
+                  "attributes": "@{ text_type = 'codeeditor' }"
                 }
               }
             }
