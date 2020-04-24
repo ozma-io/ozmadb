@@ -600,7 +600,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
             | Error e -> return Error e
             | Ok dump ->
                 let stream = new MemoryStream()
-                schemaToZipFile name dump stream
+                schemasToZipFile (Map.singleton name dump) stream
                 ignore <| stream.Seek(0L, SeekOrigin.Begin)
                 return Ok (stream :> Stream)
         }
@@ -631,12 +631,13 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
 
     member this.RestoreZipSchema (name : SchemaName) (stream : Stream) : Task<Result<unit, RestoreErrorInfo>> =
         task {
-            let dump =
+            let maybeDumps =
                 try
-                    Ok <| schemaFromZipFile name stream
+                    Ok <| schemasFromZipFile stream
                 with
                 | :? RestoreSchemaException as e -> Error (REInvalidFormat <| printException e)
-            match dump with
+            match Result.map (Map.toList) maybeDumps with
             | Error e -> return Error e
-            | Ok dump -> return! this.RestoreSchema name dump
+            | Ok [(dumpName, dump)] when name = dumpName -> return! this.RestoreSchema name dump
+            | Ok _ -> return Error (REInvalidFormat <| sprintf "Archive should only contain directory %O" name)
         }

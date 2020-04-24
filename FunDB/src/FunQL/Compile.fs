@@ -5,7 +5,7 @@ open NpgsqlTypes
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Json
+open FunWithFlags.FunDB.Serialization.Json
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Arguments

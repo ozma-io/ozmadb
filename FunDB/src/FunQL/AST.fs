@@ -9,7 +9,7 @@ open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Json
+open FunWithFlags.FunDB.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.SQL.Utils
 

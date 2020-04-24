@@ -49,10 +49,9 @@ let private getAttribute<'t when 't :> Attribute> (prop : PropertyInfo) =
     Attribute.GetCustomAttributes(prop, typeof<'t>) |> Array.map (fun x -> x :?> 't)
 
 let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceEntity) option =
-    let entityAttr = Attribute.GetCustomAttribute(prop, typeof<EntityAttribute>) :?> EntityAttribute
-    if isNull entityAttr
-    then None
-    else
+    match Attribute.GetCustomAttribute(prop, typeof<EntityAttribute>) with
+    | null -> None
+    | :? EntityAttribute as entityAttr ->
         let name = FunQLName (snakeCaseName prop.Name)
         // Should be DbSet<Foo>
         let entityClass = prop.PropertyType.GetGenericArguments().[0]
@@ -73,6 +72,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               isAbstract = entityClass.IsAbstract
             }
         Some (name, entityClass, res)
+    | _ -> failwith "Impossible"    
 
 // Build entities map using mish-mash of our custom attributes and Entity Framework Core declarations.
 let buildSystemSchema (contextClass : Type) : SourceSchema =

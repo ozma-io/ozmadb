@@ -201,8 +201,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
             if Array.isEmpty systemMigration then
                 true
             else
-                eprintfn "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
-                false
+                failwithf "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
         assert sanityCheck ()
 
         // We migrate layout first so that permissions and attributes have schemas in the table.
@@ -258,8 +257,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
             if Array.isEmpty systemMigration then
                 true
             else
-                eprintfn "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
-                false
+                failwithf "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
         assert sanityCheck ()
 
         return (changed1 || changed2 || changed3, newLayout, newUserMeta)

@@ -2,14 +2,13 @@ module FunWithFlags.FunDB.SQL.Meta
 
 open Npgsql
 open System.Threading.Tasks
-open System.Text.RegularExpressions
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Json
 open FunWithFlags.FunDB.Parsing
+open FunWithFlags.FunDB.Serialization.Json
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL

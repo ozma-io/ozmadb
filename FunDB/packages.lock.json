@@ -150,15 +150,6 @@
         "resolved": "12.0.3",
         "contentHash": "6mgjfnRB4jKMlzHSl+VD+oUc1IebOZabkbyWj2RiTgWwYPPuaK1H97G1sHqGwPlS5npiF5Q0OrxN1wni2n5QWg=="
       },
-      "Newtonsoft.Json.Bson": {
-        "type": "Direct",
-        "requested": "[1.0.*, )",
-        "resolved": "1.0.2",
-        "contentHash": "QYFyxhaABwmq3p/21VrZNYvCg3DaEoN/wUuw5nmfAf0X3HLjgupwhkEWdgfb9nvGAUIv3osmZoD3kKl4jxEmYQ==",
-        "dependencies": {
-          "Newtonsoft.Json": "12.0.1"
-        }
-      },
       "Npgsql": {
         "type": "Direct",
         "requested": "[4.1.*, )",
@@ -189,6 +180,12 @@
           "Newtonsoft.Json": "11.0.2",
           "Npgsql": "4.1.3"
         }
+      },
+      "YamlDotNet": {
+        "type": "Direct",
+        "requested": "[8.1.*, )",
+        "resolved": "8.1.1",
+        "contentHash": "JXPO7bjUUeDIXgzlLAdNFCzrxBxBzYBbXy3MEp2uWIY7KK8LoNogaPhSg2mLuzCN5flp1ydeVqm+4j3tkP0pow=="
       },
       "Esprima": {
         "type": "Transitive",

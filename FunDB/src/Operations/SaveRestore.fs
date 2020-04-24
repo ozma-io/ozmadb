@@ -8,6 +8,7 @@ open Newtonsoft.Json
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Serialization.Yaml
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Schema
@@ -220,44 +221,46 @@ let private maxFilesSize = 1L * 1024L * 1024L // 1MB
 
 let private uvPragmaAllowBroken = "--#allow_broken"
 
-let schemaToZipFile (schemaName : SchemaName) (dump : SchemaDump) (stream : Stream) =
-    let serializer = JsonSerializer()
-    serializer.Formatting <- Formatting.Indented
+let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
     use zip = new ZipArchive(stream, ZipArchiveMode.Create, true)
     let mutable totalSize = 0L
 
-    let useEntry (path : string) (fn : StreamWriter -> unit) =
-        let entry = zip.CreateEntry(path)
-        use writer = new StreamWriter(entry.Open())
-        fn writer
-        totalSize <- totalSize + writer.BaseStream.Position
+    for KeyValue(schemaName, dump) in schemas do
+        let useEntry (path : string) (fn : StreamWriter -> unit) =
+            let entry = zip.CreateEntry(sprintf "%O/%s" schemaName path)
+            // https://superuser.com/questions/603068/unzipping-file-whilst-getting-correct-permissions
+            entry.ExternalAttributes <- 0o644 <<< 16
+            use writer = new StreamWriter(entry.Open())
+            fn writer
+            totalSize <- totalSize + writer.BaseStream.Position
 
-    let dumpToEntry (path : string) (document : 'a) = useEntry path (fun writer -> serializer.Serialize(writer, document))
+        let dumpToEntry (path : string) (document : 'a) =
+            useEntry path <| fun writer ->
+                defaultYamlSerializer.Serialize(writer, document)
 
-    for KeyValue(name, entity) in dump.entities do
-        let defaultAttrs = dump.defaultAttributes |> Map.tryFind schemaName |> Option.bind (fun schema -> Map.tryFind name schema.entities) |> Option.defaultValue emptySourceAttributesEntity
-        let prettyEntity = prettifyEntity defaultAttrs entity
-        dumpToEntry (sprintf "entities/%O.json" name) prettyEntity
+        for KeyValue(name, entity) in dump.entities do
+            let defaultAttrs = dump.defaultAttributes |> Map.tryFind schemaName |> Option.bind (fun schema -> Map.tryFind name schema.entities) |> Option.defaultValue emptySourceAttributesEntity
+            let prettyEntity = prettifyEntity defaultAttrs entity
+            dumpToEntry (sprintf "entities/%O.yaml" name) prettyEntity
 
-    for KeyValue(name, role) in dump.roles do
-        dumpToEntry (sprintf "roles/%O.json" name) role
+        for KeyValue(name, role) in dump.roles do
+            dumpToEntry (sprintf "roles/%O.yaml" name) role
 
-    for KeyValue(name, uv) in dump.userViews do
-        useEntry (sprintf "user_views/%O.funql" name) <| fun writer ->
-            if uv.allowBroken then
-                writer.WriteLine(uvPragmaAllowBroken)
-            writer.Write(uv.query)
+        for KeyValue(name, uv) in dump.userViews do
+            useEntry (sprintf "user_views/%O.funql" name) <| fun writer ->
+                if uv.allowBroken then
+                    writer.WriteLine(uvPragmaAllowBroken)
+                writer.Write(uv.query)
 
-    let extraAttributes = dump.defaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
-    if not <| Map.isEmpty extraAttributes then
-        dumpToEntry extraDefaultAttributesEntry extraAttributes
+        let extraAttributes = dump.defaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
+        if not <| Map.isEmpty extraAttributes then
+            dumpToEntry extraDefaultAttributesEntry extraAttributes
 
     if totalSize > maxFilesSize then
         failwithf "Total files size in archive is %i, which is too large" totalSize
 
-let schemaFromZipFile (schemaName : SchemaName) (stream: Stream) : SchemaDump =
+let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
     use zip = new ZipArchive(stream, ZipArchiveMode.Read)
-    let serializer = JsonSerializer()
     let mutable leftSize = maxFilesSize
 
     let readEntry (entry : ZipArchiveEntry) (fn : StreamReader -> 'a) : 'a =
@@ -275,58 +278,60 @@ let schemaFromZipFile (schemaName : SchemaName) (stream: Stream) : SchemaDump =
 
     let deserializeEntry (entry : ZipArchiveEntry) : 'a = readEntry entry <| fun reader ->
         try
-            downcast serializer.Deserialize(reader, typeof<'a>)
+            downcast defaultYamlDeserializer.Deserialize(reader, typeof<'a>)
         with
         | :? JsonSerializationException as e -> raisefWithInner RestoreSchemaException e "Error during deserializing archive entry %s" entry.FullName
 
-    let parseZipEntry (schemaName : SchemaName) (entry : ZipArchiveEntry) : SchemaDump =
-        match entry.FullName with
-        | CIRegex @"^entities/(.*)\.json$" [rawName] ->
-            let name = FunQLName rawName
-            let prettyEntity : PrettyEntity = deserializeEntry entry
-            let (maybeEntityAttrs, entity) = deprettifyEntity prettyEntity
-            { emptySchemaDump with
-                  entities = Map.singleton name entity
-                  defaultAttributes =
-                      match maybeEntityAttrs with
-                      | Some attrs -> Map.singleton schemaName { entities = Map.singleton name attrs }
-                      | None -> Map.empty
-            }
-        | CIRegex @"^roles/(.*)\.json$" [rawName] ->
-            let name = FunQLName rawName
-            let role : SourceRole = deserializeEntry entry
-            { emptySchemaDump with
-                  roles = Map.singleton name role
-            }
-        | CIRegex @"^user_views/(.*)\.funql$" [rawName] ->
-            let name = FunQLName rawName
-            let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
-            if rawName = "children_table_all" then
-                let testM =
-                    let m = System.Text.RegularExpressions.Regex.Match(rawUv, @"^[ \t\r\n]*--#allow_broken[ \t]*(?:\r|\n|\r\n)(.*)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-                    if m.Success
-                    then Some <| List.tail [ for x in m.Groups -> x.Value ]
-                    else None
-                eprintfn "FOO\n%s\nFOOEND %O" rawUv testM
-            let uv =
-                match regexMatch @"^[ \t\r\n]*--#allow_broken[ \t]*(?:\r|\n|\r\n)(.*)$" (RegexOptions.Singleline ||| RegexOptions.IgnoreCase) rawUv with
-                | Some [query] ->
-                    { allowBroken = true
-                      query = query
-                    }
-                | Some _ -> failwith "Impossible"
-                | None ->
-                    { allowBroken = false
-                      query = rawUv
-                    }
-            { emptySchemaDump with
-                  userViews = Map.singleton name uv
-            }
-        | fileName when fileName = extraDefaultAttributesEntry ->
-            let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
-            { emptySchemaDump with
-                  defaultAttributes = defaultAttrs
-            }
-        | fileName -> raisef RestoreSchemaException "Invalid archive entry %s" fileName
+    let parseZipEntry (entry : ZipArchiveEntry) : SchemaName * SchemaDump =
+        let (schemaName, rawPath) =
+            match entry.FullName with
+            | CIRegex @"^([^/]+)/(.*)$" [rawSchemaName; rawPath] ->
+                (FunQLName rawSchemaName, rawPath)
+            | fileName -> raisef RestoreSchemaException "Invalid archive entry %s" fileName
+        let dump =
+            match rawPath with
+            | CIRegex @"^entities/([^/]+)\.yaml$" [rawName] ->
+                let name = FunQLName rawName
+                let prettyEntity : PrettyEntity = deserializeEntry entry
+                let (maybeEntityAttrs, entity) = deprettifyEntity prettyEntity
+                { emptySchemaDump with
+                      entities = Map.singleton name entity
+                      defaultAttributes =
+                          match maybeEntityAttrs with
+                          | Some attrs -> Map.singleton schemaName { entities = Map.singleton name attrs }
+                          | None -> Map.empty
+                }
+            | CIRegex @"^roles/([^/]+)\.yaml$" [rawName] ->
+                let name = FunQLName rawName
+                let role : SourceRole = deserializeEntry entry
+                { emptySchemaDump with
+                      roles = Map.singleton name role
+                }
+            | CIRegex @"^user_views/([^/]+)\.funql$" [rawName] ->
+                let name = FunQLName rawName
+                let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
+                let uv =
+                    match regexMatch @"^[ \t\r\n]*--#allow_broken[ \t]*(?:\r|\n|\r\n)(.*)$" (RegexOptions.Singleline ||| RegexOptions.IgnoreCase) rawUv with
+                    | Some [query] ->
+                        { allowBroken = true
+                          query = query
+                        }
+                    | Some _ -> failwith "Impossible"
+                    | None ->
+                        { allowBroken = false
+                          query = rawUv
+                        }
+                { emptySchemaDump with
+                      userViews = Map.singleton name uv
+                }
+            | fileName when fileName = extraDefaultAttributesEntry ->
+                let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
+                { emptySchemaDump with
+                      defaultAttributes = defaultAttrs
+                }
+            | fileName -> raisef RestoreSchemaException "Invalid archive entry %s" fileName
+        (schemaName, dump)
 
-    Seq.map (parseZipEntry schemaName) zip.Entries |> Seq.fold mergeSchemaDump emptySchemaDump
+    zip.Entries
+        |> Seq.map (parseZipEntry >> uncurry Map.singleton)
+        |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) Map.empty

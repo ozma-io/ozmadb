@@ -3,7 +3,7 @@
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Json
+open FunWithFlags.FunDB.Serialization.Json
 open FunWithFlags.FunDB.FunQL.AST
 
 type ParsedFieldExpr = FieldExpr<EntityRef, LinkedFieldRef>

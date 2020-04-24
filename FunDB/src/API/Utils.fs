@@ -13,7 +13,7 @@ open Giraffe
 
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Json
+open FunWithFlags.FunDB.Serialization.Json
 open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.Operations.InstancesCache
 

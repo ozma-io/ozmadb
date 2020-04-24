@@ -18,7 +18,7 @@ open Giraffe.Serialization.Json
 open Npgsql
 
 open FunWithFlags.FunDBSchema.Instances
-open FunWithFlags.FunDB.Json
+open FunWithFlags.FunDB.Serialization.Json
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.API.Info
 open FunWithFlags.FunDB.API.View
@@ -46,6 +46,7 @@ let httpJsonSettings =
     |]
     let constructors = Array.map (fun conv -> fun _ -> Some conv) converters
     let jsonSettings = makeDefaultJsonSerializerSettings constructors
+    jsonSettings.NullValueHandling <- NullValueHandling.Ignore
     jsonSettings
 
 type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
