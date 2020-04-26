@@ -289,51 +289,53 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                 (FunQLName rawSchemaName, rawPath)
             | fileName -> raisef RestoreSchemaException "Invalid archive entry %s" fileName
         let dump =
-            match rawPath with
-            | CIRegex @"^entities/([^/]+)\.yaml$" [rawName] ->
-                let name = FunQLName rawName
-                let prettyEntity : PrettyEntity = deserializeEntry entry
-                let (maybeEntityAttrs, entity) = deprettifyEntity prettyEntity
-                { emptySchemaDump with
-                      entities = Map.singleton name entity
-                      defaultAttributes =
-                          match maybeEntityAttrs with
-                          | Some attrs -> Map.singleton schemaName { entities = Map.singleton name attrs }
-                          | None -> Map.empty
-                }
-            | CIRegex @"^roles/([^/]+)\.yaml$" [rawName] ->
-                let name = FunQLName rawName
-                let role : SourceRole = deserializeEntry entry
-                { emptySchemaDump with
-                      roles = Map.singleton name role
-                }
-            | CIRegex @"^user_views/([^/]+)\.funql$" [rawName] ->
-                let name = FunQLName rawName
-                let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
-                let uv =
-                    match regexMatch @"^[ \t\r\n]*--#allow_broken[ \t]*(?:\r|\n|\r\n)(.*)$" (RegexOptions.Singleline ||| RegexOptions.IgnoreCase) rawUv with
-                    | Some [query] ->
-                        { allowBroken = true
-                          query = query
-                        }
-                    | Some _ -> failwith "Impossible"
-                    | None ->
-                        { allowBroken = false
-                          query = rawUv
-                        }
-                { emptySchemaDump with
-                      userViews = Map.singleton name uv
-                }
-            | fileName when fileName = extraDefaultAttributesEntry ->
-                let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
-                { emptySchemaDump with
-                      defaultAttributes = defaultAttrs
-                }
-            | fileName -> raisef RestoreSchemaException "Invalid archive entry %O/%s" schemaName fileName
+            if entry.Name = "" && entry.Length = 0L then
+                // Directory
+                emptySchemaDump
+            else
+                match rawPath with
+                | CIRegex @"^entities/([^/]+)\.yaml$" [rawName] ->
+                    let name = FunQLName rawName
+                    let prettyEntity : PrettyEntity = deserializeEntry entry
+                    let (maybeEntityAttrs, entity) = deprettifyEntity prettyEntity
+                    { emptySchemaDump with
+                          entities = Map.singleton name entity
+                          defaultAttributes =
+                              match maybeEntityAttrs with
+                              | Some attrs -> Map.singleton schemaName { entities = Map.singleton name attrs }
+                              | None -> Map.empty
+                    }
+                | CIRegex @"^roles/([^/]+)\.yaml$" [rawName] ->
+                    let name = FunQLName rawName
+                    let role : SourceRole = deserializeEntry entry
+                    { emptySchemaDump with
+                          roles = Map.singleton name role
+                    }
+                | CIRegex @"^user_views/([^/]+)\.funql$" [rawName] ->
+                    let name = FunQLName rawName
+                    let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
+                    let uv =
+                        match regexMatch @"^[ \t\r\n]*--#allow_broken[ \t]*(?:\r|\n|\r\n)(.*)$" (RegexOptions.Singleline ||| RegexOptions.IgnoreCase) rawUv with
+                        | Some [query] ->
+                            { allowBroken = true
+                              query = query
+                            }
+                        | Some _ -> failwith "Impossible"
+                        | None ->
+                            { allowBroken = false
+                              query = rawUv
+                            }
+                    { emptySchemaDump with
+                          userViews = Map.singleton name uv
+                    }
+                | fileName when fileName = extraDefaultAttributesEntry ->
+                    let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
+                    { emptySchemaDump with
+                          defaultAttributes = defaultAttrs
+                    }
+                | fileName -> raisef RestoreSchemaException "Invalid archive entry %O/%s" schemaName fileName
         (schemaName, dump)
 
     zip.Entries
-        // Filter directories
-        |> Seq.filter (fun entry -> not (entry.Name = "" && entry.Length = 0L))
         |> Seq.map (parseZipEntry >> uncurry Map.singleton)
         |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) Map.empty
