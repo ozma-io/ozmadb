@@ -216,10 +216,12 @@ let makeYamlSerializer (build : SerializerBuilder -> unit) : ISerializer =
     let myConverters = [|
         UnionTypeConverter() :> CrutchTypeConverter
     |]
-    let builder = SerializerBuilder()
+    let builder =
+        SerializerBuilder()
+            .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
+            .DisableAliases()
     for conv in myConverters do
         ignore <| builder.WithTypeConverter(conv)
-    ignore <| builder.ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
     build builder
     let valueSerializer = builder.BuildValueSerializer()
     for conv in myConverters do

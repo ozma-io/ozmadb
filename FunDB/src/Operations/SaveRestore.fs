@@ -215,7 +215,7 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
     let attrsRet = if Map.isEmpty defaultAttrs then None else Some { fields = defaultAttrs }
     (attrsRet, ret)
 
-let private extraDefaultAttributesEntry = "extra_default_attributes.json"
+let private extraDefaultAttributesEntry = "extra_default_attributes.yaml"
 
 let private maxFilesSize = 1L * 1024L * 1024L // 1MB
 
