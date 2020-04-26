@@ -17,6 +17,7 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     let updateAttributesField (attrs : SourceAttributesField) (existingAttrs : FieldAttributes) : unit =
         existingAttrs.AllowBroken <- attrs.allowBroken
+        existingAttrs.Priority <- attrs.priority
         existingAttrs.Attributes <- attrs.attributes
 
     let updateAttributesDatabase (schema : SourceAttributesDatabase) (existingSchema : Schema) : unit =

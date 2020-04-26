@@ -329,9 +329,11 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                 { emptySchemaDump with
                       defaultAttributes = defaultAttrs
                 }
-            | fileName -> raisef RestoreSchemaException "Invalid archive entry %s" fileName
+            | fileName -> raisef RestoreSchemaException "Invalid archive entry %O/%s" schemaName fileName
         (schemaName, dump)
 
     zip.Entries
+        // Filter directories
+        |> Seq.filter (fun entry -> not (entry.Name = "" && entry.Length = 0L))
         |> Seq.map (parseZipEntry >> uncurry Map.singleton)
         |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) Map.empty
