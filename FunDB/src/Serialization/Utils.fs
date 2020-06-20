@@ -8,7 +8,10 @@ open Microsoft.FSharp.Reflection
 
 open FunWithFlags.FunDB.Utils
 
-type UnionCases = (UnionCaseInfo * PropertyInfo[])[]
+type UnionCase =
+    { info : UnionCaseInfo
+      fields : PropertyInfo[]
+    }
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Class)>]
@@ -43,21 +46,29 @@ let isNullableType (objectType : Type) =
         | :? CompilationMappingAttribute -> true
         | _ -> failwith "Impossible"
 
-let unionCases (objectType : Type) : UnionCases =
-    FSharpType.GetUnionCases(objectType) |> Array.map (fun case -> (case, case.GetFields()))
+let unionCases (objectType : Type) : UnionCase[] =
+    FSharpType.GetUnionCases(objectType) |> Array.map (fun case -> { info = case; fields = case.GetFields() })
 
-let isUnionEnum : UnionCases -> bool =
-    Seq.forall <| fun (case, fields) -> Array.isEmpty fields
+let getUnionName (case : UnionCaseInfo) =
+    match case.GetCustomAttributes typeof<CaseNameAttribute> |> Seq.cast |> Seq.first with
+    | None -> case.Name
+    | Some (nameAttr : CaseNameAttribute) -> nameAttr.CaseName
 
-let getNewtype (case, fields) =
-    if Array.length fields = 1 then
-        Some (case, fields.[0])
+let unionNames (cases : UnionCase seq) : Map<string, UnionCase> =
+    cases |> Seq.map (fun case -> (getUnionName case.info, case)) |> Map.ofSeqUnique
+
+let isUnionEnum : UnionCase seq -> bool =
+    Seq.forall (fun case -> Array.isEmpty case.fields)
+
+let getNewtype (case : UnionCase) : (UnionCaseInfo * PropertyInfo) option =
+    if Array.length case.fields = 1 then
+        Some (case.info, case.fields.[0])
     else
         None
 
-let isNewtype (map : UnionCases) : (UnionCaseInfo * PropertyInfo) option =
-    if Array.length map = 1 then
-        getNewtype map.[0]
+let isNewtype (map : UnionCase[]) : (UnionCaseInfo * PropertyInfo) option =
+    if Seq.length map = 1 then
+        getNewtype (Seq.first map |> Option.get)
     else
         None
 
@@ -67,10 +78,10 @@ type OptionInfo =
       noneCase : UnionCaseInfo
     }
 
-let isOption (map : UnionCases) : OptionInfo option =
-    let checkNone (case, fields) =
-        if Array.isEmpty fields then
-            Some case
+let isOption (map : UnionCase[]) : OptionInfo option =
+    let checkNone case =
+        if Array.isEmpty case.fields then
+            Some case.info
         else
             None
     if Array.length map = 2 then
@@ -87,17 +98,12 @@ let unionAsObject (objectType : Type) =
     match Attribute.GetCustomAttribute(objectType, typeof<SerializeAsObjectAttribute>) with
     | null -> None
     | :? SerializeAsObjectAttribute as asObject ->
-        let getName (case : UnionCaseInfo, fields: PropertyInfo[]) =
-            let name =
-                match case.GetCustomAttributes typeof<CaseNameAttribute> |> Seq.cast |> Seq.first with
-                | None -> case.Name
-                | Some (nameAttr : CaseNameAttribute) -> nameAttr.CaseName
-            for field in fields do
-                if field.Name = name then
-                    failwith <| sprintf "Field name %s of case %s clashes with case field name" field.Name case.Name
-            name
-        let nameCases = unionCases objectType |> Seq.map (function c -> (getName c, c)) |> Map.ofSeqUnique
-        Some (asObject.CaseFieldName, nameCases)
+        let checkName (case : UnionCase) =
+            for field in case.fields do
+                if field.Name = asObject.CaseFieldName then
+                    failwith <| sprintf "Field name %s of case %s clashes with case field name" field.Name case.info.Name
+        unionCases objectType |> Seq.iter checkName
+        Some asObject.CaseFieldName
     | _ -> failwith "Impossible"    
 
 let getTypeDefaultValue (objectType : Type) : obj option =

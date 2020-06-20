@@ -13,9 +13,28 @@ open Giraffe
 
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Serialization.Utils
 open FunWithFlags.FunDB.Serialization.Json
 open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.Operations.InstancesCache
+
+type APIErrorType =
+    | [<CaseName("generic")>]
+      ErrorGeneric
+
+type APIError =
+    { [<JsonProperty("type")>]
+      errorType : APIErrorType
+      message : string
+    }
+
+let errorJson str = json { errorType = ErrorGeneric; message = str }
+
+let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
+    logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
+    clearResponse >=> setStatusCode 500 >=> errorJson ex.Message
+
+let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = setStatusCode 404 >=> errorJson "Not Found"
 
 let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
     let getArg (KeyValue(name : string, par)) =
@@ -31,7 +50,7 @@ let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyV
         | Some r -> Ok (name, r)
 
     match Seq.traverseResult tryArg args1 with
-    | Error name -> sprintf "Invalid JSON value in argument %s" name |> text |> RequestErrors.badRequest
+    | Error name -> sprintf "Invalid JSON value in argument %s" name |> errorJson |> RequestErrors.badRequest
     | Ok args2 -> f <| Map.ofSeq args2
 
 let queryArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
@@ -50,7 +69,7 @@ let commitAndReturn (handler : HttpHandler) (rctx : RequestContext) (next : Http
     task {
         match! rctx.Commit () with
         | Ok () -> return! Successful.ok handler next ctx
-        | Error msg -> return! RequestErrors.badRequest (text msg) next ctx
+        | Error msg -> return! RequestErrors.badRequest (errorJson msg) next ctx
     }
 
 let commitAndOk : RequestContext -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
@@ -98,13 +117,13 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
         | :? RequestException as e ->
             match e.Info with
             | REUserNotFound
-            | RENoRole -> return! RequestErrors.forbidden (text "") next ctx
+            | RENoRole -> return! RequestErrors.forbidden (errorJson "") next ctx
     }
 
     let protectedApi (instance : Instance) (next : HttpFunc) (ctx : HttpContext) =
         let userClaim = ctx.User.FindFirst ClaimTypes.Email
         if isNull userClaim then
-            RequestErrors.badRequest (text "No email claim in security token") next ctx
+            RequestErrors.badRequest (errorJson "No email claim in security token") next ctx
         else
             let userRoles = ctx.User.FindFirst "realm_access"
             let isRoot =
@@ -126,7 +145,7 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
             else
                 xInstance.[0]
         match! instancesSource.GetInstance instanceName with
-        | None -> return! RequestErrors.notFound (text (sprintf "Instance %s not found" instanceName)) next ctx
+        | None -> return! RequestErrors.notFound (errorJson (sprintf "Instance %s not found" instanceName)) next ctx
         | Some instance ->
             if instance.DisableSecurity then
                 return! unprotectedApi instance next ctx

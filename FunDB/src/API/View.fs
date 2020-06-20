@@ -26,11 +26,11 @@ type ViewInfoGetResponse =
 
 let viewsApi : HttpHandler =
     let returnError = function
-        | UVEArguments msg -> sprintf "Invalid arguments: %s" msg |> text |> RequestErrors.badRequest
-        | UVEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
-        | UVENotFound -> text "Not found" |> RequestErrors.notFound
-        | UVEResolve msg -> text msg |> RequestErrors.badRequest
-        | UVEExecute msg -> text msg |> RequestErrors.unprocessableEntity
+        | UVEArguments msg -> sprintf "Invalid arguments: %s" msg |> errorJson |> RequestErrors.badRequest
+        | UVEAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
+        | UVENotFound -> errorJson "Not found" |> RequestErrors.notFound
+        | UVEResolve msg -> errorJson msg |> RequestErrors.badRequest
+        | UVEExecute msg -> errorJson msg |> RequestErrors.unprocessableEntity
        
     let getRecompile (ctx : HttpContext) =
 #if DEBUG

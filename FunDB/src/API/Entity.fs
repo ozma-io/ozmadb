@@ -25,15 +25,15 @@ type TransactionResult =
 
 [<NoEquality; NoComparison>]
 type Transaction =
-    { operations: TransactionOp[]
+    { operations : TransactionOp[]
     }
 
 let entitiesApi : HttpHandler =
     let returnError = function
-        | EEArguments msg -> sprintf "Invalid arguments: %s" msg |> text |> RequestErrors.badRequest
-        | EEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
-        | EENotFound -> text "Not found" |> RequestErrors.notFound
-        | EEExecute msg -> text msg |> RequestErrors.unprocessableEntity
+        | EEArguments msg -> sprintf "Invalid arguments: %s" msg |> errorJson |> RequestErrors.badRequest
+        | EEAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
+        | EENotFound -> errorJson "Not found" |> RequestErrors.notFound
+        | EEExecute msg -> errorJson msg |> RequestErrors.unprocessableEntity
 
     let getEntityInfo (entityRef : ResolvedEntityRef) (rctx : RequestContext) : HttpHandler =
         fun next ctx -> task {

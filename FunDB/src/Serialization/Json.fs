@@ -18,12 +18,13 @@ type UnionConverter (objectType : Type) =
     inherit JsonConverter ()
 
     let cases = unionCases objectType
-    let casesMap = cases |> Seq.map (function (case, _) as c -> (case.Name, c)) |> Map.ofSeq
+    let casesMap = unionNames cases
+    let reverseNames = casesMap |> Map.toSeq |> Seq.map (fun (name, case) -> (case.info.Name, (name, case.fields))) |> Map.ofSeq
 
-    let searchCases (name : string) (doCase : (UnionCaseInfo * PropertyInfo[]) -> obj) : obj =
+    let searchCases (name : string) (doCase : UnionCase -> obj) : obj =
         match Map.tryFind name casesMap with
             | Some c -> doCase c
-            | None -> raise <| JsonException(sprintf "Unknown union case \"%s\"" name)
+            | None -> raisef JsonException "Unknown union case \"%s\"" name
 
     let readJson : JsonReader -> JsonSerializer -> obj =
         match isNewtype cases with
@@ -47,25 +48,25 @@ type UnionConverter (objectType : Type) =
                 if isUnionEnum cases then
                     fun reader serializer ->
                         let name = serializer.Deserialize<string>(reader)
-                        searchCases name <| fun (case, _) ->
-                            FSharpValue.MakeUnion(case, [||])
+                        searchCases name <| fun case ->
+                            FSharpValue.MakeUnion(case.info, [||])
                 else
                     match unionAsObject objectType with
-                    | Some (caseFieldName, caseNames) ->
+                    | Some caseFieldName ->
                         fun reader serializer ->
                             let obj = JObject.Load reader
                             let name =
                                 match obj.TryGetValue(caseFieldName) with
                                 | (true, nameToken) -> JToken.op_Explicit nameToken : string
                                 | (false, _) -> raise <| JsonException(sprintf "Couldn't find case property \"%s\"" caseFieldName)
-                            match Map.tryFind name caseNames with
-                            | Some (case, fields) ->
+                            match Map.tryFind name casesMap with
+                            | Some case ->
                                 let getField (prop : PropertyInfo) =
                                     match obj.TryGetValue(prop.Name) with
                                     | (true, valueToken) -> valueToken.ToObject(prop.PropertyType, serializer)
                                     | (false, _) -> raise <| JsonException(sprintf "Couldn't find required field \"%s\"" prop.Name)
-                                let args = fields |> Array.map getField
-                                FSharpValue.MakeUnion (case, args)
+                                let args = case.fields |> Array.map getField
+                                FSharpValue.MakeUnion (case.info, args)
                             | None -> raise <| JsonException(sprintf "Unknown union case \"%s\"" name)
                     | None ->
                         fun reader serializer ->
@@ -74,12 +75,12 @@ type UnionConverter (objectType : Type) =
                             if nameToken.Type <> JTokenType.String then
                                 raise <| JsonException("Invalid union name")
                             let name = JToken.op_Explicit nameToken : string
-                            searchCases name <| fun (case, fields) ->
-                                if Array.length fields <> array.Count - 1 then
-                                    raise <| JsonException(sprintf "Case \"%s\" has %i arguments but %i given" name (Array.length fields) (array.Count - 1))
+                            searchCases name <| fun case ->
+                                if Array.length case.fields <> array.Count - 1 then
+                                    raise <| JsonException(sprintf "Case \"%s\" has %i arguments but %i given" name (Array.length case.fields) (array.Count - 1))
 
-                                let args = fields |> Array.mapi (fun i field -> array.[i + 1].ToObject(field.PropertyType, serializer))
-                                FSharpValue.MakeUnion(case, args)
+                                let args = case.fields |> Array.mapi (fun i field -> array.[i + 1].ToObject(field.PropertyType, serializer))
+                                FSharpValue.MakeUnion(case.info, args)
 
     let writeJson : obj -> JsonWriter -> JsonSerializer -> unit =
         match isNewtype cases with
@@ -102,11 +103,11 @@ type UnionConverter (objectType : Type) =
                 if isUnionEnum cases then
                     fun value writer serializer ->
                         let (case, args) = FSharpValue.GetUnionFields(value, objectType)
-                        writer.WriteValue(case.Name)
+                        let (caseName, _) = Map.find case.Name reverseNames
+                        writer.WriteValue(caseName)
                 else
                     match unionAsObject objectType with
-                    | Some (caseFieldName, caseNames) ->
-                        let reverseNames = caseNames |> Map.toSeq |> Seq.map (fun (name, (case, fields)) -> (case.Name, (name, fields))) |> Map.ofSeq
+                    | Some caseFieldName ->
                         fun value writer serializer ->
                             let (case, args) = FSharpValue.GetUnionFields(value, objectType)
                             let (caseName, fields) = Map.find case.Name reverseNames
@@ -120,7 +121,8 @@ type UnionConverter (objectType : Type) =
                     | None ->
                         fun value writer serializer ->
                             let (case, args) = FSharpValue.GetUnionFields(value, objectType)
-                            serializer.Serialize(writer, Seq.append (Seq.singleton (case.Name :> obj)) args)
+                            let (caseName, _) = Map.find case.Name reverseNames
+                            serializer.Serialize(writer, Seq.append (Seq.singleton (caseName :> obj)) args)
 
     override this.CanConvert (someType : Type) : bool =
         someType = objectType

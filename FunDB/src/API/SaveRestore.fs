@@ -12,13 +12,13 @@ open FunWithFlags.FunDB.Operations.Context
 
 let saveRestoreApi : HttpHandler =
     let returnSaveError = function
-        | SENotFound -> text "Not found" |> RequestErrors.notFound
-        | SEAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
+        | SENotFound -> errorJson "Not found" |> RequestErrors.notFound
+        | SEAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
 
     let returnRestoreError = function
-        | REAccessDenied -> text "Forbidden" |> RequestErrors.forbidden
-        | REPreloaded -> text "Cannot restore preloaded schema" |> RequestErrors.unprocessableEntity
-        | REInvalidFormat msg -> text msg |> RequestErrors.unprocessableEntity
+        | REAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
+        | REPreloaded -> errorJson "Cannot restore preloaded schema" |> RequestErrors.unprocessableEntity
+        | REInvalidFormat msg -> errorJson msg |> RequestErrors.unprocessableEntity
 
     let saveZipSchema (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         let (schemaName, rctx) = arg :?> (SchemaName * RequestContext)
@@ -66,7 +66,7 @@ let saveRestoreApi : HttpHandler =
         match ctx.TryGetRequestHeader "Content-Type" with
         | Some "application/zip" -> return! restoreZipSchema schemaName rctx next ctx
         | Some "application/json" -> return! restoreJsonSchema schemaName rctx next ctx
-        | _ -> return! RequestErrors.unsupportedMediaType (text "Unsupported media type") next ctx
+        | _ -> return! RequestErrors.unsupportedMediaType (errorJson "Unsupported media type") next ctx
     }
 
     let saveRestoreApi (schema : string) =

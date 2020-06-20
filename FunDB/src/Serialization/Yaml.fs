@@ -73,9 +73,10 @@ type SpecializedSingleTypeConverter<'A> () =
 
 type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
     let cases = unionCases typeof<'A>
-    let casesMap = cases |> Seq.map (function (case, _) as c -> (case.Name, c)) |> Map.ofSeq
+    let casesMap = cases |> unionNames
+    let reverseNames = casesMap |> Map.toSeq |> Seq.map (fun (name, case) -> (case.info.Name, (name, case.fields))) |> Map.ofSeq
 
-    let searchCases (name : string) (doCase : (UnionCaseInfo * PropertyInfo[]) -> obj) : obj =
+    let searchCases (name : string) (doCase : UnionCase -> obj) : obj =
         match Map.tryFind name casesMap with
             | Some c -> doCase c
             | None -> raisef YamlException "Unknown union case \"%s\"" name
@@ -102,8 +103,8 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                 if isUnionEnum cases then
                     fun reader ->
                         let name = converter.Deserialize<string>(reader)
-                        let ret = searchCases name <| fun (case, _) ->
-                            FSharpValue.MakeUnion(case, [||])
+                        let ret = searchCases name <| fun case ->
+                            FSharpValue.MakeUnion(case.info, [||])
                         ret
                 else
                     failwith "Deserialization for arbitrary unions is not implemented"
@@ -129,7 +130,8 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                 if isUnionEnum cases then
                     fun value writer ->
                         let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
-                        writer.Emit(Scalar(case.Name))
+                        let (caseName, _) = Map.find case.Name reverseNames
+                        writer.Emit(Scalar(caseName))
                 else
                     failwith "Serialization for arbitrary unions is not implemented"
 
