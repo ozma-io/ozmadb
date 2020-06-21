@@ -18,7 +18,7 @@ type TransactionOp =
     | [<CaseName("delete")>] TDeleteEntity of entity : ResolvedEntityRef * id : int
 
 [<SerializeAsObject("type")>]
-type TransactionResult =
+type TransactionOpResult =
     | [<CaseName("insert")>] TRInsertEntity of id : int
     | [<CaseName("update")>] TRUpdateEntity
     | [<CaseName("delete")>] TRDeleteEntity
@@ -26,6 +26,11 @@ type TransactionResult =
 [<NoEquality; NoComparison>]
 type Transaction =
     { operations : TransactionOp[]
+    }
+
+[<NoEquality; NoComparison>]
+type TransactionResult =
+    { results : TransactionOpResult[]
     }
 
 let entitiesApi : HttpHandler =
@@ -105,7 +110,9 @@ let entitiesApi : HttpHandler =
                 }
             let mutable failed = false
             match! transaction.operations |> Seq.traverseResultTaskSync handleOne with
-            | Ok ret -> return! commitAndReturn (json ret) rctx next ctx
+            | Ok results ->
+                let ret = { results = Array.ofSeq results }
+                return! commitAndReturn (json ret) rctx next ctx
             | Error (op, err) -> return! returnError err next ctx
         }
 
