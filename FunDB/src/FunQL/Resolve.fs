@@ -233,6 +233,24 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
             { alwaysTrue = not <| hasSubType subEntity }
     { ref = relaxEntityRef subEntityRef; extra = info }
 
+type private SelectFlags =
+    { oneColumn : bool
+      requireNames : bool
+      noAttributes : bool
+    }
+
+let private viewExprSelectFlags =
+    { noAttributes = false
+      oneColumn = false
+      requireNames = true
+    }
+
+let private subExprSelectFlags =
+    { noAttributes = true
+      oneColumn = true
+      requireNames = false
+    }
+
 type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgumentsMap) =
     let mutable usedArguments : Set<Placeholder> = Set.empty
 
@@ -353,10 +371,10 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         mapFieldExpr mapper expr
 
-    let rec resolveResult (inExpression : bool) (mapping : QMapping) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
-        if not (Map.isEmpty result.attributes) && inExpression then
+    let rec resolveResult (flags : SelectFlags) (mapping : QMapping) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
+        if not (Map.isEmpty result.attributes) && flags.noAttributes then
             raisef ViewResolveException "Attributes are not allowed in query expressions"
-        let (exprInfo, expr) = resolveResultExpr inExpression mapping result.result
+        let (exprInfo, expr) = resolveResultExpr flags mapping result.result
         let ret = {
             attributes = resolveAttributes mapping result.attributes
             result = expr
@@ -364,7 +382,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         (exprInfo, ret)
 
     // Should be in sync with resultField
-    and resolveResultExpr (inExpression : bool) (mapping : QMapping) : ParsedQueryResultExpr -> ResolvedResultInfo * ResolvedQueryResultExpr = function
+    and resolveResultExpr (flags : SelectFlags) (mapping : QMapping) : ParsedQueryResultExpr -> ResolvedResultInfo * ResolvedQueryResultExpr = function
         | QRExpr (name, FERef f) ->
             Option.iter checkName name
             let (boundField, _, f') = resolveReference true mapping f
@@ -376,7 +394,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         | QRExpr (name, e) ->
             match name with
             | Some n -> checkName n
-            | None when not inExpression -> raisef ViewResolveException "Unnamed results are allowed only inside expression queries"
+            | None when flags.requireNames -> raisef ViewResolveException "Unnamed results are allowed only inside expression queries"
             | None -> ()
             let (exprInfo, expr) = resolveFieldExpr true mapping e
             let info =
@@ -409,7 +427,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
 
             ret
         let resolveQuery query =
-            let (_, res) = resolveSubSelectExpr true query
+            let (_, res) = resolveSelectExpr subExprSelectFlags query
             res
         let resolveAggr aggr =
             hasAggregates <- true
@@ -442,29 +460,24 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         (isLocal, ret)
 
-    and resolveSelectExpr (inExpression : bool) : ParsedSelectExpr -> QSelectResults * ResolvedSelectExpr = function
+    and resolveSelectExpr (flags : SelectFlags) : ParsedSelectExpr -> QSelectResults * ResolvedSelectExpr = function
         | SSelect query ->
-            let (fields, res) = resolveSingleSelectExpr inExpression query
+            let (fields, res) = resolveSingleSelectExpr flags query
             let results = {
                 fields = fields
                 attributes = res.attributes
                 fieldAttributeNames =
-                    if inExpression then
+                    if flags.noAttributes then
                         Array.empty
                     else
                         res.results |> Array.map (fun res -> (res.result.TryToName () |> Option.get, Map.keysSet res.attributes))
             }
             (results, SSelect res)
         | SSetOp (op, a, b, limits) ->
-            let (results1, a') = resolveSelectExpr inExpression a
-            let (results2, b') = resolveSelectExpr inExpression b
+            let (results1, a') = resolveSelectExpr flags a
+            let (results2, b') = resolveSelectExpr { flags with requireNames = false } b
             if Array.length results1.fieldAttributeNames <> Array.length results2.fieldAttributeNames then
                 raisef ViewResolveException "Different number of columns in a set operation expression"
-            for ((name1, attrs1), (name2, attrs2)) in Seq.zip results1.fieldAttributeNames results2.fieldAttributeNames do
-                if name1 <> name2 then
-                    raisef ViewResolveException "Different column names in a set operation: %O and %O" name1 name2
-                if attrs1 <> attrs2 then
-                    raisef ViewResolveException "Different attributes for column %O in a set operation expression" name1
             let newFields = Map.unionWith (fun name -> mergeSubqueryField) results1.fields results2.fields
             let orderLimitMapping = Map.singleton None (None, newFields)
             let (limitsAreLocal, resolvedLimits) = resolveOrderLimitClause orderLimitMapping limits
@@ -472,36 +485,27 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 raisef ViewResolveException "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.orderBy
             ({ results1 with fields = newFields }, SSetOp (op, a', b', resolvedLimits))
 
-    and resolveSubSelectExpr (inExpression : bool) (query : ParsedSelectExpr) : QSubqueryFields * ResolvedSelectExpr =
-        let (results, res) = resolveSelectExpr inExpression query
-        if not <| Map.isEmpty results.attributes then
-            raisef ViewResolveException "Subqueries cannot have attributes"
-        for (name, attrs) in results.fieldAttributeNames do
-            if not <| Set.isEmpty attrs then
-                raisef ViewResolveException "Subquery field %O cannot have attributes" name
-        (results.fields, res)
-
-    and resolveSingleSelectExpr (inExpression : bool) (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
-        if inExpression && not (Map.isEmpty query.attributes) then
+    and resolveSingleSelectExpr (flags : SelectFlags) (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
+        if flags.noAttributes && not (Map.isEmpty query.attributes) then
             raisef ViewResolveException "Attributes are not allowed in query expressions"
-        if inExpression && Array.length query.results <> 1 then
+        if flags.oneColumn && Array.length query.results <> 1 then
             raisef ViewResolveException "Expression queries must have only one resulting column"
         let (fromMapping, qFrom) =
             match query.from with
             | None -> (Map.empty, None)
             | Some from ->
-                let (mapping, res) = resolveFromExpr from
+                let (mapping, res) = resolveFromExpr flags from
                 (mapping, Some res)
         let qWhere = Option.map (resolveNonaggrFieldExpr fromMapping) query.where
         let qGroupBy = Array.map (resolveNonaggrFieldExpr fromMapping) query.groupBy
-        let rawResults = Array.map (resolveResult inExpression fromMapping) query.results
+        let rawResults = Array.map (resolveResult flags fromMapping) query.results
         let hasAggregates = Array.exists (fun (info : ResolvedResultInfo, expr) -> info.hasAggregates) rawResults || not (Array.isEmpty qGroupBy)
         let results = Array.map snd rawResults
         let makeField (info, res) =
             let bound = if hasAggregates then unboundSubqueryField else info.subquery
             (res.result.TryToName () |> Option.get, bound)
         let newFields =
-            if inExpression then
+            if flags.oneColumn then
                 Map.empty
             else
                 try
@@ -524,7 +528,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         }
         (newFields, newQuery)
 
-    and resolveFromExpr : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
+    and resolveFromExpr (flags : SelectFlags) : ParsedFromExpr -> (QMapping * ResolvedFromExpr) = function
         | FEntity (pun, name) ->
             let resName = resolveEntityRef name
             let entity =
@@ -541,8 +545,8 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             let newName = Option.defaultValue name.name pun
             (Map.singleton (Some newName) (Some resName.schema, fields), FEntity (pun, resName))
         | FJoin (jt, e1, e2, where) ->
-            let (newMapping1, newE1) = resolveFromExpr e1
-            let (newMapping2, newE2) = resolveFromExpr e2
+            let (newMapping1, newE1) = resolveFromExpr flags e1
+            let (newMapping2, newE2) = resolveFromExpr flags e2
 
             let newMapping =
                 try
@@ -558,8 +562,8 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             (newMapping, FJoin (jt, newE1, newE2, newFieldExpr))
         | FSubExpr (name, q) ->
             checkName name
-            let (fields, newQ) = resolveSubSelectExpr false q
-            (Map.singleton (Some name) (None, fields), FSubExpr (name, newQ))
+            let (info, newQ) = resolveSelectExpr { flags with requireNames = true } q
+            (Map.singleton (Some name) (None, info.fields), FSubExpr (name, newQ))
         | FValues (name, fieldNames, values) ->
             checkName name
 
@@ -605,13 +609,13 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
           columnsToFields = mappedResults
         }
 
-    member this.ResolveSelectExpr inExpression select = resolveSelectExpr inExpression select
+    member this.ResolveSelectExpr flags select = resolveSelectExpr flags select
     member this.ResolveMainEntity fields select main = resolveMainEntity fields select main
     member this.UsedArguments = usedArguments
 
 let resolveSelectExpr (layout : ILayoutFields) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
     let qualifier = QueryResolver (layout, globalArgumentsMap)
-    let (results, qQuery) = qualifier.ResolveSelectExpr true select
+    let (results, qQuery) = qualifier.ResolveSelectExpr subExprSelectFlags select
     (qualifier.UsedArguments, qQuery)
 
 let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
@@ -619,7 +623,7 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let localArguments = Map.mapKeys PLocal arguments
     let allArguments = Map.union localArguments globalArgumentsMap
     let qualifier = QueryResolver (layout, allArguments)
-    let (results, qQuery) = qualifier.ResolveSelectExpr false viewExpr.select
+    let (results, qQuery) = qualifier.ResolveSelectExpr viewExprSelectFlags viewExpr.select
     let mainEntity = Option.map (qualifier.ResolveMainEntity results.fields qQuery) viewExpr.mainEntity
 
     { arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArgumentsMap)

@@ -127,13 +127,13 @@ let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult
 
     let takeViewAttribute colType (_, valType) v =
         match colType with
-        | CTRowAttribute name -> Some (name, (valType, v))
+        | CTMeta (CMRowAttribute name) -> Some (name, (valType, v))
         | _ -> None
     let viewAttributes = Seq.map3Maybe takeViewAttribute columns result.columns values |> Map.ofSeq
 
     let takeColumnAttribute colType (_, valType) v =
         match colType with
-        | CTCellAttribute (fieldName, name) -> Some (fieldName, (name, (valType, v)))
+        | CTColumnMeta (fieldName, CCCellAttribute name) -> Some (fieldName, (name, (valType, v)))
         | _ -> None
     let makeColumnAttributes (fieldName : FieldName, values : (FieldName * (AttributeName * (SQL.SimpleValueType * SQL.Value))) seq) =
         let valuesMap = values |> Seq.map snd |> Map.ofSeq
@@ -154,13 +154,13 @@ let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult
 let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
     let takeRowAttribute i colType (_, valType) =
         match colType with
-        | CTRowAttribute name -> Some (name, (valType, i))
+        | CTMeta (CMRowAttribute name) -> Some (name, (valType, i))
         | _ -> None
     let rowAttributes = Seq.mapi2Maybe takeRowAttribute columns result.columns |> Map.ofSeq
 
     let takeCellAttribute i colType (_, valType) =
         match colType with
-            | CTCellAttribute (fieldName, name) -> Some (fieldName, (name, (valType, i)))
+            | CTColumnMeta (fieldName, CCCellAttribute name) -> Some (fieldName, (name, (valType, i)))
             | _ -> None
     let allCellAttributes =
         Seq.mapi2Maybe takeCellAttribute columns result.columns
@@ -170,37 +170,37 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
 
     let takePunAttribute i colType (_, valType) =
         match colType with
-        | CTPunAttribute name -> Some (name, (valType, i))
+        | CTColumnMeta (name, CCPun) -> Some (name, (valType, i))
         | _ -> None
     let punAttributes = Seq.mapi2Maybe takePunAttribute columns result.columns |> Map.ofSeq
 
     let takeDomainColumn i colType =
         match colType with
-        | CTDomainColumn ns -> Some (ns, i)
+        | CTMeta (CMDomain ns) -> Some (ns, i)
         | _ -> None
     let domainColumns = Seq.mapiMaybe takeDomainColumn columns |> Map.ofSeq
 
     let takeIdColumn i colType =
         match colType with
-        | CTIdColumn entity -> Some (entity, i)
+        | CTMeta (CMId name) -> Some (name, i)
         | _ -> None
     let idColumns = Seq.mapiMaybe takeIdColumn columns |> Map.ofSeq
 
     let takeSubEntityColumn i colType =
         match colType with
-        | CTSubEntityColumn entity -> Some (entity, i)
+        | CTMeta (CMSubEntity name) -> Some (name, i)
         | _ -> None
     let subEntityColumns = Seq.mapiMaybe takeSubEntityColumn columns |> Map.ofSeq
 
     let takeMainIdColumn i colType =
         match colType with
-        | CTMainIdColumn -> Some i
+        | CTMeta CMMainId -> Some i
         | _ -> None
     let mainIdColumn = Seq.mapiMaybe takeMainIdColumn columns |> Seq.first
 
     let takeMainSubEntityColumn i colType =
         match colType with
-        | CTMainSubEntityColumn -> Some i
+        | CTMeta CMMainSubEntity -> Some i
         | _ -> None
     let mainSubEntityColumn = Seq.mapiMaybe takeMainSubEntityColumn columns |> Seq.first
 
