@@ -681,7 +681,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | _ -> failwith "Unexpected path with no bound field"
         | VRPlaceholder name ->
             if Array.isEmpty linked.path then
-                (paths0, SQL.VEPlaceholder arguments.types.[name].placeholderId)
+                // Explicitly set argument type to avoid ambiguity,
+                let arg = arguments.types.[name]
+                (paths0, SQL.VECast (SQL.VEPlaceholder arg.placeholderId, arg.dbType))
             else
                 let argInfo = Map.find name initialArguments.types
                 match argInfo.fieldType with

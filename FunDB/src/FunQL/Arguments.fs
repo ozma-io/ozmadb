@@ -17,6 +17,7 @@ type PlaceholderId = int
 type CompiledArgument =
     { placeholderId : PlaceholderId
       fieldType : ArgumentFieldType
+      dbType : SQL.DBValueType
       optional : bool
     }
 
@@ -59,6 +60,7 @@ let compileFieldType : FieldType<_, _> -> SQL.SimpleValueType = function
 let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgument) : CompiledArgument =
     { placeholderId = placeholderId
       fieldType = arg.argType
+      dbType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType arg.argType)
       optional = arg.optional
     }
 
