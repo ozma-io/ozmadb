@@ -29,8 +29,8 @@ let viewsApi : HttpHandler =
         | UVEArguments msg -> sprintf "Invalid arguments: %s" msg |> errorJson |> RequestErrors.badRequest
         | UVEAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
         | UVENotFound -> errorJson "Not found" |> RequestErrors.notFound
-        | UVEResolve msg -> errorJson msg |> RequestErrors.badRequest
-        | UVEExecute msg -> errorJson msg |> RequestErrors.unprocessableEntity
+        | UVEResolution msg -> errorJson msg |> RequestErrors.badRequest
+        | UVEExecution msg -> errorJson msg |> RequestErrors.unprocessableEntity
        
     let getRecompile (ctx : HttpContext) =
 #if DEBUG

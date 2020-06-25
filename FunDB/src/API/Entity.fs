@@ -1,5 +1,6 @@
 ﻿module FunWithFlags.FunDB.API.Entity
 
+open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Giraffe
@@ -33,12 +34,43 @@ type TransactionResult =
     { results : TransactionOpResult[]
     }
 
+type TransactionErrorType =
+    | [<CaseName("transaction")>]
+      ErrorTransaction
+
+type TransactionSubErrorType =
+    | [<CaseName("generic")>]
+      TEArguments
+    | [<CaseName("access_denied")>]
+      TEAccessDenied
+    | [<CaseName("not_found")>]
+      TENotFound
+    | [<CaseName("execution")>]
+      TEExecution
+
+type TransactionError =
+    { [<JsonProperty("type")>]
+      errorType : TransactionErrorType
+      subtype : TransactionSubErrorType
+      message : string
+      operation : int
+    }
+
 let entitiesApi : HttpHandler =
-    let returnError = function
-        | EEArguments msg -> sprintf "Invalid arguments: %s" msg |> errorJson |> RequestErrors.badRequest
-        | EEAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
-        | EENotFound -> errorJson "Not found" |> RequestErrors.notFound
-        | EEExecute msg -> errorJson msg |> RequestErrors.unprocessableEntity
+    let errorString = function
+        | EEArguments msg -> (TEArguments, sprintf "Invalid arguments: %s" msg)
+        | EEAccessDenied -> (TEAccessDenied, "Insufficient privileges to perform operation")
+        | EENotFound -> (TENotFound, "Entity not found")
+        | EEExecution msg -> (TEExecution, msg)
+
+    let returnError e = 
+        let (typ, msg) = errorString e
+        let resp = errorJson msg
+        match typ with 
+        | TEArguments -> RequestErrors.badRequest resp
+        | TEAccessDenied -> RequestErrors.forbidden resp
+        | TENotFound -> RequestErrors.notFound resp
+        | TEExecution -> RequestErrors.unprocessableEntity resp
 
     let getEntityInfo (entityRef : ResolvedEntityRef) (rctx : RequestContext) : HttpHandler =
         fun next ctx -> task {
@@ -48,55 +80,19 @@ let entitiesApi : HttpHandler =
             | Result.Error err -> return! returnError err next ctx
         }
 
-    let insertEntity (entityRef : ResolvedEntityRef) (rctx : RequestContext) : HttpHandler =
-        formArgs <| fun rawArgs next ctx -> task {
-            match! rctx.InsertEntity entityRef rawArgs with
-            | Ok newId ->
-                let ret = TRInsertEntity newId
-                return! commitAndReturn (json ret) rctx next ctx
-            | Result.Error err -> return! returnError err next ctx
-        }
-
-    let updateEntity (entityRef : ResolvedEntityRef) (id : int) (rctx : RequestContext) : HttpHandler =
-        formArgs <| fun rawArgs next ctx -> task {
-                match! rctx.UpdateEntity entityRef id rawArgs with
-                | Ok () ->
-                    return! commitAndReturn (json TRUpdateEntity) rctx next ctx
-                | Result.Error err -> return! returnError err next ctx
-        }
-
-    let deleteEntity (entityRef : ResolvedEntityRef) (id : int) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        match! rctx.DeleteEntity entityRef id with
-        | Ok () -> return! commitAndReturn (json TRDeleteEntity) rctx next ctx
-        | Result.Error err -> return! returnError err next ctx
-    }
-
-    let recordApi (entityRef : ResolvedEntityRef) (id : int) =
-        choose
-            [ PUT >=> withContext (updateEntity entityRef id)
-              DELETE >=> withContext (deleteEntity entityRef id)
-            ]
-
-    let rootEntityApi (ref : ResolvedEntityRef) =
-        choose
-            [ GET >=> withContext (getEntityInfo ref)
-              POST >=> withContext (insertEntity ref)
-            ]
-
     let entityApi (schema : string, name : string) =
         let entityRef =
             { schema = FunQLName schema
               name = FunQLName name
             }
         choose
-            [ route "" >=> (rootEntityApi entityRef)
-              routef "/%i" (recordApi entityRef)
+            [ GET >=> withContext (getEntityInfo entityRef)
             ]
 
     let performTransaction (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             let! transaction = ctx.BindModelAsync<Transaction>()
-            let handleOne op =
+            let handleOne (i, op) =
                 task {
                     let! res =
                         match op with
@@ -106,14 +102,21 @@ let entitiesApi : HttpHandler =
                             Task.map (Result.map (fun _ -> TRUpdateEntity)) <| rctx.UpdateEntity ref id entries
                         | TDeleteEntity (ref, id) ->
                             Task.map (Result.map (fun _ -> TRDeleteEntity)) <| rctx.DeleteEntity ref id
-                    return Result.mapError (fun err -> (op, err)) res
+                    return Result.mapError (fun err -> (i, err)) res
                 }
-            let mutable failed = false
-            match! transaction.operations |> Seq.traverseResultTaskSync handleOne with
+            match! transaction.operations |> Seq.indexed |> Seq.traverseResultTaskSync handleOne with
             | Ok results ->
                 let ret = { results = Array.ofSeq results }
                 return! commitAndReturn (json ret) rctx next ctx
-            | Error (op, err) -> return! returnError err next ctx
+            | Error (i, err) ->
+                let (typ, msg) = errorString err
+                let ret =
+                    { errorType = ErrorTransaction
+                      subtype = typ
+                      operation = i
+                      message = msg
+                    }
+                return! RequestErrors.badRequest (json ret) next ctx
         }
 
     let transactionApi =

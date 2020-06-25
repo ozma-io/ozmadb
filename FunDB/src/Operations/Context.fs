@@ -32,30 +32,30 @@ open FunWithFlags.FunDBSchema.System
 type UserViewErrorInfo =
     | UVENotFound
     | UVEAccessDenied
-    | UVEResolve of string
-    | UVEExecute of string
+    | UVEResolution of string
+    | UVEExecution of string
     | UVEArguments of string
     with
         member this.Message =
             match this with
             | UVENotFound -> "User view not found"
             | UVEAccessDenied -> "User view access denied"
-            | UVEResolve msg -> msg
-            | UVEExecute msg -> msg
+            | UVEResolution msg -> msg
+            | UVEExecution msg -> msg
             | UVEArguments msg -> msg
 
 type EntityErrorInfo =
     | EENotFound
     | EEAccessDenied
     | EEArguments of string
-    | EEExecute of string
+    | EEExecution of string
     with
         member this.Message =
             match this with
             | EENotFound -> "Entity not found"
             | EEAccessDenied -> "Entity access denied"
             | EEArguments msg -> msg
-            | EEExecute msg -> msg
+            | EEExecution msg -> msg
 
 type SaveErrorInfo =
     | SEAccessDenied
@@ -168,7 +168,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
             with
             | :? UserViewResolveException as err ->
                 logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
-                return Error <| UVEResolve (printException err)
+                return Error <| UVEResolution (printException err)
         | UVNamed ref ->
             let recompileView query = task {
                 try
@@ -177,14 +177,14 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 with
                 | :? UserViewResolveException as err ->
                     logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
-                    return Error <| UVEResolve (printException err)
+                    return Error <| UVEResolution (printException err)
             }
             match ctx.State.userViews.Find ref with
             | None -> return Error UVENotFound
             | Some (Error err) ->
                 if not recompileQuery then
                     logger.LogError(err.error, "Requested user view {uv} is broken", ref.ToString())
-                    return Error <| UVEResolve (printException err.error)
+                    return Error <| UVEResolution (printException err.error)
                 else
                     return! recompileView err.source.query
             | Some (Ok cached) ->
@@ -411,7 +411,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Details = printException ex
                             )
                         do! cacheStore.WriteEvent event
-                        return Error (EEExecute <| printException ex)
+                        return Error (EEExecution <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
                         let event =
@@ -472,7 +472,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Details = printException ex
                             )
                         do! cacheStore.WriteEvent event
-                        return Error (EEExecute <| printException ex)
+                        return Error (EEExecution <| printException ex)
                     | :? EntityNotFoundException as ex ->
                         logger.LogError(ex, "Not found")
                         let event =
@@ -545,7 +545,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Details = printException ex
                             )
                         do! cacheStore.WriteEvent event
-                        return Error (EEExecute <| printException ex)
+                        return Error (EEExecution <| printException ex)
                     | :? EntityNotFoundException as ex ->
                         logger.LogError(ex, "Not found")
                         let event =
