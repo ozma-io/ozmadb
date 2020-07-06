@@ -1,7 +1,6 @@
 module FunWithFlags.FunDB.Serialization.Json
 
 open System
-open System.Collections.Generic
 open System.Reflection
 open Microsoft.FSharp.Reflection
 open Newtonsoft.Json

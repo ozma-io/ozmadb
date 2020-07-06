@@ -16,10 +16,7 @@ type SourceUserViewsSchema =
     }
 
 let emptySourceUserViewsSchema : SourceUserViewsSchema =
-    { userViews = Map.empty }
-
-let mergeSourceUserViewsSchema (a : SourceUserViewsSchema) (b : SourceUserViewsSchema) =
-    { userViews = Map.unionUnique a.userViews b.userViews
+    { userViews = Map.empty
     }
 
 type SourceUserViews =

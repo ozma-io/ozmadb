@@ -4,10 +4,12 @@ open System
 open System.Linq
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
+open Microsoft.Extensions.ObjectPool
 open Microsoft.EntityFrameworkCore
 open FluidCaching
 open Npgsql
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open NetJs
 
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Utils
@@ -36,6 +38,7 @@ open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
+open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.EventLogger
@@ -86,6 +89,16 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
     // FIXME: random values
     let anonymousViewsCache = FluidCache<AnonymousUserView>(64, TimeSpan.FromSeconds(0.0), TimeSpan.FromSeconds(600.0), fun () -> DateTime.Now)
     let anonymousViewsIndex = anonymousViewsCache.AddIndex("byQuery", fun uv -> uv.query)
+
+    let jsIsolates =
+        DefaultObjectPool
+            { new IPooledObjectPolicy<CachingIsolate> with
+                  member this.Create () =
+                    { isolate = Isolate.NewWithHeapSize(1UL * 1024UL * 1024UL, 32UL * 1024UL * 1024UL)
+                      cache = ObjectMap()
+                    }
+                  member this.Return _ = true
+            }
 
     let filterSystemViews (views : SourceUserViews) : SourceUserViews =
         { schemas = filterPreloadedSchemas preload views.schemas }
@@ -299,12 +312,19 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             return! getMigrationLock transaction            
     }
 
+    let runPreload layout preload =
+        let isolate = jsIsolates.Get()
+        try
+            preloadUserViews layout preload isolate
+        finally
+            jsIsolates.Return(isolate)
+
     let getCachedState (transaction : DatabaseTransaction) : Task<CachedState> = task {       
         let! transaction = getMigrationLock transaction 
         let! (userMeta, layout, isChanged) = task {
             try
                 let! (isChanged1, layout, userMeta) = initialMigratePreload logger transaction preload
-                let systemViews = preloadUserViews layout preload
+                let systemViews = runPreload layout preload
                 let! isChanged2 = updateUserViews transaction.System systemViews
                 let isChanged = isChanged1 || isChanged2
                 return (userMeta, layout, isChanged)
@@ -482,7 +502,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 }
 
                 logger.LogInformation("Updating system user views")
-                let newSystemViews = preloadUserViews layout preload
+                let newSystemViews = runPreload layout preload
                 let! _ = updateUserViews transaction.System newSystemViews
 
                 let! newUserViewsSource = buildSchemaUserViews transaction.System

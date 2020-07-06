@@ -1,16 +1,14 @@
 module FunWithFlags.FunDB.UserViews.Generate
 
-open System.Globalization
+open System
 open Newtonsoft.Json
-open Jint.Native
-open Jint.Runtime.Descriptors
-open Jint.Runtime.Interop
+open NetJs
+open NetJs.Json
 
 open FunWithFlags.FunDB.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.SQL.Utils
 
 type UserViewGenerateException (message : string, innerException : Exception) =
@@ -20,41 +18,52 @@ type UserViewGenerateException (message : string, innerException : Exception) =
 
 let userViewsFunction = "GetUserViews"
 
-let private convertUserView (KeyValue (k, v : PropertyDescriptor)) =
-    let query = Jint.Runtime.TypeConverter.ToString(v.Value)
+let private convertUserView (KeyValue (k, v : Value.Value)) =
+    let query = v.GetString().Get()
     let uv =
         { query = query
           allowBroken = false
         }
     (FunQLName k, uv)
 
-type UserViewGenerator (jsProgram : string) =
-    let engine =
-        let engine = Jint.Engine(fun cfg -> ignore <| cfg.Culture(CultureInfo.InvariantCulture)).Execute(jsProgram)
+type UserViewGeneratorTemplate (isolate : Isolate) =
+    let template =
+        let jsRenderSqlName = Template.FunctionTemplate.New(isolate, fun args ->
+            let ret = args.[0].GetString().Get() |> renderSqlName
+            Value.String.New(isolate, ret).Value
+        )
+        let template = Template.ObjectTemplate.New(isolate)
+        template.Set("renderSqlName", jsRenderSqlName)
+        template
+    
+    member this.Isolate = isolate
+    member this.Template = template
 
-        let mutable userViewsFunctionKey = Jint.Key userViewsFunction
-        if not <| engine.Global.HasProperty(&userViewsFunctionKey) then
-            raisef UserViewGenerateException "Function %O is undefined" userViewsFunction
-
-        // XXX: reimplement this in JavaScript for performance if we switch to V8
-        let jsRenderSqlName (this : JsValue) (args : JsValue[]) =
-            args.[0] |> Jint.Runtime.TypeConverter.ToString |> renderSqlName |> JsString :> JsValue
-        // Strange that this is needed...
-        let jsRenderSqlNameF = System.Func<JsValue, JsValue[], JsValue>(jsRenderSqlName)
-        engine.Global.FastAddProperty("renderSqlName", ClrFunctionInstance(engine, "renderSqlName", jsRenderSqlNameF, 1), true, false, true)
-
-        engine
+type UserViewGenerator (template : UserViewGeneratorTemplate, jsProgram : string) =
+    let context = Context.New(template.Isolate, template.Template)
+    do
+        try
+            let script = Script.Compile(context, Value.String.New(template.Isolate, jsProgram))
+            ignore <| script.Run()
+        with
+        | :? NetJsException as e ->
+            raisefWithInner UserViewGenerateException e "Couldn't initialize user view generator"
+    let runnable =
+        match context.Global.Get(userViewsFunction).Data with
+        | :? Value.Function as f -> f
+        | v -> raisef UserViewGenerateException "%s is not a function, buf %O" userViewsFunction v
 
     let generateUserViews (layout : Layout) : SourceUserViewsSchema =
-        let newViews =
-            lock engine <| fun () ->
-                // Better way?
-                let jsonParser = Jint.Native.Json.JsonParser(engine)
-                let jsLayout = layout |> serializeLayout |> JsonConvert.SerializeObject |> jsonParser.Parse
-                engine.Invoke(userViewsFunction, jsLayout)
+        use jsWriter = new V8JsonWriter(context)
+        let serializer = JsonSerializer()
+        serializer.Serialize(jsWriter, layout)
+        try
+            let newViews = runnable.Call(Nullable(), null, [|jsWriter.Result|])
+            let userViews = newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
+            { userViews = userViews
+            }
+        with
+        | :? NetJsException as e ->
+            raisefWithInner UserViewGenerateException e "Couldn't generate user views"
 
-        let userViews = newViews.AsObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
-        { userViews = userViews
-        }
-
-    member this.Generate = generateUserViews
+    member this.Generate layout = generateUserViews layout

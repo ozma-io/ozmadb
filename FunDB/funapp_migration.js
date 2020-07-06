@@ -1,98 +1,91 @@
-// FIXME: modernize this as Jint updates or we somehow switch to V8
-
-var commonViews = {
+const commonViews = {
     // Internal APIs
-    "settings":
-        "SELECT\n" +
-        "  name,\n" +
-        "  value\n" +
-        "FROM\n" +
-        "  funapp.settings",
+    "settings": `
+SELECT
+  name,
+  value
+FROM
+  funapp.settings`,
     // Public APIs
-    "system_menu":
-        "SELECT\n" +
-        "  @type = 'menu',\n" +
-        "  schemas.name AS category_name,\n" +
-        "  entities.name AS name @{ linked_view = { schema: 'funapp', name: 'table-' || schemas.name || '-' || entities.name } }\n" +
-        "FROM\n" +
-        "  public.entities\n" +
-        "  LEFT JOIN public.schemas ON schemas.id = entities.schema_id\n" +
-        "WHERE NOT entities.is_hidden\n" +
-        "ORDER BY entities.id",
-    "user_view_by_name":
-        "{ $schema string, $name string }:\n" +
-        "SELECT\n" +
-        "  @type = 'form',\n" +
-        "  @block_sizes = [\n" +
-        "    6, 6,\n" +
-        "    12\n" +
-        "  ],\n" +
-        "  schema_id,\n" +
-        "  name,\n" +
-        "  allow_broken,\n" +
-        "  query @{\n" +
-	"    form_block = 2,\n" +
-	"    text_type = 'codeeditor',\n" +
-        "  }\n" +
-        "FROM\n" +
-        "  public.user_views\n" +
-        "WHERE schema_id=>name = $schema AND name = $name\n" +
-        "FOR INSERT INTO public.user_views"
+    "system_menu": `
+SELECT
+  @type = 'menu',
+  schemas.name AS category_name,
+  entities.name AS name @{ linked_view = { schema: 'funapp', name: 'table-' || schemas.name || '-' || entities.name } }
+FROM
+  public.entities
+  LEFT JOIN public.schemas ON schemas.id = entities.schema_id
+WHERE NOT entities.is_hidden
+ORDER BY entities.id`,
+    "user_view_by_name": `
+{ $schema string, $name string }:
+SELECT
+  @type = 'form',
+  @block_sizes = [
+    6, 6,
+    12
+  ],
+  schema_id,
+  name,
+  allow_broken,
+  query @{
+    form_block = 2,
+    text_type = 'codeeditor',
+  }
+FROM
+  public.user_views
+WHERE schema_id=>name = $schema AND name = $name
+FOR INSERT INTO public.user_views`
 };
 
-function addDefaultViews(views, layout) {
-    for (var schemaName in layout.schemas) {
-        var schema = layout.schemas[schemaName]
-        for (var entityName in schema.entities) {
-            var entity = schema.entities[entityName];
+const generateDefaultViews = (layout) => {
+    return Object.fromEntries(Object.entries(layout.schemas).flatMap(([schemaName, schema]) => {
+        return Object.entries(schema.entities).flatMap(([entityName, entity]) => {
             if (entity.isHidden) {
-                continue;
+                return [];
             }
-            var sqlName = renderSqlName(schemaName) + "." + renderSqlName(entityName);
-            var fields = [];
+            const sqlName = `${renderSqlName(schemaName)}.${renderSqlName(entityName)}`;
+            const fields = [];
             if (entity.children.length > 0) {
-                fields.push(renderSqlName("sub_entity"))
+                fields.push(renderSqlName("sub_entity"));
             }
-            for (var columnField in entity.columnFields) {
+            Object.keys(entity.columnFields).forEach(columnField => {
                 fields.push(renderSqlName(columnField));
-            }
-            for (var computedField in entity.computedFields) {
-                var comp = entity.computedFields[computedField];
+            });
+            Object.entries(entity.computedFields).forEach(([computedField, comp]) => {
                 if (!comp.broken) {
                     fields.push(renderSqlName(computedField));
                 }
-            }
+            });
 
-            var formName = "form-" + schemaName + "-" + entityName;
-            var formQuery =
-                "{ $id reference(" + sqlName + ") }:\n\n" +
-                "SELECT\n  " +
-                ["@type = 'form'"].concat(fields).join(",\n  ") +
-                "\nFROM " + sqlName + " " +
-                "WHERE id = $id";
-            if (!entity.isAbstract) {
-                formQuery = formQuery + "\nFOR INSERT INTO " + sqlName;
-            }
-            views[formName] = formQuery;
+            const formName = `form-${schemaName}-${entityName}`;
+            const formQuery = `
+{ $id reference(${sqlName}) }:
+SELECT
+  @type = 'form',
+  ${fields.join(",\n  ")}
+FROM ${sqlName}
+WHERE id = $id
+${entity.isAbstract ? "" : `FOR INSERT INTO ${sqlName}`}`;
 
-            var tableName = "table-" + schemaName + "-" + entityName;
-            var tableQuery =
-                "SELECT\n  " +
-                [ "@create_view = &\"" + formName + "\"",
-                  "id @{ row_linked_view = &\"" + formName + "\" }"
-                ].concat(fields).join(",\n  ") +
-                "\nFROM " + sqlName +
-                "\nORDER BY id";
-            if (!entity.isAbstract) {
-                formQuery = formQuery + "\nFOR INSERT INTO " + sqlName;
-            }
-            views[tableName] = tableQuery;
-        }
-    }
-}
+            const tableName = `table-${schemaName}-${entityName}`;
+            const tableQuery = `
+SELECT
+  @type = 'table',
+  @create_view = &"${formName}",
+  id @{ row_linked_view = &"${formName}" },
+  ${fields.join(",\n  ")}
+FROM ${sqlName}
+ORDER BY id
+${entity.isAbstract ? "" : `FOR INSERT INTO ${sqlName}`}`;
+
+            return [[formName, formQuery], [tableName, tableQuery]];
+        });
+    }));
+};
 
 function GetUserViews(layout) {
-    var newViews = JSON.parse(JSON.stringify(commonViews));
-    addDefaultViews(newViews, layout);
-    return newViews;
-}
+    const generated = generateDefaultViews(layout);
+    const allViews = { ...commonViews, ...generated };
+    return Object.fromEntries(Object.entries(allViews).map(([name, query]) => [name, query.trim()]));
+};

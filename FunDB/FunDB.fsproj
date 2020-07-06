@@ -92,6 +92,7 @@
     <Compile Include="src/JavaScript/Utils.fs" />
     <Compile Include="src/JavaScript/AST.fs" />
     <Compile Include="src/JavaScript/FunQL.fs" />
+    <Compile Include="src/JavaScript/Runtime.fs" />
 
     <Compile Include="src/UserViews/Source.fs" />
     <Compile Include="src/UserViews/Types.fs" />
@@ -141,7 +142,8 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="3.0.*" />
     <PackageReference Include="FluidCaching" Version="1.3.*" />
     <PackageReference Include="Giraffe" Version="4.0.*" />
-    <PackageReference Include="Jint" Version="3.0.0-beta-1632" />
+    <PackageReference Include="NetJs" Version="1.0.*" />
+    <PackageReference Include="NetJs.Json" Version="1.0.*" />
     <PackageReference Include="Newtonsoft.Json" Version="12.0.*" />
     <PackageReference Include="YamlDotNet" Version="8.1.*" />
   </ItemGroup>

@@ -27,6 +27,7 @@ open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.JavaScript.Runtime
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDBSchema.System
@@ -61,7 +62,7 @@ type PreloadedSchema =
     { schema : SourceSchema
       permissions : SourcePermissionsSchema
       defaultAttributes : SourceAttributesDatabase
-      userViewGenerator : UserViewGenerator option
+      userViewScript : string option
     }
 
 [<NoEquality; NoComparison>]
@@ -100,14 +101,13 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
                 path
             else
                 Path.Join(dirname, path)
-        let program = File.ReadAllText realPath
-        UserViewGenerator program
+        File.ReadAllText realPath
     let userViewGen = Option.map readUserViewGenerator preload.userViewGenerator
 
     { schema = schema
       permissions = permissions
       defaultAttributes = defaultAttributes
-      userViewGenerator = userViewGen
+      userViewScript = userViewGen
     }
 
 let preloadLayout (preload : Preload) : SourceLayout =
@@ -119,12 +119,15 @@ let preloadPermissions (preload : Preload) : SourcePermissions =
 let preloadDefaultAttributes (preload : Preload) : SourceDefaultAttributes =
     { schemas = preload.schemas |> Map.map (fun name schema -> schema.defaultAttributes) }
 
-let preloadUserViews (fullLayout : Layout) (preload : Preload) : SourceUserViews =
-    let generateUvs : UserViewGenerator option -> SourceUserViewsSchema = function
+let preloadUserViews (fullLayout : Layout) (preload : Preload) (isolate : CachingIsolate) : SourceUserViews =
+    let generateUvs : string option -> SourceUserViewsSchema = function
     | None -> emptySourceUserViewsSchema
-    | Some uvGen -> uvGen.Generate fullLayout
+    | Some uvScript ->
+        let template = isolate.cache.GetOrCreate(fun () -> UserViewGeneratorTemplate isolate.isolate)
+        let uvGen = UserViewGenerator(template, uvScript)
+        uvGen.Generate fullLayout
 
-    { schemas = preload.schemas |> Map.map (fun name schema -> generateUvs schema.userViewGenerator)
+    { schemas = preload.schemas |> Map.map (fun name schema -> generateUvs schema.userViewScript)
     }
 
 let resolvePreload (source : SourcePreloadFile) : Preload =
@@ -135,7 +138,7 @@ let resolvePreload (source : SourcePreloadFile) : Preload =
         { schema = buildSystemSchema typeof<SystemContext>
           permissions = emptySourcePermissionsSchema
           defaultAttributes = emptySourceAttributesDatabase
-          userViewGenerator = None
+          userViewScript = None
         }
     { schemas = Map.add funSchema systemPreload preloadedSchemas
     }
