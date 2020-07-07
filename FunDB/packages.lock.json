@@ -138,16 +138,16 @@
       "NetJs": {
         "type": "Direct",
         "requested": "[1.0.*, )",
-        "resolved": "1.0.4",
-        "contentHash": "+t2JpDoB5afXvRcWqb6MbA7vVJMeV9ICqEV/DTpdkzcGwbsCbrjNlZE1UDYsN4PU2tUmGdsKiENJDOZQ7xBfYw=="
+        "resolved": "1.0.5",
+        "contentHash": "og761eiK1uEyePhitgtpPaX1ca0B/p8AxAl028/OslRcvC8cAFskZtD2fWpaVIZj3XUgVjq+PdKFlPNnyLzO5g=="
       },
       "NetJs.Json": {
         "type": "Direct",
         "requested": "[1.0.*, )",
-        "resolved": "1.0.2",
-        "contentHash": "SVJg8lb+T7nWSUB6j0qxsHXAusZamh7zrQ1YsZg/+FzH3e3cVzDy+OGSeKt5ZgGvXKdqWutlrpjwLdAzm5j9Ag==",
+        "resolved": "1.0.3",
+        "contentHash": "8PGAFklYDpVvUFFu8eiRNuFY8f/NHs6fZ+quvIaZrdiewDgRyCG3y38bFMuWPWlg3p9IcenF6svNU1BEHIwoiw==",
         "dependencies": {
-          "NetJs": "1.0.2",
+          "NetJs": "1.0.4",
           "Newtonsoft.Json": "12.0.3"
         }
       },
