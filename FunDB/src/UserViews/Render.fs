@@ -12,6 +12,7 @@ let private renderUserView = function
 
 let renderUserViewsSchema (schema : UserViewsSchema) : SourceUserViewsSchema =
     { userViews = Map.map (fun name -> renderUserView) schema.userViews
+      generatorScript = None
     }
 
 let renderUserViews (uvs : UserViews) : SourceUserViews =

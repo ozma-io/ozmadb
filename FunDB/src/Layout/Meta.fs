@@ -190,9 +190,11 @@ type private MetaBuilder (layout : Layout) =
             match Map.tryFind schemaName splitTables with
             | None -> schema
             | Some extras -> { schema with objects = Map.union schema.objects extras }
-        let allSchemas = Map.map mergeTables schemas
+        let schemas = Map.map mergeTables schemas
 
-        { SQL.schemas = allSchemas }
+        let schemas = schemas |> Map.filter (fun name schema -> not <| Map.isEmpty schema.objects)
+
+        { SQL.schemas = schemas }
 
     member this.BuildLayoutMeta = buildLayoutMeta
 

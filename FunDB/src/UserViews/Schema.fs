@@ -16,6 +16,7 @@ let private makeSourceUserView (uv : UserView) : SourceUserView =
 
 let private makeSourceSchema (schema : Schema) : SourceUserViewsSchema =
     { userViews = schema.UserViews |> Seq.map (fun uv -> (FunQLName uv.Name, makeSourceUserView uv)) |> Map.ofSeqUnique
+      generatorScript = Option.ofNull schema.UserViewGeneratorScript
     }
 
 let buildSchemaUserViews (db : SystemContext) : Task<SourceUserViews> =

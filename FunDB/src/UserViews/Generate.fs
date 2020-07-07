@@ -39,11 +39,11 @@ type UserViewGeneratorTemplate (isolate : Isolate) =
     member this.Isolate = isolate
     member this.Template = template
 
-type UserViewGenerator (template : UserViewGeneratorTemplate, jsProgram : string) =
+type private UserViewGenerator (template : UserViewGeneratorTemplate, scriptSource : string) =
     let context = Context.New(template.Isolate, template.Template)
     do
         try
-            let script = Script.Compile(context, Value.String.New(template.Isolate, jsProgram))
+            let script = Script.Compile(context, Value.String.New(template.Isolate, scriptSource))
             ignore <| script.Run()
         with
         | :? NetJsException as e ->
@@ -53,17 +53,46 @@ type UserViewGenerator (template : UserViewGeneratorTemplate, jsProgram : string
         | :? Value.Function as f -> f
         | v -> raisef UserViewGenerateException "%s is not a function, buf %O" userViewsFunction v
 
-    let generateUserViews (layout : Layout) : SourceUserViewsSchema =
-        use jsWriter = new V8JsonWriter(context)
-        let serializer = JsonSerializer()
-        serializer.Serialize(jsWriter, layout)
+    let generateUserViews (layout : Value.Value) : SourceUserViewsSchema =
         try
-            let newViews = runnable.Call(Nullable(), null, [|jsWriter.Result|])
+            let newViews = runnable.Call(Nullable(), null, [|layout|])
             let userViews = newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
-            { userViews = userViews
+            { generatorScript = Some scriptSource
+              userViews = userViews
             }
         with
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't generate user views"
 
     member this.Generate layout = generateUserViews layout
+
+type private UserViewsGenerator (template : UserViewGeneratorTemplate, layout : Layout) =
+    let mutable jsLayout : Value.Value option = None
+
+    let getLayout () =
+        match jsLayout with
+        | Some l -> l
+        | None ->
+            let context = Context.New(template.Isolate, template.Template)
+            use jsWriter = new V8JsonWriter(context)
+            let serializer = JsonSerializer()
+            serializer.Serialize(jsWriter, layout)
+            jsLayout <- Some jsWriter.Result
+            jsWriter.Result
+    
+    let generateUserViewsSchema (schema : SourceUserViewsSchema) : SourceUserViewsSchema =
+        match schema.generatorScript with
+        | None -> schema
+        | Some script ->
+            let gen = UserViewGenerator(template, script)
+            gen.Generate(getLayout ())
+
+    let generateUserViews (views : SourceUserViews) : SourceUserViews =
+        { schemas = Map.map (fun name -> generateUserViewsSchema) views.schemas
+        }
+    
+    member this.GenerateUserViews views = generateUserViews views
+
+let generateUserViews (template : UserViewGeneratorTemplate) (layout : Layout) (uvs : SourceUserViews) : SourceUserViews =
+    let gen = UserViewsGenerator(template, layout)
+    gen.GenerateUserViews uvs

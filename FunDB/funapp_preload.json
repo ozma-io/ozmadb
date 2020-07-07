@@ -92,6 +92,14 @@
                   "attributes": "@{ text_type = 'codeeditor' }"
                 }
               }
+            },
+
+            "schemas": {
+              "fields": {
+                "user_view_generator_script": {
+                  "attributes": "@{ text_type = 'codeeditor', language = 'javascript' }"
+                }
+              }
             }
           }
         }

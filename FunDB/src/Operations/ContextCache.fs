@@ -32,6 +32,7 @@ open FunWithFlags.FunDB.UserViews.Resolve
 open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.UserViews.Schema
 open FunWithFlags.FunDB.UserViews.DryRun
+open FunWithFlags.FunDB.UserViews.Generate
 open FunWithFlags.FunDB.Layout.Integrity
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Meta
@@ -217,18 +218,30 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 do! markBrokenPermissions conn.System brokenPerms
         }
     
+    let generateViews layout userViews =
+        let isolate = jsIsolates.Get()
+        try
+            let template = isolate.cache.GetOrCreate (fun () -> UserViewGeneratorTemplate isolate.isolate)
+            generateUserViews template layout userViews
+        finally
+            jsIsolates.Return(isolate)
+
     let rec finishGetCachedState (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) : Task<CachedState> = task {
         let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, prefetchedViews, sourceViews) = task {
             try
-                let! currentVersion = ensureCurrentVersion transaction isChanged
-                // We don't do commit here and instead resolve as much as possible first to fail early.
-
                 let! sourceAttrs = buildSchemaAttributes transaction.System
                 let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
 
                 let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+
+                let systemViews = preloadUserViews preload
                 let! sourceViews = buildSchemaUserViews transaction.System
+                let sourceViews = { schemas = Map.union sourceViews.schemas systemViews.schemas } : SourceUserViews
+                let sourceViews = generateViews layout sourceViews
+                let! isChanged2 = updateUserViews transaction.System sourceViews
                 let (brokenViews1, userViews) = resolveUserViews layout mergedAttrs true sourceViews
+
+                let! currentVersion = ensureCurrentVersion transaction (isChanged || isChanged2)
 
                 // To dry-run user views we need to stop the transaction.
                 do! transaction.Commit ()
@@ -312,21 +325,11 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             return! getMigrationLock transaction            
     }
 
-    let runPreload layout preload =
-        let isolate = jsIsolates.Get()
-        try
-            preloadUserViews layout preload isolate
-        finally
-            jsIsolates.Return(isolate)
-
     let getCachedState (transaction : DatabaseTransaction) : Task<CachedState> = task {       
         let! transaction = getMigrationLock transaction 
         let! (userMeta, layout, isChanged) = task {
             try
-                let! (isChanged1, layout, userMeta) = initialMigratePreload logger transaction preload
-                let systemViews = runPreload layout preload
-                let! isChanged2 = updateUserViews transaction.System systemViews
-                let isChanged = isChanged1 || isChanged2
+                let! (isChanged, layout, userMeta) = initialMigratePreload logger transaction preload
                 return (userMeta, layout, isChanged)
             with
             | ex ->
@@ -501,9 +504,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     | :? QueryException as err -> return raisefWithInner ContextException err "Migration error"
                 }
 
-                logger.LogInformation("Updating system user views")
-                let newSystemViews = runPreload layout preload
-                let! _ = updateUserViews transaction.System newSystemViews
+                logger.LogInformation("Updating generated user views")
+                let userViewsSource = generateViews layout userViewsSource
+                let! _ = updateUserViews transaction.System userViewsSource
 
                 let! newUserViewsSource = buildSchemaUserViews transaction.System
                 let (_, userViews) =
@@ -549,7 +552,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                       permissions = permissions
                       defaultAttrs = mergedAttrs
                       userViews = mergePrefetchedUserViews badUserViews goodUserViews
-                      systemViews = newSystemViews
+                      systemViews = filterSystemViews userViewsSource
                       userMeta = wantedUserMeta
                     }
 

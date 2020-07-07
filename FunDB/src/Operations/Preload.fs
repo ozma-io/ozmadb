@@ -19,7 +19,6 @@ open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDB.Layout.Integrity
 open FunWithFlags.FunDB.Layout.Meta
 open FunWithFlags.FunDB.UserViews.Source
-open FunWithFlags.FunDB.UserViews.Generate
 open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Update
@@ -27,7 +26,6 @@ open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Connection
-open FunWithFlags.FunDB.JavaScript.Runtime
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDBSchema.System
@@ -62,7 +60,7 @@ type PreloadedSchema =
     { schema : SourceSchema
       permissions : SourcePermissionsSchema
       defaultAttributes : SourceAttributesDatabase
-      userViewScript : string option
+      userViews : SourceUserViewsSchema
     }
 
 [<NoEquality; NoComparison>]
@@ -94,20 +92,22 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
         } : SourceSchema
     let permissions = { roles = Map.map (fun name -> normalizeRole) preload.roles }
     let defaultAttributes = { schemas = preload.defaultAttributes } : SourceAttributesDatabase
-
-    let readUserViewGenerator (path : string) =
+    let readUserViewScript (path : string) =
         let realPath =
             if Path.IsPathRooted(path) then
                 path
             else
                 Path.Join(dirname, path)
         File.ReadAllText realPath
-    let userViewGen = Option.map readUserViewGenerator preload.userViewGenerator
+    let userViews =
+        { userViews = Map.empty
+          generatorScript = Option.map readUserViewScript preload.userViewGenerator
+        }
 
     { schema = schema
       permissions = permissions
       defaultAttributes = defaultAttributes
-      userViewScript = userViewGen
+      userViews = userViews
     }
 
 let preloadLayout (preload : Preload) : SourceLayout =
@@ -119,16 +119,8 @@ let preloadPermissions (preload : Preload) : SourcePermissions =
 let preloadDefaultAttributes (preload : Preload) : SourceDefaultAttributes =
     { schemas = preload.schemas |> Map.map (fun name schema -> schema.defaultAttributes) }
 
-let preloadUserViews (fullLayout : Layout) (preload : Preload) (isolate : CachingIsolate) : SourceUserViews =
-    let generateUvs : string option -> SourceUserViewsSchema = function
-    | None -> emptySourceUserViewsSchema
-    | Some uvScript ->
-        let template = isolate.cache.GetOrCreate(fun () -> UserViewGeneratorTemplate isolate.isolate)
-        let uvGen = UserViewGenerator(template, uvScript)
-        uvGen.Generate fullLayout
-
-    { schemas = preload.schemas |> Map.map (fun name schema -> generateUvs schema.userViewScript)
-    }
+let preloadUserViews (preload : Preload) : SourceUserViews =
+    { schemas = preload.schemas |> Map.map (fun name schema -> schema.userViews) }
 
 let resolvePreload (source : SourcePreloadFile) : Preload =
     let preloadedSchemas = source.preload.schemas |> Map.map (fun name -> resolvePreloadedSchema source.dirname)
@@ -138,7 +130,7 @@ let resolvePreload (source : SourcePreloadFile) : Preload =
         { schema = buildSystemSchema typeof<SystemContext>
           permissions = emptySourcePermissionsSchema
           defaultAttributes = emptySourceAttributesDatabase
-          userViewScript = None
+          userViews = emptySourceUserViewsSchema
         }
     { schemas = Map.add funSchema systemPreload preloadedSchemas
     }

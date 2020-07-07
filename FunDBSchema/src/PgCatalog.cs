@@ -12,11 +12,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 {
     public class PgCatalogContext : DbContext
     {
-        public DbSet<Namespace> Namespaces { get; set; }
-        public DbSet<Class> Classes { get; set; }
-        public DbSet<Attribute> Attributes { get; set; }
-        public DbSet<AttrDef> AttrDefs { get; set; }
-        public DbSet<Constraint> Constraints { get; set; }
+        public DbSet<Namespace> Namespaces { get; set; } = null!;
+        public DbSet<Class> Classes { get; set; } = null!;
+        public DbSet<Attribute> Attributes { get; set; } = null!;
+        public DbSet<AttrDef> AttrDefs { get; set; } = null!;
+        public DbSet<Constraint> Constraints { get; set; } = null!;
 
         public PgCatalogContext()
             : base()
@@ -187,10 +187,10 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Key]
         public int Oid { get; set; }
         [Required]
-        public string NspName { get; set; }
+        public string NspName { get; set; } = null!;
 
-        public List<Class> Classes { get; set; }
-        public List<Proc> Procs { get; set; }
+        public List<Class> Classes { get; set; } = null!;
+        public List<Proc> Procs { get; set; } = null!;
     }
 
     public class Class
@@ -199,21 +199,21 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Key]
         public int Oid { get; set; }
         [Required]
-        public string RelName { get; set; }
+        public string RelName { get; set; } = null!;
         [Column(TypeName="oid")]
         public int RelNamespace { get; set; }
         public char RelKind { get; set; }
 
         [ForeignKey("RelNamespace")]
-        public Namespace Namespace { get; set; }
+        public Namespace Namespace { get; set; } = null!;
 
-        public List<Attribute> Attributes { get; set; }
+        public List<Attribute> Attributes { get; set; } = null!;
         [InverseProperty("RelClass")]
-        public List<Constraint> Constraints { get; set; }
+        public List<Constraint> Constraints { get; set; } = null!;
         [InverseProperty("RelClass")]
-        public List<Index> Indexes { get; set; }
+        public List<Index> Indexes { get; set; } = null!;
         [InverseProperty("RelClass")]
-        public List<Trigger> Triggers { get; set; }
+        public List<Trigger> Triggers { get; set; } = null!;
     }
 
     public class Attribute
@@ -221,7 +221,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Column(TypeName="oid")]
         public int AttRelId { get; set; }
         [Required]
-        public string AttName { get; set; }
+        public string AttName { get; set; } = null!;
         [Column(TypeName="oid")]
         public int AttTypId { get; set; }
         public Int16 AttNum { get; set; }
@@ -229,11 +229,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public bool AttIsDropped { get; set; }
 
         [ForeignKey("AttRelId")]
-        public Class RelClass { get; set; }
+        public Class RelClass { get; set; } = null!;
         [ForeignKey("AttTypId")]
-        public Type Type { get; set; }
+        public Type Type { get; set; } = null!;
 
-        public List<AttrDef> AttrDefs { get; set; }
+        public List<AttrDef> AttrDefs { get; set; } = null!;
     }
 
     public class Type
@@ -242,7 +242,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Key]
         public int Oid { get; set; }
         [Required]
-        public string TypName { get; set; }
+        public string TypName { get; set; } = null!;
         public char TypType { get; set; }
     }
 
@@ -252,7 +252,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Key]
         public int Oid { get; set; }
         [Required]
-        public string LanName { get; set; }
+        public string LanName { get; set; } = null!;
     }
 
     public class AttrDef
@@ -265,11 +265,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Int16 AdNum { get; set; }
 
         [NotMapped]
-        public string Source { get; set; }
+        public string Source { get; set; } = null!;
 
         [ForeignKey("AdRelId")]
-        public Class RelClass { get; set; }
-        public Attribute Attribute { get; set; }
+        public Class RelClass { get; set; } = null!;
+        public Attribute Attribute { get; set; } = null!;
     }
 
     public class Constraint
@@ -278,22 +278,22 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Key]
         public int Oid { get; set; }
         [Required]
-        public string ConName { get; set; }
+        public string ConName { get; set; } = null!;
         public char ConType { get; set; }
         [Column(TypeName="oid")]
         public int ConRelId { get; set; }
         [Column(TypeName="oid")]
         public int? ConFRelId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
-        public Int16[] ConKey { get; set; }
-        public Int16[] ConFKey { get; set; }
+        public Int16[] ConKey { get; set; } = null!;
+        public Int16[] ConFKey { get; set; } = null!;
 
         [NotMapped]
-        public string Source { get; set; }
+        public string Source { get; set; } = null!;
 
         [ForeignKey("ConRelId")]
-        public Class RelClass { get; set; }
+        public Class RelClass { get; set; } = null!;
         [ForeignKey("ConFRelId")]
-        public Class FRelClass { get; set; }
+        public Class FRelClass { get; set; } = null!;
     }
 
     public class Trigger
@@ -304,26 +304,26 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Column(TypeName="oid")]
         public int TgRelId { get; set; }
         [Required]
-        public string TgName { get; set; }
+        public string TgName { get; set; } = null!;
         [Column(TypeName="oid")]
         public int TgFOid { get; set; }
         public bool TgIsInternal { get; set; }
         public Int16 TgType { get; set; }
         [Column(TypeName="oid")]
         public int? TgConstraint { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN
-        public Int16[] TgAttr { get; set; }
+        public Int16[] TgAttr { get; set; } = null!;
         [Required]
-        public byte[] TgArgs { get; set; }
+        public byte[] TgArgs { get; set; } = null!;
 
         [NotMapped]
-        public string Source { get; set; }
+        public string Source { get; set; } = null!;
 
         [ForeignKey("TgRelId")]
-        public Class RelClass { get; set; }
+        public Class RelClass { get; set; } = null!;
         [ForeignKey("TgConstraint")]
-        public Constraint Constraint { get; set; }
+        public Constraint Constraint { get; set; } = null!;
         [ForeignKey("TgFOid")]
-        public Proc Function { get; set; }
+        public Proc Function { get; set; } = null!;
     }
 
     public class Proc
@@ -332,7 +332,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Key]
         public int Oid { get; set; }
         [Required]
-        public string ProName { get; set; }
+        public string ProName { get; set; } = null!;
         [Column(TypeName="oid")]
         public int ProNamespace { get; set; }
         [Column(TypeName="oid")]
@@ -343,14 +343,14 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public char ProVolatile { get; set; }
         public bool ProRetSet { get; set; }
         [Required]
-        public string ProSrc { get; set; }
+        public string ProSrc { get; set; } = null!;
 
         [ForeignKey("ProNamespace")]
-        public Namespace Namespace { get; set; }
+        public Namespace Namespace { get; set; } = null!;
         [ForeignKey("ProLang")]
-        public Language Language { get; set; }
+        public Language Language { get; set; } = null!;
         [ForeignKey("ProRetType")]
-        public Type RetType { get; set; }
+        public Type RetType { get; set; } = null!;
     }
 
     public class Index
@@ -362,11 +362,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public int IndRelId { get; set; }
         public bool IndIsUnique { get; set; }
         public bool IndIsPrimary { get; set; }
-        public Int16[] IndKey { get; set; }
+        public Int16[] IndKey { get; set; } = null!;
 
         [ForeignKey("IndexRelId")]
-        public Class Class { get; set; }
+        public Class Class { get; set; } = null!;
         [ForeignKey("IndRelId")]
-        public Class RelClass { get; set; }
+        public Class RelClass { get; set; } = null!;
     }
 }

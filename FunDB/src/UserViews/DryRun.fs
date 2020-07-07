@@ -280,6 +280,7 @@ let private renderPrefetchedUserView : Result<PrefetchedUserView, UserViewError>
 
 let renderPrefetchedUserViewsSchema (schema : PrefetchedViewsSchema) : SourceUserViewsSchema =
     { userViews = Map.map (fun name -> renderPrefetchedUserView) schema.userViews
+      generatorScript = None
     }
 
 let renderPrefetchedUserViews (uvs : PrefetchedUserViews) : SourceUserViews =

@@ -60,7 +60,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
     {
         public string Type { get; }
         public bool IsImmutable { get; set; }
-        public string Default { get; set; }
+        public string? Default { get; set; }
 
         public ColumnFieldAttribute(string type)
         {

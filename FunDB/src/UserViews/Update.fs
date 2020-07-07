@@ -18,6 +18,8 @@ type private UserViewsUpdater (db : SystemContext) =
         existingUv.Query <- uv.query
 
     let updateUserViewsSchema (schema : SourceUserViewsSchema) (existingSchema : Schema) : unit =
+        existingSchema.UserViewGeneratorScript <- Option.toNull schema.generatorScript
+
         let oldUserViewsMap =
             existingSchema.UserViews |> Seq.map (fun uv -> (FunQLName uv.Name, uv)) |> Map.ofSeq
 
@@ -30,6 +32,7 @@ type private UserViewsUpdater (db : SystemContext) =
             existingSchema.UserViews.Add(newUv)
             newUv
         ignore <| updateDifference db updateFunc createFunc schema.userViews oldUserViewsMap
+
 
     let updateSchemas (schemas : Map<SchemaName, SourceUserViewsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
         let updateFunc _ = updateUserViewsSchema

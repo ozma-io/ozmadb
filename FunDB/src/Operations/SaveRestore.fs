@@ -88,6 +88,7 @@ type SchemaDump =
       roles : Map<RoleName, SourceRole>
       [<JsonProperty(Required=Required.DisallowNull)>]
       userViews : Map<UserViewName, SourceUserView>
+      userViewsGeneratorScript : string option
       [<JsonProperty(Required=Required.DisallowNull)>]
       defaultAttributes : Map<SchemaName, SourceAttributesSchema>
     }
@@ -96,6 +97,7 @@ let emptySchemaDump : SchemaDump =
     { entities = Map.empty
       roles = Map.empty
       userViews = Map.empty
+      userViewsGeneratorScript = None
       defaultAttributes = Map.empty
     }
 
@@ -103,6 +105,7 @@ let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
     { entities = Map.unionUnique a.entities b.entities
       roles = Map.unionUnique a.roles b.roles
       userViews = Map.unionUnique a.userViews b.userViews
+      userViewsGeneratorScript = Option.unionUnique a.userViewsGeneratorScript b.userViewsGeneratorScript
       defaultAttributes = Map.unionWith (fun name -> mergeSourceAttributesSchema) a.defaultAttributes b.defaultAttributes
     }
 
@@ -124,7 +127,8 @@ let saveSchema (db : SystemContext) (name : SchemaName) : Task<SchemaDump> =
         return
             { entities = entities.entities
               roles = roles.roles
-              userViews = userViews.userViews
+              userViews = if Option.isSome userViews.generatorScript then Map.empty else userViews.userViews
+              userViewsGeneratorScript = userViews.generatorScript
               defaultAttributes = attributes.schemas
             }
     }
@@ -133,7 +137,12 @@ let restoreSchema (db : SystemContext) (name : SchemaName) (dump : SchemaDump) :
     task {
         let newLayout = { schemas = Map.singleton name { entities = dump.entities } } : SourceLayout
         let newPerms = { schemas = Map.singleton name { roles = dump.roles } } : SourcePermissions
-        let newUserViews = { schemas = Map.singleton name { userViews = dump.userViews } } : SourceUserViews
+        let newUserViews =
+            let uvs =
+                { userViews = if Option.isSome dump.userViewsGeneratorScript then Map.empty else dump.userViews
+                  generatorScript = dump.userViewsGeneratorScript
+                }
+            { schemas = Map.singleton name uvs } : SourceUserViews
         let newAttributes = { schemas = Map.singleton name { schemas = dump.defaultAttributes } } : SourceDefaultAttributes
 
         let! updated1 = updateLayout db newLayout
@@ -217,6 +226,8 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
 
 let private extraDefaultAttributesEntry = "extra_default_attributes.yaml"
 
+let private userViewsGeneratorEntry = "user_views_generator.js"
+
 let private maxFilesSize = 1L * 1024L * 1024L // 1MB
 
 let private uvPragmaAllowBroken = "--#allow_broken"
@@ -255,6 +266,12 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
         let extraAttributes = dump.defaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
         if not <| Map.isEmpty extraAttributes then
             dumpToEntry extraDefaultAttributesEntry extraAttributes
+        
+        match dump.userViewsGeneratorScript with
+        | None -> ()
+        | Some script ->
+            useEntry userViewsGeneratorEntry <| fun writer ->
+                writer.Write(script)
 
     if totalSize > maxFilesSize then
         failwithf "Total files size in archive is %i, which is too large" totalSize
@@ -332,6 +349,11 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                     let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
                     { emptySchemaDump with
                           defaultAttributes = defaultAttrs
+                    }
+                | fileName when fileName = userViewsGeneratorEntry ->
+                    let script = readEntry entry <| fun reader -> reader.ReadToEnd()
+                    { emptySchemaDump with
+                          userViewsGeneratorScript = Some script
                     }
                 | fileName -> raisef RestoreSchemaException "Invalid archive entry %O/%s" schemaName fileName
         (schemaName, dump)

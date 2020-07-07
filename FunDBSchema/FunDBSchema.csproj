@@ -5,6 +5,8 @@
 
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>8.0</LangVersion>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>    

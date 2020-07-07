@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.UserViews.Source
 open Newtonsoft.Json
 
 open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunDB.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceUserView =
@@ -11,17 +12,17 @@ type SourceUserView =
     }
 
 type SourceUserViewsSchema =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      userViews : Map<UserViewName, SourceUserView>
+    { userViews : Map<UserViewName, SourceUserView>
+      generatorScript : string option
+    }
+
+type SourceUserViews =
+    { schemas : Map<SchemaName, SourceUserViewsSchema>
     }
 
 let emptySourceUserViewsSchema : SourceUserViewsSchema =
     { userViews = Map.empty
-    }
-
-type SourceUserViews =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      schemas : Map<SchemaName, SourceUserViewsSchema>
+      generatorScript = None
     }
 
 let emptySourceUserViews : SourceUserViews =
