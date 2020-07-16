@@ -31,7 +31,7 @@ let viewsApi : HttpHandler =
         | UVENotFound -> errorJson "Not found" |> RequestErrors.notFound
         | UVEResolution msg -> errorJson msg |> RequestErrors.badRequest
         | UVEExecution msg -> errorJson msg |> RequestErrors.unprocessableEntity
-       
+
     let getRecompile (ctx : HttpContext) =
 #if DEBUG
             ctx.GetQueryStringValue "__recompile" |> Result.getOption |> Option.bind tryBool |> Option.defaultValue false

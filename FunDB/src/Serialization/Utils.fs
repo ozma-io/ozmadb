@@ -104,7 +104,7 @@ let unionAsObject (objectType : Type) =
                     failwith <| sprintf "Field name %s of case %s clashes with case field name" field.Name case.info.Name
         unionCases objectType |> Seq.iter checkName
         Some asObject.CaseFieldName
-    | _ -> failwith "Impossible"    
+    | _ -> failwith "Impossible"
 
 let getTypeDefaultValue (objectType : Type) : obj option =
     if isNullableType objectType then

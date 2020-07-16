@@ -539,7 +539,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let makeCase (localId, subcase) =
                 let case = SQL.VEEq (SQL.VEColumn { table = Some tableRef; name = columnName (CTMeta (CMDomain ns)) }, SQL.VEValue (SQL.VInt localId))
                 (case, domainExpression tableRef f subcase)
-            SQL.VECase (nested |> Map.toSeq |> Seq.map makeCase |> Seq.toArray, None)   
+            SQL.VECase (nested |> Map.toSeq |> Seq.map makeCase |> Seq.toArray, None)
 
     let fromInfoExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.ValueExpr) = function
         | FTEntity (id, dom) -> f dom

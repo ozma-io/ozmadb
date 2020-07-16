@@ -313,7 +313,7 @@ type FieldExprTypePrettyConverter () =
             writer.WritePropertyName("subtype")
             serializer.Serialize(writer, st)
         writer.WriteEndObject()
-        
+
 type JoinType =
     | Inner
     | Left

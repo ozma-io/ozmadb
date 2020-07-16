@@ -72,7 +72,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               isAbstract = entityClass.IsAbstract
             }
         Some (name, entityClass, res)
-    | _ -> failwith "Impossible"    
+    | _ -> failwith "Impossible"
 
 // Build entities map using mish-mash of our custom attributes and Entity Framework Core declarations.
 let buildSystemSchema (contextClass : Type) : SourceSchema =

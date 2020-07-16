@@ -217,7 +217,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     failwith "Broken system roles"
                 do! markBrokenPermissions conn.System brokenPerms
         }
-    
+
     let generateViews layout userViews =
         let isolate = jsIsolates.Get()
         try
@@ -252,7 +252,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             with
             | ex ->
                 transaction.Rollback ()
-                return reraise' ex            
+                return reraise' ex
         }
         let! currentVersion2 = task {
             try
@@ -261,7 +261,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             | ex ->
                 transaction.Rollback ()
                 return reraise' ex
-        }    
+        }
         if currentVersion2 <> currentVersion then
             let! sourceLayout = buildSchemaLayout transaction.System
             let (_, layout) = resolveLayout sourceLayout false
@@ -295,7 +295,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             with
             | ex ->
                 transaction.Rollback ()
-                return reraise' ex    
+                return reraise' ex
     }
 
     let rec getMigrationLock (transaction : DatabaseTransaction) : Task<DatabaseTransaction> = task {
@@ -322,11 +322,11 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return reraise' ex
             transaction.Rollback ()
             let transaction = new DatabaseTransaction (transaction.Connection)
-            return! getMigrationLock transaction            
+            return! getMigrationLock transaction
     }
 
-    let getCachedState (transaction : DatabaseTransaction) : Task<CachedState> = task {       
-        let! transaction = getMigrationLock transaction 
+    let getCachedState (transaction : DatabaseTransaction) : Task<CachedState> = task {
+        let! transaction = getMigrationLock transaction
         let! (userMeta, layout, isChanged) = task {
             try
                 let! (isChanged, layout, userMeta) = initialMigratePreload logger transaction preload

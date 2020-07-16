@@ -175,7 +175,7 @@ type private Phase1Resolver (layout : SourceLayout) =
             | HRInherited parentRef -> parentRef
         let parentEntity = layout.FindEntity parentRef |> Option.get
         let parentSource = Map.find name parentEntity.computedFields
-                
+
         if parentSource.isVirtual && childSource.isVirtual then
             child
         else
@@ -264,7 +264,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                     Map.unionUnique inheritedFields selfColumnFields
                 with
                 | Failure msg -> raisef ResolveLayoutException "Column field names clash: %s" msg
-            
+
         let selfComputedFields = Map.map mapComputedField entity.computedFields
         let computedFields =
             match parent with
@@ -427,8 +427,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let expr =
             match parse tokenizeFunQL fieldExpr comp.expression with
             | Ok r -> r
-            | Error msg -> raisef ResolveLayoutException "Error parsing computed field expression: %s" msg        
-        
+            | Error msg -> raisef ResolveLayoutException "Error parsing computed field expression: %s" msg
+
         let mutable isLocal = true
         let mutable hasId = false
         let mutable usedSchemas = Map.empty

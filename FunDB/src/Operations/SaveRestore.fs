@@ -209,7 +209,7 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
             defaultAttrs <- Map.add name fieldAttrs defaultAttrs
         | None -> ()
         entry
-        
+
     let ret =
         { columnFields = Map.map (fun name -> deprettifyColumnField >> extractAttrs name) entity.columnFields
           computedFields = Map.map (fun name -> deprettifyComputedField >> extractAttrs name) entity.computedFields
@@ -266,7 +266,7 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
         let extraAttributes = dump.defaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
         if not <| Map.isEmpty extraAttributes then
             dumpToEntry extraDefaultAttributesEntry extraAttributes
-        
+
         match dump.userViewsGeneratorScript with
         | None -> ()
         | Some script ->

@@ -67,7 +67,7 @@ type SpecializedTypeConverter () =
 [<AbstractClass>]
 type SpecializedSingleTypeConverter<'A> () =
     inherit SpecializedTypeConverter ()
-    
+
     override this.GetConverterType (someType : Type) : Type =
         typedefof<'A>.MakeGenericType([|someType|])
 
@@ -158,7 +158,7 @@ type SpecializedRecordConverter<'A> (converter : CrutchTypeConverter) =
         match parser.Current with
         | :? MappingStart -> ignore <| parser.MoveNext()
         | _ -> raisef YamlException "Invalid YAML value"
-    
+
         let rec getNextField (fields : Map<string, obj>) =
             match parser.Current with
             | :? MappingEnd ->
@@ -198,11 +198,11 @@ type RecordTypeConverter () =
 type SpecializedMapConverter<'K, 'V when 'K : comparison> (converter : CrutchTypeConverter) =
     interface IYamlTypeConverter with
         override this.Accepts someType = someType = typeof<Map<'K, 'V>>
-    
+
         override this.ReadYaml (parser : IParser, someType : Type) =
             let seq = converter.Deserialize<Dictionary<'K, 'V>>(parser)
             seq |> Seq.map (function KeyValue(k, v) -> (k, v)) |> Map.ofSeq :> obj
-        
+
         override this.WriteYaml (emitter, value, someType) = failwith "Not implemented"
 
 type MapTypeConverter () =
@@ -241,7 +241,7 @@ let makeYamlDeserializer (build : DeserializerBuilder -> unit) : IDeserializer =
     |]
     let builder = DeserializerBuilder()
     for conv in myConverters do
-        ignore <| builder.WithTypeConverter(conv)  
+        ignore <| builder.WithTypeConverter(conv)
     build builder
     let valueDeserializer = builder.BuildValueDeserializer()
     for conv in myConverters do

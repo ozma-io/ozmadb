@@ -203,7 +203,7 @@ type ConverterContractResolver (converterConstructors : (Type -> JsonConverter o
                     prop.Required <- Required.Always
 
         prop
-    
+
 (* Default settings for F# types:
    * All fields are always required, unless type is Option;
    * Default values for containers are provided.

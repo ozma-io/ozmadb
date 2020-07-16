@@ -58,7 +58,7 @@ let emptySourcePermissionsSchema : SourcePermissionsSchema =
 
 let mergeSourcePermissionsSchema (a : SourcePermissionsSchema) (b : SourcePermissionsSchema) : SourcePermissionsSchema =
     { roles = Map.unionUnique a.roles b.roles
-    }  
+    }
 
 type SourcePermissions =
     { [<JsonProperty(Required=Required.DisallowNull)>]

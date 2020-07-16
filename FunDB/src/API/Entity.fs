@@ -63,10 +63,10 @@ let entitiesApi : HttpHandler =
         | EENotFound -> (TENotFound, "Entity not found")
         | EEExecution msg -> (TEExecution, msg)
 
-    let returnError e = 
+    let returnError e =
         let (typ, msg) = errorString e
         let resp = errorJson msg
-        match typ with 
+        match typ with
         | TEArguments -> RequestErrors.badRequest resp
         | TEAccessDenied -> RequestErrors.forbidden resp
         | TENotFound -> RequestErrors.notFound resp

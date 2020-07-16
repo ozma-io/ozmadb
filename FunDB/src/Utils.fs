@@ -585,7 +585,7 @@ type ComparableArray<'t> when 't : comparison =
 let isUnionCase<'t> (objectType : Type) : bool =
     if not (FSharpType.IsUnion typeof<'t>) then
         failwith "Type is not a union"
-    
+
     if (typeof<'t>).IsGenericType then
         not (isNull objectType.BaseType) && objectType.BaseType.IsGenericType && objectType.BaseType.GetGenericTypeDefinition() = typedefof<'t>
     else
@@ -656,7 +656,7 @@ type ObjectMap () =
             let o = f ()
             objects.[t] <- OIObject o
             Some o
- 
+
     member this.Get (t : Type) : obj =
         this.TryGet t |> Option.get
 

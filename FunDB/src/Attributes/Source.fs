@@ -19,7 +19,7 @@ type SourceAttributesEntity =
     } with
         member this.FindField (name : FieldName) =
             Map.tryFind name this.fields
-          
+
 let emptySourceAttributesEntity : SourceAttributesEntity =
     { fields = Map.empty }
 

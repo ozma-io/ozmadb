@@ -28,14 +28,15 @@ let private convertUserView (KeyValue (k, v : Value.Value)) =
 
 type UserViewGeneratorTemplate (isolate : Isolate) =
     let template =
-        let jsRenderSqlName = Template.FunctionTemplate.New(isolate, fun args ->
+        let template = Template.ObjectTemplate.New(isolate)
+
+        template.Set("renderSqlName", Template.FunctionTemplate.New(isolate, fun args ->
             let ret = args.[0].GetString().Get() |> renderSqlName
             Value.String.New(isolate, ret).Value
-        )
-        let template = Template.ObjectTemplate.New(isolate)
-        template.Set("renderSqlName", jsRenderSqlName)
+        ))
+
         template
-    
+
     member this.Isolate = isolate
     member this.Template = template
 
@@ -79,7 +80,7 @@ type private UserViewsGenerator (template : UserViewGeneratorTemplate, layout : 
             serializer.Serialize(jsWriter, layout)
             jsLayout <- Some jsWriter.Result
             jsWriter.Result
-    
+
     let generateUserViewsSchema (schema : SourceUserViewsSchema) : SourceUserViewsSchema =
         match schema.generatorScript with
         | None -> schema
@@ -90,7 +91,7 @@ type private UserViewsGenerator (template : UserViewGeneratorTemplate, layout : 
     let generateUserViews (views : SourceUserViews) : SourceUserViews =
         { schemas = Map.map (fun name -> generateUserViewsSchema) views.schemas
         }
-    
+
     member this.GenerateUserViews views = generateUserViews views
 
 let generateUserViews (template : UserViewGeneratorTemplate) (layout : Layout) (uvs : SourceUserViews) : SourceUserViews =
