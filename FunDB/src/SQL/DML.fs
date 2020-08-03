@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.SQL.DML
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 

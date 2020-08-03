@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
+  </PropertyGroup>
+
+  <ItemGroup>    
+    <Compile Include="src/Utils.fs" />
+
+    <Compile Include="src/Serialization/Utils.fs" />
+    <Compile Include="src/Serialization/Json.fs" />
+    <Compile Include="src/Serialization/Yaml.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.*" />
+    <PackageReference Include="YamlDotNet" Version="8.1.*" />
+    <PackageReference Include="TaskBuilder.fs" Version="2.1.*" />
+  </ItemGroup>
+
+</Project>

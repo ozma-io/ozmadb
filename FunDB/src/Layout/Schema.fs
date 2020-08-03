@@ -4,7 +4,7 @@ open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDBSchema.System

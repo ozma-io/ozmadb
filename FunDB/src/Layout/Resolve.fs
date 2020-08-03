@@ -1,9 +1,8 @@
 module FunWithFlags.FunDB.Layout.Resolve
 
-open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST

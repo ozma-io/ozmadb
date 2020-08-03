@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.SQL.Migration
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.SQL.Query

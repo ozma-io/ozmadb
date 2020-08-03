@@ -7,7 +7,8 @@ open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.SQL.Utils
 
 type SQLName = SQLName of string
@@ -203,15 +204,15 @@ type ValuePrettyConverter () =
 // Simplified list of PostgreSQL types. Other types are casted to those.
 // Used when interpreting query results and for compiling FunQL.
 type SimpleType =
-    | STInt
-    | STString
-    | STDecimal
-    | STBool
-    | STDateTime
-    | STDate
-    | STInterval
-    | STRegclass
-    | STJson
+    | [<CaseName("int")>] STInt
+    | [<CaseName("string")>] STString
+    | [<CaseName("numeric")>] STDecimal
+    | [<CaseName("bool")>] STBool
+    | [<CaseName("datetime")>] STDateTime
+    | [<CaseName("date")>] STDate
+    | [<CaseName("interval")>] STInterval
+    | [<CaseName("regclass")>] STRegclass
+    | [<CaseName("json")>] STJson
     with
         override this.ToString () = this.ToSQLString()
 
@@ -231,28 +232,6 @@ type SimpleType =
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
-
-type SimpleTypePrettyConverter () =
-    inherit JsonConverter<SimpleType> ()
-
-    let simpleTypeString = function
-        | STInt -> "int"
-        | STString -> "string"
-        | STDecimal -> "numeric"
-        | STBool -> "bool"
-        | STDateTime -> "datetime"
-        | STDate -> "date"
-        | STInterval -> "interval"
-        | STRegclass -> "regclass"
-        | STJson -> "json"
-
-    override this.CanRead = false
-
-    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : SimpleType =
-        raise <| NotImplementedException ()
-
-    override this.WriteJson (writer : JsonWriter, value : SimpleType, serializer : JsonSerializer) : unit =
-        writer.WriteValue(simpleTypeString value)
 
 // Find the closest simple type to a given.
 let findSimpleType (str : TypeName) : SimpleType option =
@@ -279,9 +258,10 @@ let findSimpleType (str : TypeName) : SimpleType option =
     | "json" -> Some STJson
     | _ -> None
 
+[<SerializeAsObject("type")>]
 type ValueType<'t> when 't :> ISQLString =
-    | VTScalar of 't
-    | VTArray of 't
+    | [<CaseName(null)>] VTScalar of Type : 't
+    | [<CaseName("array")>] VTArray of Subtype : 't
     with
         override this.ToString () = this.ToSQLString()
 
@@ -292,30 +272,6 @@ type ValueType<'t> when 't :> ISQLString =
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
-
-type ValueTypePrettyConverter () =
-    inherit JsonConverter ()
-
-    override this.CanConvert (objectType : Type) =
-        isUnionCase<ValueType<_>> objectType
-
-    override this.CanRead = false
-
-    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
-        raise <| NotImplementedException ()
-
-    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
-        writer.WriteStartObject()
-        writer.WritePropertyName("type")
-        match castUnion<ValueType<ISQLString>> value with
-        | Some (VTScalar st) ->
-            serializer.Serialize(writer, st)
-        | Some (VTArray st) ->
-            writer.WriteValue("array")
-            writer.WritePropertyName("subtype")
-            serializer.Serialize(writer, st)
-        | None -> failwith "impossible"
-        writer.WriteEndObject()
 
 let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
     | VTScalar a -> VTScalar (func a)

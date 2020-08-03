@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.Attributes.Source
 
 open Newtonsoft.Json
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceAttributesField =

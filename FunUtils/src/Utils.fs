@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.Utils
+module FunWithFlags.FunUtils.Utils
 
 open Printf
 open System

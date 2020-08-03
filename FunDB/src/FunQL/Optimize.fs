@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.FunQL.Optimize
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 

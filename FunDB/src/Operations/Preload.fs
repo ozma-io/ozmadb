@@ -6,7 +6,7 @@ open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST

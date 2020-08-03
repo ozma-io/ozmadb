@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.Serialization.Yaml
+module FunWithFlags.FunUtils.Serialization.Yaml
 
 open System
 open System.Reflection
@@ -10,8 +10,8 @@ open YamlDotNet.Serialization.NodeDeserializers
 open YamlDotNet.Serialization.Utilities
 open Microsoft.FSharp.Reflection
 
-open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Serialization.Utils
+open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Serialization.Utils
 
 // https://github.com/aaubry/YamlDotNet/issues/459
 // We pass serializers to converters after instantiating them with mutation. Ugh.
@@ -73,13 +73,16 @@ type SpecializedSingleTypeConverter<'A> () =
 
 type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
     let cases = unionCases typeof<'A>
-    let casesMap = cases |> unionNames
-    let reverseNames = casesMap |> Map.toSeq |> Seq.map (fun (name, case) -> (case.info.Name, (name, case.fields))) |> Map.ofSeq
+    let casesMap = unionNames cases
+    let reverseNames = casesMap |> Map.mapWithKeys (fun name case -> (case.Info.Name, name))
 
-    let searchCases (name : string) (doCase : UnionCase -> obj) : obj =
+    let searchCases (name : string option) : UnionCase =
         match Map.tryFind name casesMap with
-            | Some c -> doCase c
-            | None -> raisef YamlException "Unknown union case \"%s\"" name
+        | Some c -> c
+        | None ->
+            match name with
+            | Some n -> raisef YamlException "Unknown union case \"%s\"" n
+            | None -> raisef YamlException "No default union case"
 
     let readYaml : IParser -> obj =
         match isNewtype cases with
@@ -92,20 +95,19 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
             match isOption cases with
             | Some option ->
                 let nullDeserializer = NullNodeDeserializer() :> INodeDeserializer
-                let nullValue = FSharpValue.MakeUnion(option.noneCase, [||])
+                let nullValue = FSharpValue.MakeUnion(option.NoneCase, [||])
                 fun reader ->
                     match nullDeserializer.Deserialize(reader, null, null) with
                     | (true, _) -> nullValue
                     | (false, _) ->
-                        let arg = converter.Deserialize(reader, option.someType.PropertyType)
-                        FSharpValue.MakeUnion(option.someCase, [|arg|])
+                        let arg = converter.Deserialize(reader, option.SomeType.PropertyType)
+                        FSharpValue.MakeUnion(option.SomeCase, [|arg|])
             | None ->
                 if isUnionEnum cases then
                     fun reader ->
                         let name = converter.Deserialize<string>(reader)
-                        let ret = searchCases name <| fun case ->
-                            FSharpValue.MakeUnion(case.info, [||])
-                        ret
+                        let case = searchCases (Option.ofNull name)
+                        FSharpValue.MakeUnion(case.Info, [||])
                 else
                     failwith "Deserialization for arbitrary unions is not implemented"
 
@@ -120,9 +122,9 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
             | Some option ->
                 fun value writer ->
                     let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
-                    if case = option.noneCase then
+                    if case = option.NoneCase then
                         writer.Emit(Scalar("null"))
-                    else if case = option.someCase then
+                    else if case = option.SomeCase then
                         converter.Serialize(writer, args.[0])
                     else
                         failwith "Sanity check failed"
@@ -130,8 +132,10 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                 if isUnionEnum cases then
                     fun value writer ->
                         let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
-                        let (caseName, _) = Map.find case.Name reverseNames
-                        writer.Emit(Scalar(caseName))
+                        let caseName = Map.find case.Name reverseNames
+                        match caseName with
+                        | None -> writer.Emit(Scalar("null"))
+                        | Some cn -> writer.Emit(Scalar(cn))
                 else
                     failwith "Serialization for arbitrary unions is not implemented"
 

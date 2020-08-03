@@ -7,8 +7,8 @@ open System.IO.Compression
 open Newtonsoft.Json
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Serialization.Yaml
+open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Serialization.Yaml
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Schema

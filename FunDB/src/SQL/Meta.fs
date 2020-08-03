@@ -6,9 +6,9 @@ open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.Parsing
-open FunWithFlags.FunDB.Serialization.Json
+open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL

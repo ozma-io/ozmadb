@@ -9,8 +9,8 @@ open Npgsql
 open NpgsqlTypes
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Serialization.Json
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Serialization.Json
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Lex

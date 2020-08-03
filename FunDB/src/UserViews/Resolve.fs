@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.UserViews.Resolve
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Source

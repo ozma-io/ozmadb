@@ -10,7 +10,7 @@ open Microsoft.Extensions.Logging
 open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Types

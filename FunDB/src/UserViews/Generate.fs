@@ -5,7 +5,7 @@ open Newtonsoft.Json
 open NetJs
 open NetJs.Json
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.Layout.Types

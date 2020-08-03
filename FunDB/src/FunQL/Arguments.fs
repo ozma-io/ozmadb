@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.FunQL.Arguments
 
 open Newtonsoft.Json.Linq
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Utils

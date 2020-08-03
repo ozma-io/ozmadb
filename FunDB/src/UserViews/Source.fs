@@ -2,8 +2,7 @@ module FunWithFlags.FunDB.UserViews.Source
 
 open Newtonsoft.Json
 
-open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Serialization.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceUserView =

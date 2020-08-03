@@ -14,13 +14,8 @@
   </PropertyGroup>
 
   <ItemGroup>    
-    <Compile Include="src/Utils.fs" />
     <Compile Include="src/Parsing.fs" />
     <Compile Include="src/Schema.fs" />
-
-    <Compile Include="src/Serialization/Utils.fs" />
-    <Compile Include="src/Serialization/Json.fs" />
-    <Compile Include="src/Serialization/Yaml.fs" />
 
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/Parsing.fs" />
@@ -129,6 +124,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../FunDBSchema/FunDBSchema.csproj" />
+    <ProjectReference Include="../FunUtils/FunUtils.fsproj" />
 
     <PackageReference Include="Npgsql" Version="4.1.*" />
     <PackageReference Include="Npgsql.Json.NET" Version="4.1.*" />

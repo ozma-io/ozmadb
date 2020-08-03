@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.UserViews.DryRun
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.FunQL.AST

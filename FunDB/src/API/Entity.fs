@@ -5,8 +5,8 @@ open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Giraffe
 
-open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Serialization.Utils
+open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.API.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Operations.Context

@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Permissions.Render
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Permissions.Source

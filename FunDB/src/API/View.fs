@@ -4,7 +4,7 @@ open Microsoft.AspNetCore.Http
 open Giraffe
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.UserViews.DryRun

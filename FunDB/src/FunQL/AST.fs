@@ -2,14 +2,15 @@ module FunWithFlags.FunDB.FunQL.AST
 
 open System
 open System.ComponentModel
+open Microsoft.FSharp.Reflection
 open System.Threading.Tasks
 open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Serialization.Utils
+open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.SQL.Utils
 
@@ -242,47 +243,29 @@ type FieldValuePrettyConverter () =
         | FNull -> writer.WriteNull()
 
 type ScalarFieldType =
-    | SFTInt
-    | SFTDecimal
-    | SFTString
-    | SFTBool
-    | SFTDateTime
-    | SFTDate
-    | SFTInterval
-    | SFTJson
-    | SFTUserViewRef
+    | [<CaseName("int")>] SFTInt
+    | [<CaseName("decimal")>] SFTDecimal
+    | [<CaseName("string")>] SFTString
+    | [<CaseName("bool")>] SFTBool
+    | [<CaseName("datetime")>] SFTDateTime
+    | [<CaseName("date")>] SFTDate
+    | [<CaseName("interval")>] SFTInterval
+    | [<CaseName("json")>] SFTJson
+    | [<CaseName("uvref")>] SFTUserViewRef
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            match this with
-            | SFTInt -> "int"
-            | SFTDecimal -> "decimal"
-            | SFTString -> "string"
-            | SFTBool -> "bool"
-            | SFTDateTime -> "datetime"
-            | SFTDate -> "date"
-            | SFTInterval -> "interval"
-            | SFTJson -> "json"
-            | SFTUserViewRef -> "uvref"
+            let (case, _) = FSharpValue.GetUnionFields(this, typeof<ScalarFieldType>)
+            unionName case |> Option.get
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type ScalarFieldTypePrettyConverter () =
-    inherit JsonConverter<ScalarFieldType> ()
-
-    override this.CanRead = false
-
-    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ScalarFieldType =
-        raise <| NotImplementedException ()
-
-    override this.WriteJson (writer : JsonWriter, value : ScalarFieldType, serializer : JsonSerializer) : unit =
-        serializer.Serialize(writer, value.ToFunQLString())
-
+[<SerializeAsObject("type")>]
 type FieldExprType =
-    | FETScalar of ScalarFieldType
-    | FETArray of ScalarFieldType
+    | [<CaseName(null)>] FETScalar of Type : ScalarFieldType
+    | [<CaseName("array")>] FETArray of Subtype : ScalarFieldType
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -293,26 +276,6 @@ type FieldExprType =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
-
-type FieldExprTypePrettyConverter () =
-    inherit JsonConverter<FieldExprType> ()
-
-    override this.CanRead = false
-
-    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : FieldExprType =
-        raise <| NotImplementedException ()
-
-    override this.WriteJson (writer : JsonWriter, value : FieldExprType, serializer : JsonSerializer) : unit =
-        writer.WriteStartObject()
-        writer.WritePropertyName("type")
-        match value with
-        | FETScalar st ->
-            serializer.Serialize(writer, st)
-        | FETArray st ->
-            writer.WriteValue("array")
-            writer.WritePropertyName("subtype")
-            serializer.Serialize(writer, st)
-        writer.WriteEndObject()
 
 type JoinType =
     | Inner
@@ -410,10 +373,10 @@ type SubEntityRef =
       extra : obj
     }
 
-type [<NoEquality; NoComparison>] FieldType<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    | FTType of FieldExprType
-    | FTReference of 'e * FieldExpr<'e, 'f> option
-    | FTEnum of Set<string>
+type [<NoEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | [<CaseName(null, InnerObject=true)>] FTType of FieldExprType
+    | [<CaseName("reference")>] FTReference of reference : 'e * where : FieldExpr<'e, 'f> option
+    | [<CaseName("enum")>] FTEnum of values : Set<string>
     with
         override this.ToString () = this.ToFunQLString()
 

@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Attributes.Merge
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Layout.Types

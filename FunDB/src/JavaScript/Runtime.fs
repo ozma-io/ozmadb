@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.JavaScript.Runtime
 
 open NetJs
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 
 type CachingIsolate =
     { isolate : Isolate

@@ -12,9 +12,9 @@ open Newtonsoft.Json
 open Giraffe
 
 open FunWithFlags.FunDBSchema.Instances
-open FunWithFlags.FunDB.Utils
-open FunWithFlags.FunDB.Serialization.Utils
-open FunWithFlags.FunDB.Serialization.Json
+open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.Operations.InstancesCache
 

@@ -7,7 +7,7 @@ open Microsoft.Extensions.Logging
 open FluidCaching
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.Operations.ContextCache
 open FunWithFlags.FunDB.Operations.EventLogger
 open FunWithFlags.FunDB.Operations.Preload

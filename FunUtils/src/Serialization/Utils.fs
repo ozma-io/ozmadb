@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.Serialization.Utils
+module FunWithFlags.FunUtils.Serialization.Utils
 
 open System
 open System.Globalization
@@ -6,11 +6,11 @@ open System.Reflection
 open System.ComponentModel
 open Microsoft.FSharp.Reflection
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 
 type UnionCase =
-    { info : UnionCaseInfo
-      fields : PropertyInfo[]
+    { Info : UnionCaseInfo
+      Fields : PropertyInfo[]
     }
 
 [<AllowNullLiteral>]
@@ -24,6 +24,7 @@ type SerializeAsObjectAttribute (caseFieldName : string) =
 type CaseNameAttribute (caseName : string) =
     inherit Attribute ()
     member this.CaseName = caseName
+    member val InnerObject = false with get, set
 
 // https://stackoverflow.com/questions/56600268/how-do-i-check-t-for-types-not-being-allowed-to-be-null
 let isNullableType (objectType : Type) =
@@ -47,22 +48,31 @@ let isNullableType (objectType : Type) =
         | _ -> failwith "Impossible"
 
 let unionCases (objectType : Type) : UnionCase[] =
-    FSharpType.GetUnionCases(objectType) |> Array.map (fun case -> { info = case; fields = case.GetFields() })
+    let cases = FSharpType.GetUnionCases(objectType)
 
-let getUnionName (case : UnionCaseInfo) =
+    let unionCase (info : UnionCaseInfo) : UnionCase =
+        let fields = info.GetFields()
+        { Info = info
+          Fields = fields
+        }
+
+    cases |> Array.map unionCase
+
+let unionName (case : UnionCaseInfo) : string option =
     match case.GetCustomAttributes typeof<CaseNameAttribute> |> Seq.cast |> Seq.first with
-    | None -> case.Name
-    | Some (nameAttr : CaseNameAttribute) -> nameAttr.CaseName
+    | None -> Some case.Name
+    | Some (nameAttr : CaseNameAttribute) when isNull nameAttr.CaseName -> None
+    | Some nameAttr -> Some nameAttr.CaseName
 
-let unionNames (cases : UnionCase seq) : Map<string, UnionCase> =
-    cases |> Seq.map (fun case -> (getUnionName case.info, case)) |> Map.ofSeqUnique
+let unionNames (cases : UnionCase seq) : Map<string option, UnionCase> =
+    cases |> Seq.map (fun case -> (unionName case.Info, case)) |> Map.ofSeqUnique
 
 let isUnionEnum : UnionCase seq -> bool =
-    Seq.forall (fun case -> Array.isEmpty case.fields)
+    Seq.forall (fun case -> Array.isEmpty case.Fields)
 
 let getNewtype (case : UnionCase) : (UnionCaseInfo * PropertyInfo) option =
-    if Array.length case.fields = 1 then
-        Some (case.info, case.fields.[0])
+    if Array.length case.Fields = 1 then
+        Some (case.Info, case.Fields.[0])
     else
         None
 
@@ -73,37 +83,68 @@ let isNewtype (map : UnionCase[]) : (UnionCaseInfo * PropertyInfo) option =
         None
 
 type OptionInfo =
-    { someCase : UnionCaseInfo
-      someType : PropertyInfo
-      noneCase : UnionCaseInfo
+    { SomeCase : UnionCaseInfo
+      SomeType : PropertyInfo
+      NoneCase : UnionCaseInfo
     }
 
 let isOption (map : UnionCase[]) : OptionInfo option =
     let checkNone case =
-        if Array.isEmpty case.fields then
-            Some case.info
+        if Array.isEmpty case.Fields then
+            Some case.Info
         else
             None
     if Array.length map = 2 then
         match (getNewtype map.[0], checkNone map.[1]) with
-        | (Some (someCase, someType), Some none) -> Some { someCase = someCase; someType = someType; noneCase = none }
+        | (Some (someCase, someType), Some none) -> Some { SomeCase = someCase; SomeType = someType; NoneCase = none }
         | _ ->
             match (getNewtype map.[1], checkNone map.[0]) with
-            | (Some (someCase, someType), Some none) -> Some { someCase = someCase; someType = someType; noneCase = none }
+            | (Some (someCase, someType), Some none) -> Some { SomeCase = someCase; SomeType = someType; NoneCase = none }
             | _ -> None
     else
         None
 
-let unionAsObject (objectType : Type) =
+type CaseAsObjectInfo =
+    { Case : UnionCase
+      InnerObject : bool
+    }
+
+type UnionAsObjectInfo =
+    { CaseField : string
+      Cases : Map<string option, CaseAsObjectInfo>
+    }
+
+let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
     match Attribute.GetCustomAttribute(objectType, typeof<SerializeAsObjectAttribute>) with
     | null -> None
     | :? SerializeAsObjectAttribute as asObject ->
-        let checkName (case : UnionCase) =
-            for field in case.fields do
-                if field.Name = asObject.CaseFieldName then
-                    failwith <| sprintf "Field name %s of case %s clashes with case field name" field.Name case.info.Name
-        unionCases objectType |> Seq.iter checkName
-        Some asObject.CaseFieldName
+        let caseInfo (case : UnionCase) =
+            let name = unionName case.Info
+            let innerObject = 
+                match case.Info.GetCustomAttributes(typeof<CaseNameAttribute>) |> Seq.cast |> Seq.first with
+                | Some (caseName : CaseNameAttribute) when caseName.InnerObject ->
+                    if Option.isSome name then
+                        failwithf "Serialization as inner object requires removed case label in a union case %s" case.Info.Name
+                    if Array.length case.Fields > 1 then
+                        failwithf "Serialization as inner object requires no more than one field in a union case %s" case.Info.Name
+                    true
+                | _ ->
+                    if Option.isSome name then
+                        for field in case.Fields do
+                            if field.Name = asObject.CaseFieldName then
+                                failwithf "Field name %s of case %s clashes with case field name" field.Name case.Info.Name
+                    false
+            let ret =
+                { Case = case
+                  InnerObject = innerObject
+                }
+            (name, ret)
+        let cases = unionCases objectType |> Seq.map caseInfo |> Map.ofSeq
+        let ret =
+            { CaseField = asObject.CaseFieldName
+              Cases = cases
+            }
+        Some ret
     | _ -> failwith "Impossible"
 
 let getTypeDefaultValue (objectType : Type) : obj option =
@@ -113,7 +154,7 @@ let getTypeDefaultValue (objectType : Type) : obj option =
         let cases = unionCases objectType
         match isOption cases with
         | Some option ->
-            let nullValue = FSharpValue.MakeUnion(option.noneCase, [||])
+            let nullValue = FSharpValue.MakeUnion(option.NoneCase, [||])
             Some nullValue
         | None -> None
     else

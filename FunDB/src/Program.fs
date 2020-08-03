@@ -1,6 +1,7 @@
 open System
 open System.IO
 open Newtonsoft.Json
+open Newtonsoft.Json.Serialization
 open Microsoft.AspNetCore
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
@@ -18,8 +19,8 @@ open Giraffe.Serialization.Json
 open Npgsql
 
 open FunWithFlags.FunDBSchema.Instances
-open FunWithFlags.FunDB.Serialization.Json
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Serialization.Json
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.API.Info
 open FunWithFlags.FunDB.API.View
 open FunWithFlags.FunDB.API.Entity
@@ -35,17 +36,17 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 let httpJsonSettings =
     let converters : JsonConverter[] = [|
         FunQL.FieldValuePrettyConverter ()
-        FunQL.ScalarFieldTypePrettyConverter ()
         FunQL.FieldTypePrettyConverter ()
-        FunQL.FieldExprTypePrettyConverter ()
         SQL.ValuePrettyConverter ()
-        SQL.SimpleTypePrettyConverter ()
-        SQL.ValueTypePrettyConverter ()
         ExecutedValuePrettyConverter ()
         ExecutedRowPrettyConverter ()
     |]
     let constructors = Array.map (fun conv -> fun _ -> Some conv) converters
     let jsonSettings = makeDefaultJsonSerializerSettings constructors
+    let resolver = jsonSettings.ContractResolver :?> ConverterContractResolver
+    resolver.NamingStrategy <- CamelCaseNamingStrategy(
+        OverrideSpecifiedNames = false
+    )
     jsonSettings.NullValueHandling <- NullValueHandling.Ignore
     jsonSettings
 

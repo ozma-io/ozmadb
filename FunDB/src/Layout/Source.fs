@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.Layout.Source
 
 open Newtonsoft.Json
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 // Source Layout; various layout sources, like database or system layout, are converted into this.

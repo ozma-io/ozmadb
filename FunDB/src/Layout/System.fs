@@ -4,7 +4,7 @@ open System
 open System.Reflection
 open System.ComponentModel.DataAnnotations
 
-open FunWithFlags.FunDB.Utils
+open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.FunQL.AST
