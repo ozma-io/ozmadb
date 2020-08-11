@@ -13,15 +13,15 @@ open FunWithFlags.FunDB.API.Utils
 
 [<NoEquality; NoComparison>]
 type ViewEntriesGetResponse =
-    { info : UserViewInfo
-      result : ExecutedViewExpr
+    { Info : UserViewInfo
+      Result : ExecutedViewExpr
     }
 
 [<NoEquality; NoComparison>]
 type ViewInfoGetResponse =
-    { info : UserViewInfo
-      pureAttributes : ExecutedAttributeMap
-      pureColumnAttributes : ExecutedAttributeMap array
+    { Info : UserViewInfo
+      PureAttributes : ExecutedAttributeMap
+      PureColumnAttributes : ExecutedAttributeMap array
     }
 
 let viewsApi : HttpHandler =
@@ -44,8 +44,8 @@ let viewsApi : HttpHandler =
             match! rctx.GetUserView viewRef rawArgs (getRecompile ctx) with
             | Ok (cached, res) ->
                 let ret =
-                    { info = cached.info
-                      result = res
+                    { Info = cached.Info
+                      Result = res
                     }
                 return! Successful.ok (json ret) next ctx
             | Result.Error err -> return! returnError err next ctx
@@ -55,9 +55,9 @@ let viewsApi : HttpHandler =
         match! rctx.GetUserViewInfo viewRef (getRecompile ctx) with
             | Ok cached ->
                 let res =
-                    { info = cached.info
-                      pureAttributes = cached.pureAttributes.attributes
-                      pureColumnAttributes = cached.pureAttributes.columnAttributes
+                    { Info = cached.Info
+                      PureAttributes = cached.PureAttributes.Attributes
+                      PureColumnAttributes = cached.PureAttributes.ColumnAttributes
                     }
                 return! Successful.ok (json res) next ctx
             | Result.Error err -> return! returnError err next ctx

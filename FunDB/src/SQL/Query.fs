@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.SQL.Query
 open System
 open System.Linq
 open System.Collections.Generic
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Npgsql
@@ -25,8 +26,8 @@ type ExprParameters = Map<int, Value>
 
 [<NoEquality; NoComparison>]
 type QueryResult =
-    { columns : (SQLName * SimpleValueType)[]
-      rows : seq<Value[]>
+    { Columns : (SQLName * SimpleValueType)[]
+      Rows : seq<Value[]>
     }
 
 let private parseType typeStr =
@@ -126,7 +127,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
 type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnection) =
     let logger = loggerFactory.CreateLogger<QueryConnection> ()
 
-    let withCommand (queryStr : string) (pars : ExprParameters) (runFunc : NpgsqlCommand -> Task<'a>) : Task<'a> =
+    let withCommand (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) (runFunc : NpgsqlCommand -> Task<'a>) : Task<'a> =
         task {
             use command = new NpgsqlCommand(queryStr, connection)
             for KeyValue (name, value) in pars do
@@ -138,7 +139,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             logger.LogInformation("Executing query with args {args}: {query}", pars, queryStr)
             try
                 try
-                    do! command.PrepareAsync()
+                    do! command.PrepareAsync(cancellationToken)
                 with :? PostgresException as ex ->
                     logger.LogError(ex, "Failed to prepare {query}", queryStr)
                     reraise' ex
@@ -150,28 +151,28 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
 
     member this.Connection = connection
 
-    member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) : Task<int> =
-        withCommand queryStr pars <| fun command -> command.ExecuteNonQueryAsync()
+    member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<int> =
+        withCommand queryStr pars cancellationToken <| fun command -> command.ExecuteNonQueryAsync(cancellationToken)
 
-    member this.ExecuteValueQuery (queryStr : string) (pars : ExprParameters) : Task<Value> =
-        withCommand queryStr pars <| fun command -> task {
-            use! reader = command.ExecuteReaderAsync()
+    member this.ExecuteValueQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<Value> =
+        withCommand queryStr pars cancellationToken <| fun command -> task {
+            use! reader = command.ExecuteReaderAsync(cancellationToken)
             if reader.FieldCount <> 1 then
                 raisef QueryException "Not one column"
             let typ = parseType (reader.GetDataTypeName(0))
-            let! hasRow0 = reader.ReadAsync()
+            let! hasRow0 = reader.ReadAsync(cancellationToken)
             if not hasRow0 then
                 raisef QueryException "No first row"
             let result = reader.[0] |> convertValue typ
-            let! hasRow1 = reader.ReadAsync()
+            let! hasRow1 = reader.ReadAsync(cancellationToken)
             if hasRow1 then
                 raisef QueryException "Has a second row"
             return result
         }
 
-    member this.ExecuteQuery (queryStr : string) (pars : ExprParameters) (queryFunc : QueryResult -> Task<'a>) : Task<'a> =
-        withCommand queryStr pars <| fun command -> task {
-            use! reader = command.ExecuteReaderAsync()
+    member this.ExecuteQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) (queryFunc : QueryResult -> Task<'a>) : Task<'a> =
+        withCommand queryStr pars cancellationToken <| fun command -> task {
+            use! reader = command.ExecuteReaderAsync(cancellationToken)
             let getColumn i =
                 let name = reader.GetName(i)
                 let typ = parseType (reader.GetDataTypeName(i))
@@ -184,13 +185,13 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             let rows = List()
             // ??? F# ???
             let mutable hasRow = false
-            let! hasRow0 = reader.ReadAsync()
+            let! hasRow0 = reader.ReadAsync(cancellationToken)
             hasRow <- hasRow0
             while hasRow do
                 let row = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
                 rows.Add(row)
-                let! hasRow1 = reader.ReadAsync()
+                let! hasRow1 = reader.ReadAsync(cancellationToken)
                 hasRow <- hasRow1
 
-            return! queryFunc { columns = columns; rows = rows }
+            return! queryFunc { Columns = columns; Rows = rows }
         }

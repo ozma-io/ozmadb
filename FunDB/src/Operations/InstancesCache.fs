@@ -22,8 +22,7 @@ and InstancesCacheStore (loggerFactory : ILoggerFactory, preload : Preload, even
 
     // FIXME: random values
     let instancesMemCache = FluidCache<InMemoryInstance>(8, TimeSpan.FromSeconds(60.0), TimeSpan.FromSeconds(3600.0), (fun () -> DateTime.Now))
-    let instancesMemIndex = instancesMemCache.AddIndex("byConnectionString", fun entry -> entry.ConnectionString)
-    let instancesMemLock = Object()
+    let instancesMemIndex = instancesMemCache.AddIndex("ByConnectionString", fun entry -> entry.ConnectionString)
     let touchedInstances = ConcurrentDictionary<string, bool>()
 
     let loadInstance (connectionString : string) =
@@ -43,10 +42,6 @@ and InstancesCacheStore (loggerFactory : ILoggerFactory, preload : Preload, even
     let instanceCreator = ItemCreator createInstance
 
     member this.GetContextCache (connectionString : string) = task {
-        match! instancesMemIndex.GetItem (connectionString) with
-        | null ->
-            let constr = lock instancesMemLock <| fun () ->
-                Task.awaitSync <| instancesMemIndex.GetItem (connectionString, instanceCreator)
-            return! constr.ConstructorTask
-        | ret -> return! ret.ConstructorTask
+        let! constr = instancesMemIndex.GetItem (connectionString, instanceCreator)
+        return! constr.ConstructorTask
     }

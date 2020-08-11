@@ -6,24 +6,24 @@ open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
 
 let renderCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckConstraint =
-    { expression = constr.expression.ToFunQLString()
+    { Expression = constr.expression.ToFunQLString()
     }
 
 let renderUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUniqueConstraint =
-    { columns = constr.columns
+    { Columns = constr.columns
     }
 
 let renderComputedField (comp : ResolvedComputedField) : SourceComputedField =
-    { expression = comp.expression.ToFunQLString()
-      allowBroken = comp.allowBroken
-      isVirtual = Option.isSome comp.virtualCases
+    { Expression = comp.expression.ToFunQLString()
+      AllowBroken = comp.allowBroken
+      IsVirtual = Option.isSome comp.virtualCases
     }
 
 let renderColumnField (column : ResolvedColumnField) : SourceColumnField =
-    { fieldType = column.fieldType.ToFunQLString()
-      isNullable = column.isNullable
-      isImmutable = column.isImmutable
-      defaultValue = Option.map (fun (x : FieldValue) -> x.ToFunQLString()) column.defaultValue
+    { Type = column.fieldType.ToFunQLString()
+      IsNullable = column.isNullable
+      IsImmutable = column.isImmutable
+      DefaultValue = Option.map (fun (x : FieldValue) -> x.ToFunQLString()) column.defaultValue
     }
 
 let renderEntity (entity : ResolvedEntity) : SourceEntity =
@@ -31,21 +31,21 @@ let renderEntity (entity : ResolvedEntity) : SourceEntity =
         | Error { inheritedFrom = None; source = source } -> Some source
         | Ok ({ inheritedFrom = None } as comp) -> Some (renderComputedField comp)
         | _ -> None
-    { columnFields = Map.mapMaybe (fun name (col : ResolvedColumnField) -> if Option.isNone col.inheritedFrom then Some (renderColumnField col) else None) entity.columnFields
-      computedFields = Map.mapMaybe mapComputed entity.computedFields
-      uniqueConstraints = Map.map (fun name constr -> renderUniqueConstraint constr) entity.uniqueConstraints
-      checkConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
-      mainField = entity.mainField
-      forbidExternalReferences = entity.forbidExternalReferences
-      isHidden = entity.isHidden
-      parent = Option.map (fun inher -> inher.parent) entity.inheritance
-      isAbstract = entity.isAbstract
+    { ColumnFields = Map.mapMaybe (fun name (col : ResolvedColumnField) -> if Option.isNone col.inheritedFrom then Some (renderColumnField col) else None) entity.columnFields
+      ComputedFields = Map.mapMaybe mapComputed entity.computedFields
+      UniqueConstraints = Map.map (fun name constr -> renderUniqueConstraint constr) entity.uniqueConstraints
+      CheckConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
+      MainField = entity.mainField
+      ForbidExternalReferences = entity.forbidExternalReferences
+      IsHidden = entity.isHidden
+      Parent = Option.map (fun inher -> inher.parent) entity.inheritance
+      IsAbstract = entity.isAbstract
     }
 
 let renderSchema (schema : ResolvedSchema) : SourceSchema =
-    { entities = Map.map (fun name entity -> renderEntity entity) schema.entities
+    { Entities = Map.map (fun name entity -> renderEntity entity) schema.entities
     }
 
 let renderLayout (layout : Layout) : SourceLayout =
-    { schemas = Map.map (fun name schema -> renderSchema schema) layout.schemas
+    { Schemas = Map.map (fun name schema -> renderSchema schema) layout.schemas
     }

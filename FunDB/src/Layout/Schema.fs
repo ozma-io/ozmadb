@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Layout.Schema
 
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -15,58 +16,58 @@ type SchemaLayoutException (message : string, innerException : Exception) =
     new (message : string) = SchemaLayoutException (message, null)
 
 let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
-    { fieldType = field.Type
-      defaultValue =
+    { Type = field.Type
+      DefaultValue =
           if field.Default = null
           then None
           else Some field.Default
-      isNullable = field.IsNullable
-      isImmutable = field.IsImmutable
+      IsNullable = field.IsNullable
+      IsImmutable = field.IsImmutable
     }
 
 let private makeSourceComputedField (field : ComputedField) : SourceComputedField =
-    { expression = field.Expression
-      allowBroken = field.AllowBroken
-      isVirtual = field.IsVirtual
+    { Expression = field.Expression
+      AllowBroken = field.AllowBroken
+      IsVirtual = field.IsVirtual
     }
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraint) : SourceUniqueConstraint =
-    { columns = Array.map FunQLName constr.Columns
+    { Columns = Array.map FunQLName constr.Columns
     }
 
 let private makeSourceCheckConstraint (constr : CheckConstraint) : SourceCheckConstraint =
-    { expression = constr.Expression
+    { Expression = constr.Expression
     }
 
 let private makeSourceEntity (entity : Entity) : SourceEntity =
-    { columnFields = entity.ColumnFields |> Seq.map (fun col -> (FunQLName col.Name, makeSourceColumnField col)) |> Map.ofSeqUnique
-      computedFields = entity.ComputedFields |> Seq.map (fun comp -> (FunQLName comp.Name, makeSourceComputedField comp)) |> Map.ofSeqUnique
-      uniqueConstraints = entity.UniqueConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceUniqueConstraint constr)) |> Map.ofSeqUnique
-      checkConstraints = entity.CheckConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceCheckConstraint constr)) |> Map.ofSeqUnique
-      mainField =
+    { ColumnFields = entity.ColumnFields |> Seq.map (fun col -> (FunQLName col.Name, makeSourceColumnField col)) |> Map.ofSeqUnique
+      ComputedFields = entity.ComputedFields |> Seq.map (fun comp -> (FunQLName comp.Name, makeSourceComputedField comp)) |> Map.ofSeqUnique
+      UniqueConstraints = entity.UniqueConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceUniqueConstraint constr)) |> Map.ofSeqUnique
+      CheckConstraints = entity.CheckConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceCheckConstraint constr)) |> Map.ofSeqUnique
+      MainField =
         if isNull entity.MainField
         then funId
         else FunQLName entity.MainField
-      forbidExternalReferences = entity.ForbidExternalReferences
-      isHidden = entity.IsHidden
-      parent =
+      ForbidExternalReferences = entity.ForbidExternalReferences
+      IsHidden = entity.IsHidden
+      Parent =
         if entity.Parent = null
         then None
         else Some { schema = FunQLName entity.Parent.Schema.Name; name = FunQLName entity.Parent.Name }
-      isAbstract = entity.IsAbstract
+      IsAbstract = entity.IsAbstract
     }
 
 let private makeSourceSchema (schema : Schema) : SourceSchema =
-    { entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
+    { Entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
     }
 
-let buildSchemaLayout (db : SystemContext) : Task<SourceLayout> =
+let buildSchemaLayout (db : SystemContext) (cancellationToken : CancellationToken) : Task<SourceLayout> =
     task {
         let currentSchemas = db.GetLayoutObjects ()
-        let! schemas = currentSchemas.ToListAsync()
+        let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
 
         return
-            { schemas = sourceSchemas
+            { Schemas = sourceSchemas
             }
     }

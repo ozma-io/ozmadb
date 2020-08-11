@@ -30,7 +30,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
 
     let resolveAttributesField (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (fieldAttrs : SourceAttributesField) : AttributesField =
         let attrsMap =
-            match parse tokenizeFunQL attributeMap fieldAttrs.attributes with
+            match parse tokenizeFunQL attributeMap fieldAttrs.Attributes with
             | Ok r -> r
             | Error msg -> raisef ResolveAttributesException "Error parsing attributes: %s" msg
 
@@ -82,8 +82,8 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attribute %O: %s" name e.Message
         let resolvedMap = Map.map resolveAttribute attrsMap
 
-        { allowBroken = fieldAttrs.allowBroken
-          priority = fieldAttrs.priority
+        { allowBroken = fieldAttrs.AllowBroken
+          priority = fieldAttrs.Priority
           attributes = resolvedMap
           globalArguments = globalArguments
         }
@@ -99,14 +99,14 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
                     | Some field ->
                             Ok <| resolveAttributesField entityRef entity fieldAttrs
                 with
-                | :? ResolveAttributesException as e when fieldAttrs.allowBroken || forceAllowBroken ->
+                | :? ResolveAttributesException as e when fieldAttrs.AllowBroken || forceAllowBroken ->
                     errors <- Map.add name (e :> exn) errors
                     Error { source = fieldAttrs; error = e }
             with
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attributes field %O: %s" name e.Message
 
         let ret =
-            { fields = entityAttrs.fields |> Map.map mapField
+            { fields = entityAttrs.Fields |> Map.map mapField
             }
         (errors, ret)
 
@@ -128,7 +128,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attributes entity %O: %s" name e.Message
 
         let ret =
-            { entities = schemaAttrs.entities |> Map.map mapEntity
+            { entities = schemaAttrs.Entities |> Map.map mapEntity
             }
         (errors, ret)
 
@@ -149,7 +149,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attributes schema %O: %s" name e.Message
 
         let ret =
-            { schemas = db.schemas |> Map.map mapSchema
+            { schemas = db.Schemas |> Map.map mapSchema
             } : AttributesDatabase
         (errors, ret)
 
@@ -168,7 +168,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in schema %O: %s" name e.Message
 
         let ret =
-            { schemas = defaultAttrs.schemas |> Map.map mapDatabase
+            { schemas = defaultAttrs.Schemas |> Map.map mapDatabase
             }
         (errors, ret)
 

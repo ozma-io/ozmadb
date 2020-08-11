@@ -44,7 +44,7 @@
     <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
 
-    <!-- Needed early for verious other parts -->
+    <!-- Needed early for various other parts -->
     <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Types.fs" />
 

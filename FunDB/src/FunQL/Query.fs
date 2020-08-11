@@ -1,8 +1,8 @@
 module FunWithFlags.FunDB.FunQL.Query
 
-open System
+open System.Threading
 open System.Threading.Tasks
-open Newtonsoft.Json
+open System.Runtime.Serialization
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunUtils.Utils
@@ -17,119 +17,67 @@ type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
 type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
 
 type [<NoEquality; NoComparison>] ExecutedValue =
-    { attributes : ExecutedAttributeMap
-      value : SQL.Value
-      pun : SQL.Value option
+    { Value : SQL.Value
+      [<DataMember(EmitDefaultValue = false, Order = 42)>]
+      Attributes : ExecutedAttributeMap
+      Pun : SQL.Value option
     }
 
-// Implemented by hand to make output smaller when there are no attributes.
-type ExecutedValuePrettyConverter () =
-    inherit JsonConverter<ExecutedValue> ()
-
-    override this.CanRead = false
-
-    override this.ReadJson (reader : JsonReader, objectType, existingValue, hasExistingValue, serializer : JsonSerializer) : ExecutedValue =
-        raise <| NotImplementedException ()
-
-    override this.WriteJson (writer : JsonWriter, res : ExecutedValue, serializer : JsonSerializer) : unit =
-        writer.WriteStartObject()
-        writer.WritePropertyName("value")
-        serializer.Serialize(writer, res.value)
-        if not <| Map.isEmpty res.attributes then
-            writer.WritePropertyName("attributes")
-            serializer.Serialize(writer, res.attributes)
-        match res.pun with
-        | None -> ()
-        | Some pun ->
-            writer.WritePropertyName("pun")
-            serializer.Serialize(writer, pun)
-        writer.WriteEndObject()
-
 type [<NoEquality; NoComparison>] ExecutedEntityId =
-    { id : int
-      [<JsonProperty(NullValueHandling=NullValueHandling.Ignore)>]
-      subEntity : ResolvedEntityRef option
+    { Id : int
+      [<DataMember(EmitDefaultValue = false)>]
+      SubEntity : ResolvedEntityRef option
     }
 
 type [<NoEquality; NoComparison>] ExecutedRow =
-    { attributes : ExecutedAttributeMap
-      values : ExecutedValue array
-      entityIds : Map<EntityName, ExecutedEntityId>
-      mainId : int option
-      mainSubEntity : ResolvedEntityRef option
-      domainId : GlobalDomainId
+    { Values : ExecutedValue array
+      DomainId : GlobalDomainId
+      [<DataMember(EmitDefaultValue = false)>]
+      Attributes : ExecutedAttributeMap
+      [<DataMember(EmitDefaultValue = false)>]
+      EntityIds : Map<EntityName, ExecutedEntityId>
+      MainId : int option
+      MainSubEntity : ResolvedEntityRef option
     }
-
-type ExecutedRowPrettyConverter () =
-    inherit JsonConverter<ExecutedRow> ()
-
-    override this.CanRead = false
-
-    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ExecutedRow =
-        raise <| NotImplementedException ()
-
-    override this.WriteJson (writer : JsonWriter, res : ExecutedRow, serializer : JsonSerializer) : unit =
-        writer.WriteStartObject()
-        writer.WritePropertyName("values")
-        serializer.Serialize(writer, res.values)
-        writer.WritePropertyName("domainId")
-        writer.WriteValue(res.domainId)
-        if not <| Map.isEmpty res.attributes then
-            writer.WritePropertyName("attributes")
-            serializer.Serialize(writer, res.attributes)
-        if not <| Map.isEmpty res.entityIds then
-            writer.WritePropertyName("entityIds")
-            serializer.Serialize(writer, res.entityIds)
-        match res.mainId with
-        | None -> ()
-        | Some mainId ->
-            writer.WritePropertyName("mainId")
-            writer.WriteValue(mainId)
-        match res.mainSubEntity with
-        | None -> ()
-        | Some mainSubEntity ->
-            writer.WritePropertyName("mainSubEntity")
-            serializer.Serialize(writer, mainSubEntity)
-        writer.WriteEndObject()
 
 [<NoEquality; NoComparison>]
 type ExecutedColumnInfo =
-    { name : FunQLName
-      attributeTypes : ExecutedAttributeTypes
-      cellAttributeTypes : ExecutedAttributeTypes
-      valueType : SQL.SimpleValueType
-      punType : SQL.SimpleValueType option
+    { Name : FunQLName
+      AttributeTypes : ExecutedAttributeTypes
+      CellAttributeTypes : ExecutedAttributeTypes
+      ValueType : SQL.SimpleValueType
+      PunType : SQL.SimpleValueType option
     }
 
 [<NoEquality; NoComparison>]
 type ExecutedViewInfo =
-    { attributeTypes : ExecutedAttributeTypes
-      rowAttributeTypes : ExecutedAttributeTypes
-      columns : ExecutedColumnInfo array
+    { AttributeTypes : ExecutedAttributeTypes
+      RowAttributeTypes : ExecutedAttributeTypes
+      Columns : ExecutedColumnInfo array
     }
 
 [<NoEquality; NoComparison>]
 type ExecutedViewExpr =
-    { attributes : ExecutedAttributeMap
-      columnAttributes : ExecutedAttributeMap array
-      rows : ExecutedRow seq
+    { Attributes : ExecutedAttributeMap
+      ColumnAttributes : ExecutedAttributeMap array
+      Rows : ExecutedRow seq
     }
 
 [<NoEquality; NoComparison>]
 type private ExecutedAttributes =
-    { attributes : ExecutedAttributeMap
-      attributeTypes : ExecutedAttributeTypes
-      columnAttributes : Map<FieldName, ExecutedAttributeTypes * ExecutedAttributeMap>
+    { Attributes : ExecutedAttributeMap
+      AttributeTypes : ExecutedAttributeTypes
+      ColumnAttributes : Map<FieldName, ExecutedAttributeTypes * ExecutedAttributeMap>
     }
 
 let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult) : ExecutedAttributes =
-    let values = Seq.exactlyOne result.rows
+    let values = Seq.exactlyOne result.Rows
 
     let takeViewAttribute colType (_, valType) v =
         match colType with
         | CTMeta (CMRowAttribute name) -> Some (name, (valType, v))
         | _ -> None
-    let viewAttributes = Seq.map3Maybe takeViewAttribute columns result.columns values |> Map.ofSeq
+    let viewAttributes = Seq.map3Maybe takeViewAttribute columns result.Columns values |> Map.ofSeq
 
     let takeColumnAttribute colType (_, valType) v =
         match colType with
@@ -141,14 +89,14 @@ let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult
         let attrTypes = Map.map (fun name -> fst) valuesMap
         (fieldName, (attrTypes, attrs))
     let colAttributes =
-        Seq.map3Maybe takeColumnAttribute columns result.columns values
+        Seq.map3Maybe takeColumnAttribute columns result.Columns values
         |> Seq.groupBy fst
         |> Seq.map makeColumnAttributes
         |> Map.ofSeq
 
-    { attributes = Map.map (fun name -> snd) viewAttributes
-      attributeTypes = Map.map (fun name -> fst) viewAttributes
-      columnAttributes = colAttributes
+    { Attributes = Map.map (fun name -> snd) viewAttributes
+      AttributeTypes = Map.map (fun name -> fst) viewAttributes
+      ColumnAttributes = colAttributes
     }
 
 let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
@@ -156,14 +104,14 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         match colType with
         | CTMeta (CMRowAttribute name) -> Some (name, (valType, i))
         | _ -> None
-    let rowAttributes = Seq.mapi2Maybe takeRowAttribute columns result.columns |> Map.ofSeq
+    let rowAttributes = Seq.mapi2Maybe takeRowAttribute columns result.Columns |> Map.ofSeq
 
     let takeCellAttribute i colType (_, valType) =
         match colType with
             | CTColumnMeta (fieldName, CCCellAttribute name) -> Some (fieldName, (name, (valType, i)))
             | _ -> None
     let allCellAttributes =
-        Seq.mapi2Maybe takeCellAttribute columns result.columns
+        Seq.mapi2Maybe takeCellAttribute columns result.Columns
         |> Seq.groupBy fst
         |> Seq.map (fun (fieldName, attrs) -> (fieldName, attrs |> Seq.map snd |> Map.ofSeq))
         |> Map.ofSeq
@@ -172,7 +120,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         match colType with
         | CTColumnMeta (name, CCPun) -> Some (name, (valType, i))
         | _ -> None
-    let punAttributes = Seq.mapi2Maybe takePunAttribute columns result.columns |> Map.ofSeq
+    let punAttributes = Seq.mapi2Maybe takePunAttribute columns result.Columns |> Map.ofSeq
 
     let takeDomainColumn i colType =
         match colType with
@@ -213,24 +161,24 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
                         | Some a -> a
                 let punType = Option.map (fun (valType, i) -> valType) <| Map.tryFind name punAttributes
                 let columnInfo =
-                    { name = name
-                      attributeTypes = Map.empty
-                      cellAttributeTypes = Map.map (fun name (valType, i) -> valType) cellAttributes
-                      valueType = valType
-                      punType = punType
+                    { Name = name
+                      AttributeTypes = Map.empty
+                      CellAttributeTypes = Map.map (fun name (valType, i) -> valType) cellAttributes
+                      ValueType = valType
+                      PunType = punType
                     }
                 Some (cellAttributes, i, columnInfo)
             | _ -> None
-    let columnsMeta = Seq.mapi2Maybe takeColumn columns result.columns |> Seq.toArray
+    let columnsMeta = Seq.mapi2Maybe takeColumn columns result.Columns |> Seq.toArray
 
     let parseRow (values : SQL.Value array) =
         let getCell (cellAttributes, i, column) =
             let attrs = Map.map (fun name (valType, i) -> values.[i]) cellAttributes
-            let pun = Option.map (fun (valType, i) -> values.[i]) <| Map.tryFind column.name punAttributes
+            let pun = Map.tryFind column.Name punAttributes |> Option.map (fun (valType, i) -> values.[i])
             let value = values.[i]
-            { attributes = attrs
-              value = value
-              pun = pun
+            { Attributes = attrs
+              Value = value
+              Pun = pun
             }
 
         let getDomainId i =
@@ -281,8 +229,8 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
             | Some id ->
                 let subEntity = Option.bind (getSubEntity name) (Map.tryFind name subEntityColumns)
                 Some
-                    { id = id
-                      subEntity = subEntity
+                    { Id = id
+                      SubEntity = subEntity
                     }
 
         let rowAttrs = Map.map (fun name (valType, i) -> values.[i]) rowAttributes
@@ -291,64 +239,64 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         let mainId = Option.map getMainId mainIdColumn
         let mainSubEntity = Option.map getMainSubEntity mainSubEntityColumn
 
-        { attributes = rowAttrs
-          values = values
-          domainId = domainId
-          entityIds = entityIds
-          mainId = mainId
-          mainSubEntity = mainSubEntity
+        { Attributes = rowAttrs
+          Values = values
+          DomainId = domainId
+          EntityIds = entityIds
+          MainId = mainId
+          MainSubEntity = mainSubEntity
         }
 
     let columns = Array.map (fun (attributes, i, column) -> column) columnsMeta
-    let rows = Seq.map parseRow result.rows
+    let rows = Seq.map parseRow result.Rows
 
     let viewInfo =
-        { columns = columns
-          attributeTypes = Map.empty
-          rowAttributeTypes = Map.map (fun name (valType, i) -> valType) rowAttributes
+        { Columns = columns
+          AttributeTypes = Map.empty
+          RowAttributeTypes = Map.map (fun name (valType, i) -> valType) rowAttributes
         }
     (viewInfo, rows)
 
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValues) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
+let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValues) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
         let parameters = prepareArguments viewExpr.query.arguments arguments
 
         let! attrsResult = task {
             match viewExpr.attributesQuery with
             | Some attributesExpr ->
-                return! connection.ExecuteQuery attributesExpr.query parameters (parseAttributesResult attributesExpr.columns >> Task.FromResult)
+                return! connection.ExecuteQuery attributesExpr.query parameters cancellationToken (parseAttributesResult attributesExpr.columns >> Task.FromResult)
             | None ->
                 return
-                    { attributes = Map.empty
-                      attributeTypes = Map.empty
-                      columnAttributes = Map.empty
+                    { Attributes = Map.empty
+                      AttributeTypes = Map.empty
+                      ColumnAttributes = Map.empty
                     }
         }
 
         let getColumnInfo (col : ExecutedColumnInfo) =
             let attributeTypes =
-                match Map.tryFind col.name attrsResult.columnAttributes with
+                match Map.tryFind col.Name attrsResult.ColumnAttributes with
                 | None -> Map.empty
                 | Some (attrTypes, attrs) -> attrTypes
-            { col with attributeTypes = attributeTypes }
+            { col with AttributeTypes = attributeTypes }
 
         let getColumnAttributes (col : ExecutedColumnInfo) =
-            match Map.tryFind col.name attrsResult.columnAttributes with
+            match Map.tryFind col.Name attrsResult.ColumnAttributes with
             | None -> Map.empty
             | Some (attrTypes, attrs) -> attrs
 
-        return! connection.ExecuteQuery (viewExpr.query.expression.ToSQLString()) parameters <| fun rawResult ->
+        return! connection.ExecuteQuery (viewExpr.query.expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
             let (info, rows) = parseResult viewExpr.mainEntity viewExpr.domains viewExpr.columns rawResult
 
             let mergedInfo =
                 { info with
-                      attributeTypes = attrsResult.attributeTypes
-                      columns = Array.map getColumnInfo info.columns
+                      AttributeTypes = attrsResult.AttributeTypes
+                      Columns = Array.map getColumnInfo info.Columns
                 }
             let result =
-                { attributes = attrsResult.attributes
-                  columnAttributes = Array.map getColumnAttributes info.columns
-                  rows = rows
+                { Attributes = attrsResult.Attributes
+                  ColumnAttributes = Array.map getColumnAttributes info.Columns
+                  Rows = rows
                 }
             resultFunc mergedInfo result
     }

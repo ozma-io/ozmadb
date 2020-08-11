@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.UserViews.DryRun
 
+open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
@@ -17,15 +18,15 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 [<NoEquality; NoComparison>]
 type MainField =
-    { name : FieldName
-      field : SerializedColumnField
+    { Name : FieldName
+      Field : SerializedColumnField
     }
 
 [<NoEquality; NoComparison>]
 type UVDomainField =
-    { ref : ResolvedFieldRef
-      field : SerializedColumnField option // Can be None for `id` or `sub_entity`.
-      idColumn : EntityName
+    { Ref : ResolvedFieldRef
+      Field : SerializedColumnField option // Can be None for `id` or `sub_entity`.
+      IdColumn : EntityName
     }
 
 type UVDomain = Map<FieldName, UVDomainField>
@@ -33,55 +34,55 @@ type UVDomains = Map<GlobalDomainId, UVDomain>
 
 [<NoEquality; NoComparison>]
 type UserViewColumn =
-    { name : ViewColumnName
-      attributeTypes : ExecutedAttributeTypes
-      cellAttributeTypes : ExecutedAttributeTypes
-      valueType : SQL.SimpleValueType
-      punType : SQL.SimpleValueType option
-      mainField : MainField option
+    { Name : ViewColumnName
+      AttributeTypes : ExecutedAttributeTypes
+      CellAttributeTypes : ExecutedAttributeTypes
+      ValueType : SQL.SimpleValueType
+      PunType : SQL.SimpleValueType option
+      MainField : MainField option
     }
 
 [<NoEquality; NoComparison>]
 type UserViewInfo =
-    { attributeTypes : ExecutedAttributeTypes
-      rowAttributeTypes : ExecutedAttributeTypes
-      domains : UVDomains
-      mainEntity : ResolvedEntityRef option
-      columns : UserViewColumn[]
+    { AttributeTypes : ExecutedAttributeTypes
+      RowAttributeTypes : ExecutedAttributeTypes
+      Domains : UVDomains
+      MainEntity : ResolvedEntityRef option
+      Columns : UserViewColumn[]
     }
 
 [<NoEquality; NoComparison>]
 type PureAttributes =
-    { attributes : ExecutedAttributeMap
-      columnAttributes : ExecutedAttributeMap[]
+    { Attributes : ExecutedAttributeMap
+      ColumnAttributes : ExecutedAttributeMap[]
     }
 
 [<NoEquality; NoComparison>]
 type PrefetchedUserView =
-    { info : UserViewInfo
-      pureAttributes : PureAttributes
-      uv : ResolvedUserView
+    { Info : UserViewInfo
+      PureAttributes : PureAttributes
+      UserView : ResolvedUserView
     }
 
 [<NoEquality; NoComparison>]
 type PrefetchedViewsSchema =
-    { userViews : Map<UserViewName, Result<PrefetchedUserView, UserViewError>>
+    { UserViews : Map<UserViewName, Result<PrefetchedUserView, UserViewError>>
     }
 
 [<NoEquality; NoComparison>]
 type PrefetchedUserViews =
-    { schemas : Map<SchemaName, PrefetchedViewsSchema>
+    { Schemas : Map<SchemaName, PrefetchedViewsSchema>
     } with
         member this.Find (ref : ResolvedUserViewRef) =
-            match Map.tryFind ref.schema this.schemas with
+            match Map.tryFind ref.schema this.Schemas with
             | None -> None
-            | Some schema -> Map.tryFind ref.name schema.userViews
+            | Some schema -> Map.tryFind ref.name schema.UserViews
 
 let private mergePrefetchedViewsSchema (a : PrefetchedViewsSchema) (b : PrefetchedViewsSchema) =
-    { userViews = Map.unionUnique a.userViews b.userViews }
+    { UserViews = Map.unionUnique a.UserViews b.UserViews }
 
 let mergePrefetchedUserViews (a : PrefetchedUserViews) (b : PrefetchedUserViews) =
-    { schemas = Map.unionWith (fun name -> mergePrefetchedViewsSchema) a.schemas b.schemas }
+    { Schemas = Map.unionWith (fun name -> mergePrefetchedViewsSchema) a.Schemas b.Schemas }
 
 type UserViewDryRunException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -95,16 +96,16 @@ let private getColumn : ColumnType -> FunQLName option = function
 let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (res : ExecutedViewExpr) : PureAttributes =
     match compiled.attributesQuery with
     | None ->
-        { attributes = Map.empty
-          columnAttributes = Array.map (fun _ -> Map.empty) res.columnAttributes
+        { Attributes = Map.empty
+          ColumnAttributes = Array.map (fun _ -> Map.empty) res.ColumnAttributes
         }
     | Some attrInfo ->
         let filterPure name attrs =
             match Map.tryFind name attrInfo.pureColumnAttributes with
             | None -> Map.empty
             | Some pureAttrs -> attrs |> Map.filter (fun name _ -> Set.contains name pureAttrs)
-        { attributes = res.attributes |> Map.filter (fun name _ -> Set.contains name attrInfo.pureAttributes)
-          columnAttributes = Seq.map2 filterPure (Seq.mapMaybe getColumn compiled.columns) res.columnAttributes |> Seq.toArray
+        { Attributes = res.Attributes |> Map.filter (fun name _ -> Set.contains name attrInfo.pureAttributes)
+          ColumnAttributes = Seq.map2 filterPure (Seq.mapMaybe getColumn compiled.columns) res.ColumnAttributes |> Seq.toArray
         }
 
 let private limitOrderLimit (orderLimit : SQL.OrderLimitClause) : SQL.OrderLimitClause =
@@ -126,7 +127,7 @@ let rec private limitView (select : SQL.SelectExpr) : SQL.SelectExpr =
       tree = limitTreeView select.tree
     }
 
-type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option) =
+type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
     let mutable serializedFields : Map<ResolvedFieldRef, SerializedColumnField> = Map.empty
 
     let getSerializedField (ref : ResolvedFieldRef) =
@@ -141,9 +142,9 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             | _ -> None
 
     let mergeDomainField (f : DomainField) : UVDomainField =
-        { ref = f.ref
-          field = getSerializedField f.ref
-          idColumn = f.idColumn
+        { Ref = f.ref
+          Field = getSerializedField f.ref
+          IdColumn = f.idColumn
         }
 
     let withThisBroken (allowBroken : bool) =
@@ -161,23 +162,23 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                     match Map.tryFind name insertInfo.columnsToFields with
                     | None -> None
                     | Some fieldName ->
-                        Some { name = fieldName
-                               field = getSerializedField { entity = insertInfo.entity; name = fieldName } |> Option.get
+                        Some { Name = fieldName
+                               Field = getSerializedField { entity = insertInfo.entity; name = fieldName } |> Option.get
                              }
 
-            { name = column.name
-              attributeTypes = column.attributeTypes
-              cellAttributeTypes = column.cellAttributeTypes
-              valueType = column.valueType
-              punType = column.punType
-              mainField = mainField
+            { Name = column.Name
+              AttributeTypes = column.AttributeTypes
+              CellAttributeTypes = column.CellAttributeTypes
+              ValueType = column.ValueType
+              PunType = column.PunType
+              MainField = mainField
             }
 
-        { attributeTypes = viewInfo.attributeTypes
-          rowAttributeTypes = viewInfo.rowAttributeTypes
-          domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.flattenedDomains
-          columns = Seq.map2 getResultColumn (Seq.mapMaybe getColumn compiled.columns) viewInfo.columns |> Seq.toArray
-          mainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.entity) viewExpr.mainEntity
+        { AttributeTypes = viewInfo.AttributeTypes
+          RowAttributeTypes = viewInfo.RowAttributeTypes
+          Domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.flattenedDomains
+          Columns = Seq.map2 getResultColumn (Seq.mapMaybe getColumn compiled.columns) viewInfo.Columns |> Seq.toArray
+          MainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.entity) viewExpr.mainEntity
         }
 
     let rec dryRunUserView (uv : ResolvedUserView) : Task<PrefetchedUserView> =
@@ -192,11 +193,11 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             let arguments = uv.compiled.query.arguments.types |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType)
 
             try
-                return! runViewExpr conn limited arguments <| fun info res ->
+                return! runViewExpr conn limited arguments cancellationToken <| fun info res ->
                     Task.FromResult
-                        { uv = uv
-                          info = mergeViewInfo uv.resolved uv.compiled info
-                          pureAttributes = getPureAttributes uv.resolved uv.compiled res
+                        { UserView = uv
+                          Info = mergeViewInfo uv.resolved uv.compiled info
+                          PureAttributes = getPureAttributes uv.resolved uv.compiled res
                         }
             with
             | :? QueryException as err ->
@@ -210,7 +211,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             task {
                 let ref = { schema = schemaName; name = name }
                 match maybeUv with
-                | Error e when not (withThisBroken e.source.allowBroken) -> return None
+                | Error e when not (withThisBroken e.source.AllowBroken) -> return None
                 | Error e -> return Some (name, Error e)
                 | Ok uv when not (withThisBroken uv.allowBroken) -> return None
                 | Ok uv ->
@@ -224,7 +225,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                                 errors <- Map.add name (e :> exn) errors
                             let err =
                                 { error = e :> exn
-                                  source = Map.find name sourceSchema.userViews
+                                  source = Map.find name sourceSchema.UserViews
                                 }
                             return Some (name, Error err)
                         else
@@ -232,7 +233,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             }
 
         let! userViews = schema.userViews |> Map.toSeq |> Seq.mapTaskSync mapUserView |> Task.map (Seq.catMaybes >> Map.ofSeq)
-        let ret = { userViews = userViews } : PrefetchedViewsSchema
+        let ret = { UserViews = userViews } : PrefetchedViewsSchema
         return (errors, ret)
     }
 
@@ -242,7 +243,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         let mapSchema name schema =
             task {
                 try
-                    let! (schemaErrors, newSchema) = resolveUserViewsSchema name (Map.find name source.schemas) schema
+                    let! (schemaErrors, newSchema) = resolveUserViewsSchema name (Map.find name source.Schemas) schema
                     if not <| Map.isEmpty schemaErrors then
                         errors <- Map.add name schemaErrors errors
                     return newSchema
@@ -252,7 +253,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             }
 
         let! schemas = resolved.schemas |> Map.mapTaskSync mapSchema
-        let ret = { schemas = schemas } : PrefetchedUserViews
+        let ret = { Schemas = schemas } : PrefetchedUserViews
         return (errors, ret)
     }
 
@@ -260,29 +261,29 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
     member this.DryRunUserViews = resolveUserViews
 
 // Warning: this should be executed outside of any transactions because of test runs.
-let dryRunUserViews (conn : QueryConnection) (layout : Layout) (forceAllowBroken : bool) (onlyWithAllowBroken : bool option) (sourceViews : SourceUserViews) (userViews : UserViews) : Task<ErroredUserViews * PrefetchedUserViews> =
+let dryRunUserViews (conn : QueryConnection) (layout : Layout) (forceAllowBroken : bool) (onlyWithAllowBroken : bool option) (sourceViews : SourceUserViews) (userViews : UserViews) (cancellationToken : CancellationToken) : Task<ErroredUserViews * PrefetchedUserViews> =
     task {
-        let runner = DryRunner(layout, conn, forceAllowBroken, onlyWithAllowBroken)
+        let runner = DryRunner(layout, conn, forceAllowBroken, onlyWithAllowBroken, cancellationToken)
         let! (errors, ret) = runner.DryRunUserViews sourceViews userViews
         return (errors, ret)
     }
 
-let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (q: ResolvedUserView) : Task<PrefetchedUserView> =
-    let runner = DryRunner(layout, conn, false, None)
+let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (q: ResolvedUserView) (cancellationToken : CancellationToken) : Task<PrefetchedUserView> =
+    let runner = DryRunner(layout, conn, false, None, cancellationToken)
     runner.DryRunAnonymousUserView q
 
 let private renderPrefetchedUserView : Result<PrefetchedUserView, UserViewError> -> SourceUserView = function
     | Ok uv ->
-        { query = uv.uv.resolved.ToFunQLString()
-          allowBroken = uv.uv.allowBroken
+        { Query = uv.UserView.resolved.ToFunQLString()
+          AllowBroken = uv.UserView.allowBroken
         }
     | Error e -> e.source
 
 let renderPrefetchedUserViewsSchema (schema : PrefetchedViewsSchema) : SourceUserViewsSchema =
-    { userViews = Map.map (fun name -> renderPrefetchedUserView) schema.userViews
-      generatorScript = None
+    { UserViews = Map.map (fun name -> renderPrefetchedUserView) schema.UserViews
+      GeneratorScript = None
     }
 
 let renderPrefetchedUserViews (uvs : PrefetchedUserViews) : SourceUserViews =
-    { schemas = Map.map (fun schemaName -> renderPrefetchedUserViewsSchema) uvs.schemas
+    { Schemas = Map.map (fun schemaName -> renderPrefetchedUserViewsSchema) uvs.Schemas
     }

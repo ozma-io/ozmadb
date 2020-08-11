@@ -1,35 +1,29 @@
 module FunWithFlags.FunDB.Layout.Source
 
-open Newtonsoft.Json
-
 open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 // Source Layout; various layout sources, like database or system layout, are converted into this.
 
 type SourceUniqueConstraint =
-    { columns : FieldName[]
+    { Columns : FieldName[]
     }
 
 type SourceCheckConstraint =
-    { expression : string
+    { Expression : string
     }
 
 type SourceColumnField =
-    { fieldType : string
-      defaultValue : string option
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      isNullable : bool
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      isImmutable : bool
+    { Type : string
+      DefaultValue : string option
+      IsNullable : bool
+      IsImmutable : bool
     }
 
 type SourceComputedField =
-    { expression : string
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      allowBroken : bool
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      isVirtual : bool
+    { Expression : string
+      AllowBroken : bool
+      IsVirtual : bool
     }
 
 type SourceField =
@@ -38,60 +32,51 @@ type SourceField =
     | SId
 
 type SourceEntity =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      columnFields : Map<FieldName, SourceColumnField>
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      computedFields : Map<FieldName, SourceComputedField>
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      uniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      checkConstraints : Map<ConstraintName, SourceCheckConstraint>
-      mainField : FieldName
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      forbidExternalReferences : bool
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      isHidden : bool
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      isAbstract : bool
-      parent : ResolvedEntityRef option
+    { ColumnFields : Map<FieldName, SourceColumnField>
+      ComputedFields : Map<FieldName, SourceComputedField>
+      UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
+      CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
+      MainField : FieldName
+      ForbidExternalReferences : bool
+      IsHidden : bool
+      IsAbstract : bool
+      Parent : ResolvedEntityRef option
     } with
         member this.FindField (name : FieldName) =
             if name = funId then
                 Some SId
             else if name = funMain then
-                this.FindField this.mainField
+                this.FindField this.MainField
             else
-                match Map.tryFind name this.columnFields with
+                match Map.tryFind name this.ColumnFields with
                 | Some col -> Some <| SColumnField col
                 | None ->
-                    match Map.tryFind name this.computedFields with
+                    match Map.tryFind name this.ComputedFields with
                     | Some comp -> Some <| SComputedField comp
                     | None -> None
 
 type SourceSchema =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      entities : Map<EntityName, SourceEntity>
+    { Entities : Map<EntityName, SourceEntity>
     }
 
 let emptySourceSchema : SourceSchema =
-    { entities = Map.empty
+    { Entities = Map.empty
     }
 
 let mergeSourceSchema (a : SourceSchema) (b : SourceSchema) : SourceSchema =
-    { entities = Map.unionUnique a.entities b.entities
+    { Entities = Map.unionUnique a.Entities b.Entities
     }
 
 type SourceLayout =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      schemas : Map<SchemaName, SourceSchema>
+    { Schemas : Map<SchemaName, SourceSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.schemas with
+            match Map.tryFind entity.schema this.Schemas with
             | None -> None
-            | Some schema -> Map.tryFind entity.name schema.entities
+            | Some schema -> Map.tryFind entity.name schema.Entities
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
 let emptySourceLayout : SourceLayout =
-    { schemas = Map.empty }
+    { Schemas = Map.empty }

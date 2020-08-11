@@ -1,65 +1,60 @@
 module FunWithFlags.FunDB.Attributes.Source
 
-open Newtonsoft.Json
+open System.ComponentModel
 
 open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceAttributesField =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      allowBroken : bool
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      priority : int
-      attributes : string
+    { AllowBroken : bool
+      [<DefaultValue(0)>]
+      Priority : int
+      Attributes : string
     }
 
 type SourceAttributesEntity =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      fields : Map<FieldName, SourceAttributesField>
+    { Fields : Map<FieldName, SourceAttributesField>
     } with
         member this.FindField (name : FieldName) =
-            Map.tryFind name this.fields
+            Map.tryFind name this.Fields
 
 let emptySourceAttributesEntity : SourceAttributesEntity =
-    { fields = Map.empty }
+    { Fields = Map.empty }
 
 let mergeSourceAttributesEntity (a : SourceAttributesEntity) (b : SourceAttributesEntity) : SourceAttributesEntity =
-    { fields = Map.unionUnique a.fields b.fields
+    { Fields = Map.unionUnique a.Fields b.Fields
     }
 
 type SourceAttributesSchema =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      entities : Map<EntityName, SourceAttributesEntity>
+    { Entities : Map<EntityName, SourceAttributesEntity>
     }
 
 let mergeSourceAttributesSchema (a : SourceAttributesSchema) (b : SourceAttributesSchema) : SourceAttributesSchema =
-    { entities = Map.unionWith (fun name -> mergeSourceAttributesEntity) a.entities b.entities
+    { Entities = Map.unionWith (fun name -> mergeSourceAttributesEntity) a.Entities b.Entities
     }
 
 type SourceAttributesDatabase =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      schemas : Map<SchemaName, SourceAttributesSchema>
+    { Schemas : Map<SchemaName, SourceAttributesSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.schemas with
+            match Map.tryFind entity.schema this.Schemas with
                 | None -> None
-                | Some schema -> Map.tryFind entity.name schema.entities
+                | Some schema -> Map.tryFind entity.name schema.Entities
 
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
 let emptySourceAttributesDatabase : SourceAttributesDatabase =
-    { schemas = Map.empty }
+    { Schemas = Map.empty }
 
 let mergeSourceAttributesDatabase (a : SourceAttributesDatabase) (b : SourceAttributesDatabase) : SourceAttributesDatabase =
-    { schemas = Map.unionWith (fun name -> mergeSourceAttributesSchema) a.schemas b.schemas
+    { Schemas = Map.unionWith (fun name -> mergeSourceAttributesSchema) a.Schemas b.Schemas
     }
 
 type SourceDefaultAttributes =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      schemas : Map<SchemaName, SourceAttributesDatabase>
+    { Schemas : Map<SchemaName, SourceAttributesDatabase>
     }
 
 let emptySourceDefaultAttributes : SourceDefaultAttributes =
-    { schemas = Map.empty }
+    { Schemas = Map.empty }

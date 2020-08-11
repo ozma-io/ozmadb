@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.SQL.Migration
 
+open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
@@ -66,10 +67,10 @@ let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta
     }
 
 [<NoEquality; NoComparison>]
-type AColumnMeta =
-    { columnType : DBValueType
-      isNullable : bool
-      defaultExpr : ValueExpr option
+type private AColumnMeta =
+    { ColumnType : DBValueType
+      IsNullable : bool
+      DefaultExpr : ValueExpr option
     }
 
 // Convert tree the way PostgreSQL converts it internally, but drop type casts.
@@ -258,11 +259,11 @@ let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMet
 let planDatabaseMigration (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =
     migrateBuildDatabase fromMeta toMeta |> Seq.sortBy schemaOperationOrder |> Seq.toArray
 
-let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) : Task<bool> =
+let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) (cancellationToken : CancellationToken) : Task<bool> =
     task {
         let mutable touched = false
         for action in plan do
-            let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty
+            let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty cancellationToken
             touched <- true
             ()
         if touched then

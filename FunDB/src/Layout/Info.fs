@@ -67,11 +67,11 @@ let serializeComputedField (comp : ResolvedComputedField) : SerializedComputedFi
     }
 
 let serializeComputedFieldError (comp : ComputedFieldError) : SerializedComputedField =
-    { expression = comp.source.expression
+    { expression = comp.source.Expression
       inheritedFrom = comp.inheritedFrom
-      allowBroken = comp.source.allowBroken
+      allowBroken = comp.source.AllowBroken
       isBroken = true
-      isVirtual = comp.source.isVirtual
+      isVirtual = comp.source.IsVirtual
     }
 
 let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField =

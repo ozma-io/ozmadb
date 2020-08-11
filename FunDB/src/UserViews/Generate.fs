@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.UserViews.Generate
 
-open System
+open System.Threading
 open Newtonsoft.Json
 open NetJs
 open NetJs.Json
@@ -21,8 +21,8 @@ let userViewsFunction = "GetUserViews"
 let private convertUserView (KeyValue (k, v : Value.Value)) =
     let query = v.GetString().Get()
     let uv =
-        { query = query
-          allowBroken = false
+        { Query = query
+          AllowBroken = false
         }
     (FunQLName k, uv)
 
@@ -54,20 +54,20 @@ type private UserViewGenerator (template : UserViewGeneratorTemplate, scriptSour
         | :? Value.Function as f -> f
         | v -> raisef UserViewGenerateException "%s is not a function, buf %O" userViewsFunction v
 
-    let generateUserViews (layout : Value.Value) : SourceUserViewsSchema =
+    let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : SourceUserViewsSchema =
         try
-            let newViews = runnable.Call(Nullable(), null, [|layout|])
+            let newViews = runnable.Call(cancellationToken, null, [|layout|])
             let userViews = newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
-            { generatorScript = Some scriptSource
-              userViews = userViews
+            { GeneratorScript = Some scriptSource
+              UserViews = userViews
             }
         with
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't generate user views"
 
-    member this.Generate layout = generateUserViews layout
+    member this.Generate layout cancellationToken = generateUserViews layout cancellationToken
 
-type private UserViewsGenerator (template : UserViewGeneratorTemplate, layout : Layout) =
+type private UserViewsGenerator (template : UserViewGeneratorTemplate, layout : Layout, cancellationToken : CancellationToken) =
     let mutable jsLayout : Value.Value option = None
 
     let getLayout () =
@@ -82,18 +82,18 @@ type private UserViewsGenerator (template : UserViewGeneratorTemplate, layout : 
             jsWriter.Result
 
     let generateUserViewsSchema (schema : SourceUserViewsSchema) : SourceUserViewsSchema =
-        match schema.generatorScript with
+        match schema.GeneratorScript with
         | None -> schema
         | Some script ->
             let gen = UserViewGenerator(template, script)
-            gen.Generate(getLayout ())
+            gen.Generate (getLayout ()) cancellationToken
 
     let generateUserViews (views : SourceUserViews) : SourceUserViews =
-        { schemas = Map.map (fun name -> generateUserViewsSchema) views.schemas
+        { Schemas = Map.map (fun name -> generateUserViewsSchema) views.Schemas
         }
 
     member this.GenerateUserViews views = generateUserViews views
 
-let generateUserViews (template : UserViewGeneratorTemplate) (layout : Layout) (uvs : SourceUserViews) : SourceUserViews =
-    let gen = UserViewsGenerator(template, layout)
+let generateUserViews (template : UserViewGeneratorTemplate) (layout : Layout) (uvs : SourceUserViews) (cancellationToken : CancellationToken) : SourceUserViews =
+    let gen = UserViewsGenerator(template, layout, cancellationToken)
     gen.GenerateUserViews uvs

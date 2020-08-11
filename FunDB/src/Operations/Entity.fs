@@ -1,5 +1,6 @@
 ﻿module FunWithFlags.FunDB.Operations.Entity
 
+open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
@@ -34,12 +35,12 @@ type EntityId = int
 
 type EntityArguments = Map<FieldName, FieldValue>
 
-let private runQuery (runFunc : string -> ExprParameters -> Task<'a>) (globalArgs : EntityArguments) (query : Query<'q>) (placeholders : EntityArguments) : Task<'a> =
+let private runQuery (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>) (globalArgs : EntityArguments) (query : Query<'q>) (placeholders : EntityArguments) (cancellationToken : CancellationToken) : Task<'a> =
     task {
         try
             // FIXME: Slow
             let args = Map.union (Map.mapKeys PGlobal globalArgs) (Map.mapKeys PLocal placeholders)
-            return! runFunc (query.expression.ToSQLString()) (prepareArguments query.arguments args)
+            return! runFunc (query.expression.ToSQLString()) (prepareArguments query.arguments args) cancellationToken
         with
             | :? QueryException as ex ->
                 return raisefWithInner EntityExecutionException ex.InnerException "%s" ex.Message
@@ -47,9 +48,9 @@ let private runQuery (runFunc : string -> ExprParameters -> Task<'a>) (globalArg
 
 let private runNonQuery (connection : QueryConnection) = runQuery connection.ExecuteNonQuery
 
-let private runIntQuery (connection : QueryConnection) globalArgs query placeholders =
+let private runIntQuery (connection : QueryConnection) globalArgs query placeholders cancellationToken =
     task {
-        match! runQuery connection.ExecuteValueQuery globalArgs query placeholders with
+        match! runQuery connection.ExecuteValueQuery globalArgs query placeholders cancellationToken with
         | SQL.VInt i -> return i
         | _ -> return raisef EntityExecutionException "Non-integer result"
     }
@@ -72,7 +73,7 @@ let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : Re
         | :? PermissionsEntityException as e ->
             raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-let countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (whereExpr : SQL.ValueExpr) =
+let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (whereExpr : SQL.ValueExpr) (cancellationToken : CancellationToken) =
     task {
         let testExpr =
             SQL.SSelect
@@ -87,7 +88,7 @@ let countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (wher
             { expression = testExpr
               arguments = emptyArguments
             }
-        let! count = runIntQuery connection Map.empty testQuery Map.empty
+        let! count = runIntQuery connection Map.empty testQuery Map.empty cancellationToken
         if count > 0 then
             raisef EntityDeniedException "Access denied"
         else
@@ -95,15 +96,15 @@ let countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (wher
     }
 
 type private ValueColumn =
-    { placeholder : Placeholder
-      argument : Argument<ResolvedEntityRef, FunQLVoid>
-      column : SQL.ColumnName
-      extra : obj
+    { Placeholder : Placeholder
+      Argument : Argument<ResolvedEntityRef, FunQLVoid>
+      Column : SQL.ColumnName
+      Extra : obj
     }
 
 let private fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.defaultValue || field.isNullable
 
-let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) : Task<int> =
+let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) (cancellationToken : CancellationToken) : Task<int> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             let isOptional = fieldIsOptional field
@@ -112,10 +113,10 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
             | Some arg ->
                 Some
-                    { placeholder = PLocal fieldName
-                      argument = { argType = clearFieldType field.fieldType; optional = isOptional }
-                      column = field.columnName
-                      extra = ({ name = fieldName } : RestrictedColumnInfo)
+                    { Placeholder = PLocal fieldName
+                      Argument = { argType = clearFieldType field.fieldType; optional = isOptional }
+                      Column = field.columnName
+                      Extra = ({ name = fieldName } : RestrictedColumnInfo)
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
@@ -127,10 +128,10 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let (subEntityValue, rawArgs) =
             if hasSubType entity then
                 let value =
-                    { placeholder = PLocal funSubEntity
-                      argument = { argType = FTType (FETScalar SFTString); optional = false }
-                      column = sqlFunSubEntity
-                      extra = null
+                    { Placeholder = PLocal funSubEntity
+                      Argument = { argType = FTType (FETScalar SFTString); optional = false }
+                      Column = sqlFunSubEntity
+                      Extra = null
                     }
                 let newArgs = Map.add funSubEntity (FString entity.typeName) rawArgs
                 (Seq.singleton value, newArgs)
@@ -138,11 +139,11 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 (Seq.empty, rawArgs)
 
         let argumentTypes = Seq.append subEntityValue (entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue) |> Seq.cache
-        let arguments = argumentTypes |> Seq.map (fun value -> (value.placeholder, value.argument)) |> Map.ofSeq |> compileArguments
+        let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
         // Id is needed so that we always have at least one column inserted.
-        let insertColumns = argumentTypes |> Seq.map (fun value -> (value.extra, value.column))
+        let insertColumns = argumentTypes |> Seq.map (fun value -> (value.Extra, value.Column))
         let columns = Seq.append (Seq.singleton (null, sqlFunId)) insertColumns |> Array.ofSeq
-        let values = argumentTypes |> Seq.map (fun value -> arguments.types.[value.placeholder].placeholderId |> SQL.VEPlaceholder |> SQL.IVValue)
+        let values = argumentTypes |> Seq.map (fun value -> arguments.types.[value.Placeholder].placeholderId |> SQL.VEPlaceholder |> SQL.IVValue)
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
         let expr =
@@ -166,12 +167,12 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-        return! runIntQuery connection globalArgs query rawArgs
+        return! runIntQuery connection globalArgs query rawArgs cancellationToken
     }
 
 let private funIdArg = { argType = FTType (FETScalar SFTInt); optional = false }
 
-let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) : Task<unit> =
+let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) (cancellationToken : CancellationToken) : Task<unit> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
@@ -179,10 +180,10 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | Some arg when field.isImmutable -> raisef EntityDeniedException "Field %O is immutable" { entity = entityRef; name = fieldName }
             | Some arg ->
                 Some
-                    { placeholder = PLocal fieldName
-                      argument = { argType = clearFieldType field.fieldType; optional = fieldIsOptional field }
-                      column = field.columnName
-                      extra = ({ name = fieldName } : RestrictedColumnInfo)
+                    { Placeholder = PLocal fieldName
+                      Argument = { argType = clearFieldType field.fieldType; optional = fieldIsOptional field }
+                      Column = field.columnName
+                      Extra = ({ name = fieldName } : RestrictedColumnInfo)
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
@@ -190,8 +191,8 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             raisef EntityExecutionException "Entity %O is hidden" entityRef
 
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
-        let arguments = argumentTypes |> Seq.map (fun value -> (value.placeholder, value.argument)) |> Map.ofSeq |> compileArguments
-        let columns = argumentTypes |> Seq.map (fun value -> (value.column, (value.extra, SQL.VEPlaceholder arguments.types.[value.placeholder].placeholderId))) |> Map.ofSeq
+        let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
+        let columns = argumentTypes |> Seq.map (fun value -> (value.Column, (value.Extra, SQL.VEPlaceholder arguments.types.[value.Placeholder].placeholderId))) |> Map.ofSeq
 
         let (idPlaceholder, arguments) = addArgument (PLocal funId) funIdArg arguments
 
@@ -222,12 +223,12 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-        let! affected = runNonQuery connection globalArgs restricted (Map.add funId (FInt id) rawArgs)
+        let! affected = runNonQuery connection globalArgs restricted (Map.add funId (FInt id) rawArgs) cancellationToken
         if affected = 0 then
-            do! countAndThrow connection tableRef whereExpr
+            do! countAndThrow connection tableRef whereExpr cancellationToken
     }
 
-let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) : Task<unit> =
+let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (cancellationToken : CancellationToken) : Task<unit> =
     task {
         let entity = layout.FindEntity entityRef |> Option.get
 
@@ -265,7 +266,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
-        let! affected = runNonQuery connection globalArgs restricted (Map.singleton funId (FInt id))
+        let! affected = runNonQuery connection globalArgs restricted (Map.singleton funId (FInt id)) cancellationToken
         if affected = 0 then
-            do! countAndThrow connection tableRef whereExpr
+            do! countAndThrow connection tableRef whereExpr cancellationToken
     }

@@ -30,9 +30,9 @@ let private getColumn : ColumnType -> FunQLName option = function
 
 [<NoEquality; NoComparison>]
 type private HalfResolvedView =
-    { source : SourceUserView
-      resolved : ResolvedViewExpr
-      allowBroken : bool
+    { Source : SourceUserView
+      Resolved : ResolvedViewExpr
+      AllowBroken : bool
     }
 
 type private HalfResolvedSchema = Map<UserViewName, Result<HalfResolvedView, UserViewError>>
@@ -41,7 +41,7 @@ type private HalfResolvedViews = Map<SchemaName, HalfResolvedSchema>
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let resolveUserView (uv : SourceUserView) : HalfResolvedView =
         let parsed =
-            match parse tokenizeFunQL viewExpr uv.query with
+            match parse tokenizeFunQL viewExpr uv.Query with
             | Error msg -> raisef UserViewResolveException "Parse error: %s" msg
             | Ok rawExpr -> rawExpr
         let resolved =
@@ -49,9 +49,9 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                 resolveViewExpr layout parsed
             with
             | :? ViewResolveException as err -> raisefWithInner UserViewResolveException err "Resolve error"
-        { source = uv
-          resolved = resolved
-          allowBroken = uv.allowBroken
+        { Source = uv
+          Resolved = resolved
+          AllowBroken = uv.AllowBroken
         }
 
     let resolveUserViewsSchema (schema : SourceUserViewsSchema) : HalfResolvedSchema =
@@ -62,7 +62,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     Ok <| resolveUserView uv
                 with
                 | :? UserViewResolveException as e ->
-                    if forceAllowBroken || uv.allowBroken then
+                    if forceAllowBroken || uv.AllowBroken then
                         let err =
                             { error = e :> exn
                               source = uv
@@ -72,7 +72,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                         reraise ()
             with
             | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "Error in user view %O: %s" name e.Message
-        schema.userViews |> Map.map mapUserView
+        schema.UserViews |> Map.map mapUserView
 
     let resolveUserViews (uvs : SourceUserViews) : HalfResolvedViews =
         let mapSchema name schema =
@@ -82,7 +82,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                 resolveUserViewsSchema schema
             with
             | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
-        uvs.schemas |> Map.map mapSchema
+        uvs.Schemas |> Map.map mapSchema
 
     member this.ResolveUserView = resolveUserView
     member this.ResolveUserViews = resolveUserViews
@@ -111,14 +111,14 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
 
         let dereferenced =
             try
-                dereferenceViewExpr checkView homeSchema uv.resolved
+                dereferenceViewExpr checkView homeSchema uv.Resolved
             with
             | :? ViewDereferenceException as err -> raisefWithInner UserViewResolveException err "Dereference error"
         let compiled = compileViewExpr layout defaultAttrs dereferenced
 
         { resolved = dereferenced
           compiled = compiled
-          allowBroken = uv.allowBroken
+          allowBroken = uv.AllowBroken
         }
 
     let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : ErroredUserViewsSchema * UserViewsSchema =
@@ -129,13 +129,13 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
             match maybeUv with
             | Error e ->
                 cachedViews <- Map.add ref (Error e) cachedViews
-                if not e.source.allowBroken then
+                if not e.source.AllowBroken then
                     errors <- Map.add name e.error errors
                 Error e
             | Ok uv ->
                 match findCached ref with
                 | Some (Error e) ->
-                    if not e.source.allowBroken then
+                    if not e.source.AllowBroken then
                         errors <- Map.add name e.error errors
                     Error e
                 | Some (Ok uv) -> Ok uv
@@ -146,12 +146,12 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
                             Ok r
                         with
                         | :? UserViewResolveException as e ->
-                            if uv.allowBroken || forceAllowBroken then
-                                if not uv.source.allowBroken then
+                            if uv.AllowBroken || forceAllowBroken then
+                                if not uv.Source.AllowBroken then
                                     errors <- Map.add name (e :> exn) errors
                                 let err =
                                     { error = e :> exn
-                                      source = uv.source
+                                      source = uv.Source
                                     }
                                 Error err
                             else
@@ -195,6 +195,6 @@ let resolveUserViews (layout : Layout) (defaultAttrs : MergedDefaultAttributes) 
 
 let resolveAnonymousUserView (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (findExistingView : FindExistingView) (homeSchema : SchemaName option) (q: string) : ResolvedUserView =
     let phase1 = Phase1Resolver(layout, false)
-    let resolvedView = phase1.ResolveUserView { query = q; allowBroken = false }
+    let resolvedView = phase1.ResolveUserView { Query = q; AllowBroken = false }
     let phase2 = Phase2Resolver(layout, defaultAttrs, findExistingView, Map.empty, false)
     phase2.ResolveAnonymousUserView homeSchema resolvedView

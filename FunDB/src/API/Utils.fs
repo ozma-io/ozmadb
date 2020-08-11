@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.API.Utils
 
 open System.Collections.Generic
+open System.Threading
 open System.Threading.Tasks
 open System.Security.Claims
 open Microsoft.Extensions.Primitives
@@ -24,11 +25,11 @@ type APIErrorType =
 
 type APIError =
     { [<JsonProperty("type")>]
-      errorType : APIErrorType
-      message : string
+      ErrorType : APIErrorType
+      Message : string
     }
 
-let errorJson str = json { errorType = ErrorGeneric; message = str }
+let errorJson str = json { ErrorType = ErrorGeneric; Message = str }
 
 let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
     logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
@@ -75,11 +76,11 @@ let commitAndReturn (handler : HttpHandler) (rctx : RequestContext) (next : Http
 let commitAndOk : RequestContext -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
 
 type RealmAccess =
-    { roles : string[]
+    { Roles : string[]
     }
 
 type IInstancesSource =
-    abstract member GetInstance : string -> Task<Instance option>
+    abstract member GetInstance : string -> CancellationToken -> Task<Instance option>
 
 let anonymousUsername = "anonymous@example.com"
 
@@ -107,10 +108,11 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
         try
             use! rctx =
                 RequestContext.Create
-                    { cacheStore = cacheStore
-                      userName = userName
-                      isRoot = (userName = instance.Owner || isRoot)
-                      language = lang
+                    { CacheStore = cacheStore
+                      UserName = userName
+                      IsRoot = (userName = instance.Owner || isRoot)
+                      Language = lang
+                      CancellationToken = ctx.RequestAborted
                     }
             return! f rctx next ctx
         with
@@ -129,7 +131,7 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
             let isRoot =
                 if not <| isNull userRoles then
                     let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
-                    roles.roles |> Seq.contains "fundb_admin"
+                    roles.Roles |> Seq.contains "fundb_admin"
                 else
                     false
             makeContext instance userClaim.Value isRoot next ctx
@@ -144,7 +146,7 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
                 ctx.Request.Host.Host
             else
                 xInstance.[0]
-        match! instancesSource.GetInstance instanceName with
+        match! instancesSource.GetInstance instanceName ctx.RequestAborted with
         | None -> return! RequestErrors.notFound (errorJson (sprintf "Instance %s not found" instanceName)) next ctx
         | Some instance ->
             if instance.DisableSecurity then

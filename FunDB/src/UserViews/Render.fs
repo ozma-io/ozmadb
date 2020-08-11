@@ -5,16 +5,16 @@ open FunWithFlags.FunDB.UserViews.Types
 
 let private renderUserView = function
     | Ok uv ->
-        { query = uv.resolved.ToFunQLString()
-          allowBroken = uv.allowBroken
+        { Query = uv.resolved.ToFunQLString()
+          AllowBroken = uv.allowBroken
         }
     | Error e -> e.source
 
 let renderUserViewsSchema (schema : UserViewsSchema) : SourceUserViewsSchema =
-    { userViews = Map.map (fun name -> renderUserView) schema.userViews
-      generatorScript = None
+    { UserViews = Map.map (fun name -> renderUserView) schema.userViews
+      GeneratorScript = None
     }
 
 let renderUserViews (uvs : UserViews) : SourceUserViews =
-    { schemas = Map.map (fun schemaName -> renderUserViewsSchema) uvs.schemas
+    { Schemas = Map.map (fun schemaName -> renderUserViewsSchema) uvs.schemas
     }

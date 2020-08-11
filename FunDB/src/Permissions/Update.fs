@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Permissions.Update
 
 open System.Collections.Generic
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore;
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -17,8 +18,8 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
     let updateAllowedField (field : SourceAllowedField) (existingField : RoleColumnField) : unit =
-        existingField.Change <- field.change
-        existingField.Select <- Option.toNull field.select
+        existingField.Change <- field.Change
+        existingField.Select <- Option.toNull field.Select
 
     let updateAllowedFields (entityRef : ResolvedEntityRef) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) =
         let oldFieldsMap =
@@ -34,17 +35,17 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingEntity.ColumnFields.Add(newField)
             newField
-        ignore <| updateDifference db updateFunc createFunc entity.fields oldFieldsMap
+        ignore <| updateDifference db updateFunc createFunc entity.Fields oldFieldsMap
 
     let updateAllowedEntity (entityRef : ResolvedEntityRef) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) : unit =
         updateAllowedFields entityRef entity existingEntity
 
-        existingEntity.AllowBroken <- entity.allowBroken
-        existingEntity.Insert <- entity.insert
-        existingEntity.Check <- Option.toNull entity.check
-        existingEntity.Select <- Option.toNull entity.select
-        existingEntity.Update <- Option.toNull entity.update
-        existingEntity.Delete <- Option.toNull entity.delete
+        existingEntity.AllowBroken <- entity.AllowBroken
+        existingEntity.Insert <- entity.Insert
+        existingEntity.Check <- Option.toNull entity.Check
+        existingEntity.Select <- Option.toNull entity.Select
+        existingEntity.Update <- Option.toNull entity.Update
+        existingEntity.Delete <- Option.toNull entity.Delete
 
     let updateAllowedDatabase (role : SourceRole) (existingRole : Role) : unit =
         let oldEntitiesMap =
@@ -53,11 +54,11 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
             |> Map.ofSeq
 
         let entitiesMap =
-            role.permissions.schemas |> Map.toSeq
-            |> Seq.collect (fun (schemaName, entities) -> entities.entities |> Map.toSeq |> Seq.map (fun (entityName, entity) -> ({ schema = schemaName; name = entityName }, entity)))
+            role.Permissions.Schemas |> Map.toSeq
+            |> Seq.collect (fun (schemaName, entities) -> entities.Entities |> Map.toSeq |> Seq.map (fun (entityName, entity) -> ({ schema = schemaName; name = entityName }, entity)))
             |> Map.ofSeq
 
-        existingRole.AllowBroken <- role.allowBroken
+        existingRole.AllowBroken <- role.AllowBroken
 
         let updateFunc = updateAllowedEntity
         let createFunc entityRef =
@@ -84,7 +85,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingSchema.Roles.Add(newRole)
             newRole
-        ignore <| updateDifference db updateFunc createFunc schema.roles oldRolesMap
+        ignore <| updateDifference db updateFunc createFunc schema.Roles oldRolesMap
 
     let updateSchemas (schemas : Map<SchemaName, SourcePermissionsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
         let updateFunc _ = updatePermissionsSchema
@@ -93,31 +94,31 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     member this.UpdateSchemas = updateSchemas
 
-let updatePermissions (db : SystemContext) (roles : SourcePermissions) : Task<bool> =
+let updatePermissions (db : SystemContext) (roles : SourcePermissions) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync()
+        let! _ = db.SaveChangesAsync(cancellationToken)
 
         let currentSchemas = db.GetRolesObjects ()
 
-        let! allSchemas = currentSchemas.AsTracking().ToListAsync()
+        let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
         // We don't touch in any way schemas not in layout.
         let schemasMap =
             allSchemas
             |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
-            |> Seq.filter (fun (name, schema) -> Map.containsKey name roles.schemas)
+            |> Seq.filter (fun (name, schema) -> Map.containsKey name roles.Schemas)
             |> Map.ofSeq
 
         let updater = PermissionsUpdater(db, allSchemas)
-        updater.UpdateSchemas roles.schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync()
+        updater.UpdateSchemas roles.Schemas schemasMap
+        let! changedEntries = db.SaveChangesAsync(cancellationToken)
         return changedEntries > 0
     }
 
-let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) : Task<unit> =
+let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) (cancellationToken : CancellationToken) : Task<unit> =
     task {
         let currentSchemas = db.GetRolesObjects ()
 
-        let! schemas = currentSchemas.AsTracking().ToListAsync()
+        let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
 
         for schema in schemas do
             match Map.tryFind (FunQLName schema.Name) perms with
@@ -136,6 +137,6 @@ let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) : Ta
                                 if Map.containsKey (FunQLName entity.Entity.Name) entityErrors then
                                     entity.AllowBroken <- true
 
-        let! _ = db.SaveChangesAsync()
+        let! _ = db.SaveChangesAsync(cancellationToken)
         return ()
     }

@@ -19,30 +19,30 @@ let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * Sourc
         let name = FunQLName (snakeCaseName property.Name)
         let requiredAttr = Attribute.GetCustomAttribute(property, typeof<RequiredAttribute>) :?> RequiredAttribute
         let res =
-            { fieldType = field.Type
-              defaultValue =
+            { Type = field.Type
+              DefaultValue =
                   if isNull field.Default
                   then None
                   else Some field.Default
-              isNullable = isNull requiredAttr && not property.PropertyType.IsPrimitive
-              isImmutable = field.IsImmutable
+              IsNullable = isNull requiredAttr && not property.PropertyType.IsPrimitive
+              IsImmutable = field.IsImmutable
             }
         Some (name, res)
 
 let private makeSourceComputedField (field : ComputedFieldAttribute) : FunQLName * SourceComputedField =
     let res =
-        { expression = field.Expression
-          allowBroken = false
-          isVirtual = field.IsVirtual
+        { Expression = field.Expression
+          AllowBroken = false
+          IsVirtual = field.IsVirtual
         }
     (FunQLName field.Name, res)
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraintAttribute) : FunQLName * SourceUniqueConstraint =
-    let res = { columns = Array.map FunQLName constr.Columns }
+    let res = { Columns = Array.map FunQLName constr.Columns }
     (FunQLName constr.Name, res)
 
 let private makeSourceCheckConstraint (constr : CheckConstraintAttribute) : FunQLName * SourceCheckConstraint =
-    let res = { expression = constr.Expression } : SourceCheckConstraint
+    let res = { Expression = constr.Expression } : SourceCheckConstraint
     (FunQLName constr.Name, res)
 
 let private getAttribute<'t when 't :> Attribute> (prop : PropertyInfo) =
@@ -61,15 +61,15 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
         let checkConstraints = getAttribute<CheckConstraintAttribute> prop
 
         let res =
-            { columnFields = columnFields
-              computedFields = computedFields |> Seq.map makeSourceComputedField |> Map.ofSeq
-              uniqueConstraints = uniqueConstraints |> Seq.map makeSourceUniqueConstraint |> Map.ofSeq
-              checkConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
-              mainField = FunQLName entityAttr.MainField
-              forbidExternalReferences = entityAttr.ForbidExternalReferences
-              isHidden = entityAttr.IsHidden
-              parent = None
-              isAbstract = entityClass.IsAbstract
+            { ColumnFields = columnFields
+              ComputedFields = computedFields |> Seq.map makeSourceComputedField |> Map.ofSeq
+              UniqueConstraints = uniqueConstraints |> Seq.map makeSourceUniqueConstraint |> Map.ofSeq
+              CheckConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
+              MainField = FunQLName entityAttr.MainField
+              ForbidExternalReferences = entityAttr.ForbidExternalReferences
+              IsHidden = entityAttr.IsHidden
+              Parent = None
+              IsAbstract = entityClass.IsAbstract
             }
         Some (name, entityClass, res)
     | _ -> failwith "Impossible"
@@ -83,8 +83,8 @@ let buildSystemSchema (contextClass : Type) : SourceSchema =
         match propType.BaseType with
         | null as baseType | baseType when baseType = typeof<obj> -> entity
         | baseType ->
-            { entity with parent = Some { schema = funSchema; name = Map.find baseType.FullName types }}
+            { entity with Parent = Some { schema = funSchema; name = Map.find baseType.FullName types }}
 
     let entities = entitiesInfo |> Seq.map (fun (name, propType, entity) -> (name, applyParent entity propType)) |> Map.ofSeq
-    { entities = entities
+    { Entities = entities
     }

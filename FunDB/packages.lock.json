@@ -52,8 +52,8 @@
       "NetJs": {
         "type": "Direct",
         "requested": "[1.0.*, )",
-        "resolved": "1.0.7",
-        "contentHash": "+BTMczMMVpAmIEnZUQxSmBb5wHXyqgul+9oNYD/Zm5cXxRRPRxrXIBHBU2lU808oYTPrg3RqfLqI0DIvCvZrDg=="
+        "resolved": "1.0.8",
+        "contentHash": "9duASmYyhmqIBhBRbOdhqocJT7Lvx5SIVxxtJCPuZfPLjQSQtSleAnHzDwIRbzfPcbda6lUYVHX4xtTOq1HWew=="
       },
       "NetJs.Json": {
         "type": "Direct",

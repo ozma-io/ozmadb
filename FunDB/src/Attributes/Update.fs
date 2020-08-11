@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Attributes.Update
 
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -16,9 +17,9 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
     let updateAttributesField (attrs : SourceAttributesField) (existingAttrs : FieldAttributes) : unit =
-        existingAttrs.AllowBroken <- attrs.allowBroken
-        existingAttrs.Priority <- attrs.priority
-        existingAttrs.Attributes <- attrs.attributes
+        existingAttrs.AllowBroken <- attrs.AllowBroken
+        existingAttrs.Priority <- attrs.Priority
+        existingAttrs.Attributes <- attrs.Attributes
 
     let updateAttributesDatabase (schema : SourceAttributesDatabase) (existingSchema : Schema) : unit =
         let addOldAttrsKey (attrs : FieldAttributes) =
@@ -29,10 +30,10 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
         let addNewAttrsFieldsKey schemaName entityName (fieldName, attrs : SourceAttributesField) =
             (({ schema = schemaName; name = entityName }, fieldName), attrs)
         let addNewAttrsEntitiesKey schemaName (entityName, entity : SourceAttributesEntity) =
-            entity.fields |> Map.toSeq |> Seq.map (addNewAttrsFieldsKey schemaName entityName)
+            entity.Fields |> Map.toSeq |> Seq.map (addNewAttrsFieldsKey schemaName entityName)
         let addNewAttrsKey (schemaName, schema : SourceAttributesSchema) =
-            schema.entities |> Map.toSeq |> Seq.collect (addNewAttrsEntitiesKey schemaName)
-        let newAttrsMap = schema.schemas |> Map.toSeq |> Seq.collect addNewAttrsKey |> Map.ofSeq
+            schema.Entities |> Map.toSeq |> Seq.collect (addNewAttrsEntitiesKey schemaName)
+        let newAttrsMap = schema.Schemas |> Map.toSeq |> Seq.collect addNewAttrsKey |> Map.ofSeq
 
         let updateFunc _ = updateAttributesField
         let createFunc (entityRef, FunQLName fieldName) =
@@ -53,31 +54,31 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     member this.UpdateSchemas = updateSchemas
 
-let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) : Task<bool> =
+let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync()
+        let! _ = db.SaveChangesAsync(cancellationToken)
 
         let currentSchemas = db.GetAttributesObjects ()
 
-        let! allSchemas = currentSchemas.AsTracking().ToListAsync()
+        let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
         // We don't touch in any way schemas not in layout.
         let schemasMap =
             allSchemas
             |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
-            |> Seq.filter (fun (name, schema) -> Map.containsKey name attrs.schemas)
+            |> Seq.filter (fun (name, schema) -> Map.containsKey name attrs.Schemas)
             |> Map.ofSeq
 
         let updater = AttributesUpdater(db, allSchemas)
-        updater.UpdateSchemas attrs.schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync()
+        updater.UpdateSchemas attrs.Schemas schemasMap
+        let! changedEntries = db.SaveChangesAsync(cancellationToken)
         return changedEntries > 0
     }
 
-let markBrokenAttributes (db : SystemContext) (attrs : ErroredDefaultAttributes) : Task<unit> =
+let markBrokenAttributes (db : SystemContext) (attrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) : Task<unit> =
     task {
         let currentSchemas = db.GetAttributesObjects ()
 
-        let! schemas = currentSchemas.AsTracking().ToListAsync()
+        let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
 
         for schema in schemas do
             match Map.tryFind (FunQLName schema.Name) attrs with
@@ -93,6 +94,6 @@ let markBrokenAttributes (db : SystemContext) (attrs : ErroredDefaultAttributes)
                             if Map.containsKey (FunQLName attrs.FieldName) entityErrors then
                                 attrs.AllowBroken <- true
 
-        let! _ = db.SaveChangesAsync()
+        let! _ = db.SaveChangesAsync(cancellationToken)
         return ()
     }

@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Layout.Update
 
 open System
 open System.Collections.Generic
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -25,13 +26,13 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
     let updateColumnFields (entity : Entity) : Map<FieldName, SourceColumnField> -> Map<FieldName, ColumnField> -> Map<FieldName, ColumnField> =
         let updateColumnFunc _ (newColumn : SourceColumnField) (oldColumn : ColumnField) =
             let def =
-                match newColumn.defaultValue with
+                match newColumn.DefaultValue with
                 | None -> null
                 | Some def -> def
-            oldColumn.IsNullable <- newColumn.isNullable
-            oldColumn.IsImmutable <- newColumn.isImmutable
+            oldColumn.IsNullable <- newColumn.IsNullable
+            oldColumn.IsImmutable <- newColumn.IsImmutable
             oldColumn.Default <- def
-            oldColumn.Type <- newColumn.fieldType
+            oldColumn.Type <- newColumn.Type
         let createColumnFunc (FunQLName name) =
             let newColumn =
                 ColumnField (
@@ -43,9 +44,9 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     let updateComputedFields (entity : Entity) : Map<FieldName, SourceComputedField> -> Map<FieldName, ComputedField> -> Map<FieldName, ComputedField> =
         let updateComputedFunc _ (newComputed : SourceComputedField) (oldComputed : ComputedField) =
-            oldComputed.Expression <- newComputed.expression
-            oldComputed.AllowBroken <- newComputed.allowBroken
-            oldComputed.IsVirtual <- newComputed.isVirtual
+            oldComputed.Expression <- newComputed.Expression
+            oldComputed.AllowBroken <- newComputed.AllowBroken
+            oldComputed.IsVirtual <- newComputed.IsVirtual
         let createComputedFunc (FunQLName name) =
             let newComputed =
                 ComputedField (
@@ -57,7 +58,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     let updateUniqueConstraints (entity : Entity) : Map<FieldName, SourceUniqueConstraint> -> Map<FieldName, UniqueConstraint> -> Map<FieldName, UniqueConstraint> =
         let updateUniqueFunc _ (newUnique : SourceUniqueConstraint) (oldUnique : UniqueConstraint) =
-            let columnNames = Array.map (fun x -> x.ToString()) newUnique.columns
+            let columnNames = Array.map (fun x -> x.ToString()) newUnique.Columns
             oldUnique.Columns <- columnNames
         let createUniqueFunc (FunQLName name) =
             let newUnique =
@@ -70,7 +71,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     let updateCheckConstraints (entity : Entity) : Map<FieldName, SourceCheckConstraint> -> Map<FieldName, CheckConstraint> -> Map<FieldName, CheckConstraint> =
         let updateCheckFunc _ (newCheck : SourceCheckConstraint) (oldCheck : CheckConstraint) =
-            oldCheck.Expression <- newCheck.expression
+            oldCheck.Expression <- newCheck.Expression
         let createCheckFunc (FunQLName name) =
             let newCheck =
                 CheckConstraint (
@@ -94,19 +95,19 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         let uniqueConstraintsMap = existingEntity.UniqueConstraints |> Seq.map (fun unique -> (FunQLName unique.Name, unique)) |> Map.ofSeq
         let checkConstraintsMap = existingEntity.CheckConstraints |> Seq.map (fun check -> (FunQLName check.Name, check)) |> Map.ofSeq
 
-        ignore <| updateColumnFields existingEntity entity.columnFields columnFieldsMap
-        ignore <| updateComputedFields existingEntity entity.computedFields computedFieldsMap
-        ignore <| updateUniqueConstraints existingEntity entity.uniqueConstraints uniqueConstraintsMap
-        ignore <| updateCheckConstraints existingEntity entity.checkConstraints checkConstraintsMap
+        ignore <| updateColumnFields existingEntity entity.ColumnFields columnFieldsMap
+        ignore <| updateComputedFields existingEntity entity.ComputedFields computedFieldsMap
+        ignore <| updateUniqueConstraints existingEntity entity.UniqueConstraints uniqueConstraintsMap
+        ignore <| updateCheckConstraints existingEntity entity.CheckConstraints checkConstraintsMap
 
-        if entity.mainField = funId then
+        if entity.MainField = funId then
             existingEntity.MainField <- null
         else
-            existingEntity.MainField <-entity.mainField.ToString()
-        existingEntity.ForbidExternalReferences <- entity.forbidExternalReferences
-        existingEntity.IsHidden <- entity.isHidden
-        existingEntity.IsAbstract <- entity.isAbstract
-        match entity.parent with
+            existingEntity.MainField <-entity.MainField.ToString()
+        existingEntity.ForbidExternalReferences <- entity.ForbidExternalReferences
+        existingEntity.IsHidden <- entity.IsHidden
+        existingEntity.IsAbstract <- entity.IsAbstract
+        match entity.Parent with
         | None ->
             existingEntity.ParentId <- Nullable()
         | Some ref ->
@@ -131,7 +132,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingSchema.Entities.Add(newEntity)
             newEntity
-        ignore <| updateDifference db updateFunc createFunc schema.entities entitiesMap
+        ignore <| updateDifference db updateFunc createFunc schema.Entities entitiesMap
 
     let updateSchemas schemas existingSchemas =
         let updateFunc _ = updateSchema
@@ -155,13 +156,13 @@ let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) : T
 
         let allEntitiesMap = makeAllEntitiesMap schemas
         let neededSchemas =
-            schemas |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.schemas)
+            schemas |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.Schemas)
 
         for schema in neededSchemas do
             for entity in schema.Entities do
                 if not entity.ParentId.HasValue then
                     let newEntity = layout.FindEntity { schema = FunQLName schema.Name; name = FunQLName entity.Name } |> Option.get
-                    match newEntity.parent with
+                    match newEntity.Parent with
                     | None -> ()
                     | Some ref ->
                         let id = Map.find ref allEntitiesMap
@@ -171,23 +172,23 @@ let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) : T
         return ()
     }
 
-let updateLayout (db : SystemContext) (layout : SourceLayout) : Task<bool> =
+let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync()
+        let! _ = db.SaveChangesAsync(cancellationToken)
 
         let currentSchemas = db.GetLayoutObjects ()
-        let! schemas = currentSchemas.AsTracking().ToListAsync()
+        let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
 
         // We don't touch in any way schemas not in layout.
         let schemasMap =
             schemas
-            |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.schemas)
+            |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.Schemas)
             |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
             |> Map.ofSeq
 
         let updater = LayoutUpdater (db, schemas)
-        updater.UpdateSchemas layout.schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync()
+        updater.UpdateSchemas layout.Schemas schemasMap
+        let! changedEntries = db.SaveChangesAsync(cancellationToken)
 
         if updater.NeedsParentPass then
             do! updateLayoutParents db layout
@@ -195,11 +196,11 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) : Task<bool> =
         return changedEntries > 0
     }
 
-let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) : Task<unit> =
+let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) (cancellationToken : CancellationToken) : Task<unit> =
     task {
         let currentSchemas = db.GetLayoutObjects ()
 
-        let! schemas = currentSchemas.AsTracking().ToListAsync()
+        let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
 
         for schema in schemas do
             match Map.tryFind (FunQLName schema.Name) layout with
@@ -213,6 +214,6 @@ let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) : Task<unit> 
                             if Map.containsKey (FunQLName comp.Name) errors.computedFields then
                                 comp.AllowBroken <- true
 
-        let! _ = db.SaveChangesAsync()
+        let! _ = db.SaveChangesAsync(cancellationToken)
         return ()
     }

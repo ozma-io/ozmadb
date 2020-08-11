@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
@@ -84,7 +85,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
             }
         }
 
-        public async Task<IEnumerable<Namespace>> GetObjects()
+        public async Task<IEnumerable<Namespace>> GetObjects(CancellationToken cancellationToken)
         {
             // All this circus because just running:
             //
@@ -135,7 +136,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                             }).ToList(),
                     }
                 )
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
             return ret
                 .Select(ns => 
                     {

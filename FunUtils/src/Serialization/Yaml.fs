@@ -6,6 +6,7 @@ open System.Collections.Generic
 open YamlDotNet.Core
 open YamlDotNet.Core.Events
 open YamlDotNet.Serialization
+open YamlDotNet.Serialization.NamingConventions
 open YamlDotNet.Serialization.NodeDeserializers
 open YamlDotNet.Serialization.Utilities
 open Microsoft.FSharp.Reflection
@@ -17,8 +18,21 @@ open FunWithFlags.FunUtils.Serialization.Utils
 // We pass serializers to converters after instantiating them with mutation. Ugh.
 [<AbstractClass>]
 type CrutchTypeConverter () =
-    member val ValueSerializer : IValueSerializer = null with get, set
-    member val ValueDeserializer : IValueDeserializer = null with get, set
+    let mutable valueSerializer : IValueSerializer = null
+    let mutable valueDeserializer : IValueDeserializer = null
+    let mutable namingConvention : INamingConvention = null
+
+    member this.ValueSerializer
+        with get () = valueSerializer
+        and internal set (value) = valueSerializer <- value
+
+    member this.ValueDeserializer
+        with get () = valueDeserializer
+        and internal set (value) = valueDeserializer <- value
+
+    member this.NamingConvention
+        with get () = namingConvention
+        and internal set (value) = namingConvention <- value
 
     member this.Serialize(emitter : IEmitter, value : obj) =
         this.ValueSerializer.SerializeValue(emitter, value, null)
@@ -86,10 +100,12 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
 
     let readYaml : IParser -> obj =
         match isNewtype cases with
-        | Some (case, argProperty) ->
+        | Some info ->
             fun reader ->
-                let arg = converter.Deserialize(reader, argProperty.PropertyType)
-                FSharpValue.MakeUnion(case, [|arg|])
+                let arg = converter.Deserialize(reader, info.Type.PropertyType)
+                if not info.ValueIsNullable && isNull arg then
+                    raisef YamlException "Attempted to set null to non-nullable value"
+                FSharpValue.MakeUnion(info.Case, [|arg|])
         | None ->
             // XXX: We do lose information here is we serialize e.g. ('a option option).
             match isOption cases with
@@ -101,6 +117,8 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                     | (true, _) -> nullValue
                     | (false, _) ->
                         let arg = converter.Deserialize(reader, option.SomeType.PropertyType)
+                        if not option.ValueIsNullable && isNull arg then
+                            raisef YamlException "Attempted to set null to non-nullable value"
                         FSharpValue.MakeUnion(option.SomeCase, [|arg|])
             | None ->
                 if isUnionEnum cases then
@@ -113,7 +131,7 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
 
     let writeYaml : obj -> IEmitter -> unit =
         match isNewtype cases with
-        | Some (case, argProperty) ->
+        | Some info ->
             fun value writer ->
                 let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
                 converter.Serialize(writer, args.[0])
@@ -151,47 +169,62 @@ type UnionTypeConverter () =
         FSharpType.IsUnion someType
 
 type SpecializedRecordConverter<'A> (converter : CrutchTypeConverter) =
-    let fields = FSharpType.GetRecordFields(typeof<'A>)
-    let fieldTypes = fields |> Seq.map (fun prop -> (prop.Name, prop.PropertyType)) |> Map.ofSeq
-    let defaultValues =
-        fields
-            |> Seq.mapMaybe (fun prop -> getTypeDefaultValue prop.PropertyType |> Option.map (fun def -> (prop.Name, def)))
-            |> Map.ofSeq
+    let getFieldInfo prop =
+        let field = serializableField prop
+        (converter.NamingConvention.Apply field.Name, field)
+
+    let fields = FSharpType.GetRecordFields(typeof<'A>) |> Array.map getFieldInfo
+    let fieldsMap = Map.ofSeq fields
+    let defaultValuesMap = fields |> Seq.mapMaybe (fun (name, field) -> Option.map (fun def -> (name, def)) field.DefaultValue) |> Map.ofSeq
 
     let readYaml (parser : IParser) : obj =
         match parser.Current with
         | :? MappingStart -> ignore <| parser.MoveNext()
         | _ -> raisef YamlException "Invalid YAML value"
 
-        let rec getNextField (fields : Map<string, obj>) =
+        let rec getNextField (values : Map<string, obj>) =
             match parser.Current with
             | :? MappingEnd ->
                 ignore <| parser.MoveNext()
-                fields
+                values
             | :? Scalar as scalar ->
                 ignore <| parser.MoveNext()
-                match Map.tryFind scalar.Value fieldTypes with
-                | Some valueType ->
-                    let value = converter.Deserialize(parser, valueType)
-                    let fields = Map.add scalar.Value value fields
-                    getNextField fields
+                match Map.tryFind scalar.Value fieldsMap with
+                | Some field ->
+                    let value = converter.Deserialize(parser, field.Property.PropertyType)
+                    if not field.IsNullable && isNull value then
+                        raisef YamlException "Attempted to set null to non-nullable field \"%s\"" scalar.Value
+                    let values = Map.add scalar.Value value values
+                    getNextField values
                 | _ ->
                     parser.SkipThisAndNestedEvents()
-                    getNextField fields
+                    getNextField values
             | _ -> raisef YamlException "Invalid YAML value"
 
-        let valuesMap = getNextField defaultValues
-        let lookupField (prop : PropertyInfo) =
-            match Map.tryFind prop.Name valuesMap with
-            | None -> raisef YamlException "Field \"%s\" not found" prop.Name
+        let valuesMap = getNextField defaultValuesMap
+        let lookupField (name, field) =
+            match Map.tryFind name valuesMap with
+            | None -> raisef YamlException "Field \"%s\" not found" name
             | Some o -> o
         let values = fields |> Array.map lookupField
         FSharpValue.MakeRecord(typeof<'A>, values)
 
+    let writeYaml (value : obj) (writer : IEmitter) : unit =
+        writer.Emit(MappingStart())
+        let emitValue (name, field) =
+            let value = field.Property.GetValue(value, null)
+            match field.DefaultValue with
+            | Some d when not (Option.defaultValue true field.EmitDefaultValue) && d = value -> ()
+            | _ ->
+                writer.Emit(Scalar(name))
+                converter.Serialize(writer, value)
+        Seq.iter emitValue fields
+        writer.Emit(MappingEnd())
+
     interface IYamlTypeConverter with
         override this.Accepts someType = someType = typeof<'A>
         override this.ReadYaml (parser, someType) = readYaml parser
-        override this.WriteYaml (emitter, value, someType) = failwith "Not implemented"
+        override this.WriteYaml (emitter, value, someType) = writeYaml value emitter
 
 type RecordTypeConverter () =
     inherit SpecializedSingleTypeConverter<SpecializedRecordConverter<obj>> ()
@@ -201,7 +234,8 @@ type RecordTypeConverter () =
 
 type SpecializedMapConverter<'K, 'V when 'K : comparison> (converter : CrutchTypeConverter) =
     interface IYamlTypeConverter with
-        override this.Accepts someType = someType = typeof<Map<'K, 'V>>
+        override this.Accepts someType =
+            someType = typeof<Map<'K, 'V>>
 
         override this.ReadYaml (parser : IParser, someType : Type) =
             let seq = converter.Deserialize<Dictionary<'K, 'V>>(parser)
@@ -218,39 +252,61 @@ type MapTypeConverter () =
     override this.Accepts (someType : Type) : bool =
         someType.IsGenericType && someType.GetGenericTypeDefinition() = typedefof<Map<_, _>>
 
-let makeYamlSerializer (build : SerializerBuilder -> unit) : ISerializer =
-    let myConverters = [|
+type YamlSerializerSettings =
+    { NamingConvention : INamingConvention
+      CrutchTypeConverters : unit -> CrutchTypeConverter seq
+    }
+
+let defaultYamlSerializerSettings =
+    { NamingConvention = NullNamingConvention.Instance
+      CrutchTypeConverters = fun () -> Seq.empty
+    }
+
+let makeYamlSerializer (settings : YamlSerializerSettings) : ISerializer =
+    let myConverters = seq {
         UnionTypeConverter() :> CrutchTypeConverter
-    |]
+    }
+    let converters = Seq.append myConverters (settings.CrutchTypeConverters ()) |> Seq.cache
     let builder =
         SerializerBuilder()
             .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
             .DisableAliases()
-    for conv in myConverters do
+    for conv in converters do
         ignore <| builder.WithTypeConverter(conv)
-    build builder
     let valueSerializer = builder.BuildValueSerializer()
-    for conv in myConverters do
+    for conv in converters do
         conv.ValueSerializer <- valueSerializer
+        conv.NamingConvention <- settings.NamingConvention
     let serializer = builder.Build()
     serializer
 
-let defaultYamlSerializer = makeYamlSerializer ignore
+let defaultYamlSerializer = makeYamlSerializer defaultYamlSerializerSettings
 
-let makeYamlDeserializer (build : DeserializerBuilder -> unit) : IDeserializer =
-    let myConverters = [|
+type YamlDeserializerSettings =
+    { NamingConvention : INamingConvention
+      CrutchTypeConverters : unit -> CrutchTypeConverter seq
+    }
+
+let defaultYamlDeserializerSettings =
+    { NamingConvention = NullNamingConvention.Instance
+      CrutchTypeConverters = fun () -> Seq.empty
+    }
+
+let makeYamlDeserializer (settings : YamlDeserializerSettings) : IDeserializer =
+    let myConverters = seq {
         UnionTypeConverter() :> CrutchTypeConverter
         RecordTypeConverter() :> CrutchTypeConverter
         MapTypeConverter() :> CrutchTypeConverter
-    |]
+    }
+    let converters = Seq.append myConverters (settings.CrutchTypeConverters ()) |> Seq.cache
     let builder = DeserializerBuilder()
-    for conv in myConverters do
+    for conv in converters do
         ignore <| builder.WithTypeConverter(conv)
-    build builder
     let valueDeserializer = builder.BuildValueDeserializer()
-    for conv in myConverters do
+    for conv in converters do
         conv.ValueDeserializer <- valueDeserializer
+        conv.NamingConvention <- settings.NamingConvention
     let deserializer = builder.Build()
     deserializer
 
-let defaultYamlDeserializer = makeYamlDeserializer ignore
+let defaultYamlDeserializer = makeYamlDeserializer defaultYamlDeserializerSettings

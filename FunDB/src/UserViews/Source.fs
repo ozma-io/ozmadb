@@ -1,28 +1,26 @@
 module FunWithFlags.FunDB.UserViews.Source
 
-open Newtonsoft.Json
-
 open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceUserView =
-    { allowBroken : bool
-      query : string
+    { AllowBroken : bool
+      Query : string
     }
 
 type SourceUserViewsSchema =
-    { userViews : Map<UserViewName, SourceUserView>
-      generatorScript : string option
+    { UserViews : Map<UserViewName, SourceUserView>
+      GeneratorScript : string option
     }
 
 type SourceUserViews =
-    { schemas : Map<SchemaName, SourceUserViewsSchema>
+    { Schemas : Map<SchemaName, SourceUserViewsSchema>
     }
 
 let emptySourceUserViewsSchema : SourceUserViewsSchema =
-    { userViews = Map.empty
-      generatorScript = None
+    { UserViews = Map.empty
+      GeneratorScript = None
     }
 
 let emptySourceUserViews : SourceUserViews =
-    { schemas = Map.empty }
+    { Schemas = Map.empty }

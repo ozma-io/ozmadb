@@ -1,69 +1,57 @@
 module FunWithFlags.FunDB.Permissions.Source
 
-open Newtonsoft.Json
-
 open FunWithFlags.FunUtils.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type ResolvedRoleRef = ResolvedEntityRef
 
 type SourceAllowedField =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      change: bool
-      select : string option
+    { Change : bool
+      Select : string option
     }
 
 type SourceAllowedEntity =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      allowBroken : bool
-      check : string option
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      insert : bool
-      select : string option
-      update : string option
-      delete : string option
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      fields : Map<FieldName, SourceAllowedField>
+    { AllowBroken : bool
+      Check : string option
+      Insert : bool
+      Select : string option
+      Update : string option
+      Delete : string option
+      Fields : Map<FieldName, SourceAllowedField>
     }
 
 type SourceAllowedSchema =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      entities : Map<EntityName, SourceAllowedEntity>
+    { Entities : Map<EntityName, SourceAllowedEntity>
     }
 
 type SourceAllowedDatabase =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      schemas : Map<SchemaName, SourceAllowedSchema>
+    { Schemas : Map<SchemaName, SourceAllowedSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.schemas with
+            match Map.tryFind entity.schema this.Schemas with
                 | None -> None
-                | Some schema -> Map.tryFind entity.name schema.entities
+                | Some schema -> Map.tryFind entity.name schema.Entities
 
 type SourceRole =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      parents : Set<ResolvedRoleRef>
-      permissions : SourceAllowedDatabase
-      [<JsonProperty(Required=Required.DisallowNull)>]
-      allowBroken : bool
+    { Parents : Set<ResolvedRoleRef>
+      Permissions : SourceAllowedDatabase
+      AllowBroken : bool
     }
 
 type SourcePermissionsSchema =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      roles : Map<RoleName, SourceRole>
+    { Roles : Map<RoleName, SourceRole>
     }
 
 let emptySourcePermissionsSchema : SourcePermissionsSchema =
-    { roles = Map.empty }
+    { Roles = Map.empty }
 
 let mergeSourcePermissionsSchema (a : SourcePermissionsSchema) (b : SourcePermissionsSchema) : SourcePermissionsSchema =
-    { roles = Map.unionUnique a.roles b.roles
+    { Roles = Map.unionUnique a.Roles b.Roles
     }
 
 type SourcePermissions =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      schemas : Map<SchemaName, SourcePermissionsSchema>
+    { Schemas : Map<SchemaName, SourcePermissionsSchema>
     }
 
 let emptySourcePermissions : SourcePermissions =
-    { schemas = Map.empty }
+    { Schemas = Map.empty }

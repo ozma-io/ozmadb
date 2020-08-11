@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Operations.Preload
 
 open System.IO
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
@@ -32,40 +33,40 @@ open FunWithFlags.FunDBSchema.System
 
 type SourcePreloadedSchema =
     { [<JsonProperty(Required=Required.DisallowNull)>]
-      entities : Map<EntityName, SourceEntity>
+      Entities : Map<EntityName, SourceEntity>
       [<JsonProperty(Required=Required.DisallowNull)>]
-      roles : Map<RoleName, SourceRole>
+      Roles : Map<RoleName, SourceRole>
       [<JsonProperty(Required=Required.DisallowNull)>]
-      defaultAttributes : Map<SchemaName, SourceAttributesSchema>
-      userViewGenerator : string option // Path to .js file
+      DefaultAttributes : Map<SchemaName, SourceAttributesSchema>
+      UserViewGenerator : string option // Path to .js file
     }
 
 type SourcePreload =
     { [<JsonProperty(Required=Required.DisallowNull)>]
-      schemas : Map<SchemaName, SourcePreloadedSchema>
+      Schemas : Map<SchemaName, SourcePreloadedSchema>
     }
 
 type SourcePreloadFile =
-    { preload : SourcePreload
-      dirname : string
+    { Preload : SourcePreload
+      DirName : string
     }
 
 let emptySourcePreloadFile : SourcePreloadFile =
-    { preload = { schemas = Map.empty }
-      dirname = ""
+    { Preload = { Schemas = Map.empty }
+      DirName = ""
     }
 
 [<NoEquality; NoComparison>]
 type PreloadedSchema =
-    { schema : SourceSchema
-      permissions : SourcePermissionsSchema
-      defaultAttributes : SourceAttributesDatabase
-      userViews : SourceUserViewsSchema
+    { Schema : SourceSchema
+      Permissions : SourcePermissionsSchema
+      DefaultAttributes : SourceAttributesDatabase
+      UserViews : SourceUserViewsSchema
     }
 
 [<NoEquality; NoComparison>]
 type Preload =
-    { schemas : Map<SchemaName, PreloadedSchema>
+    { Schemas : Map<SchemaName, PreloadedSchema>
     }
 
 let readSourcePreload (path : string) : SourcePreloadFile =
@@ -73,25 +74,25 @@ let readSourcePreload (path : string) : SourcePreloadFile =
     use jsonStream = new JsonTextReader(stream)
     let serializer = JsonSerializer.CreateDefault()
     let preload = serializer.Deserialize<SourcePreload>(jsonStream)
-    { preload = preload
-      dirname = Path.GetDirectoryName path
+    { Preload = preload
+      DirName = Path.GetDirectoryName path
     }
 
 // Empty schemas in Roles aren't reflected in the database so we need to remove them -- otherwise a "change" will always be detected.
 let private normalizeRole (role : SourceRole) =
     { role with
-          permissions =
-              { role.permissions with
-                    schemas = role.permissions.schemas |> Map.filter (fun name schema -> not (Map.isEmpty schema.entities))
+          Permissions =
+              { role.Permissions with
+                    Schemas = role.Permissions.Schemas |> Map.filter (fun name schema -> not (Map.isEmpty schema.Entities))
               }
     }
 
 let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloadedSchema) : PreloadedSchema =
     let schema =
-        { entities = preload.entities
+        { Entities = preload.Entities
         } : SourceSchema
-    let permissions = { roles = Map.map (fun name -> normalizeRole) preload.roles }
-    let defaultAttributes = { schemas = preload.defaultAttributes } : SourceAttributesDatabase
+    let permissions = { Roles = Map.map (fun name -> normalizeRole) preload.Roles }
+    let defaultAttributes = { Schemas = preload.DefaultAttributes } : SourceAttributesDatabase
     let readUserViewScript (path : string) =
         let realPath =
             if Path.IsPathRooted(path) then
@@ -100,72 +101,72 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
                 Path.Join(dirname, path)
         File.ReadAllText realPath
     let userViews =
-        { userViews = Map.empty
-          generatorScript = Option.map readUserViewScript preload.userViewGenerator
+        { UserViews = Map.empty
+          GeneratorScript = Option.map readUserViewScript preload.UserViewGenerator
         }
 
-    { schema = schema
-      permissions = permissions
-      defaultAttributes = defaultAttributes
-      userViews = userViews
+    { Schema = schema
+      Permissions = permissions
+      DefaultAttributes = defaultAttributes
+      UserViews = userViews
     }
 
 let preloadLayout (preload : Preload) : SourceLayout =
-    { schemas = preload.schemas |> Map.map (fun name schema -> schema.schema) }
+    { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.Schema) }
 
 let preloadPermissions (preload : Preload) : SourcePermissions =
-    { schemas = preload.schemas |> Map.map (fun name schema -> schema.permissions) }
+    { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.Permissions) }
 
 let preloadDefaultAttributes (preload : Preload) : SourceDefaultAttributes =
-    { schemas = preload.schemas |> Map.map (fun name schema -> schema.defaultAttributes) }
+    { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.DefaultAttributes) }
 
 let preloadUserViews (preload : Preload) : SourceUserViews =
-    { schemas = preload.schemas |> Map.map (fun name schema -> schema.userViews) }
+    { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.UserViews) }
 
 let resolvePreload (source : SourcePreloadFile) : Preload =
-    let preloadedSchemas = source.preload.schemas |> Map.map (fun name -> resolvePreloadedSchema source.dirname)
+    let preloadedSchemas = source.Preload.Schemas |> Map.map (fun name -> resolvePreloadedSchema source.DirName)
     if Map.containsKey funSchema preloadedSchemas then
         failwith "Preload cannot contain public schema"
     let systemPreload =
-        { schema = buildSystemSchema typeof<SystemContext>
-          permissions = emptySourcePermissionsSchema
-          defaultAttributes = emptySourceAttributesDatabase
-          userViews = emptySourceUserViewsSchema
+        { Schema = buildSystemSchema typeof<SystemContext>
+          Permissions = emptySourcePermissionsSchema
+          DefaultAttributes = emptySourceAttributesDatabase
+          UserViews = emptySourceUserViewsSchema
         }
-    { schemas = Map.add funSchema systemPreload preloadedSchemas
+    { Schemas = Map.add funSchema systemPreload preloadedSchemas
     }
 
 let preloadLayoutIsUnchanged (sourceLayout : SourceLayout) (preload : Preload) =
     let notChanged (name : SchemaName, schema : SourceSchema) =
-        match Map.tryFind name preload.schemas with
-        | Some existing -> schema = existing.schema
+        match Map.tryFind name preload.Schemas with
+        | Some existing -> schema = existing.Schema
         | None -> true
-    sourceLayout.schemas |> Map.toSeq |> Seq.forall notChanged
+    sourceLayout.Schemas |> Map.toSeq |> Seq.forall notChanged
 
 let preloadPermissionsAreUnchanged (sourcePerms : SourcePermissions) (preload : Preload) =
     let notChanged (name : SchemaName, schema : SourcePermissionsSchema) =
-        match Map.tryFind name preload.schemas with
-        | Some existing -> schema = existing.permissions
+        match Map.tryFind name preload.Schemas with
+        | Some existing -> schema = existing.Permissions
         | None -> true
-    sourcePerms.schemas |> Map.toSeq |> Seq.forall notChanged
+    sourcePerms.Schemas |> Map.toSeq |> Seq.forall notChanged
 
 let preloadAttributesAreUnchanged (sourceAttrs : SourceDefaultAttributes) (preload : Preload) =
     let notChanged (name : SchemaName, schema : SourceAttributesDatabase) =
-        match Map.tryFind name preload.schemas with
-        | Some existing -> schema = existing.defaultAttributes
+        match Map.tryFind name preload.Schemas with
+        | Some existing -> schema = existing.DefaultAttributes
         | None -> true
-    sourceAttrs.schemas |> Map.toSeq |> Seq.forall notChanged
+    sourceAttrs.Schemas |> Map.toSeq |> Seq.forall notChanged
 
-let filterPreloadedSchemas (preload : Preload) = Map.filter (fun name _ -> Map.containsKey name preload.schemas)
+let filterPreloadedSchemas (preload : Preload) = Map.filter (fun name _ -> Map.containsKey name preload.Schemas)
 
-let filterUserSchemas (preload : Preload) = Map.filter (fun name _ -> not <| Map.containsKey name preload.schemas)
+let filterUserSchemas (preload : Preload) = Map.filter (fun name _ -> not <| Map.containsKey name preload.Schemas)
 
 let filterPreloadedMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
-    { schemas = Map.filter (fun (SQL.SQLName name) _ -> Map.containsKey (FunQLName name) preload.schemas) meta.schemas
+    { schemas = Map.filter (fun (SQL.SQLName name) _ -> Map.containsKey (FunQLName name) preload.Schemas) meta.schemas
     } : SQL.DatabaseMeta
 
 let filterUserMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
-    { schemas = Map.filter (fun (SQL.SQLName name) _ -> not <| Map.containsKey (FunQLName name) preload.schemas) meta.schemas
+    { schemas = Map.filter (fun (SQL.SQLName name) _ -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta.schemas
     } : SQL.DatabaseMeta
 
 let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : Set<LayoutAssertion> * SQL.DatabaseMeta =
@@ -176,36 +177,37 @@ let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : Set<LayoutAsser
     (assertions, meta)
 
 // Returns only user meta
-let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preload : Preload) : Task<bool * Layout * SQL.DatabaseMeta> =
+let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preload : Preload) (cancellationToken : CancellationToken) : Task<bool * Layout * SQL.DatabaseMeta> =
     task {
         logger.LogInformation("Migrating system entities to the current version")
         let sourceLayout = preloadLayout preload
         let (_, layout) = resolveLayout sourceLayout false
         let (_, newSystemMeta) = buildFullLayoutMeta layout layout
-        let! currentMeta = buildDatabaseMeta conn.Transaction
+        let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
 
         let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
-        let! _ = migrateDatabase conn.Connection.Query systemMigration
+        let! _ = migrateDatabase conn.Connection.Query systemMigration cancellationToken
 
         // Second migration shouldn't produce any changes.
-        let sanityCheck () =
-            let currentMeta = Task.awaitSync <| buildDatabaseMeta conn.Transaction
+        let sanityCheck () = task {
+            let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
             let currentSystemMeta = filterPreloadedMeta preload currentMeta
             let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta |> Seq.toArray
             if Array.isEmpty systemMigration then
-                true
+                return true
             else
-                failwithf "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
-        assert sanityCheck ()
+                return failwithf "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
+        }
+        assert (Task.awaitSync <| sanityCheck ())
 
         // We migrate layout first so that permissions and attributes have schemas in the table.
-        let! changed1 = updateLayout conn.System sourceLayout
+        let! changed1 = updateLayout conn.System sourceLayout cancellationToken
         let permissions = preloadPermissions preload
         let defaultAttributes = preloadDefaultAttributes preload
         let! changed2 =
             try
-                updatePermissions conn.System permissions
+                updatePermissions conn.System permissions cancellationToken
             with
             | _ ->
                 // Maybe we'll get a better error
@@ -213,14 +215,14 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
                 reraise ()
         let! changed3 =
             try
-                updateAttributes conn.System defaultAttributes
+                updateAttributes conn.System defaultAttributes cancellationToken
             with
             | _ ->
                 // Maybe we'll get a better error
                 let (errors, attrs) = resolveAttributes layout false defaultAttributes
                 reraise ()
 
-        let! newLayoutSource = buildSchemaLayout conn.System
+        let! newLayoutSource = buildSchemaLayout conn.System cancellationToken
         let (brokenLayout, newLayout) = resolveLayout newLayoutSource true
 
         for KeyValue(schemaName, schema) in brokenLayout do
@@ -228,7 +230,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
                 for KeyValue(compName, err) in entity.computedFields do
                     logger.LogWarning(err, "Marking computed field {ref} as broken", { entity = { schema = schemaName; name = entityName }; name = compName })
 
-        do! markBrokenLayout conn.System brokenLayout
+        do! markBrokenLayout conn.System brokenLayout cancellationToken
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
 
@@ -238,22 +240,23 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
             if Array.isEmpty systemMigration then
                 Task.result currentMeta
             else
-                buildDatabaseMeta conn.Transaction
+                buildDatabaseMeta conn.Transaction cancellationToken
         let currentUserMeta = filterUserMeta preload currentMeta
 
         let userMigration = planDatabaseMigration currentUserMeta newUserMeta
-        let! _ = migrateDatabase conn.Connection.Query userMigration
+        let! _ = migrateDatabase conn.Connection.Query userMigration cancellationToken
 
         // Second migration shouldn't produce any changes.
-        let sanityCheck () =
-            let currentMeta = Task.awaitSync <| buildDatabaseMeta conn.Transaction
+        let sanityCheck () = task {
+            let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
             let currentUserMeta = filterUserMeta preload currentMeta
             let systemMigration = planDatabaseMigration currentUserMeta newUserMeta |> Seq.toArray
             if Array.isEmpty systemMigration then
-                true
+                return true
             else
-                failwithf "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
-        assert sanityCheck ()
+                return failwithf "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
+        }
+        assert (Task.awaitSync <| sanityCheck ())
 
         return (changed1 || changed2 || changed3, newLayout, newUserMeta)
     }

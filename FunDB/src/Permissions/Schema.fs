@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Permissions.Schema
 
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -13,20 +14,20 @@ type SchemaRolesException (message : string) =
     inherit Exception(message)
 
 let private makeSourceAllowedField (field : RoleColumnField) : SourceAllowedField =
-    { change = field.Change
-      select = Option.ofNull field.Select
+    { Change = field.Change
+      Select = Option.ofNull field.Select
     }
 
 let private makeSourceAllowedEntity (entity : RoleEntity) : SourceAllowedEntity =
     let fields = entity.ColumnFields |> Seq.map (fun col -> (FunQLName col.ColumnName, makeSourceAllowedField col)) |> Map.ofSeqUnique
 
-    { fields = fields
-      allowBroken = entity.AllowBroken
-      check = Option.ofNull entity.Check
-      insert = entity.Insert
-      select = Option.ofNull entity.Select
-      update = Option.ofNull entity.Update
-      delete = Option.ofNull entity.Delete
+    { Fields = fields
+      AllowBroken = entity.AllowBroken
+      Check = Option.ofNull entity.Check
+      Insert = entity.Insert
+      Select = Option.ofNull entity.Select
+      Update = Option.ofNull entity.Update
+      Delete = Option.ofNull entity.Delete
     }
 
 let private makeSourceAllowedEntities (entity : RoleEntity) : Map<EntityName, SourceAllowedEntity> =
@@ -37,27 +38,27 @@ let private makeSourceAllowedDatabase (role : Role) : SourceAllowedDatabase =
         role.Entities |>
         Seq.map (fun entity -> (FunQLName entity.Entity.Schema.Name, makeSourceAllowedEntities entity)) |>
         Map.ofSeqWith (fun name -> Map.unionUnique) |>
-        Map.map (fun name entities -> { entities = entities })
-    { schemas = schemas
+        Map.map (fun name entities -> { Entities = entities })
+    { Schemas = schemas
     }
 
 let private makeSourceRole (role : Role) : SourceRole =
-    { parents = role.Parents |> Seq.map (fun role -> { schema = FunQLName role.Parent.Schema.Name; name = FunQLName role.Parent.Name }) |> Set.ofSeqUnique
-      permissions = makeSourceAllowedDatabase role
-      allowBroken = role.AllowBroken
+    { Parents = role.Parents |> Seq.map (fun role -> { schema = FunQLName role.Parent.Schema.Name; name = FunQLName role.Parent.Name }) |> Set.ofSeqUnique
+      Permissions = makeSourceAllowedDatabase role
+      AllowBroken = role.AllowBroken
     }
 
 let private makeSourcePermissionsSchema (schema : Schema) : SourcePermissionsSchema =
-    { roles = schema.Roles |> Seq.map (fun role -> (FunQLName role.Name, makeSourceRole role)) |> Map.ofSeqUnique
+    { Roles = schema.Roles |> Seq.map (fun role -> (FunQLName role.Name, makeSourceRole role)) |> Map.ofSeqUnique
     }
 
-let buildSchemaPermissions (db : SystemContext) : Task<SourcePermissions> =
+let buildSchemaPermissions (db : SystemContext) (cancellationToken : CancellationToken) : Task<SourcePermissions> =
     task {
         let currentSchemas = db.GetRolesObjects ()
-        let! schemas = currentSchemas.ToListAsync()
+        let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourcePermissionsSchema schema)) |> Map.ofSeqUnique
 
         return
-            { schemas = sourceSchemas
+            { Schemas = sourceSchemas
             }
     }

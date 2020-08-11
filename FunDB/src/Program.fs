@@ -1,5 +1,6 @@
 open System
 open System.IO
+open System.Threading
 open Newtonsoft.Json
 open Newtonsoft.Json.Serialization
 open Microsoft.AspNetCore
@@ -38,8 +39,6 @@ let httpJsonSettings =
         FunQL.FieldValuePrettyConverter ()
         FunQL.FieldTypePrettyConverter ()
         SQL.ValuePrettyConverter ()
-        ExecutedValuePrettyConverter ()
-        ExecutedRowPrettyConverter ()
     |]
     let constructors = Array.map (fun conv -> fun _ -> Some conv) converters
     let jsonSettings = makeDefaultJsonSerializerSettings constructors
@@ -52,21 +51,21 @@ let httpJsonSettings =
 
 type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
     interface IInstancesSource with
-        member this.GetInstance (host : string) = task {
+        member this.GetInstance (host : string) (cancellationToken : CancellationToken) = task {
             use instances =
                 let systemOptions =
                     (DbContextOptionsBuilder<InstancesContext> ())
                         .UseLoggerFactory(loggerFactory)
                         .UseNpgsql(connectionString)
                 new InstancesContext(systemOptions.Options)
-            match! instances.Instances.FirstOrDefaultAsync(fun x -> x.Name = host && x.Enabled) with
+            match! instances.Instances.FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken) with
             | null -> return None
             | instance -> return Some instance
         }
 
 type StaticInstance (instance : Instance) =
     interface IInstancesSource with
-        member this.GetInstance (host : string) = Task.result (Some instance)
+        member this.GetInstance (host : string) (cancellationToken : CancellationToken) = Task.result (Some instance)
 
 type Startup (config : IConfiguration) =
     let fundbSection = config.GetSection("FunDB")

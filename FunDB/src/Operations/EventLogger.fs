@@ -62,5 +62,5 @@ type EventLogger (loggerFactory : ILoggerFactory) =
                             (transaction.Connection :> IDisposable).Dispose ()
         } :> Task
 
-    member this.WriteEvent (connectionString : string, entry : EventEntry) =
-        chan.Writer.WriteAsync ((connectionString, entry))
+    member this.WriteEvent (connectionString : string, entry : EventEntry, cancellationToken : CancellationToken) =
+        chan.Writer.WriteAsync ((connectionString, entry), cancellationToken)

@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.SQL.Meta
 
 open Npgsql
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
@@ -361,7 +362,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 
     member this.FinishSchemaMeta = finishSchemaMeta
 
-let buildDatabaseMeta (transaction : NpgsqlTransaction) : Task<DatabaseMeta> =
+let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
     task {
         let dbOptions =
             (DbContextOptionsBuilder<PgCatalogContext> ())
@@ -373,7 +374,7 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) : Task<DatabaseMeta> =
         use db = new PgCatalogContext(dbOptions.Options)
         ignore <| db.Database.UseTransaction(transaction)
 
-        let! namespaces = db.GetObjects()
+        let! namespaces = db.GetObjects(cancellationToken)
 
         let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
         let phase2 = Phase2Resolver(unconstrainedSchemas)

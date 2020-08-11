@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Operations.Context
 
 open System
 open System.IO
+open System.Threading
 open System.Threading.Tasks
 open System.Linq
 open NpgsqlTypes
@@ -117,10 +118,11 @@ type UserViewSource =
 
 [<NoEquality; NoComparison>]
 type RequestParams =
-    { cacheStore : ContextCacheStore
-      userName : UserName
-      isRoot : bool
-      language : string
+    { CacheStore : ContextCacheStore
+      UserName : UserName
+      IsRoot : bool
+      Language : string
+      CancellationToken : CancellationToken
     }
 
 [<NoEquality; NoComparison>]
@@ -137,7 +139,7 @@ let private getRole = function
     | RTRole role -> Some role
 
 type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : int option, roleType : RoleType) =
-    let { cacheStore = cacheStore; userName = userName; language = language; isRoot = isRoot } = opts
+    let { CacheStore = cacheStore; UserName = userName; CancellationToken = cancellationToken } = opts
     let logger = cacheStore.LoggerFactory.CreateLogger<RequestContext>()
     let mutable needMigration = false
 
@@ -147,8 +149,8 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
         | None -> FNull
         | Some id -> FInt id
     let globalArguments =
-        [ (FunQLName "lang", FString language)
-          (FunQLName "user", FString userName)
+        [ (FunQLName "lang", FString opts.Language)
+          (FunQLName "user", FString opts.UserName)
           (FunQLName "user_id", userId)
           (FunQLName "transaction_time", FDateTime <| NpgsqlDateTime transactionTime)
         ] |> Map.ofList
@@ -179,14 +181,14 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
                     return Error <| UVEResolution (printException err)
             }
-            match ctx.State.userViews.Find ref with
+            match ctx.State.UserViews.Find ref with
             | None -> return Error UVENotFound
             | Some (Error err) ->
                 if not recompileQuery then
                     logger.LogError(err.error, "Requested user view {uv} is broken", ref.ToString())
                     return Error <| UVEResolution (printException err.error)
                 else
-                    return! recompileView err.source.query
+                    return! recompileView err.source.Query
             | Some (Ok cached) ->
                 if not recompileQuery then
                     return Ok cached
@@ -213,19 +215,19 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
         compiled.query.arguments.types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
 
     static member Create (opts : RequestParams) : Task<RequestContext> = task {
-        let! ctx = opts.cacheStore.GetCache()
+        let! ctx = opts.CacheStore.GetCache(opts.CancellationToken)
         try
-            let lowerUserName = opts.userName.ToLowerInvariant()
+            let lowerUserName = opts.UserName.ToLowerInvariant()
             // FIXME: SLOW!
             let! rawUsers =
                 ctx.Transaction.System.Users
                     .Include("Role")
                     .Include("Role.Schema")
-                    .ToListAsync()
+                    .ToListAsync(opts.CancellationToken)
             let rawUser = rawUsers |> Seq.filter (fun user -> user.Name.ToLowerInvariant() = lowerUserName) |> Seq.first
             let userId = rawUser |> Option.map (fun u -> u.Id)
             let roleType =
-                if opts.isRoot then
+                if opts.IsRoot then
                     RTRoot
                 else
                     match rawUser with
@@ -233,7 +235,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     | Some user when user.IsRoot -> RTRoot
                     | Some user when isNull user.Role -> raise <| RequestException RENoRole
                     | Some user ->
-                        match ctx.State.permissions.Find { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get with
+                        match ctx.State.Permissions.Find { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get with
                         | Ok role -> RTRole role
                         | Error e -> raise <| RequestException RENoRole
             return new RequestContext(opts, ctx, userId, roleType)
@@ -247,10 +249,11 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
         member this.Dispose () =
             (ctx :> IDisposable).Dispose()
 
-    member this.UserName = userName
-    member this.Language = language
+    member this.UserName = opts.UserName
+    member this.Language = opts.Language
     member this.Context = ctx
     member this.CacheStore = cacheStore
+    member this.CancellationToken = cancellationToken
 
     member this.Commit () : Task<Result<unit, string>> =
         task {
@@ -275,7 +278,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 try
                     match roleType with
                     | RTRoot -> ()
-                    | RTRole role -> checkRoleViewExpr ctx.State.layout role uv.uv.compiled
+                    | RTRole role -> checkRoleViewExpr ctx.State.Layout role uv.UserView.compiled
                     return Ok uv
                 with
                 | :? PermissionsViewException as err ->
@@ -290,7 +293,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                             Error = "access_denied",
                             Details = sprintf "Failed to get info for %O: %s" source (printException err)
                         )
-                    do! cacheStore.WriteEvent event
+                    do! ctx.WriteEvent event
                     return Error UVEAccessDenied
         }
 
@@ -302,11 +305,11 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 try
                     let restricted =
                         match roleType with
-                        | RTRoot -> uv.uv.compiled
+                        | RTRoot -> uv.UserView.compiled
                         | RTRole role ->
-                            applyRoleViewExpr ctx.State.layout role uv.uv.compiled
+                            applyRoleViewExpr ctx.State.Layout role uv.UserView.compiled
                     let getResult info (res : ExecutedViewExpr) = task {
-                        return (uv, { res with rows = Array.ofSeq res.rows })
+                        return (uv, { res with Rows = Array.ofSeq res.Rows })
                     }
                     match convertViewArguments rawArgs restricted with
                     | Error msg ->
@@ -320,10 +323,10 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "arguments",
                                 Details = sprintf "Invalid arguments for %O: %s" source msg
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error <| UVEArguments msg
                     | Ok arguments ->
-                            let! r = runViewExpr ctx.Connection.Query restricted arguments getResult
+                            let! r = runViewExpr ctx.Connection.Query restricted arguments cancellationToken getResult
                             return Ok r
                 with
                 | :? PermissionsViewException as err ->
@@ -338,17 +341,17 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                             Error = "access_denied",
                             Details = sprintf "Failed to execute %O: %s" source (printException err)
                         )
-                    do! cacheStore.WriteEvent event
+                    do! ctx.WriteEvent event
                     return Error UVEAccessDenied
         }
 
     member this.GetEntityInfo (entityRef : ResolvedEntityRef) : Task<Result<SerializedEntity, EntityErrorInfo>> =
         task {
-            match ctx.State.layout.FindEntity(entityRef) with
+            match ctx.State.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
             | Some entity ->
                 try
-                    let res = getEntityInfo ctx.State.layout (getRole roleType) entityRef entity
+                    let res = getEntityInfo ctx.State.Layout (getRole roleType) entityRef entity
                     return Ok res
                 with
                     | :? EntityDeniedException as ex ->
@@ -365,20 +368,20 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "access_denied",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error EEAccessDenied
         }
 
     member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<int, EntityErrorInfo>> =
         task {
-            match ctx.State.layout.FindEntity(entityRef) with
+            match ctx.State.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
             | Some entity ->
                 match convertEntityArguments rawArgs entity with
                 | Error str -> return Error <| EEArguments str
                 | Ok args ->
                     try
-                        let! newId = insertEntity ctx.Connection.Query globalArguments ctx.State.layout (getRole roleType) entityRef args
+                        let! newId = insertEntity ctx.Connection.Query globalArguments ctx.State.Layout (getRole roleType) entityRef args cancellationToken
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -410,7 +413,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "execution",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error (EEExecution <| printException ex)
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
@@ -426,13 +429,13 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "access_denied",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error EEAccessDenied
         }
 
     member this.UpdateEntity (entityRef : ResolvedEntityRef) (id : int) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> =
         task {
-            match ctx.State.layout.FindEntity(entityRef) with
+            match ctx.State.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
             | Some entity ->
                 match convertEntityArguments rawArgs entity with
@@ -440,7 +443,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 | Ok args when Map.isEmpty args -> return Ok ()
                 | Ok args ->
                     try
-                        do! updateEntity ctx.Connection.Query globalArguments ctx.State.layout (getRole roleType) entityRef id args
+                        do! updateEntity ctx.Connection.Query globalArguments ctx.State.Layout (getRole roleType) entityRef id args cancellationToken
                         let event =
                             EventEntry (
                                 TransactionTimestamp = transactionTime,
@@ -471,7 +474,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "execution",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error (EEExecution <| printException ex)
                     | :? EntityNotFoundException as ex ->
                         logger.LogError(ex, "Not found")
@@ -487,7 +490,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "not_found",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error EENotFound
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
@@ -503,17 +506,17 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "access_denied",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error EEAccessDenied
         }
 
     member this.DeleteEntity (entityRef : ResolvedEntityRef) (id : int) : Task<Result<unit, EntityErrorInfo>> =
         task {
-            match ctx.State.layout.FindEntity(entityRef) with
+            match ctx.State.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
             | Some entity ->
                 try
-                    do! deleteEntity ctx.Connection.Query globalArguments ctx.State.layout (getRole roleType) entityRef id
+                    do! deleteEntity ctx.Connection.Query globalArguments ctx.State.Layout (getRole roleType) entityRef id cancellationToken
                     let event =
                         EventEntry (
                             TransactionTimestamp = transactionTime,
@@ -544,7 +547,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "execution",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error (EEExecution <| printException ex)
                     | :? EntityNotFoundException as ex ->
                         logger.LogError(ex, "Not found")
@@ -560,7 +563,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "not_found",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error EENotFound
                     | :? EntityDeniedException as ex ->
                         logger.LogError(ex, "Access denied")
@@ -576,7 +579,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                                 Error = "access_denied",
                                 Details = printException ex
                             )
-                        do! cacheStore.WriteEvent event
+                        do! ctx.WriteEvent event
                         return Error EEAccessDenied
         }
 
@@ -586,7 +589,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 return Error SEAccessDenied
             else
                 try
-                    let! schema = saveSchema ctx.Transaction.System name
+                    let! schema = saveSchema ctx.Transaction.System name cancellationToken
                     return Ok schema
                 with
                 | :? SaveSchemaException as ex ->
@@ -609,10 +612,10 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
         task {
             if not (isRootRole roleType) then
                 return Error REAccessDenied
-            else if Map.containsKey name cacheStore.Preload.schemas then
+            else if Map.containsKey name cacheStore.Preload.Schemas then
                 return Error REPreloaded
             else
-                let! modified = restoreSchema ctx.Transaction.System name dump
+                let! modified = restoreSchema ctx.Transaction.System name dump cancellationToken
                 let event =
                     EventEntry (
                         TransactionTimestamp = transactionTime,
@@ -623,7 +626,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         EntityId = Nullable(),
                         Details = dump.ToString()
                     )
-                ignore <| ctx.Transaction.System.Events.Add(event)
+                do! ctx.WriteEvent event
                 if modified then
                     needMigration <- true
                 return Ok ()

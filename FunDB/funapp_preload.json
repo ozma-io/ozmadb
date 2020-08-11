@@ -7,8 +7,8 @@
       "entities": {
         "settings": {
           "columnFields": {
-            "name": { "fieldType": "string" },
-            "value": { "fieldType": "string" }
+            "name": { "type": "string" },
+            "value": { "type": "string" }
           },
           "uniqueConstraints": {
             "unique_name": { "columns": [ "name" ] }
