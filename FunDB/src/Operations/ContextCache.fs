@@ -27,6 +27,10 @@ open FunWithFlags.FunDB.Attributes.Schema
 open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Merge
 open FunWithFlags.FunDB.Attributes.Update
+open FunWithFlags.FunDB.Triggers.Types
+open FunWithFlags.FunDB.Triggers.Schema
+open FunWithFlags.FunDB.Triggers.Resolve
+open FunWithFlags.FunDB.Triggers.Update
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Resolve
@@ -56,6 +60,7 @@ type CachedRequestContext =
       UserViews : PrefetchedUserViews
       Permissions : Permissions
       DefaultAttrs : MergedDefaultAttributes
+      Triggers : ResolvedTriggers
       SystemViews : SourceUserViews
       UserMeta : SQL.DatabaseMeta
     }
@@ -172,6 +177,28 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 do! markBrokenAttributes conn.System brokenAttrs cancellationToken
         }
 
+    let checkBrokenTriggers (conn : DatabaseTransaction) (brokenTriggers : ErroredTriggers) (cancellationToken : CancellationToken) =
+        task {
+            if not (Map.isEmpty brokenTriggers) then
+                let mutable critical = false
+                for KeyValue(schemaName, schema) in brokenTriggers do
+                    let isSystem = Map.containsKey schemaName preload.Schemas
+                    if isSystem then
+                        critical <- true
+                    for KeyValue(triggerSchemaName, triggersSchema) in schema do
+                        for KeyValue(triggerEntityName, triggersEntity) in triggersSchema do
+                            for KeyValue(triggerName, err) in triggersEntity do
+                                let schemaStr = schemaName.ToString()
+                                let triggerName = ({ entity = { schema = triggerSchemaName; name = triggerEntityName }; name = triggerName } : ResolvedFieldRef).ToString()
+                                if isSystem then
+                                    logger.LogError(err, "System trigger {name} from {schema} is broken", triggerName, schemaStr)
+                                else
+                                    logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerName, schemaStr)
+                if critical then
+                    failwith "Broken system triggers"
+                do! markBrokenTriggers conn.System brokenTriggers cancellationToken
+        }
+
     let checkBrokenUserViews (conn : DatabaseTransaction) (brokenViews : ErroredUserViews) (cancellationToken : CancellationToken) =
         task {
             if not (Map.isEmpty brokenViews) then
@@ -229,12 +256,14 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             jsIsolates.Return(isolate)
 
     let rec finishGetCachedState (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, prefetchedViews, sourceViews) = task {
+        let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, brokenTriggers, prefetchedViews, sourceViews) = task {
             try
                 let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
                 let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
-
                 let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+
+                let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
+                let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
 
                 let systemViews = preloadUserViews preload
                 let! sourceViews = buildSchemaUserViews transaction.System cancellationToken
@@ -250,7 +279,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 let! (brokenViews2, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
                 let transaction = new DatabaseTransaction (transaction.Connection)
                 let brokenViews = unionErroredUserViews brokenViews1 brokenViews2
-                return (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, prefetchedViews, sourceViews)
+                return (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, brokenTriggers, prefetchedViews, sourceViews)
             with
             | ex ->
                 transaction.Rollback ()
@@ -274,6 +303,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
         else
             try
                 do! checkBrokenAttributes transaction brokenAttrs cancellationToken
+                do! checkBrokenTriggers transaction brokenTriggers cancellationToken
                 do! checkBrokenUserViews transaction brokenViews cancellationToken
 
                 let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
@@ -288,6 +318,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     { Layout = layout
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
+                      Triggers = triggers
                       UserViews = prefetchedViews
                       SystemViews = systemViews
                       UserMeta = userMeta
@@ -343,7 +374,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
     // Called when state update by another instance is detected.
     let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> = task {
-        let! (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews) = task {
+        let! (transaction, layout, mergedAttrs, triggers, sourceUvs, userViews, prefetchedBadViews) = task {
             try
                 let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
                 let (_, layout) = resolveLayout sourceLayout false
@@ -351,6 +382,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
                 let (_, defaultAttrs) = resolveAttributes layout false sourceAttrs
                 let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+
+                let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
+                let (_, triggers) = resolveTriggers layout false sourceTriggers
 
                 let! sourceUvs = buildSchemaUserViews transaction.System cancellationToken
                 let (_, userViews) = resolveUserViews layout mergedAttrs false sourceUvs
@@ -360,7 +394,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 // We dry-run those views that _can_ be failed here, outside of a transaction.
                 let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews cancellationToken
                 let transaction = new DatabaseTransaction(transaction.Connection)
-                return (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews)
+                return (transaction, layout, mergedAttrs, triggers, sourceUvs, userViews, prefetchedBadViews)
             with
             | ex ->
                 transaction.Rollback ()
@@ -396,6 +430,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     { Layout = layout
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
+                      Triggers = triggers
                       UserViews = prefetchedViews
                       SystemViews = systemViews
                       UserMeta = userMeta
@@ -490,6 +525,16 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
                 let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
+                let! triggersSource = buildSchemaTriggers transaction.System cancellationToken
+                if not <| preloadTriggersAreUnchanged triggersSource preload then
+                    raisef ResolveLayoutException "Cannot modify system triggers"
+                let (_, triggers) =
+                    try
+                        resolveTriggers layout false triggersSource
+                    with
+                    | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
+                let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+
                 let! userViewsSource = buildSchemaUserViews transaction.System cancellationToken
                 if filterSystemViews userViewsSource <> oldState.Context.SystemViews then
                     raisef ContextException "Cannot modify system user views"
@@ -551,6 +596,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     { Layout = layout
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
+                      Triggers = triggers
                       UserViews = mergePrefetchedUserViews badUserViews goodUserViews
                       SystemViews = filterSystemViews userViewsSource
                       UserMeta = wantedUserMeta

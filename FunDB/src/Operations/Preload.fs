@@ -26,18 +26,19 @@ open FunWithFlags.FunDB.Permissions.Update
 open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
+open FunWithFlags.FunDB.Triggers.Resolve
+open FunWithFlags.FunDB.Triggers.Source
+open FunWithFlags.FunDB.Triggers.Update
 open FunWithFlags.FunDB.Connection
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDBSchema.System
 
 type SourcePreloadedSchema =
-    { [<JsonProperty(Required=Required.DisallowNull)>]
-      Entities : Map<EntityName, SourceEntity>
-      [<JsonProperty(Required=Required.DisallowNull)>]
+    { Entities : Map<EntityName, SourceEntity>
       Roles : Map<RoleName, SourceRole>
-      [<JsonProperty(Required=Required.DisallowNull)>]
       DefaultAttributes : Map<SchemaName, SourceAttributesSchema>
+      Triggers : Map<SchemaName, SourceTriggersSchema>
       UserViewGenerator : string option // Path to .js file
     }
 
@@ -61,6 +62,7 @@ type PreloadedSchema =
     { Schema : SourceSchema
       Permissions : SourcePermissionsSchema
       DefaultAttributes : SourceAttributesDatabase
+      Triggers : SourceTriggersDatabase
       UserViews : SourceUserViewsSchema
     }
 
@@ -93,6 +95,7 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
         } : SourceSchema
     let permissions = { Roles = Map.map (fun name -> normalizeRole) preload.Roles }
     let defaultAttributes = { Schemas = preload.DefaultAttributes } : SourceAttributesDatabase
+    let triggers = { Schemas = preload.Triggers } : SourceTriggersDatabase
     let readUserViewScript (path : string) =
         let realPath =
             if Path.IsPathRooted(path) then
@@ -108,6 +111,7 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
     { Schema = schema
       Permissions = permissions
       DefaultAttributes = defaultAttributes
+      Triggers = triggers
       UserViews = userViews
     }
 
@@ -120,6 +124,9 @@ let preloadPermissions (preload : Preload) : SourcePermissions =
 let preloadDefaultAttributes (preload : Preload) : SourceDefaultAttributes =
     { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.DefaultAttributes) }
 
+let preloadTriggers (preload : Preload) : SourceTriggers =
+    { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.Triggers) }
+
 let preloadUserViews (preload : Preload) : SourceUserViews =
     { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.UserViews) }
 
@@ -131,6 +138,7 @@ let resolvePreload (source : SourcePreloadFile) : Preload =
         { Schema = buildSystemSchema typeof<SystemContext>
           Permissions = emptySourcePermissionsSchema
           DefaultAttributes = emptySourceAttributesDatabase
+          Triggers = emptySourceTriggersDatabase
           UserViews = emptySourceUserViewsSchema
         }
     { Schemas = Map.add funSchema systemPreload preloadedSchemas
@@ -156,6 +164,13 @@ let preloadAttributesAreUnchanged (sourceAttrs : SourceDefaultAttributes) (prelo
         | Some existing -> schema = existing.DefaultAttributes
         | None -> true
     sourceAttrs.Schemas |> Map.toSeq |> Seq.forall notChanged
+
+let preloadTriggersAreUnchanged (sourceTriggers : SourceTriggers) (preload : Preload) =
+    let notChanged (name : SchemaName, schema : SourceTriggersDatabase) =
+        match Map.tryFind name preload.Schemas with
+        | Some existing -> schema = existing.Triggers
+        | None -> true
+    sourceTriggers.Schemas |> Map.toSeq |> Seq.forall notChanged
 
 let filterPreloadedSchemas (preload : Preload) = Map.filter (fun name _ -> Map.containsKey name preload.Schemas)
 
@@ -205,6 +220,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         let! changed1 = updateLayout conn.System sourceLayout cancellationToken
         let permissions = preloadPermissions preload
         let defaultAttributes = preloadDefaultAttributes preload
+        let triggers = preloadTriggers preload
         let! changed2 =
             try
                 updatePermissions conn.System permissions cancellationToken
@@ -220,6 +236,14 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
             | _ ->
                 // Maybe we'll get a better error
                 let (errors, attrs) = resolveAttributes layout false defaultAttributes
+                reraise ()
+        let! changed4 =
+            try
+                updateTriggers conn.System triggers cancellationToken
+            with
+            | _ ->
+                // Maybe we'll get a better error
+                let (errors, attrs) = resolveTriggers layout false triggers
                 reraise ()
 
         let! newLayoutSource = buildSchemaLayout conn.System cancellationToken
@@ -258,5 +282,5 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         }
         assert (Task.awaitSync <| sanityCheck ())
 
-        return (changed1 || changed2 || changed3, newLayout, newUserMeta)
+        return (changed1 || changed2 || changed3 || changed4, newLayout, newUserMeta)
     }

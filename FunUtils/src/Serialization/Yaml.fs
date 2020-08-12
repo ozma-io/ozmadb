@@ -87,75 +87,64 @@ type SpecializedSingleTypeConverter<'A> () =
 
 type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
     let cases = unionCases typeof<'A>
-    let casesMap = unionNames cases
-    let reverseNames = casesMap |> Map.mapWithKeys (fun name case -> (case.Info.Name, name))
 
-    let searchCases (name : string option) : UnionCase =
-        match Map.tryFind name casesMap with
-        | Some c -> c
-        | None ->
-            match name with
-            | Some n -> raisef YamlException "Unknown union case \"%s\"" n
-            | None -> raisef YamlException "No default union case"
-
-    let readYaml : IParser -> obj =
+    let (readYaml, writeYaml) =
         match isNewtype cases with
         | Some info ->
-            fun reader ->
-                let arg = converter.Deserialize(reader, info.Type.PropertyType)
-                if not info.ValueIsNullable && isNull arg then
-                    raisef YamlException "Attempted to set null to non-nullable value"
-                FSharpValue.MakeUnion(info.Case, [|arg|])
+            let read =
+                fun (reader : IParser) ->
+                    let arg = converter.Deserialize(reader, info.Type.PropertyType)
+                    if not info.ValueIsNullable && isNull arg then
+                        raisef YamlException "Attempted to set null to non-nullable value"
+                    FSharpValue.MakeUnion(info.Case, [|arg|])
+            let write =
+                fun value (writer : IEmitter) ->
+                    let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
+                    converter.Serialize(writer, args.[0])
+            (read, write)
         | None ->
             // XXX: We do lose information here is we serialize e.g. ('a option option).
             match isOption cases with
             | Some option ->
                 let nullDeserializer = NullNodeDeserializer() :> INodeDeserializer
-                let nullValue = FSharpValue.MakeUnion(option.NoneCase, [||])
-                fun reader ->
-                    match nullDeserializer.Deserialize(reader, null, null) with
-                    | (true, _) -> nullValue
-                    | (false, _) ->
-                        let arg = converter.Deserialize(reader, option.SomeType.PropertyType)
-                        if not option.ValueIsNullable && isNull arg then
-                            raisef YamlException "Attempted to set null to non-nullable value"
-                        FSharpValue.MakeUnion(option.SomeCase, [|arg|])
+                let read =
+                    fun (reader : IParser) ->
+                        match nullDeserializer.Deserialize(reader, null, null) with
+                        | (true, _) -> option.NoneValue
+                        | (false, _) ->
+                            let arg = converter.Deserialize(reader, option.SomeType.PropertyType)
+                            if not option.ValueIsNullable && isNull arg then
+                                raisef YamlException "Attempted to set null to non-nullable value"
+                            FSharpValue.MakeUnion(option.SomeCase, [|arg|])
+                let write =
+                    fun value (writer : IEmitter) ->
+                        if value = option.NoneValue then
+                            writer.Emit(Scalar("null"))
+                        else
+                            let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
+                            assert (case = option.SomeCase)
+                            assert (Array.length args = 1)
+                            converter.Serialize(writer, args.[0])
+                (read, write)
             | None ->
-                if isUnionEnum cases then
-                    fun reader ->
-                        let name = converter.Deserialize<string>(reader)
-                        let case = searchCases (Option.ofNull name)
-                        FSharpValue.MakeUnion(case.Info, [||])
-                else
-                    failwith "Deserialization for arbitrary unions is not implemented"
-
-    let writeYaml : obj -> IEmitter -> unit =
-        match isNewtype cases with
-        | Some info ->
-            fun value writer ->
-                let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
-                converter.Serialize(writer, args.[0])
-        | None ->
-            match isOption cases with
-            | Some option ->
-                fun value writer ->
-                    let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
-                    if case = option.NoneCase then
-                        writer.Emit(Scalar("null"))
-                    else if case = option.SomeCase then
-                        converter.Serialize(writer, args.[0])
-                    else
-                        failwith "Sanity check failed"
-            | None ->
-                if isUnionEnum cases then
-                    fun value writer ->
-                        let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
-                        let caseName = Map.find case.Name reverseNames
-                        match caseName with
-                        | None -> writer.Emit(Scalar("null"))
-                        | Some cn -> writer.Emit(Scalar(cn))
-                else
-                    failwith "Serialization for arbitrary unions is not implemented"
+                match isUnionEnum cases with
+                | Some options ->
+                    let read =
+                        fun (reader : IParser) ->
+                            let name = converter.Deserialize<string>(reader)
+                            match Map.tryFind (Option.ofNull name) options with
+                            | Some (_, v) -> v
+                            | None -> raisef YamlException "Unknown enum case %s" name
+                    let reverseOptions = options |> Map.mapWithKeys (fun name (case, v) -> (case.Name, name))
+                    let write =
+                        fun value (writer : IEmitter) ->
+                            let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
+                            match Map.find case.Name reverseOptions with
+                            | None -> writer.Emit(Scalar("null"))
+                            | Some cn -> writer.Emit(Scalar(cn))
+                    (read, write)
+                | None ->
+                    failwith "(De)serialization for arbitrary unions is not implemented"
 
     interface IYamlTypeConverter with
         override this.Accepts someType = someType = typeof<'A>

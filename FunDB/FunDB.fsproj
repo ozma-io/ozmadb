@@ -74,12 +74,12 @@
     <Compile Include="src/Attributes/Render.fs" />
     <Compile Include="src/Attributes/Update.fs" />
 
-    <!--<Compile Include="src/Triggers/Source.fs" />
+    <Compile Include="src/Triggers/Source.fs" />
     <Compile Include="src/Triggers/Types.fs" />
     <Compile Include="src/Triggers/Resolve.fs" />
     <Compile Include="src/Triggers/Schema.fs" />
     <Compile Include="src/Triggers/Render.fs" />
-    <Compile Include="src/Triggers/Update.fs" />-->
+    <Compile Include="src/Triggers/Update.fs" />
 
     <Compile Include="src/Permissions/Source.fs" />
     <Compile Include="src/Permissions/Types.fs" />

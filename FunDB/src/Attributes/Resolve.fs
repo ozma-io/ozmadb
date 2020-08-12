@@ -15,7 +15,7 @@ type ResolveAttributesException (message : string, innerException : Exception) =
 
     new (message : string) = ResolveAttributesException (message, null)
 
-type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAttrs : SourceDefaultAttributes) =
+type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let rec checkPath (entity : ResolvedEntity) (name : FieldName) (fields : FieldName list) : unit =
         match fields with
         | [] ->
@@ -153,7 +153,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
             } : AttributesDatabase
         (errors, ret)
 
-    let resolveAttributes () : ErroredDefaultAttributes * DefaultAttributes =
+    let resolveAttributes (defaultAttrs : SourceDefaultAttributes) : ErroredDefaultAttributes * DefaultAttributes =
         let mutable errors = Map.empty
 
         let mapDatabase name db =
@@ -172,8 +172,8 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, defaultAt
             }
         (errors, ret)
 
-    member this.ResolveAttributes () = resolveAttributes ()
+    member this.ResolveAttributes defaultAttrs = resolveAttributes defaultAttrs
 
 let resolveAttributes (layout : Layout) (forceAllowBroken : bool) (source : SourceDefaultAttributes) : ErroredDefaultAttributes * DefaultAttributes =
-    let phase1 = Phase1Resolver (layout, forceAllowBroken, source)
-    phase1.ResolveAttributes ()
+    let phase1 = Phase1Resolver (layout, forceAllowBroken)
+    phase1.ResolveAttributes source

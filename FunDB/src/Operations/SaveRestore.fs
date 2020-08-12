@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Operations.SaveRestore
 
+open System.ComponentModel
 open System.Threading
 open System.Threading.Tasks
 open System.Text.RegularExpressions
@@ -24,6 +25,9 @@ open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Schema
 open FunWithFlags.FunDB.Attributes.Update
+open FunWithFlags.FunDB.Triggers.Source
+open FunWithFlags.FunDB.Triggers.Schema
+open FunWithFlags.FunDB.Triggers.Update
 open FunWithFlags.FunDBSchema.System
 
 type SaveSchemaErrorInfo =
@@ -71,12 +75,23 @@ type PrettyEntity =
       SystemDefaultAttributes : Map<FieldName, SourceAttributesField>
     }
 
+type PrettyTriggerMeta =
+    { AllowBroken : bool
+      [<DefaultValue(0)>]
+      Priority : int
+      Time : TriggerTime
+      OnInsert : bool
+      OnUpdateFields : FieldName[]
+      OnDelete : bool
+    }
+
 type SchemaDump =
     { Entities : Map<EntityName, SourceEntity>
       Roles : Map<RoleName, SourceRole>
       UserViews : Map<UserViewName, SourceUserView>
       UserViewsGeneratorScript : string option
       DefaultAttributes : Map<SchemaName, SourceAttributesSchema>
+      Triggers : Map<SchemaName, SourceTriggersSchema>
     }
 
 let emptySchemaDump : SchemaDump =
@@ -85,6 +100,7 @@ let emptySchemaDump : SchemaDump =
       UserViews = Map.empty
       UserViewsGeneratorScript = None
       DefaultAttributes = Map.empty
+      Triggers = Map.empty
     }
 
 let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
@@ -93,6 +109,7 @@ let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
       UserViews = Map.unionUnique a.UserViews b.UserViews
       UserViewsGeneratorScript = Option.unionUnique a.UserViewsGeneratorScript b.UserViewsGeneratorScript
       DefaultAttributes = Map.unionWith (fun name -> mergeSourceAttributesSchema) a.DefaultAttributes b.DefaultAttributes
+      Triggers = Map.unionWith (fun name -> mergeSourceTriggersSchema) a.Triggers b.Triggers
     }
 
 let saveSchema (db : SystemContext) (name : SchemaName) (cancellationToken : CancellationToken) : Task<SchemaDump> =
@@ -101,6 +118,7 @@ let saveSchema (db : SystemContext) (name : SchemaName) (cancellationToken : Can
         let! rolesData = buildSchemaPermissions db cancellationToken
         let! userViewsData = buildSchemaUserViews db cancellationToken
         let! attributesData = buildSchemaAttributes db cancellationToken
+        let! triggersData = buildSchemaTriggers db cancellationToken
 
         let findOrFail m =
             match Map.tryFind name m with
@@ -110,12 +128,14 @@ let saveSchema (db : SystemContext) (name : SchemaName) (cancellationToken : Can
         let roles = findOrFail rolesData.Schemas
         let userViews = findOrFail userViewsData.Schemas
         let attributes = findOrFail attributesData.Schemas
+        let triggers = findOrFail triggersData.Schemas
         return
             { Entities = entities.Entities
               Roles = roles.Roles
               UserViews = if Option.isSome userViews.GeneratorScript then Map.empty else userViews.UserViews
               UserViewsGeneratorScript = userViews.GeneratorScript
               DefaultAttributes = attributes.Schemas
+              Triggers = triggers.Schemas
             }
     }
 
@@ -139,6 +159,25 @@ let restoreSchema (db : SystemContext) (name : SchemaName) (dump : SchemaDump) (
         return updated1 || updated2 || updated3 || updated4
     }
 
+let private prettifyTriggerMeta (trigger : SourceTrigger) : PrettyTriggerMeta =
+    { AllowBroken = trigger.AllowBroken
+      Priority = trigger.Priority
+      Time = trigger.Time
+      OnInsert = trigger.OnInsert
+      OnUpdateFields = trigger.OnUpdateFields
+      OnDelete = trigger.OnDelete
+    }
+
+let private deprettifyTrigger (meta : PrettyTriggerMeta) (procedure : string) : SourceTrigger =
+    { AllowBroken = meta.AllowBroken
+      Priority = meta.Priority
+      Time = meta.Time
+      OnInsert = meta.OnInsert
+      OnUpdateFields = meta.OnUpdateFields
+      OnDelete = meta.OnDelete
+      Procedure = procedure
+    }
+
 let private prettifyColumnField (defaultAttrs : SourceAttributesField option) (field : SourceColumnField) : PrettyColumnField =
     { Type = field.Type
       DefaultValue = field.DefaultValue
@@ -147,12 +186,29 @@ let private prettifyColumnField (defaultAttrs : SourceAttributesField option) (f
       DefaultAttributes = defaultAttrs
     }
 
+let private deprettifyColumnField (field : PrettyColumnField) : SourceAttributesField option * SourceColumnField =
+    let ret =
+        { Type = field.Type
+          DefaultValue = field.DefaultValue
+          IsNullable = field.IsNullable
+          IsImmutable = field.IsImmutable
+        }
+    (field.DefaultAttributes, ret)
+
 let private prettifyComputedField (defaultAttrs : SourceAttributesField option) (field : SourceComputedField) : PrettyComputedField =
     { Expression = field.Expression
       AllowBroken = field.AllowBroken
       IsVirtual = field.IsVirtual
       DefaultAttributes = defaultAttrs
     }
+
+let private deprettifyComputedField (field : PrettyComputedField) : SourceAttributesField option * SourceComputedField =
+    let ret =
+        { Expression = field.Expression
+          AllowBroken = field.AllowBroken
+          IsVirtual = field.IsVirtual
+        }
+    (field.DefaultAttributes, ret)
 
 let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : SourceEntity) : PrettyEntity =
     let applyAttrs fn name = fn (defaultAttrs.FindField name)
@@ -167,23 +223,6 @@ let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : Sou
       Parent = entity.Parent
       SystemDefaultAttributes = defaultAttrs.Fields |> Map.filter (fun name attrs -> Set.contains name systemColumns)
     }
-
-let private deprettifyColumnField (field : PrettyColumnField) : SourceAttributesField option * SourceColumnField =
-    let ret =
-        { Type = field.Type
-          DefaultValue = field.DefaultValue
-          IsNullable = field.IsNullable
-          IsImmutable = field.IsImmutable
-        }
-    (field.DefaultAttributes, ret)
-
-let private deprettifyComputedField (field : PrettyComputedField) : SourceAttributesField option * SourceComputedField =
-    let ret =
-        { Expression = field.Expression
-          AllowBroken = field.AllowBroken
-          IsVirtual = field.IsVirtual
-        }
-    (field.DefaultAttributes, ret)
 
 let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity option * SourceEntity =
     if not <| Set.isEmpty (Set.difference (Map.keysSet entity.SystemDefaultAttributes) systemColumns) then
@@ -253,6 +292,14 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
                     writer.WriteLine(uvPragmaAllowBroken)
                 writer.Write(uv.Query)
 
+        for KeyValue(schemaName, schemaTriggers) in dump.Triggers do
+            for KeyValue(entityName, entityTriggers) in schemaTriggers.Entities do
+                for KeyValue(triggerName, trigger) in entityTriggers.Triggers do
+                    let prettyMeta = prettifyTriggerMeta trigger
+                    dumpToEntry (sprintf "triggers/%O/%O/%O.yaml" schemaName entityName triggerName) prettyMeta
+                    useEntry (sprintf "triggers/%O/%O/%O.js" schemaName entityName triggerName) <| fun writer ->
+                        writer.Write(trigger.Procedure)
+
         let extraAttributes = dump.DefaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
         if not <| Map.isEmpty extraAttributes then
             dumpToEntry extraDefaultAttributesEntry extraAttributes
@@ -289,6 +336,8 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
         with
         | :? JsonSerializationException as e -> raisefWithInner RestoreSchemaException e "Error during deserializing archive entry %s" entry.FullName
 
+    let mutable encounteredTriggers : Map<SchemaName * ResolvedFieldRef, PrettyTriggerMeta option * string> = Map.empty
+
     let parseZipEntry (entry : ZipArchiveEntry) : SchemaName * SchemaDump =
         let (schemaName, rawPath) =
             match entry.FullName with
@@ -312,6 +361,20 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                               | Some attrs -> Map.singleton schemaName { Entities = Map.singleton name attrs }
                               | None -> Map.empty
                     }
+                | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.yaml$" [rawSchemaName; rawEntityName; rawTriggerName] ->
+                    let ref = { entity = { schema = FunQLName rawSchemaName; name = FunQLName rawEntityName }; name = FunQLName rawTriggerName }
+                    let prettyTriggerMeta : PrettyTriggerMeta = deserializeEntry entry
+                    let (prevMeta, prevProc) = Map.findWithDefault (schemaName, ref) (fun () -> (None, "")) encounteredTriggers
+                    assert (Option.isNone prevMeta)
+                    encounteredTriggers <- Map.add (schemaName, ref) (Some prettyTriggerMeta, prevProc) encounteredTriggers
+                    emptySchemaDump
+                | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.js$" [rawSchemaName; rawEntityName; rawTriggerName] ->
+                    let ref = { entity = { schema = FunQLName rawSchemaName; name = FunQLName rawEntityName }; name = FunQLName rawTriggerName }
+                    let rawProcedure = readEntry entry <| fun reader -> reader.ReadToEnd()
+                    let (prevMeta, prevProc) = Map.findWithDefault (schemaName, ref) (fun () -> (None, "")) encounteredTriggers
+                    assert (prevProc = "")
+                    encounteredTriggers <- Map.add (schemaName, ref) (prevMeta, rawProcedure) encounteredTriggers
+                    emptySchemaDump
                 | CIRegex @"^roles/([^/]+)\.yaml$" [rawName] ->
                     let name = FunQLName rawName
                     let role : SourceRole = deserializeEntry entry
@@ -348,6 +411,27 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                 | fileName -> raisef RestoreSchemaException "Invalid archive entry %O/%s" schemaName fileName
         (schemaName, dump)
 
-    zip.Entries
-        |> Seq.map (parseZipEntry >> uncurry Map.singleton)
-        |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) Map.empty
+    let dump =
+        zip.Entries
+            |> Seq.map (parseZipEntry >> uncurry Map.singleton)
+            |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) Map.empty
+
+    let convertTrigger (KeyValue((schemaName, ref), data)) =
+        match data with
+        | (Some meta, proc) ->
+            let entityTriggers =
+                { Triggers = Map.singleton ref.name (deprettifyTrigger meta proc) }
+            let schemaTriggers =
+                { Entities = Map.singleton ref.entity.name entityTriggers }
+            let ret =
+                { emptySchemaDump with
+                      Triggers = Map.singleton ref.entity.schema schemaTriggers
+                }
+            (schemaName, ret)
+        | (None, _) -> raisef RestoreSchemaException "No meta description for trigger %O" ref
+    let dump =
+        encounteredTriggers
+            |> Seq.map (convertTrigger >> uncurry Map.singleton)
+            |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) dump
+
+    dump

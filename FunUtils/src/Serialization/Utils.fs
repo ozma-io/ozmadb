@@ -69,8 +69,13 @@ let unionName (case : UnionCaseInfo) : string option =
 let unionNames (cases : UnionCase seq) : Map<string option, UnionCase> =
     cases |> Seq.map (fun case -> (unionName case.Info, case)) |> Map.ofSeqUnique
 
-let isUnionEnum : UnionCase seq -> bool =
-    Seq.forall (fun case -> Array.isEmpty case.Fields)
+let isUnionEnum (cases : UnionCase seq) : Map<string option, UnionCaseInfo * obj> option =
+    let enumCase case =
+        if Array.isEmpty case.Fields then
+            Some (unionName case.Info, (case.Info, FSharpValue.MakeUnion(case.Info, [||])))
+        else
+            None
+    cases |> Seq.traverseOption enumCase |> Option.map Map.ofSeq
 
 let getNewtype (case : UnionCase) : (UnionCaseInfo * PropertyInfo) option =
     if Array.length case.Fields = 1 then
@@ -93,7 +98,7 @@ let isNewtype (map : UnionCase[]) : NewtypeInfo option =
 type OptionInfo =
     { SomeCase : UnionCaseInfo
       SomeType : PropertyInfo
-      NoneCase : UnionCaseInfo
+      NoneValue : obj
       ValueIsNullable : bool
     }
 
@@ -117,7 +122,7 @@ let isOption (map : UnionCase[]) : OptionInfo option =
             Some
                 { SomeCase = someCase
                   SomeType = someType
-                  NoneCase = noneCase
+                  NoneValue = FSharpValue.MakeUnion(noneCase, [||])
                   ValueIsNullable = isNullableType someType.PropertyType
                 }
     else
@@ -132,8 +137,7 @@ let getTypeDefaultValue (objectType : Type) : obj option =
         let cases = unionCases objectType
         match isOption cases with
         | Some option ->
-            let nullValue = FSharpValue.MakeUnion(option.NoneCase, [||])
-            Some nullValue
+            Some option.NoneValue
         | None when objectType.IsGenericType && objectType.GetGenericTypeDefinition () = typedefof<_ list> ->
             let emptyCase = FSharpType.GetUnionCases(objectType) |> Array.find (fun case -> case.Name = "Empty")
             Some <| FSharpValue.MakeUnion(emptyCase, [||])

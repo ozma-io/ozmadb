@@ -49,7 +49,6 @@ type UserViewName = FunQLName
 type RoleName = FunQLName
 type FunctionName = FunQLName
 type TriggerName = FunQLName
-type AttributesName = FunQLName
 
 type EntityRef =
     { schema : SchemaName option
@@ -255,11 +254,13 @@ type ScalarFieldType =
     | [<CaseName("json")>] SFTJson
     | [<CaseName("uvref")>] SFTUserViewRef
     with
+        static member private Fields = unionNames (unionCases typeof<ScalarFieldType>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
+
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             let (case, _) = FSharpValue.GetUnionFields(this, typeof<ScalarFieldType>)
-            unionName case |> Option.get
+            Map.find case.Name ScalarFieldType.Fields
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
