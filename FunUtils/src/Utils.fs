@@ -104,6 +104,10 @@ module Result =
         | Ok _ -> failwith "Result.getError"
         | Error v -> v
 
+    let result (fe : 'e -> 'r) (fa : 'a -> 'r) : Result<'a, 'e> -> 'r = function
+        | Ok a -> fa a
+        | Error e -> fe e
+
     let getOrDefault (f : 'e -> 'a) : Result<'a, 'e> -> 'a = function
         | Ok a -> a
         | Error e -> f e

@@ -1,7 +1,6 @@
 module FunWithFlags.FunDB.UserViews.Generate
 
 open System.Threading
-open Newtonsoft.Json
 open NetJs
 open NetJs.Json
 
@@ -75,11 +74,9 @@ type private UserViewsGenerator (template : UserViewGeneratorTemplate, layout : 
         | Some l -> l
         | None ->
             let context = Context.New(template.Isolate, template.Template)
-            use jsWriter = new V8JsonWriter(context)
-            let serializer = JsonSerializer()
-            serializer.Serialize(jsWriter, layout)
-            jsLayout <- Some jsWriter.Result
-            jsWriter.Result
+            let layout = V8JsonWriter.Serialize(context, layout)
+            jsLayout <- Some layout
+            layout
 
     let generateUserViewsSchema (schema : SourceUserViewsSchema) : SourceUserViewsSchema =
         match schema.GeneratorScript with

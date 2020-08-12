@@ -11,27 +11,17 @@ open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.API.Utils
 
-[<NoEquality; NoComparison>]
-type ViewEntriesGetResponse =
-    { Info : UserViewInfo
-      Result : ExecutedViewExpr
-    }
-
-[<NoEquality; NoComparison>]
-type ViewInfoGetResponse =
-    { Info : UserViewInfo
-      PureAttributes : ExecutedAttributeMap
-      PureColumnAttributes : ExecutedAttributeMap array
-    }
+let private error e =
+    let handler =
+        match e with
+        | UVEArguments _ -> RequestErrors.badRequest
+        | UVEAccessDenied -> RequestErrors.forbidden
+        | UVENotFound -> RequestErrors.notFound
+        | UVEResolution _ -> RequestErrors.badRequest
+        | UVEExecution _ -> RequestErrors.unprocessableEntity
+    handler (json e)
 
 let viewsApi : HttpHandler =
-    let returnError = function
-        | UVEArguments msg -> sprintf "Invalid arguments: %s" msg |> errorJson |> RequestErrors.badRequest
-        | UVEAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
-        | UVENotFound -> errorJson "Not found" |> RequestErrors.notFound
-        | UVEResolution msg -> errorJson msg |> RequestErrors.badRequest
-        | UVEExecution msg -> errorJson msg |> RequestErrors.unprocessableEntity
-
     let getRecompile (ctx : HttpContext) =
 #if DEBUG
             ctx.GetQueryStringValue "__recompile" |> Result.getOption |> Option.bind tryBool |> Option.defaultValue false
@@ -42,25 +32,14 @@ let viewsApi : HttpHandler =
     let selectFromView (viewRef : UserViewSource) (rctx : RequestContext) =
         queryArgs <| fun rawArgs next ctx -> task {
             match! rctx.GetUserView viewRef rawArgs (getRecompile ctx) with
-            | Ok (cached, res) ->
-                let ret =
-                    { Info = cached.Info
-                      Result = res
-                    }
-                return! Successful.ok (json ret) next ctx
-            | Result.Error err -> return! returnError err next ctx
+            | Ok res -> return! Successful.ok (json res) next ctx
+            | Result.Error err -> return! error err next ctx
         }
 
     let infoView (viewRef : UserViewSource) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         match! rctx.GetUserViewInfo viewRef (getRecompile ctx) with
-            | Ok cached ->
-                let res =
-                    { Info = cached.Info
-                      PureAttributes = cached.PureAttributes.Attributes
-                      PureColumnAttributes = cached.PureAttributes.ColumnAttributes
-                    }
-                return! Successful.ok (json res) next ctx
-            | Result.Error err -> return! returnError err next ctx
+            | Ok res -> return! Successful.ok (json res) next ctx
+            | Result.Error err -> return! error err next ctx
     }
 
     let viewApi (viewRef : UserViewSource) =

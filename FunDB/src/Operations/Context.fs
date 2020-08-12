@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Operations.Context
 
 open System
 open System.IO
+open System.Runtime.Serialization
 open System.Threading
 open System.Threading.Tasks
 open System.Linq
@@ -12,6 +13,7 @@ open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Types
@@ -30,53 +32,61 @@ open FunWithFlags.FunDB.Operations.SaveRestore
 module SQL = FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDBSchema.System
 
+[<SerializeAsObject("error")>]
 type UserViewErrorInfo =
-    | UVENotFound
-    | UVEAccessDenied
-    | UVEResolution of string
-    | UVEExecution of string
-    | UVEArguments of string
+    | [<CaseName("not_found")>] UVENotFound
+    | [<CaseName("access_denied")>] UVEAccessDenied
+    | [<CaseName("resolution")>] UVEResolution of Details : string
+    | [<CaseName("execution")>] UVEExecution of Details : string
+    | [<CaseName("arguments")>] UVEArguments of Details : string
     with
+        [<DataMember>]
         member this.Message =
             match this with
             | UVENotFound -> "User view not found"
             | UVEAccessDenied -> "User view access denied"
-            | UVEResolution msg -> msg
-            | UVEExecution msg -> msg
-            | UVEArguments msg -> msg
+            | UVEResolution msg -> "User view typecheck failed"
+            | UVEExecution msg -> "User view execution failed"
+            | UVEArguments msg -> "Invalid user view arguments"
 
+[<SerializeAsObject("error")>]
 type EntityErrorInfo =
-    | EENotFound
-    | EEAccessDenied
-    | EEArguments of string
-    | EEExecution of string
+    | [<CaseName("not_found")>] EENotFound
+    | [<CaseName("access_denied")>] EEAccessDenied
+    | [<CaseName("arguments")>] EEArguments of Details : string
+    | [<CaseName("execution")>] EEExecution of Details : string
     with
+        [<DataMember>]
         member this.Message =
             match this with
             | EENotFound -> "Entity not found"
             | EEAccessDenied -> "Entity access denied"
-            | EEArguments msg -> msg
-            | EEExecution msg -> msg
+            | EEArguments msg -> "Invalid operation arguments"
+            | EEExecution msg -> "Operation execution failed"
 
+[<SerializeAsObject("error")>]
 type SaveErrorInfo =
-    | SEAccessDenied
-    | SENotFound
+    | [<CaseName("access_denied")>] SEAccessDenied
+    | [<CaseName("not_found")>] SENotFound
     with
+        [<DataMember>]
         member this.Message =
             match this with
             | SEAccessDenied -> "Dump access denied"
             | SENotFound -> "Schema not found"
 
+[<SerializeAsObject("error")>]
 type RestoreErrorInfo =
-    | REAccessDenied
-    | REPreloaded
-    | REInvalidFormat of string
+    | [<CaseName("access_denied")>] REAccessDenied
+    | [<CaseName("preloaded")>] REPreloaded
+    | [<CaseName("invalid_format")>] REInvalidFormat of Message : string
     with
+        [<DataMember>]
         member this.Message =
             match this with
             | REAccessDenied -> "Restore access denied"
             | REPreloaded -> "Cannot restore preloaded schemas"
-            | REInvalidFormat msg -> msg
+            | REInvalidFormat msg -> "Invalid data format"
 
 type RequestErrorInfo =
     | REUserNotFound
@@ -112,9 +122,10 @@ let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEn
     | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
     | Error err -> Error err
 
+[<SerializeAsObject("type")>]
 type UserViewSource =
-    | UVAnonymous of string
-    | UVNamed of ResolvedUserViewRef
+    | [<CaseName("anonymous")>] UVAnonymous of Query : string
+    | [<CaseName("named")>] UVNamed of Ref : ResolvedUserViewRef
 
 [<NoEquality; NoComparison>]
 type RequestParams =
@@ -123,6 +134,47 @@ type RequestParams =
       IsRoot : bool
       Language : string
       CancellationToken : CancellationToken
+    }
+
+[<NoEquality; NoComparison>]
+type UserViewEntriesResult =
+    { Info : UserViewInfo
+      Result : ExecutedViewExpr
+    }
+
+[<NoEquality; NoComparison>]
+type UserViewInfoResult =
+    { Info : UserViewInfo
+      PureAttributes : ExecutedAttributeMap
+      PureColumnAttributes : ExecutedAttributeMap array
+    }
+
+[<SerializeAsObject("type")>]
+[<NoEquality; NoComparison>]
+type TransactionOp =
+    | [<CaseName("insert")>] TInsertEntity of Entity : ResolvedEntityRef * Entries : RawArguments
+    | [<CaseName("update")>] TUpdateEntity of Entity : ResolvedEntityRef * Id : int * Entries : RawArguments
+    | [<CaseName("delete")>] TDeleteEntity of Entity : ResolvedEntityRef * Id : int
+
+[<SerializeAsObject("type")>]
+type TransactionOpResult =
+    | [<CaseName("insert")>] TRInsertEntity of Id : int
+    | [<CaseName("update")>] TRUpdateEntity
+    | [<CaseName("delete")>] TRDeleteEntity
+
+[<NoEquality; NoComparison>]
+type Transaction =
+    { Operations : TransactionOp[]
+    }
+
+[<NoEquality; NoComparison>]
+type TransactionResult =
+    { Results : TransactionOpResult[]
+    }
+
+type TransactionError =
+    { Error : EntityErrorInfo
+      Operation : int
     }
 
 [<NoEquality; NoComparison>]
@@ -270,7 +322,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                 return Error <| printException ex
         }
 
-    member this.GetUserViewInfo (source : UserViewSource) (recompileQuery : bool) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
+    member this.GetUserViewInfo (source : UserViewSource) (recompileQuery : bool) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
         task {
             match! resolveSource source recompileQuery with
             | Error e -> return Error e
@@ -279,7 +331,10 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     match roleType with
                     | RTRoot -> ()
                     | RTRole role -> checkRoleViewExpr ctx.State.Layout role uv.UserView.compiled
-                    return Ok uv
+                    return Ok { Info = uv.Info
+                                PureAttributes = uv.PureAttributes.Attributes
+                                PureColumnAttributes = uv.PureAttributes.ColumnAttributes
+                              }
                 with
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view info")
@@ -297,7 +352,7 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (recompileQuery : bool) : Task<Result<PrefetchedUserView * ExecutedViewExpr, UserViewErrorInfo>> =
+    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (recompileQuery : bool) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
         task {
             match! resolveSource source recompileQuery with
             | Error e -> return Error e
@@ -326,8 +381,10 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                         do! ctx.WriteEvent event
                         return Error <| UVEArguments msg
                     | Ok arguments ->
-                            let! r = runViewExpr ctx.Connection.Query restricted arguments cancellationToken getResult
-                            return Ok r
+                            let! (uv, res) = runViewExpr ctx.Connection.Query restricted arguments cancellationToken getResult
+                            return Ok { Info = uv.Info
+                                        Result = res
+                                      }
                 with
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view")
@@ -581,6 +638,29 @@ type RequestContext private (opts : RequestParams, ctx : IContext, rawUserId : i
                             )
                         do! ctx.WriteEvent event
                         return Error EEAccessDenied
+        }
+
+    member this.RunTransaction (transaction : Transaction) : Task<Result<TransactionResult, TransactionError>> =
+        task {
+            let handleOne (i, op) =
+                task {
+                    let! res =
+                        match op with
+                        | TInsertEntity (ref, entries) ->
+                            Task.map (Result.map TRInsertEntity) <| this.InsertEntity ref entries
+                        | TUpdateEntity (ref, id, entries) ->
+                            Task.map (Result.map (fun _ -> TRUpdateEntity)) <| this.UpdateEntity ref id entries
+                        | TDeleteEntity (ref, id) ->
+                            Task.map (Result.map (fun _ -> TRDeleteEntity)) <| this.DeleteEntity ref id
+                    return Result.mapError (fun err -> (i, err)) res
+                }
+            match! transaction.Operations |> Seq.indexed |> Seq.traverseResultTaskSync handleOne with
+            | Ok results ->
+                return Ok { Results = Array.ofSeq results }
+            | Error (i, err) ->
+                return Error { Error = err
+                               Operation = i
+                             }
         }
 
     member this.SaveSchema (name : SchemaName) : Task<Result<SchemaDump, SaveErrorInfo>> =

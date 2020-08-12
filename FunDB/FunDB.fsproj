@@ -74,6 +74,13 @@
     <Compile Include="src/Attributes/Render.fs" />
     <Compile Include="src/Attributes/Update.fs" />
 
+    <!--<Compile Include="src/Triggers/Source.fs" />
+    <Compile Include="src/Triggers/Types.fs" />
+    <Compile Include="src/Triggers/Resolve.fs" />
+    <Compile Include="src/Triggers/Schema.fs" />
+    <Compile Include="src/Triggers/Render.fs" />
+    <Compile Include="src/Triggers/Update.fs" />-->
+
     <Compile Include="src/Permissions/Source.fs" />
     <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Resolve.fs" />
@@ -106,6 +113,7 @@
     <Compile Include="src/Operations/InstancesCache.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
     <Compile Include="src/Operations/Context.fs" />
+    <Compile Include="src/Operations/JavaScript.fs" />
 
     <Compile Include="src/API/Utils.fs" />
     <Compile Include="src/API/Info.fs" />

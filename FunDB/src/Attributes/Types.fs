@@ -6,45 +6,45 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 [<NoEquality; NoComparison>]
 type AttributesField =
-    { allowBroken : bool
-      priority : int
-      attributes : ResolvedAttributeMap
-      globalArguments : Set<ArgumentName>
+    { AllowBroken : bool
+      Priority : int
+      Attributes : ResolvedAttributeMap
+      GlobalArguments : Set<ArgumentName>
     }
 
 [<NoEquality; NoComparison>]
 type AttributesError =
-    { source : SourceAttributesField
-      error : exn
+    { Source : SourceAttributesField
+      Error : exn
     }
 
 [<NoEquality; NoComparison>]
 type AttributesEntity =
-    { fields : Map<FieldName, Result<AttributesField, AttributesError>>
+    { Fields : Map<FieldName, Result<AttributesField, AttributesError>>
     } with
         member this.FindField (name : FieldName) =
-            Map.tryFind name this.fields
+            Map.tryFind name this.Fields
 
 [<NoEquality; NoComparison>]
 type AttributesSchema =
-    { entities : Map<EntityName, AttributesEntity>
+    { Entities : Map<EntityName, AttributesEntity>
     }
 
 [<NoEquality; NoComparison>]
 type AttributesDatabase =
-    { schemas : Map<SchemaName, AttributesSchema>
+    { Schemas : Map<SchemaName, AttributesSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.schemas with
+            match Map.tryFind entity.schema this.Schemas with
             | None -> None
-            | Some schema -> Map.tryFind entity.name schema.entities
+            | Some schema -> Map.tryFind entity.name schema.Entities
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
 [<NoEquality; NoComparison>]
 type DefaultAttributes =
-    { schemas : Map<SchemaName, AttributesDatabase>
+    { Schemas : Map<SchemaName, AttributesDatabase>
     }
 
 type ErroredAttributesEntity = Map<FieldName, exn>

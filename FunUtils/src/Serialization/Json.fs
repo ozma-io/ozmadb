@@ -164,11 +164,19 @@ type UnionConverter (objectType : Type) =
                                     | _ -> null
                                 for (field, arg) in Seq.zip caseObject.Fields args do
                                     match field.DefaultValue with
-                                    | Some d when not (Option.defaultValue true field.EmitDefaultValue) && d = value -> ()
+                                    | Some d when not (Option.defaultValue true field.EmitDefaultValue) && d = arg -> ()
                                     | _ ->
                                         let name = if isNull resolver then field.Name else resolver.GetResolvedPropertyName(field.Name)
                                         writer.WritePropertyName(name)
                                         serializer.Serialize(writer, arg)
+                                // Add extra properties -- stuff from `with` block.
+                                let contract = serializer.ContractResolver.ResolveContract (value.GetType()) :?> JsonObjectContract
+                                for prop in contract.Properties do
+                                    let fieldValue = prop.ValueProvider.GetValue(value)
+                                    let skipDefaultValue = prop.DefaultValueHandling.GetValueOrDefault(DefaultValueHandling.Populate) &&& DefaultValueHandling.Ignore = DefaultValueHandling.Ignore
+                                    if not (skipDefaultValue && prop.DefaultValue = fieldValue) then
+                                        writer.WritePropertyName(prop.PropertyName)
+                                        serializer.Serialize(writer, fieldValue)
                                 writer.WriteEndObject()
                     | None ->
                         fun value writer serializer ->

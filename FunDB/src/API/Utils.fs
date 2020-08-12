@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.API.Utils
 
 open System.Collections.Generic
+open System.Runtime.Serialization
 open System.Threading
 open System.Threading.Tasks
 open System.Security.Claims
@@ -14,22 +15,17 @@ open Giraffe
 
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils.Utils
-open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.Operations.Context
 open FunWithFlags.FunDB.Operations.InstancesCache
 
-type APIErrorType =
-    | [<CaseName("generic")>]
-      ErrorGeneric
-
 type APIError =
-    { [<JsonProperty("type")>]
-      ErrorType : APIErrorType
-      Message : string
-    }
+    { Message : string
+    } with
+        [<DataMember>]
+        member this.Error = "generic"
 
-let errorJson str = json { ErrorType = ErrorGeneric; Message = str }
+let errorJson str = json { Message = str }
 
 let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
     logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")

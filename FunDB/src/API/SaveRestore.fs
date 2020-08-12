@@ -10,28 +10,34 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.Operations.Context
 
+let private saveError e = 
+    let handler =
+        match e with
+        | SENotFound -> RequestErrors.notFound
+        | SEAccessDenied -> RequestErrors.forbidden
+    handler (json e)
+
+let private restoreError e = 
+    let handler =
+        match e with
+        | REAccessDenied -> RequestErrors.forbidden
+        | REPreloaded -> RequestErrors.unprocessableEntity
+        | REInvalidFormat _ -> RequestErrors.unprocessableEntity
+    handler (json e)
+
 let saveRestoreApi : HttpHandler =
-    let returnSaveError = function
-        | SENotFound -> errorJson "Not found" |> RequestErrors.notFound
-        | SEAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
-
-    let returnRestoreError = function
-        | REAccessDenied -> errorJson "Forbidden" |> RequestErrors.forbidden
-        | REPreloaded -> errorJson "Cannot restore preloaded schema" |> RequestErrors.unprocessableEntity
-        | REInvalidFormat msg -> errorJson msg |> RequestErrors.unprocessableEntity
-
     let saveZipSchema (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         let (schemaName, rctx) = arg :?> (SchemaName * RequestContext)
         match! rctx.SaveZipSchema schemaName with
         | Ok dumpStream -> return! ctx.WriteStreamAsync false dumpStream None None
-        | Error err -> return! returnSaveError err next ctx
+        | Error err -> return! saveError err next ctx
     }
 
     let saveJsonSchema (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         let (schemaName, rctx) = arg :?> (SchemaName * RequestContext)
         match! rctx.SaveSchema schemaName with
         | Ok dump -> return! Successful.ok (json dump) next ctx
-        | Error err -> return! returnSaveError err next ctx
+        | Error err -> return! saveError err next ctx
     }
 
     let saveSchemaNegotiationRules =
@@ -50,7 +56,7 @@ let saveRestoreApi : HttpHandler =
         let! dump = ctx.BindJsonAsync<SchemaDump>()
         match! rctx.RestoreSchema schemaName dump with
         | Ok () -> return! commitAndOk rctx next ctx
-        | Error err -> return! returnRestoreError err next ctx
+        | Error err -> return! restoreError err next ctx
     }
 
     let restoreZipSchema (schemaName : SchemaName) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
@@ -59,7 +65,7 @@ let saveRestoreApi : HttpHandler =
         ignore <| stream.Seek(0L, SeekOrigin.Begin)
         match! rctx.RestoreZipSchema schemaName stream with
         | Ok () -> return! commitAndOk rctx next ctx
-        | Error err -> return! returnRestoreError err next ctx
+        | Error err -> return! restoreError err next ctx
     }
 
     let restoreSchema (schemaName : SchemaName) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {

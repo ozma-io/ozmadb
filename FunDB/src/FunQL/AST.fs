@@ -48,6 +48,8 @@ type ArgumentName = FunQLName
 type UserViewName = FunQLName
 type RoleName = FunQLName
 type FunctionName = FunQLName
+type TriggerName = FunQLName
+type AttributesName = FunQLName
 
 type EntityRef =
     { schema : SchemaName option

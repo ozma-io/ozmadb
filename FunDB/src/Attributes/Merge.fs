@@ -69,7 +69,7 @@ let private mergeAttributesPair (a : MergedDefaultAttributes) (b : MergedDefault
 
 let private makeMergedAttributesField = function
     | Ok field ->
-        field.attributes |> Map.map (fun name expr -> { priority = field.priority; expression = expr; inherited = false })
+        field.Attributes |> Map.map (fun name expr -> { priority = field.Priority; expression = expr; inherited = false })
     | Error _ -> Map.empty
 
 let private makeOneMergedAttributesEntity (entityAttrs : AttributesEntity) : MergedAttributesEntity =
@@ -79,7 +79,7 @@ let private makeOneMergedAttributesEntity (entityAttrs : AttributesEntity) : Mer
             None
         else
             Some ret
-    { fields = Map.mapMaybe addNonEmpty entityAttrs.fields }
+    { fields = Map.mapMaybe addNonEmpty entityAttrs.Fields }
 
 let private markMapInherited (attrs : MergedAttributeMap) : MergedAttributeMap =
     Map.map (fun name attr -> { attr with inherited = true }) attrs
@@ -109,14 +109,14 @@ type private AttributesMerger (layout : Layout, attrs : AttributesDatabase) =
 
     let makeMergedAttributesSchema (schemaName : SchemaName) (schema : AttributesSchema) =
         let iterEntity name entity =
-            match Map.tryFind name schema.entities with
+            match Map.tryFind name schema.Entities with
             | None -> ()
             | Some entityAttrs -> makeMergedAttributesEntity { schema = schemaName; name = name } entityAttrs
-        Map.iter iterEntity schema.entities
+        Map.iter iterEntity schema.Entities
 
     let makeMergedAttributedDatabase () =
         let iterSchema schemaName schema =
-            match Map.tryFind schemaName attrs.schemas with
+            match Map.tryFind schemaName attrs.Schemas with
             | None -> ()
             | Some schemaAttrs -> makeMergedAttributesSchema schemaName schemaAttrs
         Map.iter iterSchema layout.schemas
@@ -135,4 +135,4 @@ let mergeDefaultAttributes (layout: Layout) (attrs : DefaultAttributes) : Merged
         let merger = AttributesMerger (layout, attrs)
         merger.MergeDefaultAttributes ()
 
-    attrs.schemas |> Map.toSeq |> Seq.map (fun (name, db) -> mergeOne db) |> Seq.fold mergeAttributesPair emptyMergedDefaultAttributes
+    attrs.Schemas |> Map.toSeq |> Seq.map (fun (name, db) -> mergeOne db) |> Seq.fold mergeAttributesPair emptyMergedDefaultAttributes
