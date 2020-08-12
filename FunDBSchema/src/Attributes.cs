@@ -7,6 +7,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
     {
         public string MainField { get; }
         public bool ForbidExternalReferences { get; set; }
+        public bool ForbidTriggers { get; set; }
         public bool IsHidden { get; set; }
 
         public EntityAttribute(string mainField)

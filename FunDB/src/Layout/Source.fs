@@ -38,6 +38,7 @@ type SourceEntity =
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       MainField : FieldName
       ForbidExternalReferences : bool
+      ForbidTriggers : bool
       IsHidden : bool
       IsAbstract : bool
       Parent : ResolvedEntityRef option

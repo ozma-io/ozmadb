@@ -1018,7 +1018,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         | Some attrs ->
                             let makeDefaultAttr name =
                                 let attr = Map.find name attrs
-                                let expr = convertLinkedLocalExpr entityRef attr.expression
+                                let expr = convertLinkedLocalExpr entityRef attr.Expression
                                 let attrCol = CCCellAttribute name
                                 let (newPaths, compiled) = compileLinkedFieldExpr paths expr
                                 paths <- newPaths
@@ -1318,9 +1318,9 @@ let private checkPureColumn : SQL.SelectedColumn -> PurityStatus option = functi
 
 [<NoEquality; NoComparison>]
 type private PureColumn =
-    { columnType : ColumnType
-      purity : PurityStatus
-      result : SQL.SelectedColumn
+    { ColumnType : ColumnType
+      Purity : PurityStatus
+      Result : SQL.SelectedColumn
     }
 
 let rec private findPureAttributes (columnTypes : ColumnType[]) : SQL.SelectTreeExpr -> (PureColumn option)[] = function
@@ -1335,9 +1335,9 @@ let rec private findPureAttributes (columnTypes : ColumnType[]) : SQL.SelectTree
                     | _ -> false
                 if isGood then
                     let info =
-                        { columnType = colType
-                          purity = purity
-                          result = res
+                        { ColumnType = colType
+                          Purity = purity
+                          Result = res
                         }
                     Some info
                 else
@@ -1384,7 +1384,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
             None
         else
             let query = SQL.SSelect {
-                    columns = Array.map (fun info -> info.result) onlyPureAttrs
+                    columns = Array.map (fun info -> info.Result) onlyPureAttrs
                     from = None
                     where = None
                     groupBy = [||]
@@ -1393,17 +1393,17 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
                 }
 
             let getPureAttribute (info : PureColumn) =
-                match info.columnType with
-                | CTMeta (CMRowAttribute name) when info.purity = Pure -> Some name
+                match info.ColumnType with
+                | CTMeta (CMRowAttribute name) when info.Purity = Pure -> Some name
                 | _ -> None
             let pureAttrs = onlyPureAttrs |> Seq.mapMaybe getPureAttribute |> Set.ofSeq
             let getPureColumnAttribute (info : PureColumn) =
-                match info.columnType with
-                | CTColumnMeta (colName, CCCellAttribute name) when info.purity = Pure -> Some (colName, Set.singleton name)
+                match info.ColumnType with
+                | CTColumnMeta (colName, CCCellAttribute name) when info.Purity = Pure -> Some (colName, Set.singleton name)
                 | _ -> None
             let pureColAttrs = onlyPureAttrs |> Seq.mapMaybe getPureColumnAttribute |> Map.ofSeqWith (fun name -> Set.union)
             Some { query = query.ToString()
-                   columns = Array.map (fun info -> info.columnType) onlyPureAttrs
+                   columns = Array.map (fun info -> info.ColumnType) onlyPureAttrs
                    pureAttributes = pureAttrs
                    pureColumnAttributes = pureColAttrs
                  }

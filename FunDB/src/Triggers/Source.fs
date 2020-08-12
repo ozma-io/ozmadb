@@ -11,7 +11,6 @@ open FunWithFlags.FunDB.FunQL.AST
 type TriggerTime =
     | [<CaseName("BEFORE")>] TTBefore
     | [<CaseName("AFTER")>] TTAfter
-    | [<CaseName("INSTEAD OF")>] TTInsteadOf
     with
         static member private Fields = unionNames (unionCases typeof<TriggerTime>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
 

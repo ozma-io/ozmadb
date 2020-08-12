@@ -105,6 +105,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         else
             existingEntity.MainField <-entity.MainField.ToString()
         existingEntity.ForbidExternalReferences <- entity.ForbidExternalReferences
+        existingEntity.ForbidTriggers <- entity.ForbidTriggers
         existingEntity.IsHidden <- entity.IsHidden
         existingEntity.IsAbstract <- entity.IsAbstract
         match entity.Parent with

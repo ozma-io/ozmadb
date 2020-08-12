@@ -305,6 +305,47 @@ module Seq =
 
     let hash (s : seq<'a>) : int = Seq.fold (curry HashCode.Combine) 0 s
 
+    let ofEnumerator (i : IEnumerator<'a>) : seq<'a> =
+        seq {
+            while i.MoveNext() do
+                yield i.Current
+        }
+
+    let mergeSortedBy (keyFunc : 'a -> 'k) (seq1 : seq<'a>) (seq2 : seq<'a>) : seq<'a> =
+        seq {
+            let i1 = seq1.GetEnumerator()
+            if not (i1.MoveNext()) then
+                yield! seq2
+            else
+                let i2 = seq2.GetEnumerator()
+                if not (i2.MoveNext()) then
+                    yield i1.Current
+                    yield! ofEnumerator i1
+                else
+                    let mutable key1 = keyFunc i1.Current
+                    let mutable key2 = keyFunc i2.Current
+                    let mutable next = true
+                    while next do
+                        if key1 < key2 then
+                            yield i1.Current
+                            if not (i1.MoveNext()) then
+                                yield i2.Current
+                                yield! ofEnumerator i2
+                                next <- false
+                            else
+                                key1 <- keyFunc i1.Current
+                        else
+                            yield i2.Current
+                            if not (i2.MoveNext()) then
+                                yield i1.Current
+                                yield! ofEnumerator i1
+                                next <- false
+                            else
+                                key2 <- keyFunc i2.Current
+        }
+
+    let mergeSorted (seq1 : seq<'a>) (seq2 : seq<'a>) : seq<'a> = mergeSortedBy id seq1 seq2
+
 module Map =
     let ofSeqWith (resolve : 'k -> 'v -> 'v -> 'v) (items : seq<'k * 'v>) : Map<'k, 'v> =
         let addOrResolve m (k, v) =

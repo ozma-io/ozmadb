@@ -80,6 +80,7 @@
     <Compile Include="src/Triggers/Schema.fs" />
     <Compile Include="src/Triggers/Render.fs" />
     <Compile Include="src/Triggers/Update.fs" />
+    <Compile Include="src/Triggers/Merge.fs" />
 
     <Compile Include="src/Permissions/Source.fs" />
     <Compile Include="src/Permissions/Types.fs" />

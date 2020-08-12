@@ -69,6 +69,7 @@ type PrettyEntity =
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       MainField : FieldName
       ForbidExternalReferences : bool
+      ForbidTriggers : bool
       IsHidden : bool
       IsAbstract : bool
       Parent : ResolvedEntityRef option
@@ -218,6 +219,7 @@ let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : Sou
       CheckConstraints = entity.CheckConstraints
       MainField = entity.MainField
       ForbidExternalReferences = entity.ForbidExternalReferences
+      ForbidTriggers = entity.ForbidTriggers
       IsHidden = entity.IsHidden
       IsAbstract = entity.IsAbstract
       Parent = entity.Parent
@@ -242,6 +244,7 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
           CheckConstraints = entity.CheckConstraints
           MainField = entity.MainField
           ForbidExternalReferences = entity.ForbidExternalReferences
+          ForbidTriggers = entity.ForbidTriggers
           IsHidden = entity.IsHidden
           IsAbstract = entity.IsAbstract
           Parent = entity.Parent

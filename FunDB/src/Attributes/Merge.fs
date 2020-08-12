@@ -7,47 +7,50 @@ open FunWithFlags.FunDB.Layout.Types
 
 [<NoEquality; NoComparison>]
 type MergedAttribute =
-    { priority : int
-      inherited : bool
-      expression : ResolvedFieldExpr
+    { SchemaName : SchemaName
+      Priority : int
+      Inherited : bool
+      Expression : ResolvedFieldExpr
     }
 
 type MergedAttributeMap = Map<AttributeName, MergedAttribute>
 
 [<NoEquality; NoComparison>]
 type MergedAttributesEntity =
-    { fields : Map<FieldName, MergedAttributeMap>
+    { Fields : Map<FieldName, MergedAttributeMap>
     } with
         member this.FindField (name : FieldName) =
-            Map.tryFind name this.fields
+            Map.tryFind name this.Fields
 
 [<NoEquality; NoComparison>]
 type MergedAttributesSchema =
-    { entities : Map<EntityName, MergedAttributesEntity>
+    { Entities : Map<EntityName, MergedAttributesEntity>
     }
 
 [<NoEquality; NoComparison>]
 type MergedDefaultAttributes =
-    { schemas : Map<SchemaName, MergedAttributesSchema>
+    { Schemas : Map<SchemaName, MergedAttributesSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.schemas with
+            match Map.tryFind entity.schema this.Schemas with
             | None -> None
-            | Some schema -> Map.tryFind entity.name schema.entities
+            | Some schema -> Map.tryFind entity.name schema.Entities
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
 let emptyMergedDefaultAttributes =
-    { schemas = Map.empty
+    { Schemas = Map.empty
     } : MergedDefaultAttributes
 
 let private chooseAttribute (a : MergedAttribute) (b : MergedAttribute) : MergedAttribute =
-    if not a.inherited && b.inherited then
+    if not a.Inherited && b.Inherited then
         a
-    else if a.inherited && not b.inherited then
+    else if a.Inherited && not b.Inherited then
         b
-    else if a.priority < b.priority then
+    else if a.Priority < b.Priority then
+        a
+    else if a.SchemaName < b.SchemaName then
         a
     else
         b
@@ -56,83 +59,69 @@ let private mergeAttributeMap (a : MergedAttributeMap) (b : MergedAttributeMap) 
     Map.unionWith (fun name -> chooseAttribute) a b
 
 let private mergeAttributesEntity (a : MergedAttributesEntity) (b : MergedAttributesEntity) : MergedAttributesEntity =
-    { fields = Map.unionWith (fun name -> mergeAttributeMap) a.fields b.fields
+    { Fields = Map.unionWith (fun name -> mergeAttributeMap) a.Fields b.Fields
     }
 
 let private mergeAttributesSchema (a : MergedAttributesSchema) (b : MergedAttributesSchema) : MergedAttributesSchema =
-    { entities = Map.unionWith (fun name -> mergeAttributesEntity) a.entities b.entities
+    { Entities = Map.unionWith (fun name -> mergeAttributesEntity) a.Entities b.Entities
     }
 
 let private mergeAttributesPair (a : MergedDefaultAttributes) (b : MergedDefaultAttributes) : MergedDefaultAttributes =
-    { schemas = Map.unionWith (fun name -> mergeAttributesSchema) a.schemas b.schemas
+    { Schemas = Map.unionWith (fun name -> mergeAttributesSchema) a.Schemas b.Schemas
     }
 
-let private makeMergedAttributesField = function
+let private makeMergedAttributesField (schemaName : SchemaName) = function
     | Ok field ->
-        field.Attributes |> Map.map (fun name expr -> { priority = field.Priority; expression = expr; inherited = false })
+        field.Attributes |> Map.map (fun name expr -> { SchemaName = schemaName; Priority = field.Priority; Expression = expr; Inherited = false })
     | Error _ -> Map.empty
 
-let private makeOneMergedAttributesEntity (entityAttrs : AttributesEntity) : MergedAttributesEntity =
+let private makeOneMergedAttributesEntity (schemaName : SchemaName) (entityAttrs : AttributesEntity) : MergedAttributesEntity =
     let addNonEmpty name fieldAttrs =
-        let ret = makeMergedAttributesField fieldAttrs
+        let ret = makeMergedAttributesField schemaName fieldAttrs
         if Map.isEmpty ret then
             None
         else
             Some ret
-    { fields = Map.mapMaybe addNonEmpty entityAttrs.Fields }
+    { Fields = Map.mapMaybe addNonEmpty entityAttrs.Fields }
 
 let private markMapInherited (attrs : MergedAttributeMap) : MergedAttributeMap =
-    Map.map (fun name attr -> { attr with inherited = true }) attrs
+    Map.map (fun name attr -> { attr with Inherited = true }) attrs
 
 let private markEntityInherited (entityAttrs : MergedAttributesEntity) : MergedAttributesEntity =
-    { fields = Map.map (fun name field -> markMapInherited field) entityAttrs.fields }
+    { Fields = Map.map (fun name field -> markMapInherited field) entityAttrs.Fields }
 
-type private AttributesMerger (layout : Layout, attrs : AttributesDatabase) =
-    let mutable mergedAttrs = Map.empty
+type private AttributesMerger (layout : Layout) =
+    let emitMergedAttributesEntity (schemaName : SchemaName) (attrEntityRef : ResolvedEntityRef) (entityAttrs : AttributesEntity) =
+        seq {
+            let entity = layout.FindEntity attrEntityRef |> Option.get
+            let retEntity = makeOneMergedAttributesEntity schemaName entityAttrs
+            if not (Map.isEmpty retEntity.Fields) then
+                yield (attrEntityRef, retEntity)
+                if not (Map.isEmpty entity.children) then
+                    let inheritedEntity = markEntityInherited retEntity
+                    for KeyValue (childRef, childInfo) in entity.children do
+                        yield (childRef, inheritedEntity)
+        }
 
-    let makeMergedAttributesEntity (entityRef : ResolvedEntityRef) (entityAttrs : AttributesEntity) =
-        let entity = layout.FindEntity entityRef |> Option.get
-        let retEntity = makeOneMergedAttributesEntity entityAttrs
-        let retEntity =
-            match Map.tryFind entityRef mergedAttrs with
-            | None -> retEntity
-            | Some old -> mergeAttributesEntity old retEntity
-        mergedAttrs <- Map.add entityRef retEntity mergedAttrs
-        if not (Map.isEmpty entity.children) then
-            let inheritedEntity = markEntityInherited retEntity
-            for KeyValue (childRef, childInfo) in entity.children do
-                let newAttrs =
-                    match Map.tryFind entityRef mergedAttrs with
-                    | None -> inheritedEntity
-                    | Some old -> mergeAttributesEntity inheritedEntity old
-                mergedAttrs <- Map.add childRef newAttrs mergedAttrs
+    let emitDefaultAttributes (attrs : DefaultAttributes) =
+        seq {
+            for KeyValue(schemaName, attrsDb) in attrs.Schemas do
+                for KeyValue(attrSchemaName, schema) in attrsDb.Schemas do
+                    for KeyValue(attrEntityName, entity) in schema.Entities do
+                        yield! emitMergedAttributesEntity schemaName { schema = attrSchemaName; name = attrEntityName } entity
+        }
 
-    let makeMergedAttributesSchema (schemaName : SchemaName) (schema : AttributesSchema) =
-        let iterEntity name entity =
-            match Map.tryFind name schema.Entities with
-            | None -> ()
-            | Some entityAttrs -> makeMergedAttributesEntity { schema = schemaName; name = name } entityAttrs
-        Map.iter iterEntity schema.Entities
-
-    let makeMergedAttributedDatabase () =
-        let iterSchema schemaName schema =
-            match Map.tryFind schemaName attrs.Schemas with
-            | None -> ()
-            | Some schemaAttrs -> makeMergedAttributesSchema schemaName schemaAttrs
-        Map.iter iterSchema layout.schemas
-
-    member this.MergeDefaultAttributes () =
-        makeMergedAttributedDatabase ()
+    let mergeDefaultAttributes (attrs : DefaultAttributes) : MergedDefaultAttributes =
         let schemas =
-            mergedAttrs
-                |> Map.toSeq
-                |> Seq.map (fun (ref, attrs) -> (ref.schema, { entities = Map.singleton ref.name attrs }))
-                |> Map.ofSeqWith (fun name -> mergeAttributesSchema)
-        { schemas = schemas }
+            emitDefaultAttributes attrs
+            |> Map.ofSeqWith (fun ref attrs1 attrs2 -> mergeAttributesEntity attrs1 attrs2)
+            |> Map.toSeq
+            |> Seq.map (fun (ref, attrs) -> (ref.schema, { Entities = Map.singleton ref.name attrs }))
+            |> Map.ofSeqWith (fun name -> mergeAttributesSchema)
+        { Schemas = schemas }
+
+    member this.MergeDefaultAttributes attrs = mergeDefaultAttributes attrs
 
 let mergeDefaultAttributes (layout: Layout) (attrs : DefaultAttributes) : MergedDefaultAttributes =
-    let mergeOne attrs =
-        let merger = AttributesMerger (layout, attrs)
-        merger.MergeDefaultAttributes ()
-
-    attrs.Schemas |> Map.toSeq |> Seq.map (fun (name, db) -> mergeOne db) |> Seq.fold mergeAttributesPair emptyMergedDefaultAttributes
+    let merger = AttributesMerger (layout)
+    merger.MergeDefaultAttributes attrs

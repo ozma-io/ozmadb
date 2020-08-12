@@ -67,6 +67,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               CheckConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
               MainField = FunQLName entityAttr.MainField
               ForbidExternalReferences = entityAttr.ForbidExternalReferences
+              ForbidTriggers = entityAttr.ForbidTriggers
               IsHidden = entityAttr.IsHidden
               Parent = None
               IsAbstract = entityClass.IsAbstract

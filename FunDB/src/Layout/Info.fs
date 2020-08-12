@@ -9,102 +9,104 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 [<NoEquality; NoComparison>]
 type SerializedColumnField =
-    { fieldType : ResolvedFieldType
-      valueType : SQL.SimpleValueType
-      defaultValue : FieldValue option
-      isNullable : bool
-      isImmutable : bool
-      inheritedFrom : ResolvedEntityRef option
+    { FieldType : ResolvedFieldType
+      ValueType : SQL.SimpleValueType
+      DefaultValue : FieldValue option
+      IsNullable : bool
+      IsImmutable : bool
+      InheritedFrom : ResolvedEntityRef option
     }
 
 [<NoEquality; NoComparison>]
 type SerializedComputedField =
-    { expression : string
-      allowBroken : bool
-      isBroken : bool
-      inheritedFrom : ResolvedEntityRef option
-      isVirtual : bool
+    { Expression : string
+      AllowBroken : bool
+      IsBroken : bool
+      InheritedFrom : ResolvedEntityRef option
+      IsVirtual : bool
     }
 
 [<NoEquality; NoComparison>]
 type SerializedChildEntity =
-    { ref : ResolvedEntityRef
-      direct : bool
+    { Ref : ResolvedEntityRef
+      Direct : bool
     }
 
 [<NoEquality; NoComparison>]
 type SerializedEntity =
-    { columnFields : Map<FieldName, SerializedColumnField>
-      computedFields : Map<FieldName, SerializedComputedField>
-      uniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
-      checkConstraints : Map<ConstraintName, SourceCheckConstraint>
-      mainField : FieldName
-      forbidExternalReferences : bool
-      isHidden : bool
-      parent : ResolvedEntityRef option
-      children : SerializedChildEntity seq
-      isAbstract : bool
-      root : ResolvedEntityRef
+    { ColumnFields : Map<FieldName, SerializedColumnField>
+      ComputedFields : Map<FieldName, SerializedComputedField>
+      UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
+      CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
+      MainField : FieldName
+      ForbidExternalReferences : bool
+      ForbidTriggers : bool
+      IsHidden : bool
+      Parent : ResolvedEntityRef option
+      Children : SerializedChildEntity seq
+      IsAbstract : bool
+      Root : ResolvedEntityRef
     }
 
 [<NoEquality; NoComparison>]
 type SerializedSchema =
-    { entities : Map<EntityName, SerializedEntity>
-      roots : Set<EntityName>
+    { Entities : Map<EntityName, SerializedEntity>
+      Roots : Set<EntityName>
     }
 
 [<NoEquality; NoComparison>]
 type SerializedLayout =
-    { schemas : Map<SchemaName, SerializedSchema>
+    { Schemas : Map<SchemaName, SerializedSchema>
     }
 
 let serializeComputedField (comp : ResolvedComputedField) : SerializedComputedField =
-    { expression = comp.expression.ToFunQLString()
-      inheritedFrom = comp.inheritedFrom
-      allowBroken = comp.allowBroken
-      isBroken = false
-      isVirtual = Option.isSome comp.virtualCases
+    { Expression = comp.expression.ToFunQLString()
+      InheritedFrom = comp.inheritedFrom
+      AllowBroken = comp.allowBroken
+      IsBroken = false
+      IsVirtual = Option.isSome comp.virtualCases
     }
 
 let serializeComputedFieldError (comp : ComputedFieldError) : SerializedComputedField =
-    { expression = comp.source.Expression
-      inheritedFrom = comp.inheritedFrom
-      allowBroken = comp.source.AllowBroken
-      isBroken = true
-      isVirtual = comp.source.IsVirtual
+    { Expression = comp.source.Expression
+      InheritedFrom = comp.inheritedFrom
+      AllowBroken = comp.source.AllowBroken
+      IsBroken = true
+      IsVirtual = comp.source.IsVirtual
     }
 
 let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField =
-    { fieldType = column.fieldType
-      valueType = column.valueType
-      isNullable = column.isNullable
-      isImmutable = column.isImmutable
-      defaultValue = column.defaultValue
-      inheritedFrom = column.inheritedFrom
+    { FieldType = column.fieldType
+      ValueType = column.valueType
+      IsNullable = column.isNullable
+      IsImmutable = column.isImmutable
+      DefaultValue = column.defaultValue
+      InheritedFrom = column.inheritedFrom
     }
 
 let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
     let mapComputed name = function
         | Ok f -> serializeComputedField f
         | Error e -> serializeComputedFieldError e
-    { columnFields = Map.map (fun name col -> serializeColumnField col) entity.columnFields
-      computedFields = Map.map mapComputed entity.computedFields
-      uniqueConstraints = Map.map (fun name constr -> renderUniqueConstraint constr) entity.uniqueConstraints
-      checkConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
-      mainField = entity.mainField
-      forbidExternalReferences = entity.forbidExternalReferences
-      isHidden = entity.isHidden
-      parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
-      isAbstract = entity.isAbstract
-      children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { ref = ref; direct = info.direct })
-      root = entity.root
+    { ColumnFields = Map.map (fun name col -> serializeColumnField col) entity.columnFields
+      ComputedFields = Map.map mapComputed entity.computedFields
+      UniqueConstraints = Map.map (fun name constr -> renderUniqueConstraint constr) entity.uniqueConstraints
+      CheckConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
+      MainField = entity.mainField
+      ForbidExternalReferences = entity.forbidExternalReferences
+      ForbidTriggers = entity.forbidTriggers
+      IsHidden = entity.isHidden
+      Parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
+      IsAbstract = entity.isAbstract
+      Children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.direct })
+      Root = entity.root
     }
 
 let serializeSchema (schema : ResolvedSchema) : SerializedSchema =
-    { entities = Map.map (fun name entity -> serializeEntity entity) schema.entities
-      roots = schema.roots
+    { Entities = Map.map (fun name entity -> serializeEntity entity) schema.entities
+      Roots = schema.roots
     }
 
 let serializeLayout (layout : Layout) : SerializedLayout =
-    { schemas = Map.map (fun name schema -> serializeSchema schema) layout.schemas
+    { Schemas = Map.map (fun name schema -> serializeSchema schema) layout.schemas
     }

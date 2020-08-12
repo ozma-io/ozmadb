@@ -37,6 +37,7 @@ let renderEntity (entity : ResolvedEntity) : SourceEntity =
       CheckConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
       MainField = entity.mainField
       ForbidExternalReferences = entity.forbidExternalReferences
+      ForbidTriggers = entity.forbidTriggers
       IsHidden = entity.isHidden
       Parent = Option.map (fun inher -> inher.parent) entity.inheritance
       IsAbstract = entity.isAbstract

@@ -19,10 +19,12 @@ let private checkName (FunQLName name) : unit =
     if not <| goodName name then
         raisef ResolveTriggersException "Invalid role name"
 
-type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
+type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, triggers : SourceTriggers) =
     let isolate = Isolate.NewWithHeapSize (1024UL * 1024UL, 16UL * 1024UL * 1024UL)
 
     let resolveTrigger (entity : ResolvedEntity) (trigger : SourceTrigger) : ResolvedTrigger =
+        if entity.forbidTriggers then
+            raisef ResolveTriggersException "Triggers are disabled for this entity"
         try
             ignore <| UnboundScript.Compile(isolate, String.New(isolate, trigger.Procedure))
         with
@@ -70,7 +72,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             }
         (errors, ret)
 
-    let resolveTriggersSchema (schemaName : SchemaName) (schema : ResolvedSchema) (schemaTriggers : SourceTriggersSchema) : ErroredTriggersSchema * TriggersSchema =
+    let resolveTriggersSchema (schema : ResolvedSchema) (schemaTriggers : SourceTriggersSchema) : ErroredTriggersSchema * TriggersSchema =
         let mutable errors = Map.empty
 
         let mapEntity name entityAttrs =
@@ -100,7 +102,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     match Map.tryFind name layout.schemas with
                     | None -> raisef ResolveTriggersException "Unknown schema name"
                     | Some schema -> schema
-                let (schemaErrors, newSchema) = resolveTriggersSchema name schema schemaAttrs
+                let (schemaErrors, newSchema) = resolveTriggersSchema schema schemaAttrs
                 if not <| Map.isEmpty schemaErrors then
                     errors <- Map.add name schemaErrors errors
                 newSchema
@@ -112,7 +114,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             } : TriggersDatabase
         (errors, ret)
 
-    let resolveTriggers (triggers : SourceTriggers) : ErroredTriggers * ResolvedTriggers =
+    let resolveTriggers () : ErroredTriggers * ResolvedTriggers =
         let mutable errors = Map.empty
 
         let mapDatabase name db =
@@ -131,8 +133,8 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             }
         (errors, ret)
 
-    member this.ResolveTriggers triggers = resolveTriggers triggers
+    member this.ResolveTriggers () = resolveTriggers ()
 
 let resolveTriggers (layout : Layout) (forceAllowBroken : bool) (source : SourceTriggers) : ErroredTriggers * ResolvedTriggers =
-    let phase1 = Phase1Resolver (layout, forceAllowBroken)
-    phase1.ResolveTriggers source
+    let phase1 = Phase1Resolver (layout, forceAllowBroken, source)
+    phase1.ResolveTriggers ()

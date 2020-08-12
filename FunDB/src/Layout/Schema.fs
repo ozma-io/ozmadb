@@ -49,6 +49,7 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         then funId
         else FunQLName entity.MainField
       ForbidExternalReferences = entity.ForbidExternalReferences
+      ForbidTriggers = entity.ForbidTriggers
       IsHidden = entity.IsHidden
       Parent =
         if entity.Parent = null

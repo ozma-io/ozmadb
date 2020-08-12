@@ -149,16 +149,17 @@ let applyRoleInfo (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedE
 
     let columnFields = entity.columnFields |> Map.mapMaybe getField
 
-    { columnFields = columnFields
+    { ColumnFields = columnFields
       // FIXME!
-      computedFields = Map.empty
-      uniqueConstraints = Map.empty
-      checkConstraints = Map.empty
-      mainField = entity.mainField
-      forbidExternalReferences = entity.forbidExternalReferences
-      isHidden = entity.isHidden
-      parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
-      children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { ref = ref; direct = info.direct })
-      isAbstract = entity.isAbstract
-      root = entity.root
+      ComputedFields = Map.empty
+      UniqueConstraints = Map.empty
+      CheckConstraints = Map.empty
+      MainField = entity.mainField
+      ForbidExternalReferences = entity.forbidExternalReferences
+      ForbidTriggers = entity.forbidTriggers
+      IsHidden = entity.isHidden
+      Parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
+      Children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.direct })
+      IsAbstract = entity.isAbstract
+      Root = entity.root
     }
