@@ -1,7 +1,6 @@
 module FunWithFlags.FunUtils.Serialization.Yaml
 
 open System
-open System.Reflection
 open System.Collections.Generic
 open YamlDotNet.Core
 open YamlDotNet.Core.Events
@@ -11,7 +10,7 @@ open YamlDotNet.Serialization.NodeDeserializers
 open YamlDotNet.Serialization.Utilities
 open Microsoft.FSharp.Reflection
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 
 // https://github.com/aaubry/YamlDotNet/issues/459

@@ -4,7 +4,7 @@ open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.FunQL.AST
@@ -71,18 +71,22 @@ type PrefetchedViewsSchema =
 
 [<NoEquality; NoComparison>]
 type PrefetchedUserViews =
-    { Schemas : Map<SchemaName, PrefetchedViewsSchema>
+    { Schemas : Map<SchemaName, Result<PrefetchedViewsSchema, UserViewsSchemaError>>
     } with
         member this.Find (ref : ResolvedUserViewRef) =
             match Map.tryFind ref.schema this.Schemas with
-            | None -> None
-            | Some schema -> Map.tryFind ref.name schema.UserViews
+            | Some (Ok schema) -> Map.tryFind ref.name schema.UserViews
+            | _ -> None
 
 let private mergePrefetchedViewsSchema (a : PrefetchedViewsSchema) (b : PrefetchedViewsSchema) =
     { UserViews = Map.unionUnique a.UserViews b.UserViews }
 
 let mergePrefetchedUserViews (a : PrefetchedUserViews) (b : PrefetchedUserViews) =
-    { Schemas = Map.unionWith (fun name -> mergePrefetchedViewsSchema) a.Schemas b.Schemas }
+    let mergeOne a b =
+        match (a, b) with
+        | (Ok schema1, Ok schema2) -> Ok (mergePrefetchedViewsSchema schema1 schema2)
+        | _ -> failwith "Cannot merge different error types"
+    { Schemas = Map.unionWith (fun name -> mergeOne) a.Schemas b.Schemas }
 
 type UserViewDryRunException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -184,20 +188,20 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
     let rec dryRunUserView (uv : ResolvedUserView) : Task<PrefetchedUserView> =
         task {
             let limited =
-                { uv.compiled with
+                { uv.Compiled with
                       query =
-                          { uv.compiled.query with
-                                expression = limitView uv.compiled.query.expression
+                          { uv.Compiled.query with
+                                expression = limitView uv.Compiled.query.expression
                           }
                 }
-            let arguments = uv.compiled.query.arguments.types |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType)
+            let arguments = uv.Compiled.query.arguments.types |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType)
 
             try
                 return! runViewExpr conn limited arguments cancellationToken <| fun info res ->
                     Task.FromResult
                         { UserView = uv
-                          Info = mergeViewInfo uv.resolved uv.compiled info
-                          PureAttributes = getPureAttributes uv.resolved uv.compiled res
+                          Info = mergeViewInfo uv.Resolved uv.Compiled info
+                          PureAttributes = getPureAttributes uv.Resolved uv.Compiled res
                         }
             with
             | :? QueryException as err ->
@@ -211,48 +215,50 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             task {
                 let ref = { schema = schemaName; name = name }
                 match maybeUv with
-                | Error e when not (withThisBroken e.source.AllowBroken) -> return None
+                | Error e when not (withThisBroken e.Source.AllowBroken) -> return None
                 | Error e -> return Some (name, Error e)
-                | Ok uv when not (withThisBroken uv.allowBroken) -> return None
+                | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
                 | Ok uv ->
                     try
                         let! r = dryRunUserView uv
                         return Some (name, Ok r)
                     with
                     | :? UserViewDryRunException as e ->
-                        if uv.allowBroken || forceAllowBroken then
-                            if not uv.allowBroken then
+                        if uv.AllowBroken || forceAllowBroken then
+                            if not uv.AllowBroken then
                                 errors <- Map.add name (e :> exn) errors
                             let err =
-                                { error = e :> exn
-                                  source = Map.find name sourceSchema.UserViews
-                                }
+                                { Error = e :> exn
+                                  Source = Map.find name sourceSchema.UserViews
+                                } : UserViewError
                             return Some (name, Error err)
                         else
                             return raisefWithInner UserViewDryRunException e "Error in user view %O" ref
             }
 
-        let! userViews = schema.userViews |> Map.toSeq |> Seq.mapTaskSync mapUserView |> Task.map (Seq.catMaybes >> Map.ofSeq)
+        let! userViews = schema.UserViews |> Map.toSeq |> Seq.mapTask mapUserView |> Task.map (Seq.catMaybes >> Map.ofSeq)
         let ret = { UserViews = userViews } : PrefetchedViewsSchema
         return (errors, ret)
     }
 
     let resolveUserViews (source : SourceUserViews) (resolved : UserViews) : Task<ErroredUserViews * PrefetchedUserViews> = task {
-        let mutable errors = Map.empty
+        let mutable errors : ErroredUserViews = Map.empty
 
-        let mapSchema name schema =
-            task {
-                try
-                    let! (schemaErrors, newSchema) = resolveUserViewsSchema name (Map.find name source.Schemas) schema
-                    if not <| Map.isEmpty schemaErrors then
-                        errors <- Map.add name schemaErrors errors
-                    return newSchema
-                with
-                | :? UserViewDryRunException as e ->
-                    return raisefWithInner UserViewDryRunException e.InnerException "Error in schema %O: %s" name e.Message
-            }
+        let mapSchema name = function
+            | Ok schema ->
+                task {
+                    try
+                        let! (schemaErrors, newSchema) = resolveUserViewsSchema name (Map.find name source.Schemas) schema
+                        if not <| Map.isEmpty schemaErrors then
+                            errors <- Map.add name (Ok schemaErrors) errors
+                        return Ok newSchema
+                    with
+                    | :? UserViewDryRunException as e ->
+                        return raisefWithInner UserViewDryRunException e.InnerException "Error in schema %O: %s" name e.Message
+                }
+            | Error e -> Task.result (Error e)
 
-        let! schemas = resolved.schemas |> Map.mapTaskSync mapSchema
+        let! schemas = resolved.Schemas |> Map.mapTask mapSchema
         let ret = { Schemas = schemas } : PrefetchedUserViews
         return (errors, ret)
     }
@@ -274,10 +280,10 @@ let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (q: Resol
 
 let private renderPrefetchedUserView : Result<PrefetchedUserView, UserViewError> -> SourceUserView = function
     | Ok uv ->
-        { Query = uv.UserView.resolved.ToFunQLString()
-          AllowBroken = uv.UserView.allowBroken
+        { Query = uv.UserView.Resolved.ToFunQLString()
+          AllowBroken = uv.UserView.AllowBroken
         }
-    | Error e -> e.source
+    | Error e -> e.Source
 
 let renderPrefetchedUserViewsSchema (schema : PrefetchedViewsSchema) : SourceUserViewsSchema =
     { UserViews = Map.map (fun name -> renderPrefetchedUserView) schema.UserViews
@@ -285,5 +291,9 @@ let renderPrefetchedUserViewsSchema (schema : PrefetchedViewsSchema) : SourceUse
     }
 
 let renderPrefetchedUserViews (uvs : PrefetchedUserViews) : SourceUserViews =
-    { Schemas = Map.map (fun schemaName -> renderPrefetchedUserViewsSchema) uvs.Schemas
+    let renderOne = function
+    | Ok schema -> renderPrefetchedUserViewsSchema schema
+    | Error e -> e.Source
+
+    { Schemas = Map.map (fun schemaName -> renderOne) uvs.Schemas
     }

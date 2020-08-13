@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Layout.Source
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 
 // Source Layout; various layout sources, like database or system layout, are converted into this.

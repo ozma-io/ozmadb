@@ -7,7 +7,7 @@ open System.Reflection
 open System.ComponentModel
 open Microsoft.FSharp.Reflection
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 
 type UnionCase =
     { Info : UnionCaseInfo

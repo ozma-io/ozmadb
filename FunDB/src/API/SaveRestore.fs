@@ -1,87 +1,109 @@
 module FunWithFlags.FunDB.API.SaveRestore
 
 open System.IO
-open Microsoft.AspNetCore.Http
+open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
-open Giraffe
+open Microsoft.Extensions.Logging
 
-open FunWithFlags.FunDB.API.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Operations.SaveRestore
-open FunWithFlags.FunDB.Operations.Context
+open FunWithFlags.FunDB.API.Types
 
-let private saveError e = 
-    let handler =
-        match e with
-        | SENotFound -> RequestErrors.notFound
-        | SEAccessDenied -> RequestErrors.forbidden
-    handler (json e)
+let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<EntityArguments, string> =
+    let getValue (fieldName : FieldName, field : ResolvedColumnField) =
+        match Map.tryFind (fieldName.ToString()) rawArgs with
+        | None -> Ok None
+        | Some value ->
+            match parseValueFromJson field.fieldType field.isNullable value with
+            | None -> Error <| sprintf "Cannot convert field to expected type %O: %O" field.fieldType fieldName
+            | Some arg -> Ok (Some (fieldName, arg))
+    match entity.columnFields |> Map.toSeq |> Seq.traverseResult getValue with
+    | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
+    | Error err -> Error err
 
-let private restoreError e = 
-    let handler =
-        match e with
-        | REAccessDenied -> RequestErrors.forbidden
-        | REPreloaded -> RequestErrors.unprocessableEntity
-        | REInvalidFormat _ -> RequestErrors.unprocessableEntity
-    handler (json e)
+let private isRootRole : RoleType -> bool = function
+    | RTRoot -> true
+    | RTRole _ -> false
 
-let saveRestoreApi : HttpHandler =
-    let saveZipSchema (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        let (schemaName, rctx) = arg :?> (SchemaName * RequestContext)
-        match! rctx.SaveZipSchema schemaName with
-        | Ok dumpStream -> return! ctx.WriteStreamAsync false dumpStream None None
-        | Error err -> return! saveError err next ctx
-    }
+type SaveRestoreAPI (rctx : IRequestContext) =
+    let ctx = rctx.Context
+    let logger = ctx.LoggerFactory.CreateLogger<SaveRestoreAPI>()
 
-    let saveJsonSchema (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        let (schemaName, rctx) = arg :?> (SchemaName * RequestContext)
-        match! rctx.SaveSchema schemaName with
-        | Ok dump -> return! Successful.ok (json dump) next ctx
-        | Error err -> return! saveError err next ctx
-    }
+    member this.SaveSchema (name : SchemaName) : Task<Result<SchemaDump, SaveErrorInfo>> =
+        task {
+            if not (isRootRole rctx.User.Type) then
+                logger.LogError("Dump access denied")
+                do! rctx.WriteEvent (fun event ->
+                    event.Type <- "saveSchema"
+                    event.Error <- "access_denied"
+                )
+                return Error RSEAccessDenied
+            else
+                try
+                    let! schema = saveSchema ctx.Transaction.System name ctx.CancellationToken
+                    return Ok schema
+                with
+                | :? SaveSchemaException as ex ->
+                    match ex.Info with
+                    | SENotFound -> return Error RSENotFound
+        }
 
-    let saveSchemaNegotiationRules =
-        dict [
-            "*/*"             , saveZipSchema
-            "application/json", saveJsonSchema
-            "application/zip" , saveZipSchema
-        ]
+    member this.SaveZipSchema (name : SchemaName) : Task<Result<Stream, SaveErrorInfo>> =
+        task {
+            match! this.SaveSchema name with
+            | Error e -> return Error e
+            | Ok dump ->
+                let stream = new MemoryStream()
+                schemasToZipFile (Map.singleton name dump) stream
+                ignore <| stream.Seek(0L, SeekOrigin.Begin)
+                return Ok (stream :> Stream)
+        }
 
-    let saveSchema (schemaName : SchemaName) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        let negotiateConfig = ctx.GetService<INegotiationConfig>()
-        return! negotiateWith saveSchemaNegotiationRules negotiateConfig.UnacceptableHandler (schemaName, rctx) next ctx
-    }
+    member this.RestoreSchema (name : SchemaName) (dump : SchemaDump) : Task<Result<unit, RestoreErrorInfo>> =
+        task {
+            if not (isRootRole rctx.User.Type) then
+                logger.LogError("Restore access denied")
+                do! rctx.WriteEvent (fun event ->
+                    event.Type <- "restoreSchema"
+                    event.Error <- "access_denied"
+                )
+                return Error RREAccessDenied
+            else if Map.containsKey name ctx.Preload.Schemas then
+                logger.LogError("Cannot restore preloaded schemas")
+                do! rctx.WriteEvent (fun event ->
+                    event.Type <- "restoreSchema"
+                    event.Error <- "preloaded"
+                )
+                return Error RREPreloaded
+            else
+                let! modified = restoreSchema ctx.Transaction.System name dump ctx.CancellationToken
+                if modified then
+                    ctx.ScheduleMigration ()
+                rctx.WriteEventSync (fun event ->
+                    event.Type <- "restoreSchema"
+                    event.Details <- dump.ToString()
+                )
+                return Ok ()
+        }
 
-    let restoreJsonSchema (schemaName : SchemaName) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        let! dump = ctx.BindJsonAsync<SchemaDump>()
-        match! rctx.RestoreSchema schemaName dump with
-        | Ok () -> return! commitAndOk rctx next ctx
-        | Error err -> return! restoreError err next ctx
-    }
+    member this.RestoreZipSchema (name : SchemaName) (stream : Stream) : Task<Result<unit, RestoreErrorInfo>> =
+        task {
+            let maybeDumps =
+                try
+                    Ok <| schemasFromZipFile stream
+                with
+                | :? RestoreSchemaException as e -> Error (RREInvalidFormat <| exceptionString e)
+            match Result.map (Map.toList) maybeDumps with
+            | Error e -> return Error e
+            | Ok [(dumpName, dump)] when name = dumpName -> return! this.RestoreSchema name dump
+            | Ok _ -> return Error (RREInvalidFormat <| sprintf "Archive should only contain directory %O" name)
+        }
 
-    let restoreZipSchema (schemaName : SchemaName) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        use stream = new MemoryStream()
-        do! ctx.Request.Body.CopyToAsync(stream)
-        ignore <| stream.Seek(0L, SeekOrigin.Begin)
-        match! rctx.RestoreZipSchema schemaName stream with
-        | Ok () -> return! commitAndOk rctx next ctx
-        | Error err -> return! restoreError err next ctx
-    }
-
-    let restoreSchema (schemaName : SchemaName) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        match ctx.TryGetRequestHeader "Content-Type" with
-        | Some "application/zip" -> return! restoreZipSchema schemaName rctx next ctx
-        | Some "application/json" -> return! restoreJsonSchema schemaName rctx next ctx
-        | _ -> return! RequestErrors.unsupportedMediaType (errorJson "Unsupported media type") next ctx
-    }
-
-    let saveRestoreApi (schema : string) =
-        let schemaName = FunQLName schema
-        choose
-            [ GET >=> withContext (saveSchema schemaName)
-              PUT >=> withContext (restoreSchema schemaName)
-            ]
-
-    choose
-        [ subRoutef "/layouts/%s" saveRestoreApi
-        ]
+    interface ISaveRestoreAPI with
+        member this.SaveSchema name = this.SaveSchema name
+        member this.SaveZipSchema name = this.SaveZipSchema name
+        member this.RestoreSchema name dump = this.RestoreSchema name dump
+        member this.RestoreZipSchema name stream = this.RestoreZipSchema name stream

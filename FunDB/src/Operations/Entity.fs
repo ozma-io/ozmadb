@@ -4,7 +4,7 @@ open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile

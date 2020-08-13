@@ -10,7 +10,9 @@ open Newtonsoft.Json
 open YamlDotNet.Serialization.NamingConventions
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.IO
+open FunWithFlags.FunUtils.Parsing
 open FunWithFlags.FunUtils.Serialization.Yaml
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
@@ -86,11 +88,19 @@ type PrettyTriggerMeta =
       OnDelete : bool
     }
 
+type PrettyUserViewMeta =
+    { AllowBroken : bool
+    }
+
+type PrettyUserViewsGeneratorScriptMeta =
+    { AllowBroken : bool
+    }
+
 type SchemaDump =
     { Entities : Map<EntityName, SourceEntity>
       Roles : Map<RoleName, SourceRole>
       UserViews : Map<UserViewName, SourceUserView>
-      UserViewsGeneratorScript : string option
+      UserViewsGeneratorScript : SourceUserViewsGeneratorScript option
       DefaultAttributes : Map<SchemaName, SourceAttributesSchema>
       Triggers : Map<SchemaName, SourceTriggersSchema>
     }
@@ -151,13 +161,15 @@ let restoreSchema (db : SystemContext) (name : SchemaName) (dump : SchemaDump) (
                 }
             { Schemas = Map.singleton name uvs } : SourceUserViews
         let newAttributes = { Schemas = Map.singleton name { Schemas = dump.DefaultAttributes } } : SourceDefaultAttributes
+        let newTriggers = { Schemas = Map.singleton name { Schemas = dump.Triggers } } : SourceTriggers
 
         let! updated1 = updateLayout db newLayout cancellationToken
         let! updated2 = updatePermissions db newPerms cancellationToken
         let! updated3 = updateUserViews db newUserViews cancellationToken
         let! updated4 = updateAttributes db newAttributes cancellationToken
+        let! updated5 = updateTriggers db newTriggers cancellationToken
 
-        return updated1 || updated2 || updated3 || updated4
+        return updated1 || updated2 || updated3 || updated4 || updated5
     }
 
 let private prettifyTriggerMeta (trigger : SourceTrigger) : PrettyTriggerMeta =
@@ -254,11 +266,10 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
 
 let private extraDefaultAttributesEntry = "extra_default_attributes.yaml"
 
+let private userViewsGeneratorMetaEntry = "user_views_generator.yaml"
 let private userViewsGeneratorEntry = "user_views_generator.js"
 
 let private maxFilesSize = 1L * 1024L * 1024L // 1MB
-
-let private uvPragmaAllowBroken = "--#allow_broken"
 
 let myYamlSerializer = makeYamlSerializer { defaultYamlSerializerSettings with NamingConvention = CamelCaseNamingConvention.Instance }
 
@@ -290,10 +301,10 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
             dumpToEntry (sprintf "roles/%O.yaml" name) role
 
         for KeyValue(name, uv) in dump.UserViews do
-            useEntry (sprintf "user_views/%O.funql" name) <| fun writer ->
-                if uv.AllowBroken then
-                    writer.WriteLine(uvPragmaAllowBroken)
-                writer.Write(uv.Query)
+            useEntry (sprintf "user_views/%O.funql" name) <| fun writer -> writer.Write(uv.Query)
+            if uv.AllowBroken then
+                let uvMeta = { AllowBroken = true } : PrettyUserViewMeta
+                dumpToEntry (sprintf "user_views/%O.yaml" name) uvMeta
 
         for KeyValue(schemaName, schemaTriggers) in dump.Triggers do
             for KeyValue(entityName, entityTriggers) in schemaTriggers.Entities do
@@ -310,8 +321,10 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
         match dump.UserViewsGeneratorScript with
         | None -> ()
         | Some script ->
-            useEntry userViewsGeneratorEntry <| fun writer ->
-                writer.Write(script)
+            useEntry userViewsGeneratorEntry <| fun writer -> writer.Write(script)
+            if script.AllowBroken then
+                let scriptMeta = { AllowBroken = true } : PrettyUserViewsGeneratorScriptMeta
+                dumpToEntry userViewsGeneratorMetaEntry scriptMeta
 
     if totalSize > maxFilesSize then
         failwithf "Total files size in archive is %i, which is too large" totalSize
@@ -340,6 +353,8 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
         | :? JsonSerializationException as e -> raisefWithInner RestoreSchemaException e "Error during deserializing archive entry %s" entry.FullName
 
     let mutable encounteredTriggers : Map<SchemaName * ResolvedFieldRef, PrettyTriggerMeta option * string> = Map.empty
+    let mutable encounteredUserViews : Map<SchemaName * UserViewName, PrettyUserViewMeta * string> = Map.empty
+    let mutable encounteredUserViewGeneratorScripts : Map<SchemaName, PrettyUserViewsGeneratorScriptMeta * string> = Map.empty
 
     let parseZipEntry (entry : ZipArchiveEntry) : SchemaName * SchemaDump =
         let (schemaName, rawPath) =
@@ -384,33 +399,35 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                     { emptySchemaDump with
                           Roles = Map.singleton name role
                     }
+                | CIRegex @"^user_views/([^/]+)\.yaml$" [rawName] ->
+                    let name = FunQLName rawName
+                    let prettyUvMeta : PrettyUserViewMeta = deserializeEntry entry
+                    let (prevMeta, prevUv) = Map.findWithDefault (schemaName, name) (fun () -> (({ AllowBroken = false } : PrettyUserViewMeta), "")) encounteredUserViews
+                    encounteredUserViews <- Map.add (schemaName, name) (prettyUvMeta, prevUv) encounteredUserViews
+                    emptySchemaDump
                 | CIRegex @"^user_views/([^/]+)\.funql$" [rawName] ->
                     let name = FunQLName rawName
                     let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let uv =
-                        match regexMatch @"^[ \t\r\n]*--#allow_broken[ \t]*(?:\r|\n|\r\n)(.*)$" (RegexOptions.Singleline ||| RegexOptions.IgnoreCase) rawUv with
-                        | Some [query] ->
-                            { AllowBroken = true
-                              Query = query
-                            }
-                        | Some _ -> failwith "Impossible"
-                        | None ->
-                            { AllowBroken = false
-                              Query = rawUv
-                            }
-                    { emptySchemaDump with
-                          UserViews = Map.singleton name uv
-                    }
+
+                    let (prevMeta, prevUv) = Map.findWithDefault (schemaName, name) (fun () -> (({ AllowBroken = false } : PrettyUserViewMeta), "")) encounteredUserViews
+                    assert (prevUv = "")
+                    encounteredUserViews <- Map.add (schemaName, name) (prevMeta, rawUv) encounteredUserViews
+                    emptySchemaDump
                 | fileName when fileName = extraDefaultAttributesEntry ->
                     let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
                     { emptySchemaDump with
                           DefaultAttributes = defaultAttrs
                     }
+                | fileName when fileName = userViewsGeneratorMetaEntry ->
+                    let prettyGeneratorMeta : PrettyUserViewsGeneratorScriptMeta = deserializeEntry entry
+                    let (prevMeta, prevScript) = Map.findWithDefault schemaName (fun () -> (({ AllowBroken = false } : PrettyUserViewsGeneratorScriptMeta), "")) encounteredUserViewGeneratorScripts
+                    encounteredUserViewGeneratorScripts <- Map.add schemaName (prettyGeneratorMeta, prevScript) encounteredUserViewGeneratorScripts
+                    emptySchemaDump
                 | fileName when fileName = userViewsGeneratorEntry ->
                     let script = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    { emptySchemaDump with
-                          UserViewsGeneratorScript = Some script
-                    }
+                    let (prevMeta, prevScript) = Map.findWithDefault schemaName (fun () -> (({ AllowBroken = false } : PrettyUserViewsGeneratorScriptMeta), "")) encounteredUserViewGeneratorScripts
+                    encounteredUserViewGeneratorScripts <- Map.add schemaName (prevMeta, script) encounteredUserViewGeneratorScripts
+                    emptySchemaDump
                 | fileName -> raisef RestoreSchemaException "Invalid archive entry %O/%s" schemaName fileName
         (schemaName, dump)
 
@@ -435,6 +452,20 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
     let dump =
         encounteredTriggers
             |> Seq.map (convertTrigger >> uncurry Map.singleton)
+            |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) dump
+    let convertUserView (KeyValue((schemaName, name), (meta : PrettyUserViewMeta, uv))) =
+        let ret = { emptySchemaDump with UserViews = Map.singleton name { Query = uv; AllowBroken = meta.AllowBroken } }
+        (schemaName, ret)
+    let dump =
+        encounteredUserViews
+            |> Seq.map (convertUserView >> uncurry Map.singleton)
+            |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) dump
+    let convertUserViewsGeneratorScript (KeyValue(schemaName, (meta : PrettyUserViewsGeneratorScriptMeta, script))) =
+        let ret = { emptySchemaDump with UserViewsGeneratorScript = Some { Script = script; AllowBroken = meta.AllowBroken } }
+        (schemaName, ret)
+    let dump =
+        encounteredUserViewGeneratorScripts
+            |> Seq.map (convertUserViewsGeneratorScript >> uncurry Map.singleton)
             |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) dump
 
     dump

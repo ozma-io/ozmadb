@@ -36,6 +36,7 @@
     <Compile Include="src/SQL/Meta.fs" />
 
     <Compile Include="src/Connection.fs" />
+    <Compile Include="src/EventLogger.fs" />
 
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />
@@ -102,25 +103,30 @@
     <Compile Include="src/UserViews/Types.fs" />
     <Compile Include="src/UserViews/Resolve.fs" />
     <Compile Include="src/UserViews/Schema.fs" />
-    <Compile Include="src/UserViews/Generate.fs" />
     <Compile Include="src/UserViews/Render.fs" />
+    <Compile Include="src/UserViews/Generate.fs" />
     <Compile Include="src/UserViews/Update.fs" />
     <Compile Include="src/UserViews/DryRun.fs" />
 
     <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/Entity.fs" />
-    <Compile Include="src/Operations/EventLogger.fs" />
-    <Compile Include="src/Operations/ContextCache.fs" />
-    <Compile Include="src/Operations/InstancesCache.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
-    <Compile Include="src/Operations/Context.fs" />
-    <Compile Include="src/Operations/JavaScript.fs" />
 
-    <Compile Include="src/API/Utils.fs" />
-    <Compile Include="src/API/Info.fs" />
-    <Compile Include="src/API/View.fs" />
-    <Compile Include="src/API/Entity.fs" />
+    <Compile Include="src/API/Types.fs" />
+    <Compile Include="src/API/ContextCache.fs" />
+    <Compile Include="src/API/InstancesCache.fs" />
+    <Compile Include="src/API/Request.fs" />
+    <Compile Include="src/API/UserViews.fs" />
+    <Compile Include="src/API/Entities.fs" />
     <Compile Include="src/API/SaveRestore.fs" />
+    <Compile Include="src/API/API.fs" />
+    <Compile Include="src/API/JavaScript.fs" />
+
+    <Compile Include="src/HTTP/Utils.fs" />
+    <Compile Include="src/HTTP/Info.fs" />
+    <Compile Include="src/HTTP/View.fs" />
+    <Compile Include="src/HTTP/Entity.fs" />
+    <Compile Include="src/HTTP/SaveRestore.fs" />
     
     <Compile Include="src/Program.fs" />
   </ItemGroup>

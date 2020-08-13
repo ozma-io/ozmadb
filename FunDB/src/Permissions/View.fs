@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Permissions.View
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Optimize

@@ -21,16 +21,15 @@ open Npgsql
 
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils.Serialization.Json
-open FunWithFlags.FunUtils.Utils
-open FunWithFlags.FunDB.API.Info
-open FunWithFlags.FunDB.API.View
-open FunWithFlags.FunDB.API.Entity
-open FunWithFlags.FunDB.API.SaveRestore
-open FunWithFlags.FunDB.API.Utils
-open FunWithFlags.FunDB.Operations.InstancesCache
+open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.HTTP.Info
+open FunWithFlags.FunDB.HTTP.View
+open FunWithFlags.FunDB.HTTP.Entity
+open FunWithFlags.FunDB.HTTP.SaveRestore
+open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.Operations.Preload
-open FunWithFlags.FunDB.Operations.EventLogger
-open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.API.InstancesCache
+open FunWithFlags.FunDB.EventLogger
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 

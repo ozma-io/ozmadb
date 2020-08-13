@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Layout.Info
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types

@@ -1,15 +1,15 @@
-﻿module FunWithFlags.FunDB.API.Entity
+﻿module FunWithFlags.FunDB.HTTP.Entity
 
 open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Giraffe
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
-open FunWithFlags.FunDB.API.Utils
+open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.Operations.Context
+open FunWithFlags.FunDB.API.Types
 
 let private errorHandler = function
     | EENotFound -> RequestErrors.badRequest
@@ -18,9 +18,9 @@ let private errorHandler = function
     | EEExecution _ -> RequestErrors.unprocessableEntity
 
 let entitiesApi : HttpHandler =
-    let getEntityInfo (entityRef : ResolvedEntityRef) (rctx : RequestContext) : HttpHandler =
+    let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) : HttpHandler =
         fun next ctx -> task {
-            match! rctx.GetEntityInfo entityRef with
+            match! api.Entities.GetEntityInfo entityRef with
             | Ok info ->
                 return! Successful.ok (json info) next ctx
             | Result.Error err -> return! errorHandler err (json err) next ctx
@@ -35,12 +35,12 @@ let entitiesApi : HttpHandler =
             [ GET >=> withContext (getEntityInfo entityRef)
             ]
 
-    let runTransaction (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let runTransaction (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             let! transaction = ctx.BindModelAsync<Transaction>()
-            match! rctx.RunTransaction transaction with
+            match! api.Entities.RunTransaction transaction with
             | Ok ret ->
-                return! commitAndReturn (json ret) rctx next ctx
+                return! commitAndReturn (json ret) api next ctx
             | Error err ->
                 return! RequestErrors.badRequest (json err) next ctx
         }

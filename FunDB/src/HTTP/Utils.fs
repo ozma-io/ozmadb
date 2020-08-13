@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.API.Utils
+module FunWithFlags.FunDB.HTTP.Utils
 
 open System.Collections.Generic
 open System.Runtime.Serialization
@@ -14,10 +14,13 @@ open Newtonsoft.Json
 open Giraffe
 
 open FunWithFlags.FunDBSchema.Instances
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
-open FunWithFlags.FunDB.Operations.Context
-open FunWithFlags.FunDB.Operations.InstancesCache
+open FunWithFlags.FunDB.API.Types
+open FunWithFlags.FunDB.API.ContextCache
+open FunWithFlags.FunDB.API.Request
+open FunWithFlags.FunDB.API.InstancesCache
+open FunWithFlags.FunDB.API.API
 
 type APIError =
     { Message : string
@@ -62,14 +65,17 @@ let formArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : H
 let authorize =
     requiresAuthentication (challenge JwtBearerDefaults.AuthenticationScheme)
 
-let commitAndReturn (handler : HttpHandler) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+let commitAndReturn (handler : HttpHandler) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {
-        match! rctx.Commit () with
-        | Ok () -> return! Successful.ok handler next ctx
-        | Error msg -> return! RequestErrors.badRequest (errorJson msg) next ctx
+        try
+            do! api.Request.Context.Commit ()
+            return! Successful.ok handler next ctx
+        with
+        | :? ContextException as e ->
+            return! RequestErrors.badRequest (errorJson (exceptionString e)) next ctx
     }
 
-let commitAndOk : RequestContext -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
+let commitAndOk : IFunDBAPI -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
 
 type RealmAccess =
     { Roles : string[]
@@ -80,7 +86,7 @@ type IInstancesSource =
 
 let anonymousUsername = "anonymous@example.com"
 
-let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
+let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
     let makeContext (instance : Instance) (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
         let logger = ctx.GetLogger("withContext")
         logger.LogInformation("Creating context for instance {}, user {} (is_root: {})", instance.Name, userName, isRoot)
@@ -102,15 +108,15 @@ let withContext (f : RequestContext -> HttpHandler) : HttpHandler =
             | None -> "en-US"
 
         try
-            use! rctx =
+            use! dbCtx = cacheStore.GetCache ctx.RequestAborted
+            let! rctx =
                 RequestContext.Create
-                    { CacheStore = cacheStore
-                      UserName = userName
+                    { UserName = userName
                       IsRoot = (userName = instance.Owner || isRoot)
                       Language = lang
-                      CancellationToken = ctx.RequestAborted
+                      Context = dbCtx
                     }
-            return! f rctx next ctx
+            return! f (FunDBAPI rctx) next ctx
         with
         | :? RequestException as e ->
             match e.Info with

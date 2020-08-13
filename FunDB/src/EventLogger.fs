@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.Operations.EventLogger
+module FunWithFlags.FunDB.EventLogger
 
 open System
 open System.Data
@@ -19,10 +19,10 @@ type EventLogger (loggerFactory : ILoggerFactory) =
     let chan = Channel.CreateUnbounded<string * EventEntry>()
     let logger = loggerFactory.CreateLogger<EventLogger>()
 
-    override this.ExecuteAsync (stoppingToken : CancellationToken) : Task =
+    override this.ExecuteAsync (cancellationToken : CancellationToken) : Task =
         task {
-            while not stoppingToken.IsCancellationRequested do
-                match! chan.Reader.WaitToReadAsync stoppingToken with
+            while not cancellationToken.IsCancellationRequested do
+                match! chan.Reader.WaitToReadAsync cancellationToken with
                 | false -> ()
                 | true ->
                     let databaseConnections = Dictionary()
@@ -49,8 +49,7 @@ type EventLogger (loggerFactory : ILoggerFactory) =
                         let mutable totalChanged = 0
                         for KeyValue(connectionString, transaction) in databaseConnections do
                             try
-                                let! changed = transaction.System.SaveChangesAsync stoppingToken
-                                do! transaction.Commit ()
+                                let! changed = transaction.Commit (cancellationToken)
                                 totalChanged <- totalChanged + changed
                             with
                             | ex ->

@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Triggers.Merge
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types

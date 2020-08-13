@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.FunQL.Compile
 open NpgsqlTypes
 open Newtonsoft.Json.Linq
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve

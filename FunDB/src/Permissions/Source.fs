@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Permissions.Source
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 
 type ResolvedRoleRef = ResolvedEntityRef

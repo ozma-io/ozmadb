@@ -8,7 +8,18 @@
   </PropertyGroup>
 
   <ItemGroup>    
-    <Compile Include="src/Utils.fs" />
+    <Compile Include="src/Task.fs" />
+    <Compile Include="src/Option.fs" />
+    <Compile Include="src/Result.fs" />
+    <Compile Include="src/Seq.fs" />
+    <Compile Include="src/Set.fs" />
+    <Compile Include="src/Map.fs" />
+    <Compile Include="src/Array.fs" />
+    <Compile Include="src/String.fs" />
+    <Compile Include="src/Parsing.fs" />
+    <Compile Include="src/Collections.fs" />
+    <Compile Include="src/IO.fs" />
+    <Compile Include="src/TopLevel.fs" />
 
     <Compile Include="src/Serialization/Utils.fs" />
     <Compile Include="src/Serialization/Json.fs" />

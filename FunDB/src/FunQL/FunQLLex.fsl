@@ -5,7 +5,7 @@ module FunWithFlags.FunDB.FunQL.Lex
 open System
 open FSharp.Text.Lexing
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Parsing
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.Parsing
 

@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Permissions.Entity
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Optimize

@@ -186,6 +186,8 @@ namespace FunWithFlags.FunDBSchema.System
         public string Name { get; set; } = null!;
         [ColumnField("string")]
         public string? UserViewGeneratorScript { get; set; }
+        [ColumnField("bool", Default="false")]
+        public bool UserViewGeneratorScriptAllowBroken { get; set; }
 
         public List<Entity> Entities { get; set; } = null!;
         public List<Role> Roles { get; set; } = null!;
@@ -465,6 +467,6 @@ namespace FunWithFlags.FunDBSchema.System
         public string? Error { get; set; }
         [ColumnField("string", IsImmutable=true)]
         [Required]
-        public string Details { get; set; } = null!;
+        public string Details { get; set; } = "";
      }
 }

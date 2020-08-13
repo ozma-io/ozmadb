@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Attributes.Resolve
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lex

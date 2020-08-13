@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.Schema
 open Microsoft.EntityFrameworkCore
 open Npgsql.NameTranslation
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 
 let updateDifference (db : DbContext) (updateFunc : 'k -> 'nobj -> 'eobj -> unit) (createFunc : 'k -> 'eobj) (newObjects : Map<'k, 'nobj>) (existingObjects : Map<'k, 'eobj>) : Map<'k, 'eobj> =
     let updateObject (name, newObject) =

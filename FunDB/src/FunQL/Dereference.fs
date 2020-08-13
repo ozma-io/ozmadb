@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.FunQL.Dereference
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 

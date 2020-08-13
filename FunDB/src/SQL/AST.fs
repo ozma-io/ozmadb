@@ -7,7 +7,7 @@ open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.SQL.Utils
 
@@ -439,7 +439,7 @@ type [<CustomEquality; NoComparison>] ValueExpr =
                     match els with
                     | None -> ""
                     | Some e -> sprintf "ELSE %s" (e.ToSQLString())
-                concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
+                String.concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
             | VECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
@@ -502,7 +502,7 @@ and [<NoEquality; NoComparison>] FromExpr =
                     | None -> ""
                     | Some names -> names |> Seq.map (fun n -> n.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
                 let subStr = sprintf "(%s) AS %s" (expr.ToSQLString()) (name.ToSQLString())
-                concatWithWhitespaces [subStr; fieldNamesStr]
+                String.concatWithWhitespaces [subStr; fieldNamesStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -549,7 +549,7 @@ and [<NoEquality; NoComparison>] SingleSelectExpr =
                 else
                     sprintf "GROUP BY %s" (this.groupBy |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", ")
 
-            sprintf "SELECT %s" (concatWithWhitespaces [resultsStr; fromStr; whereStr; groupByStr; this.orderLimit.ToSQLString()])
+            sprintf "SELECT %s" (String.concatWithWhitespaces [resultsStr; fromStr; whereStr; groupByStr; this.orderLimit.ToSQLString()])
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -574,7 +574,7 @@ and [<NoEquality; NoComparison>] OrderLimitClause =
                     match this.offset with
                     | Some e -> sprintf "OFFSET %s" (e.ToSQLString())
                     | None -> ""
-                concatWithWhitespaces [orderByStr; limitStr; offsetStr]
+                String.concatWithWhitespaces [orderByStr; limitStr; offsetStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -595,7 +595,7 @@ and [<NoEquality; NoComparison>] SelectTreeExpr =
                 sprintf "VALUES %s" valuesStr
             | SSetOp (op, a, b, order) ->
                 let setStr = sprintf "(%s) %s (%s)" (a.ToSQLString()) (op.ToSQLString()) (b.ToSQLString())
-                concatWithWhitespaces [setStr; order.ToSQLString()]
+                String.concatWithWhitespaces [setStr; order.ToSQLString()]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -617,7 +617,7 @@ and [<NoEquality; NoComparison>] SelectExpr =
                         |> Seq.map (fun (name, expr) -> sprintf "%s AS (%s)" (name.ToSQLString()) (expr.ToSQLString()))
                         |> String.concat ", "
                         |> sprintf "WITH %s"
-            concatWithWhitespaces [ctesStr; this.tree.ToSQLString()]
+            String.concatWithWhitespaces [ctesStr; this.tree.ToSQLString()]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

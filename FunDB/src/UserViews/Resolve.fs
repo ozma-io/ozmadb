@@ -1,6 +1,9 @@
 module FunWithFlags.FunDB.UserViews.Resolve
 
-open FunWithFlags.FunUtils.Utils
+open NetJs
+open NetJs.Value
+
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Source
@@ -35,8 +38,13 @@ type private HalfResolvedView =
       AllowBroken : bool
     }
 
-type private HalfResolvedSchema = Map<UserViewName, Result<HalfResolvedView, UserViewError>>
-type private HalfResolvedViews = Map<SchemaName, HalfResolvedSchema>
+[<NoEquality; NoComparison>]
+type private HalfResolvedSchema =
+    { Source : SourceUserViewsSchema
+      UserViews : Map<UserViewName, Result<HalfResolvedView, UserViewError>>
+    }
+
+type private HalfResolvedViews = Map<SchemaName, Result<HalfResolvedSchema, UserViewsSchemaError>>
 
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let resolveUserView (uv : SourceUserView) : HalfResolvedView =
@@ -48,31 +56,33 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             try
                 resolveViewExpr layout parsed
             with
-            | :? ViewResolveException as err -> raisefWithInner UserViewResolveException err "Resolve error"
+            | :? ViewResolveException as e -> raisefWithInner UserViewResolveException e "Resolve error"
         { Source = uv
           Resolved = resolved
           AllowBroken = uv.AllowBroken
         }
 
-    let resolveUserViewsSchema (schema : SourceUserViewsSchema) : HalfResolvedSchema =
+    let resolveUserViewsSchema (schema : SourceUserViewsSchema) : Result<HalfResolvedSchema, UserViewsSchemaError> =
         let mapUserView name uv =
             try
                 checkName name
                 try
                     Ok <| resolveUserView uv
                 with
-                | :? UserViewResolveException as e ->
-                    if forceAllowBroken || uv.AllowBroken then
-                        let err =
-                            { error = e :> exn
-                              source = uv
-                            }
-                        Error err
-                    else
-                        reraise ()
+                | :? UserViewResolveException as e when (forceAllowBroken || uv.AllowBroken) ->
+                    let err =
+                        { Error = e :> exn
+                          Source = uv
+                        } : UserViewError
+                    Error err
             with
             | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "Error in user view %O: %s" name e.Message
-        schema.UserViews |> Map.map mapUserView
+
+        let uvs = schema.UserViews |> Map.map mapUserView
+
+        Ok { Source = schema
+             UserViews = uvs
+           }
 
     let resolveUserViews (uvs : SourceUserViews) : HalfResolvedViews =
         let mapSchema name schema =
@@ -102,12 +112,16 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
             match findExistingView ref with
             | Some _ -> ()
             | None ->
-                let schema =
+                let mschema =
                     match Map.tryFind ref.schema halfResolved with
                     | None -> raisef UserViewResolveException "Referenced view not found: %O" ref
                     | Some r -> r
-                if not <| Map.containsKey ref.name schema then
-                    raisef UserViewResolveException "Referenced view not found: %O" ref
+                match mschema with
+                | Ok schema ->
+                    if not <| Map.containsKey ref.name schema.UserViews then
+                        raisef UserViewResolveException "Referenced view not found: %O" ref
+                | Error e ->
+                    raisef UserViewResolveException "User view's schema is broken: %O" ref
 
         let dereferenced =
             try
@@ -116,9 +130,9 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
             | :? ViewDereferenceException as err -> raisefWithInner UserViewResolveException err "Dereference error"
         let compiled = compileViewExpr layout defaultAttrs dereferenced
 
-        { resolved = dereferenced
-          compiled = compiled
-          allowBroken = uv.AllowBroken
+        { Resolved = dereferenced
+          Compiled = compiled
+          AllowBroken = uv.AllowBroken
         }
 
     let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : ErroredUserViewsSchema * UserViewsSchema =
@@ -129,14 +143,14 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
             match maybeUv with
             | Error e ->
                 cachedViews <- Map.add ref (Error e) cachedViews
-                if not e.source.AllowBroken then
-                    errors <- Map.add name e.error errors
+                if not e.Source.AllowBroken then
+                    errors <- Map.add name e.Error errors
                 Error e
             | Ok uv ->
                 match findCached ref with
                 | Some (Error e) ->
-                    if not e.source.AllowBroken then
-                        errors <- Map.add name e.error errors
+                    if not e.Source.AllowBroken then
+                        errors <- Map.add name e.Error errors
                     Error e
                 | Some (Ok uv) -> Ok uv
                 | None ->
@@ -145,39 +159,44 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
                             let r = resolveUserView (Set.singleton ref) (Some schemaName) uv
                             Ok r
                         with
-                        | :? UserViewResolveException as e ->
-                            if uv.AllowBroken || forceAllowBroken then
-                                if not uv.Source.AllowBroken then
-                                    errors <- Map.add name (e :> exn) errors
-                                let err =
-                                    { error = e :> exn
-                                      source = uv.Source
-                                    }
-                                Error err
-                            else
-                                raisefWithInner UserViewResolveException e "Error in user view %O" ref
+                        | :? UserViewResolveException as e when uv.AllowBroken || forceAllowBroken ->
+                            if not uv.Source.AllowBroken then
+                                errors <- Map.add name (e :> exn) errors
+                            let err =
+                                { Error = e :> exn
+                                  Source = uv.Source
+                                } : UserViewError
+                            Error err
+                        | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "Error in user view %O" ref
                     cachedViews <- Map.add ref r cachedViews
                     r
 
-        let userViews = schema |> Map.map mapUserView
-        let ret = { userViews = userViews } : UserViewsSchema
+        let userViews = schema.UserViews |> Map.map mapUserView
+        let ret =
+            { UserViews = userViews
+              GeneratorScript = schema.Source.GeneratorScript
+            } : UserViewsSchema
         (errors, ret)
 
     let resolveUserViews () : ErroredUserViews * UserViews =
-        let mutable errors = Map.empty
+        let mutable errors : ErroredUserViews = Map.empty
 
-        let mapSchema name schema =
-            try
-                let (schemaErrors, newSchema) = resolveUserViewsSchema name schema
-                if not <| Map.isEmpty schemaErrors then
-                    errors <- Map.add name schemaErrors errors
-                newSchema
-            with
-            | :? UserViewResolveException as e ->
-                raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
+        let mapSchema name = function
+            | Ok schema ->
+                try
+                    let (schemaErrors, newSchema) = resolveUserViewsSchema name schema
+                    if not <| Map.isEmpty schemaErrors then
+                        errors <- Map.add name (Ok schemaErrors) errors
+                    Ok newSchema
+                with
+                | :? UserViewResolveException as e ->
+                    raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
+            | Error err ->
+                errors <- Map.add name (Error err.Error) errors
+                Error err
 
         let schemas = halfResolved |> Map.map mapSchema
-        let ret = { schemas = schemas } : UserViews
+        let ret = { Schemas = schemas } : UserViews
         (errors, ret)
 
     member this.ResolveAnonymousUserView homeSchema uv =

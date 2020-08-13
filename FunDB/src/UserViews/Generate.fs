@@ -4,11 +4,14 @@ open System.Threading
 open NetJs
 open NetJs.Json
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
+open FunWithFlags.FunDB.UserViews.Render
+open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.SQL.Utils
+open FunWithFlags.FunDB.JavaScript.Runtime
 
 type UserViewGenerateException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -39,58 +42,89 @@ type UserViewGeneratorTemplate (isolate : Isolate) =
     member this.Isolate = isolate
     member this.Template = template
 
-type private UserViewGenerator (template : UserViewGeneratorTemplate, scriptSource : string) =
-    let context = Context.New(template.Isolate, template.Template)
-    do
+type private UserViewGeneratorScript (template : UserViewGeneratorTemplate, scriptSource : string) =
+    let func =
         try
-            let script = Script.Compile(context, Value.String.New(template.Isolate, scriptSource))
-            ignore <| script.Run()
+            CachedFunction.FromScript(template.Isolate, template.Template, scriptSource, userViewsFunction)
         with
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't initialize user view generator"
-    let runnable =
-        match context.Global.Get(userViewsFunction).Data with
-        | :? Value.Function as f -> f
-        | v -> raisef UserViewGenerateException "%s is not a function, buf %O" userViewsFunction v
 
-    let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : SourceUserViewsSchema =
+    let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
         try
-            let newViews = runnable.Call(cancellationToken, null, [|layout|])
-            let userViews = newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
-            { GeneratorScript = Some scriptSource
-              UserViews = userViews
-            }
+            let newViews = func.Function.Call(cancellationToken, null, [|layout|])
+            newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
         with
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't generate user views"
 
     member this.Generate layout cancellationToken = generateUserViews layout cancellationToken
+    member this.Context = func.Context
 
-type private UserViewsGenerator (template : UserViewGeneratorTemplate, layout : Layout, cancellationToken : CancellationToken) =
-    let mutable jsLayout : Value.Value option = None
+type private UserViewGenerator =
+    { Generator : UserViewGeneratorScript
+      Source : SourceUserViewsGeneratorScript
+      SourceSchema : SourceUserViewsSchema
+    }
 
-    let getLayout () =
-        match jsLayout with
-        | Some l -> l
-        | None ->
-            let context = Context.New(template.Isolate, template.Template)
-            let layout = V8JsonWriter.Serialize(context, layout)
-            jsLayout <- Some layout
-            layout
+type private PreparedUserViewSchema =
+    | PUVGenerator of UserViewGenerator
+    | PUVError of UserViewsSchemaError
+    | PUVStatic of SourceUserViewsSchema
 
-    let generateUserViewsSchema (schema : SourceUserViewsSchema) : SourceUserViewsSchema =
+type private UserViewsGenerators = Map<SchemaName, PreparedUserViewSchema>
+
+type private UserViewsGeneratorState (layout : Layout, cancellationToken : CancellationToken, forceAllowBroken : bool) =
+    let generateUserViewsSchema (gen : UserViewGenerator) : Result<SourceUserViewsSchema, UserViewsSchemaError> =
+        let layout = V8JsonWriter.Serialize(gen.Generator.Context, layout)
+        try
+            let uvs = gen.Generator.Generate layout cancellationToken
+            Ok { UserViews = uvs
+                 GeneratorScript = Some gen.Source
+               }
+        with
+        | :? NetJsException as e when forceAllowBroken || gen.Source.AllowBroken ->
+            Error { Source = gen.SourceSchema; Error = SETGenerator (e :> exn) }
+
+    let generateUserViews (gens : UserViewsGenerators) : ErroredUserViews * SourceUserViews =
+        let mutable errors : ErroredUserViews = Map.empty
+        let generateOne name = function
+            | PUVGenerator gen ->
+                match generateUserViewsSchema gen with
+                | Ok ret -> ret
+                | Error err ->
+                    errors <- Map.add name (Error err.Error) errors
+                    { UserViews = Map.empty; GeneratorScript = err.Source.GeneratorScript }
+            | PUVStatic ret -> ret
+            | PUVError err ->
+                errors <- Map.add name (Error err.Error) errors
+                { UserViews = Map.empty; GeneratorScript = err.Source.GeneratorScript }
+        let schemas = Map.map generateOne gens
+        let ret = { Schemas = schemas } : SourceUserViews
+        (errors, ret)
+
+    member this.GenerateUserViews gens = generateUserViews gens
+
+type UserViewsGenerator (template : UserViewGeneratorTemplate, userViews : SourceUserViews, createForceAllowBroken : bool) =
+    let prepareGenerator (schema : SourceUserViewsSchema) =
         match schema.GeneratorScript with
-        | None -> schema
+        | None -> PUVStatic schema
         | Some script ->
-            let gen = UserViewGenerator(template, script)
-            gen.Generate (getLayout ()) cancellationToken
+            try
+                let gen = UserViewGeneratorScript (template, script.Script)
+                let ret =
+                    { Generator = gen
+                      Source = script
+                      SourceSchema = schema
+                    }
+                PUVGenerator ret
+            with
+            | :? NetJsException as e when createForceAllowBroken || script.AllowBroken ->
+                PUVError { Source = schema; Error = SETGenerator (e :> exn) }
+    let gens : UserViewsGenerators = Map.map (fun name -> prepareGenerator) userViews.Schemas
 
-    let generateUserViews (views : SourceUserViews) : SourceUserViews =
-        { Schemas = Map.map (fun name -> generateUserViewsSchema) views.Schemas
-        }
+    let generateUserViews (layout : Layout) (cancellationToken : CancellationToken) (forceAllowBroken : bool) : ErroredUserViews * SourceUserViews =
+        let state = UserViewsGeneratorState(layout, cancellationToken, forceAllowBroken)
+        state.GenerateUserViews gens
 
-    member this.GenerateUserViews views = generateUserViews views
-
-let generateUserViews (template : UserViewGeneratorTemplate) (layout : Layout) (uvs : SourceUserViews) (cancellationToken : CancellationToken) : SourceUserViews =
-    let gen = UserViewsGenerator(template, layout, cancellationToken)
-    gen.GenerateUserViews uvs
+    member this.GenerateUserViews layout cancellationToken forceAllowBroken = generateUserViews layout cancellationToken forceAllowBroken

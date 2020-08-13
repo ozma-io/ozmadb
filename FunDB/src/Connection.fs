@@ -2,6 +2,8 @@ module FunWithFlags.FunDB.Connection
 
 open System
 open System.Data
+open System.Threading
+open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 open Npgsql
@@ -18,7 +20,10 @@ type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : stri
 
     interface IDisposable with
         member this.Dispose () =
-            connection.Dispose()
+            connection.Dispose ()
+
+    interface IAsyncDisposable with
+        member this.DisposeAsync () = connection.DisposeAsync ()
 
     member this.Query = query
     member this.Connection = connection
@@ -41,18 +46,25 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
         // FIXME: Maybe introduce more granular locking?
         new DatabaseTransaction(conn, IsolationLevel.Serializable)
 
-    member this.Rollback () =
-        transaction.Dispose ()
-        system.Dispose ()
+    member this.Rollback () = task {
+        do! transaction.DisposeAsync ()
+        do! system.DisposeAsync ()
+    }
 
-    member this.Commit () = task {
-        let! _ = system.SaveChangesAsync ()
-        do! transaction.CommitAsync ()
-        this.Rollback ()
+    member this.Commit (cancellationToken : CancellationToken) = task {
+        let! changed = system.SaveChangesAsync (cancellationToken)
+        do! transaction.CommitAsync (cancellationToken)
+        do! this.Rollback ()
+        return changed
     }
 
     interface IDisposable with
-        member this.Dispose () = this.Rollback ()
+        member this.Dispose () =
+            transaction.Dispose ()
+            system.Dispose ()
+
+    interface IAsyncDisposable with
+        member this.DisposeAsync () = ValueTask(this.Rollback ())
 
     member this.System = system
     member this.Transaction = transaction

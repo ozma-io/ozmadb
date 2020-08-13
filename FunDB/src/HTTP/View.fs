@@ -1,15 +1,16 @@
-module FunWithFlags.FunDB.API.View
+module FunWithFlags.FunDB.HTTP.View
 
 open Microsoft.AspNetCore.Http
 open Giraffe
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Parsing
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.UserViews.DryRun
-open FunWithFlags.FunDB.Operations.Context
-open FunWithFlags.FunDB.API.Utils
+open FunWithFlags.FunDB.API.Types
+open FunWithFlags.FunDB.HTTP.Utils
 
 let private error e =
     let handler =
@@ -29,15 +30,15 @@ let viewsApi : HttpHandler =
             false
 #endif
 
-    let selectFromView (viewRef : UserViewSource) (rctx : RequestContext) =
+    let selectFromView (viewRef : UserViewSource) (api : IFunDBAPI) =
         queryArgs <| fun rawArgs next ctx -> task {
-            match! rctx.GetUserView viewRef rawArgs (getRecompile ctx) with
+            match! api.UserViews.GetUserView viewRef rawArgs (getRecompile ctx) with
             | Ok res -> return! Successful.ok (json res) next ctx
             | Result.Error err -> return! error err next ctx
         }
 
-    let infoView (viewRef : UserViewSource) (rctx : RequestContext) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        match! rctx.GetUserViewInfo viewRef (getRecompile ctx) with
+    let infoView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+        match! api.UserViews.GetUserViewInfo viewRef (getRecompile ctx) with
             | Ok res -> return! Successful.ok (json res) next ctx
             | Result.Error err -> return! error err next ctx
     }

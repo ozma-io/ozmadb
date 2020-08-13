@@ -4,7 +4,7 @@ open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
@@ -104,14 +104,15 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
             { body = [| checkStmt; returnStmt |]
             } : PLPgSQL.Program
         let checkFunctionDefinition =
-            { arguments = [||]
-              returnValue = SQL.FRValue (SQL.SQLRawString "trigger")
-              behaviour = SQL.FBStable
-              language = PLPgSQL.plPgSQLName
-              definition = checkProgram.ToPLPgSQLString()
+            { Arguments = [||]
+              ReturnValue = SQL.FRValue (SQL.SQLRawString "trigger")
+              Behaviour = SQL.FBStable
+              Language = PLPgSQL.plPgSQLName
+              Definition = checkProgram.ToPLPgSQLString()
             } : SQL.FunctionDefinition
-        let checkFunctionObject = SQL.OMFunction <| Map.singleton { items = [||] } checkFunctionDefinition
         let checkFunctionName = SQL.SQLName <| sprintf "__ref_type_check__%s__%s" entity.hashName field.hashName
+        let checkFunctionKey = string checkFunctionName
+        let checkFunctionObject = SQL.OMFunction <| Map.singleton [||] checkFunctionDefinition
 
         let checkOldColumn = SQL.VEColumn { table = Some sqlOldRow; name = field.columnName }
         let checkNewColumn = SQL.VEColumn { table = Some sqlNewRow; name = field.columnName }
@@ -121,36 +122,38 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
             else
                 SQL.VENotEq (checkOldColumn, checkNewColumn)
         let checkUpdateTriggerDefinition =
-            { isConstraint = true
-              order = SQL.TOAfter
-              events = [| SQL.TEUpdate (Some [| field.columnName |]) |]
-              mode = SQL.TMEachRow
-              condition = Some checkUpdateTriggerCondition
-              functionName = { schema = Some fromSchema; name = checkFunctionName }
-              functionArgs = [||]
+            { IsConstraint = true
+              Order = SQL.TOAfter
+              Events = [| SQL.TEUpdate (Some [| field.columnName |]) |]
+              Mode = SQL.TMEachRow
+              Condition = Some checkUpdateTriggerCondition
+              FunctionName = { schema = Some fromSchema; name = checkFunctionName }
+              FunctionArgs = [||]
             } : SQL.TriggerDefinition
         let checkUpdateTriggerName = SQL.SQLName <| sprintf "__ref_type_update__%s__%s" entity.hashName field.hashName
+        let checkUpdateTriggerKey = string checkUpdateTriggerName
         let checkUpdateTriggerObject = SQL.OMTrigger (fromTable, checkUpdateTriggerDefinition)
 
         let checkInsertTriggerDefinition =
-            { isConstraint = true
-              order = SQL.TOAfter
-              events = [| SQL.TEInsert |]
-              mode = SQL.TMEachRow
-              condition = None
-              functionName = { schema = Some fromSchema; name = checkFunctionName }
-              functionArgs = [||]
+            { IsConstraint = true
+              Order = SQL.TOAfter
+              Events = [| SQL.TEInsert |]
+              Mode = SQL.TMEachRow
+              Condition = None
+              FunctionName = { schema = Some fromSchema; name = checkFunctionName }
+              FunctionArgs = [||]
             } : SQL.TriggerDefinition
         let checkInsertTriggerName = SQL.SQLName <| sprintf "__ref_type_insert__%s__%s" entity.hashName field.hashName
+        let checkInsertTriggerKey = string checkInsertTriggerName
         let checkInsertTriggerObject = SQL.OMTrigger (fromTable, checkInsertTriggerDefinition)
 
         let objects =
-            Map.ofList
-                [ (checkFunctionName, checkFunctionObject)
-                  (checkUpdateTriggerName, checkUpdateTriggerObject)
-                  (checkInsertTriggerName, checkInsertTriggerObject)
-                ]
-        { schemas = Map.singleton fromSchema { objects = objects } }
+            [ (checkFunctionKey, (checkFunctionName, checkFunctionObject))
+              (checkUpdateTriggerKey, (checkUpdateTriggerName, checkUpdateTriggerObject))
+              (checkInsertTriggerKey, (checkInsertTriggerName, checkInsertTriggerObject))
+            ]
+            |> Map.ofSeq
+        { Schemas = Map.singleton (fromSchema.ToString()) { Name = fromSchema; Objects = objects } }
 
 let buildAssertionsMeta (layout : Layout) : LayoutAssertion seq -> SQL.DatabaseMeta =
     Seq.map (buildAssertionMeta layout) >> Seq.fold SQL.unionDatabaseMeta SQL.emptyDatabaseMeta

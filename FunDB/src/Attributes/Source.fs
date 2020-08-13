@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.Attributes.Source
 
 open System.ComponentModel
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceAttributesField =

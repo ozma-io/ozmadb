@@ -1,4 +1,4 @@
-﻿module FunWithFlags.FunDB.Operations.ContextCache
+﻿module FunWithFlags.FunDB.API.ContextCache
 
 open System
 open System.Linq
@@ -13,7 +13,10 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open NetJs
 
 open FunWithFlags.FunDBSchema.System
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Parsing
+open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.EventLogger
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
 open FunWithFlags.FunDB.Layout.Resolve
@@ -30,6 +33,7 @@ open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Schema
 open FunWithFlags.FunDB.Triggers.Resolve
+open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.Triggers.Update
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
@@ -45,36 +49,13 @@ open FunWithFlags.FunDB.SQL.Migration
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.JavaScript.Runtime
-open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Operations.Preload
-open FunWithFlags.FunDB.Operations.EventLogger
+open FunWithFlags.FunDB.API.Types
 
 type ContextException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
 
     new (message : string) = ContextException (message, null)
-
-[<NoEquality; NoComparison>]
-type CachedRequestContext =
-    { Layout : Layout
-      UserViews : PrefetchedUserViews
-      Permissions : Permissions
-      DefaultAttrs : MergedDefaultAttributes
-      Triggers : ResolvedTriggers
-      SystemViews : SourceUserViews
-      UserMeta : SQL.DatabaseMeta
-    }
-
-type IContext =
-    inherit IDisposable
-
-    abstract member Migrate : unit -> Task<unit>
-    abstract member GetAnonymousView : string -> Task<PrefetchedUserView>
-    abstract member ResolveAnonymousView : SchemaName option -> string -> Task<PrefetchedUserView>
-    abstract member WriteEvent : EventEntry -> ValueTask
-    abstract Connection : DatabaseConnection with get
-    abstract Transaction : DatabaseTransaction with get
-    abstract State : CachedRequestContext with get
 
 [<NoEquality; NoComparison>]
 type private AnonymousUserView =
@@ -87,9 +68,9 @@ let private fallbackVersion = 0
 let private migrationLockNumber = 0
 
 [<NoEquality; NoComparison>]
-type CachedState =
+type private CachedState =
     { Version : int
-      Context : CachedRequestContext
+      Context : CachedContext
     }
 
 type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, connectionString : string, eventLogger : EventLogger, warmStartup : bool) =
@@ -100,11 +81,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
     let jsIsolates =
         DefaultObjectPool
-            { new IPooledObjectPolicy<CachingIsolate> with
+            { new IPooledObjectPolicy<Isolate> with
                   member this.Create () =
-                    { isolate = Isolate.NewWithHeapSize(1UL * 1024UL * 1024UL, 32UL * 1024UL * 1024UL)
-                      cache = ObjectMap()
-                    }
+                    Isolate.NewWithHeapSize(1UL * 1024UL * 1024UL, 32UL * 1024UL * 1024UL)
                   member this.Return _ = true
             }
 
@@ -118,11 +97,11 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
     let getCurrentVersion (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> = task {
         let! (transaction, versionEntry) = task {
             try
-                let! versionEntry = transaction.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstOrDefaultAsync(cancellationToken)
+                let! versionEntry = transaction.System.State.AsTracking().FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
                 return (transaction, versionEntry)
             with
             | :? PostgresException ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 let transaction = new DatabaseTransaction (transaction.Connection)
                 return (transaction, null)
         }
@@ -132,12 +111,12 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
     }
 
     let ensureCurrentVersion (conn : DatabaseTransaction) (bump : bool) (cancellationToken : CancellationToken) : Task<int> = task {
-        let! versionEntry = conn.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstOrDefaultAsync(cancellationToken)
+        let! versionEntry = conn.System.State.AsTracking().FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
         match versionEntry with
         | null ->
             let newEntry = StateValue (Name = versionField, Value = string fallbackVersion)
             ignore <| conn.System.State.Add(newEntry)
-            let! _ = conn.System.SaveChangesAsync()
+            let! _ = conn.System.SaveChangesAsync(cancellationToken)
             return fallbackVersion
         | entry ->
             match tryIntInvariant entry.Value with
@@ -145,13 +124,13 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 if bump then
                     let newVersion = v + 1
                     entry.Value <- string newVersion
-                    let! _ = conn.System.SaveChangesAsync()
+                    let! _ = conn.System.SaveChangesAsync(cancellationToken)
                     return newVersion
                 else
                     return v
             | None ->
                 entry.Value <- string fallbackVersion
-                let! _ = conn.System.SaveChangesAsync()
+                let! _ = conn.System.SaveChangesAsync(cancellationToken)
                 return fallbackVersion
     }
 
@@ -203,16 +182,23 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
         task {
             if not (Map.isEmpty brokenViews) then
                 let mutable critical = false
-                for KeyValue(schemaName, schema) in brokenViews do
+                for KeyValue(schemaName, mschema) in brokenViews do
                     let isSystem = Map.containsKey schemaName preload.Schemas
                     if isSystem then
                         critical <- true
-                    for KeyValue(uvName, err) in schema do
-                        let uvName = ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString()
+                    match mschema with
+                    | Ok schema ->
+                        for KeyValue(uvName, err) in schema do
+                            let uvName = ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString()
+                            if isSystem then
+                                logger.LogError(err, "System view {uv} is broken", uvName)
+                            else
+                                logger.LogWarning(err, "Marking {uv} as broken", uvName)
+                    | Error (SETGenerator err) ->
                         if isSystem then
-                            logger.LogError(err, "System view {uv} is broken", uvName)
+                            logger.LogError(err, "System view generator for {schema} is broken", schemaName)
                         else
-                            logger.LogWarning(err, "Marking {uv} as broken", uvName)
+                            logger.LogWarning(err, "Marking generator for {schema} as broken", schemaName)
                 if critical then
                     failwith "Broken system user views"
                 do! markBrokenUserViews conn.System brokenViews cancellationToken
@@ -247,16 +233,22 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 do! markBrokenPermissions conn.System brokenPerms cancellationToken
         }
 
-    let generateViews layout userViews cancellationToken =
+    let uvGeneratorTemplate = IsolateLocal(UserViewGeneratorTemplate)
+
+    let generateViews' isolate layout userViews cancellationToken forceAllowBroken =
+        let template = uvGeneratorTemplate.GetValue(isolate)
+        let generator = UserViewsGenerator(template, userViews, forceAllowBroken)
+        generator.GenerateUserViews layout cancellationToken forceAllowBroken
+    
+    let generateViews layout userViews cancellationToken forceAllowBroken =
         let isolate = jsIsolates.Get()
         try
-            let template = isolate.cache.GetOrCreate (fun () -> UserViewGeneratorTemplate isolate.isolate)
-            generateUserViews template layout userViews cancellationToken
+            generateViews' isolate layout userViews cancellationToken forceAllowBroken
         finally
             jsIsolates.Return(isolate)
 
     let rec finishGetCachedState (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, brokenTriggers, prefetchedViews, sourceViews) = task {
+        let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews) = task {
             try
                 let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
                 let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
@@ -264,25 +256,26 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
                 let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                 let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
+                let mergedTriggers = mergeTriggers layout triggers
 
                 let systemViews = preloadUserViews preload
                 let! sourceViews = buildSchemaUserViews transaction.System cancellationToken
                 let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
-                let sourceViews = generateViews layout sourceViews cancellationToken
+                let (brokenViews1, sourceViews) = generateViews layout sourceViews cancellationToken true
                 let! isChanged2 = updateUserViews transaction.System sourceViews cancellationToken
-                let (brokenViews1, userViews) = resolveUserViews layout mergedAttrs true sourceViews
+                let (brokenViews2, userViews) = resolveUserViews layout mergedAttrs true sourceViews
 
                 let! currentVersion = ensureCurrentVersion transaction (isChanged || isChanged2) cancellationToken
 
                 // To dry-run user views we need to stop the transaction.
-                do! transaction.Commit ()
-                let! (brokenViews2, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
+                let! _ = transaction.Commit (cancellationToken)
+                let! (brokenViews3, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
                 let transaction = new DatabaseTransaction (transaction.Connection)
-                let brokenViews = unionErroredUserViews brokenViews1 brokenViews2
-                return (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, brokenTriggers, prefetchedViews, sourceViews)
+                let brokenViews = unionErroredUserViews (unionErroredUserViews brokenViews1 brokenViews2) brokenViews3
+                return (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews)
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
         }
         let! currentVersion2 = task {
@@ -290,7 +283,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return! ensureCurrentVersion transaction false cancellationToken
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
         }
         if currentVersion2 <> currentVersion then
@@ -312,13 +305,13 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
                 let systemViews = filterSystemViews sourceViews
 
-                do! transaction.Commit ()
+                let! _ = transaction.Commit (cancellationToken)
 
                 let state =
                     { Layout = layout
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
-                      Triggers = triggers
+                      Triggers = mergedTriggers
                       UserViews = prefetchedViews
                       SystemViews = systemViews
                       UserMeta = userMeta
@@ -327,7 +320,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return { Version = currentVersion; Context = state }
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
     }
 
@@ -340,7 +333,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
         }
         match ret with
@@ -351,9 +344,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 ()
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
-            transaction.Rollback ()
+            do! transaction.Rollback ()
             let transaction = new DatabaseTransaction (transaction.Connection)
             return! getMigrationLock transaction cancellationToken
     }
@@ -366,15 +359,15 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return (userMeta, layout, isChanged)
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
         }
         return! finishGetCachedState transaction layout userMeta isChanged cancellationToken
     }
 
-    // Called when state update by another instance is detected.
+    // Called when state update by another instance is detected. More lightweight than full `getCachedState`.
     let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> = task {
-        let! (transaction, layout, mergedAttrs, triggers, sourceUvs, userViews, prefetchedBadViews) = task {
+        let! (transaction, layout, mergedAttrs, mergedTriggers, sourceUvs, userViews, prefetchedBadViews) = task {
             try
                 let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
                 let (_, layout) = resolveLayout sourceLayout false
@@ -385,19 +378,20 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
                 let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                 let (_, triggers) = resolveTriggers layout false sourceTriggers
+                let mergedTriggers = mergeTriggers layout triggers
 
                 let! sourceUvs = buildSchemaUserViews transaction.System cancellationToken
                 let (_, userViews) = resolveUserViews layout mergedAttrs false sourceUvs
 
                 // To dry-run user views we need to stop the transaction.
-                do! transaction.Commit ()
+                let! _ = transaction.Commit (cancellationToken)
                 // We dry-run those views that _can_ be failed here, outside of a transaction.
                 let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews cancellationToken
                 let transaction = new DatabaseTransaction(transaction.Connection)
-                return (transaction, layout, mergedAttrs, triggers, sourceUvs, userViews, prefetchedBadViews)
+                return (transaction, layout, mergedAttrs, mergedTriggers, sourceUvs, userViews, prefetchedBadViews)
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
         }
         let! currentVersion2 = task {
@@ -405,7 +399,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return! ensureCurrentVersion transaction false cancellationToken
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
         }
         if currentVersion2 <> currentVersion then
@@ -430,7 +424,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     { Layout = layout
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
-                      Triggers = triggers
+                      Triggers = mergedTriggers
                       UserViews = prefetchedViews
                       SystemViews = systemViews
                       UserMeta = userMeta
@@ -439,7 +433,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return (transaction, { Version = currentVersion; Context = newState })
             with
             | ex ->
-                transaction.Rollback ()
+                do! transaction.Rollback ()
                 return reraise' ex
     }
 
@@ -455,7 +449,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     return! getCachedState transaction cancellationToken
                 | Some ver ->
                     let! (transaction, newState) = rebuildFromDatabase transaction ver cancellationToken
-                    transaction.Rollback ()
+                    do! transaction.Rollback ()
                     return newState
         else
             return! getCachedState transaction cancellationToken
@@ -492,6 +486,12 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                         else
                             return (transaction, oldState)
                 }
+
+            let mutable maybeIsolate = None
+            let getIsolate () =
+                match maybeIsolate with
+                | Some isolate -> isolate
+                | None -> jsIsolates.Get()
 
             let migrate () = task {
                 logger.LogInformation("Starting migration")
@@ -533,7 +533,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                         resolveTriggers layout false triggersSource
                     with
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
-                let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+                let mergedTriggers = mergeTriggers layout triggers
 
                 let! userViewsSource = buildSchemaUserViews transaction.System cancellationToken
                 if filterSystemViews userViewsSource <> oldState.Context.SystemViews then
@@ -550,7 +550,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 }
 
                 logger.LogInformation("Updating generated user views")
-                let userViewsSource = generateViews layout userViewsSource cancellationToken
+                let isolate = getIsolate ()
+                let (_, userViewsSource) = generateViews' isolate layout userViewsSource cancellationToken false
                 let! _ = updateUserViews transaction.System userViewsSource cancellationToken
 
                 let! newUserViewsSource = buildSchemaUserViews transaction.System cancellationToken
@@ -577,16 +578,16 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 // We update state now and check user views _after_ that.
                 // At this point we are sure there is a valid versionEntry because GetCache should have been called.
                 let newVersion = oldState.Version + 1
-                let! versionEntry = transaction.System.State.AsTracking().Where(fun x -> x.Name = versionField).FirstAsync()
+                let! versionEntry = transaction.System.State.AsTracking().FirstAsync((fun x -> x.Name = versionField), cancellationToken)
                 versionEntry.Value <- string newVersion
                 // Serialized access error: 40001, may need to process it differently later (retry with fallback?)
                 try
-                    let! _ = transaction.System.SaveChangesAsync()
+                    let! _ = transaction.System.SaveChangesAsync(cancellationToken)
                     ()
                 with
                 | :? DbUpdateException as err -> raisefWithInner ContextException err "State update error"
 
-                do! transaction.Commit()
+                let! _ = transaction.Commit (cancellationToken)
 
                 let! (_, goodUserViews) = dryRunUserViews conn.Query layout false (Some true) newUserViewsSource userViews cancellationToken
 
@@ -596,7 +597,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     { Layout = layout
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
-                      Triggers = triggers
+                      Triggers = mergedTriggers
                       UserViews = mergePrefetchedUserViews badUserViews goodUserViews
                       SystemViews = filterSystemViews userViewsSource
                       UserMeta = wantedUserMeta
@@ -632,18 +633,53 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return ret.UserView
             }
 
+            let mutable needMigration = false
+            let commit () =
+                task {
+                    if needMigration then
+                        do! migrate ()
+                    else
+                        try
+                            let! _ = transaction.Commit (cancellationToken)
+                            ()
+                        with
+                        | :? DbUpdateException as ex -> return raisefWithInner ContextException ex "Failed to commit"
+                }
+
+            let transactionTime = DateTime.UtcNow
+
             return
                 { new IContext with
                       member this.Transaction = transaction
-                      member this.Connection = conn
                       member this.State = oldState.Context
-                      member this.Migrate () = migrate ()
+                      member this.TransactionTime = transactionTime
+                      member this.LoggerFactory = loggerFactory
+                      member this.CancellationToken = cancellationToken
+                      member this.Preload = preload
+                      member this.Isolate = getIsolate ()
+
+                      member this.Commit () = commit ()
+                      member this.ScheduleMigration () =
+                        needMigration <- true
                       member this.GetAnonymousView query = getAnonymousView query
                       member this.ResolveAnonymousView homeSchema query = resolveAnonymousView homeSchema query
                       member this.WriteEvent event = eventLogger.WriteEvent(connectionString, event, cancellationToken)
+
                       member this.Dispose () =
-                          (transaction :> IDisposable).Dispose()
-                          (conn :> IDisposable).Dispose()
+                          match maybeIsolate with
+                          | Some isolate -> jsIsolates.Return isolate
+                          | None -> ()
+                          (transaction :> IDisposable).Dispose ()
+                          (conn :> IDisposable).Dispose ()
+                      member this.DisposeAsync () =
+                          // FIXME: replace with unitVtask when we switch to Ply.
+                          ValueTask(task {
+                              match maybeIsolate with
+                              | Some isolate -> jsIsolates.Return isolate
+                              | None -> ()
+                              do! (transaction :> IAsyncDisposable).DisposeAsync ()
+                              do! (conn :> IAsyncDisposable).DisposeAsync ()
+                          })
                 }
         with
         | e ->

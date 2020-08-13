@@ -1,8 +1,8 @@
-module FunWithFlags.FunDB.API.Info
+module FunWithFlags.FunDB.HTTP.Info
 
 open Giraffe
 
-open FunWithFlags.FunDB.API.Utils
+open FunWithFlags.FunDB.HTTP.Utils
 
 let infoApi : HttpHandler =
     let ping = GET >=> (Map.empty |> json |> Successful.ok)

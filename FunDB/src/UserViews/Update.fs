@@ -6,7 +6,7 @@ open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
@@ -19,7 +19,12 @@ type private UserViewsUpdater (db : SystemContext) =
         existingUv.Query <- uv.Query
 
     let updateUserViewsSchema (schema : SourceUserViewsSchema) (existingSchema : Schema) : unit =
-        existingSchema.UserViewGeneratorScript <- Option.toNull schema.GeneratorScript
+        match schema.GeneratorScript with
+        | Some src ->
+            existingSchema.UserViewGeneratorScript <- src.Script
+            existingSchema.UserViewGeneratorScriptAllowBroken <- src.AllowBroken
+        | None ->
+            existingSchema.UserViewGeneratorScript <- null
 
         let oldUserViewsMap =
             existingSchema.UserViews |> Seq.map (fun uv -> (FunQLName uv.Name, uv)) |> Map.ofSeq
@@ -71,9 +76,13 @@ let markBrokenUserViews (db : SystemContext) (uvs : ErroredUserViews) (cancellat
 
         for schema in schemasMap do
             let errors = Map.find (FunQLName schema.Name) uvs
-            for uv in schema.UserViews do
-                if Map.containsKey (FunQLName uv.Name) errors then
-                    uv.AllowBroken <- true
+            match errors with
+            | Ok schemaErrors ->
+                for uv in schema.UserViews do
+                    if Map.containsKey (FunQLName uv.Name) schemaErrors then
+                        uv.AllowBroken <- true
+            | Error (SETGenerator _) ->
+                schema.UserViewGeneratorScriptAllowBroken <- true
 
         let! _ = db.SaveChangesAsync(cancellationToken)
         return ()

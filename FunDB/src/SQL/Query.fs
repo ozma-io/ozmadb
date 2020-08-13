@@ -11,7 +11,7 @@ open NpgsqlTypes
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
 open FunWithFlags.FunUtils.Serialization.Json
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.Lex

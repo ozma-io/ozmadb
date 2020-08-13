@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.Triggers.Source
 open Microsoft.FSharp.Reflection
 open System.ComponentModel
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST

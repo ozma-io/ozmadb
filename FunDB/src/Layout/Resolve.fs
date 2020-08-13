@@ -1,8 +1,10 @@
 module FunWithFlags.FunDB.Layout.Resolve
 
 open Newtonsoft.Json.Linq
+open System.Security.Cryptography
+open System.Text
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
@@ -73,9 +75,24 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
               aggregate = voidAggr
               subEntity = voidSubEntity
         }
+ 
+let private makeOldHashName (FunQLName name) =
+    String.truncate hashNameLength name
 
-let private makeHashName (name : FunQLName) =
-    name |> string |> String.truncate hashNameLength
+let private hashNameSuffixLength = 4
+
+let private makeHashName (FunQLName name) =
+    if String.length name <= hashNameLength then
+        name
+    else
+        assert (hashNameLength >= hashNameSuffixLength)
+        let prefix = String.truncate (hashNameLength - hashNameSuffixLength) name
+        use md5 = MD5.Create ()
+        let md5Bytes = md5.ComputeHash(Encoding.UTF8.GetBytes(name))
+        let stringBuilder = StringBuilder ()
+        for i = 1 to hashNameSuffixLength / 2 do
+            ignore <| stringBuilder.Append(md5Bytes.[0].ToString("x2"))
+        sprintf "%s%s" prefix (stringBuilder.ToString())
 
 let private resolveUniqueConstraint (entity : ResolvedEntity) (constrName : ConstraintName) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.Columns then
@@ -87,6 +104,7 @@ let private resolveUniqueConstraint (entity : ResolvedEntity) (constrName : Cons
         | None -> raisef ResolveLayoutException "Unknown column %O in unique constraint" name
 
     { columns = Array.map checkColumn constr.Columns
+      oldHashName = makeOldHashName constrName
       hashName = makeHashName constrName
     }
 
@@ -230,6 +248,7 @@ type private Phase1Resolver (layout : SourceLayout) =
           isImmutable = col.IsImmutable
           inheritedFrom = None
           columnName = SQL.SQLName columnName
+          oldHashName = makeOldHashName fieldName
           hashName = makeHashName fieldName
         }
 
@@ -542,6 +561,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | Ok r -> r
             | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing check constraint expression: %s" msg)
         { expression = resolveCheckExpr entityRef entity checkExpr
+          oldHashName = makeOldHashName constrName
           hashName = makeHashName constrName
         }
 
@@ -599,6 +619,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               root = entity.Root
               typeName = entity.TypeName
               isAbstract = entity.Source.IsAbstract
+              oldHashName = makeOldHashName entityRef.name
               hashName = makeHashName entityRef.name
             } : ResolvedEntity
 

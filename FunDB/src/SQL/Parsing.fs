@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.SQL.Parsing
 open System.Text
 open FSharp.Text.Lexing
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils.Parsing
 
 let escapedString (startPos : int) (lexbuf: LexBuffer<_>) : string =
     let strBuilder = StringBuilder lexbuf.LexemeLength

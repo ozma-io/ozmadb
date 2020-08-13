@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.UserViews.Source
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 
 type SourceUserView =
@@ -8,9 +8,14 @@ type SourceUserView =
       Query : string
     }
 
+type SourceUserViewsGeneratorScript =
+  { Script : string
+    AllowBroken : bool
+  }
+
 type SourceUserViewsSchema =
     { UserViews : Map<UserViewName, SourceUserView>
-      GeneratorScript : string option
+      GeneratorScript : SourceUserViewsGeneratorScript option
     }
 
 type SourceUserViews =

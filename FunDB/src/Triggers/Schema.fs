@@ -6,7 +6,7 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Microsoft.FSharp.Reflection
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.FunQL.AST

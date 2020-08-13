@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Permissions.Apply
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Layout.Types

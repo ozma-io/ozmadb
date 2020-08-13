@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.JavaScript.FunQL
 open System
 open NpgsqlTypes
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.JavaScript.AST
 open FunWithFlags.FunDB.FunQL.AST
 

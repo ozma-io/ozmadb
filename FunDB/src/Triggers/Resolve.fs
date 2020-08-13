@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.Triggers.Resolve
 open NetJs
 open NetJs.Value
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.Layout.Types

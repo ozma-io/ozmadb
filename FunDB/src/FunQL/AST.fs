@@ -9,7 +9,7 @@ open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.SQL.Utils
@@ -472,7 +472,7 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
                     match els with
                     | None -> ""
                     | Some e -> sprintf "ELSE %s" (e.ToFunQLString())
-                concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
+                String.concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
             | FECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
@@ -524,7 +524,7 @@ and [<NoEquality; NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLName and '
                 then ""
                 else renderAttributesMap this.attributes
 
-            concatWithWhitespaces [this.result.ToFunQLString(); attrsStr]
+            String.concatWithWhitespaces [this.result.ToFunQLString(); attrsStr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -571,7 +571,7 @@ and [<NoEquality; NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLName 
                     match this.offset with
                     | Some e -> sprintf "OFFSET %s" (e.ToFunQLString())
                     | None -> ""
-                concatWithWhitespaces [orderByStr; limitStr; offsetStr]
+                String.concatWithWhitespaces [orderByStr; limitStr; offsetStr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -631,7 +631,7 @@ and [<NoEquality; NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName 
                 else
                     sprintf "GROUP BY %s" (this.groupBy |> Array.map (fun x -> x.ToFunQLString()) |> String.concat ", ")
 
-            sprintf "SELECT %s" (concatWithWhitespaces [resultStr; fromStr; whereStr; groupByStr; this.orderLimit.ToFunQLString()])
+            sprintf "SELECT %s" (String.concatWithWhitespaces [resultStr; fromStr; whereStr; groupByStr; this.orderLimit.ToFunQLString()])
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
@@ -647,7 +647,7 @@ and [<NoEquality; NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f
             | SSelect e -> e.ToFunQLString()
             | SSetOp (op, a, b, order) ->
                 let setStr = sprintf "(%s) %s (%s)" (a.ToFunQLString()) (op.ToFunQLString()) (b.ToFunQLString())
-                concatWithWhitespaces [setStr; order.ToFunQLString()]
+                String.concatWithWhitespaces [setStr; order.ToFunQLString()]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -764,7 +764,7 @@ let idFieldExprTaskSyncMapper (fieldReference : 'f1 -> Task<'f2>) (query : Selec
       subEntity = fun _ _ r -> Task.result r
     }
 
-let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
+let rec mapTaskFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
     let rec traverse = function
         | FEValue value -> Task.map FEValue (mapper.value value)
         | FERef r -> Task.map FERef (mapper.fieldReference r)
@@ -782,8 +782,8 @@ let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f
         | FELessEq (a, b) -> Task.map2Sync (curry FELessEq) (traverse a) (traverse b)
         | FEGreater (a, b) -> Task.map2Sync (curry FEGreater) (traverse a) (traverse b)
         | FEGreaterEq (a, b) -> Task.map2Sync (curry FEGreaterEq) (traverse a) (traverse b)
-        | FEIn (e, vals) -> Task.map2Sync (curry FEIn) (traverse e) (Array.mapTaskSync traverse vals)
-        | FENotIn (e, vals) -> Task.map2Sync (curry FENotIn) (traverse e) (Array.mapTaskSync traverse vals)
+        | FEIn (e, vals) -> Task.map2Sync (curry FEIn) (traverse e) (Array.mapTask traverse vals)
+        | FENotIn (e, vals) -> Task.map2Sync (curry FENotIn) (traverse e) (Array.mapTask traverse vals)
         | FEInQuery (e, query) -> Task.map2Sync (curry FEInQuery) (traverse e) (mapper.query query)
         | FENotInQuery (e, query) -> Task.map2Sync (curry FENotInQuery) (traverse e) (mapper.query query)
         | FECast (e, typ) -> Task.map (fun newE -> FECast (newE, typ)) (traverse e)
@@ -795,21 +795,21 @@ let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f
                 let! newE = traverse e
                 return (newCond, newE)
             }
-            Task.map2Sync (curry FECase) (Array.mapTaskSync mapOne es) (Option.mapTask traverse els)
-        | FECoalesce vals -> Task.map FECoalesce (Array.mapTaskSync traverse vals)
-        | FEJsonArray vals -> Task.map FEJsonArray (Array.mapTaskSync traverse vals)
-        | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTaskSync (fun name -> traverse) obj)
+            Task.map2Sync (curry FECase) (Array.mapTask mapOne es) (Option.mapTask traverse els)
+        | FECoalesce vals -> Task.map FECoalesce (Array.mapTask traverse vals)
+        | FEJsonArray vals -> Task.map FEJsonArray (Array.mapTask traverse vals)
+        | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTask (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> Task.map2Sync (curry FEJsonArrow) (traverse a) (traverse b)
         | FEJsonTextArrow (a, b) -> Task.map2Sync (curry FEJsonTextArrow) (traverse a) (traverse b)
         | FEPlus (a, b) -> Task.map2Sync (curry FEPlus) (traverse a) (traverse b)
         | FEMinus (a, b) -> Task.map2Sync (curry FEMinus) (traverse a) (traverse b)
         | FEMultiply (a, b) -> Task.map2Sync (curry FEMultiply) (traverse a) (traverse b)
         | FEDivide (a, b) -> Task.map2Sync (curry FEDivide) (traverse a) (traverse b)
-        | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTaskSync traverse args)
+        | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTask traverse args)
         | FEAggFunc (name, args) ->
             task {
                 let! args1 = mapper.aggregate args
-                return! Task.map (fun x -> FEAggFunc (name, x)) (mapTaskSyncAggExpr traverse args1)
+                return! Task.map (fun x -> FEAggFunc (name, x)) (mapTaskAggExpr traverse args1)
             }
         | FESubquery query -> Task.map FESubquery (mapper.query query)
         | FEInheritedFrom (f, nam) ->
@@ -826,8 +826,8 @@ let rec mapTaskSyncFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f
             }
     traverse
 
-and mapTaskSyncAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>) : AggExpr<'e1, 'f1> -> Task<AggExpr<'e2, 'f2>> = function
-    | AEAll exprs -> Task.map AEAll (Array.mapTaskSync func exprs)
+and mapTaskAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>) : AggExpr<'e1, 'f1> -> Task<AggExpr<'e2, 'f2>> = function
+    | AEAll exprs -> Task.map AEAll (Array.mapTask func exprs)
     | AEDistinct expr -> Task.map AEDistinct (func expr)
     | AEStar -> Task.result AEStar
 

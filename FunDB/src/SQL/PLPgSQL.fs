@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.SQL.PLPgSQL
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL
@@ -67,7 +67,7 @@ type RaiseMessage =
 
         member this.ToPLPgSQLString () =
             let args = this.options |> Seq.map (fun o -> sprintf ", %s" (o.ToSQLString())) |> String.concat ""
-            concatWithWhitespaces [renderSqlString this.format; args]
+            String.concatWithWhitespaces [renderSqlString this.format; args]
 
         interface IPLPgSQLString with
             member this.ToPLPgSQLString () = this.ToPLPgSQLString()
@@ -102,7 +102,7 @@ type Statement =
                         match els with
                         | None -> ""
                         | Some stmts -> sprintf "ELSE %s" (stmtsToString stmts)
-                    concatWithWhitespaces [firstStr; otherCases; elseStr; "END IF"]
+                    String.concatWithWhitespaces [firstStr; otherCases; elseStr; "END IF"]
                 | StRaise raise -> raise.ToPLPgSQLString()
                 | StReturn expr -> sprintf "RETURN %s" (expr.ToSQLString())
             sprintf "%s;" str
@@ -129,7 +129,7 @@ and [<NoEquality; NoComparison>] RaiseStatement =
                 else
                     let opts = this.options |> Map.toSeq |> Seq.map (fun (opt, v) -> sprintf "%s = %s" (opt.ToPLPgSQLString()) (v.ToSQLString())) |> String.concat ", "
                     sprintf "USING %s" opts
-            concatWithWhitespaces [initStr; messageStr; optionsStr]
+            String.concatWithWhitespaces [initStr; messageStr; optionsStr]
 
         interface IPLPgSQLString with
             member this.ToPLPgSQLString () = this.ToPLPgSQLString()

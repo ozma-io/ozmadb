@@ -1,13 +1,15 @@
 module FunWithFlags.FunDB.Operations.Preload
 
 open System.IO
+open System.Linq
+open Microsoft.EntityFrameworkCore
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST
@@ -102,7 +104,8 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
                 path
             else
                 Path.Join(dirname, path)
-        File.ReadAllText realPath
+        let script = File.ReadAllText realPath
+        { AllowBroken = false; Script = script }
     let userViews =
         { UserViews = Map.empty
           GeneratorScript = Option.map readUserViewScript preload.UserViewGenerator
@@ -177,15 +180,22 @@ let filterPreloadedSchemas (preload : Preload) = Map.filter (fun name _ -> Map.c
 let filterUserSchemas (preload : Preload) = Map.filter (fun name _ -> not <| Map.containsKey name preload.Schemas)
 
 let filterPreloadedMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
-    { schemas = Map.filter (fun (SQL.SQLName name) _ -> Map.containsKey (FunQLName name) preload.Schemas) meta.schemas
+    { Schemas = Map.filter (fun name _ -> Map.containsKey (FunQLName name) preload.Schemas) meta.Schemas
     } : SQL.DatabaseMeta
 
 let filterUserMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
-    { schemas = Map.filter (fun (SQL.SQLName name) _ -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta.schemas
+    { Schemas = Map.filter (fun name _ -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta.Schemas
     } : SQL.DatabaseMeta
 
 let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : Set<LayoutAssertion> * SQL.DatabaseMeta =
     let meta1 = buildLayoutMeta layout subLayout
+    let assertions = buildAssertions layout subLayout
+    let meta2 = buildAssertionsMeta layout assertions
+    let meta = SQL.unionDatabaseMeta meta1 meta2
+    (assertions, meta)
+
+let buildFullOldLayoutMeta (layout : Layout) (subLayout : Layout) : Set<LayoutAssertion> * SQL.DatabaseMeta =
+    let meta1 = buildOldLayoutMeta layout subLayout
     let assertions = buildAssertions layout subLayout
     let meta2 = buildAssertionsMeta layout assertions
     let meta = SQL.unionDatabaseMeta meta1 meta2
@@ -197,6 +207,18 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         logger.LogInformation("Migrating system entities to the current version")
         let sourceLayout = preloadLayout preload
         let (_, layout) = resolveLayout sourceLayout false
+        let! layoutVersion = conn.System.State.FirstOrDefaultAsync((fun x -> x.Name = "LayoutVersion"), cancellationToken)
+        logger.LogInformation("Not renaming old tables: {}", isNull layoutVersion)
+        if isNull layoutVersion then
+            logger.LogInformation("Renaming old tables")
+            let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
+            let currentSystemMeta = filterPreloadedMeta preload currentMeta
+            let (_, newSystemMeta) = buildFullOldLayoutMeta layout layout
+            let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
+
+            let! _ = migrateDatabase conn.Connection.Query systemMigration cancellationToken
+            logger.LogInformation("Finished renaming old tables")
+            ()
         let (_, newSystemMeta) = buildFullLayoutMeta layout layout
         let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
@@ -208,7 +230,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         let sanityCheck () = task {
             let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
             let currentSystemMeta = filterPreloadedMeta preload currentMeta
-            let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta |> Seq.toArray
+            let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
             if Array.isEmpty systemMigration then
                 return true
             else
@@ -258,12 +280,27 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
 
+        if isNull layoutVersion then
+            logger.LogInformation("Renaming old tables")
+            let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
+            let currentUserMeta = filterUserMeta preload currentMeta
+            let (_, newMeta) = buildFullOldLayoutMeta newLayout newLayout
+            let newUserMeta = filterUserMeta preload newMeta
+            let userMigration = planDatabaseMigration currentUserMeta newUserMeta
+
+            let! _ = migrateDatabase conn.Connection.Query userMigration cancellationToken
+
+            let newEntry = StateValue (Name = "LayoutVersion", Value = "1")
+            ignore <| conn.System.State.Add(newEntry)
+            let! _ = conn.System.SaveChangesAsync(cancellationToken)
+            logger.LogInformation("Finished renaming old tables")
+            ()
         let (_, newMeta) = buildFullLayoutMeta newLayout newLayout
         let newUserMeta = filterUserMeta preload newMeta
         let! currentMeta =
-            if Array.isEmpty systemMigration then
+            (*if Array.isEmpty systemMigration then
                 Task.result currentMeta
-            else
+            else*)
                 buildDatabaseMeta conn.Transaction cancellationToken
         let currentUserMeta = filterUserMeta preload currentMeta
 
@@ -274,7 +311,7 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         let sanityCheck () = task {
             let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
             let currentUserMeta = filterUserMeta preload currentMeta
-            let systemMigration = planDatabaseMigration currentUserMeta newUserMeta |> Seq.toArray
+            let systemMigration = planDatabaseMigration currentUserMeta newUserMeta
             if Array.isEmpty systemMigration then
                 return true
             else

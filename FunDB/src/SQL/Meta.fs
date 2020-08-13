@@ -7,7 +7,8 @@ open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Parsing
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.SQL.Utils
@@ -148,19 +149,18 @@ let parseUdtName (str : string) : DBValueType =
     else
         VTScalar <| SQLRawString str
 
-let private makeColumnMeta (attr : Attribute) : ColumnName * ColumnMeta =
+let private makeColumnMeta (attr : Attribute) : ColumnMeta =
     try
         let columnType =
             if attr.Type.TypType <> 'b' then
                 raisef SQLMetaException "Unsupported non-base type: %s" attr.Type.TypName
             parseUdtName attr.Type.TypName
         let defaultExpr = attr.AttrDefs |> Seq.first |> Option.map (fun def -> parseLocalExpr def.Source)
-        let res =
-            { columnType = columnType
-              isNullable = not attr.AttNotNull
-              defaultExpr = defaultExpr
-            }
-        (SQLName attr.AttName, res)
+        { Name = SQLName attr.AttName
+          ColumnType = columnType
+          IsNullable = not attr.AttNotNull
+          DefaultExpr = defaultExpr
+        }
     with
     | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in column %s: %s" attr.AttName e.Message
 
@@ -168,15 +168,15 @@ type private TableColumnIds = Map<ColumnNum, ColumnName>
 
 [<NoEquality; NoComparison>]
 type private PgTableMeta =
-    { columns : TableColumnIds
-      constraints : Constraint seq
-      indexes : Index seq
+    { Columns : TableColumnIds
+      Constraints : Constraint seq
+      Indexes : Index seq
     }
 
 [<NoEquality; NoComparison>]
 type private PgSchemaMeta =
-    { objects : Map<SQLName, ObjectMeta>
-      tables : Map<TableName, PgTableMeta>
+    { Objects : Map<MigrationKey, SQLName * ObjectMeta>
+      Tables : Map<TableName, PgTableMeta>
     }
 type private PgSchemas = Map<SchemaName, PgSchemaMeta>
 
@@ -231,13 +231,13 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
               name = SQLName trigger.Function.ProName
             }
         let def =
-            { isConstraint = trigger.TgConstraint.HasValue
-              order = order
-              events = events |> Array.ofSeq
-              mode = mode
-              condition = condition
-              functionName = functionName
-              functionArgs = [||]
+            { IsConstraint = trigger.TgConstraint.HasValue
+              Order = order
+              Events = events |> Array.ofSeq
+              Mode = mode
+              Condition = condition
+              FunctionName = functionName
+              FunctionArgs = [||]
             }
         (SQLName trigger.TgName, def)
     with
@@ -246,17 +246,17 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
 let private makeUnconstrainedTableMeta (cl : Class) : TableName * (Map<SQLName, ObjectMeta> * TableMeta * PgTableMeta) =
     try
         let columnIds = cl.Attributes |> Seq.map (fun attr -> (attr.AttNum, SQLName attr.AttName)) |> Map.ofSeqUnique
-        let columns = cl.Attributes |> Seq.map makeColumnMeta |> Map.ofSeqUnique
+        let columns = cl.Attributes |> Seq.map (makeColumnMeta >> (fun col -> (col.Name.ToString(), col))) |> Map.ofSeqUnique
         let tableName = SQLName cl.RelName
         let makeTrigger trig =
             let (name, def) =  makeTriggerMeta columnIds trig
             (name, OMTrigger (tableName, def))
         let triggers = cl.Triggers |> Seq.map makeTrigger |> Map.ofSeqUnique
-        let res = { columns = columns }
+        let res = { Columns = columns }
         let meta =
-            { columns = columnIds
-              constraints = cl.Constraints
-              indexes = cl.Indexes
+            { Columns = columnIds
+              Constraints = cl.Constraints
+              Indexes = cl.Indexes
             }
         (tableName, (triggers, res, meta))
     with
@@ -278,29 +278,31 @@ let private makeFunctionMeta (proc : Proc) : FunctionName * Map<FunctionSignatur
             | 'v' -> FBVolatile
             | _ -> raisef SQLMetaException "Unknown volatile specifier %c" proc.ProVolatile
 
-        let signature = { items = [||] }
+        let signature = [||]
         let def =
-            { arguments = [||]
-              returnValue = FRValue <| SQLRawString proc.RetType.TypName
-              behaviour = behaviour
-              language = SQLName proc.Language.LanName
-              definition = proc.ProSrc
+            { Arguments = [||]
+              ReturnValue = FRValue <| SQLRawString proc.RetType.TypName
+              Behaviour = behaviour
+              Language = SQLName proc.Language.LanName
+              Definition = proc.ProSrc
             }
         (SQLName proc.ProName, Map.singleton signature def)
     with
     | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in function %s: %s" proc.ProName e.Message
 
+let private tagName (name : SQLName) a = (name.ToString(), (name, a))
+
 let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchemaMeta =
     try
-        let tableObjects = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'r') |> Seq.map makeUnconstrainedTableMeta |> Map.ofSeqUnique
+        let tableObjects = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'r') |> Seq.map makeUnconstrainedTableMeta |> Map
         let tablesMeta = tableObjects |> Map.map (fun name (triggers, table, meta) -> meta)
-        let tables = tableObjects |> Map.map (fun name (triggers, table, meta) -> OMTable table)
-        let triggers = tableObjects |> Map.toSeq |> Seq.map (fun (name, (triggers, table, meta)) -> triggers) |> Seq.fold Map.unionUnique Map.empty
-        let sequences = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'S') |> Seq.map makeSequenceMeta |> Map.ofSeqUnique
-        let functions = ns.Procs |> Seq.map makeFunctionMeta |> Map.ofSeqWith (fun name -> Map.unionUnique) |> Map.map (fun name overloads -> OMFunction overloads)
+        let tables = tableObjects |> Map.mapWithKeys (fun name (triggers, table, meta) -> (name.ToString(), (name, OMTable table)))
+        let triggers = tableObjects |> Map.toSeq |> Seq.map (fun (name, (triggers, table, meta)) -> triggers) |> Seq.fold Map.unionUnique Map.empty |> Map.mapWithKeys tagName
+        let sequences = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'S') |> Seq.map (makeSequenceMeta >> uncurry tagName) |> Map.ofSeqUnique
+        let functions = ns.Procs |> Seq.map makeFunctionMeta |> Map.ofSeqWith (fun name -> Map.unionUnique) |> Map.mapWithKeys (fun name overloads -> (name.ToString(), (name, OMFunction overloads)))
         let res =
-            { objects = List.fold Map.unionUnique Map.empty [tables; sequences; triggers; functions]
-              tables = tablesMeta
+            { Objects = List.fold Map.unionUnique Map.empty [tables; sequences; triggers; functions]
+              Tables = tablesMeta
             }
         (SQLName ns.NspName, res)
     with
@@ -317,10 +319,10 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
             | 'f' ->
                 let refSchema = SQLName constr.FRelClass.Namespace.NspName
                 let refName = SQLName constr.FRelClass.RelName
-                let refTable = Map.find refName (Map.find refSchema schemaIds).tables
+                let refTable = Map.find refName (Map.find refSchema schemaIds).Tables
                 let makeRefColumn (fromNum : ColumnNum) (toNum : ColumnNum) =
                     let fromName = makeLocalColumn fromNum
-                    let toName = Map.find toNum refTable.columns
+                    let toName = Map.find toNum refTable.Columns
                     (fromName, toName)
 
                 let tableRef = { schema = Some refSchema; name = refName }
@@ -341,23 +343,24 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
         else
             let cols = Array.map makeLocalColumn index.IndKey
             let ret =
-                { columns = cols
+                { Columns = cols
                 } : IndexMeta
             Some (SQLName index.Class.RelName, ret)
 
     let finishSchemaMeta (schemaName : SchemaName) (schema : PgSchemaMeta) : SchemaMeta =
         let makeConstraints (tableName : TableName, table : PgTableMeta) =
             let constraints =
-                table.constraints
-                |> Seq.mapMaybe (makeConstraintMeta tableName table.columns)
-                |> Seq.map (fun (constrRame, constr) -> (constrRame, OMConstraint (tableName, constr)))
+                table.Constraints
+                |> Seq.mapMaybe (makeConstraintMeta tableName table.Columns)
+                |> Seq.map ((fun (constrName, constr) -> (constrName, OMConstraint (tableName, constr))) >> uncurry tagName)
             let indexes =
-                table.indexes
-                |> Seq.mapMaybe (makeIndexMeta tableName table.columns)
-                |> Seq.map (fun (indexName, index) -> (indexName, OMIndex (tableName, index)))
+                table.Indexes
+                |> Seq.mapMaybe (makeIndexMeta tableName table.Columns)
+                |> Seq.map ((fun (indexName, index) -> (indexName, OMIndex (tableName, index))) >> uncurry tagName)
             Seq.append constraints indexes
-        let newObjects = schema.tables |> Map.toSeq |> Seq.collect makeConstraints |> Map.ofSeqUnique
-        { objects = Map.unionUnique schema.objects newObjects
+        let newObjects = schema.Tables |> Map.toSeq |> Seq.collect makeConstraints |> Map.ofSeqUnique
+        { Name = schemaName
+          Objects = Map.unionUnique schema.Objects newObjects
         }
 
     member this.FinishSchemaMeta = finishSchemaMeta
@@ -378,6 +381,6 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : Can
 
         let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
         let phase2 = Phase2Resolver(unconstrainedSchemas)
-        let schemas = unconstrainedSchemas |> Map.map phase2.FinishSchemaMeta
-        return { schemas = schemas }
+        let schemas = unconstrainedSchemas |> Map.mapWithKeys (fun name meta -> (name.ToString(), phase2.FinishSchemaMeta name meta))
+        return { Schemas = schemas }
     }

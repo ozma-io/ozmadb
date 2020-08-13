@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.SQL.DDL
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 
@@ -8,12 +8,14 @@ type ConstraintName = SQLName
 type IndexName = SQLName
 type SequenceName = SQLName
 type TriggerName = SQLName
+type MigrationKey = string
 
 [<NoEquality; NoComparison>]
 type ColumnMeta =
-    { columnType : DBValueType
-      isNullable : bool
-      defaultExpr : ValueExpr option
+    { Name : ColumnName
+      ColumnType : DBValueType
+      IsNullable : bool
+      DefaultExpr : ValueExpr option
     }
 
 type ConstraintType =
@@ -31,20 +33,20 @@ type ConstraintMeta =
 
 [<StructuralEquality; NoComparison>]
 type IndexMeta =
-    { columns : ColumnName[]
+    { Columns : ColumnName[]
     }
 
 [<NoEquality; NoComparison>]
 type TableMeta =
-    { columns : Map<ColumnName, ColumnMeta>
+    { Columns : Map<MigrationKey, ColumnMeta>
     }
 
 let emptyTableMeta =
-    { columns = Map.empty
+    { Columns = Map.empty
     }
 
 let unionTableMeta (a : TableMeta) (b : TableMeta) =
-    { columns = Map.unionUnique a.columns b.columns
+    { Columns = Map.unionUnique a.Columns b.Columns
     }
 
 type FunctionMode =
@@ -67,28 +69,28 @@ type FunctionMode =
 
 [<StructuralEquality; NoComparison>]
 type FunctionArgument =
-    { name : SQLName option
-      defaultValue : ValueExpr option // Do not set to NULL
+    { Name : SQLName option
+      DefaultValue : ValueExpr option // Do not set to NULL
     }
 
 type FunctionArgumentSignature =
-    { typeName : TypeName
-      mode : FunctionMode
+    { TypeName : TypeName
+      Mode : FunctionMode
     }
 
 let private functionSignatureToString (signature : FunctionArgumentSignature) =
-    sprintf "%s %s" (signature.mode.ToSQLString()) (signature.typeName.ToSQLString())
+    sprintf "%s %s" (signature.Mode.ToSQLString()) (signature.TypeName.ToSQLString())
 
 let private functionArgumentToString (signature : FunctionArgumentSignature) (arg : FunctionArgument) =
     let nameStr =
-        match arg.name with
+        match arg.Name with
         | None -> ""
         | Some n -> n.ToSQLString()
     let defaultStr =
-        match arg.defaultValue with
+        match arg.DefaultValue with
         | None -> ""
         | Some d -> sprintf "= %s" (d.ToSQLString())
-    concatWithWhitespaces [signature.mode.ToSQLString(); nameStr; signature.typeName.ToSQLString(); defaultStr]
+    String.concatWithWhitespaces [signature.Mode.ToSQLString(); nameStr; signature.TypeName.ToSQLString(); defaultStr]
 
 [<StructuralEquality; NoComparison>]
 type FunctionReturn =
@@ -128,11 +130,11 @@ type FunctionBehaviour =
 
 [<StructuralEquality; NoComparison>]
 type FunctionDefinition =
-    { arguments : FunctionArgument[]
-      returnValue : FunctionReturn
-      behaviour : FunctionBehaviour
-      language : SQLName
-      definition : string
+    { Arguments : FunctionArgument[]
+      ReturnValue : FunctionReturn
+      Behaviour : FunctionBehaviour
+      Language : SQLName
+      Definition : string
     }
 
 type TriggerOrder =
@@ -187,16 +189,16 @@ type TriggerMode =
 
 [<StructuralEquality; NoComparison>]
 type TriggerDefinition =
-    { isConstraint : bool
-      order : TriggerOrder
-      events : TriggerEvent[]
-      mode : TriggerMode
-      condition : ValueExpr option
-      functionName : SchemaObject
-      functionArgs : string[]
+    { IsConstraint : bool
+      Order : TriggerOrder
+      Events : TriggerEvent[]
+      Mode : TriggerMode
+      Condition : ValueExpr option
+      FunctionName : SchemaObject
+      FunctionArgs : string[]
     }
 
-type FunctionSignature = ComparableArray<FunctionArgumentSignature>
+type FunctionSignature = FunctionArgumentSignature[]
 
 [<NoEquality; NoComparison>]
 type ObjectMeta =
@@ -207,35 +209,35 @@ type ObjectMeta =
     | OMFunction of Map<FunctionSignature, FunctionDefinition>
     | OMTrigger of TableName * TriggerDefinition
 
+type SchemaObjects = Map<MigrationKey, SQLName * ObjectMeta>
+
 [<NoEquality; NoComparison>]
 type SchemaMeta =
-    { objects : Map<SQLName, ObjectMeta>
-    }
-
-let emptySchemaMeta =
-    { objects = Map.empty
+    { Name : SchemaName
+      Objects : SchemaObjects
     }
 
 let unionSchemaMeta (a : SchemaMeta) (b : SchemaMeta) =
-    { objects = Map.unionUnique a.objects b.objects
+    { Name = b.Name
+      Objects = Map.unionUnique a.Objects b.Objects
     }
 
 [<NoEquality; NoComparison>]
 type DatabaseMeta =
-    { schemas : Map<SchemaName, SchemaMeta>
+    { Schemas : Map<MigrationKey, SchemaMeta>
     }
 
 let emptyDatabaseMeta =
-    { schemas = Map.empty
+    { Schemas = Map.empty
     }
 
 let unionDatabaseMeta (a : DatabaseMeta) (b : DatabaseMeta) =
-    { schemas = Map.unionWith (fun name -> unionSchemaMeta) a.schemas b.schemas
+    { Schemas = Map.unionWith (fun key -> unionSchemaMeta) a.Schemas b.Schemas
     }
 
 [<NoEquality; NoComparison>]
 type TableOperation =
-    | TOCreateColumn of ColumnName * ColumnMeta
+    | TOCreateColumn of ColumnMeta
     | TODeleteColumn of ColumnName
     | TOAlterColumnType of ColumnName * DBValueType
     | TOAlterColumnNull of ColumnName * bool
@@ -245,13 +247,13 @@ type TableOperation =
 
         member this.ToSQLString () =
             match this with
-            | TOCreateColumn (col, pars) ->
-                let notNullStr = if pars.isNullable then "NULL" else "NOT NULL"
+            | TOCreateColumn pars ->
+                let notNullStr = if pars.IsNullable then "NULL" else "NOT NULL"
                 let defaultStr =
-                    match pars.defaultExpr with
+                    match pars.DefaultExpr with
                     | None -> ""
                     | Some def -> sprintf "DEFAULT %s" (def.ToSQLString())
-                sprintf "ADD COLUMN %s %s %s %s" (col.ToSQLString()) (pars.columnType.ToSQLString()) notNullStr defaultStr
+                sprintf "ADD COLUMN %s %s %s %s" (pars.Name.ToSQLString()) (pars.ColumnType.ToSQLString()) notNullStr defaultStr
             | TODeleteColumn col -> sprintf "DROP COLUMN %s" (col.ToSQLString())
             | TOAlterColumnType (col, typ) -> sprintf "ALTER COLUMN %s SET DATA TYPE %s" (col.ToSQLString()) (typ.ToSQLString())
             | TOAlterColumnNull (col, isNullable) -> sprintf "ALTER COLUMN %s %s NOT NULL" (col.ToSQLString()) (if isNullable then "DROP" else "SET")
@@ -264,20 +266,27 @@ type TableOperation =
 [<NoEquality; NoComparison>]
 type SchemaOperation =
     | SOCreateSchema of SchemaName
-    | SODeleteSchema of SchemaName
+    | SORenameSchema of SchemaName * SchemaName
+    | SODropSchema of SchemaName
     | SOCreateTable of TableRef
-    | SODeleteTable of TableRef
-    | SOCreateSequence of SchemaObject
-    | SODeleteSequence of SchemaObject
-    // Constraint operations are not plain ALTER TABLE operations because they create new objects at schema namespace.
-    | SOCreateConstraint of SchemaObject * TableName * ConstraintMeta
-    | SODeleteConstraint of SchemaObject * TableName
-    | SOCreateIndex of SchemaObject * TableName * IndexMeta
-    | SODeleteIndex of SchemaObject
+    | SORenameTable of TableRef * TableName
     | SOAlterTable of TableRef * TableOperation[]
+    | SORenameTableColumn of TableRef * ColumnName * ColumnName
+    | SODropTable of TableRef
+    | SOCreateSequence of SchemaObject
+    | SORenameSequence of SchemaObject * SQLName
+    | SODropSequence of SchemaObject
+    | SOCreateConstraint of SchemaObject * TableName * ConstraintMeta
+    | SORenameConstraint of SchemaObject * TableName * ConstraintName
+    | SODropConstraint of SchemaObject * TableName
+    | SOCreateIndex of SchemaObject * TableName * IndexMeta
+    | SORenameIndex of SchemaObject * IndexName
+    | SODropIndex of SchemaObject
     | SOCreateOrReplaceFunction of SchemaObject * FunctionSignature * FunctionDefinition
+    | SORenameFunction of SchemaObject * FunctionSignature * FunctionName
     | SODropFunction of SchemaObject * FunctionSignature
     | SOCreateTrigger of SchemaObject * TableName * TriggerDefinition
+    | SORenameTrigger of SchemaObject * TableName * TriggerName
     | SODropTrigger of SchemaObject * TableName
     with
         override this.ToString () = this.ToSQLString()
@@ -285,11 +294,16 @@ type SchemaOperation =
         member this.ToSQLString () =
             match this with
             | SOCreateSchema schema -> sprintf "CREATE SCHEMA %s" (schema.ToSQLString())
-            | SODeleteSchema schema -> sprintf "DROP SCHEMA %s" (schema.ToSQLString())
+            | SORenameSchema (schema, toName) -> sprintf "ALTER SCHEMA %s RENAME TO %s" (schema.ToSQLString()) (toName.ToSQLString())
+            | SODropSchema schema -> sprintf "DROP SCHEMA %s" (schema.ToSQLString())
             | SOCreateTable table -> sprintf "CREATE TABLE %s ()" (table.ToSQLString())
-            | SODeleteTable table -> sprintf "DROP TABLE %s" (table.ToSQLString())
+            | SORenameTable (table, toName) -> sprintf "ALTER TABLE %s RENAME TO %s" (table.ToSQLString()) (toName.ToSQLString())
+            | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+            | SORenameTableColumn (table, col, toCol) -> sprintf "ALTER TABLE %s RENAME COLUMN %s TO %s" (table.ToSQLString()) (col.ToSQLString()) (toCol.ToSQLString())
+            | SODropTable table -> sprintf "DROP TABLE %s" (table.ToSQLString())
             | SOCreateSequence seq -> sprintf "CREATE SEQUENCE %s" (seq.ToSQLString())
-            | SODeleteSequence seq -> sprintf "DROP SEQUENCE %s" (seq.ToSQLString())
+            | SORenameSequence (seq, toName) -> sprintf "ALTER SEQUENCE %s RENAME TO %s" (seq.ToSQLString()) (toName.ToSQLString())
+            | SODropSequence seq -> sprintf "DROP SEQUENCE %s" (seq.ToSQLString())
             | SOCreateConstraint (constr, table, pars) ->
                 let constraintStr =
                     match pars with
@@ -305,45 +319,51 @@ type SchemaOperation =
                         sprintf "FOREIGN KEY (%s) REFERENCES %s (%s)" myCols (ref.ToSQLString()) refCols
                     | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
                 sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) constraintStr
-            | SODeleteConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
+            | SORenameConstraint (constr, table, toName) -> sprintf "ALTER TABLE %s RENAME CONSTRAINT %s TO %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) (toName.ToSQLString())
+            | SODropConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
             | SOCreateIndex (index, table, pars) ->
                 let cols =
-                    assert (not <| Array.isEmpty pars.columns)
-                    pars.columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                    assert (not <| Array.isEmpty pars.Columns)
+                    pars.Columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
                 sprintf "CREATE INDEX %s ON %s (%s)" (index.name.ToSQLString()) ({ index with name = table }.ToSQLString()) cols
-            | SODeleteIndex index -> sprintf "DROP INDEX %s" (index.ToSQLString())
-            | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+            | SORenameIndex (index, toName) -> sprintf "ALTER INDEX %s RENAME TO %s" (index.ToSQLString()) (toName.ToSQLString())
+            | SODropIndex index -> sprintf "DROP INDEX %s" (index.ToSQLString())
             | SOCreateOrReplaceFunction (func, args, def) ->
-                assert (Array.length args.items = Array.length def.arguments)
-                let argsStr = Seq.map2 functionArgumentToString args def.arguments |> String.concat ", "
+                assert (Array.length args = Array.length def.Arguments)
+                let argsStr = Seq.map2 functionArgumentToString args def.Arguments |> String.concat ", "
                 sprintf "CREATE OR REPLACE FUNCTION %s (%s) RETURNS %s LANGUAGE %s %s AS %s"
                     (func.ToSQLString())
                     argsStr
-                    (def.returnValue.ToSQLString())
-                    (def.language.ToSQLString())
-                    (def.behaviour.ToSQLString())
-                    (renderSqlString def.definition)
+                    (def.ReturnValue.ToSQLString())
+                    (def.Language.ToSQLString())
+                    (def.Behaviour.ToSQLString())
+                    (renderSqlString def.Definition)
+            | SORenameFunction (func, args, toName) ->
+                let argsStr = args |> Seq.map functionSignatureToString |> String.concat ", "
+                sprintf "ALTER FUNCTION %s (%s) RENAME TO %s" (func.ToSQLString()) argsStr (toName.ToSQLString())
             | SODropFunction (func, args) ->
-                let argsStr = args.items |> Seq.map functionSignatureToString |> String.concat ", "
+                let argsStr = args |> Seq.map functionSignatureToString |> String.concat ", "
                 sprintf "DROP FUNCTION %s (%s)" (func.ToSQLString()) argsStr
             | SOCreateTrigger (trigger, table, def) ->
-                assert (not <| Array.isEmpty def.events)
-                let constraintStr = if def.isConstraint then "CONSTRAINT" else ""
-                let eventsStr = def.events |> Seq.map (fun e -> e.ToSQLString()) |> String.concat " OR "
+                assert (not <| Array.isEmpty def.Events)
+                let constraintStr = if def.IsConstraint then "CONSTRAINT" else ""
+                let eventsStr = def.Events |> Seq.map (fun e -> e.ToSQLString()) |> String.concat " OR "
                 let triggerStr =
                     sprintf "TRIGGER %s %s %s ON %s %s"
                         (trigger.name.ToSQLString())
-                        (def.order.ToSQLString())
+                        (def.Order.ToSQLString())
                         eventsStr
                         ({ schema = trigger.schema; name = table }.ToSQLString())
-                        (def.mode.ToSQLString())
+                        (def.Mode.ToSQLString())
                 let whenStr =
-                    match def.condition with
+                    match def.Condition with
                     | None -> ""
                     | Some cond -> sprintf "WHEN (%s)" (cond.ToSQLString())
-                let argsStr = def.functionArgs |> Seq.map renderSqlString |> String.concat ", "
-                let tailStr = sprintf "EXECUTE PROCEDURE %s (%s)" (def.functionName.ToSQLString()) argsStr
-                concatWithWhitespaces ["CREATE"; constraintStr; triggerStr; whenStr; tailStr]
+                let argsStr = def.FunctionArgs |> Seq.map renderSqlString |> String.concat ", "
+                let tailStr = sprintf "EXECUTE PROCEDURE %s (%s)" (def.FunctionName.ToSQLString()) argsStr
+                String.concatWithWhitespaces ["CREATE"; constraintStr; triggerStr; whenStr; tailStr]
+            | SORenameTrigger (trigger, table, toName) ->
+                sprintf "ALTER TRIGGER %s ON %s RENAME TO %s" (trigger.name.ToSQLString()) ({ schema = trigger.schema; name = table }.ToSQLString()) (toName.ToSQLString())
             | SODropTrigger (trigger, table) ->
                 sprintf "DROP TRIGGER %s ON %s" (trigger.name.ToSQLString()) ({ schema = trigger.schema; name = table }.ToSQLString())
 

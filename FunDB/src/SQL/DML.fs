@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.SQL.DML
 
-open FunWithFlags.FunUtils.Utils
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 
@@ -61,7 +61,7 @@ type InsertExpr =
                     (this.name.ToSQLString())
                     (this.columns |> Seq.map (fun (extra, x) -> x.ToSQLString()) |> String.concat ", ")
                     (this.values.ToSQLString())
-            concatWithWhitespaces [insertStr; returningStr]
+            String.concatWithWhitespaces [insertStr; returningStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -84,7 +84,7 @@ type UpdateExpr =
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
             let updateStr = sprintf "UPDATE %s SET %s" (this.name.ToSQLString()) valuesExpr
-            concatWithWhitespaces [updateStr; condExpr]
+            String.concatWithWhitespaces [updateStr; condExpr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -102,7 +102,7 @@ type DeleteExpr =
                 match this.where with
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
-            sprintf "DELETE FROM %s" (concatWithWhitespaces [this.name.ToSQLString(); condExpr])
+            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.name.ToSQLString(); condExpr])
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
