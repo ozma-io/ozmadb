@@ -142,10 +142,9 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="3.0.*" />
     <PackageReference Include="FluidCaching" Version="1.3.*" />
     <PackageReference Include="Giraffe" Version="4.0.*" />
-    <PackageReference Include="NetJs" Version="1.0.*" />
-    <PackageReference Include="NetJs.Json" Version="1.0.*" />
-    <PackageReference Include="Newtonsoft.Json" Version="12.0.*" />
-    <PackageReference Include="YamlDotNet" Version="8.1.*" />
+
+    <PackageReference Include="NetJs" Version="1.1.*" />
+    <PackageReference Include="NetJs.Json" Version="1.1.*" />
   </ItemGroup>
 
 </Project>

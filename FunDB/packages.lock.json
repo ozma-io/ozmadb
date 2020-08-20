@@ -51,25 +51,19 @@
       },
       "NetJs": {
         "type": "Direct",
-        "requested": "[1.0.*, )",
-        "resolved": "1.0.9",
-        "contentHash": "VRoiSO9JwMfH3zL6eiJ+B/Qn9oY4rffuvPL8KQtspvvm3132SaLRV8kX85aqywpLWVtcopANJCf+L26tEnq4EQ=="
+        "requested": "[1.1.*, )",
+        "resolved": "1.1.0",
+        "contentHash": "/fQ++ncJT5BOzI6v6dO9r7bbTLeTrOyN3jxswNTVhNtstVe+hiSB7kTk55E5KqQv/RL1oTg08NZPyrWpxxwuSA=="
       },
       "NetJs.Json": {
         "type": "Direct",
-        "requested": "[1.0.*, )",
-        "resolved": "1.0.4",
-        "contentHash": "cMjULo9cGgWSZSc2RxQQK0oqrfhp1cgf+UED3DWMWPvYH1OBE/XiwtMT2Vmn/MsBe7u2/1fjNWGnD8src0mVbA==",
+        "requested": "[1.1.*, )",
+        "resolved": "1.1.0",
+        "contentHash": "7EPNMDzDea0cYwp1o8/8FXOjpEivTsN63w+vD+H0B8NxRrM1EQepusUJbB6F0gZo8dhRFg5AxLWwDLWb5v54jg==",
         "dependencies": {
-          "NetJs": "1.0.9",
+          "NetJs": "1.1.0",
           "Newtonsoft.Json": "12.0.3"
         }
-      },
-      "Newtonsoft.Json": {
-        "type": "Direct",
-        "requested": "[12.0.*, )",
-        "resolved": "12.0.3",
-        "contentHash": "6mgjfnRB4jKMlzHSl+VD+oUc1IebOZabkbyWj2RiTgWwYPPuaK1H97G1sHqGwPlS5npiF5Q0OrxN1wni2n5QWg=="
       },
       "Npgsql": {
         "type": "Direct",
@@ -101,12 +95,6 @@
           "Newtonsoft.Json": "11.0.2",
           "Npgsql": "4.1.4"
         }
-      },
-      "YamlDotNet": {
-        "type": "Direct",
-        "requested": "[8.1.*, )",
-        "resolved": "8.1.2",
-        "contentHash": "GlPKbb4l+91dyYVKV7UnJlr2CWooNNM1ayZWC90QAmlFPgbwSkfhgId7dGjTAHqkB84BZqjMSy5PlAYf1iejVA=="
       },
       "FsLexYacc.Runtime": {
         "type": "Transitive",
@@ -370,6 +358,11 @@
           "System.Xml.ReaderWriter": "4.3.0",
           "System.Xml.XDocument": "4.3.0"
         }
+      },
+      "Newtonsoft.Json": {
+        "type": "Transitive",
+        "resolved": "12.0.3",
+        "contentHash": "6mgjfnRB4jKMlzHSl+VD+oUc1IebOZabkbyWj2RiTgWwYPPuaK1H97G1sHqGwPlS5npiF5Q0OrxN1wni2n5QWg=="
       },
       "runtime.debian.8-x64.runtime.native.System.Security.Cryptography.OpenSsl": {
         "type": "Transitive",
@@ -1269,6 +1262,11 @@
           "System.Threading.Tasks.Extensions": "4.4.0",
           "System.ValueTuple": "4.4.0"
         }
+      },
+      "YamlDotNet": {
+        "type": "Transitive",
+        "resolved": "8.1.2",
+        "contentHash": "GlPKbb4l+91dyYVKV7UnJlr2CWooNNM1ayZWC90QAmlFPgbwSkfhgId7dGjTAHqkB84BZqjMSy5PlAYf1iejVA=="
       },
       "fundbschema": {
         "type": "Project",
