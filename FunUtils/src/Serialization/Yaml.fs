@@ -253,11 +253,13 @@ let defaultYamlSerializerSettings =
 let makeYamlSerializer (settings : YamlSerializerSettings) : ISerializer =
     let myConverters = seq {
         UnionTypeConverter() :> CrutchTypeConverter
+        RecordTypeConverter() :> CrutchTypeConverter
     }
     let converters = Seq.append myConverters (settings.CrutchTypeConverters ()) |> Seq.cache
     let builder =
         SerializerBuilder()
             .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
+            .WithNamingConvention(settings.NamingConvention)
             .DisableAliases()
     for conv in converters do
         ignore <| builder.WithTypeConverter(conv)

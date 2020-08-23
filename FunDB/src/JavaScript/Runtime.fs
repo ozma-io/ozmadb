@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.JavaScript.Runtime
 
 open System.Runtime.CompilerServices
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open NetJs
 open NetJs.Value
 open NetJs.Template

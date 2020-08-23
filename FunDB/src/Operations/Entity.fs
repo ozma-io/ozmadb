@@ -2,7 +2,7 @@
 
 open System.Threading
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
@@ -61,9 +61,6 @@ let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
     | FTType t -> FTType t
 
 let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
-    if entity.isHidden then
-        raisef EntityExecutionException "Entity %O is hidden" entityRef
-
     match role with
     | None -> serializeEntity entity
     | Some role ->
@@ -74,7 +71,7 @@ let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : Re
             raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
 
 let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (whereExpr : SQL.ValueExpr) (cancellationToken : CancellationToken) =
-    task {
+    unitTask {
         let testExpr =
             SQL.SSelect
                 { columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
@@ -172,8 +169,8 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
 let private funIdArg = { argType = FTType (FETScalar SFTInt); optional = false }
 
-let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) (cancellationToken : CancellationToken) : Task<unit> =
-    task {
+let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) (cancellationToken : CancellationToken) : Task =
+    unitTask {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
             | None -> None
@@ -189,7 +186,6 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let entity = layout.FindEntity entityRef |> Option.get
         if entity.isHidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
-
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
         let columns = argumentTypes |> Seq.map (fun value -> (value.Column, (value.Extra, SQL.VEPlaceholder arguments.types.[value.Placeholder].placeholderId))) |> Map.ofSeq
@@ -228,8 +224,8 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             do! countAndThrow connection tableRef whereExpr cancellationToken
     }
 
-let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (cancellationToken : CancellationToken) : Task<unit> =
-    task {
+let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (cancellationToken : CancellationToken) : Task =
+    unitTask {
         let entity = layout.FindEntity entityRef |> Option.get
 
         if entity.isHidden then

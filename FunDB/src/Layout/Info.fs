@@ -40,8 +40,6 @@ type SerializedEntity =
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       MainField : FieldName
       ForbidExternalReferences : bool
-      ForbidTriggers : bool
-      IsHidden : bool
       Parent : ResolvedEntityRef option
       Children : SerializedChildEntity seq
       IsAbstract : bool
@@ -94,8 +92,6 @@ let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
       CheckConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
       MainField = entity.mainField
       ForbidExternalReferences = entity.forbidExternalReferences
-      ForbidTriggers = entity.forbidTriggers
-      IsHidden = entity.isHidden
       Parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
       IsAbstract = entity.isAbstract
       Children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.direct })
@@ -103,7 +99,7 @@ let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
     }
 
 let serializeSchema (schema : ResolvedSchema) : SerializedSchema =
-    { Entities = Map.map (fun name entity -> serializeEntity entity) schema.entities
+    { Entities = Map.mapMaybe (fun name entity -> if entity.isHidden then None else Some <| serializeEntity entity) schema.entities
       Roots = schema.roots
     }
 

@@ -3,7 +3,7 @@ module FunWithFlags.FunUtils.Seq
 open System
 open System.Collections.Generic
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.NonAffine
 
 let mapMaybe (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
     seq { for i in s do
@@ -122,6 +122,63 @@ let foldOption (func : 'acc -> 'a -> 'acc option) (init : 'acc) (vals : seq<'a>)
         None
     else
         Some acc
+
+let foldResult (func : 'acc -> 'a -> Result<'acc, 'e>) (init : 'acc) (vals : seq<'a>) : Result<'acc, 'e> =
+    let mutable acc = init
+    let mutable error = None
+    let tryOne a =
+        match func acc a with
+        | Ok newAcc ->
+            acc <- newAcc
+            true
+        | Error e ->
+            error <- Some e
+            false
+    iterStop tryOne vals
+    match error with
+    | None -> Ok acc
+    | Some e -> Error e
+
+let foldOptionTask (func : 'acc -> 'a -> Task<'acc option>) (init : 'acc) (vals : seq<'a>) : Task<'acc option> =
+    task {
+        let mutable acc = init
+        let mutable failed = false
+        let tryOne a =
+            task {
+                match! func acc a with
+                | Some newAcc ->
+                    acc <- newAcc
+                    return true
+                | None ->
+                    failed <- true
+                    return false
+            }
+        do! iterTaskStop tryOne vals
+        if failed then
+            return None
+        else
+            return Some acc
+    }
+
+let foldResultTask (func : 'acc -> 'a -> Task<Result<'acc, 'e>>) (init : 'acc) (vals : seq<'a>) : Task<Result<'acc, 'e>> =
+    task {
+        let mutable acc = init
+        let mutable error = None
+        let tryOne a =
+            task {
+                match! func acc a with
+                | Ok newAcc ->
+                    acc <- newAcc
+                    return true
+                | Error e ->
+                    error <- Some e
+                    return false
+            }
+        do! iterTaskStop tryOne vals
+        match error with
+        | None -> return Ok acc
+        | Some e -> return Error e
+    }
 
 let traverseOption (func : 'a -> 'b option) (vals : seq<'a>) : seq<'b> option =
     let list = List<'b>()

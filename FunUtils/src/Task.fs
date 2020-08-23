@@ -1,7 +1,7 @@
 module FunWithFlags.FunUtils.Task
 
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.NonAffine
 
 let bind (f : 'a -> Task<'b>) (a : Task<'a>) : Task<'b> =
     task {
@@ -18,7 +18,7 @@ let map (f : 'a -> 'b) (a : Task<'a>) : Task<'b> =
         return f r
     }
 
-let map2Sync (f : 'a -> 'b -> 'c) (a : Task<'a>) (b : Task<'b>) : Task<'c> =
+let map2 (f : 'a -> 'b -> 'c) (a : Task<'a>) (b : Task<'b>) : Task<'c> =
     task {
         let! r1 = a
         let! r2 = b

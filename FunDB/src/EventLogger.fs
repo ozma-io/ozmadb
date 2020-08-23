@@ -8,7 +8,7 @@ open System.Threading.Tasks
 open System.Threading.Channels
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Connection
@@ -61,5 +61,6 @@ type EventLogger (loggerFactory : ILoggerFactory) =
                             (transaction.Connection :> IDisposable).Dispose ()
         } :> Task
 
-    member this.WriteEvent (connectionString : string, entry : EventEntry, cancellationToken : CancellationToken) =
-        chan.Writer.WriteAsync ((connectionString, entry), cancellationToken)
+    member this.WriteEvent (connectionString : string, entry : EventEntry) =
+        if not <| chan.Writer.TryWrite ((connectionString, entry)) then
+            failwith "Failed to write event"

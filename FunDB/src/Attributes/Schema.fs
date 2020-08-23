@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.Attributes.Schema
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Attributes.Source

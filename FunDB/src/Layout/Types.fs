@@ -151,6 +151,7 @@ type ResolvedEntity =
       mainField : FieldName
       forbidExternalReferences : bool
       forbidTriggers : bool
+      triggersMigration : bool
       isHidden : bool
       inheritance : EntityInheritance option
       subEntityParseExpr : SQL.ValueExpr // Parses SubEntity field into JSON

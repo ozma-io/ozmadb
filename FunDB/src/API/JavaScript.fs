@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.API.JavaScript
 
 open NetJs
 open NetJs.Json
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Utils
@@ -96,15 +96,26 @@ type APITemplate (isolate : Isolate) =
             }, isolate.CurrentCancellationToken).Value
         ))
 
+        fundbTemplate.Set("writeEvent", Template.FunctionTemplate.New(isolate, fun args ->
+            if args.Length <> 1 then
+                invalidArg "args" "Number of arguments must be 1"
+            let details = args.[0].GetString().Get()
+            let api = Option.get currentAPI
+            api.Request.WriteEventSync (fun event ->
+                event.Type <- "triggerEvent"
+                event.Details <- details
+            )
+            Value.Undefined.New(isolate)
+        ))
+
         template
 
     member this.Isolate = isolate
     member this.Template = template
 
-    member this.RunWithAPI api action =
+    member this.SetAPI api =
         assert (Option.isNone currentAPI)
         currentAPI <- Some api
-        try
-            action ()
-        finally
-            currentAPI <- None
+
+    member this.ResetAPI api =
+        currentAPI <- None

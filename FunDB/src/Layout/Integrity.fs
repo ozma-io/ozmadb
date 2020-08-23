@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.Layout.Integrity
 
 open System.Threading
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Compile
@@ -185,8 +185,8 @@ let private compileAssertionCheck (layout : Layout) : LayoutAssertion -> SQL.Sel
             } : SQL.SingleSelectExpr
         { ctes = Map.empty; tree = SQL.SSelect singleSelect }
 
-let checkAssertion (conn : QueryConnection) (layout : Layout) (assertion : LayoutAssertion) (cancellationToken : CancellationToken) : Task<unit> =
-    task {
+let checkAssertion (conn : QueryConnection) (layout : Layout) (assertion : LayoutAssertion) (cancellationToken : CancellationToken) : Task =
+    unitTask {
         let query = compileAssertionCheck layout assertion
         try
             match! conn.ExecuteValueQuery (query.ToSQLString()) Map.empty cancellationToken with

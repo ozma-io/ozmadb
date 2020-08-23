@@ -113,6 +113,8 @@
     <Compile Include="src/Operations/SaveRestore.fs" />
 
     <Compile Include="src/API/Types.fs" />
+    <Compile Include="src/API/JavaScript.fs" />
+    <Compile Include="src/API/Triggers.fs" />
     <Compile Include="src/API/ContextCache.fs" />
     <Compile Include="src/API/InstancesCache.fs" />
     <Compile Include="src/API/Request.fs" />
@@ -120,7 +122,6 @@
     <Compile Include="src/API/Entities.fs" />
     <Compile Include="src/API/SaveRestore.fs" />
     <Compile Include="src/API/API.fs" />
-    <Compile Include="src/API/JavaScript.fs" />
 
     <Compile Include="src/HTTP/Utils.fs" />
     <Compile Include="src/HTTP/Info.fs" />

@@ -7,7 +7,7 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Meta
@@ -265,10 +265,11 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
             with
             | _ ->
                 // Maybe we'll get a better error
-                let (errors, attrs) = resolveTriggers layout false triggers
+                let (errors, triggers) = resolveTriggers layout false triggers
                 reraise ()
 
         let! newLayoutSource = buildSchemaLayout conn.System cancellationToken
+        let newLayoutSource = applyHiddenLayoutData newLayoutSource sourceLayout
         let (brokenLayout, newLayout) = resolveLayout newLayoutSource true
 
         for KeyValue(schemaName, schema) in brokenLayout do

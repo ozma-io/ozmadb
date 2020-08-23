@@ -8,7 +8,7 @@ open System.IO
 open System.IO.Compression
 open Newtonsoft.Json
 open YamlDotNet.Serialization.NamingConventions
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.IO
@@ -71,8 +71,6 @@ type PrettyEntity =
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       MainField : FieldName
       ForbidExternalReferences : bool
-      ForbidTriggers : bool
-      IsHidden : bool
       IsAbstract : bool
       Parent : ResolvedEntityRef option
       SystemDefaultAttributes : Map<FieldName, SourceAttributesField>
@@ -231,8 +229,6 @@ let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : Sou
       CheckConstraints = entity.CheckConstraints
       MainField = entity.MainField
       ForbidExternalReferences = entity.ForbidExternalReferences
-      ForbidTriggers = entity.ForbidTriggers
-      IsHidden = entity.IsHidden
       IsAbstract = entity.IsAbstract
       Parent = entity.Parent
       SystemDefaultAttributes = defaultAttrs.Fields |> Map.filter (fun name attrs -> Set.contains name systemColumns)
@@ -256,8 +252,9 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
           CheckConstraints = entity.CheckConstraints
           MainField = entity.MainField
           ForbidExternalReferences = entity.ForbidExternalReferences
-          ForbidTriggers = entity.ForbidTriggers
-          IsHidden = entity.IsHidden
+          ForbidTriggers = false
+          IsHidden = false
+          TriggersMigration = false
           IsAbstract = entity.IsAbstract
           Parent = entity.Parent
         }

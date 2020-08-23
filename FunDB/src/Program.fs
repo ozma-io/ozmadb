@@ -12,7 +12,7 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Cors.Infrastructure
 open Microsoft.AspNetCore.Authentication
 open Microsoft.AspNetCore.Authentication.JwtBearer
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open Microsoft.IdentityModel.Tokens
 open Microsoft.EntityFrameworkCore
 open Giraffe

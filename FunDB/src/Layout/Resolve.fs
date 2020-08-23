@@ -612,6 +612,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               mainField = entity.Source.MainField
               forbidExternalReferences = entity.Source.ForbidExternalReferences
               forbidTriggers = entity.Source.ForbidTriggers
+              triggersMigration = entity.Source.TriggersMigration
               isHidden = entity.Source.IsHidden
               inheritance = Option.map makeInheritance entity.Source.Parent
               subEntityParseExpr = subEntityParseExpr

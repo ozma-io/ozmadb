@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.Attributes.Update
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
@@ -74,8 +74,8 @@ let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (can
         return changedEntries > 0
     }
 
-let markBrokenAttributes (db : SystemContext) (attrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) : Task<unit> =
-    task {
+let markBrokenAttributes (db : SystemContext) (attrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) : Task =
+    unitTask {
         let currentSchemas = db.GetAttributesObjects ()
 
         let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)

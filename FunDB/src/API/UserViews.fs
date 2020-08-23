@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.API.UserViews
 
 open System.Linq
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 
@@ -45,7 +45,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                         logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
                         return Error <| UVEResolution (exceptionString err)
                 }
-                match ctx.State.UserViews.Find ref with
+                match ctx.UserViews.Find ref with
                 | None -> return Error UVENotFound
                 | Some (Error err) ->
                     if not recompileQuery then
@@ -87,7 +87,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                 try
                     match rctx.User.Type with
                     | RTRoot -> ()
-                    | RTRole role -> checkRoleViewExpr ctx.State.Layout role uv.UserView.Compiled
+                    | RTRole role -> checkRoleViewExpr ctx.Layout role uv.UserView.Compiled
                     return Ok { Info = uv.Info
                                 PureAttributes = uv.PureAttributes.Attributes
                                 PureColumnAttributes = uv.PureAttributes.ColumnAttributes
@@ -95,7 +95,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                 with
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view info")
-                    do! rctx.WriteEvent (fun event ->
+                    rctx.WriteEvent (fun event ->
                         event.Type <- "getUserViewInfo"
                         event.Error <- "access_denied"
                         event.Details <- sprintf "Failed to get info for %O: %s" source (exceptionString err)
@@ -113,13 +113,13 @@ type UserViewsAPI (rctx : IRequestContext) =
                         match rctx.User.Type with
                         | RTRoot -> uv.UserView.Compiled
                         | RTRole role ->
-                            applyRoleViewExpr ctx.State.Layout role uv.UserView.Compiled
+                            applyRoleViewExpr ctx.Layout role uv.UserView.Compiled
                     let getResult info (res : ExecutedViewExpr) = task {
                         return (uv, { res with Rows = Array.ofSeq res.Rows })
                     }
                     match convertViewArguments rawArgs restricted with
                     | Error msg ->
-                        do! rctx.WriteEvent (fun event ->
+                        rctx.WriteEvent (fun event ->
                             event.Type <- "getUserView"
                             event.Error <- "arguments"
                             event.Details <- sprintf "Invalid arguments for %O: %s" source msg
@@ -133,7 +133,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                 with
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view")
-                    do! rctx.WriteEvent (fun event ->
+                    rctx.WriteEvent (fun event ->
                         event.Type <- "getUserView"
                         event.Error <- "access_denied"
                         event.Details <- sprintf "Failed to execute %O: %s" source (exceptionString err)

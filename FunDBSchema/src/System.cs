@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 using Npgsql.NameTranslation;
 
@@ -16,41 +17,41 @@ namespace FunWithFlags.FunDBSchema.System
         [CheckConstraint("not_empty", "name <> ''")]
         public DbSet<StateValue> State { get; set; } = null!;
 
-        [Entity("name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [UniqueConstraint("name", new [] {"name"})]
         public DbSet<Schema> Schemas { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"schema_id", "name"})]
         public DbSet<Entity> Entities { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"entity_id", "name"})]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> '' AND name <> 'id' AND name <> 'sub_entity'")]
         public DbSet<ColumnField> ColumnFields { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"entity_id", "name"})]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> '' AND name <> 'id' AND name <> 'sub_entity'")]
         public DbSet<ComputedField> ComputedFields { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"entity_id", "name"})]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         [CheckConstraint("not_empty", "columns <> (array[] :: array(string))")]
         public DbSet<UniqueConstraint> UniqueConstraints { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"entity_id", "name"})]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         public DbSet<CheckConstraint> CheckConstraints { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"schema_id", "name"})]
         [CheckConstraint("not_reserved", "name <> ''")]
@@ -61,32 +62,32 @@ namespace FunWithFlags.FunDBSchema.System
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<User> Users { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"schema_id", "name"})]
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<Role> Roles { get; set; } = null!;
 
-        [Entity("id", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("id", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [UniqueConstraint("role", new [] {"role_id", "parent_id"})]
         public DbSet<RoleParent> RoleParents { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "role_id=>__main || '.' || entity_id=>__main")]
         [UniqueConstraint("entry", new [] {"role_id", "entity_id"})]
         public DbSet<RoleEntity> RoleEntities { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "role_entity_id=>__main || '.' || column_name")]
         [UniqueConstraint("entry", new [] {"role_entity_id", "column_name"})]
         public DbSet<RoleColumnField> RoleColumnFields { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || field_entity_id=>__main || '.' || field_name")]
         [UniqueConstraint("entry", new [] {"schema_id", "field_entity_id", "field_name"})]
         public DbSet<FieldAttributes> FieldsAttributes { get; set; } = null!;
 
-        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true)]
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || trigger_entity_id=>__main || '.' || name")]
         [UniqueConstraint("entry", new [] {"schema_id", "trigger_entity_id", "name"})]
         public DbSet<Trigger> Triggers { get; set; } = null!;
@@ -209,11 +210,6 @@ namespace FunWithFlags.FunDBSchema.System
         public string? MainField { get; set; }
         [ColumnField("bool", Default="false")]
         public bool ForbidExternalReferences { get; set; }
-
-        [ColumnField("bool", Default="false")]
-        public bool ForbidTriggers { get; set; }
-        [ColumnField("bool", Default="false")]
-        public bool IsHidden { get; set; }
         [ColumnField("bool", Default="false")]
         public bool IsAbstract { get; set; }
         [ColumnField("reference(public.entities)", IsImmutable=true)]
@@ -431,7 +427,7 @@ namespace FunWithFlags.FunDBSchema.System
         public bool AllowBroken { get; set; }
         [ColumnField("int", Default="0")]
         public int Priority { get; set; }
-        [ColumnField("enum('BEFORE', 'AFTER', 'INSTEAD OF')")]
+        [ColumnField("enum('BEFORE', 'AFTER')")]
         [Required]
         public string Time { get; set; } = null!;
         [ColumnField("bool", Default="false")]
@@ -455,6 +451,10 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Type { get; set; } = null!;
+        [ColumnField("json", IsImmutable=true, Default="{type: 'api'}")]
+        [Column(TypeName = "jsonb")]
+        [Required]
+        public string Source { get; set; } = "";
         [ColumnField("string", IsImmutable=true)]
         public string? UserName { get; set; }
         [ColumnField("string", IsImmutable=true)]

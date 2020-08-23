@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.HTTP.SaveRestore
 
 open System.IO
 open Microsoft.AspNetCore.Http
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open Giraffe
 
 open FunWithFlags.FunDB.HTTP.Utils

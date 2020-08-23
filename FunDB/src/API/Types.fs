@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.API.Types
+module rec FunWithFlags.FunDB.API.Types
 
 open System
 open System.IO
@@ -14,8 +14,8 @@ open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.DryRun
+open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Attributes.Merge
@@ -23,36 +23,44 @@ open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.SaveRestore
+open FunWithFlags.FunDB.Operations.Entity
 module SQL = FunWithFlags.FunDB.SQL.DDL
 
-[<NoEquality; NoComparison>]
-type CachedContext =
-    { Layout : Layout
-      UserViews : PrefetchedUserViews
-      Permissions : Permissions
-      DefaultAttrs : MergedDefaultAttributes
-      Triggers : MergedTriggers
-      SystemViews : SourceUserViews
-      UserMeta : SQL.DatabaseMeta
-    }
+type RawArguments = Map<string, JToken>
+
+type ITriggerScript =
+    abstract member RunInsertTriggerBefore : ResolvedEntityRef -> EntityArguments -> CancellationToken -> Task<RawArguments option>
+    abstract member RunUpdateTriggerBefore : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task<RawArguments option>
+    abstract member RunDeleteTriggerBefore : ResolvedEntityRef -> int -> CancellationToken -> Task
+
+    abstract member RunInsertTriggerAfter : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task
+    abstract member RunUpdateTriggerAfter : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task
+    abstract member RunDeleteTriggerAfter : ResolvedEntityRef -> CancellationToken -> Task
 
 type IContext =
     inherit IDisposable
     inherit IAsyncDisposable
 
-    abstract Transaction : DatabaseTransaction with get
-    abstract State : CachedContext with get
-    abstract Preload : Preload with get
-    abstract TransactionTime : DateTime with get
-    abstract LoggerFactory : ILoggerFactory with get
-    abstract CancellationToken : CancellationToken with get
-    abstract Isolate : Isolate
+    abstract member Transaction : DatabaseTransaction with get
+    abstract member Preload : Preload with get
+    abstract member TransactionTime : DateTime with get
+    abstract member LoggerFactory : ILoggerFactory with get
+    abstract member CancellationToken : CancellationToken with get
+    abstract member Isolate : Isolate
+
+    abstract member Layout : Layout
+    abstract member UserViews : PrefetchedUserViews
+    abstract member Permissions : Permissions
+    abstract member DefaultAttrs : MergedDefaultAttributes
+    abstract member Triggers : MergedTriggers
 
     abstract member ScheduleMigration : unit -> unit
-    abstract member Commit : unit -> Task<unit>
+    abstract member Commit : unit -> Task
     abstract member GetAnonymousView : string -> Task<PrefetchedUserView>
     abstract member ResolveAnonymousView : SchemaName option -> string -> Task<PrefetchedUserView>
-    abstract member WriteEvent : EventEntry -> ValueTask
+    abstract member WriteEvent : EventEntry -> unit
+    abstract member SetAPI : IFunDBAPI -> unit
+    abstract member FindTrigger : TriggerRef -> ITriggerScript option
 
 [<NoEquality; NoComparison>]
 type RoleType =
@@ -66,15 +74,20 @@ type RequestUser =
       Language : string
     }
 
-type RawArguments = Map<string, JToken>
+[<SerializeAsObject("type")>]
+type EventSource =
+    | [<CaseName("api")>] ESAPI
+    | [<CaseName("trigger", InnerObject=true)>] ESTrigger of TriggerRef
 
 type IRequestContext =
     abstract Context : IContext with get
     abstract User : RequestUser with get
     abstract GlobalArguments : Map<ArgumentName, FieldValue> with get
+    abstract Source : EventSource with get
 
-    abstract member WriteEvent : (EventEntry -> unit) -> ValueTask
+    abstract member WriteEvent : (EventEntry -> unit) -> unit
     abstract member WriteEventSync : (EventEntry -> unit) -> unit
+    abstract member RunWithSource : EventSource -> (unit -> Task<'a>) -> Task<'a>
 
 [<SerializeAsObject("error")>]
 type UserViewErrorInfo =
@@ -121,6 +134,8 @@ type EntityErrorInfo =
     | [<CaseName("access_denied")>] EEAccessDenied
     | [<CaseName("arguments")>] EEArguments of Details : string
     | [<CaseName("execution")>] EEExecution of Details : string
+    | [<CaseName("exception")>] EEException of Details : string
+    | [<CaseName("trigger")>] EETrigger of Schema : SchemaName * Name : TriggerName * Inner : EntityErrorInfo
     with
         [<DataMember>]
         member this.Message =
@@ -129,6 +144,8 @@ type EntityErrorInfo =
             | EEAccessDenied -> "Entity access denied"
             | EEArguments msg -> "Invalid operation arguments"
             | EEExecution msg -> "Operation execution failed"
+            | EEException msg -> "Exception during running user code"
+            | EETrigger (schema, name, inner) -> "Error while running trigger"
 
 [<SerializeAsObject("type")>]
 [<NoEquality; NoComparison>]
@@ -200,3 +217,11 @@ type IFunDBAPI =
     abstract member UserViews : IUserViewsAPI
     abstract member Entities : IEntitiesAPI
     abstract member SaveRestore : ISaveRestoreAPI
+
+let dummyFunDBAPI =
+    { new IFunDBAPI with
+          member this.Request = failwith "Attempted to access dummy API"
+          member this.UserViews = failwith "Attempted to access dummy API"
+          member this.Entities = failwith "Attempted to access dummy API"
+          member this.SaveRestore = failwith "Attempted to access dummy API"
+    }

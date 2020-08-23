@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.HTTP.View
 
 open Microsoft.AspNetCore.Http
 open Giraffe
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Parsing

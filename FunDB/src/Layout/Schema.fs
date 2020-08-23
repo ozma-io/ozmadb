@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.Layout.Schema
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Layout.Source
@@ -49,8 +49,9 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         then funId
         else FunQLName entity.MainField
       ForbidExternalReferences = entity.ForbidExternalReferences
-      ForbidTriggers = entity.ForbidTriggers
-      IsHidden = entity.IsHidden
+      ForbidTriggers = false
+      TriggersMigration = false
+      IsHidden = false
       Parent =
         if entity.Parent = null
         then None
@@ -71,4 +72,22 @@ let buildSchemaLayout (db : SystemContext) (cancellationToken : CancellationToke
         return
             { Schemas = sourceSchemas
             }
+    }
+
+let private applyHiddenLayoutSchemaData (sourceSchema : SourceSchema) (systemSchema : SourceSchema) : SourceSchema =
+    let mergeOne entity systemEntity =
+        { entity with
+              ForbidTriggers = systemEntity.ForbidTriggers
+              TriggersMigration = systemEntity.TriggersMigration
+              IsHidden = systemEntity.IsHidden
+        }
+    { Entities = Map.unionWith (fun name -> mergeOne) sourceSchema.Entities systemSchema.Entities
+    }
+
+let applyHiddenLayoutData (sourceLayout : SourceLayout) (systemLayout : SourceLayout) : SourceLayout =
+    let mergeOne name schema =
+        match Map.tryFind name systemLayout.Schemas with
+        | None -> schema
+        | Some systemSchema -> applyHiddenLayoutSchemaData schema systemSchema
+    { Schemas = Map.map mergeOne sourceLayout.Schemas
     }

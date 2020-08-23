@@ -7,7 +7,7 @@ open System.Threading.Tasks
 open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
@@ -748,7 +748,7 @@ and mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1
     | AEDistinct expr -> AEDistinct (func expr)
     | AEStar -> AEStar
 
-type FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQLName and 'e2 :> IFunQLName and 'f2 :> IFunQLName =
+type FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQLName and 'e2 :> IFunQLName and 'f2 :> IFunQLName =
     { value : FieldValue -> Task<FieldValue>
       fieldReference : 'f1 -> Task<'f2>
       query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>
@@ -756,7 +756,7 @@ type FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 
       subEntity : SubEntityContext -> 'f2 -> SubEntityRef -> Task<SubEntityRef>
     }
 
-let idFieldExprTaskSyncMapper (fieldReference : 'f1 -> Task<'f2>) (query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) =
+let idFieldExprTaskMapper (fieldReference : 'f1 -> Task<'f2>) (query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) =
     { value = Task.result
       fieldReference = fieldReference
       query = query
@@ -764,28 +764,28 @@ let idFieldExprTaskSyncMapper (fieldReference : 'f1 -> Task<'f2>) (query : Selec
       subEntity = fun _ _ r -> Task.result r
     }
 
-let rec mapTaskFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
+let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
     let rec traverse = function
         | FEValue value -> Task.map FEValue (mapper.value value)
         | FERef r -> Task.map FERef (mapper.fieldReference r)
         | FENot e -> Task.map FENot (traverse e)
-        | FEAnd (a, b) -> Task.map2Sync (curry FEAnd) (traverse a) (traverse b)
-        | FEOr (a, b) -> Task.map2Sync (curry FEOr) (traverse a) (traverse b)
-        | FEConcat (a, b) -> Task.map2Sync (curry FEConcat) (traverse a) (traverse b)
-        | FEDistinct (a, b) -> Task.map2Sync (curry FEDistinct) (traverse a) (traverse b)
-        | FENotDistinct (a, b) -> Task.map2Sync (curry FENotDistinct) (traverse a) (traverse b)
-        | FEEq (a, b) -> Task.map2Sync (curry FEEq) (traverse a) (traverse b)
-        | FENotEq (a, b) -> Task.map2Sync (curry FENotEq) (traverse a) (traverse b)
-        | FELike (e, pat) -> Task.map2Sync (curry FELike) (traverse e) (traverse pat)
-        | FENotLike (e, pat) -> Task.map2Sync (curry FENotLike) (traverse e) (traverse pat)
-        | FELess (a, b) -> Task.map2Sync (curry FELess) (traverse a) (traverse b)
-        | FELessEq (a, b) -> Task.map2Sync (curry FELessEq) (traverse a) (traverse b)
-        | FEGreater (a, b) -> Task.map2Sync (curry FEGreater) (traverse a) (traverse b)
-        | FEGreaterEq (a, b) -> Task.map2Sync (curry FEGreaterEq) (traverse a) (traverse b)
-        | FEIn (e, vals) -> Task.map2Sync (curry FEIn) (traverse e) (Array.mapTask traverse vals)
-        | FENotIn (e, vals) -> Task.map2Sync (curry FENotIn) (traverse e) (Array.mapTask traverse vals)
-        | FEInQuery (e, query) -> Task.map2Sync (curry FEInQuery) (traverse e) (mapper.query query)
-        | FENotInQuery (e, query) -> Task.map2Sync (curry FENotInQuery) (traverse e) (mapper.query query)
+        | FEAnd (a, b) -> Task.map2 (curry FEAnd) (traverse a) (traverse b)
+        | FEOr (a, b) -> Task.map2 (curry FEOr) (traverse a) (traverse b)
+        | FEConcat (a, b) -> Task.map2 (curry FEConcat) (traverse a) (traverse b)
+        | FEDistinct (a, b) -> Task.map2 (curry FEDistinct) (traverse a) (traverse b)
+        | FENotDistinct (a, b) -> Task.map2 (curry FENotDistinct) (traverse a) (traverse b)
+        | FEEq (a, b) -> Task.map2 (curry FEEq) (traverse a) (traverse b)
+        | FENotEq (a, b) -> Task.map2 (curry FENotEq) (traverse a) (traverse b)
+        | FELike (e, pat) -> Task.map2 (curry FELike) (traverse e) (traverse pat)
+        | FENotLike (e, pat) -> Task.map2 (curry FENotLike) (traverse e) (traverse pat)
+        | FELess (a, b) -> Task.map2 (curry FELess) (traverse a) (traverse b)
+        | FELessEq (a, b) -> Task.map2 (curry FELessEq) (traverse a) (traverse b)
+        | FEGreater (a, b) -> Task.map2 (curry FEGreater) (traverse a) (traverse b)
+        | FEGreaterEq (a, b) -> Task.map2 (curry FEGreaterEq) (traverse a) (traverse b)
+        | FEIn (e, vals) -> Task.map2 (curry FEIn) (traverse e) (Array.mapTask traverse vals)
+        | FENotIn (e, vals) -> Task.map2 (curry FENotIn) (traverse e) (Array.mapTask traverse vals)
+        | FEInQuery (e, query) -> Task.map2 (curry FEInQuery) (traverse e) (mapper.query query)
+        | FENotInQuery (e, query) -> Task.map2 (curry FENotInQuery) (traverse e) (mapper.query query)
         | FECast (e, typ) -> Task.map (fun newE -> FECast (newE, typ)) (traverse e)
         | FEIsNull e -> Task.map FEIsNull (traverse e)
         | FEIsNotNull e -> Task.map FEIsNotNull (traverse e)
@@ -795,16 +795,16 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskSyncMapper<'e1, 'f1, 'e2, 'f2>) 
                 let! newE = traverse e
                 return (newCond, newE)
             }
-            Task.map2Sync (curry FECase) (Array.mapTask mapOne es) (Option.mapTask traverse els)
+            Task.map2 (curry FECase) (Array.mapTask mapOne es) (Option.mapTask traverse els)
         | FECoalesce vals -> Task.map FECoalesce (Array.mapTask traverse vals)
         | FEJsonArray vals -> Task.map FEJsonArray (Array.mapTask traverse vals)
         | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTask (fun name -> traverse) obj)
-        | FEJsonArrow (a, b) -> Task.map2Sync (curry FEJsonArrow) (traverse a) (traverse b)
-        | FEJsonTextArrow (a, b) -> Task.map2Sync (curry FEJsonTextArrow) (traverse a) (traverse b)
-        | FEPlus (a, b) -> Task.map2Sync (curry FEPlus) (traverse a) (traverse b)
-        | FEMinus (a, b) -> Task.map2Sync (curry FEMinus) (traverse a) (traverse b)
-        | FEMultiply (a, b) -> Task.map2Sync (curry FEMultiply) (traverse a) (traverse b)
-        | FEDivide (a, b) -> Task.map2Sync (curry FEDivide) (traverse a) (traverse b)
+        | FEJsonArrow (a, b) -> Task.map2 (curry FEJsonArrow) (traverse a) (traverse b)
+        | FEJsonTextArrow (a, b) -> Task.map2 (curry FEJsonTextArrow) (traverse a) (traverse b)
+        | FEPlus (a, b) -> Task.map2 (curry FEPlus) (traverse a) (traverse b)
+        | FEMinus (a, b) -> Task.map2 (curry FEMinus) (traverse a) (traverse b)
+        | FEMultiply (a, b) -> Task.map2 (curry FEMultiply) (traverse a) (traverse b)
+        | FEDivide (a, b) -> Task.map2 (curry FEDivide) (traverse a) (traverse b)
         | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTask traverse args)
         | FEAggFunc (name, args) ->
             task {

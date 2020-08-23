@@ -4,7 +4,7 @@ open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore;
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
@@ -114,8 +114,8 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) (cancella
         return changedEntries > 0
     }
 
-let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) (cancellationToken : CancellationToken) : Task<unit> =
-    task {
+let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) (cancellationToken : CancellationToken) : Task =
+    unitTask {
         let currentSchemas = db.GetRolesObjects ()
 
         let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)

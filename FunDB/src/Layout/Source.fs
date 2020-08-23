@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.Layout.Source
 
+open Newtonsoft.Json
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 
@@ -38,7 +40,11 @@ type SourceEntity =
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       MainField : FieldName
       ForbidExternalReferences : bool
+      [<JsonIgnore>]
       ForbidTriggers : bool
+      [<JsonIgnore>]
+      TriggersMigration : bool
+      [<JsonIgnore>]
       IsHidden : bool
       IsAbstract : bool
       Parent : ResolvedEntityRef option

@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.SQL.Migration
 
 open System.Threading
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.AST

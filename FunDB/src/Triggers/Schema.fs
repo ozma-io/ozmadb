@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.Triggers.Schema
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open Microsoft.FSharp.Reflection
 
 open FunWithFlags.FunUtils

@@ -7,9 +7,9 @@ open NetJs.Json
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
-open FunWithFlags.FunDB.UserViews.Render
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.JavaScript.Runtime
 
@@ -18,7 +18,7 @@ type UserViewGenerateException (message : string, innerException : Exception) =
 
     new (message : string) = UserViewGenerateException (message, null)
 
-let userViewsFunction = "GetUserViews"
+let userViewsFunction = "getUserViews"
 
 let private convertUserView (KeyValue (k, v : Value.Value)) =
     let query = v.GetString().Get()
@@ -52,9 +52,12 @@ type private UserViewGeneratorScript (template : UserViewGeneratorTemplate, scri
 
     let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
         try
+            eprintfn "Test: %O" (layout.GetObject().GetProperties() |> Seq.map (fun (KeyValue(k, v)) -> (k, v)) |> Map.ofSeq)
             let newViews = func.Function.Call(cancellationToken, null, [|layout|])
             newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
         with
+        | :? JSException as e ->
+            raisefWithInner UserViewGenerateException e "Unhandled exception in user view generator: %s" (e.JSStackTrace.ToPrettyString())
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't generate user views"
 
@@ -76,7 +79,7 @@ type private UserViewsGenerators = Map<SchemaName, PreparedUserViewSchema>
 
 type private UserViewsGeneratorState (layout : Layout, cancellationToken : CancellationToken, forceAllowBroken : bool) =
     let generateUserViewsSchema (gen : UserViewGenerator) : Result<SourceUserViewsSchema, UserViewsSchemaError> =
-        let layout = V8JsonWriter.Serialize(gen.Generator.Context, layout)
+        let layout = V8JsonWriter.Serialize(gen.Generator.Context, serializeLayout layout)
         try
             let uvs = gen.Generator.Generate layout cancellationToken
             Ok { UserViews = uvs
@@ -123,8 +126,6 @@ type UserViewsGenerator (template : UserViewGeneratorTemplate, userViews : Sourc
                 PUVError { Source = schema; Error = SETGenerator (e :> exn) }
     let gens : UserViewsGenerators = Map.map (fun name -> prepareGenerator) userViews.Schemas
 
-    let generateUserViews (layout : Layout) (cancellationToken : CancellationToken) (forceAllowBroken : bool) : ErroredUserViews * SourceUserViews =
+    member this.GenerateUserViews (layout : Layout) (cancellationToken : CancellationToken) (forceAllowBroken : bool) : ErroredUserViews * SourceUserViews =
         let state = UserViewsGeneratorState(layout, cancellationToken, forceAllowBroken)
         state.GenerateUserViews gens
-
-    member this.GenerateUserViews layout cancellationToken forceAllowBroken = generateUserViews layout cancellationToken forceAllowBroken

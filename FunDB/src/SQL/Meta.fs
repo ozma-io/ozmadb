@@ -5,7 +5,7 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Parsing

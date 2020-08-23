@@ -15,7 +15,6 @@ SELECT
 FROM
   public.entities
   LEFT JOIN public.schemas ON schemas.id = entities.schema_id
-WHERE NOT entities.is_hidden
 ORDER BY entities.id`,
     "user_view_by_name": `
 { $schema string, $name string }:
@@ -84,7 +83,7 @@ ${entity.isAbstract ? "" : `FOR INSERT INTO ${sqlName}`}`;
     }));
 };
 
-function GetUserViews(layout) {
+function getUserViews(layout) {
     const generated = generateDefaultViews(layout);
     const allViews = { ...commonViews, ...generated };
     return Object.fromEntries(Object.entries(allViews).map(([name, query]) => [name, query.trim()]));

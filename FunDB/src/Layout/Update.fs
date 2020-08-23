@@ -5,7 +5,7 @@ open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
@@ -105,8 +105,6 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         else
             existingEntity.MainField <-entity.MainField.ToString()
         existingEntity.ForbidExternalReferences <- entity.ForbidExternalReferences
-        existingEntity.ForbidTriggers <- entity.ForbidTriggers
-        existingEntity.IsHidden <- entity.IsHidden
         existingEntity.IsAbstract <- entity.IsAbstract
         match entity.Parent with
         | None ->
@@ -133,7 +131,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingSchema.Entities.Add(newEntity)
             newEntity
-        ignore <| updateDifference db updateFunc createFunc schema.Entities entitiesMap
+        ignore <| updateDifference db updateFunc createFunc (Map.filter (fun name entity -> not entity.IsHidden) schema.Entities) entitiesMap
 
     let updateSchemas schemas existingSchemas =
         let updateFunc _ = updateSchema
@@ -150,8 +148,8 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
     member this.UpdateSchemas = updateSchemas
     member this.NeedsParentPass = needsParentPass
 
-let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) : Task<unit> =
-    task {
+let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) : Task =
+    unitTask {
         let currentSchemas = db.GetLayoutObjects ()
         let! schemas = currentSchemas.AsTracking().ToListAsync()
 
@@ -197,8 +195,8 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken
         return changedEntries > 0
     }
 
-let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) (cancellationToken : CancellationToken) : Task<unit> =
-    task {
+let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) (cancellationToken : CancellationToken) : Task =
+    unitTask {
         let currentSchemas = db.GetLayoutObjects ()
 
         let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)

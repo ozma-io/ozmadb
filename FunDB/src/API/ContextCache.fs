@@ -1,7 +1,6 @@
 ﻿module FunWithFlags.FunDB.API.ContextCache
 
 open System
-open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
@@ -9,7 +8,7 @@ open Microsoft.Extensions.ObjectPool
 open Microsoft.EntityFrameworkCore
 open FluidCaching
 open Npgsql
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open NetJs
 
 open FunWithFlags.FunDBSchema.System
@@ -51,6 +50,8 @@ module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.API.Types
+open FunWithFlags.FunDB.API.JavaScript
+open FunWithFlags.FunDB.API.Triggers
 
 type ContextException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -66,6 +67,18 @@ type private AnonymousUserView =
 let private versionField = "StateVersion"
 let private fallbackVersion = 0
 let private migrationLockNumber = 0
+
+[<NoEquality; NoComparison>]
+type private CachedContext =
+    { Layout : Layout
+      UserViews : PrefetchedUserViews
+      Permissions : Permissions
+      DefaultAttrs : MergedDefaultAttributes
+      TriggerScripts : IsolateLocal<TriggerScripts>
+      Triggers : MergedTriggers
+      SystemViews : SourceUserViews
+      UserMeta : SQL.DatabaseMeta
+    }
 
 [<NoEquality; NoComparison>]
 type private CachedState =
@@ -233,6 +246,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 do! markBrokenPermissions conn.System brokenPerms cancellationToken
         }
 
+    let apiTemplate = IsolateLocal(APITemplate)
+
     let uvGeneratorTemplate = IsolateLocal(UserViewGeneratorTemplate)
 
     let generateViews' isolate layout userViews cancellationToken forceAllowBroken =
@@ -248,14 +263,16 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             jsIsolates.Return(isolate)
 
     let rec finishGetCachedState (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews) = task {
+        let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews) = task {
             try
                 let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
                 let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
                 let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
                 let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
-                let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
+                let (brokenTriggers1, triggers) = resolveTriggers layout true sourceTriggers
+                let (brokenTriggers2, triggers) = testEvalTriggers true sourceTriggers triggers
+                let brokenTriggers = unionErroredTriggers brokenTriggers1 brokenTriggers2
                 let mergedTriggers = mergeTriggers layout triggers
 
                 let systemViews = preloadUserViews preload
@@ -272,7 +289,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 let! (brokenViews3, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
                 let transaction = new DatabaseTransaction (transaction.Connection)
                 let brokenViews = unionErroredUserViews (unionErroredUserViews brokenViews1 brokenViews2) brokenViews3
-                return (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews)
+                return (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews)
             with
             | ex ->
                 do! transaction.Rollback ()
@@ -288,6 +305,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
         }
         if currentVersion2 <> currentVersion then
             let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
+            let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
             let (_, layout) = resolveLayout sourceLayout false
             let! state = finishGetCachedState transaction layout userMeta false cancellationToken
             let! meta = buildDatabaseMeta transaction.Transaction cancellationToken
@@ -312,6 +330,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
                       Triggers = mergedTriggers
+                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (apiTemplate.GetValue isolate) triggers)
                       UserViews = prefetchedViews
                       SystemViews = systemViews
                       UserMeta = userMeta
@@ -367,9 +386,10 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
     // Called when state update by another instance is detected. More lightweight than full `getCachedState`.
     let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> = task {
-        let! (transaction, layout, mergedAttrs, mergedTriggers, sourceUvs, userViews, prefetchedBadViews) = task {
+        let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews) = task {
             try
                 let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
+                let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
                 let (_, layout) = resolveLayout sourceLayout false
 
                 let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
@@ -378,6 +398,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
                 let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                 let (_, triggers) = resolveTriggers layout false sourceTriggers
+                let (_, triggers) = testEvalTriggers false sourceTriggers triggers
                 let mergedTriggers = mergeTriggers layout triggers
 
                 let! sourceUvs = buildSchemaUserViews transaction.System cancellationToken
@@ -388,7 +409,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 // We dry-run those views that _can_ be failed here, outside of a transaction.
                 let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews cancellationToken
                 let transaction = new DatabaseTransaction(transaction.Connection)
-                return (transaction, layout, mergedAttrs, mergedTriggers, sourceUvs, userViews, prefetchedBadViews)
+                return (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews)
             with
             | ex ->
                 do! transaction.Rollback ()
@@ -425,6 +446,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
                       Triggers = mergedTriggers
+                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (apiTemplate.GetValue isolate) triggers)
                       UserViews = prefetchedViews
                       SystemViews = systemViews
                       UserMeta = userMeta
@@ -491,52 +513,62 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
             let getIsolate () =
                 match maybeIsolate with
                 | Some isolate -> isolate
-                | None -> jsIsolates.Get()
+                | None ->
+                    let isolate = jsIsolates.Get()
+                    maybeIsolate <- Some isolate
+                    isolate
 
             let migrate () = task {
                 logger.LogInformation("Starting migration")
                 // Careful here not to evaluate user views before we do migration
 
-                let! layoutSource = buildSchemaLayout transaction.System cancellationToken
-                if not <| preloadLayoutIsUnchanged layoutSource preload then
+                let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
+                let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
+                if not <| preloadLayoutIsUnchanged sourceLayout preload then
                     raisef ContextException "Cannot modify system layout"
                 let (_, layout) =
                     try
-                        resolveLayout layoutSource false
+                        resolveLayout sourceLayout false
                     with
                     | :? ResolveLayoutException as err -> raisefWithInner ContextException err "Failed to resolve layout"
 
-                let! permissionsSource = buildSchemaPermissions transaction.System cancellationToken
-                if not <| preloadPermissionsAreUnchanged permissionsSource preload then
+                let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
+                if not <| preloadPermissionsAreUnchanged sourcePermissions preload then
                     raisef ResolveLayoutException "Cannot modify system permissions"
                 let (_, permissions) =
                     try
-                        resolvePermissions layout false permissionsSource
+                        resolvePermissions layout false sourcePermissions
                     with
                     | :? ResolvePermissionsException as err -> raisefWithInner ContextException err "Failed to resolve permissions"
 
-                let! attrsSource = buildSchemaAttributes transaction.System cancellationToken
-                if not <| preloadAttributesAreUnchanged attrsSource preload then
+                let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
+                if not <| preloadAttributesAreUnchanged sourceAttrs preload then
                     raisef ResolveLayoutException "Cannot modify system default attributes"
                 let (_, defaultAttrs) =
                     try
-                        resolveAttributes layout false attrsSource
+                        resolveAttributes layout false sourceAttrs
                     with
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
                 let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
-                let! triggersSource = buildSchemaTriggers transaction.System cancellationToken
-                if not <| preloadTriggersAreUnchanged triggersSource preload then
+                let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
+                if not <| preloadTriggersAreUnchanged sourceTriggers preload then
                     raisef ResolveLayoutException "Cannot modify system triggers"
                 let (_, triggers) =
                     try
-                        resolveTriggers layout false triggersSource
+                        resolveTriggers layout false sourceTriggers
+                    with
+                    | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
+                let (_, triggers) =
+                    try
+                        eprintfn ""
+                        testEvalTriggers false sourceTriggers triggers
                     with
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
                 let mergedTriggers = mergeTriggers layout triggers
 
-                let! userViewsSource = buildSchemaUserViews transaction.System cancellationToken
-                if filterSystemViews userViewsSource <> oldState.Context.SystemViews then
+                let! sourceUserViews = buildSchemaUserViews transaction.System cancellationToken
+                if filterSystemViews sourceUserViews <> oldState.Context.SystemViews then
                     raisef ContextException "Cannot modify system user views"
 
                 // Actually migrate.
@@ -551,7 +583,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
                 logger.LogInformation("Updating generated user views")
                 let isolate = getIsolate ()
-                let (_, userViewsSource) = generateViews' isolate layout userViewsSource cancellationToken false
+                let (_, userViewsSource) = generateViews' isolate layout sourceUserViews cancellationToken false
                 let! _ = updateUserViews transaction.System userViewsSource cancellationToken
 
                 let! newUserViewsSource = buildSchemaUserViews transaction.System cancellationToken
@@ -598,6 +630,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
                       Triggers = mergedTriggers
+                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (apiTemplate.GetValue isolate) triggers)
                       UserViews = mergePrefetchedUserViews badUserViews goodUserViews
                       SystemViews = filterSystemViews userViewsSource
                       UserMeta = wantedUserMeta
@@ -635,7 +668,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
             let mutable needMigration = false
             let commit () =
-                task {
+                unitTask {
                     if needMigration then
                         do! migrate ()
                     else
@@ -646,40 +679,70 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                         | :? DbUpdateException as ex -> return raisefWithInner ContextException ex "Failed to commit"
                 }
 
+            let mutable maybeAPITemplate = None
+            let setAPI api =
+                match maybeAPITemplate with
+                | Some template -> failwith "Cannot set API more than once"
+                | None ->
+                    let template = apiTemplate.GetValue (getIsolate ())
+                    template.SetAPI api
+                    maybeAPITemplate <- Some template
+
+            let mutable maybeTriggerScripts = None
+            let getTriggerScripts () =
+                match maybeTriggerScripts with
+                | Some triggerScripts -> triggerScripts
+                | None ->
+                    let triggerScripts = oldState.Context.TriggerScripts.GetValue (getIsolate ())
+                    maybeTriggerScripts <- Some triggerScripts
+                    triggerScripts
+
             let transactionTime = DateTime.UtcNow
 
             return
                 { new IContext with
                       member this.Transaction = transaction
-                      member this.State = oldState.Context
                       member this.TransactionTime = transactionTime
                       member this.LoggerFactory = loggerFactory
                       member this.CancellationToken = cancellationToken
                       member this.Preload = preload
                       member this.Isolate = getIsolate ()
 
+                      member this.Layout = oldState.Context.Layout
+                      member this.UserViews = oldState.Context.UserViews
+                      member this.Permissions = oldState.Context.Permissions
+                      member this.DefaultAttrs = oldState.Context.DefaultAttrs
+                      member this.Triggers = oldState.Context.Triggers
+
                       member this.Commit () = commit ()
                       member this.ScheduleMigration () =
                         needMigration <- true
                       member this.GetAnonymousView query = getAnonymousView query
                       member this.ResolveAnonymousView homeSchema query = resolveAnonymousView homeSchema query
-                      member this.WriteEvent event = eventLogger.WriteEvent(connectionString, event, cancellationToken)
+                      member this.WriteEvent event = eventLogger.WriteEvent(connectionString, event)
+                      member this.SetAPI api = setAPI api
+                      member this.FindTrigger ref = (getTriggerScripts ()).FindTrigger ref
 
                       member this.Dispose () =
+                          match maybeAPITemplate with
+                          | Some template -> template.ResetAPI ()
+                          | None -> ()
                           match maybeIsolate with
                           | Some isolate -> jsIsolates.Return isolate
                           | None -> ()
                           (transaction :> IDisposable).Dispose ()
                           (conn :> IDisposable).Dispose ()
                       member this.DisposeAsync () =
-                          // FIXME: replace with unitVtask when we switch to Ply.
-                          ValueTask(task {
+                          unitVtask {
+                              match maybeAPITemplate with
+                              | Some template -> template.ResetAPI ()
+                              | None -> ()
                               match maybeIsolate with
                               | Some isolate -> jsIsolates.Return isolate
                               | None -> ()
                               do! (transaction :> IAsyncDisposable).DisposeAsync ()
                               do! (conn :> IAsyncDisposable).DisposeAsync ()
-                          })
+                          }
                 }
         with
         | e ->

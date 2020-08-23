@@ -2,7 +2,7 @@
 
 open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open Giraffe
 
 open FunWithFlags.FunUtils
@@ -16,6 +16,8 @@ let private errorHandler = function
     | EEAccessDenied -> RequestErrors.forbidden
     | EEArguments _ -> RequestErrors.notFound
     | EEExecution _ -> RequestErrors.unprocessableEntity
+    | EEException _ -> ServerErrors.internalError
+    | EETrigger _ -> ServerErrors.internalError
 
 let entitiesApi : HttpHandler =
     let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) : HttpHandler =

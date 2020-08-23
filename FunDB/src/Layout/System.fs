@@ -68,6 +68,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               MainField = FunQLName entityAttr.MainField
               ForbidExternalReferences = entityAttr.ForbidExternalReferences
               ForbidTriggers = entityAttr.ForbidTriggers
+              TriggersMigration = entityAttr.TriggersMigration
               IsHidden = entityAttr.IsHidden
               Parent = None
               IsAbstract = entityClass.IsAbstract

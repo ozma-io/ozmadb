@@ -9,7 +9,7 @@ open Microsoft.Extensions.Primitives
 open Microsoft.Extensions.Logging
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 open Giraffe
 
@@ -115,6 +115,7 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
                       IsRoot = (userName = instance.Owner || isRoot)
                       Language = lang
                       Context = dbCtx
+                      Source = ESAPI
                     }
             return! f (FunDBAPI rctx) next ctx
         with

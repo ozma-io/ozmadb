@@ -1,7 +1,7 @@
 module FunWithFlags.FunUtils.Option
 
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.NonAffine
 
 let getOrFailWith (errorFunc : unit -> string) : 'a option -> 'a = function
     | Some r -> r

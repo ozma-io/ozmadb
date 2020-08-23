@@ -6,8 +6,9 @@ open System.Threading.Tasks
 open NpgsqlTypes
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
+open Newtonsoft.Json
 open Newtonsoft.Json.Linq
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunUtils
@@ -35,6 +36,7 @@ type RequestParams =
       UserName : UserName
       IsRoot : bool
       Language : string
+      Source : EventSource
     }
 
 type RequestContext private (opts : RequestParams, userId : int option, roleType : RoleType) =
@@ -58,12 +60,15 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
           Language = opts.Language
         }
 
+    let mutable source = opts.Source
+
     let makeEvent (addDetails : EventEntry -> unit) =
         let event =
             EventEntry (
                 TransactionTimestamp = ctx.TransactionTime,
                 Timestamp = DateTime.UtcNow,
-                UserName = opts.UserName
+                UserName = opts.UserName,
+                Source = JsonConvert.SerializeObject(source)
             )
         addDetails event
         event
@@ -89,7 +94,7 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
                     | Some user when user.IsRoot -> RTRoot
                     | Some user when isNull user.Role -> raise <| RequestException RENoRole
                     | Some user ->
-                        match ctx.State.Permissions.Find { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get with
+                        match ctx.Permissions.Find { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get with
                         | Ok role -> RTRole role
                         | Error e -> raise <| RequestException RENoRole
             return RequestContext(opts, userId, roleType)
@@ -105,10 +110,22 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
     member this.WriteEventSync (addDetails : EventEntry -> unit) =
         ignore <| ctx.Transaction.System.Events.Add(makeEvent addDetails)
 
+    member this.RunWithSource (newSource : EventSource) (func : unit -> Task<'a>) : Task<'a> =
+        task {
+            let oldSource = source
+            source <- newSource
+            try
+                return! func ()
+            finally
+                source <- oldSource
+        }
+
     interface IRequestContext with
         member this.User = user
         member this.Context = ctx
         member this.GlobalArguments = globalArguments
+        member this.Source = source
 
         member this.WriteEvent addDetails = this.WriteEvent addDetails
         member this.WriteEventSync addDetails = this.WriteEventSync addDetails
+        member this.RunWithSource newSource func = this.RunWithSource newSource func

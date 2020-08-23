@@ -8,11 +8,10 @@ open FunWithFlags.FunDB.Layout.Types
 
 [<NoEquality; NoComparison>]
 type MergedTrigger =
-    { SchemaName : SchemaName
+    { Schema : SchemaName
       Name : TriggerName
       Priority : int
       Inherited : bool
-      Procedure : string
     }
 
 type TriggerUpdateField =
@@ -40,11 +39,39 @@ type MergedTriggersSchema =
 [<NoEquality; NoComparison>]
 type MergedTriggers =
     { Schemas : Map<SchemaName, MergedTriggersSchema>
-    } with
-        member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.Schemas with
-            | None -> None
-            | Some schema -> Map.tryFind entity.name schema.Entities
+    }
+
+let private findTriggersTime (entity : ResolvedEntityRef) (time : TriggerTime) (triggers : MergedTriggers) : MergedTriggersTime option =
+    Map.tryFind entity.schema triggers.Schemas
+        |> Option.bind (fun schema -> Map.tryFind entity.name schema.Entities) 
+        |> Option.map (fun entity -> match time with | TTBefore -> entity.Before | TTAfter -> entity.After)
+
+let findMergedTriggersInsert (entity : ResolvedEntityRef) (time : TriggerTime) (triggers : MergedTriggers) : MergedTrigger seq =
+    match findTriggersTime entity time triggers with
+    | None -> Seq.empty
+    | Some timeTriggers -> Array.toSeq timeTriggers.OnInsert
+
+let findMergedTriggersUpdate (entity : ResolvedEntityRef) (time : TriggerTime) (fields : FieldName seq) (triggers : MergedTriggers) : MergedTrigger seq =
+    match findTriggersTime entity time triggers with
+    | None -> Seq.empty
+    | Some timeTriggers ->
+        seq {
+            match Map.tryFind MUFAll timeTriggers.OnUpdateFields with
+            | None -> ()
+            | Some triggers -> yield! triggers
+            yield!
+                seq {
+                    for field in fields do
+                        match Map.tryFind (MUFField field) timeTriggers.OnUpdateFields with
+                        | None -> ()
+                        | Some triggers -> yield! triggers
+                } |> Seq.distinctBy (fun trigger -> (trigger.Schema, trigger.Name))
+        } |> Seq.sortBy (fun trigger -> trigger.Priority)
+
+let findMergedTriggersDelete (entity : ResolvedEntityRef) (time : TriggerTime) (triggers : MergedTriggers) : MergedTrigger seq =
+    match findTriggersTime entity time triggers with
+    | None -> Seq.empty
+    | Some timeTriggers -> Array.toSeq timeTriggers.OnDelete
 
 let emptyMergedTriggerTime =
     { OnInsert = [||]
@@ -62,7 +89,7 @@ let emptyMergedTriggers =
     } : MergedTriggers
 
 let private mergeSortedTriggers (a : MergedTrigger[]) (b : MergedTrigger[]) : MergedTrigger[] =
-    Seq.mergeSortedBy (fun trig -> (trig.Priority, trig.Inherited, trig.SchemaName, trig.Name)) a b |> Array.ofSeq
+    Seq.mergeSortedBy (fun trig -> (trig.Priority, trig.Inherited, trig.Schema, trig.Name)) a b |> Array.ofSeq
 
 let private mergeTriggersTime (a : MergedTriggersTime) (b : MergedTriggersTime) : MergedTriggersTime =
     { OnInsert = mergeSortedTriggers a.OnInsert b.OnInsert
@@ -86,11 +113,10 @@ let private mergeTriggersPair (a : MergedTriggers) (b : MergedTriggers) : Merged
 let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : TriggerName) : Result<ResolvedTrigger, TriggerError> -> MergedTriggersEntity option = function
     | Ok trigger when trigger.OnInsert || trigger.OnUpdateFields <> TUFSet Set.empty || trigger.OnDelete ->
         let merged =
-            { SchemaName = schemaName
+            { Schema = schemaName
               Name = name
               Priority = trigger.Priority
               Inherited = false
-              Procedure = trigger.Procedure
             }
         let time =
             { OnInsert = if trigger.OnInsert then [|merged|] else [||]

@@ -7,7 +7,7 @@ open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 open Npgsql
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.SQL.Query

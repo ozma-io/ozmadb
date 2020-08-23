@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.API.SaveRestore
 
 open System.IO
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 
 open FunWithFlags.FunUtils
@@ -36,7 +36,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
         task {
             if not (isRootRole rctx.User.Type) then
                 logger.LogError("Dump access denied")
-                do! rctx.WriteEvent (fun event ->
+                rctx.WriteEvent (fun event ->
                     event.Type <- "saveSchema"
                     event.Error <- "access_denied"
                 )
@@ -66,14 +66,14 @@ type SaveRestoreAPI (rctx : IRequestContext) =
         task {
             if not (isRootRole rctx.User.Type) then
                 logger.LogError("Restore access denied")
-                do! rctx.WriteEvent (fun event ->
+                rctx.WriteEvent (fun event ->
                     event.Type <- "restoreSchema"
                     event.Error <- "access_denied"
                 )
                 return Error RREAccessDenied
             else if Map.containsKey name ctx.Preload.Schemas then
                 logger.LogError("Cannot restore preloaded schemas")
-                do! rctx.WriteEvent (fun event ->
+                rctx.WriteEvent (fun event ->
                     event.Type <- "restoreSchema"
                     event.Error <- "preloaded"
                 )

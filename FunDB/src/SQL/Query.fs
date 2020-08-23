@@ -8,7 +8,7 @@ open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Npgsql
 open NpgsqlTypes
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunUtils
