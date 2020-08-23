@@ -58,8 +58,8 @@
       "NetJs.Json": {
         "type": "Direct",
         "requested": "[1.1.*, )",
-        "resolved": "1.1.1",
-        "contentHash": "bj+32T+CuKx4EgNsQkzvijGUtRMWWVkdRQyE+zgDwKvvHmD2l4GOojvWrev5PCBDuvG/5ycdlL4QFOjNZD78Fw==",
+        "resolved": "1.1.2",
+        "contentHash": "pPCFF8HPMULfThA1zF82l2w86xz5ChASOeEq8x4tVEggqXqgp/zoQBW9DL66I3ICwhyDyD215B42uDSe7S2cIg==",
         "dependencies": {
           "NetJs": "1.1.4",
           "Newtonsoft.Json": "12.0.3"
