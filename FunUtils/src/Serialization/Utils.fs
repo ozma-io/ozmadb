@@ -215,8 +215,6 @@ let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
             let innerObject = 
                 match case.Info.GetCustomAttributes(typeof<CaseNameAttribute>) |> Seq.cast |> Seq.first with
                 | Some (caseName : CaseNameAttribute) when caseName.InnerObject ->
-                    if Option.isSome name then
-                        failwithf "Serialization as inner object requires removed case label in a union case %s" case.Info.Name
                     if Array.length case.Fields > 1 then
                         failwithf "Serialization as inner object requires no more than one field in a union case %s" case.Info.Name
                     true
