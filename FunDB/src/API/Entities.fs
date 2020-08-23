@@ -4,6 +4,7 @@ open System
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
+open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
@@ -152,7 +153,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                                 event.SchemaName <- entityRef.schema.ToString()
                                 event.EntityName <- entityRef.name.ToString()
                                 event.EntityId <- Nullable newId
-                                event.Details <- args.ToString()
+                                event.Details <- JsonConvert.SerializeObject args
                             )
                             if entity.triggersMigration then
                                 ctx.ScheduleMigration ()
@@ -203,7 +204,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                                 event.SchemaName <- entityRef.schema.ToString()
                                 event.EntityName <- entityRef.name.ToString()
                                 event.EntityId <- Nullable id
-                                event.Details <- args.ToString()
+                                event.Details <- JsonConvert.SerializeObject args
                             )
                             if entity.triggersMigration then
                                 ctx.ScheduleMigration ()

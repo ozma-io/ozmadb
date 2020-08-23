@@ -4,6 +4,7 @@ open System.IO
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
+open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
@@ -84,7 +85,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                     ctx.ScheduleMigration ()
                 rctx.WriteEventSync (fun event ->
                     event.Type <- "restoreSchema"
-                    event.Details <- dump.ToString()
+                    event.Details <- JsonConvert.SerializeObject dump
                 )
                 return Ok ()
         }
