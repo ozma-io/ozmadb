@@ -123,7 +123,7 @@ type UserViewInfoResult =
       PureAttributes : ExecutedAttributeMap
       PureColumnAttributes : ExecutedAttributeMap array
     }
- 
+
  type IUserViewsAPI =
     abstract member GetUserViewInfo : UserViewSource -> bool -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
     abstract member GetUserView : UserViewSource -> RawArguments -> bool -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>

@@ -254,7 +254,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
         let template = uvGeneratorTemplate.GetValue(isolate)
         let generator = UserViewsGenerator(template, userViews, forceAllowBroken)
         generator.GenerateUserViews layout cancellationToken forceAllowBroken
-    
+
     let generateViews layout userViews cancellationToken forceAllowBroken =
         let isolate = jsIsolates.Get()
         try

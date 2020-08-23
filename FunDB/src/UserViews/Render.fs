@@ -19,6 +19,6 @@ let renderUserViews (uvs : UserViews) : SourceUserViews =
     let renderOne = function
     | Ok schema -> renderUserViewsSchema schema
     | Error e -> e.Source
-  
+
     { Schemas = Map.map (fun schemaName -> renderOne) uvs.Schemas
     }

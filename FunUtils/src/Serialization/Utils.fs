@@ -212,7 +212,7 @@ let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
     | :? SerializeAsObjectAttribute as asObject ->
         let caseInfo (case : UnionCase) =
             let name = unionName case.Info
-            let innerObject = 
+            let innerObject =
                 match case.Info.GetCustomAttributes(typeof<CaseNameAttribute>) |> Seq.cast |> Seq.first with
                 | Some (caseName : CaseNameAttribute) when caseName.InnerObject ->
                     if Array.length case.Fields > 1 then

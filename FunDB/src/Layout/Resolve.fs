@@ -75,7 +75,7 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
               aggregate = voidAggr
               subEntity = voidSubEntity
         }
- 
+
 let private makeOldHashName (FunQLName name) =
     String.truncate hashNameLength name
 

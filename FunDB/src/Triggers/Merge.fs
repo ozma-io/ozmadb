@@ -43,7 +43,7 @@ type MergedTriggers =
 
 let private findTriggersTime (entity : ResolvedEntityRef) (time : TriggerTime) (triggers : MergedTriggers) : MergedTriggersTime option =
     Map.tryFind entity.schema triggers.Schemas
-        |> Option.bind (fun schema -> Map.tryFind entity.name schema.Entities) 
+        |> Option.bind (fun schema -> Map.tryFind entity.name schema.Entities)
         |> Option.map (fun entity -> match time with | TTBefore -> entity.Before | TTAfter -> entity.After)
 
 let findMergedTriggersInsert (entity : ResolvedEntityRef) (time : TriggerTime) (triggers : MergedTriggers) : MergedTrigger seq =

@@ -10,14 +10,14 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.API.Types
 
-let private saveError e = 
+let private saveError e =
     let handler =
         match e with
         | RSENotFound -> RequestErrors.notFound
         | RSEAccessDenied -> RequestErrors.forbidden
     handler (json e)
 
-let private restoreError e = 
+let private restoreError e =
     let handler =
         match e with
         | RREAccessDenied -> RequestErrors.forbidden

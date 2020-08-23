@@ -48,7 +48,7 @@ type UnionConverter (objectType : Type) =
                                     match serializer.ContractResolver with
                                     | :? DefaultContractResolver as r -> r
                                     | _ -> null
-                                let contract = serializer.ContractResolver.ResolveContract 
+                                let contract = serializer.ContractResolver.ResolveContract
                                 let getField (field : SerializableField) =
                                     let name = if isNull resolver then field.Name else resolver.GetResolvedPropertyName(field.Name)
                                     match obj.TryGetValue(name) with
@@ -230,7 +230,7 @@ type ConverterContractResolver (converterConstructors : (Type -> JsonConverter o
     override this.CreateProperty (memberInfo : MemberInfo, serialization : MemberSerialization) : JsonProperty =
         let prop = base.CreateProperty (memberInfo, serialization)
 
-        if prop.Order.HasValue then 
+        if prop.Order.HasValue then
             eprintfn "Order for %s.%s is %O" memberInfo.DeclaringType.Name memberInfo.Name prop.Order
 
         if FSharpType.IsRecord memberInfo.DeclaringType || FSharpType.IsUnion memberInfo.DeclaringType then

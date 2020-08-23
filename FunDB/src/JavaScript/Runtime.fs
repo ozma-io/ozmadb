@@ -15,7 +15,7 @@ type IsolateLocal<'a when 'a : not struct> (create : Isolate -> 'a) =
     member this.HasValue (isolate : Isolate) =
         match table.TryGetValue(isolate) with
         | (ret, _) -> ret
-    
+
     member this.GetValue (isolate : Isolate) =
 
         table.GetValue(isolate, fun isolate -> create isolate)
