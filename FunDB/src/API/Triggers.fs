@@ -13,7 +13,6 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types
-open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.JavaScript
@@ -22,8 +21,6 @@ type TriggerRunException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
 
     new (message : string) = TriggerRunException (message, null)
-
-let private triggerFunction = "handleEvent"
 
 [<SerializeAsObject("type")>]
 type SerializedTriggerSource =
@@ -37,10 +34,10 @@ type SerializedTriggerEvent =
       Source : SerializedTriggerSource
     }
 
-type TriggerScript (template : APITemplate, scriptSource : string) =
+type TriggerScript (template : APITemplate, name : string, scriptSource : string) =
     let func =
         try
-            CachedFunction.FromScript(template.Isolate, template.Template, scriptSource, triggerFunction)
+            CachedFunction.FromScript(template.Isolate, template.Template, name, scriptSource)
         with
         | :? NetJsException as e ->
             raisefWithInner TriggerRunException e "Couldn't initialize trigger"
@@ -164,40 +161,45 @@ type TriggerScripts =
                 |> Option.bind (fun schema -> Map.tryFind ref.Entity.name schema.Entities)
                 |> Option.bind (fun entity -> Map.tryFind ref.Name entity.Triggers)
 
-let private prepareTriggerScriptsEntity (template : APITemplate) (triggers : TriggersEntity) : TriggerScriptsEntity =
+let private triggerName (triggerRef : TriggerRef) =
+    sprintf "%O/triggers/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.schema triggerRef.Entity.name triggerRef.Name
+
+let private prepareTriggerScriptsEntity (template : APITemplate) (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : TriggerScriptsEntity =
     let getOne name = function
     | Error e -> None
-    | Ok trigger -> Some (TriggerScript(template, trigger.Procedure) :> ITriggerScript)
+    | Ok trigger -> Some (TriggerScript(template, triggerName { Schema = schemaName; Entity = triggerEntity; Name = name }, trigger.Procedure) :> ITriggerScript)
 
     { Triggers = Map.mapMaybe getOne triggers.Triggers
     }
 
-let private prepareTriggerScriptsSchema (template : APITemplate) (triggers : TriggersSchema) : TriggerScriptsSchema =
-    { Entities = Map.map (fun name -> prepareTriggerScriptsEntity template) triggers.Entities
+let private prepareTriggerScriptsSchema (template : APITemplate) (schemaName : SchemaName) (triggerSchema : SchemaName) (triggers : TriggersSchema) : TriggerScriptsSchema =
+    let getOne name = prepareTriggerScriptsEntity template schemaName { schema = triggerSchema; name = name }
+    { Entities = Map.map getOne triggers.Entities
     }
 
-let private prepareTriggerScriptsDatabase (template : APITemplate) (triggers : TriggersDatabase) : TriggerScriptsDatabase =
-    { Schemas = Map.map (fun name -> prepareTriggerScriptsSchema template) triggers.Schemas
+let private prepareTriggerScriptsDatabase (template : APITemplate) (schemaName : SchemaName) (triggers : TriggersDatabase) : TriggerScriptsDatabase =
+    { Schemas = Map.map (prepareTriggerScriptsSchema template schemaName) triggers.Schemas
     }
 
 let prepareTriggerScripts (template : APITemplate) (triggers : ResolvedTriggers) : TriggerScripts =
-    { Schemas = Map.map (fun name -> prepareTriggerScriptsDatabase template) triggers.Schemas
+    { Schemas = Map.map (prepareTriggerScriptsDatabase template) triggers.Schemas
     }
 
 type private TestTriggerEvaluator (forceAllowBroken : bool) =
     let isolate = Isolate.NewWithHeapSize (1024UL * 1024UL, 16UL * 1024UL * 1024UL)
     let apiTemplate = APITemplate(isolate)
 
-    let testTrigger (trigger : ResolvedTrigger) : unit =
-        ignore <| TriggerScript(apiTemplate, trigger.Procedure)
+    let testTrigger (triggerRef : TriggerRef) (trigger : ResolvedTrigger) : unit =
+        ignore <| TriggerScript(apiTemplate, triggerName triggerRef, trigger.Procedure)
 
-    let testTriggersEntity (sourceTriggers : SourceTriggersEntity) (entityTriggers : TriggersEntity) : ErroredTriggersEntity * TriggersEntity =
+    let testTriggersEntity (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (sourceTriggers : SourceTriggersEntity) (entityTriggers : TriggersEntity) : ErroredTriggersEntity * TriggersEntity =
         let mutable errors = Map.empty
 
         let mapTrigger name (trigger : ResolvedTrigger) =
             try
                 try
-                    testTrigger trigger
+                    let ref = { Schema = schemaName; Entity = triggerEntity; Name = name }
+                    testTrigger ref trigger
                     Ok trigger
                 with
                 | :? TriggerRunException as e when trigger.AllowBroken || forceAllowBroken ->
@@ -211,12 +213,13 @@ type private TestTriggerEvaluator (forceAllowBroken : bool) =
             } : TriggersEntity
         (errors, ret)
 
-    let testTriggersSchema (sourceTriggers : SourceTriggersSchema) (schemaTriggers : TriggersSchema) : ErroredTriggersSchema * TriggersSchema =
+    let testTriggersSchema (schemaName : SchemaName) (triggerSchema : SchemaName) (sourceTriggers : SourceTriggersSchema) (schemaTriggers : TriggersSchema) : ErroredTriggersSchema * TriggersSchema =
         let mutable errors = Map.empty
 
         let mapEntity name entityTriggers =
             try
-                let (entityErrors, newEntity) = testTriggersEntity (Map.find name sourceTriggers.Entities) entityTriggers
+                let ref = { schema = triggerSchema; name = name }
+                let (entityErrors, newEntity) = testTriggersEntity schemaName ref (Map.find name sourceTriggers.Entities) entityTriggers
                 if not <| Map.isEmpty entityErrors then
                     errors <- Map.add name entityErrors errors
                 newEntity
@@ -228,12 +231,12 @@ type private TestTriggerEvaluator (forceAllowBroken : bool) =
             } : TriggersSchema
         (errors, ret)
 
-    let testTriggersDatabase (sourceTriggers : SourceTriggersDatabase) (db : TriggersDatabase) : ErroredTriggersDatabase * TriggersDatabase =
+    let testTriggersDatabase (schemaName : SchemaName) (sourceTriggers : SourceTriggersDatabase) (db : TriggersDatabase) : ErroredTriggersDatabase * TriggersDatabase =
         let mutable errors = Map.empty
 
         let mapSchema name schemaTriggers =
             try
-                let (schemaErrors, newSchema) = testTriggersSchema (Map.find name sourceTriggers.Schemas) schemaTriggers
+                let (schemaErrors, newSchema) = testTriggersSchema schemaName name (Map.find name sourceTriggers.Schemas) schemaTriggers
                 if not <| Map.isEmpty schemaErrors then
                     errors <- Map.add name schemaErrors errors
                 newSchema
@@ -250,7 +253,7 @@ type private TestTriggerEvaluator (forceAllowBroken : bool) =
 
         let mapDatabase name db =
             try
-                let (dbErrors, newDb) = testTriggersDatabase (Map.find name sourceTriggers.Schemas) db
+                let (dbErrors, newDb) = testTriggersDatabase name (Map.find name sourceTriggers.Schemas) db
                 if not <| Map.isEmpty dbErrors then
                     errors <- Map.add name dbErrors errors
                 newDb

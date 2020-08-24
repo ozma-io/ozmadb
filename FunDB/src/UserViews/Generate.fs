@@ -42,10 +42,10 @@ type UserViewGeneratorTemplate (isolate : Isolate) =
     member this.Isolate = isolate
     member this.Template = template
 
-type private UserViewGeneratorScript (template : UserViewGeneratorTemplate, scriptSource : string) =
+type private UserViewGeneratorScript (template : UserViewGeneratorTemplate, name : string, scriptSource : string) =
     let func =
         try
-            CachedFunction.FromScript(template.Isolate, template.Template, scriptSource, userViewsFunction)
+            CachedFunction.FromScript(template.Isolate, template.Template, name, scriptSource)
         with
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't initialize user view generator"
@@ -108,12 +108,12 @@ type private UserViewsGeneratorState (layout : Layout, cancellationToken : Cance
     member this.GenerateUserViews gens = generateUserViews gens
 
 type UserViewsGenerator (template : UserViewGeneratorTemplate, userViews : SourceUserViews, createForceAllowBroken : bool) =
-    let prepareGenerator (schema : SourceUserViewsSchema) =
+    let prepareGenerator (name : SchemaName) (schema : SourceUserViewsSchema) =
         match schema.GeneratorScript with
         | None -> PUVStatic schema
         | Some script ->
             try
-                let gen = UserViewGeneratorScript (template, script.Script)
+                let gen = UserViewGeneratorScript (template, sprintf "%O/user_views_generator.mjs" name, script.Script)
                 let ret =
                     { Generator = gen
                       Source = script
@@ -123,7 +123,7 @@ type UserViewsGenerator (template : UserViewGeneratorTemplate, userViews : Sourc
             with
             | :? NetJsException as e when createForceAllowBroken || script.AllowBroken ->
                 PUVError { Source = schema; Error = SETGenerator (e :> exn) }
-    let gens : UserViewsGenerators = Map.map (fun name -> prepareGenerator) userViews.Schemas
+    let gens : UserViewsGenerators = Map.map prepareGenerator userViews.Schemas
 
     member this.GenerateUserViews (layout : Layout) (cancellationToken : CancellationToken) (forceAllowBroken : bool) : ErroredUserViews * SourceUserViews =
         let state = UserViewsGeneratorState(layout, cancellationToken, forceAllowBroken)

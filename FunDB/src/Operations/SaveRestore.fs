@@ -264,7 +264,7 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
 let private extraDefaultAttributesEntry = "extra_default_attributes.yaml"
 
 let private userViewsGeneratorMetaEntry = "user_views_generator.yaml"
-let private userViewsGeneratorEntry = "user_views_generator.js"
+let private userViewsGeneratorEntry = "user_views_generator.mjs"
 
 let private maxFilesSize = 1L * 1024L * 1024L // 1MB
 
@@ -308,7 +308,7 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
                 for KeyValue(triggerName, trigger) in entityTriggers.Triggers do
                     let prettyMeta = prettifyTriggerMeta trigger
                     dumpToEntry (sprintf "triggers/%O/%O/%O.yaml" schemaName entityName triggerName) prettyMeta
-                    useEntry (sprintf "triggers/%O/%O/%O.js" schemaName entityName triggerName) <| fun writer ->
+                    useEntry (sprintf "triggers/%O/%O/%O.mjs" schemaName entityName triggerName) <| fun writer ->
                         writer.Write(trigger.Procedure)
 
         let extraAttributes = dump.DefaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
@@ -383,7 +383,7 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                     assert (Option.isNone prevMeta)
                     encounteredTriggers <- Map.add (schemaName, ref) (Some prettyTriggerMeta, prevProc) encounteredTriggers
                     emptySchemaDump
-                | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.js$" [rawSchemaName; rawEntityName; rawTriggerName] ->
+                | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.mjs$" [rawSchemaName; rawEntityName; rawTriggerName] ->
                     let ref = { entity = { schema = FunQLName rawSchemaName; name = FunQLName rawEntityName }; name = FunQLName rawTriggerName }
                     let rawProcedure = readEntry entry <| fun reader -> reader.ReadToEnd()
                     let (prevMeta, prevProc) = Map.findWithDefault (schemaName, ref) (fun () -> (None, "")) encounteredTriggers

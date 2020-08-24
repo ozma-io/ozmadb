@@ -2,7 +2,7 @@
   "schemas": {
     "funapp": {
 
-      "userViewGenerator": "./funapp_migration.js",
+      "userViewGenerator": "./funapp_migration.mjs",
 
       "entities": {
         "settings": {

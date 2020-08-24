@@ -83,7 +83,7 @@ ${entity.isAbstract ? "" : `FOR INSERT INTO ${sqlName}`}`;
     }));
 };
 
-function getUserViews(layout) {
+export default function getUserViews(layout) {
     const generated = generateDefaultViews(layout);
     const allViews = { ...commonViews, ...generated };
     return Object.fromEntries(Object.entries(allViews).map(([name, query]) => [name, query.trim()]));
