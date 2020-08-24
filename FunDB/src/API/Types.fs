@@ -28,10 +28,15 @@ module SQL = FunWithFlags.FunDB.SQL.DDL
 
 type RawArguments = Map<string, JToken>
 
+type ArgsTriggerResult =
+    | ATTouched of RawArguments
+    | ATUntouched
+    | ATCancelled
+
 type ITriggerScript =
-    abstract member RunInsertTriggerBefore : ResolvedEntityRef -> EntityArguments -> CancellationToken -> Task<RawArguments option>
-    abstract member RunUpdateTriggerBefore : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task<RawArguments option>
-    abstract member RunDeleteTriggerBefore : ResolvedEntityRef -> int -> CancellationToken -> Task
+    abstract member RunInsertTriggerBefore : ResolvedEntityRef -> EntityArguments -> CancellationToken -> Task<ArgsTriggerResult>
+    abstract member RunUpdateTriggerBefore : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task<ArgsTriggerResult>
+    abstract member RunDeleteTriggerBefore : ResolvedEntityRef -> int -> CancellationToken -> Task<bool>
 
     abstract member RunInsertTriggerAfter : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task
     abstract member RunUpdateTriggerAfter : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task
@@ -156,7 +161,7 @@ type TransactionOp =
 
 [<SerializeAsObject("type")>]
 type TransactionOpResult =
-    | [<CaseName("insert")>] TRInsertEntity of Id : int
+    | [<CaseName("insert")>] TRInsertEntity of Id : int option
     | [<CaseName("update")>] TRUpdateEntity
     | [<CaseName("delete")>] TRDeleteEntity
 
@@ -177,7 +182,7 @@ type TransactionError =
 
  type IEntitiesAPI =
     abstract member GetEntityInfo : ResolvedEntityRef -> Task<Result<SerializedEntity, EntityErrorInfo>>
-    abstract member InsertEntity : ResolvedEntityRef -> RawArguments -> Task<Result<int, EntityErrorInfo>>
+    abstract member InsertEntity : ResolvedEntityRef -> RawArguments -> Task<Result<int option, EntityErrorInfo>>
     abstract member UpdateEntity : ResolvedEntityRef -> int -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member DeleteEntity : ResolvedEntityRef -> int -> Task<Result<unit, EntityErrorInfo>>
     abstract member RunTransaction : Transaction -> Task<Result<TransactionResult, TransactionError>>

@@ -27,8 +27,8 @@ let private triggerFunction = "handleEvent"
 
 [<SerializeAsObject("type")>]
 type SerializedTriggerSource =
-    | [<CaseName("insert")>] TSInsert of NewId : int option * Args : EntityArguments
-    | [<CaseName("update")>] TSUpdate of Id : int * Args : EntityArguments
+    | [<CaseName("insert")>] TSInsert of NewId : int option
+    | [<CaseName("update")>] TSUpdate of Id : int
     | [<CaseName("delete")>] TSDelete of Id : int option
 
 type SerializedTriggerEvent =
@@ -45,7 +45,7 @@ type TriggerScript (template : APITemplate, scriptSource : string) =
         | :? NetJsException as e ->
             raisefWithInner TriggerRunException e "Couldn't initialize trigger"
 
-    let runArgsTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (cancellationToken : CancellationToken) : Task<RawArguments option> =
+    let runArgsTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
         task {
             let event =
                 { Entity = entity
@@ -53,14 +53,18 @@ type TriggerScript (template : APITemplate, scriptSource : string) =
                   Source = source
                 }
             let eventValue = V8JsonWriter.Serialize(func.Context, event)
+            let oldArgs = V8JsonWriter.Serialize(func.Context, args)
             try
-                let newArgs = func.Function.Call(cancellationToken, null, [|eventValue|])
+                let newArgs = func.Function.Call(cancellationToken, null, [|eventValue; oldArgs|])
                 do! template.Isolate.EventLoop.Run ()
                 let newArgs = newArgs.GetValueOrPromiseResult ()
-                if newArgs.ValueType = ValueType.Undefined then
-                    return None
+                if not <| newArgs.BooleanValue () then
+                    return ATCancelled
                 else
-                    return V8JsonReader.Deserialize(newArgs)
+                    if oldArgs.HandleEquals(newArgs) then
+                        return ATUntouched
+                    else
+                        return ATTouched <| V8JsonReader.Deserialize(newArgs)
             with
             | :? JSException as e ->
                 return raisefWithInner TriggerRunException e "Unhandled exception in trigger: %s" (e.JSStackTrace.ToPrettyString())
@@ -68,16 +72,22 @@ type TriggerScript (template : APITemplate, scriptSource : string) =
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
-    let runVoidTrigger (entity : ResolvedEntityRef) (time : TriggerTime) (source : SerializedTriggerSource) (cancellationToken : CancellationToken) : Task =
+    let runAfterTrigger (entity : ResolvedEntityRef)(source : SerializedTriggerSource) (args : EntityArguments option) (cancellationToken : CancellationToken) : Task =
         unitTask {
             let event =
                 { Entity = entity
-                  Time = time
+                  Time = TTAfter
                   Source = source
                 }
             let eventValue = V8JsonWriter.Serialize(func.Context, event)
             try
-                let maybePromise = func.Function.Call(cancellationToken, null, [|eventValue|])
+                let functionArgs =
+                    match args with
+                    | Some oldArgsObj ->
+                        let oldArgs = V8JsonWriter.Serialize(func.Context, oldArgsObj)
+                        [|eventValue; oldArgs|]
+                    | None -> [|eventValue|]
+                let maybePromise = func.Function.Call(cancellationToken, null, functionArgs)
                 do! template.Isolate.EventLoop.Run ()
                 ignore <| maybePromise.GetValueOrPromiseResult ()
             with
@@ -87,23 +97,39 @@ type TriggerScript (template : APITemplate, scriptSource : string) =
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
-    member this.RunInsertTriggerBefore (entity : ResolvedEntityRef) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<RawArguments option> =
-        runArgsTrigger entity (TSInsert (None, args)) cancellationToken
+    member this.RunInsertTriggerBefore (entity : ResolvedEntityRef) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
+        runArgsTrigger entity (TSInsert None) args cancellationToken
 
-    member this.RunUpdateTriggerBefore (entity : ResolvedEntityRef) (id : int) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<RawArguments option> =
-        runArgsTrigger entity (TSUpdate (id, args)) cancellationToken
+    member this.RunUpdateTriggerBefore (entity : ResolvedEntityRef) (id : int) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
+        runArgsTrigger entity (TSUpdate id) args cancellationToken
 
-    member this.RunDeleteTriggerBefore (entity : ResolvedEntityRef) (id : int) (cancellationToken : CancellationToken) : Task =
-        runVoidTrigger entity TTBefore (TSDelete (Some id)) cancellationToken
-
+    member this.RunDeleteTriggerBefore (entity : ResolvedEntityRef) (id : int) (cancellationToken : CancellationToken) : Task<bool> =
+        task {
+            let event =
+                { Entity = entity
+                  Time = TTBefore
+                  Source = TSDelete (Some id)
+                }
+            let eventValue = V8JsonWriter.Serialize(func.Context, event)
+            try
+                let maybeContinue = func.Function.Call(cancellationToken, null, [|eventValue|])
+                do! template.Isolate.EventLoop.Run ()
+                let maybeContinue = maybeContinue.GetValueOrPromiseResult ()
+                return maybeContinue.BooleanValue ()
+            with
+            | :? JSException as e ->
+                return raisefWithInner TriggerRunException e "Unhandled exception in trigger: %s" (e.JSStackTrace.ToPrettyString())
+            | :? NetJsException as e ->
+                return raisefWithInner TriggerRunException e "Failed to run trigger"
+        }
     member this.RunInsertTriggerAfter (entity : ResolvedEntityRef) (newId : int) (args : EntityArguments) (cancellationToken : CancellationToken) : Task =
-        runVoidTrigger entity TTAfter (TSInsert (Some newId, args)) cancellationToken
+        runAfterTrigger entity (TSInsert (Some newId)) (Some args) cancellationToken
 
     member this.RunUpdateTriggerAfter (entity : ResolvedEntityRef) (id : int) (args : EntityArguments) (cancellationToken : CancellationToken) : Task=
-        runVoidTrigger entity TTAfter (TSUpdate (id, args)) cancellationToken
+        runAfterTrigger entity (TSUpdate id) (Some args) cancellationToken
 
     member this.RunDeleteTriggerAfter (entity : ResolvedEntityRef) (cancellationToken : CancellationToken) : Task =
-        runVoidTrigger entity TTAfter (TSDelete None) cancellationToken
+        runAfterTrigger entity (TSDelete None) None cancellationToken
 
     member this.Context = func.Context
 

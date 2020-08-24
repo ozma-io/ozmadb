@@ -33,12 +33,16 @@ let private getRole = function
     | RTRoot -> None
     | RTRole role -> Some role
 
+type private BeforeTriggerError =
+    | BEError of EntityErrorInfo
+    | BECancelled
+
 type EntitiesAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<EntitiesAPI>()
     let query = ctx.Transaction.Connection.Query
 
-    let runArgsTrigger (run : ITriggerScript -> Task<RawArguments option>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, EntityErrorInfo>> =
+    let runArgsTrigger (run : ITriggerScript -> Task<ArgsTriggerResult>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, BeforeTriggerError>> =
         let ref =
             { Schema = trigger.Schema
               Entity = entityRef
@@ -49,8 +53,9 @@ type EntitiesAPI (rctx : IRequestContext) =
             task {
                 try
                     match! run script with
-                    | None -> return Ok args
-                    | Some rawArgs ->
+                    | ATCancelled -> return Error BECancelled
+                    | ATUntouched -> return Ok args
+                    | ATTouched rawArgs ->
                         match convertEntityArguments rawArgs entity with
                         | Error str ->
                             logger.LogError("Trigger {} returned invalid arguments", ref)
@@ -59,7 +64,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                                 event.Error <- "arguments"
                                 event.Details <- str
                             )
-                            return Error <| EETrigger (trigger.Schema, trigger.Name, EEArguments str)
+                            return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEArguments str))
                         | Ok newArgs -> return Ok newArgs
                 with
                 | :? TriggerRunException as ex ->
@@ -69,10 +74,10 @@ type EntitiesAPI (rctx : IRequestContext) =
                             event.Error <- "exception"
                             event.Details <- exceptionString ex
                         )
-                        return Error <| EETrigger (trigger.Schema, trigger.Name, EEException (exceptionString ex))
+                        return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (exceptionString ex)))
             }
 
-    let runVoidTrigger (run : ITriggerScript -> Task) (entityRef : ResolvedEntityRef) (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
+    let runAfterTrigger (run : ITriggerScript -> Task) (entityRef : ResolvedEntityRef) (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
         let ref =
             { Schema = trigger.Schema
               Entity = entityRef
@@ -95,23 +100,46 @@ type EntitiesAPI (rctx : IRequestContext) =
                         return Error <| EETrigger (ref.Schema, ref.Name, EEException (exceptionString ex))
             }
 
-    let applyInsertTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, EntityErrorInfo>> =
+    let applyInsertTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, BeforeTriggerError>> =
         runArgsTrigger (fun script -> script.RunInsertTriggerBefore entityRef args ctx.CancellationToken) entityRef entity args trigger
 
-    let applyUpdateTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : int) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, EntityErrorInfo>> =
+    let applyUpdateTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : int) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, BeforeTriggerError>> =
         runArgsTrigger (fun script -> script.RunUpdateTriggerBefore entityRef id args ctx.CancellationToken) entityRef entity args trigger
 
-    let applyDeleteTriggerBefore (entityRef : ResolvedEntityRef) (id : int) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
-        runVoidTrigger (fun script -> script.RunDeleteTriggerBefore entityRef id ctx.CancellationToken) entityRef trigger
+    let applyDeleteTriggerBefore (entityRef : ResolvedEntityRef) (id : int) () (trigger : MergedTrigger) : Task<Result<unit, BeforeTriggerError>> =
+        let ref =
+            { Schema = trigger.Schema
+              Entity = entityRef
+              Name = trigger.Name
+            }
+        let script = ctx.FindTrigger ref |> Option.get
+        rctx.RunWithSource (ESTrigger ref) <| fun () ->
+            task {
+                try
+                    let! maybeContinue = script.RunDeleteTriggerBefore entityRef id ctx.CancellationToken
+                    if maybeContinue then
+                        return Ok ()
+                    else
+                        return Error BECancelled
+                with
+                | :? TriggerRunException as ex ->
+                        logger.LogError(ex, "Exception in trigger {}", ref)
+                        rctx.WriteEvent (fun event ->
+                            event.Type <- "triggerError"
+                            event.Error <- "exception"
+                            event.Details <- exceptionString ex
+                        )
+                        return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (exceptionString ex)))
+            }
 
     let applyInsertTriggerAfter (entityRef : ResolvedEntityRef) (id : int) (args : EntityArguments) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
-        runVoidTrigger (fun script -> script.RunInsertTriggerAfter entityRef id args ctx.CancellationToken) entityRef trigger
+        runAfterTrigger (fun script -> script.RunInsertTriggerAfter entityRef id args ctx.CancellationToken) entityRef trigger
 
     let applyUpdateTriggerAfter (entityRef : ResolvedEntityRef) (id : int) (args : EntityArguments) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
-        runVoidTrigger (fun script -> script.RunUpdateTriggerAfter entityRef id args ctx.CancellationToken) entityRef trigger
+        runAfterTrigger (fun script -> script.RunUpdateTriggerAfter entityRef id args ctx.CancellationToken) entityRef trigger
 
     let applyDeleteTriggerAfter (entityRef : ResolvedEntityRef) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
-        runVoidTrigger (fun script -> script.RunDeleteTriggerAfter entityRef ctx.CancellationToken) entityRef trigger
+        runAfterTrigger (fun script -> script.RunDeleteTriggerAfter entityRef ctx.CancellationToken) entityRef trigger
 
     member this.GetEntityInfo (entityRef : ResolvedEntityRef) : Task<Result<SerializedEntity, EntityErrorInfo>> =
         task {
@@ -134,7 +162,7 @@ type EntitiesAPI (rctx : IRequestContext) =
             | _ -> return Error EENotFound
         }
 
-    member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<int, EntityErrorInfo>> =
+    member this.InsertEntity (entityRef : ResolvedEntityRef) (rawArgs : RawArguments) : Task<Result<int option, EntityErrorInfo>> =
         task {
             match ctx.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
@@ -144,7 +172,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                 | Ok args ->
                     let beforeTriggers = findMergedTriggersInsert entityRef TTBefore ctx.Triggers
                     match! Seq.foldResultTask (applyInsertTriggerBefore entityRef entity) args beforeTriggers with
-                    | Error e -> return Error e
+                    | Error (BEError e) -> return Error e
+                    | Error BECancelled -> return Ok None
                     | Ok args ->
                         try
                             let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getRole rctx.User.Type) entityRef args ctx.CancellationToken
@@ -160,7 +189,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                             let afterTriggers = findMergedTriggersInsert entityRef TTAfter ctx.Triggers
                             match! Seq.foldResultTask (applyInsertTriggerAfter entityRef newId args) () afterTriggers with
                             | Error e -> return Error e
-                            | Ok () -> return Ok newId
+                            | Ok () -> return Ok (Some newId)
                         with
                         | :? EntityExecutionException as ex ->
                             logger.LogError(ex, "Failed to insert entry")
@@ -195,7 +224,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                 | Ok args ->
                     let beforeTriggers = findMergedTriggersUpdate entityRef TTBefore (Map.keys args) ctx.Triggers
                     match! Seq.foldResultTask (applyUpdateTriggerBefore entityRef entity id) args beforeTriggers with
-                    | Error e -> return Error e
+                    | Error (BEError e) -> return Error e
+                    | Error BECancelled -> return Ok ()
                     | Ok args ->
                         try
                             do! updateEntity query rctx.GlobalArguments ctx.Layout (getRole rctx.User.Type) entityRef id args ctx.CancellationToken
@@ -253,7 +283,8 @@ type EntitiesAPI (rctx : IRequestContext) =
             | Some entity ->
                 let beforeTriggers = findMergedTriggersDelete entityRef TTBefore ctx.Triggers
                 match! Seq.foldResultTask (applyDeleteTriggerBefore entityRef id) () beforeTriggers with
-                | Error e -> return Error e
+                | Error (BEError e) -> return Error e
+                | Error BECancelled -> return Ok ()
                 | Ok () ->
                     try
                         do! deleteEntity query rctx.GlobalArguments ctx.Layout (getRole rctx.User.Type) entityRef id ctx.CancellationToken
