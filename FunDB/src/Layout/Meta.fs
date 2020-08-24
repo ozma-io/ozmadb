@@ -9,7 +9,7 @@ open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 
-type private MetaBuilder (layout : Layout, useOldHash : bool) =
+type private MetaBuilder (layout : Layout) =
     let rec compileComputedExpr (entity : ResolvedEntity) : ResolvedFieldExpr -> SQL.ValueExpr =
         let makeFullName (ctx : ReferenceContext) : LinkedBoundFieldRef -> SQL.ValueExpr = function
             | { ref = VRColumn { ref = { entity = None; name = name }}; path = [||] } -> compileComputedName entity ctx name
@@ -56,7 +56,7 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
                     let refEntity = layout.FindEntity entityRef |> Option.get
                     let tableRef = compileResolvedEntityRef refEntity.root
                     let constrName = SQL.SQLName <| sprintf "__foreign__%s__%s"  entity.hashName field.hashName
-                    let constrKey = sprintf "__foreign__%s__%s"  (if useOldHash then entity.oldHashName else entity.hashName) (if useOldHash then field.oldHashName else field.hashName)
+                    let constrKey = sprintf "__foreign__%s__%s"  entity.hashName field.hashName
                     Seq.singleton (constrKey, (constrName, SQL.CMForeignKey (tableRef, [| (columnName, sqlFunId) |])))
                 | FTEnum vals ->
                     let expr =
@@ -73,7 +73,7 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
                         else
                             SQL.VEIn (col, exprs)
                     let constrName = SQL.SQLName <| sprintf "__enum__%s__%s" entity.hashName field.hashName
-                    let constrKey = sprintf "__enum__%s__%s"  (if useOldHash then entity.oldHashName else entity.hashName) (if useOldHash then field.oldHashName else field.hashName)
+                    let constrKey = sprintf "__enum__%s__%s" entity.hashName field.hashName
                     Seq.singleton (constrKey, (constrName, SQL.CMCheck expr))
                 | _ -> Seq.empty
         (res, constr)
@@ -81,7 +81,7 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
     let makeEntityMeta (ref : ResolvedEntityRef) (entity : ResolvedEntity) : SQL.TableMeta * (SQL.MigrationKey * (SQL.SQLName * SQL.ObjectMeta)) seq =
         let makeUniqueConstraint (name, constr : ResolvedUniqueConstraint) =
             let name = SQL.SQLName <| sprintf "__unique__%s__%s" entity.hashName constr.hashName
-            let key = sprintf "__unique__%s__%s" (if useOldHash then entity.oldHashName else entity.hashName) (if useOldHash then constr.oldHashName else constr.hashName)
+            let key = sprintf "__unique__%s__%s"entity.hashName constr.hashName
             (key, (name, makeUniqueConstraintMeta entity constr))
         let uniqueConstraints = entity.uniqueConstraints |> Map.toSeq |> Seq.map makeUniqueConstraint
         let tableName = compileResolvedEntityRef entity.root
@@ -89,10 +89,10 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
         match entity.inheritance with
         | None ->
             let idSeqName = SQL.SQLName <| sprintf "__id__%s" entity.hashName
-            let idSeqKey = sprintf "__id__%s" (if useOldHash then entity.oldHashName else entity.hashName)
+            let idSeqKey = sprintf "__id__%s"entity.hashName
             let idConstraints =
                 let name = SQL.SQLName <| sprintf "__primary__%s" entity.hashName
-                let key = sprintf "__primary__%s" (if useOldHash then entity.oldHashName else entity.hashName)
+                let key = sprintf "__primary__%s"entity.hashName
                 let constr = SQL.CMPrimaryKey [| sqlFunId |]
                 Seq.singleton (key, (name, constr))
 
@@ -119,10 +119,10 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
                     let checkExpr = makeCheckExpr (layout.FindEntity >> Option.get) entity
 
                     let typeCheckName = SQL.SQLName <| sprintf "__type_check__%s" entity.hashName
-                    let typeCheckKey = sprintf "__type_check__%s" (if useOldHash then entity.oldHashName else entity.hashName)
+                    let typeCheckKey = sprintf "__type_check__%s"entity.hashName
                     let constrs = Seq.singleton (typeCheckKey, (typeCheckName, SQL.CMCheck checkExpr))
                     let typeIndexName = SQL.SQLName <| sprintf "__type_index__%s" entity.hashName
-                    let typeIndexKey = sprintf "__type_index__%s" (if useOldHash then entity.oldHashName else entity.hashName)
+                    let typeIndexKey = sprintf "__type_index__%s"entity.hashName
                     let indexes = Seq.singleton (typeIndexKey, (typeIndexName, ({ Columns = [| sqlFunSubEntity |] } : SQL.IndexMeta)))
 
                     (columns, constrs, indexes)
@@ -133,7 +133,7 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
             let makeCheckConstraint (name, constr : ResolvedCheckConstraint) =
                 let meta = SQL.CMCheck <| compileCheckExpr entity constr.expression
                 let sqlName = SQL.SQLName <| sprintf "__check__%s__%s" entity.hashName constr.hashName
-                let sqlKey = sprintf "__check__%s__%s" (if useOldHash then entity.oldHashName else entity.hashName) (if useOldHash then constr.oldHashName else constr.hashName)
+                let sqlKey = sprintf "__check__%s__%s"entity.hashName constr.hashName
                 (sqlKey, (sqlName, meta))
 
             let columnObjects = entity.columnFields |> Map.toSeq |> Seq.map makeColumn |> Seq.cache
@@ -164,7 +164,7 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
                             let checkNull = SQL.VEIsNull (SQL.VEColumn { table = None; name = field.columnName })
                             let expr = SQL.VENot (SQL.VEAnd (inheritance.checkExpr, checkNull))
                             let notnullName = SQL.SQLName <| sprintf "__notnull__%s__%s" entity.hashName field.hashName
-                            let notnullKey = sprintf "__notnull__%s__%s" (if useOldHash then entity.oldHashName else entity.hashName) (if useOldHash then field.oldHashName else field.hashName)
+                            let notnullKey = sprintf "__notnull__%s__%s"entity.hashName field.hashName
                             Seq.singleton (notnullKey, (notnullName, SQL.CMCheck expr))
                     Some (field.columnName, ({ meta with IsNullable = true }, Seq.append constrs extraConstrs))
             let makeCheckConstraint (name, constr : ResolvedCheckConstraint) =
@@ -172,7 +172,7 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
                 let check = SQL.VEOr (SQL.VENot (inheritance.checkExpr), expr)
                 let meta = SQL.CMCheck check
                 let checkName = SQL.SQLName <| sprintf "__check__%s__%s" entity.hashName constr.hashName
-                let checkKey = sprintf "__check__%s__%s" (if useOldHash then entity.oldHashName else entity.hashName) (if useOldHash then constr.oldHashName else constr.hashName)
+                let checkKey = sprintf "__check__%s__%s"entity.hashName constr.hashName
                 (checkKey, (checkName, meta))
 
             let columnObjects = entity.columnFields |> Map.toSeq |> Seq.mapMaybe makeColumn |> Seq.cache
@@ -223,9 +223,5 @@ type private MetaBuilder (layout : Layout, useOldHash : bool) =
 
 // Sub-layout allows one to build meta only for a part of
 let buildLayoutMeta (layout : Layout) (subLayout : Layout) : SQL.DatabaseMeta =
-    let builder = MetaBuilder (layout, false)
-    builder.BuildLayoutMeta subLayout
-
-let buildOldLayoutMeta (layout : Layout) (subLayout : Layout) : SQL.DatabaseMeta =
-    let builder = MetaBuilder (layout, true)
+    let builder = MetaBuilder (layout)
     builder.BuildLayoutMeta subLayout

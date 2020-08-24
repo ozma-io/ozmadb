@@ -194,34 +194,17 @@ let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : Set<LayoutAsser
     let meta = SQL.unionDatabaseMeta meta1 meta2
     (assertions, meta)
 
-let buildFullOldLayoutMeta (layout : Layout) (subLayout : Layout) : Set<LayoutAssertion> * SQL.DatabaseMeta =
-    let meta1 = buildOldLayoutMeta layout subLayout
-    let assertions = buildAssertions layout subLayout
-    let meta2 = buildAssertionsMeta layout assertions
-    let meta = SQL.unionDatabaseMeta meta1 meta2
-    (assertions, meta)
-
 // Returns only user meta
 let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preload : Preload) (cancellationToken : CancellationToken) : Task<bool * Layout * SQL.DatabaseMeta> =
     task {
         logger.LogInformation("Migrating system entities to the current version")
         let sourceLayout = preloadLayout preload
         let (_, layout) = resolveLayout sourceLayout false
-        let! layoutVersion = conn.System.State.FirstOrDefaultAsync((fun x -> x.Name = "LayoutVersion"), cancellationToken)
-        logger.LogInformation("Not renaming old tables: {}", isNull layoutVersion)
-        if isNull layoutVersion then
-            logger.LogInformation("Renaming old tables")
-            let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
-            let currentSystemMeta = filterPreloadedMeta preload currentMeta
-            let (_, newSystemMeta) = buildFullOldLayoutMeta layout layout
-            let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
-
-            let! _ = migrateDatabase conn.Connection.Query systemMigration cancellationToken
-            logger.LogInformation("Finished renaming old tables")
-            ()
         let (_, newSystemMeta) = buildFullLayoutMeta layout layout
         let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
+
+        conn.System.State.RemoveRange(conn.System.State.Where((fun x -> x.Name = "LayoutVersion")))
 
         let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
         let! _ = migrateDatabase conn.Connection.Query systemMigration cancellationToken
@@ -281,21 +264,6 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
 
-        if isNull layoutVersion then
-            logger.LogInformation("Renaming old tables")
-            let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
-            let currentUserMeta = filterUserMeta preload currentMeta
-            let (_, newMeta) = buildFullOldLayoutMeta newLayout newLayout
-            let newUserMeta = filterUserMeta preload newMeta
-            let userMigration = planDatabaseMigration currentUserMeta newUserMeta
-
-            let! _ = migrateDatabase conn.Connection.Query userMigration cancellationToken
-
-            let newEntry = StateValue (Name = "LayoutVersion", Value = "1")
-            ignore <| conn.System.State.Add(newEntry)
-            let! _ = conn.System.SaveChangesAsync(cancellationToken)
-            logger.LogInformation("Finished renaming old tables")
-            ()
         let (_, newMeta) = buildFullLayoutMeta newLayout newLayout
         let newUserMeta = filterUserMeta preload newMeta
         let! currentMeta =

@@ -40,14 +40,12 @@ type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>
 [<NoEquality; NoComparison>]
 type ResolvedUniqueConstraint =
     { columns : FunQLName array
-      oldHashName : HashName
       hashName : HashName // Guaranteed to be unique in an entity
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedCheckConstraint =
     { expression : LocalFieldExpr
-      oldHashName : HashName
       hashName : HashName // Guaranteed to be unique in an entity
     }
 
@@ -60,7 +58,6 @@ type ResolvedColumnField =
       isImmutable : bool
       inheritedFrom : ResolvedEntityRef option
       columnName : SQL.ColumnName
-      oldHashName : HashName
       hashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
     }
 
@@ -157,7 +154,6 @@ type ResolvedEntity =
       subEntityParseExpr : SQL.ValueExpr // Parses SubEntity field into JSON
       children : Map<ResolvedEntityRef, ChildEntity>
       typeName : string // SubEntity value for this entity
-      oldHashName : HashName
       hashName : HashName // Guaranteed to be unique for any entity in a schema
       isAbstract : bool
       // Hierarchy root

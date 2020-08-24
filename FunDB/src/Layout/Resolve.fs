@@ -76,9 +76,6 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
               subEntity = voidSubEntity
         }
 
-let private makeOldHashName (FunQLName name) =
-    String.truncate hashNameLength name
-
 let private hashNameSuffixLength = 4
 
 let private makeHashName (FunQLName name) =
@@ -104,7 +101,6 @@ let private resolveUniqueConstraint (entity : ResolvedEntity) (constrName : Cons
         | None -> raisef ResolveLayoutException "Unknown column %O in unique constraint" name
 
     { columns = Array.map checkColumn constr.Columns
-      oldHashName = makeOldHashName constrName
       hashName = makeHashName constrName
     }
 
@@ -248,7 +244,6 @@ type private Phase1Resolver (layout : SourceLayout) =
           isImmutable = col.IsImmutable
           inheritedFrom = None
           columnName = SQL.SQLName columnName
-          oldHashName = makeOldHashName fieldName
           hashName = makeHashName fieldName
         }
 
@@ -561,7 +556,6 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | Ok r -> r
             | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing check constraint expression: %s" msg)
         { expression = resolveCheckExpr entityRef entity checkExpr
-          oldHashName = makeOldHashName constrName
           hashName = makeHashName constrName
         }
 
@@ -620,7 +614,6 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               root = entity.Root
               typeName = entity.TypeName
               isAbstract = entity.Source.IsAbstract
-              oldHashName = makeOldHashName entityRef.name
               hashName = makeHashName entityRef.name
             } : ResolvedEntity
 
