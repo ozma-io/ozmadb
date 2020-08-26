@@ -365,8 +365,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 
     member this.FinishSchemaMeta = finishSchemaMeta
 
-let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
-    task {
+let createPgCatalogContext (transaction : NpgsqlTransaction) =
         let dbOptions =
             (DbContextOptionsBuilder<PgCatalogContext> ())
                 .UseNpgsql(transaction.Connection)
@@ -376,7 +375,11 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : Can
 #endif
         use db = new PgCatalogContext(dbOptions.Options)
         ignore <| db.Database.UseTransaction(transaction)
+        db
 
+let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
+    task {
+        let db = createPgCatalogContext transaction
         let! namespaces = db.GetObjects(cancellationToken)
 
         let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique

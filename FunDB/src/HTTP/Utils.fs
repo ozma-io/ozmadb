@@ -84,64 +84,33 @@ type RealmAccess =
 type IInstancesSource =
     abstract member GetInstance : string -> CancellationToken -> Task<Instance option>
 
-let anonymousUsername = "anonymous@example.com"
+let private anonymousUsername = "anonymous@example.com"
 
-let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
-    let makeContext (instance : Instance) (userName : string) (isRoot : bool) (next : HttpFunc) (ctx : HttpContext) = task {
-        let logger = ctx.GetLogger("withContext")
-        logger.LogInformation("Creating context for instance {}, user {} (is_root: {})", instance.Name, userName, isRoot)
-        let connectionString = sprintf "Host=%s; Port=%i; Database=%s; Username=%s; Password=%s" instance.Host instance.Port instance.Database instance.Username instance.Password
-        let contextCache = ctx.GetService<InstancesCacheStore>()
-        let! cacheStore = contextCache.GetContextCache(connectionString)
-
-        let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
-        let specifiedLang =
-            if isNull acceptLanguage then
-                None
-            else
-                acceptLanguage
-                |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
-                |> Seq.first
-        let lang =
-            match specifiedLang with
-            | Some l -> l.Value.Value
-            | None -> "en-US"
-
-        try
-            use! dbCtx = cacheStore.GetCache ctx.RequestAborted
-            let! rctx =
-                RequestContext.Create
-                    { UserName = userName
-                      IsRoot = (userName = instance.Owner || isRoot)
-                      Language = lang
-                      Context = dbCtx
-                      Source = ESAPI
-                    }
-            return! f (FunDBAPI rctx) next ctx
-        with
-        | :? RequestException as e ->
-            match e.Info with
-            | REUserNotFound
-            | RENoRole -> return! RequestErrors.forbidden (errorJson "") next ctx
+type InstanceContext =
+    { Instance : Instance
+      UserName : string
+      IsRoot : bool
     }
 
-    let protectedApi (instance : Instance) (next : HttpFunc) (ctx : HttpContext) =
-        let userClaim = ctx.User.FindFirst ClaimTypes.Email
-        if isNull userClaim then
-            RequestErrors.badRequest (errorJson "No email claim in security token") next ctx
-        else
-            let userRoles = ctx.User.FindFirst "realm_access"
-            let isRoot =
-                if not <| isNull userRoles then
-                    let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
-                    roles.Roles |> Seq.contains "fundb_admin"
-                else
-                    false
-            makeContext instance userClaim.Value isRoot next ctx
+let instanceConnectionString (instance : Instance) =
+    sprintf "Host=%s; Port=%i; Database=%s; Username=%s; Password=%s" instance.Host instance.Port instance.Database instance.Username instance.Password
 
-    let unprotectedApi instance = makeContext instance anonymousUsername true
+let resolveUser (f : string -> bool -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+    let userClaim = ctx.User.FindFirst ClaimTypes.Email
+    if isNull userClaim then
+        RequestErrors.badRequest (errorJson "No email claim in security token") next ctx
+    else
+        let userRoles = ctx.User.FindFirst "realm_access"
+        let isRoot =
+            if not <| isNull userRoles then
+                let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
+                roles.Roles |> Seq.contains "fundb_admin"
+            else
+                false
+        f userClaim.Value isRoot next ctx
 
-    let lookupInstance (next : HttpFunc) (ctx : HttpContext) = task {
+let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+    task {
         let instancesSource = ctx.GetService<IInstancesSource>()
         let xInstance = ctx.Request.Headers.["X-Instance"]
         let instanceName =
@@ -153,9 +122,50 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
         | None -> return! RequestErrors.notFound (errorJson (sprintf "Instance %s not found" instanceName)) next ctx
         | Some instance ->
             if instance.DisableSecurity then
-                return! unprotectedApi instance next ctx
+                return! f { Instance = instance; UserName = anonymousUsername; IsRoot = true } next ctx
             else
-                return! (authorize >=> protectedApi instance) next ctx
+                let f' userName isRoot = f { Instance = instance; UserName = userName; IsRoot = isRoot }
+                return! (authorize >=> resolveUser f') next ctx
     }
 
-    lookupInstance
+let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
+    let makeContext (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
+        task {
+            let logger = ctx.GetLogger("withContext")
+            logger.LogInformation("Creating context for instance {}, user {} (is_root: {})", inst.Instance.Name, inst.UserName, inst.IsRoot)
+            let connectionString = instanceConnectionString inst.Instance
+            let instancesCache = ctx.GetService<InstancesCacheStore>()
+            let! cacheStore = instancesCache.GetContextCache(connectionString)
+
+            let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
+            let specifiedLang =
+                if isNull acceptLanguage then
+                    None
+                else
+                    acceptLanguage
+                    |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
+                    |> Seq.first
+            let lang =
+                match specifiedLang with
+                | Some l -> l.Value.Value
+                | None -> "en-US"
+
+            try
+                use! dbCtx = cacheStore.GetCache ctx.RequestAborted
+                let! rctx =
+                    RequestContext.Create
+                        { UserName = inst.UserName
+                          IsRoot = (inst.UserName = inst.Instance.Owner || inst.IsRoot)
+                          Language = lang
+                          Context = dbCtx
+                          Source = ESAPI
+                        }
+                return! f (FunDBAPI rctx) next ctx
+            with
+            | :? RequestException as e ->
+                match e.Info with
+                | REUserNotFound
+                | RENoRole -> return! RequestErrors.forbidden (errorJson "") next ctx
+        }
+
+    lookupInstance makeContext

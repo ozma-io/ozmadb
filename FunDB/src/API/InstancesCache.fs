@@ -32,3 +32,4 @@ type InstancesCacheStore (loggerFactory : ILoggerFactory, preload : Preload, eve
     let instanceCreator = ItemCreator createInstance
 
     member this.GetContextCache (connectionString : string) = instancesMemIndex.GetItem (connectionString, instanceCreator)
+    member this.Clear () = instancesMemCache.Clear ()

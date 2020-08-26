@@ -12,6 +12,7 @@ open FSharp.Control.Tasks.Affine
 open NetJs
 
 open FunWithFlags.FunDBSchema.System
+open FunWithFlags.FunDBSchema.PgCatalog
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Parsing
 open FunWithFlags.FunDB.Connection
@@ -84,6 +85,13 @@ type private CachedContext =
 type private CachedState =
     { Version : int
       Context : CachedContext
+    }
+
+let instanceIsInitialized (conn : DatabaseTransaction) =
+    task {
+        let pg = createPgCatalogContext conn.Transaction
+        let! ns = pg.Namespaces.FirstOrDefaultAsync(fun ns -> ns.NspName = "public")
+        return not <| isNull ns
     }
 
 type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, connectionString : string, eventLogger : EventLogger, warmStartup : bool) =
