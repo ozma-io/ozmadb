@@ -89,7 +89,7 @@ type private CachedState =
 
 let instanceIsInitialized (conn : DatabaseTransaction) =
     task {
-        let pg = createPgCatalogContext conn.Transaction
+        use pg = createPgCatalogContext conn.Transaction
         let! ns = pg.Namespaces.FirstOrDefaultAsync(fun ns -> ns.NspName = "public")
         return not <| isNull ns
     }

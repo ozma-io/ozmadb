@@ -373,13 +373,18 @@ let createPgCatalogContext (transaction : NpgsqlTransaction) =
         use loggerFactory = LoggerFactory.Create(fun builder -> ignore <| builder.AddConsole())
         ignore <| dbOptions.UseLoggerFactory(loggerFactory)
 #endif
-        use db = new PgCatalogContext(dbOptions.Options)
-        ignore <| db.Database.UseTransaction(transaction)
+        let db = new PgCatalogContext(dbOptions.Options)
+        try
+            ignore <| db.Database.UseTransaction(transaction)
+        with
+        | _ ->
+            db.Dispose ()
+            reraise ()
         db
 
 let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
     task {
-        let db = createPgCatalogContext transaction
+        use db = createPgCatalogContext transaction
         let! namespaces = db.GetObjects(cancellationToken)
 
         let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
