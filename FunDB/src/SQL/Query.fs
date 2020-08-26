@@ -41,15 +41,15 @@ let private parseType typeStr =
     | Error msg -> raisef QueryException "Cannot parse database type: %s" msg
 
 let private convertInt : obj -> int option = function
-    | :? byte as value -> Some <| int value
     | :? sbyte as value -> Some <| int value
     | :? int16 as value -> Some <| int value
-    | :? uint16 as value -> Some <| int value
-    | :? int32 as value -> Some <| int value
-    // XXX: possible loss of data
-    | :? uint32 as value -> Some <| int value
-    | :? int64 as value -> Some <| int value
-    | :? uint64 as value -> Some <| int value
+    | :? int32 as value -> Some value
+    | value -> None
+
+let private convertDecimal : obj -> decimal option = function
+    | :? decimal as value -> Some value
+    | :? float32 as value -> Some <| decimal value
+    | :? double as value -> Some <| decimal value
     | value -> None
 
 let private convertValue valType (rawValue : obj) =
@@ -59,8 +59,11 @@ let private convertValue valType (rawValue : obj) =
         match convertInt value with
         | Some i -> VInt i
         | None -> raisef QueryException "Unknown integer type: %s" (value.GetType().FullName)
-    | (VTScalar STDecimal, (:? decimal as value)) -> VDecimal value
-    | (VTScalar STDecimal, (:? double as value)) -> VDecimal (decimal value)
+    | (VTScalar STBigInt, (:? int64 as value)) -> VBigInt value
+    | (VTScalar STDecimal, value) ->
+        match convertDecimal value with
+        | Some i -> VDecimal i
+        | None -> raisef QueryException "Unknown decimal type: %s" (value.GetType().FullName)
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
     | (VTScalar STDateTime, (:? NpgsqlDateTime as value)) -> VDateTime value
@@ -83,7 +86,8 @@ let private convertValue valType (rawValue : obj) =
 
         match scalarType with
         | STInt -> VIntArray (convertArray convertInt rootVals)
-        | STDecimal -> VDecimalArray (convertArray tryCast<decimal> rootVals)
+        | STBigInt -> VBigIntArray (convertArray tryCast<int64> rootVals)
+        | STDecimal -> VDecimalArray (convertArray convertDecimal rootVals)
         | STString -> VStringArray (convertArray tryCast<string> rootVals)
         | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
         | STDateTime -> VDateTimeArray (convertArray tryCast<NpgsqlDateTime> rootVals)
@@ -105,6 +109,7 @@ let private npgsqlArray (typ : NpgsqlDbType) (vals : ArrayValue<'a> array) : Npg
 
 let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VInt i -> (Some NpgsqlDbType.Integer, upcast i)
+    | VBigInt i -> (Some NpgsqlDbType.Bigint, upcast i)
     | VDecimal d -> (Some NpgsqlDbType.Numeric, upcast d)
     | VString s -> (Some NpgsqlDbType.Text, upcast s)
     | VRegclass name -> raisef QueryException "Regclass arguments are not supported: %O" name
@@ -114,6 +119,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VInterval int -> (Some NpgsqlDbType.Interval, upcast int)
     | VJson j -> (Some NpgsqlDbType.Jsonb, upcast j)
     | VIntArray vals -> npgsqlArray NpgsqlDbType.Integer vals
+    | VBigIntArray vals -> npgsqlArray NpgsqlDbType.Bigint vals
     | VDecimalArray vals -> npgsqlArray NpgsqlDbType.Numeric vals
     | VStringArray vals -> npgsqlArray NpgsqlDbType.Text vals
     | VBoolArray vals -> npgsqlArray NpgsqlDbType.Boolean vals
@@ -164,6 +170,23 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             if not hasRow0 then
                 raisef QueryException "No first row"
             let result = reader.[0] |> convertValue typ
+            let! hasRow1 = reader.ReadAsync(cancellationToken)
+            if hasRow1 then
+                raisef QueryException "Has a second row"
+            return result
+        }
+
+    member this.ExecuteValuesQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<Value array> =
+        withCommand queryStr pars cancellationToken <| fun command -> task {
+            use! reader = command.ExecuteReaderAsync(cancellationToken)
+            let getColumn i = parseType (reader.GetDataTypeName(i))
+            let! hasRow0 = reader.ReadAsync(cancellationToken)
+            if not hasRow0 then
+                raisef QueryException "No first row"
+            let getRow i =
+                let typ = parseType (reader.GetDataTypeName(i))
+                reader.GetProviderSpecificValue(i) |> convertValue typ
+            let result = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
             let! hasRow1 = reader.ReadAsync(cancellationToken)
             if hasRow1 then
                 raisef QueryException "Has a second row"

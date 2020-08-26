@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json.Linq
 open NetJs
+open NpgsqlTypes
 
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDBSchema.System
@@ -48,7 +49,8 @@ type IContext =
 
     abstract member Transaction : DatabaseTransaction with get
     abstract member Preload : Preload with get
-    abstract member TransactionTime : DateTime with get
+    abstract member TransactionId : int with get
+    abstract member TransactionTime : NpgsqlDateTime with get
     abstract member LoggerFactory : ILoggerFactory with get
     abstract member CancellationToken : CancellationToken with get
     abstract member Isolate : Isolate
@@ -136,6 +138,7 @@ type UserViewInfoResult =
 [<SerializeAsObject("error")>]
 type EntityErrorInfo =
     | [<CaseName("not_found")>] EENotFound
+    | [<CaseName("frozen")>] EEFrozen
     | [<CaseName("access_denied")>] EEAccessDenied
     | [<CaseName("arguments")>] EEArguments of Details : string
     | [<CaseName("execution")>] EEExecution of Details : string
@@ -146,6 +149,7 @@ type EntityErrorInfo =
         member this.Message =
             match this with
             | EENotFound -> "Entity not found"
+            | EEFrozen -> "Entity is frozen"
             | EEAccessDenied -> "Entity access denied"
             | EEArguments msg -> "Invalid operation arguments"
             | EEExecution msg -> "Operation execution failed"

@@ -156,6 +156,7 @@ type ResolvedEntity =
       typeName : string // SubEntity value for this entity
       hashName : HashName // Guaranteed to be unique for any entity in a schema
       isAbstract : bool
+      isFrozen : bool
       // Hierarchy root
       root : ResolvedEntityRef
     } with

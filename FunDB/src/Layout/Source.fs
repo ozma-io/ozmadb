@@ -47,6 +47,7 @@ type SourceEntity =
       [<JsonIgnore>]
       IsHidden : bool
       IsAbstract : bool
+      IsFrozen : bool
       Parent : ResolvedEntityRef option
     } with
         member this.FindField (name : FieldName) =

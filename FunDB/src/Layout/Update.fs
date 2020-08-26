@@ -106,6 +106,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
             existingEntity.MainField <-entity.MainField.ToString()
         existingEntity.ForbidExternalReferences <- entity.ForbidExternalReferences
         existingEntity.IsAbstract <- entity.IsAbstract
+        existingEntity.IsFrozen <- entity.IsFrozen
         match entity.Parent with
         | None ->
             existingEntity.ParentId <- Nullable()

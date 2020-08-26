@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.API.Types
 
 let private errorHandler = function
     | EENotFound -> RequestErrors.badRequest
+    | EEFrozen -> RequestErrors.forbidden
     | EEAccessDenied -> RequestErrors.forbidden
     | EEArguments _ -> RequestErrors.notFound
     | EEExecution _ -> RequestErrors.unprocessableEntity

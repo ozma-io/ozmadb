@@ -1,17 +1,15 @@
 using System;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace FunWithFlags.FunDBSchema.PgCatalog
 {
-    public class PgCatalogContext : DbContext
+    public class PgCatalogContext : PostgresContext
     {
         public DbSet<Namespace> Namespaces { get; set; } = null!;
         public DbSet<Class> Classes { get; set; } = null!;
@@ -27,16 +25,6 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public PgCatalogContext(DbContextOptions options)
             : base(options)
         {
-        }
-        
-        public static string PgGetExpr(string pg_node_tree, int relation_oid)
-        {
-            throw new InvalidOperationException();
-        }
-    
-        public static string PgGetTriggerDef(int trigger_oid)
-        {
-            throw new InvalidOperationException();
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -58,16 +46,6 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
             modelBuilder.Entity<Constraint>()
                 .Property<string>("ConBin");
-
-            var pgGetExprMethod = typeof(PgCatalogContext).GetRuntimeMethod(nameof(PgGetExpr), new[] { typeof(string), typeof(int) });
-            modelBuilder
-                .HasDbFunction(pgGetExprMethod)
-                .HasTranslation(args => SqlFunctionExpression.Create("pg_get_expr", args, typeof(string), null));
-
-            var pgGetTriggerDefMethod = typeof(PgCatalogContext).GetRuntimeMethod(nameof(PgGetTriggerDef), new[] { typeof(int) });
-            modelBuilder
-                .HasDbFunction(pgGetTriggerDefMethod)
-                .HasTranslation(args => SqlFunctionExpression.Create("pg_get_triggerdef", args, typeof(string), null));
 
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {

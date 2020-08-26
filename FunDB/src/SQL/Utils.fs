@@ -60,6 +60,8 @@ let renderSqlDecimal (f : decimal) = f.ToString(CultureInfo.InvariantCulture)
 
 let renderSqlInt (i : int) : string = i.ToString(CultureInfo.InvariantCulture)
 
+let renderSqlBigInt (i : int64) : string = i.ToString(CultureInfo.InvariantCulture)
+
 let renderSqlJson (j : JToken) : string = j.ToString(Formatting.None)
 
 let trySqlDateTime (s : string) : NpgsqlDateTime option =

@@ -72,6 +72,7 @@ type PrettyEntity =
       MainField : FieldName
       ForbidExternalReferences : bool
       IsAbstract : bool
+      IsFrozen : bool
       Parent : ResolvedEntityRef option
       SystemDefaultAttributes : Map<FieldName, SourceAttributesField>
     }
@@ -230,6 +231,7 @@ let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : Sou
       MainField = entity.MainField
       ForbidExternalReferences = entity.ForbidExternalReferences
       IsAbstract = entity.IsAbstract
+      IsFrozen = entity.IsFrozen
       Parent = entity.Parent
       SystemDefaultAttributes = defaultAttrs.Fields |> Map.filter (fun name attrs -> Set.contains name systemColumns)
     }
@@ -256,6 +258,7 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
           IsHidden = false
           TriggersMigration = false
           IsAbstract = entity.IsAbstract
+          IsFrozen = entity.IsFrozen
           Parent = entity.Parent
         }
     let attrsRet = if Map.isEmpty defaultAttrs then None else Some { Fields = defaultAttrs }

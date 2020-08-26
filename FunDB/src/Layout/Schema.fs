@@ -52,6 +52,7 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
       ForbidTriggers = false
       TriggersMigration = false
       IsHidden = false
+      IsFrozen = entity.IsFrozen
       Parent =
         if entity.Parent = null
         then None

@@ -704,11 +704,16 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     maybeTriggerScripts <- Some triggerScripts
                     triggerScripts
 
-            let transactionTime = DateTime.UtcNow
+            let! systemInfo = transaction.Connection.Query.ExecuteValuesQuery "SELECT transaction_timestamp(), txid_current()" Map.empty cancellationToken
+            let (transactionTime, transactionId) =
+                match systemInfo with
+                | [|SQL.VDateTime ts; SQL.VBigInt txid|] -> (ts, int txid)
+                | _ -> failwith "Impossible"
 
             return
                 { new IContext with
                       member this.Transaction = transaction
+                      member this.TransactionId = transactionId
                       member this.TransactionTime = transactionTime
                       member this.LoggerFactory = loggerFactory
                       member this.CancellationToken = cancellationToken

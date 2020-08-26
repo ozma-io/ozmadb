@@ -43,6 +43,7 @@ type SerializedEntity =
       Parent : ResolvedEntityRef option
       Children : SerializedChildEntity seq
       IsAbstract : bool
+      IsFrozen : bool
       Root : ResolvedEntityRef
     }
 
@@ -94,6 +95,7 @@ let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
       ForbidExternalReferences = entity.forbidExternalReferences
       Parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
       IsAbstract = entity.isAbstract
+      IsFrozen = entity.isFrozen
       Children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.direct })
       Root = entity.root
     }

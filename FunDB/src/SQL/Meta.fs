@@ -59,6 +59,7 @@ let private runCast castFunc str =
 let private parseToSimpleType : SimpleType -> (string -> Value) = function
     | STString -> VString
     | STInt -> runCast tryIntInvariant >> VInt
+    | STBigInt -> runCast tryInt64Invariant >> VBigInt
     | STDecimal -> runCast tryDecimalInvariant >> VDecimal
     | STBool -> runCast tryBool >> VBool
     | STDateTime -> runCast trySqlDateTime >> VDateTime

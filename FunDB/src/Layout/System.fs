@@ -70,6 +70,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               ForbidTriggers = entityAttr.ForbidTriggers
               TriggersMigration = entityAttr.TriggersMigration
               IsHidden = entityAttr.IsHidden
+              IsFrozen = entityAttr.IsFrozen
               Parent = None
               IsAbstract = entityClass.IsAbstract
             }

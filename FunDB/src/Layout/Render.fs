@@ -40,6 +40,7 @@ let renderEntity (entity : ResolvedEntity) : SourceEntity =
       ForbidTriggers = entity.forbidTriggers
       TriggersMigration = entity.triggersMigration
       IsHidden = entity.isHidden
+      IsFrozen = entity.isFrozen
       Parent = Option.map (fun inher -> inher.parent) entity.inheritance
       IsAbstract = entity.isAbstract
     }

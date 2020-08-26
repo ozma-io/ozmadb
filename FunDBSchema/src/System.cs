@@ -10,7 +10,7 @@ using FunWithFlags.FunDBSchema.Attributes;
 
 namespace FunWithFlags.FunDBSchema.System
 {
-    public class SystemContext : DbContext
+    public class SystemContext : PostgresContext
     {
         [Entity("name", ForbidExternalReferences=true, ForbidTriggers=true, IsHidden=true)]
         [UniqueConstraint("name", new [] {"name"})]
@@ -92,7 +92,7 @@ namespace FunWithFlags.FunDBSchema.System
         [UniqueConstraint("entry", new [] {"schema_id", "trigger_entity_id", "name"})]
         public DbSet<Trigger> Triggers { get; set; } = null!;
 
-        [Entity("id", ForbidTriggers=true)]
+        [Entity("id", ForbidTriggers=true, IsFrozen=true)]
         public DbSet<EventEntry> Events { get; set; } = null!;
 
         public SystemContext()
@@ -115,7 +115,7 @@ namespace FunWithFlags.FunDBSchema.System
             modelBuilder.Entity<RoleParent>()
                 .HasOne(roleParent => roleParent.Parent)
                 .WithMany(role => role.Children);
-            
+
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {
                 table.SetTableName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(table.GetTableName()));
@@ -212,6 +212,9 @@ namespace FunWithFlags.FunDBSchema.System
         public bool ForbidExternalReferences { get; set; }
         [ColumnField("bool", Default="false")]
         public bool IsAbstract { get; set; }
+
+        [ColumnField("bool", Default="false")]
+        public bool IsFrozen { get; set; }
         [ColumnField("reference(public.entities)", IsImmutable=true)]
         public int? ParentId { get; set; }
         public Entity Parent { get; set; } = null!;
@@ -444,6 +447,9 @@ namespace FunWithFlags.FunDBSchema.System
     public class EventEntry
     {
         public int Id { get; set; }
+
+        [ColumnField("int", IsImmutable=true, Default="-1")]
+        public int TransactionId { get; set; }
         [ColumnField("datetime", IsImmutable=true)]
         public DateTime TransactionTimestamp { get; set; }
         [ColumnField("datetime", IsImmutable=true)]

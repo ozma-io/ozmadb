@@ -105,6 +105,7 @@ and mapValueArray (func : 'a -> 'b) (vals : ValueArray<'a>) : ValueArray<'b> =
 
 type [<NoEquality; NoComparison>] Value =
     | VInt of int
+    | VBigInt of int64
     | VDecimal of decimal
     | VString of string
     | VRegclass of SchemaObject
@@ -114,6 +115,7 @@ type [<NoEquality; NoComparison>] Value =
     | VInterval of NpgsqlTimeSpan
     | VJson of JToken
     | VIntArray of ValueArray<int>
+    | VBigIntArray of ValueArray<int64>
     | VDecimalArray of ValueArray<decimal>
     | VStringArray of ValueArray<string>
     | VBoolArray of ValueArray<bool>
@@ -138,6 +140,7 @@ type [<NoEquality; NoComparison>] Value =
 
             match this with
             | VInt i -> renderSqlInt i
+            | VBigInt i -> renderSqlBigInt i
             | VDecimal d -> renderSqlDecimal d
             | VString s -> sprintf "%s :: text" (renderSqlString s)
             | VRegclass rc -> sprintf "%s :: regclass" (rc.ToSQLString() |> renderSqlString)
@@ -147,6 +150,7 @@ type [<NoEquality; NoComparison>] Value =
             | VInterval d -> sprintf "%s :: interval" (d |> string |> renderSqlString)
             | VJson j -> sprintf "%s :: jsonb" (j |> renderSqlJson |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
+            | VBigIntArray vals -> renderArray renderSqlBigInt "int8" vals
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | VStringArray vals -> renderArray renderSqlString "text" vals
             | VBoolArray vals -> renderArray renderSqlBool "bool" vals
@@ -182,6 +186,7 @@ type ValuePrettyConverter () =
 
         match value with
         | VInt i -> writer.WriteValue(i)
+        | VBigInt i -> writer.WriteValue(i)
         | VDecimal d -> writer.WriteValue(d)
         | VString s -> writer.WriteValue(s)
         | VBool b -> writer.WriteValue(b)
@@ -191,6 +196,7 @@ type ValuePrettyConverter () =
         | VJson j -> j.WriteTo(writer)
         | VRegclass rc -> writer.WriteValue(string rc)
         | VIntArray vals -> serializeArray id vals
+        | VBigIntArray vals -> serializeArray id vals
         | VDecimalArray vals -> serializeArray id vals
         | VStringArray vals -> serializeArray id vals
         | VBoolArray vals -> serializeArray id vals
@@ -205,6 +211,7 @@ type ValuePrettyConverter () =
 // Used when interpreting query results and for compiling FunQL.
 type SimpleType =
     | [<CaseName("int")>] STInt
+    | [<CaseName("bigint")>] STBigInt
     | [<CaseName("string")>] STString
     | [<CaseName("numeric")>] STDecimal
     | [<CaseName("bool")>] STBool
@@ -219,6 +226,7 @@ type SimpleType =
         member this.ToSQLString () =
             match this with
             | STInt -> "int4"
+            | STBigInt -> "int8"
             | STString -> "text"
             | STDecimal -> "numeric"
             | STBool -> "bool"
@@ -238,8 +246,8 @@ let findSimpleType (str : TypeName) : SimpleType option =
     match str.ToString() with
     | "int4" -> Some STInt
     | "integer" -> Some STInt
-    // XXX: Loss of data!
-    | "bigint" -> Some STInt
+    | "int8" -> Some STBigInt
+    | "bigint" -> Some STBigInt
     | "text" -> Some STString
     | "double precision" -> Some STDecimal
     | "decimal" -> Some STDecimal
@@ -282,6 +290,7 @@ type SimpleValueType = ValueType<SimpleType>
 
 let valueSimpleType : Value -> SimpleValueType option = function
     | VInt i -> Some <| VTScalar STInt
+    | VBigInt i -> Some <| VTScalar STBigInt
     | VDecimal d -> Some <| VTScalar STDecimal
     | VString s -> Some <| VTScalar STString
     | VBool b -> Some <| VTScalar STBool
@@ -291,6 +300,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VRegclass rc -> Some <| VTScalar STRegclass
     | VJson j -> Some <| VTScalar STJson
     | VIntArray vals -> Some <| VTArray STInt
+    | VBigIntArray vals -> Some <| VTArray STBigInt
     | VDecimalArray vals -> Some <| VTArray STDecimal
     | VStringArray vals -> Some <| VTArray STString
     | VBoolArray vals -> Some <| VTArray STBool

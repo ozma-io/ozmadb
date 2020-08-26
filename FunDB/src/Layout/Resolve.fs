@@ -614,6 +614,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               root = entity.Root
               typeName = entity.TypeName
               isAbstract = entity.Source.IsAbstract
+              isFrozen = entity.Source.IsFrozen
               hashName = makeHashName entityRef.name
             } : ResolvedEntity
 

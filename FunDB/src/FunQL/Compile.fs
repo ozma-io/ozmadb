@@ -275,12 +275,14 @@ let composeExhaustingIf (compileTag : 'tag -> SQL.ValueExpr) (options : ('tag * 
 
 let private valueToJson : SQL.Value -> JToken = function
     | SQL.VInt i -> JToken.op_Implicit i
+    | SQL.VBigInt i -> JToken.op_Implicit i
     | SQL.VDecimal d -> JToken.op_Implicit d
     | SQL.VString s -> JToken.op_Implicit s
     | SQL.VBool b -> JToken.op_Implicit b
     | SQL.VJson j -> j
     | SQL.VStringArray ss -> sqlJsonArray ss
     | SQL.VIntArray ss -> sqlJsonArray ss
+    | SQL.VBigIntArray ss -> sqlJsonArray ss
     | SQL.VBoolArray ss -> sqlJsonArray ss
     | SQL.VDecimalArray ss -> sqlJsonArray ss
     | SQL.VJsonArray initialVals ->

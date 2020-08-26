@@ -1016,6 +1016,8 @@ let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
                                   optional = true })
           (FunQLName "transaction_time", { argType = FTType <| FETScalar SFTDateTime
                                            optional = false })
+          (FunQLName "transaction_id", { argType = FTType <| FETScalar SFTInt
+                                         optional = false })
         ]
 
 let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal

@@ -166,6 +166,7 @@ type EntitiesAPI (rctx : IRequestContext) =
         task {
             match ctx.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
+            | Some entity when entity.isFrozen -> return Error EEFrozen
             | Some entity ->
                 match convertEntityArguments rawArgs entity with
                 | Error str -> return Error <| EEArguments str
@@ -217,6 +218,7 @@ type EntitiesAPI (rctx : IRequestContext) =
         task {
             match ctx.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
+            | Some entity when entity.isFrozen -> return Error EEFrozen
             | Some entity ->
                 match convertEntityArguments rawArgs entity with
                 | Error str -> return Error <| EEArguments str
@@ -280,6 +282,7 @@ type EntitiesAPI (rctx : IRequestContext) =
         task {
             match ctx.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
+            | Some entity when entity.isFrozen -> return Error EEFrozen
             | Some entity ->
                 let beforeTriggers = findMergedTriggersDelete entityRef TTBefore ctx.Triggers
                 match! Seq.foldResultTask (applyDeleteTriggerBefore entityRef id) () beforeTriggers with

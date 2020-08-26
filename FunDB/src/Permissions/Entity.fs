@@ -159,5 +159,6 @@ let applyRoleInfo (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedE
       Parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
       Children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.direct })
       IsAbstract = entity.isAbstract
+      IsFrozen = entity.isFrozen
       Root = entity.root
     }

@@ -39,20 +39,24 @@ type RequestParams =
       Source : EventSource
     }
 
+let private maxSourceDepth = 16
+
 type RequestContext private (opts : RequestParams, userId : int option, roleType : RoleType) =
     let ctx = opts.Context
     let userIdValue =
         match userId with
         | None -> FNull
         | Some id -> FInt id
+    // Should be in sync with globalArgumentTypes
     let globalArguments =
         [ (FunQLName "lang", FString opts.Language)
           (FunQLName "user", FString opts.UserName)
           (FunQLName "user_id", userIdValue)
-          (FunQLName "transaction_time", FDateTime <| NpgsqlDateTime ctx.TransactionTime)
+          (FunQLName "transaction_time", FDateTime ctx.TransactionTime)
+          (FunQLName "transaction_id", FInt ctx.TransactionId)
         ] |> Map.ofList
     do
-        assert (globalArgumentTypes |> Map.toSeq |> Seq.forall (fun (name, _) -> Map.containsKey name globalArguments))
+        assert (Map.keysSet globalArgumentTypes = Map.keysSet globalArguments)
 
     let user =
         { Type = roleType
@@ -61,11 +65,13 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
         }
 
     let mutable source = opts.Source
+    let mutable sourceDepth = 0
 
     let makeEvent (addDetails : EventEntry -> unit) =
         let event =
             EventEntry (
-                TransactionTimestamp = ctx.TransactionTime,
+                TransactionTimestamp = ctx.TransactionTime.ToDateTime(),
+                TransactionId = ctx.TransactionId,
                 Timestamp = DateTime.UtcNow,
                 UserName = opts.UserName,
                 Source = JsonConvert.SerializeObject(source)
@@ -112,11 +118,15 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
 
     member this.RunWithSource (newSource : EventSource) (func : unit -> Task<'a>) : Task<'a> =
         task {
+            if sourceDepth >= maxSourceDepth then
+                raisef StackOverflowException "Stack depth exceeded"
             let oldSource = source
             source <- newSource
+            sourceDepth <- sourceDepth + 1
             try
                 return! func ()
             finally
+                sourceDepth <- sourceDepth - 1
                 source <- oldSource
         }
 

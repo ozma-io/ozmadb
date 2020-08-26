@@ -12,6 +12,14 @@ let tryInt (culture : CultureInfo) (str : string) : int option =
 let tryIntInvariant : string -> int option = tryInt CultureInfo.InvariantCulture
 let tryIntCurrent : string -> int option = tryInt CultureInfo.CurrentCulture
 
+let tryInt64 (culture : CultureInfo) (str : string) : int64 option =
+    match Int64.TryParse(str, NumberStyles.Integer ||| NumberStyles.AllowDecimalPoint, culture) with
+    | (true, res) -> Some res
+    | _ -> None
+
+let tryInt64Invariant : string -> int64 option = tryInt64 CultureInfo.InvariantCulture
+let tryInt64Current : string -> int64 option = tryInt64 CultureInfo.CurrentCulture
+
 let tryDecimal (culture : CultureInfo) (str : string) : decimal option =
     match Decimal.TryParse(str, NumberStyles.Currency, culture) with
     | (true, res) -> Some res
