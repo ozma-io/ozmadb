@@ -1,8 +1,6 @@
 module FunWithFlags.FunDB.Operations.Preload
 
 open System.IO
-open System.Linq
-open Microsoft.EntityFrameworkCore
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
@@ -203,8 +201,6 @@ let initialMigratePreload (logger :ILogger) (conn : DatabaseTransaction) (preloa
         let (_, newSystemMeta) = buildFullLayoutMeta layout layout
         let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
-
-        conn.System.State.RemoveRange(conn.System.State.Where((fun x -> x.Name = "LayoutVersion")))
 
         let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
         let! _ = migrateDatabase conn.Connection.Query systemMigration cancellationToken
