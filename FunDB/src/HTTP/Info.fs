@@ -5,6 +5,7 @@ open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open System.Data
 open Giraffe
+open Npgsql
 
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.API.InstancesCache
@@ -34,7 +35,8 @@ let infoApi : HttpHandler =
             RequestErrors.forbidden (errorJson "") next ctx
         else
             let instancesCache = ctx.GetService<InstancesCacheStore>()
-            instancesCache.Clear()
+            instancesCache.Clear ()
+            NpgsqlConnection.ClearAllPools ()
             Successful.ok (json Map.empty) next ctx
 
     choose

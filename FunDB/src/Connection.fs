@@ -3,7 +3,6 @@ module FunWithFlags.FunDB.Connection
 open System
 open System.Data
 open System.Threading
-open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 open Npgsql
@@ -23,7 +22,8 @@ type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : stri
             connection.Dispose ()
 
     interface IAsyncDisposable with
-        member this.DisposeAsync () = connection.DisposeAsync ()
+        member this.DisposeAsync () =
+            connection.DisposeAsync ()
 
     member this.Query = query
     member this.Connection = connection

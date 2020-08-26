@@ -52,7 +52,6 @@ type private UserViewGeneratorScript (template : UserViewGeneratorTemplate, scri
 
     let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
         try
-            eprintfn "Test: %O" (layout.GetObject().GetProperties() |> Seq.map (fun (KeyValue(k, v)) -> (k, v)) |> Map.ofSeq)
             let newViews = func.Function.Call(cancellationToken, null, [|layout|])
             newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
         with

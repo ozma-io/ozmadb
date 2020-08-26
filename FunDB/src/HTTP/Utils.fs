@@ -12,6 +12,7 @@ open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 open Giraffe
+open Npgsql
 
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils
@@ -93,7 +94,13 @@ type InstanceContext =
     }
 
 let instanceConnectionString (instance : Instance) =
-    sprintf "Host=%s; Port=%i; Database=%s; Username=%s; Password=%s" instance.Host instance.Port instance.Database instance.Username instance.Password
+    let builder = NpgsqlConnectionStringBuilder ()
+    builder.Host <- instance.Host
+    builder.Port <- instance.Port
+    builder.Database <- instance.Database
+    builder.Username <- instance.Username
+    builder.Password <- instance.Password
+    builder.ConnectionString
 
 let resolveUser (f : string -> bool -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
     let userClaim = ctx.User.FindFirst ClaimTypes.Email

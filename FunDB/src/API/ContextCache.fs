@@ -302,14 +302,15 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 do! transaction.Rollback ()
                 return reraise' ex
         }
-        let! currentVersion2 = task {
-            try
-                return! ensureCurrentVersion transaction false cancellationToken
-            with
-            | ex ->
-                do! transaction.Rollback ()
-                return reraise' ex
-        }
+        let! currentVersion2 =
+            task {
+                try
+                    return! ensureCurrentVersion transaction false cancellationToken
+                with
+                | ex ->
+                    do! transaction.Rollback ()
+                    return reraise' ex
+            }
         if currentVersion2 <> currentVersion then
             let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
             let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
@@ -568,7 +569,6 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
                 let (_, triggers) =
                     try
-                        eprintfn ""
                         testEvalTriggers false sourceTriggers triggers
                     with
                     | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
