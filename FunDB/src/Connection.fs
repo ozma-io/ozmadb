@@ -46,17 +46,19 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
         // FIXME: Maybe introduce more granular locking?
         new DatabaseTransaction(conn, IsolationLevel.Serializable)
 
-    member this.Rollback () = task {
-        do! transaction.DisposeAsync ()
-        do! system.DisposeAsync ()
-    }
+    member this.Rollback () =
+        unitVtask {
+            do! transaction.DisposeAsync ()
+            do! system.DisposeAsync ()
+        }
 
-    member this.Commit (cancellationToken : CancellationToken) = task {
-        let! changed = system.SaveChangesAsync (cancellationToken)
-        do! transaction.CommitAsync (cancellationToken)
-        do! this.Rollback ()
-        return changed
-    }
+    member this.Commit (cancellationToken : CancellationToken) =
+        task {
+            let! changed = system.SaveChangesAsync (cancellationToken)
+            do! transaction.CommitAsync (cancellationToken)
+            do! this.Rollback ()
+            return changed
+        }
 
     interface IDisposable with
         member this.Dispose () =
@@ -64,7 +66,7 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
             system.Dispose ()
 
     interface IAsyncDisposable with
-        member this.DisposeAsync () = ValueTask(this.Rollback ())
+        member this.DisposeAsync () = this.Rollback ()
 
     member this.System = system
     member this.Transaction = transaction
