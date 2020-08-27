@@ -13,7 +13,8 @@ type TriggerRef =
     { Schema : SchemaName
       Entity : ResolvedEntityRef
       Name : TriggerName
-    }
+    } with
+        override this.ToString () = sprintf "%s.%s.%s" (this.Schema.ToFunQLString()) (this.Entity.ToFunQLString()) (this.Name.ToFunQLString())
 
 [<NoEquality; NoComparison>]
 type ResolvedTrigger =

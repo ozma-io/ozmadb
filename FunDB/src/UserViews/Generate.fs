@@ -38,14 +38,17 @@ type UserViewGeneratorTemplate (isolate : Isolate) =
         ))
 
         template
-
+ 
     member this.Isolate = isolate
-    member this.Template = template
+
+    interface IJavaScriptTemplate with
+        member this.ObjectTemplate = template
+        member this.FinishInitialization context = ()
 
 type private UserViewGeneratorScript (template : UserViewGeneratorTemplate, name : string, scriptSource : string) =
     let func =
         try
-            CachedFunction.FromScript(template.Isolate, template.Template, name, scriptSource)
+            CachedFunction.FromScript template name scriptSource
         with
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't initialize user view generator"

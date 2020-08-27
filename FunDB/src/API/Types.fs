@@ -85,6 +85,11 @@ type RequestUser =
 type EventSource =
     | [<CaseName("api")>] ESAPI
     | [<CaseName("trigger", InnerObject=true)>] ESTrigger of TriggerRef
+    with
+        override this.ToString () =
+            match this with
+            | ESAPI -> "API"
+            | ESTrigger trig -> sprintf "(trigger %O)" trig
 
 type IRequestContext =
     abstract Context : IContext with get
@@ -174,14 +179,19 @@ type Transaction =
     { Operations : TransactionOp[]
     }
 
+type TransactionError =
+    { Details : EntityErrorInfo
+      Operation : int
+    } with
+        [<DataMember>]
+        member this.Error = "transaction"
+
+        [<DataMember>]
+        member this.Message = this.Details.Message
+
 [<NoEquality; NoComparison>]
 type TransactionResult =
     { Results : TransactionOpResult[]
-    }
-
-type TransactionError =
-    { Error : EntityErrorInfo
-      Operation : int
     }
 
  type IEntitiesAPI =

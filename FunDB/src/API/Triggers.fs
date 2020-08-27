@@ -37,7 +37,7 @@ type SerializedTriggerEvent =
 type TriggerScript (template : APITemplate, name : string, scriptSource : string) =
     let func =
         try
-            CachedFunction.FromScript(template.Isolate, template.Template, name, scriptSource)
+            CachedFunction.FromScript template name scriptSource
         with
         | :? NetJsException as e ->
             raisefWithInner TriggerRunException e "Couldn't initialize trigger"

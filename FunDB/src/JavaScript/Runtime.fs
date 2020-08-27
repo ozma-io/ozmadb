@@ -17,14 +17,28 @@ type IsolateLocal<'a when 'a : not struct> (create : Isolate -> 'a) =
         | (ret, _) -> ret
 
     member this.GetValue (isolate : Isolate) =
-
         table.GetValue(isolate, fun isolate -> create isolate)
 
+type IJavaScriptTemplate =
+    abstract member ObjectTemplate : ObjectTemplate
+    abstract member FinishInitialization : Context -> unit
+
+let createFunction (context : Context) (name : string) (script : string) =
+    context.Global.Set("global", context.Global.Value)
+    let func =
+        let jsModule = Module.Compile(String.New(context.Isolate, script), ScriptOrigin(name, IsModule = true))
+        jsModule.Instantiate(context, (fun name id -> raise <| JSException.NewFromString(context, "No imports allowed")))
+        ignore <| jsModule.Evaluate()
+        jsModule.Namespace.Get("default").GetFunction()
+    func
+
 type CachedFunction private (func : Function) =
-    static member FromScript (isolate : Isolate, template : ObjectTemplate, name : string, script : string) =
-        let context = Context.New(isolate, template)
+    static member FromScript (api : IJavaScriptTemplate) (name : string) (script : string) =
+        let context = Context.New(api.ObjectTemplate.Isolate, api.ObjectTemplate)
+        context.Global.Set("global", context.Global.Value)
+        api.FinishInitialization context
         let func =
-            let jsModule = Module.Compile(String.New(isolate, script), ScriptOrigin(name, IsModule = true))
+            let jsModule = Module.Compile(String.New(context.Isolate, script), ScriptOrigin(name, IsModule = true))
             jsModule.Instantiate(context, (fun name id -> raise <| JSException.NewFromString(context, "No imports allowed")))
             ignore <| jsModule.Evaluate()
             jsModule.Namespace.Get("default").GetFunction()

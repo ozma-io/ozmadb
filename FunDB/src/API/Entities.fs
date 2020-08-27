@@ -357,7 +357,7 @@ type EntitiesAPI (rctx : IRequestContext) =
             | Ok results ->
                 return Ok { Results = Array.ofSeq results }
             | Error (i, err) ->
-                return Error { Error = err
+                return Error { Details = err
                                Operation = i
                              }
         }
