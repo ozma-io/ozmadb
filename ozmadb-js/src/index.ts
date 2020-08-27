@@ -141,6 +141,14 @@ export interface IEntity {
   root: IEntityRef;
 }
 
+export interface ISchema {
+  entities: Record<EntityName, IEntity>;
+}
+
+export interface ILayout {
+  schemas: Record<SchemaName, ISchema>;
+}
+
 /*
  * User view metadata. Includes columns, types etc.
  */
