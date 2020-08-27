@@ -31,6 +31,18 @@ export interface IUserViewRef {
   name: UserViewName;
 }
 
+export interface IAnonymousUserView {
+  type: "anonymous";
+  query: string;
+}
+
+export interface INamedUserView {
+  type: "named";
+  ref: IUserViewRef;
+}
+
+export type UserViewSource = IAnonymousUserView | INamedUserView
+
 /*
  * Database result types.
  */
@@ -262,6 +274,15 @@ export interface ITransactionResult {
 }
 
 /*
+ * Error types.
+ */
+
+export interface IApiError {
+  type: string;
+  message: string;
+}
+
+/*
  * Low-level API client.
  */
 
@@ -273,42 +294,30 @@ const convertArgs = (args: Record<string, any>): URLSearchParams => {
   return params;
 };
 
-export class OzmaError extends Error {
-  body: any;
-  response: Response;
+export class FunDBError extends Error {
+  body: IApiError;
 
-  constructor(rawBody: string, response: Response) {
-    let body: any = rawBody;
-    const contentType = response.headers.get("Content-Type");
-    if (contentType && contentType.startsWith("application/json")) {
-      try {
-        body = JSON.parse(rawBody);
-      } catch (e) {
-        // Leave it raw.
-      }
-    }
-    const message = typeof body === "object" && "message" in body ? body.message : (rawBody !== "" ? rawBody : response.statusText);
-    super(String(message));
+  constructor(body: IApiError) {
+    super(body.message);
     this.body = body;
-    this.response = response;
   }
 }
 
-const fetchOzma = async (input: RequestInfo, init?: RequestInit): Promise<Response> => {
+const fetchFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Response> => {
   const response = await fetch(input, init);
   if (!response.ok) {
-    const rawBody = await response.text();
-    throw new OzmaError(rawBody, response);
+    const body = await response.json();
+    throw new FunDBError(body);
   }
   return response;
 };
 
 const fetchJson = async (input: RequestInfo, init?: RequestInit): Promise<any> => {
-  const response = await fetchOzma(input, init);
+  const response = await fetchFunDB(input, init);
   return await response.json();
 };
 
-export default class OzmaAPI {
+export default class FunDBAPI {
   private apiUrl: string;
 
   constructor(opts: { apiUrl: string }) {
@@ -321,7 +330,7 @@ export default class OzmaAPI {
       headers["Authorization"] = `Bearer ${token}`;
     }
     headers["Accept"] = accept;
-    const response = await fetchOzma(`${this.apiUrl}/${subUrl}`, {
+    const response = await fetchFunDB(`${this.apiUrl}/${subUrl}`, {
       method: "GET",
       headers,
     });
@@ -356,41 +365,41 @@ export default class OzmaAPI {
     });
   }
 
-  async getUserView(path: string, token: string | null, args: URLSearchParams): Promise<IViewExprResult> {
+  getUserView = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewExprResult> => {
     return await this.fetchJsonApi(`views/${path}/entries?${args}`, token, "GET");
   }
 
-  async getUserViewInfo(path: string, token: string | null, args: URLSearchParams): Promise<IViewInfoResult> {
+  getUserViewInfo = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewInfoResult> => {
     return await this.fetchJsonApi(`views/${path}/info?${args}`, token, "GET");
   }
 
-  async getAnonymousUserView(token: string | null, query: string, args: Record<string, any>): Promise<IViewExprResult> {
+  getAnonymousUserView = async (token: string | null, query: string, args: Record<string, any>): Promise<IViewExprResult> => {
     const search = convertArgs(args);
     search.set("__query", query);
     return await this.getUserView("anonymous", token, search);
   }
 
-  async getNamedUserView(token: string | null, ref: IUserViewRef, args: Record<string, any>): Promise<IViewExprResult> {
+  getNamedUserView = async (token: string | null, ref: IUserViewRef, args: Record<string, any>): Promise<IViewExprResult> => {
     return await this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, convertArgs(args));
   }
 
-  async getNamedUserViewInfo(token: string | null, ref: IUserViewRef): Promise<IViewInfoResult> {
+  getNamedUserViewInfo = async (token: string | null, ref: IUserViewRef): Promise<IViewInfoResult> => {
     return await this.getUserViewInfo(`by_name/${ref.schema}/${ref.name}`, token, new URLSearchParams());
   }
 
-  async getEntityInfo(token: string | null, ref: IEntityRef): Promise<IEntity> {
+  getEntityInfo = async (token: string | null, ref: IEntityRef): Promise<IEntity> => {
     return await this.fetchJsonApi(`entity/${ref.schema}/${ref.name}`, token, "GET");
   }
 
-  async runTransaction(token: string | null, action: ITransaction): Promise<ITransactionResult> {
+  runTransaction = async (token: string | null, action: ITransaction): Promise<ITransactionResult> => {
     return await this.fetchJsonApi("transaction", token, "POST", action);
   };
 
-  async saveSchema(token: string | null, schema: string): Promise<Blob> {
+  saveSchema = async (token: string | null, schema: string): Promise<Blob> => {
     return await this.fetchGetFileApi(`layouts/${schema}`, token, "application/zip");
   };
 
-  async restoreSchema(token: string | null, schema: string, data: Blob): Promise<void> {
+  restoreSchema = async (token: string | null, schema: string, data: Blob): Promise<void> => {
     await this.fetchSendFileApi(`layouts/${schema}`, token, "PUT", "application/zip", data);
   };
 }
