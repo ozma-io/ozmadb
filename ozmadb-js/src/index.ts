@@ -286,9 +286,11 @@ export interface ITransactionResult {
  */
 
 export interface IApiError {
-  type: string;
+  error: string;
   message: string;
 }
+
+export type UserViewErrorType = "access_denied" | "not_found" | "resolution" | "execution" | "arguments";
 
 /*
  * Low-level API client.
