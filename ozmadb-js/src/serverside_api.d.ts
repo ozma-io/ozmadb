@@ -11,3 +11,5 @@ export interface IFunDBAPI {
   deleteEntity: (ref: Api.IEntityRef, id: number) => Promise<Api.IDeleteEntityResult>;
   writeEvent: (message: string) => void;
 }
+
+export declare const FunDB: IFunDBAPI
