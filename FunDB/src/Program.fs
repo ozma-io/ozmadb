@@ -4,6 +4,7 @@ open System.Threading
 open Newtonsoft.Json
 open Newtonsoft.Json.Serialization
 open Microsoft.AspNetCore
+open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
 open Microsoft.Extensions.Logging
@@ -93,6 +94,17 @@ type Startup (config : IConfiguration) =
         cfg.TokenValidationParameters <- TokenValidationParameters (
             ValidateAudience = false
         )
+        cfg.Events <- JwtBearerEvents()
+        // https://stackoverflow.com/questions/48649717/addjwtbearer-onauthenticationfailed-return-custom-error
+        cfg.Events.OnChallenge <- fun ctx ->
+            ctx.HandleResponse ()
+            ctx.Response.StatusCode <- StatusCodes.Status401Unauthorized
+            ctx.Response.ContentType <- "application/json"
+            let ret = Map.ofSeq (seq {
+                ("error", "unauthorized")
+                ("message", "Failed to authorize using access token")
+            })
+            ctx.Response.WriteAsync(JsonConvert.SerializeObject(ret))
 
     let configureCors (cfg : CorsPolicyBuilder) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()

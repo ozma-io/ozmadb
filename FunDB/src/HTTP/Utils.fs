@@ -8,7 +8,9 @@ open System.Security.Claims
 open Microsoft.Extensions.Primitives
 open Microsoft.Extensions.Logging
 open Microsoft.AspNetCore.Http
+open Microsoft.AspNetCore.Authentication
 open Microsoft.AspNetCore.Authentication.JwtBearer
+open Microsoft.Extensions.DependencyInjection
 open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 open Giraffe
@@ -23,7 +25,7 @@ open FunWithFlags.FunDB.API.Request
 open FunWithFlags.FunDB.API.InstancesCache
 open FunWithFlags.FunDB.API.API
 
-type APIError =
+type GenericError =
     { Message : string
     } with
         [<DataMember>]
