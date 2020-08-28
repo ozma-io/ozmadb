@@ -11,7 +11,7 @@ type MergedTrigger =
     { Schema : SchemaName
       Name : TriggerName
       Priority : int
-      Inherited : bool
+      Inherited : ResolvedEntityRef option
     }
 
 type TriggerUpdateField =
@@ -116,7 +116,7 @@ let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : Trigger
             { Schema = schemaName
               Name = name
               Priority = trigger.Priority
-              Inherited = false
+              Inherited = None
             }
         let time =
             { OnInsert = if trigger.OnInsert then [|merged|] else [||]
@@ -133,18 +133,18 @@ let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : Trigger
         Some entity
     | _ -> None
 
-let private markTriggerInherited (trigger : MergedTrigger) : MergedTrigger =
-    { trigger with Inherited = true }
+let private markTriggerInherited (originalRef : ResolvedEntityRef) (trigger : MergedTrigger) : MergedTrigger =
+    { trigger with Inherited = Some originalRef }
 
-let private markTimeInherited (time : MergedTriggersTime) : MergedTriggersTime =
-    { OnInsert = Array.map markTriggerInherited time.OnInsert
-      OnUpdateFields = Map.map (fun key -> Array.map markTriggerInherited) time.OnUpdateFields
-      OnDelete = Array.map markTriggerInherited time.OnDelete
+let private markTimeInherited (originalRef : ResolvedEntityRef) (time : MergedTriggersTime) : MergedTriggersTime =
+    { OnInsert = Array.map (markTriggerInherited originalRef) time.OnInsert
+      OnUpdateFields = Map.map (fun key -> Array.map (markTriggerInherited originalRef)) time.OnUpdateFields
+      OnDelete = Array.map (markTriggerInherited originalRef) time.OnDelete
     }
 
-let private markEntityInherited (entityTriggers : MergedTriggersEntity) : MergedTriggersEntity =
-    { Before = markTimeInherited entityTriggers.Before
-      After = markTimeInherited entityTriggers.After
+let private markEntityInherited (originalRef : ResolvedEntityRef) (entityTriggers : MergedTriggersEntity) : MergedTriggersEntity =
+    { Before = markTimeInherited originalRef entityTriggers.Before
+      After = markTimeInherited originalRef entityTriggers.After
     }
 
 type private TriggersMerger (layout : Layout) =
@@ -155,7 +155,7 @@ type private TriggersMerger (layout : Layout) =
             | Some merged ->
                 yield (triggerEntityRef, merged)
                 if not (Map.isEmpty triggerEntity.children) then
-                    let inheritedMerged = markEntityInherited merged
+                    let inheritedMerged = markEntityInherited triggerEntityRef merged
                     for KeyValue (childRef, childInfo) in triggerEntity.children do
                         yield (childRef, inheritedMerged)
         }

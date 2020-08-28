@@ -45,7 +45,7 @@ type EntitiesAPI (rctx : IRequestContext) =
     let runArgsTrigger (run : ITriggerScript -> Task<ArgsTriggerResult>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, BeforeTriggerError>> =
         let ref =
             { Schema = trigger.Schema
-              Entity = entityRef
+              Entity = Option.defaultValue entityRef trigger.Inherited
               Name = trigger.Name
             }
         let script = ctx.FindTrigger ref |> Option.get
@@ -80,7 +80,7 @@ type EntitiesAPI (rctx : IRequestContext) =
     let runAfterTrigger (run : ITriggerScript -> Task) (entityRef : ResolvedEntityRef) (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
         let ref =
             { Schema = trigger.Schema
-              Entity = entityRef
+              Entity = Option.defaultValue entityRef trigger.Inherited
               Name = trigger.Name
             }
         let script = ctx.FindTrigger ref |> Option.get
@@ -109,7 +109,7 @@ type EntitiesAPI (rctx : IRequestContext) =
     let applyDeleteTriggerBefore (entityRef : ResolvedEntityRef) (id : int) () (trigger : MergedTrigger) : Task<Result<unit, BeforeTriggerError>> =
         let ref =
             { Schema = trigger.Schema
-              Entity = entityRef
+              Entity = Option.defaultValue entityRef trigger.Inherited
               Name = trigger.Name
             }
         let script = ctx.FindTrigger ref |> Option.get
