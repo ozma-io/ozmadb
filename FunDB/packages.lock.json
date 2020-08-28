@@ -10,9 +10,9 @@
       },
       "FSharp.Core": {
         "type": "Direct",
-        "requested": "[4.7.0, )",
-        "resolved": "4.7.0",
-        "contentHash": "6Bf2qzSCaJoP6tTfO+a5muUS7QbyJANqSut73zQvwQ9It5P0ITz9VKseeia2ofco30c55EQ0jA2wf2+A2gpGnw=="
+        "requested": "[4.7.2, )",
+        "resolved": "4.7.2",
+        "contentHash": "w3XFVTnyZUbC8e2QT6a85ern6y7eQPPk+MYemz1FP0iBfgZcembL+wmo5cIZ1kxB8jfoXC8Q9KVkOMsGpkBKbA=="
       },
       "FsLexYacc": {
         "type": "Direct",
@@ -1288,7 +1288,7 @@
       "funutils": {
         "type": "Project",
         "dependencies": {
-          "FSharp.Core": "4.7.0",
+          "FSharp.Core": "4.7.2",
           "Newtonsoft.Json": "12.0.0",
           "Ply": "0.3.0",
           "YamlDotNet": "8.1.0"
