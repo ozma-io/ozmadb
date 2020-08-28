@@ -1030,6 +1030,7 @@ let allowedAggregateFunctions : Set<FunctionName> =
           FunQLName "max"
           FunQLName "count"
           FunQLName "bool_and"
+          FunQLName "string_agg"
         ]
 
 // int is number of arguments
@@ -1040,6 +1041,7 @@ let allowedFunctions : Set<FunctionName> =
           FunQLName "age"
           FunQLName "date_part"
           FunQLName "date_trunc"
+          FunQLName "to_char"
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =

@@ -469,22 +469,6 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
     let mutable cachedState : CachedState option = None
 
-    let getInitialCachedState (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        use conn = new DatabaseConnection(loggerFactory, connectionString)
-        let transaction = new DatabaseTransaction(conn)
-        if warmStartup then
-                let! (transaction, ret) = getCurrentVersion transaction cancellationToken
-                match ret with
-                | None ->
-                    return! getCachedState transaction cancellationToken
-                | Some ver ->
-                    let! (transaction, newState) = rebuildFromDatabase transaction ver cancellationToken
-                    do! transaction.Rollback ()
-                    return newState
-        else
-            return! getCachedState transaction cancellationToken
-    }
-
     member this.LoggerFactory = loggerFactory
     member this.Preload = preload
     member this.EventLogger = eventLogger
