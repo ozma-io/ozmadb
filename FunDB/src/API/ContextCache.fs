@@ -482,13 +482,11 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 task {
                     let! (transaction, ret) = getCurrentVersion transaction cancellationToken
                     match (cachedState, ret) with
-                    | (_, None)
-                    | (None, _) ->
+                    | (None, Some ver) when warmStartup ->
                         transaction.Connection.Connection.UnprepareAll ()
-                        let! newState = getCachedState transaction cancellationToken
+                        let! (transaction, newState) = rebuildFromDatabase transaction ver cancellationToken
                         anonymousViewsCache.Clear()
                         cachedState <- Some newState
-                        let transaction = new DatabaseTransaction (transaction.Connection)
                         return (transaction, newState)
                     | (Some oldState, Some ver) ->
                         if oldState.Version <> ver then
@@ -499,6 +497,14 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                             return (transaction, newState)
                         else
                             return (transaction, oldState)
+                    | (_, None)
+                    | (None, _) ->
+                        transaction.Connection.Connection.UnprepareAll ()
+                        let! newState = getCachedState transaction cancellationToken
+                        anonymousViewsCache.Clear()
+                        cachedState <- Some newState
+                        let transaction = new DatabaseTransaction (transaction.Connection)
+                        return (transaction, newState)
                 }
 
             let mutable maybeIsolate = None
