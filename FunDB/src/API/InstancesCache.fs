@@ -25,7 +25,8 @@ type InstancesCacheStore (loggerFactory : ILoggerFactory, preload : Preload, eve
             Task.FromResult <| ContextCacheStore (loggerFactory, preload, connectionString, eventLogger, true)
         else
             logger.LogInformation("Initializing cold instance state")
-            let newStore = ContextCacheStore (loggerFactory, preload, connectionString, eventLogger, false)
+            // HACK HACK HACK
+            let newStore = ContextCacheStore (loggerFactory, preload, connectionString, eventLogger, true)
             ignore <| touchedInstances.TryAdd(connectionString, true)
             Task.FromResult newStore
 
