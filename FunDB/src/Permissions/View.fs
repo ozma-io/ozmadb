@@ -48,7 +48,7 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
             for arg in fieldsRestriction.globalArguments do
                 let (argPlaceholder, newArguments) = addArgument (FunQL.PGlobal arg) FunQL.globalArgumentTypes.[arg] arguments
                 arguments <- newArguments
-            compileRestriction layout ref arguments.types fieldsRestriction |> Some
+            compileRestriction layout ref arguments.Types fieldsRestriction |> Some
 
     let filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =
         let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
@@ -148,19 +148,19 @@ type private PermissionsApplier (access : SchemaAccess) =
     member this.ApplyToSelectExpr = applyToSelectExpr
 
 let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (expr : CompiledViewExpr) : unit =
-    let accessCompiler = AccessCompiler (layout, role, expr.query.arguments)
+    let accessCompiler = AccessCompiler (layout, role, expr.query.Arguments)
     let access = accessCompiler.FilterUsedSchemas layout expr.usedSchemas
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (view : CompiledViewExpr) : CompiledViewExpr =
-    let accessCompiler = AccessCompiler (layout, role, view.query.arguments)
+    let accessCompiler = AccessCompiler (layout, role, view.query.Arguments)
     let access = accessCompiler.FilterUsedSchemas layout view.usedSchemas
     let applier = PermissionsApplier access
-    let expression = applier.ApplyToSelectExpr view.query.expression
+    let expression = applier.ApplyToSelectExpr view.query.Expression
     { view with
           query =
               { view.query with
-                    expression = expression
-                    arguments = accessCompiler.Arguments
+                    Expression = expression
+                    Arguments = accessCompiler.Arguments
               }
     }

@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.SQL.Meta
 
 open Npgsql
+open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -383,10 +384,10 @@ let createPgCatalogContext (transaction : NpgsqlTransaction) =
             reraise ()
         db
 
-let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
+let buildDatabaseMeta (transaction : NpgsqlTransaction) (withoutSchemas : SchemaName seq) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
     task {
         use db = createPgCatalogContext transaction
-        let! namespaces = db.GetObjects(cancellationToken)
+        let! namespaces = db.GetObjects(Seq.map string withoutSchemas, cancellationToken)
 
         let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
         let phase2 = Phase2Resolver(unconstrainedSchemas)

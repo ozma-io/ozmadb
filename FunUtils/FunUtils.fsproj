@@ -19,6 +19,7 @@
     <Compile Include="src/Parsing.fs" />
     <Compile Include="src/Collections.fs" />
     <Compile Include="src/IO.fs" />
+    <Compile Include="src/Expr.fs" />
     <Compile Include="src/TopLevel.fs" />
 
     <Compile Include="src/Serialization/Utils.fs" />

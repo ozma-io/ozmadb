@@ -1,12 +1,17 @@
 module FunWithFlags.FunDB.Layout.Update
 
 open System
+open System.Linq
+open Microsoft.FSharp.Linq.RuntimeHelpers
+open Microsoft.FSharp.Quotations
+open Z.EntityFramework.Plus
 open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
@@ -196,24 +201,39 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken
         return changedEntries > 0
     }
 
+let private findBrokenComputedFieldsEntity (entityRef : ResolvedEntityRef) (entity : ErroredEntity) : ResolvedFieldRef seq =
+    seq {
+        for KeyValue(fieldName, field) in entity.ComputedFields do
+            yield { entity = entityRef; name = fieldName }
+    }
+
+let private findBrokenComputedFieldsSchema (schemaName : SchemaName) (schema : ErroredSchema) : ResolvedFieldRef seq =
+    seq {
+        for KeyValue(entityName, entity) in schema do
+            yield! findBrokenComputedFieldsEntity { schema = schemaName; name = entityName } entity
+    }
+
+let private findBrokenComputedFields (layout : ErroredLayout) : ResolvedFieldRef seq =
+    seq {
+        for KeyValue(schemaName, schema) in layout do
+            yield! findBrokenComputedFieldsSchema schemaName schema
+    }
+
+let checkEntityName (ref : ResolvedEntityRef) : Expr<Entity -> bool> =
+    let schemaName = string ref.schema
+    let entityName = string ref.name
+    <@ fun entity -> entity.Name = entityName && entity.Schema.Name = schemaName @>
+
+let private checkComputedFieldName (ref : ResolvedFieldRef) : Expr<ComputedField -> bool> =
+    let checkEntity = checkEntityName ref.entity
+    let compName = string ref.name
+    <@ fun field -> field.Name = compName && (%checkEntity) field.Entity @>
+
 let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) (cancellationToken : CancellationToken) : Task =
     unitTask {
-        let currentSchemas = db.GetLayoutObjects ()
-
-        let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
-
-        for schema in schemas do
-            match Map.tryFind (FunQLName schema.Name) layout with
-            | None -> ()
-            | Some schemaErrors ->
-                for entity in schema.Entities do
-                    match Map.tryFind (FunQLName entity.Name) schemaErrors with
-                    | None -> ()
-                    | Some errors ->
-                        for comp in entity.ComputedFields do
-                            if Map.containsKey (FunQLName comp.Name) errors.computedFields then
-                                comp.AllowBroken <- true
-
-        let! _ = db.SaveChangesAsync(cancellationToken)
-        return ()
+        let computedFieldErrors = findBrokenComputedFields layout |> Array.ofSeq
+        if not <| Array.isEmpty computedFieldErrors then
+            let check = computedFieldErrors |> Seq.map checkComputedFieldName |> Seq.fold1 (fun a b -> <@ fun field -> (%a) field || (%b) field @>)
+            let! _ = db.ComputedFields.Where(LeafExpressionConverter.QuotationToLambdaExpression <@ Func<_, _>(fun x -> (%check) x) @>).DeleteAsync(cancellationToken)
+            ()
     }

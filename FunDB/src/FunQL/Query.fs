@@ -259,7 +259,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
 
 let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValues) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
-        let parameters = prepareArguments viewExpr.query.arguments arguments
+        let parameters = prepareArguments viewExpr.query.Arguments arguments
 
         let! attrsResult = task {
             match viewExpr.attributesQuery with
@@ -285,7 +285,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | None -> Map.empty
             | Some (attrTypes, attrs) -> attrs
 
-        return! connection.ExecuteQuery (viewExpr.query.expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
+        return! connection.ExecuteQuery (viewExpr.query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
             let (info, rows) = parseResult viewExpr.mainEntity viewExpr.domains viewExpr.columns rawResult
 
             let mergedInfo =

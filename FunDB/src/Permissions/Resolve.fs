@@ -347,16 +347,17 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                 match resolveAllowedEntity entityRef allowedEntity with
                 | Ok ret ->
                     match ret.error with
-                    | Some e ->
+                    | Some e when not allowedEntity.AllowBroken ->
                         errors <- Map.add name e errors
-                    | None -> ()
+                    | _ -> ()
                     Ok ret.allowed
                 | Error e ->
                     match e.error with
                     | :? ResolvePermissionsParentException ->
                         Error e
                     | _ ->
-                        errors <- Map.add name e.error errors
+                        if not allowedEntity.AllowBroken then
+                            errors <- Map.add name e.error errors
                         Error e
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed entity %O: %s" name e.Message

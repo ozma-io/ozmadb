@@ -71,7 +71,7 @@ let emptySourceSchema : SourceSchema =
     { Entities = Map.empty
     }
 
-let mergeSourceSchema (a : SourceSchema) (b : SourceSchema) : SourceSchema =
+let unionSourceSchema (a : SourceSchema) (b : SourceSchema) : SourceSchema =
     { Entities = Map.unionUnique a.Entities b.Entities
     }
 
@@ -88,3 +88,7 @@ type SourceLayout =
 
 let emptySourceLayout : SourceLayout =
     { Schemas = Map.empty }
+
+let unionSourceLayout (a : SourceLayout) (b : SourceLayout) : SourceLayout =
+    { Schemas = Map.unionWith (fun name -> unionSourceSchema) a.Schemas b.Schemas
+    }

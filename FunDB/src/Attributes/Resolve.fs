@@ -100,7 +100,8 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                             Ok <| resolveAttributesField entityRef entity fieldAttrs
                 with
                 | :? ResolveAttributesException as e when fieldAttrs.AllowBroken || forceAllowBroken ->
-                    errors <- Map.add name (e :> exn) errors
+                    if not fieldAttrs.AllowBroken then
+                        errors <- Map.add name (e :> exn) errors
                     Error { Source = fieldAttrs; Error = e }
             with
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attributes field %O: %s" name e.Message

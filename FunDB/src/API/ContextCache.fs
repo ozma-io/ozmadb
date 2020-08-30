@@ -1,6 +1,9 @@
 ﻿module FunWithFlags.FunDB.API.ContextCache
 
 open System
+open System.Reflection
+open System.IO
+open System.Security.Cryptography
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
@@ -64,9 +67,15 @@ type private AnonymousUserView =
       UserView : PrefetchedUserView
     }
 
+let private databaseField = "DatabaseVersion"
 let private versionField = "StateVersion"
 let private fallbackVersion = 0
 let private migrationLockNumber = 0
+let private migrationLockParams = Map.singleton 0 (SQL.VInt migrationLockNumber)
+let private assemblyHash =
+    use hasher = SHA256.Create()
+    use assembly = File.OpenRead(Assembly.GetCallingAssembly().Location)
+    hasher.ComputeHash(assembly) |> Array.map (fun x -> x.ToString("x2")) |> String.concat ""
 
 [<NoEquality; NoComparison>]
 type private CachedContext =
@@ -93,11 +102,13 @@ let instanceIsInitialized (conn : DatabaseTransaction) =
         return stateCount > 0
     }
 
-type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, connectionString : string, eventLogger : EventLogger, warmStartup : bool) =
+type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, connectionString : string, eventLogger : EventLogger) =
     let logger = loggerFactory.CreateLogger<ContextCacheStore>()
     // FIXME: random values
     let anonymousViewsCache = FluidCache<AnonymousUserView>(64, TimeSpan.FromSeconds(0.0), TimeSpan.FromSeconds(600.0), fun () -> DateTime.Now)
     let anonymousViewsIndex = anonymousViewsCache.AddIndex("byQuery", fun uv -> uv.Query)
+
+    let currentDatabaseVersion = sprintf "%s %i" assemblyHash (hash preload)
 
     let jsIsolates =
         DefaultObjectPool
@@ -113,144 +124,71 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
     let filterUserLayout (layout : Layout) : Layout =
         { schemas = filterUserSchemas preload layout.schemas }
 
-    // If `None` cold rebuild if needed.
-    let getCurrentVersion (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> = task {
-        let! (transaction, versionEntry) = task {
-            try
-                let! versionEntry = transaction.System.State.AsTracking().FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
-                return (transaction, versionEntry)
-            with
-            | :? PostgresException ->
-                do! transaction.Rollback ()
-                let transaction = new DatabaseTransaction (transaction.Connection)
-                return (transaction, null)
+    // If `None` cold rebuild is needed.
+    let getCurrentVersion (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
+        task {
+            let! (transaction, versionEntry) = task {
+                try
+                    let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
+                    return (transaction, versionEntry)
+                with
+                | :? PostgresException ->
+                    do! transaction.Rollback ()
+                    let transaction = new DatabaseTransaction (transaction.Connection)
+                    return (transaction, null)
+            }
+            match versionEntry with
+            | null -> return (transaction, None)
+            | entry -> return (transaction, tryIntInvariant entry.Value)
         }
-        match versionEntry with
-        | null -> return (transaction, None)
-        | entry -> return (transaction, tryIntInvariant entry.Value)
-    }
 
-    let ensureCurrentVersion (conn : DatabaseTransaction) (bump : bool) (cancellationToken : CancellationToken) : Task<int> = task {
-        let! versionEntry = conn.System.State.AsTracking().FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
-        match versionEntry with
-        | null ->
-            let newEntry = StateValue (Name = versionField, Value = string fallbackVersion)
-            ignore <| conn.System.State.Add(newEntry)
-            let! _ = conn.System.SaveChangesAsync(cancellationToken)
-            return fallbackVersion
-        | entry ->
-            match tryIntInvariant entry.Value with
-            | Some v ->
-                if bump then
-                    let newVersion = v + 1
-                    entry.Value <- string newVersion
+    let ensureCurrentVersion (conn : DatabaseTransaction) (bump : bool) (cancellationToken : CancellationToken) : Task<int> =
+        task {
+                let! versionEntry = conn.System.State.AsTracking().FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
+                match versionEntry with
+                | null ->
+                    let newEntry = StateValue (Name = versionField, Value = string fallbackVersion)
+                    ignore <| conn.System.State.Add(newEntry)
                     let! _ = conn.System.SaveChangesAsync(cancellationToken)
-                    return newVersion
-                else
-                    return v
-            | None ->
-                entry.Value <- string fallbackVersion
-                let! _ = conn.System.SaveChangesAsync(cancellationToken)
-                return fallbackVersion
-    }
-
-    let checkBrokenAttributes (conn : DatabaseTransaction) (brokenAttrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) =
-        task {
-            if not (Map.isEmpty brokenAttrs) then
-                let mutable critical = false
-                for KeyValue(schemaName, schema) in brokenAttrs do
-                    let isSystem = Map.containsKey schemaName preload.Schemas
-                    if isSystem then
-                        critical <- true
-                    for KeyValue(attrsSchemaName, attrsSchema) in schema do
-                        for KeyValue(attrsEntityName, attrsEntity) in attrsSchema do
-                            for KeyValue(attrsFieldName, err) in attrsEntity do
-                                let schemaStr = schemaName.ToString()
-                                let defFieldName = ({ entity = { schema = attrsSchemaName; name = attrsEntityName }; name = attrsFieldName } : ResolvedFieldRef).ToString()
-                                if isSystem then
-                                    logger.LogError(err, "System default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
-                                else
-                                    logger.LogWarning(err, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
-                if critical then
-                    failwith "Broken system default attributes"
-                do! markBrokenAttributes conn.System brokenAttrs cancellationToken
-        }
-
-    let checkBrokenTriggers (conn : DatabaseTransaction) (brokenTriggers : ErroredTriggers) (cancellationToken : CancellationToken) =
-        task {
-            if not (Map.isEmpty brokenTriggers) then
-                let mutable critical = false
-                for KeyValue(schemaName, schema) in brokenTriggers do
-                    let isSystem = Map.containsKey schemaName preload.Schemas
-                    if isSystem then
-                        critical <- true
-                    for KeyValue(triggerSchemaName, triggersSchema) in schema do
-                        for KeyValue(triggerEntityName, triggersEntity) in triggersSchema do
-                            for KeyValue(triggerName, err) in triggersEntity do
-                                let schemaStr = schemaName.ToString()
-                                let triggerName = ({ entity = { schema = triggerSchemaName; name = triggerEntityName }; name = triggerName } : ResolvedFieldRef).ToString()
-                                if isSystem then
-                                    logger.LogError(err, "System trigger {name} from {schema} is broken", triggerName, schemaStr)
-                                else
-                                    logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerName, schemaStr)
-                if critical then
-                    failwith "Broken system triggers"
-                do! markBrokenTriggers conn.System brokenTriggers cancellationToken
-        }
-
-    let checkBrokenUserViews (conn : DatabaseTransaction) (brokenViews : ErroredUserViews) (cancellationToken : CancellationToken) =
-        task {
-            if not (Map.isEmpty brokenViews) then
-                let mutable critical = false
-                for KeyValue(schemaName, mschema) in brokenViews do
-                    let isSystem = Map.containsKey schemaName preload.Schemas
-                    if isSystem then
-                        critical <- true
-                    match mschema with
-                    | Ok schema ->
-                        for KeyValue(uvName, err) in schema do
-                            let uvName = ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString()
-                            if isSystem then
-                                logger.LogError(err, "System view {uv} is broken", uvName)
-                            else
-                                logger.LogWarning(err, "Marking {uv} as broken", uvName)
-                    | Error (SETGenerator err) ->
-                        if isSystem then
-                            logger.LogError(err, "System view generator for {schema} is broken", schemaName)
+                    return fallbackVersion
+                | entry ->
+                    match tryIntInvariant entry.Value with
+                    | Some v ->
+                        if bump then
+                            let newVersion = v + 1
+                            entry.Value <- string newVersion
+                            let! _ = conn.System.SaveChangesAsync(cancellationToken)
+                            return newVersion
                         else
-                            logger.LogWarning(err, "Marking generator for {schema} as broken", schemaName)
-                if critical then
-                    failwith "Broken system user views"
-                do! markBrokenUserViews conn.System brokenViews cancellationToken
+                            return v
+                    | None ->
+                        entry.Value <- string fallbackVersion
+                        let! _ = conn.System.SaveChangesAsync(cancellationToken)
+                        return fallbackVersion
+            }
+
+    let getDatabaseVersion (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<string option> =
+        task {
+            let! databaseEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = databaseField), cancellationToken)
+            match databaseEntry with
+            | null -> return None
+            | entry -> return Some entry.Value
         }
 
-    let checkBrokenPermissions (conn : DatabaseTransaction) (brokenPerms : ErroredPermissions) (cancellationToken : CancellationToken) =
-        task {
-            if not (Map.isEmpty brokenPerms) then
-                let mutable critical = false
-                for KeyValue(schemaName, schema) in brokenPerms do
-                    let isSystem = Map.containsKey schemaName preload.Schemas
-                    if isSystem then
-                        critical <- true
-                    for KeyValue(roleName, role) in schema do
-                        match role with
-                        | EFatal err ->
-                                if isSystem then
-                                    logger.LogError(err, "System role {role} is broken", roleName)
-                                else
-                                    logger.LogWarning(err, "Marking {role} as broken", roleName)
-                        | EDatabase errs ->
-                            for KeyValue(allowedSchemaName, allowedSchema) in errs do
-                                for KeyValue(allowedEntityName, err) in allowedSchema do
-                                    let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()
-                                    let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()
-                                    if isSystem then
-                                        logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
-                                    else
-                                        logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
-                if critical then
-                    failwith "Broken system roles"
-                do! markBrokenPermissions conn.System brokenPerms cancellationToken
+    let ensureDatabaseVersion (conn : DatabaseTransaction) (cancellationToken : CancellationToken) : Task =
+        unitTask {
+            let! databaseEntry = conn.System.State.AsTracking().FirstOrDefaultAsync((fun x -> x.Name = databaseField), cancellationToken)
+            match databaseEntry with
+            | null ->
+                let newEntry = StateValue (Name = databaseField, Value = currentDatabaseVersion)
+                ignore <| conn.System.State.Add(newEntry)
+                let! _ = conn.System.SaveChangesAsync(cancellationToken)
+                ()
+            | entry when entry.Value <> currentDatabaseVersion ->
+                entry.Value <- currentDatabaseVersion
+                let! _ = conn.System.SaveChangesAsync(cancellationToken)
+                ()
+            | _ -> ()
         }
 
     let apiTemplate = IsolateLocal(APITemplate)
@@ -269,7 +207,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
         finally
             jsIsolates.Return(isolate)
 
-    let rec finishGetCachedState (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
+    let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
         let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews) = task {
             try
                 let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
@@ -312,22 +250,19 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     return reraise' ex
             }
         if currentVersion2 <> currentVersion then
-            let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
-            let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
+            let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
             let (_, layout) = resolveLayout sourceLayout false
-            let! state = finishGetCachedState transaction layout userMeta false cancellationToken
-            let! meta = buildDatabaseMeta transaction.Transaction cancellationToken
-            let userMeta = filterUserMeta preload meta
-            return { state with Context = { state.Context with UserMeta = userMeta } }
+            let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
+            return! finishColdRebuild transaction layout userMeta false cancellationToken
         else
             try
-                do! checkBrokenAttributes transaction brokenAttrs cancellationToken
-                do! checkBrokenTriggers transaction brokenTriggers cancellationToken
-                do! checkBrokenUserViews transaction brokenViews cancellationToken
+                do! checkBrokenAttributes logger preload transaction brokenAttrs cancellationToken
+                do! checkBrokenTriggers logger preload transaction brokenTriggers cancellationToken
+                do! checkBrokenUserViews logger preload transaction brokenViews cancellationToken
 
                 let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
                 let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
-                do! checkBrokenPermissions transaction brokenPerms cancellationToken
+                do! checkBrokenPermissions logger preload transaction brokenPerms cancellationToken
 
                 let systemViews = filterSystemViews sourceViews
 
@@ -351,53 +286,56 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 return reraise' ex
     }
 
-    let rec getMigrationLock (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction> = task {
-        // Try to get a lock. If we fail, wait till someone else releases it and then _restart the transaction and try again_.
-        // This is because otherwise transaction gets to see older state of the database.
-        let migrationLockParams = Map.singleton 0 (SQL.VInt migrationLockNumber)
-        let! ret = task {
-            try
-                return! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken
-            with
-            | ex ->
+    let rec getMigrationLock (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<bool> =
+        task {
+            // Try to get a lock. If we fail, wait till someone else releases it and then _restart the transaction and try again_.
+            // This is because otherwise transaction gets to see older state of the database.
+            let! ret = task {
+                try
+                    return! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken
+                with
+                | ex ->
+                    do! transaction.Rollback ()
+                    return reraise' ex
+            }
+            match ret with
+            | SQL.VBool true -> return true
+            | _ ->
+                try
+                    let! _ = transaction.Connection.Query.ExecuteNonQuery "SELECT pg_advisory_xact_lock(@0)" migrationLockParams cancellationToken
+                    ()
+                with
+                | ex ->
+                    do! transaction.Rollback ()
+                    return reraise' ex
                 do! transaction.Rollback ()
-                return reraise' ex
+                return false
         }
-        match ret with
-        | SQL.VBool true -> return transaction
-        | _ ->
-            try
-                let! _ = transaction.Connection.Query.ExecuteNonQuery "SELECT pg_advisory_xact_lock(@0)" migrationLockParams cancellationToken
-                ()
-            with
-            | ex ->
-                do! transaction.Rollback ()
-                return reraise' ex
-            do! transaction.Rollback ()
-            let transaction = new DatabaseTransaction (transaction.Connection)
-            return! getMigrationLock transaction cancellationToken
-    }
 
-    let getCachedState (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let! transaction = getMigrationLock transaction cancellationToken
-        let! (userMeta, layout, isChanged) = task {
-            try
-                let! (isChanged, layout, userMeta) = initialMigratePreload logger transaction preload cancellationToken
-                return (userMeta, layout, isChanged)
-            with
-            | ex ->
-                do! transaction.Rollback ()
-                return reraise' ex
+    let coldRebuildFromDatabase (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<CachedState option> =
+        task {
+            match! getMigrationLock transaction cancellationToken with
+            | false -> return None
+            | true ->
+                let! (userMeta, layout, isChanged) = task {
+                    try
+                        let! (isChanged, layout, userMeta) = initialMigratePreload logger preload transaction cancellationToken
+                        do! ensureDatabaseVersion transaction cancellationToken
+                        return (userMeta, layout, isChanged)
+                    with
+                    | ex ->
+                        do! transaction.Rollback ()
+                        return reraise' ex
+                }
+                let! ret = finishColdRebuild transaction layout userMeta isChanged cancellationToken
+                return Some ret
         }
-        return! finishGetCachedState transaction layout userMeta isChanged cancellationToken
-    }
 
-    // Called when state update by another instance is detected. More lightweight than full `getCachedState`.
-    let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> = task {
+    // Called when state update by another instance is detected. More lightweight than full `coldRebuildFromDatabase`.
+    let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState> = task {
         let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews) = task {
             try
-                let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
-                let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
+                let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
                 let (_, layout) = resolveLayout sourceLayout false
 
                 let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
@@ -413,7 +351,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 let (_, userViews) = resolveUserViews layout mergedAttrs false sourceUvs
 
                 // To dry-run user views we need to stop the transaction.
-                let! _ = transaction.Commit (cancellationToken)
+                let! _ = transaction.Rollback ()
                 // We dry-run those views that _can_ be failed here, outside of a transaction.
                 let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews cancellationToken
                 let transaction = new DatabaseTransaction(transaction.Connection)
@@ -423,14 +361,15 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 do! transaction.Rollback ()
                 return reraise' ex
         }
-        let! currentVersion2 = task {
-            try
-                return! ensureCurrentVersion transaction false cancellationToken
-            with
-            | ex ->
-                do! transaction.Rollback ()
-                return reraise' ex
-        }
+        let! currentVersion2 =
+            task {
+                try
+                    return! ensureCurrentVersion transaction false cancellationToken
+                with
+                | ex ->
+                    do! transaction.Rollback ()
+                    return reraise' ex
+            }
         if currentVersion2 <> currentVersion then
             return! rebuildFromDatabase transaction currentVersion2 cancellationToken
         else
@@ -446,8 +385,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                 let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
                 let (_, permissions) = resolvePermissions layout false sourcePermissions
 
-                let! meta = buildDatabaseMeta transaction.Transaction cancellationToken
-                let userMeta = filterUserMeta preload meta
+                let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
+
+                do! transaction.Rollback ()
 
                 let newState =
                     { Layout = layout
@@ -460,7 +400,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                       UserMeta = userMeta
                     }
 
-                return (transaction, { Version = currentVersion; Context = newState })
+                return { Version = currentVersion; Context = newState }
             with
             | ex ->
                 do! transaction.Rollback ()
@@ -468,6 +408,69 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
     }
 
     let mutable cachedState : CachedState option = None
+    // Used to detect simultaneous migrations.
+    let cachedStateLock = new SemaphoreSlim 1
+
+    let tryWithStateLock (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) (next : unit -> Task) : Task<bool> =
+        task {
+            let! success = cachedStateLock.WaitAsync(0)
+            if not success then
+                do! transaction.Rollback ()
+                do! cachedStateLock.WaitAsync (cancellationToken)
+                ignore <| cachedStateLock.Release ()
+                return false
+            else
+                try
+                    do! next ()
+                    return true
+                finally
+                    ignore <| cachedStateLock.Release ()
+        }
+
+    let rec getCachedState (conn : DatabaseConnection) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> =
+        task {
+            let transaction = new DatabaseTransaction(conn)
+            let! (transaction, ret) = getCurrentVersion transaction cancellationToken
+            match (cachedState, ret) with
+            | (None, Some ver) ->
+                let! _ = tryWithStateLock transaction cancellationToken <| fun () ->
+                    unitTask {
+                        let! databaseVersion = getDatabaseVersion transaction cancellationToken
+                        if databaseVersion = Some currentDatabaseVersion then
+                            let! newState = rebuildFromDatabase transaction ver cancellationToken
+                            cachedState <- Some newState
+                        else
+                            match! coldRebuildFromDatabase transaction cancellationToken with
+                            | None -> ()
+                            | Some newState -> 
+                                cachedState <- Some newState
+                    }
+                return! getCachedState conn cancellationToken
+            | (Some oldState, Some ver) ->
+                if oldState.Version <> ver then
+                    let! _ = tryWithStateLock transaction cancellationToken <| fun () ->
+                        unitTask {
+                            transaction.Connection.Connection.UnprepareAll()
+                            let! newState = rebuildFromDatabase transaction ver cancellationToken
+                            anonymousViewsCache.Clear()
+                            cachedState <- Some newState
+                        }
+                    return! getCachedState conn cancellationToken
+                else
+                    return (transaction, oldState)
+            | (_, None)
+            | (None, _) ->
+                let! _ = tryWithStateLock transaction cancellationToken <| fun () ->
+                    unitTask {
+                        transaction.Connection.Connection.UnprepareAll()
+                        match! coldRebuildFromDatabase transaction cancellationToken with
+                        | None -> ()
+                        | Some newState ->
+                            anonymousViewsCache.Clear()
+                            cachedState <- Some newState
+                    }
+                return! getCachedState conn cancellationToken
+        }
 
     member this.LoggerFactory = loggerFactory
     member this.Preload = preload
@@ -477,35 +480,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
     member this.GetCache (cancellationToken : CancellationToken) = task {
         let conn = new DatabaseConnection(loggerFactory, connectionString)
         try
-            let transaction = new DatabaseTransaction(conn)
-            let! (transaction, oldState) =
-                task {
-                    let! (transaction, ret) = getCurrentVersion transaction cancellationToken
-                    match (cachedState, ret) with
-                    | (None, Some ver) when warmStartup ->
-                        transaction.Connection.Connection.UnprepareAll ()
-                        let! (transaction, newState) = rebuildFromDatabase transaction ver cancellationToken
-                        anonymousViewsCache.Clear()
-                        cachedState <- Some newState
-                        return (transaction, newState)
-                    | (Some oldState, Some ver) ->
-                        if oldState.Version <> ver then
-                            transaction.Connection.Connection.UnprepareAll ()
-                            let! (transaction, newState) = rebuildFromDatabase transaction ver cancellationToken
-                            anonymousViewsCache.Clear()
-                            cachedState <- Some newState
-                            return (transaction, newState)
-                        else
-                            return (transaction, oldState)
-                    | (_, None)
-                    | (None, _) ->
-                        transaction.Connection.Connection.UnprepareAll ()
-                        let! newState = getCachedState transaction cancellationToken
-                        anonymousViewsCache.Clear()
-                        cachedState <- Some newState
-                        let transaction = new DatabaseTransaction (transaction.Connection)
-                        return (transaction, newState)
-                }
+            let! (transaction, oldState) = getCachedState conn cancellationToken
 
             let mutable maybeIsolate = None
             let getIsolate () =
@@ -516,129 +491,140 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                     maybeIsolate <- Some isolate
                     isolate
 
-            let migrate () = task {
-                logger.LogInformation("Starting migration")
-                // Careful here not to evaluate user views before we do migration
+            let migrate () =
+                task {
+                    let! localSuccess = cachedStateLock.WaitAsync(0)
+                    if not localSuccess then
+                        raisef ContextException "Another migration is in progress"
 
-                let! sourceLayout = buildSchemaLayout transaction.System cancellationToken
-                let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
-                if not <| preloadLayoutIsUnchanged sourceLayout preload then
-                    raisef ContextException "Cannot modify system layout"
-                let (_, layout) =
                     try
-                        resolveLayout sourceLayout false
-                    with
-                    | :? ResolveLayoutException as err -> raisefWithInner ContextException err "Failed to resolve layout"
+                        match! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken with
+                        | SQL.VBool true -> ()
+                        | _ -> raisef ContextException "Another migration is in progress"
+                        
+                        logger.LogInformation("Starting migration")
+                        // Careful here not to evaluate user views before we do migration.
 
-                let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
-                if not <| preloadPermissionsAreUnchanged sourcePermissions preload then
-                    raisef ResolveLayoutException "Cannot modify system permissions"
-                let (_, permissions) =
-                    try
-                        resolvePermissions layout false sourcePermissions
-                    with
-                    | :? ResolvePermissionsException as err -> raisefWithInner ContextException err "Failed to resolve permissions"
+                        let! sourceLayout = buildSchemaLayout transaction.System Seq.empty cancellationToken
+                        let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
+                        if not <| preloadLayoutIsUnchanged sourceLayout preload then
+                            raisef ContextException "Cannot modify system layout"
+                        let (_, layout) =
+                            try
+                                resolveLayout sourceLayout false
+                            with
+                            | :? ResolveLayoutException as err -> raisefWithInner ContextException err "Failed to resolve layout"
 
-                let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
-                if not <| preloadAttributesAreUnchanged sourceAttrs preload then
-                    raisef ResolveLayoutException "Cannot modify system default attributes"
-                let (_, defaultAttrs) =
-                    try
-                        resolveAttributes layout false sourceAttrs
-                    with
-                    | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
-                let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+                        let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
+                        if not <| preloadPermissionsAreUnchanged sourcePermissions preload then
+                            raisef ResolveLayoutException "Cannot modify system permissions"
+                        let (_, permissions) =
+                            try
+                                resolvePermissions layout false sourcePermissions
+                            with
+                            | :? ResolvePermissionsException as err -> raisefWithInner ContextException err "Failed to resolve permissions"
 
-                let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
-                if not <| preloadTriggersAreUnchanged sourceTriggers preload then
-                    raisef ResolveLayoutException "Cannot modify system triggers"
-                let (_, triggers) =
-                    try
-                        resolveTriggers layout false sourceTriggers
-                    with
-                    | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
-                let (_, triggers) =
-                    try
-                        testEvalTriggers false sourceTriggers triggers
-                    with
-                    | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
-                let mergedTriggers = mergeTriggers layout triggers
+                        let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
+                        if not <| preloadAttributesAreUnchanged sourceAttrs preload then
+                            raisef ResolveLayoutException "Cannot modify system default attributes"
+                        let (_, defaultAttrs) =
+                            try
+                                resolveAttributes layout false sourceAttrs
+                            with
+                            | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
+                        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
-                let! sourceUserViews = buildSchemaUserViews transaction.System cancellationToken
-                if filterSystemViews sourceUserViews <> oldState.Context.SystemViews then
-                    raisef ContextException "Cannot modify system user views"
+                        let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
+                        if not <| preloadTriggersAreUnchanged sourceTriggers preload then
+                            raisef ResolveLayoutException "Cannot modify system triggers"
+                        let (_, triggers) =
+                            try
+                                resolveTriggers layout false sourceTriggers
+                            with
+                            | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
+                        let (_, triggers) =
+                            try
+                                testEvalTriggers false sourceTriggers triggers
+                            with
+                            | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
+                        let mergedTriggers = mergeTriggers layout triggers
 
-                // Actually migrate.
-                let (newAssertions, wantedUserMeta) = buildFullLayoutMeta layout (filterUserLayout layout)
-                let migration = planDatabaseMigration oldState.Context.UserMeta wantedUserMeta
-                let! migrated = task {
-                    try
-                        return! migrateDatabase transaction.Connection.Query migration cancellationToken
-                    with
-                    | :? QueryException as err -> return raisefWithInner ContextException err "Migration error"
-                }
+                        let! sourceUserViews = buildSchemaUserViews transaction.System cancellationToken
+                        if filterSystemViews sourceUserViews <> oldState.Context.SystemViews then
+                            raisef ContextException "Cannot modify system user views"
 
-                logger.LogInformation("Updating generated user views")
-                let isolate = getIsolate ()
-                let (_, userViewsSource) = generateViews' isolate layout sourceUserViews cancellationToken false
-                let! _ = updateUserViews transaction.System userViewsSource cancellationToken
+                        // Actually migrate.
+                        let (newAssertions, wantedUserMeta) = buildFullLayoutMeta layout (filterUserLayout layout)
+                        let migration = planDatabaseMigration oldState.Context.UserMeta wantedUserMeta
+                        let! migrated = task {
+                            try
+                                return! migrateDatabase transaction.Connection.Query migration cancellationToken
+                            with
+                            | :? QueryException as err -> return raisefWithInner ContextException err "Migration error"
+                        }
 
-                let! newUserViewsSource = buildSchemaUserViews transaction.System cancellationToken
-                let (_, userViews) =
-                    try
-                        resolveUserViews layout mergedAttrs false newUserViewsSource
-                    with
-                    | :? UserViewResolveException as err -> raisefWithInner ContextException err "Failed to resolve user views"
-                let! (_, badUserViews) = task {
-                    try
-                        return! dryRunUserViews conn.Query layout false (Some false) newUserViewsSource userViews cancellationToken
-                    with
-                    | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
-                }
+                        logger.LogInformation("Updating generated user views")
+                        let isolate = getIsolate ()
+                        let (_, userViewsSource) = generateViews' isolate layout sourceUserViews cancellationToken false
+                        let! _ = updateUserViews transaction.System userViewsSource cancellationToken
 
-                let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
-                for check in Set.difference newAssertions oldAssertions do
-                    logger.LogInformation("Running integrity check {check}", check)
-                    try
-                        do! checkAssertion transaction.Connection.Query layout check cancellationToken
-                    with
-                    | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity check"
+                        let! newUserViewsSource = buildSchemaUserViews transaction.System cancellationToken
+                        let (_, userViews) =
+                            try
+                                resolveUserViews layout mergedAttrs false newUserViewsSource
+                            with
+                            | :? UserViewResolveException as err -> raisefWithInner ContextException err "Failed to resolve user views"
+                        let! (_, badUserViews) = task {
+                            try
+                                return! dryRunUserViews conn.Query layout false (Some false) newUserViewsSource userViews cancellationToken
+                            with
+                            | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
+                        }
 
-                // We update state now and check user views _after_ that.
-                // At this point we are sure there is a valid versionEntry because GetCache should have been called.
-                let newVersion = oldState.Version + 1
-                let! versionEntry = transaction.System.State.AsTracking().FirstAsync((fun x -> x.Name = versionField), cancellationToken)
-                versionEntry.Value <- string newVersion
-                // Serialized access error: 40001, may need to process it differently later (retry with fallback?)
-                try
-                    let! _ = transaction.System.SaveChangesAsync(cancellationToken)
-                    ()
-                with
-                | :? DbUpdateException as err -> raisefWithInner ContextException err "State update error"
+                        let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
+                        for check in Set.difference newAssertions oldAssertions do
+                            logger.LogInformation("Running integrity check {check}", check)
+                            try
+                                do! checkAssertion transaction.Connection.Query layout check cancellationToken
+                            with
+                            | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity check"
 
-                let! _ = transaction.Commit (cancellationToken)
+                        // We update state now and check user views _after_ that.
+                        // At this point we are sure there is a valid versionEntry because GetCache should have been called.
+                        let newVersion = oldState.Version + 1
+                        let! versionEntry = transaction.System.State.AsTracking().FirstAsync((fun x -> x.Name = versionField), cancellationToken)
+                        versionEntry.Value <- string newVersion
+                        // Serialized access error: 40001, may need to process it differently later (retry with fallback?)
+                        try
+                            let! _ = transaction.System.SaveChangesAsync(cancellationToken)
+                            ()
+                        with
+                        | :? DbUpdateException as err -> raisefWithInner ContextException err "State update error"
 
-                let! (_, goodUserViews) = dryRunUserViews conn.Query layout false (Some true) newUserViewsSource userViews cancellationToken
+                        let! _ = transaction.Commit (cancellationToken)
 
-                (conn :> IDisposable).Dispose()
+                        let! (_, goodUserViews) = dryRunUserViews conn.Query layout false (Some true) newUserViewsSource userViews cancellationToken
 
-                let newState =
-                    { Layout = layout
-                      Permissions = permissions
-                      DefaultAttrs = mergedAttrs
-                      Triggers = mergedTriggers
-                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (apiTemplate.GetValue isolate) triggers)
-                      UserViews = mergePrefetchedUserViews badUserViews goodUserViews
-                      SystemViews = filterSystemViews userViewsSource
-                      UserMeta = wantedUserMeta
-                    }
+                        (conn :> IDisposable).Dispose()
 
-                anonymousViewsCache.Clear()
-                if migrated then
-                    // There is no way to force-clear prepared statements for all connections in the pool, so we clear the pool itself instead.
-                    NpgsqlConnection.ClearPool(transaction.Connection.Connection)
-                cachedState <- Some { Version = newVersion; Context = newState }
-                return ()
+                        let newState =
+                            { Layout = layout
+                              Permissions = permissions
+                              DefaultAttrs = mergedAttrs
+                              Triggers = mergedTriggers
+                              TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (apiTemplate.GetValue isolate) triggers)
+                              UserViews = mergePrefetchedUserViews badUserViews goodUserViews
+                              SystemViews = filterSystemViews userViewsSource
+                              UserMeta = wantedUserMeta
+                            }
+
+                        anonymousViewsCache.Clear()
+                        if migrated then
+                            // There is no way to force-clear prepared statements for all connections in the pool, so we clear the pool itself instead.
+                            NpgsqlConnection.ClearPool(transaction.Connection.Connection)
+                        cachedState <- Some { Version = newVersion; Context = newState }
+                    finally
+                        ignore <| cachedStateLock.Release()
             }
 
             let resolveAnonymousView homeSchema query = task {

@@ -422,7 +422,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | Some (_, RComputedField comp) ->
                 match resolveComputedField stack entity fieldRef comp with
                 | Ok field -> { IsLocal = field.isLocal; HasId = field.hasId; UsedSchemas = mergeUsedSchemas usedSchemas field.usedSchemas }
-                | Error e -> raisefWithInner ResolveLayoutException e.error "Computed field %O is broken" fieldRef
+                | Error e -> raisefWithInner ResolveLayoutException e.Error "Computed field %O is broken" fieldRef
             | Some (newName, RColumnField _) ->
                 let usedSchemas = addUsedField fieldRef.entity.schema fieldRef.entity.name newName usedSchemas
                 { IsLocal = true; HasId = false; UsedSchemas = usedSchemas }
@@ -494,12 +494,12 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             let origFieldRef = { fieldRef with entity = parentRef }
             match Map.tryFind origFieldRef cachedComputedFields with
             | Some (Ok f) -> Ok { f with inheritedFrom = Some parentRef }
-            | Some (Error e) -> Error { e with inheritedFrom = Some parentRef }
+            | Some (Error e) -> Error { e with InheritedFrom = Some parentRef }
             | None ->
                 let origEntity = Map.find parentRef entities
                 match resolveComputedField stack origEntity origFieldRef (Map.find fieldRef.name origEntity.ComputedFields) with
                 | Ok f -> Ok { f with inheritedFrom = Some parentRef }
-                | Error e -> Error { e with inheritedFrom = Some parentRef }
+                | Error e -> Error { e with InheritedFrom = Some parentRef }
         | HRSource (hashName, comp) ->
             match Map.tryFind fieldRef cachedComputedFields with
             | Some f -> f
@@ -513,7 +513,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     field
                 with
                 | :? ResolveLayoutException as e when comp.AllowBroken || forceAllowBroken ->
-                    Error { source = comp; error = e; inheritedFrom = None }
+                    Error { Source = comp; Error = e; InheritedFrom = None }
 
     let resolveCheckExpr (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : ParsedFieldExpr -> LocalFieldExpr =
         let resolveReference : LinkedFieldRef -> FieldName = function
@@ -566,9 +566,9 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             try
                 let ret = resolveComputedField Set.empty entity { entity = entityRef; name = name } field
                 match ret with
-                | Ok _ -> ()
-                | Error e ->
-                    computedErrors <- Map.add name e.error computedErrors
+                | Error e when Option.isNone e.InheritedFrom (*&& not e.Source.AllowBroken*) ->
+                    computedErrors <- Map.add name e.Error computedErrors
+                | _ -> ()
                 ret
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in computed field %O: %s" name e.Message
@@ -649,7 +649,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                   checkConstraints = checkConstraints
             }
         let errors =
-            { computedFields = computedErrors
+            { ComputedFields = computedErrors
             }
         (errors, ret)
 
@@ -664,7 +664,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 let (entityErrors, entity) = resolveEntity ref halfEntity
                 if Option.isNone entity.inheritance then
                     roots <- Set.add name roots
-                if not (Map.isEmpty entityErrors.computedFields) then
+                if not (Map.isEmpty entityErrors.ComputedFields) then
                     errors <- Map.add name entityErrors errors
                 entity
             with
@@ -707,8 +707,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 //
 
 type private HalfVirtualFieldCase =
-    { case : VirtualFieldCase
-      entities : Set<ResolvedEntityRef> // includes all children for a given case
+    { Case : VirtualFieldCase
+      Entities : Set<ResolvedEntityRef> // includes all children for a given case
     }
 
 type private Phase3Resolver (layout : Layout) =
@@ -717,7 +717,7 @@ type private Phase3Resolver (layout : Layout) =
 
     let rec resolveMyVirtualCases (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : HalfVirtualFieldCase array =
         let childVirtualCases = findVirtualChildren entity fieldRef.name |> Seq.toArray
-        let handledChildren = childVirtualCases |> Seq.map (fun c -> c.entities) |> Set.unionMany
+        let handledChildren = childVirtualCases |> Seq.map (fun c -> c.Entities) |> Set.unionMany
 
         let getName (ref, entity : ResolvedEntity) =
             if entity.isAbstract || Set.contains ref handledChildren then
@@ -744,8 +744,8 @@ type private Phase3Resolver (layout : Layout) =
                   ref = fieldRef
                 }
             let myHalf =
-                { case = myCase
-                  entities = options |> Seq.map fst |> Set.ofSeq
+                { Case = myCase
+                  Entities = options |> Seq.map fst |> Set.ofSeq
                 }
             Array.append childVirtualCases [|myHalf|]
 
@@ -775,7 +775,7 @@ type private Phase3Resolver (layout : Layout) =
         match comp.virtualCases with
         | None -> comp
         | Some _ ->
-            let cases = resolveVirtualCases entity fieldRef comp |> Array.map (fun c -> c.case)
+            let cases = resolveVirtualCases entity fieldRef comp |> Array.map (fun c -> c.Case)
             let getUsedSchemas (case : VirtualFieldCase) =
                 let entity = layout.FindEntity case.ref.entity |> Option.get
                 let field = Map.find case.ref.name entity.computedFields |> Result.get

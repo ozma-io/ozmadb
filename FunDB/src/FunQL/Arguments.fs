@@ -15,9 +15,9 @@ type PlaceholderId = int
 
 [<NoEquality; NoComparison>]
 type CompiledArgument =
-    { placeholderId : PlaceholderId
-      fieldType : ArgumentFieldType
-      dbType : SQL.DBValueType
+    { PlaceholderId : PlaceholderId
+      FieldType : ArgumentFieldType
+      DbType : SQL.DBValueType
       optional : bool
     }
 
@@ -27,14 +27,14 @@ type ArgumentValues = Map<Placeholder, FieldValue>
 
 [<NoEquality; NoComparison>]
 type QueryArguments =
-    { types : CompiledArgumentsMap
-      lastPlaceholderId : PlaceholderId
+    { Types : CompiledArgumentsMap
+      LastPlaceholderId : PlaceholderId
     }
 
 [<NoEquality; NoComparison>]
 type Query<'e when 'e :> ISQLString> =
-    { expression : 'e
-      arguments : QueryArguments
+    { Expression : 'e
+      Arguments : QueryArguments
     }
 
 let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
@@ -58,31 +58,31 @@ let compileFieldType : FieldType<_, _> -> SQL.SimpleValueType = function
     | FTEnum vals -> SQL.VTScalar SQL.STString
 
 let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgument) : CompiledArgument =
-    { placeholderId = placeholderId
-      fieldType = arg.argType
-      dbType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType arg.argType)
+    { PlaceholderId = placeholderId
+      FieldType = arg.argType
+      DbType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType arg.argType)
       optional = arg.optional
     }
 
 let emptyArguments =
-    { types = Map.empty
-      lastPlaceholderId = 0
+    { Types = Map.empty
+      LastPlaceholderId = 0
     }
 
 let addArgument (name : Placeholder) (arg : ResolvedArgument) (args : QueryArguments) : PlaceholderId * QueryArguments =
-    match Map.tryFind name args.types with
-    | Some oldArg -> (oldArg.placeholderId, args)
+    match Map.tryFind name args.Types with
+    | Some oldArg -> (oldArg.PlaceholderId, args)
     | None ->
-        let nextArg = args.lastPlaceholderId + 1
+        let nextArg = args.LastPlaceholderId + 1
         let ret =
-            { types = Map.add name (compileArgument nextArg arg) args.types
-              lastPlaceholderId = nextArg
+            { Types = Map.add name (compileArgument nextArg arg) args.Types
+              LastPlaceholderId = nextArg
             }
         (nextArg, ret)
 
 let mergeArguments (a : QueryArguments) (b : QueryArguments) : QueryArguments =
-    { types = Map.unionUnique a.types b.types
-      lastPlaceholderId = max a.lastPlaceholderId b.lastPlaceholderId
+    { Types = Map.unionUnique a.Types b.Types
+      LastPlaceholderId = max a.LastPlaceholderId b.LastPlaceholderId
     }
 
 let compileArguments (args : ResolvedArgumentsMap) : QueryArguments =
@@ -93,8 +93,8 @@ let compileArguments (args : ResolvedArgumentsMap) : QueryArguments =
         compileArgument lastPlaceholderId arg
 
     let arguments = args |> Map.map convertArgument
-    { types = arguments
-      lastPlaceholderId = lastPlaceholderId
+    { Types = arguments
+      LastPlaceholderId = lastPlaceholderId
     }
 
 let private typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : unit =
@@ -141,6 +141,6 @@ let prepareArguments (args : QueryArguments) (values : ArgumentValues) : ExprPar
                     raisef ArgumentCheckException "Argument not found: %O" name
             | Some value -> (false, value)
         if not (mapping.optional && notFound) then
-            typecheckArgument mapping.fieldType value
-        (mapping.placeholderId, compileFieldValueSingle value)
-    args.types |> Map.mapWithKeys makeParameter
+            typecheckArgument mapping.FieldType value
+        (mapping.PlaceholderId, compileFieldValueSingle value)
+    args.Types |> Map.mapWithKeys makeParameter

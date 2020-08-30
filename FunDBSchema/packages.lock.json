@@ -39,6 +39,12 @@
           "System.Text.Json": "4.6.0"
         }
       },
+      "System.Linq.Async": {
+        "type": "Direct",
+        "requested": "[4.1.*, )",
+        "resolved": "4.1.1",
+        "contentHash": "+MYrr8Jz8ayKhOJrqh+9EH4y2qcKYUehxKXE3j4IG5to4FlXz6HF0CgBUtYqrcbW5uOaCEUoZ+SVnp4dEIAi6Q=="
+      },
       "Microsoft.Bcl.AsyncInterfaces": {
         "type": "Transitive",
         "resolved": "1.1.1",

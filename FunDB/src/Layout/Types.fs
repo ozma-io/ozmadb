@@ -101,9 +101,9 @@ type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedF
 
 [<NoEquality; NoComparison>]
 type ComputedFieldError =
-    { source : SourceComputedField
-      inheritedFrom : ResolvedEntityRef option
-      error : exn
+    { Source : SourceComputedField
+      InheritedFrom : ResolvedEntityRef option
+      Error : exn
     }
 
 [<NoEquality; NoComparison>]
@@ -229,8 +229,12 @@ let rec checkInheritance (layout : ILayoutFields) (parentRef : ResolvedEntityRef
         | None -> false
         | Some childParentRef -> checkInheritance layout parentRef childParentRef
 
+let filterLayout (f : SchemaName -> bool) (layout : Layout) : Layout =
+    { schemas = Map.filter (fun name schema -> f name) layout.schemas
+    }
+
 type ErroredEntity =
-    { computedFields : Map<FieldName, exn>
+    { ComputedFields : Map<FieldName, exn>
     }
 type ErroredSchema = Map<EntityName, ErroredEntity>
 type ErroredLayout = Map<SchemaName, ErroredSchema>

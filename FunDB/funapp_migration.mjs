@@ -52,7 +52,7 @@ const generateDefaultViews = (layout) => {
                 fields.push(renderSqlName(columnField));
             });
             Object.entries(entity.computedFields).forEach(([computedField, comp]) => {
-                if (!comp.broken) {
+                if (!comp.isBroken) {
                     fields.push(renderSqlName(computedField));
                 }
             });

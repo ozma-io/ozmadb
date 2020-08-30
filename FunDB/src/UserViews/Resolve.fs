@@ -181,7 +181,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
     let resolveUserViews () : ErroredUserViews * UserViews =
         let mutable errors : ErroredUserViews = Map.empty
 
-        let mapSchema name = function
+        let mapSchema name : Result<_, UserViewsSchemaError> -> Result<_, UserViewsSchemaError> = function
             | Ok schema ->
                 try
                     let (schemaErrors, newSchema) = resolveUserViewsSchema name schema

@@ -28,7 +28,7 @@ let renderColumnField (column : ResolvedColumnField) : SourceColumnField =
 
 let renderEntity (entity : ResolvedEntity) : SourceEntity =
     let mapComputed name : Result<ResolvedComputedField, ComputedFieldError> -> SourceComputedField option = function
-        | Error { inheritedFrom = None; source = source } -> Some source
+        | Error { InheritedFrom = None; Source = source } -> Some source
         | Ok ({ inheritedFrom = None } as comp) -> Some (renderComputedField comp)
         | _ -> None
     { ColumnFields = Map.mapMaybe (fun name (col : ResolvedColumnField) -> if Option.isNone col.inheritedFrom then Some (renderColumnField col) else None) entity.columnFields

@@ -684,11 +684,11 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | VRPlaceholder name ->
             if Array.isEmpty linked.path then
                 // Explicitly set argument type to avoid ambiguity,
-                let arg = arguments.types.[name]
-                (paths0, SQL.VECast (SQL.VEPlaceholder arg.placeholderId, arg.dbType))
+                let arg = arguments.Types.[name]
+                (paths0, SQL.VECast (SQL.VEPlaceholder arg.PlaceholderId, arg.DbType))
             else
-                let argInfo = Map.find name initialArguments.types
-                match argInfo.fieldType with
+                let argInfo = Map.find name initialArguments.Types
+                match argInfo.FieldType with
                 | FTReference (argEntityRef, where) ->
                     let firstName = linked.path.[0]
                     let remainingPath = Array.skip 1 linked.path
@@ -1363,8 +1363,8 @@ let rec private flattenDomains : Domains -> FlattenedDomains = function
 
 let compileSingleFromClause (layout : Layout) (argumentsMap : CompiledArgumentsMap) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : SQL.FromExpr * SQL.ValueExpr option =
     let bogusArguments =
-        { types = argumentsMap
-          lastPlaceholderId = 0
+        { Types = argumentsMap
+          LastPlaceholderId = 0
         }
     let compiler = QueryCompiler (layout, emptyMergedDefaultAttributes, bogusArguments)
     compiler.CompileSingleFromClause from where
@@ -1411,7 +1411,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
                  }
 
     { attributesQuery = attrQuery
-      query = { expression = newExpr; arguments = compiler.Arguments }
+      query = { Expression = newExpr; Arguments = compiler.Arguments }
       columns = newColumns
       domains = info.domains
       flattenedDomains = flattenDomains info.domains

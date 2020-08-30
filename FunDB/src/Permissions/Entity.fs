@@ -27,7 +27,7 @@ type RestrictedColumnInfo =
     }
 
 let applyRoleInsert (layout : Layout)  (role : ResolvedRole) (query : Query<SQL.InsertExpr>) : Query<SQL.InsertExpr> =
-    let tableInfo = query.expression.extra :?> RestrictedTableInfo
+    let tableInfo = query.Expression.Extra :?> RestrictedTableInfo
     let entity = layout.FindEntity tableInfo.ref |> Option.get
     let flattened =
         match Map.tryFind entity.root role.flattened with
@@ -37,7 +37,7 @@ let applyRoleInsert (layout : Layout)  (role : ResolvedRole) (query : Query<SQL.
     | Some { insert = true } -> ()
     | _ -> raisef PermissionsEntityException" Access denied to insert"
 
-    for (extra, col) in query.expression.columns do
+    for (extra, col) in query.Expression.Columns do
         match extra with
         | :? RestrictedColumnInfo as colInfo ->
             let field = Map.find colInfo.name entity.columnFields
@@ -49,7 +49,7 @@ let applyRoleInsert (layout : Layout)  (role : ResolvedRole) (query : Query<SQL.
     query
 
 let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.UpdateExpr>) : Query<SQL.UpdateExpr> =
-    let tableInfo = query.expression.extra :?> RestrictedTableInfo
+    let tableInfo = query.Expression.Extra :?> RestrictedTableInfo
     let entity = layout.FindEntity tableInfo.ref |> Option.get
     let flattened =
         match Map.tryFind entity.root role.flattened with
@@ -69,7 +69,7 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.U
             | Some { change = true; select = select } -> andRestriction restriction select
             | _ -> raisef PermissionsEntityException "Access denied to update field %O" colInfo.name
         | _ -> restriction
-    let fieldsRestriction = query.expression.columns |> Map.values |> Seq.fold addRestriction updateRestr
+    let fieldsRestriction = query.Expression.Columns |> Map.values |> Seq.fold addRestriction updateRestr
 
     match fieldsRestriction.expression with
     | OFEFalse -> raisef PermissionsEntityException "Access denied to update"
@@ -81,19 +81,19 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.U
                 args
             else
                 args
-        let arguments = globalArgumentTypes |> Map.fold findOrAddOne query.arguments
-        let newExpr = compileValueRestriction layout tableInfo.ref arguments.types fieldsRestriction
+        let arguments = globalArgumentTypes |> Map.fold findOrAddOne query.Arguments
+        let newExpr = compileValueRestriction layout tableInfo.ref arguments.Types fieldsRestriction
         let expr =
-            { query.expression with
-                  where = Option.unionWith (curry SQL.VEAnd) query.expression.where (Some newExpr)
+            { query.Expression with
+                  Where = Option.unionWith (curry SQL.VEAnd) query.Expression.Where (Some newExpr)
             }
-        { arguments = arguments
-          expression = expr
+        { Arguments = arguments
+          Expression = expr
         }
 
 // We don't allow to delete other entities in the inheritance hierarchy, so we don't need to apply restrictions from parents and children.
 let applyRoleDelete (layout : Layout) (role : ResolvedRole) (query : Query<SQL.DeleteExpr>) : Query<SQL.DeleteExpr> =
-    let tableInfo = query.expression.extra :?> RestrictedTableInfo
+    let tableInfo = query.Expression.Extra :?> RestrictedTableInfo
     let entity = layout.FindEntity tableInfo.ref |> Option.get
     let flattened =
         match Map.tryFind  entity.root role.flattened with
@@ -121,14 +121,14 @@ let applyRoleDelete (layout : Layout) (role : ResolvedRole) (query : Query<SQL.D
                 args
             else
                 args
-        let arguments = globalArgumentTypes |> Map.fold findOrAddOne query.arguments
-        let newExpr = compileValueRestriction layout tableInfo.ref arguments.types fieldsRestriction
+        let arguments = globalArgumentTypes |> Map.fold findOrAddOne query.Arguments
+        let newExpr = compileValueRestriction layout tableInfo.ref arguments.Types fieldsRestriction
         let expr =
-            { query.expression with
-                  where = Option.unionWith (curry SQL.VEAnd) query.expression.where (Some newExpr)
+            { query.Expression with
+                  Where = Option.unionWith (curry SQL.VEAnd) query.Expression.Where (Some newExpr)
             }
-        { arguments = arguments
-          expression = expr
+        { Arguments = arguments
+          Expression = expr
         }
 
 let applyRoleInfo (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) : SerializedEntity =

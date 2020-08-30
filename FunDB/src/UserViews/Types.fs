@@ -51,7 +51,7 @@ type UserViews =
 type ErroredUserViewsSchema = Map<UserViewName, exn>
 type ErroredUserViews = Map<SchemaName, Result<ErroredUserViewsSchema, UserViewsSchemaErrorType>>
 
-let unionErroredUserViews (a : ErroredUserViews) (b : ErroredUserViews) =
+let unionErroredUserViews (a : ErroredUserViews) (b : ErroredUserViews) : ErroredUserViews =
     let mergeOne a b =
         match (a, b) with
         | (Ok schema1, Ok schema2) -> Ok (Map.unionUnique schema1 schema2)

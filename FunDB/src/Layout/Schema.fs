@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Layout.Schema
 
+open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -64,9 +65,10 @@ let private makeSourceSchema (schema : Schema) : SourceSchema =
     { Entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
     }
 
-let buildSchemaLayout (db : SystemContext) (cancellationToken : CancellationToken) : Task<SourceLayout> =
+let buildSchemaLayout (db : SystemContext) (withoutSchemas : SchemaName seq) (cancellationToken : CancellationToken) : Task<SourceLayout> =
     task {
-        let currentSchemas = db.GetLayoutObjects ()
+        let withoutSchemasArr = withoutSchemas |> Seq.map string |> Array.ofSeq
+        let currentSchemas = db.GetLayoutObjects().Where(fun schema -> not (withoutSchemasArr.Contains(schema.Name)))
         let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
 

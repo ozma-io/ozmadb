@@ -17,18 +17,9 @@ type InstancesCacheStore (loggerFactory : ILoggerFactory, preload : Preload, eve
     // FIXME: random values
     let instancesMemCache = FluidCache<ContextCacheStore>(8, TimeSpan.FromSeconds(60.0), TimeSpan.FromSeconds(3600.0), (fun () -> DateTime.Now))
     let instancesMemIndex = instancesMemCache.AddIndex("ByConnectionString", fun entry -> entry.ConnectionString)
-    let touchedInstances = ConcurrentDictionary<string, bool>()
 
     let createInstance (connectionString : string) =
-        if touchedInstances.ContainsKey(connectionString) then
-            logger.LogInformation("Initializing warm instance state")
-            Task.FromResult <| ContextCacheStore (loggerFactory, preload, connectionString, eventLogger, true)
-        else
-            logger.LogInformation("Initializing cold instance state")
-            // HACK HACK HACK
-            let newStore = ContextCacheStore (loggerFactory, preload, connectionString, eventLogger, true)
-            ignore <| touchedInstances.TryAdd(connectionString, true)
-            Task.FromResult newStore
+        Task.FromResult <| ContextCacheStore (loggerFactory, preload, connectionString, eventLogger)
 
     let instanceCreator = ItemCreator createInstance
 

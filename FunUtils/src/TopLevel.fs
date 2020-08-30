@@ -20,6 +20,7 @@ module String = String
 module Parsing = Parsing
 module Collections = Collections
 module IO = IO
+module Expr = Expr
 
 type Void = private Void of unit
 type Exception = System.Exception

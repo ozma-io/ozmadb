@@ -124,7 +124,7 @@ let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
 
 let saveSchema (db : SystemContext) (name : SchemaName) (cancellationToken : CancellationToken) : Task<SchemaDump> =
     task {
-        let! entitiesData = buildSchemaLayout db cancellationToken
+        let! entitiesData = buildSchemaLayout db Seq.empty cancellationToken
         let! rolesData = buildSchemaPermissions db cancellationToken
         let! userViewsData = buildSchemaUserViews db cancellationToken
         let! attributesData = buildSchemaAttributes db cancellationToken

@@ -71,12 +71,12 @@ type UserViewsAPI (rctx : IRequestContext) =
             | PLocal (FunQLName lname) ->
                 match Map.tryFind lname rawArgs with
                 | Some argStr ->
-                    match parseValueFromJson arg.fieldType false argStr with
-                    | None -> Error <| sprintf "Cannot convert argument %O to type %O" name arg.fieldType
+                    match parseValueFromJson arg.FieldType false argStr with
+                    | None -> Error <| sprintf "Cannot convert argument %O to type %O" name arg.FieldType
                     | Some arg -> Ok (Some (name, arg))
                 | _ -> Ok None
             | PGlobal gname -> Ok (Some (name, Map.find gname rctx.GlobalArguments))
-        compiled.query.arguments.types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
+        compiled.query.Arguments.Types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
 
 
     member this.GetUserViewInfo (source : UserViewSource) (recompileQuery : bool) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =

@@ -40,7 +40,7 @@ let private runQuery (runFunc : string -> ExprParameters -> CancellationToken ->
         try
             // FIXME: Slow
             let args = Map.union (Map.mapKeys PGlobal globalArgs) (Map.mapKeys PLocal placeholders)
-            return! runFunc (query.expression.ToSQLString()) (prepareArguments query.arguments args) cancellationToken
+            return! runFunc (query.Expression.ToSQLString()) (prepareArguments query.Arguments args) cancellationToken
         with
             | :? QueryException as ex ->
                 return raisefWithInner EntityExecutionException ex.InnerException "%s" ex.Message
@@ -82,8 +82,8 @@ let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRe
                   extra = null
                 }
         let testQuery =
-            { expression = testExpr
-              arguments = emptyArguments
+            { Expression = testExpr
+              Arguments = emptyArguments
             }
         let! count = runIntQuery connection Map.empty testQuery Map.empty cancellationToken
         if count > 0 then
@@ -140,19 +140,19 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         // Id is needed so that we always have at least one column inserted.
         let insertColumns = argumentTypes |> Seq.map (fun value -> (value.Extra, value.Column))
         let columns = Seq.append (Seq.singleton (null, sqlFunId)) insertColumns |> Array.ofSeq
-        let values = argumentTypes |> Seq.map (fun value -> arguments.types.[value.Placeholder].placeholderId |> SQL.VEPlaceholder |> SQL.IVValue)
+        let values = argumentTypes |> Seq.map (fun value -> arguments.Types.[value.Placeholder].PlaceholderId |> SQL.VEPlaceholder |> SQL.IVValue)
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
         let expr =
-            { name = compileResolvedEntityRef entity.root
-              columns = columns
-              values = SQL.IValues [| valuesWithSys |]
-              returning = [| SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunId }) |]
-              extra = ({ ref = entityRef } : RestrictedTableInfo)
+            { Name = compileResolvedEntityRef entity.root
+              Columns = columns
+              Values = SQL.IValues [| valuesWithSys |]
+              Returning = [| SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunId }) |]
+              Extra = ({ ref = entityRef } : RestrictedTableInfo)
             } : SQL.InsertExpr
         let query =
-            { expression = expr
-              arguments = arguments
+            { Expression = expr
+              Arguments = arguments
             }
         let query =
             match role with
@@ -188,7 +188,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             raisef EntityExecutionException "Entity %O is hidden" entityRef
         let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
-        let columns = argumentTypes |> Seq.map (fun value -> (value.Column, (value.Extra, SQL.VEPlaceholder arguments.types.[value.Placeholder].placeholderId))) |> Map.ofSeq
+        let columns = argumentTypes |> Seq.map (fun value -> (value.Column, (value.Extra, SQL.VEPlaceholder arguments.Types.[value.Placeholder].PlaceholderId))) |> Map.ofSeq
 
         let (idPlaceholder, arguments) = addArgument (PLocal funId) funIdArg arguments
 
@@ -200,14 +200,14 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | None -> whereId
 
         let expr =
-            { name = tableRef
-              columns = columns
-              where = Some whereExpr
-              extra = ({ ref = entityRef } : RestrictedTableInfo)
+            { Name = tableRef
+              Columns = columns
+              Where = Some whereExpr
+              Extra = ({ ref = entityRef } : RestrictedTableInfo)
             } : SQL.UpdateExpr
         let query =
-            { expression = expr
-              arguments = arguments
+            { Expression = expr
+              Arguments = arguments
             }
         let restricted =
             match role with
@@ -244,13 +244,13 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let tableRef = compileResolvedEntityRef entity.root
 
         let expr =
-            { name = tableRef
-              where = Some whereExpr
-              extra = ({ ref = entityRef } : RestrictedTableInfo)
+            { Name = tableRef
+              Where = Some whereExpr
+              Extra = ({ ref = entityRef } : RestrictedTableInfo)
             } : SQL.DeleteExpr
         let query =
-            { expression = expr
-              arguments = arguments
+            { Expression = expr
+              Arguments = arguments
             }
         let restricted =
             match role with

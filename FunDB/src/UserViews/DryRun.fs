@@ -191,10 +191,10 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                 { uv.Compiled with
                       query =
                           { uv.Compiled.query with
-                                expression = limitView uv.Compiled.query.expression
+                                Expression = limitView uv.Compiled.query.Expression
                           }
                 }
-            let arguments = uv.Compiled.query.arguments.types |> Map.map (fun name arg -> defaultCompiledArgument arg.fieldType)
+            let arguments = uv.Compiled.query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
 
             try
                 return! runViewExpr conn limited arguments cancellationToken <| fun info res ->
@@ -291,7 +291,7 @@ let renderPrefetchedUserViewsSchema (schema : PrefetchedViewsSchema) : SourceUse
     }
 
 let renderPrefetchedUserViews (uvs : PrefetchedUserViews) : SourceUserViews =
-    let renderOne = function
+    let renderOne : Result<_, UserViewsSchemaError> -> SourceUserViewsSchema = function
     | Ok schema -> renderPrefetchedUserViewsSchema schema
     | Error e -> e.Source
 

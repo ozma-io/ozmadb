@@ -235,6 +235,10 @@ let unionDatabaseMeta (a : DatabaseMeta) (b : DatabaseMeta) =
     { Schemas = Map.unionWith (fun key -> unionSchemaMeta) a.Schemas b.Schemas
     }
 
+let filterDatabaseMeta (f : SchemaName -> bool) (meta : DatabaseMeta) =
+    { Schemas = Map.filter (fun name schema -> f schema.Name) meta.Schemas
+    }
+
 [<NoEquality; NoComparison>]
 type TableOperation =
     | TOCreateColumn of ColumnMeta
