@@ -3,6 +3,7 @@
 
 set -x
 
+dotnet --info
 rm -rf bin publish
 # Issue with lock files
 # dotnet restore --locked-mode
