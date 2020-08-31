@@ -217,7 +217,7 @@ let private checkBrokenLayout (logger :ILogger) (preload : Preload) (conn : Data
                             logger.LogWarning(err, "System computed field {ref} as broken", { entity = { schema = schemaName; name = entityName }; name = compName })
                         else
                             logger.LogWarning(err, "Marking computed field {ref} as broken", { entity = { schema = schemaName; name = entityName }; name = compName })
-        
+
             if critical then
                 failwith "Broken system layout"
             do! markBrokenLayout conn.System brokenLayout cancellationToken

@@ -7,12 +7,12 @@ open Microsoft.FSharp.Quotations
 open Microsoft.FSharp.Linq.RuntimeHelpers
 
 // http://www.fssnip.net/bx/title/Expanding-quotations
-    
+
 /// The parameter 'vars' is an immutable map that assigns expressions to variables
 /// (as we recursively process the tree, we replace all known variables)
-let rec private expand' (vars : Map<Var, Expr>) (expr : Expr) : Expr = 
+let rec private expand' (vars : Map<Var, Expr>) (expr : Expr) : Expr =
   // First recursively process & replace variables
-  let expanded = 
+  let expanded =
     match expr with
     // If the variable has an assignment, then replace it with the expression
     | ExprShape.ShapeVar v when Map.containsKey v vars -> vars.[v]
@@ -22,7 +22,7 @@ let rec private expand' (vars : Map<Var, Expr>) (expr : Expr) : Expr =
         let this = match body with Some b -> Expr.Application(meth, b) | _ -> meth
         let res = Expr.Applications(this, [ for a in args -> [a]])
         expand' vars res
-    | ExprShape.ShapeLambda(v, expr) -> 
+    | ExprShape.ShapeLambda(v, expr) ->
         Expr.Lambda(v, expand' vars expr)
     | ExprShape.ShapeCombination(o, exprs) ->
         ExprShape.RebuildShapeCombination(o, List.map (expand' vars) exprs)

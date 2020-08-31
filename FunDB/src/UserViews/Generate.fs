@@ -38,7 +38,7 @@ type UserViewGeneratorTemplate (isolate : Isolate) =
         ))
 
         template
- 
+
     member this.Isolate = isolate
 
     interface IJavaScriptTemplate with

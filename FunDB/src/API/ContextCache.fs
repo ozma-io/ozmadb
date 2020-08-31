@@ -442,7 +442,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                         else
                             match! coldRebuildFromDatabase transaction cancellationToken with
                             | None -> ()
-                            | Some newState -> 
+                            | Some newState ->
                                 cachedState <- Some newState
                     }
                 return! getCachedState conn cancellationToken
@@ -501,7 +501,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                         match! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken with
                         | SQL.VBool true -> ()
                         | _ -> raisef ContextException "Another migration is in progress"
-                        
+
                         logger.LogInformation("Starting migration")
                         // Careful here not to evaluate user views before we do migration.
 

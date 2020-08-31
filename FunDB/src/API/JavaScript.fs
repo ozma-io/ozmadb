@@ -161,7 +161,7 @@ global.FunDBError = FunDBError;
 
     interface IJavaScriptTemplate with
         member this.ObjectTemplate = template
-        member this.FinishInitialization context = 
+        member this.FinishInitialization context =
             let p = preludeScript.Bind(context)
             ignore <| p.Run()
             errorConstructor <- Some <| context.Global.Get("FunDBError").GetFunction()
