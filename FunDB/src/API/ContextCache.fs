@@ -517,7 +517,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
                         let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
                         if not <| preloadPermissionsAreUnchanged sourcePermissions preload then
-                            raisef ResolveLayoutException "Cannot modify system permissions"
+                            raisef ContextException "Cannot modify system permissions"
                         let (_, permissions) =
                             try
                                 resolvePermissions layout false sourcePermissions
@@ -526,7 +526,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
                         let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
                         if not <| preloadAttributesAreUnchanged sourceAttrs preload then
-                            raisef ResolveLayoutException "Cannot modify system default attributes"
+                            raisef ContextException "Cannot modify system default attributes"
                         let (_, defaultAttrs) =
                             try
                                 resolveAttributes layout false sourceAttrs
@@ -536,17 +536,17 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
 
                         let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                         if not <| preloadTriggersAreUnchanged sourceTriggers preload then
-                            raisef ResolveLayoutException "Cannot modify system triggers"
+                            raisef ContextException "Cannot modify system triggers"
                         let (_, triggers) =
                             try
                                 resolveTriggers layout false sourceTriggers
                             with
-                            | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
+                            | :? ResolveTriggersException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
                         let (_, triggers) =
                             try
                                 testEvalTriggers false sourceTriggers triggers
                             with
-                            | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
+                            | :? TriggerRunException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
                         let mergedTriggers = mergeTriggers layout triggers
 
                         let! sourceUserViews = buildSchemaUserViews transaction.System cancellationToken
