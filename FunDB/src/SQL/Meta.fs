@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.SQL.Meta
 
 open Npgsql
 open System.Linq
+open Newtonsoft.Json
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -313,7 +314,13 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =
     let makeConstraintMeta (tableName : TableName) (columnIds : TableColumnIds) (constr : Constraint) : (ConstraintName * ConstraintMeta) option =
-        let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
+        let makeLocalColumn (num : ColumnNum) =
+            try
+                Map.find num columnIds
+            with
+            | e ->
+                eprintfn "Table name: %O, columnIds: %s, column num: %i, constraint name: %s, constraint id: %i" tableName (JsonConvert.SerializeObject columnIds) num constr.ConName constr.Oid
+                reraise ()
         let ret =
             match constr.ConType with
             | 'c' ->
@@ -324,7 +331,13 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                 let refTable = Map.find refName (Map.find refSchema schemaIds).Tables
                 let makeRefColumn (fromNum : ColumnNum) (toNum : ColumnNum) =
                     let fromName = makeLocalColumn fromNum
-                    let toName = Map.find toNum refTable.Columns
+                    let toName =
+                        try
+                            Map.find toNum refTable.Columns
+                        with
+                        | e ->
+                            eprintfn "Table name: %O, columnIds: %s, to column num: %i, constraint name: %s, constraint id: %i" tableName (JsonConvert.SerializeObject columnIds) toNum constr.ConName constr.Oid
+                            reraise ()
                     (fromName, toName)
 
                 let tableRef = { schema = Some refSchema; name = refName }
