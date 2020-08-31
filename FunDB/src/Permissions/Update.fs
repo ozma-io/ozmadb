@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Permissions.Update
 open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
+open Microsoft.FSharp.Quotations
 open Microsoft.EntityFrameworkCore;
 open FSharp.Control.Tasks.Affine
 
@@ -114,29 +115,51 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) (cancella
         return changedEntries > 0
     }
 
-let markBrokenPermissions (db : SystemContext) (perms : ErroredPermissions) (cancellationToken : CancellationToken) : Task =
+type private RoleErrorRef = ERRole of RoleRef
+                          | EREntity of AllowedEntityRef
+
+let private findBrokenAllowedSchema (roleRef : RoleRef) (allowedSchemaName : SchemaName) (schema : ErroredAllowedSchema) : RoleErrorRef seq =
+    seq {
+        for KeyValue(allowedEntityName, entity) in schema do
+            yield EREntity { Role = roleRef; Entity = { schema = allowedSchemaName; name = allowedEntityName } }
+    }
+
+let private findBrokenRole (roleRef : RoleRef) (role : ErroredRole) : RoleErrorRef seq =
+    seq {
+        match role with
+        | ERFatal e -> yield ERRole roleRef
+        | ERDatabase db ->
+            for KeyValue(allowedSchemaName, schema) in db do
+                yield! findBrokenAllowedSchema roleRef allowedSchemaName schema
+    }
+
+let private findBrokenRolesSchema (schemaName : SchemaName) (roles : ErroredRoles) : RoleErrorRef seq =
+    seq {
+        for KeyValue(roleName, role) in roles do
+            yield! findBrokenRole { schema = schemaName; name = roleName } role
+    }
+
+let private findBrokenPermissions (roles : ErroredPermissions) : RoleErrorRef seq =
+    seq {
+        for KeyValue(schemaName, schema) in roles do
+            yield! findBrokenRolesSchema schemaName schema
+    }
+
+let private checkRoleName (ref : RoleRef) : Expr<Role -> bool> =
+    let checkSchema = checkSchemaName ref.schema
+    let roleName = string ref.name
+    <@ fun role -> (%checkSchema) role.Schema && role.Name = roleName @>
+
+let private checkAllowedEntityName (ref : AllowedEntityRef) : Expr<RoleEntity -> bool> =
+    let checkEntity = checkEntityName ref.Entity
+    let checkRole = checkRoleName ref.Role
+    <@ fun allowed -> (%checkRole) allowed.Role && (%checkEntity) allowed.Entity @>
+
+let markBrokenPermissions (db : SystemContext) (roles : ErroredPermissions) (cancellationToken : CancellationToken) : Task =
     unitTask {
-        let currentSchemas = db.GetRolesObjects ()
-
-        let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
-
-        for schema in schemas do
-            match Map.tryFind (FunQLName schema.Name) perms with
-            | None -> ()
-            | Some schemaErrors ->
-                for role in schema.Roles do
-                    match Map.tryFind (FunQLName role.Name) schemaErrors with
-                    | None -> ()
-                    | Some (EFatal err) ->
-                        role.AllowBroken <- true
-                    | Some (EDatabase roleErrors) ->
-                        for entity in role.Entities do
-                            match Map.tryFind (FunQLName entity.Entity.Schema.Name) roleErrors with
-                            | None -> ()
-                            | Some entityErrors ->
-                                if Map.containsKey (FunQLName entity.Entity.Name) entityErrors then
-                                    entity.AllowBroken <- true
-
-        let! _ = db.SaveChangesAsync(cancellationToken)
-        return ()
+        let broken = findBrokenPermissions roles
+        let roleChecks = broken |> Seq.mapMaybe (function ERRole ref -> Some ref | _ -> None) |> Seq.map checkRoleName
+        do! genericMarkBroken db.Roles roleChecks <@ fun x -> Role(AllowBroken = true) @> cancellationToken
+        let allowedEntityChecks = broken |> Seq.mapMaybe (function EREntity ref -> Some ref | _ -> None) |> Seq.map checkAllowedEntityName
+        do! genericMarkBroken db.RoleEntities allowedEntityChecks <@ fun x -> RoleEntity(AllowBroken = true) @> cancellationToken
     }

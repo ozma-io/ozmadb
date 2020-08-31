@@ -16,47 +16,47 @@ let private namesToRefs =
     mapFieldExpr mapper
 
 let private renderRestriction (e : Restriction) =
-    match e.expression with
+    match e.Expression with
     | OFEFalse -> None
-    | _ -> (e.expression.ToFieldExpr() |> namesToRefs).ToFunQLString() |> Some
+    | _ -> (e.Expression.ToFieldExpr() |> namesToRefs).ToFunQLString() |> Some
 
 let private renderAllowedField (allowedField : AllowedField) : SourceAllowedField =
-    { Change = allowedField.change
-      Select = renderRestriction allowedField.select
+    { Change = allowedField.Change
+      Select = renderRestriction allowedField.Select
     }
 
 let private renderAllowedEntity : Result<AllowedEntity, AllowedEntityError> -> SourceAllowedEntity = function
     | Ok allowedEntity ->
-        { AllowBroken = allowedEntity.allowBroken
-          Fields = allowedEntity.fields |> Map.map (fun name -> renderAllowedField)
-          Check = renderRestriction allowedEntity.check
-          Insert = allowedEntity.insert
-          Select = renderRestriction allowedEntity.select
-          Update = renderRestriction allowedEntity.update
-          Delete = renderRestriction allowedEntity.delete
+        { AllowBroken = allowedEntity.AllowBroken
+          Fields = allowedEntity.Fields |> Map.map (fun name -> renderAllowedField)
+          Check = renderRestriction allowedEntity.Check
+          Insert = allowedEntity.Insert
+          Select = renderRestriction allowedEntity.Select
+          Update = renderRestriction allowedEntity.Update
+          Delete = renderRestriction allowedEntity.Delete
         } : SourceAllowedEntity
-    | Error e -> e.source
+    | Error e -> e.Source
 
 let private renderAllowedSchema (allowedSchema : AllowedSchema) : SourceAllowedSchema =
-    { Entities = Map.map (fun name -> renderAllowedEntity) allowedSchema.entities
+    { Entities = Map.map (fun name -> renderAllowedEntity) allowedSchema.Entities
     }
 
 let private renderAllowedDatabase (allowedDb : AllowedDatabase) : SourceAllowedDatabase =
-    { Schemas = Map.map (fun name -> renderAllowedSchema) allowedDb.schemas
+    { Schemas = Map.map (fun name -> renderAllowedSchema) allowedDb.Schemas
     }
 
 let private renderRole : Result<ResolvedRole, RoleError> -> SourceRole = function
     | Ok role ->
-        { Parents = role.parents
-          Permissions = renderAllowedDatabase role.permissions
-          AllowBroken = role.allowBroken
+        { Parents = role.Parents
+          Permissions = renderAllowedDatabase role.Permissions
+          AllowBroken = role.AllowBroken
         }
-    | Error e -> e.source
+    | Error e -> e.Source
 
 let renderPermissionsSchema (schema : PermissionsSchema) : SourcePermissionsSchema =
-    { Roles = Map.map (fun name -> renderRole) schema.roles
+    { Roles = Map.map (fun name -> renderRole) schema.Roles
     }
 
 let renderPermissions (perms : Permissions) : SourcePermissions =
-    { Schemas = Map.map (fun name -> renderPermissionsSchema) perms.schemas
+    { Schemas = Map.map (fun name -> renderPermissionsSchema) perms.Schemas
     }

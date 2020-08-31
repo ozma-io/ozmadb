@@ -10,7 +10,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.SingleSelectExpr =
     let entity = layout.FindEntity ref |> Option.get
-    let (from, where) = compileSingleFromClause layout arguments (FEntity (None, ref)) (Some <| restr.expression.ToFieldExpr())
+    let (from, where) = compileSingleFromClause layout arguments (FEntity (None, ref)) (Some <| restr.Expression.ToFieldExpr())
     { columns = [| compileNoSchemaResolvedEntityRef ref |> Some |> SQL.SCAll |]
       from = Some from
       where = where
@@ -21,7 +21,7 @@ let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : 
 
 let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.ValueExpr =
     let entity = layout.FindEntity ref |> Option.get
-    let (from, where) = compileSingleFromClause layout arguments (FEntity (None, ref)) (Some <| restr.expression.ToFieldExpr())
+    let (from, where) = compileSingleFromClause layout arguments (FEntity (None, ref)) (Some <| restr.Expression.ToFieldExpr())
     match from with
     | SQL.FTable _ -> where |> Option.get
     | _ ->

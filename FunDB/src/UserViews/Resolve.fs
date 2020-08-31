@@ -135,7 +135,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
           AllowBroken = uv.AllowBroken
         }
 
-    let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : ErroredUserViewsSchema * UserViewsSchema =
+    let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : Map<UserViewName, exn> * UserViewsSchema =
         let mutable errors = Map.empty
 
         let mapUserView name maybeUv =
@@ -186,13 +186,13 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
                 try
                     let (schemaErrors, newSchema) = resolveUserViewsSchema name schema
                     if not <| Map.isEmpty schemaErrors then
-                        errors <- Map.add name (Ok schemaErrors) errors
+                        errors <- Map.add name (UEUserViews schemaErrors) errors
                     Ok newSchema
                 with
                 | :? UserViewResolveException as e ->
                     raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
             | Error err ->
-                errors <- Map.add name (Error err.Error) errors
+                errors <- Map.add name (UEGenerator err.Error) errors
                 Error err
 
         let schemas = halfResolved |> Map.map mapSchema

@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Triggers.Update
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
+open Microsoft.FSharp.Quotations
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
@@ -78,26 +79,36 @@ let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellatio
         return changedEntries > 0
     }
 
-let markBrokenTriggers (db : SystemContext) (triggers : ErroredTriggers) (cancellationToken : CancellationToken) : Task =
-    unitTask {
-        let currentSchemas = db.GetTriggersObjects ()
-
-        let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
-
-        for schema in schemas do
-            match Map.tryFind (FunQLName schema.Name) triggers with
-            | None -> ()
-            | Some dbErrors ->
-                for trigger in schema.Triggers do
-                    match Map.tryFind (FunQLName trigger.TriggerEntity.Schema.Name) dbErrors with
-                    | None -> ()
-                    | Some schemaErrors ->
-                        match Map.tryFind (FunQLName trigger.TriggerEntity.Name) schemaErrors with
-                        | None -> ()
-                        | Some entityErrors ->
-                            if Map.containsKey (FunQLName trigger.Name) entityErrors then
-                                trigger.AllowBroken <- true
-
-        let! _ = db.SaveChangesAsync(cancellationToken)
-        return ()
+let private findBrokenTriggersEntity (schemaName : SchemaName) (trigEntityRef : ResolvedEntityRef) (entity : ErroredTriggersEntity) : TriggerRef seq =
+    seq {
+        for KeyValue(triggerName, trigger) in entity do
+            yield { Schema = schemaName; Entity = trigEntityRef; Name = triggerName }
     }
+
+let private findBrokenTriggersSchema (schemaName : SchemaName) (trigSchemaName : SchemaName) (schema : ErroredTriggersSchema) : TriggerRef seq =
+    seq {
+        for KeyValue(trigEntityName, entity) in schema do
+            yield! findBrokenTriggersEntity schemaName { schema = trigSchemaName; name = trigEntityName } entity
+    }
+
+let private findBrokenTriggersDatabase (schemaName : SchemaName) (db : ErroredTriggersDatabase) : TriggerRef seq =
+    seq {
+        for KeyValue(trigSchemaName, schema) in db do
+            yield! findBrokenTriggersSchema schemaName trigSchemaName schema
+    }
+
+let private findBrokenTriggers (triggers : ErroredTriggers) : TriggerRef seq =
+    seq {
+        for KeyValue(schemaName, schema) in triggers do
+            yield! findBrokenTriggersDatabase schemaName schema
+    }
+
+let private checkTriggerName (ref : TriggerRef) : Expr<Trigger -> bool> =
+    let checkEntity = checkEntityName ref.Entity
+    let checkSchema = checkSchemaName ref.Schema
+    let triggerName = string ref.Name
+    <@ fun triggers -> (%checkSchema) triggers.Schema && (%checkEntity) triggers.TriggerEntity && triggers.Name = triggerName @>
+
+let markBrokenTriggers (db : SystemContext) (triggers : ErroredTriggers) (cancellationToken : CancellationToken) : Task =
+    let checks = findBrokenTriggers triggers |> Seq.map checkTriggerName
+    genericMarkBroken db.Triggers checks <@ fun x -> Trigger(AllowBroken = true) @> cancellationToken

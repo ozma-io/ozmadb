@@ -10,14 +10,21 @@ type UserName = string
 
 type ResolvedRoleRef = Source.ResolvedRoleRef
 
+type RoleRef = ResolvedEntityRef
+
+type AllowedEntityRef =
+  { Role : RoleRef
+    Entity : ResolvedEntityRef
+  }
+
 [<NoEquality; NoComparison>]
 type Restriction =
-    { expression : ResolvedOptimizedFieldExpr
-      globalArguments : Set<ArgumentName>
+    { Expression : ResolvedOptimizedFieldExpr
+      GlobalArguments : Set<ArgumentName>
     } with
     override this.ToString () = this.ToFunQLString ()
 
-    member this.ToFunQLString () = this.expression.ToFunQLString ()
+    member this.ToFunQLString () = this.Expression.ToFunQLString ()
 
     interface IFunQLString with
         member this.ToFunQLString () = this.ToFunQLString()
@@ -25,104 +32,104 @@ type Restriction =
 [<NoEquality; NoComparison>]
 type AllowedField =
     { // Are you allowed to change (UPDATE/INSERT) this field?
-      change : bool
+      Change : bool
       // Are you allowed to select this entry? If yes, what _additional_ restrictions are in place if this field is used, on top of entity-wide?
-      select : Restriction
+      Select : Restriction
     }
 
 [<NoEquality; NoComparison>]
 type AllowedOperationError =
-    { source : string
-      error : exn
+    { Source : string
+      Error : exn
     }
 
 [<NoEquality; NoComparison>]
 type AllowedEntity =
-    { allowBroken : bool
+    { AllowBroken : bool
       // Post-UPDATE/INSERT check expression.
-      check : Restriction
+      Check : Restriction
       // Are you allowed to INSERT?
-      insert : bool
+      Insert : bool
       // Which entries are you allowed to SELECT?
-      select : Restriction
+      Select : Restriction
       // Which entries are you allowed to UPDATE (on top of SELECT)?
-      update : Restriction
+      Update : Restriction
       // Which entries are you allowed to DELETE (on top of SELECT)?
-      delete : Restriction
-      fields : Map<FieldName, AllowedField>
+      Delete : Restriction
+      Fields : Map<FieldName, AllowedField>
     }
 
 [<NoEquality; NoComparison>]
 type AllowedEntityError =
-    { source : SourceAllowedEntity
-      error : exn
+    { Source : SourceAllowedEntity
+      Error : exn
     }
 
 [<NoEquality; NoComparison>]
 type AllowedSchema =
-    { entities : Map<EntityName, Result<AllowedEntity, AllowedEntityError>>
+    { Entities : Map<EntityName, Result<AllowedEntity, AllowedEntityError>>
     }
 
 [<NoEquality; NoComparison>]
 type AllowedDatabase =
-    { schemas : Map<SchemaName, AllowedSchema>
+    { Schemas : Map<SchemaName, AllowedSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.schemas with
+            match Map.tryFind entity.schema this.Schemas with
                 | None -> None
-                | Some schema -> Map.tryFind entity.name schema.entities
+                | Some schema -> Map.tryFind entity.name schema.Entities
 
 [<NoEquality; NoComparison>]
 type FlatAllowedDerivedEntity =
-    { insert : bool
-      check : Restriction
-      select : Restriction
-      update : Restriction
-      delete : Restriction
+    { Insert : bool
+      Check : Restriction
+      Select : Restriction
+      Update : Restriction
+      Delete : Restriction
     }
 
 [<NoEquality; NoComparison>]
 type FlatAllowedEntity =
-    { children : Map<ResolvedEntityRef, FlatAllowedDerivedEntity>
-      fields : Map<ResolvedFieldRef, AllowedField>
+    { Children : Map<ResolvedEntityRef, FlatAllowedDerivedEntity>
+      Fields : Map<ResolvedFieldRef, AllowedField>
     }
 
 type FlatAllowedDatabase = Map<ResolvedEntityRef, FlatAllowedEntity>
 
 [<NoEquality; NoComparison>]
 type ResolvedRole =
-    { parents : Set<ResolvedRoleRef>
-      permissions : AllowedDatabase
-      flattened : FlatAllowedDatabase
-      allowBroken : bool
+    { Parents : Set<ResolvedRoleRef>
+      Permissions : AllowedDatabase
+      Flattened : FlatAllowedDatabase
+      AllowBroken : bool
     }
 
 [<NoEquality; NoComparison>]
 type RoleError =
-    { source : SourceRole
-      error : exn
+    { Source : SourceRole
+      Error : exn
     }
 
 [<NoEquality; NoComparison>]
 type PermissionsSchema =
-    { roles : Map<RoleName, Result<ResolvedRole, RoleError>>
+    { Roles : Map<RoleName, Result<ResolvedRole, RoleError>>
     }
 
 [<NoEquality; NoComparison>]
 type Permissions =
-    { schemas : Map<SchemaName, PermissionsSchema>
+    { Schemas : Map<SchemaName, PermissionsSchema>
     } with
         member this.Find (ref : ResolvedRoleRef) =
-            match Map.tryFind ref.schema this.schemas with
+            match Map.tryFind ref.schema this.Schemas with
             | None -> None
-            | Some schema -> Map.tryFind ref.name schema.roles
+            | Some schema -> Map.tryFind ref.name schema.Roles
 
 type ErroredAllowedSchema = Map<EntityName, exn>
 type ErroredAllowedDatabase = Map<SchemaName, ErroredAllowedSchema>
 
 type ErroredRole =
-    | EFatal of exn
-    | EDatabase of ErroredAllowedDatabase
+    | ERFatal of exn
+    | ERDatabase of ErroredAllowedDatabase
 
 type ErroredRoles = Map<RoleName, ErroredRole>
 type ErroredPermissions = Map<SchemaName, ErroredRoles>

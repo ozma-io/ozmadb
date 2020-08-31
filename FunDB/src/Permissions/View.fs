@@ -27,25 +27,25 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
 
     let filterUsedFields (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) (usedFields : FunQL.UsedFields) : FieldAccess =
         let flattened =
-            match Map.tryFind entity.root role.flattened with
+            match Map.tryFind entity.root role.Flattened with
             | Some f -> f
             | None -> raisef PermissionsViewException "Access denied to entity %O" ref
-        let accessor (derived : FlatAllowedDerivedEntity) = derived.select
+        let accessor (derived : FlatAllowedDerivedEntity) = derived.Select
         let selectRestr = applyRestrictionExpression accessor layout flattened ref
 
         let addRestriction restriction name =
             let field = Map.find name entity.columnFields
             let parentEntity = Option.defaultValue ref field.inheritedFrom
-            match Map.tryFind ({ entity = parentEntity; name = name } : FunQL.ResolvedFieldRef) flattened.fields with
-            | Some r -> andRestriction restriction r.select
+            match Map.tryFind ({ entity = parentEntity; name = name } : FunQL.ResolvedFieldRef) flattened.Fields with
+            | Some r -> andRestriction restriction r.Select
             | _ -> raisef PermissionsViewException "Access denied to select field %O" name
         let fieldsRestriction = usedFields |> Set.toSeq |> Seq.fold addRestriction selectRestr
 
-        match fieldsRestriction.expression with
+        match fieldsRestriction.Expression with
         | OFEFalse -> raisef PermissionsViewException "Access denied to select"
         | OFETrue -> None
         | _ ->
-            for arg in fieldsRestriction.globalArguments do
+            for arg in fieldsRestriction.GlobalArguments do
                 let (argPlaceholder, newArguments) = addArgument (FunQL.PGlobal arg) FunQL.globalArgumentTypes.[arg] arguments
                 arguments <- newArguments
             compileRestriction layout ref arguments.Types fieldsRestriction |> Some

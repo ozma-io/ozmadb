@@ -31,12 +31,10 @@ type UserViewsSchema =
       GeneratorScript : SourceUserViewsGeneratorScript option
     }
 
-type UserViewsSchemaErrorType = SETGenerator of exn
-
 [<NoEquality; NoComparison>]
 type UserViewsSchemaError =
   { Source : SourceUserViewsSchema
-    Error : UserViewsSchemaErrorType
+    Error : exn
   }
 
 [<NoEquality; NoComparison>]
@@ -48,14 +46,17 @@ type UserViews =
             | Some (Ok schema) -> Map.tryFind ref.name schema.UserViews
             | _ -> None
 
-type ErroredUserViewsSchema = Map<UserViewName, exn>
-type ErroredUserViews = Map<SchemaName, Result<ErroredUserViewsSchema, UserViewsSchemaErrorType>>
+type ErroredUserViewsSchema =
+    | UEGenerator of exn
+    | UEUserViews of Map<UserViewName, exn>
+
+type ErroredUserViews = Map<SchemaName, ErroredUserViewsSchema>
 
 let unionErroredUserViews (a : ErroredUserViews) (b : ErroredUserViews) : ErroredUserViews =
     let mergeOne a b =
         match (a, b) with
-        | (Ok schema1, Ok schema2) -> Ok (Map.unionUnique schema1 schema2)
-        | (Error e, Ok _) -> Error e
-        | (Ok _, Error e) -> Error e
+        | (UEUserViews schema1, UEUserViews schema2) -> UEUserViews (Map.unionUnique schema1 schema2)
+        | (UEGenerator e, UEUserViews _) -> UEGenerator e
+        | (UEUserViews _, UEGenerator e) -> UEGenerator e
         | _ -> failwith "Cannot merge different error types"
     Map.unionWith (fun name -> mergeOne) a b

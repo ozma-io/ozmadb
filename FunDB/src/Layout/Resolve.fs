@@ -566,7 +566,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             try
                 let ret = resolveComputedField Set.empty entity { entity = entityRef; name = name } field
                 match ret with
-                | Error e when Option.isNone e.InheritedFrom (*&& not e.Source.AllowBroken*) ->
+                | Error e when Option.isNone e.InheritedFrom && not e.Source.AllowBroken ->
                     computedErrors <- Map.add name e.Error computedErrors
                 | _ -> ()
                 ret

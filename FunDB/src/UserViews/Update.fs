@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.UserViews.Update
 open System.Linq
 open System.Threading
 open System.Threading.Tasks
+open Microsoft.FSharp.Quotations
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
@@ -11,6 +12,7 @@ open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
+open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
 type private UserViewsUpdater (db : SystemContext) =
@@ -66,24 +68,34 @@ let updateUserViews (db : SystemContext) (uvs : SourceUserViews) (cancellationTo
         return changedEntries > 0
     }
 
+type private UserViewErrorRef = ERGenerator of SchemaName
+                              | ERUserView of ResolvedUserViewRef
+
+let private findBrokenUserViewsSchema (schemaName : SchemaName) (schema : ErroredUserViewsSchema) : UserViewErrorRef seq =
+    seq {
+        match schema with
+        | UEGenerator e -> yield ERGenerator schemaName
+        | UEUserViews schema ->
+            for KeyValue(uvName, uv) in schema do
+                yield ERUserView { schema = schemaName; name = uvName }
+    }
+
+let private findBrokenUserViews (uvs : ErroredUserViews) : UserViewErrorRef seq =
+    seq {
+        for KeyValue(schemaName, schema) in uvs do
+            yield! findBrokenUserViewsSchema schemaName schema
+    }
+
+let private checkUserViewName (ref : ResolvedUserViewRef) : Expr<UserView -> bool> =
+    let checkSchema = checkSchemaName ref.schema
+    let uvName = string ref.name
+    <@ fun uv -> (%checkSchema) uv.Schema && uv.Name = uvName @>
+
 let markBrokenUserViews (db : SystemContext) (uvs : ErroredUserViews) (cancellationToken : CancellationToken) : Task =
     unitTask {
-        let currentSchemas = db.GetUserViewsObjects ()
-
-        let wantedSchemas = uvs |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
-        let! schemasMap =
-            currentSchemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync(cancellationToken)
-
-        for schema in schemasMap do
-            let errors = Map.find (FunQLName schema.Name) uvs
-            match errors with
-            | Ok schemaErrors ->
-                for uv in schema.UserViews do
-                    if Map.containsKey (FunQLName uv.Name) schemaErrors then
-                        uv.AllowBroken <- true
-            | Error (SETGenerator _) ->
-                schema.UserViewGeneratorScriptAllowBroken <- true
-
-        let! _ = db.SaveChangesAsync(cancellationToken)
-        return ()
+        let broken = findBrokenUserViews uvs
+        let schemaChecks = broken |> Seq.mapMaybe (function ERGenerator ref -> Some ref | _ -> None) |> Seq.map checkSchemaName
+        do! genericMarkBroken db.Schemas schemaChecks <@ fun x -> Schema(UserViewGeneratorScriptAllowBroken = true) @> cancellationToken
+        let uvChecks = broken |> Seq.mapMaybe (function ERUserView ref -> Some ref | _ -> None) |> Seq.map checkUserViewName
+        do! genericMarkBroken db.UserViews uvChecks <@ fun x -> UserView(AllowBroken = true) @> cancellationToken
     }

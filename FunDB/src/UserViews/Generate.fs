@@ -45,7 +45,7 @@ type UserViewGeneratorTemplate (isolate : Isolate) =
         member this.ObjectTemplate = template
         member this.FinishInitialization context = ()
 
-type private UserViewGeneratorScript (template : UserViewGeneratorTemplate, name : string, scriptSource : string) =
+type private UserViewsGeneratorScript (template : UserViewGeneratorTemplate, name : string, scriptSource : string) =
     let func =
         try
             CachedFunction.FromScript template name scriptSource
@@ -67,14 +67,14 @@ type private UserViewGeneratorScript (template : UserViewGeneratorTemplate, name
     member this.Context = func.Context
 
 type private UserViewGenerator =
-    { Generator : UserViewGeneratorScript
+    { Generator : UserViewsGeneratorScript
       Source : SourceUserViewsGeneratorScript
       SourceSchema : SourceUserViewsSchema
     }
 
 type private PreparedUserViewSchema =
     | PUVGenerator of UserViewGenerator
-    | PUVError of UserViewsSchemaError
+    | PUVError of SourceUserViewsGeneratorScript * UserViewsSchemaError
     | PUVStatic of SourceUserViewsSchema
 
 type private UserViewsGenerators = Map<SchemaName, PreparedUserViewSchema>
@@ -89,7 +89,7 @@ type private UserViewsGeneratorState (layout : Layout, cancellationToken : Cance
                }
         with
         | :? NetJsException as e when forceAllowBroken || gen.Source.AllowBroken ->
-            Error { Source = gen.SourceSchema; Error = SETGenerator (e :> exn) }
+            Error { Source = gen.SourceSchema; Error = e :> exn }
 
     let generateUserViews (gens : UserViewsGenerators) : ErroredUserViews * SourceUserViews =
         let mutable errors : ErroredUserViews = Map.empty
@@ -98,11 +98,12 @@ type private UserViewsGeneratorState (layout : Layout, cancellationToken : Cance
                 match generateUserViewsSchema gen with
                 | Ok ret -> ret
                 | Error err ->
-                    errors <- Map.add name (Error err.Error) errors
+                    errors <- Map.add name (UEGenerator err.Error) errors
                     { UserViews = Map.empty; GeneratorScript = err.Source.GeneratorScript }
             | PUVStatic ret -> ret
-            | PUVError err ->
-                errors <- Map.add name (Error err.Error) errors
+            | PUVError (script, err) ->
+                if not script.AllowBroken then
+                    errors <- Map.add name (UEGenerator err.Error) errors
                 { UserViews = Map.empty; GeneratorScript = err.Source.GeneratorScript }
         let schemas = Map.map generateOne gens
         let ret = { Schemas = schemas } : SourceUserViews
@@ -116,7 +117,7 @@ type UserViewsGenerator (template : UserViewGeneratorTemplate, userViews : Sourc
         | None -> PUVStatic schema
         | Some script ->
             try
-                let gen = UserViewGeneratorScript (template, sprintf "%O/user_views_generator.mjs" name, script.Script)
+                let gen = UserViewsGeneratorScript (template, sprintf "%O/user_views_generator.mjs" name, script.Script)
                 let ret =
                     { Generator = gen
                       Source = script
@@ -125,7 +126,7 @@ type UserViewsGenerator (template : UserViewGeneratorTemplate, userViews : Sourc
                 PUVGenerator ret
             with
             | :? NetJsException as e when createForceAllowBroken || script.AllowBroken ->
-                PUVError { Source = schema; Error = SETGenerator (e :> exn) }
+                PUVError (script, { Source = schema; Error = e :> exn })
     let gens : UserViewsGenerators = Map.map prepareGenerator userViews.Schemas
 
     member this.GenerateUserViews (layout : Layout) (cancellationToken : CancellationToken) (forceAllowBroken : bool) : ErroredUserViews * SourceUserViews =

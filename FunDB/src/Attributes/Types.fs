@@ -4,6 +4,12 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 module SQL = FunWithFlags.FunDB.SQL.AST
 
+type DefaultAttributeRef =
+    { Schema : SchemaName
+      Field : ResolvedFieldRef
+    } with
+        override this.ToString () = sprintf "%s.%s" (this.Schema.ToFunQLString()) (this.Field.ToFunQLString())
+
 [<NoEquality; NoComparison>]
 type AttributesField =
     { AllowBroken : bool

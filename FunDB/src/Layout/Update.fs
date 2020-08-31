@@ -2,7 +2,6 @@ module FunWithFlags.FunDB.Layout.Update
 
 open System
 open System.Linq
-open Microsoft.FSharp.Linq.RuntimeHelpers
 open Microsoft.FSharp.Quotations
 open Z.EntityFramework.Plus
 open System.Collections.Generic
@@ -219,21 +218,34 @@ let private findBrokenComputedFields (layout : ErroredLayout) : ResolvedFieldRef
             yield! findBrokenComputedFieldsSchema schemaName schema
     }
 
-let checkEntityName (ref : ResolvedEntityRef) : Expr<Entity -> bool> =
-    let schemaName = string ref.schema
-    let entityName = string ref.name
-    <@ fun entity -> entity.Name = entityName && entity.Schema.Name = schemaName @>
+let checkSchemaName (name : SchemaName) : Expr<Schema -> bool> =
+    let schemaName = string name
+    <@ fun schema -> schema.Name = schemaName @>
 
-let private checkComputedFieldName (ref : ResolvedFieldRef) : Expr<ComputedField -> bool> =
+let checkEntityName (ref : ResolvedEntityRef) : Expr<Entity -> bool> =
+    let checkSchema = checkSchemaName ref.schema
+    let entityName = string ref.name
+    <@ fun entity -> entity.Name = entityName && (%checkSchema) entity.Schema @>
+
+let checkColumnFieldName (ref : ResolvedFieldRef) : Expr<ColumnField -> bool> =
     let checkEntity = checkEntityName ref.entity
     let compName = string ref.name
     <@ fun field -> field.Name = compName && (%checkEntity) field.Entity @>
 
-let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) (cancellationToken : CancellationToken) : Task =
+let checkComputedFieldName (ref : ResolvedFieldRef) : Expr<ComputedField -> bool> =
+    let checkEntity = checkEntityName ref.entity
+    let compName = string ref.name
+    <@ fun field -> field.Name = compName && (%checkEntity) field.Entity @>
+
+let genericMarkBroken (queryable : IQueryable<'a>) (checks : Expr<'a -> bool> seq) (setBroken : Expr<'a -> 'a>) (cancellationToken : CancellationToken) : Task =
     unitTask {
-        let computedFieldErrors = findBrokenComputedFields layout |> Array.ofSeq
-        if not <| Array.isEmpty computedFieldErrors then
-            let check = computedFieldErrors |> Seq.map checkComputedFieldName |> Seq.fold1 (fun a b -> <@ fun field -> (%a) field || (%b) field @>)
-            let! _ = db.ComputedFields.Where(LeafExpressionConverter.QuotationToLambdaExpression <@ Func<_, _>(fun x -> (%check) x) @>).DeleteAsync(cancellationToken)
+        let errors = Array.ofSeq checks
+        if not <| Array.isEmpty errors then
+            let check = errors |> Seq.fold1 (fun a b -> <@ fun field -> (%a) field || (%b) field @>)
+            let! _ = queryable.Where(Expr.toExpressionFunc check).UpdateAsync(Expr.toMemberInit setBroken, cancellationToken)
             ()
     }
+
+let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) (cancellationToken : CancellationToken) : Task =
+    let checks = findBrokenComputedFields layout |> Seq.map checkComputedFieldName
+    genericMarkBroken db.ComputedFields checks <@ fun x -> ComputedField(AllowBroken = true) @> cancellationToken

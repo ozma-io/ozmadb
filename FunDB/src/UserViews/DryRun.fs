@@ -208,7 +208,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                 return raisefWithInner UserViewDryRunException err "Test execution error"
         }
 
-    let resolveUserViewsSchema (schemaName : SchemaName) (sourceSchema : SourceUserViewsSchema) (schema : UserViewsSchema) : Task<ErroredUserViewsSchema * PrefetchedViewsSchema> = task {
+    let resolveUserViewsSchema (schemaName : SchemaName) (sourceSchema : SourceUserViewsSchema) (schema : UserViewsSchema) : Task<Map<UserViewName, exn> * PrefetchedViewsSchema> = task {
         let mutable errors = Map.empty
 
         let mapUserView (name, maybeUv : Result<ResolvedUserView, UserViewError>) =
@@ -250,7 +250,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                     try
                         let! (schemaErrors, newSchema) = resolveUserViewsSchema name (Map.find name source.Schemas) schema
                         if not <| Map.isEmpty schemaErrors then
-                            errors <- Map.add name (Ok schemaErrors) errors
+                            errors <- Map.add name (UEUserViews schemaErrors) errors
                         return Ok newSchema
                     with
                     | :? UserViewDryRunException as e ->

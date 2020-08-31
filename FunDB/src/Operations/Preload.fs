@@ -209,7 +209,6 @@ let buildUserDatabaseMeta (transaction : NpgsqlTransaction) (preload : Preload) 
 let private checkBrokenLayout (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenLayout : ErroredLayout) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
-
         for KeyValue(schemaName, schema) in brokenLayout do
             for KeyValue(entityName, entity) in schema do
                 let isSystem = Map.containsKey schemaName preload.Schemas
@@ -227,101 +226,97 @@ let private checkBrokenLayout (logger :ILogger) (preload : Preload) (conn : Data
 
 let checkBrokenAttributes (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenAttrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) =
     unitTask {
-        if not (Map.isEmpty brokenAttrs) then
-            let mutable critical = false
-            for KeyValue(schemaName, schema) in brokenAttrs do
-                let isSystem = Map.containsKey schemaName preload.Schemas
-                if isSystem then
-                    critical <- true
-                for KeyValue(attrsSchemaName, attrsSchema) in schema do
-                    for KeyValue(attrsEntityName, attrsEntity) in attrsSchema do
-                        for KeyValue(attrsFieldName, err) in attrsEntity do
-                            let schemaStr = schemaName.ToString()
-                            let defFieldName = ({ entity = { schema = attrsSchemaName; name = attrsEntityName }; name = attrsFieldName } : ResolvedFieldRef).ToString()
-                            if isSystem then
-                                logger.LogError(err, "System default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
-                            else
-                                logger.LogWarning(err, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
-            if critical then
-                failwith "Broken system default attributes"
-            do! markBrokenAttributes conn.System brokenAttrs cancellationToken
+        let mutable critical = false
+        for KeyValue(schemaName, schema) in brokenAttrs do
+            let isSystem = Map.containsKey schemaName preload.Schemas
+            if isSystem then
+                critical <- true
+            for KeyValue(attrsSchemaName, attrsSchema) in schema do
+                for KeyValue(attrsEntityName, attrsEntity) in attrsSchema do
+                    for KeyValue(attrsFieldName, err) in attrsEntity do
+                        let schemaStr = schemaName.ToString()
+                        let defFieldName = ({ entity = { schema = attrsSchemaName; name = attrsEntityName }; name = attrsFieldName } : ResolvedFieldRef).ToString()
+                        if isSystem then
+                            logger.LogError(err, "System default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
+                        else
+                            logger.LogWarning(err, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
+        if critical then
+            failwith "Broken system default attributes"
+        do! markBrokenAttributes conn.System brokenAttrs cancellationToken
     }
 
 let checkBrokenTriggers (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenTriggers : ErroredTriggers) (cancellationToken : CancellationToken) =
     unitTask {
-        if not (Map.isEmpty brokenTriggers) then
-            let mutable critical = false
-            for KeyValue(schemaName, schema) in brokenTriggers do
-                let isSystem = Map.containsKey schemaName preload.Schemas
-                if isSystem then
-                    critical <- true
-                for KeyValue(triggerSchemaName, triggersSchema) in schema do
-                    for KeyValue(triggerEntityName, triggersEntity) in triggersSchema do
-                        for KeyValue(triggerName, err) in triggersEntity do
-                            let schemaStr = schemaName.ToString()
-                            let triggerName = ({ entity = { schema = triggerSchemaName; name = triggerEntityName }; name = triggerName } : ResolvedFieldRef).ToString()
-                            if isSystem then
-                                logger.LogError(err, "System trigger {name} from {schema} is broken", triggerName, schemaStr)
-                            else
-                                logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerName, schemaStr)
-            if critical then
-                failwith "Broken system triggers"
-            do! markBrokenTriggers conn.System brokenTriggers cancellationToken
+        let mutable critical = false
+        for KeyValue(schemaName, schema) in brokenTriggers do
+            let isSystem = Map.containsKey schemaName preload.Schemas
+            if isSystem then
+                critical <- true
+            for KeyValue(triggerSchemaName, triggersSchema) in schema do
+                for KeyValue(triggerEntityName, triggersEntity) in triggersSchema do
+                    for KeyValue(triggerName, err) in triggersEntity do
+                        let schemaStr = schemaName.ToString()
+                        let triggerName = ({ entity = { schema = triggerSchemaName; name = triggerEntityName }; name = triggerName } : ResolvedFieldRef).ToString()
+                        if isSystem then
+                            logger.LogError(err, "System trigger {name} from {schema} is broken", triggerName, schemaStr)
+                        else
+                            logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerName, schemaStr)
+        if critical then
+            failwith "Broken system triggers"
+        do! markBrokenTriggers conn.System brokenTriggers cancellationToken
     }
 
 let checkBrokenUserViews (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenViews : ErroredUserViews) (cancellationToken : CancellationToken) =
     unitTask {
-        if not (Map.isEmpty brokenViews) then
-            let mutable critical = false
-            for KeyValue(schemaName, mschema) in brokenViews do
-                let isSystem = Map.containsKey schemaName preload.Schemas
-                if isSystem then
-                    critical <- true
-                match mschema with
-                | Ok schema ->
-                    for KeyValue(uvName, err) in schema do
-                        let uvName = ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString()
-                        if isSystem then
-                            logger.LogError(err, "System view {uv} is broken", uvName)
-                        else
-                            logger.LogWarning(err, "Marking {uv} as broken", uvName)
-                | Error (SETGenerator err) ->
+        let mutable critical = false
+        for KeyValue(schemaName, mschema) in brokenViews do
+            let isSystem = Map.containsKey schemaName preload.Schemas
+            if isSystem then
+                critical <- true
+            match mschema with
+            | UEUserViews schema ->
+                for KeyValue(uvName, err) in schema do
+                    let uvName = ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString()
                     if isSystem then
-                        logger.LogError(err, "System view generator for {schema} is broken", schemaName)
+                        logger.LogError(err, "System view {uv} is broken", uvName)
                     else
-                        logger.LogWarning(err, "Marking generator for {schema} as broken", schemaName)
-            if critical then
-                failwith "Broken system user views"
-            do! markBrokenUserViews conn.System brokenViews cancellationToken
+                        logger.LogWarning(err, "Marking {uv} as broken", uvName)
+            | UEGenerator err ->
+                if isSystem then
+                    logger.LogError(err, "System view generator for schema {schema} is broken", schemaName)
+                else
+                    logger.LogWarning(err, "Marking view generator for schema {schema} as broken", schemaName)
+        if critical then
+            failwith "Broken system user views"
+        do! markBrokenUserViews conn.System brokenViews cancellationToken
     }
 
 let checkBrokenPermissions (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenPerms : ErroredPermissions) (cancellationToken : CancellationToken) =
     unitTask {
-        if not (Map.isEmpty brokenPerms) then
-            let mutable critical = false
-            for KeyValue(schemaName, schema) in brokenPerms do
-                let isSystem = Map.containsKey schemaName preload.Schemas
-                if isSystem then
-                    critical <- true
-                for KeyValue(roleName, role) in schema do
-                    match role with
-                    | EFatal err ->
+        let mutable critical = false
+        for KeyValue(schemaName, schema) in brokenPerms do
+            let isSystem = Map.containsKey schemaName preload.Schemas
+            if isSystem then
+                critical <- true
+            for KeyValue(roleName, role) in schema do
+                match role with
+                | ERFatal err ->
+                        if isSystem then
+                            logger.LogError(err, "System role {role} is broken", roleName)
+                        else
+                            logger.LogWarning(err, "Marking {role} as broken", roleName)
+                | ERDatabase errs ->
+                    for KeyValue(allowedSchemaName, allowedSchema) in errs do
+                        for KeyValue(allowedEntityName, err) in allowedSchema do
+                            let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()
+                            let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()
                             if isSystem then
-                                logger.LogError(err, "System role {role} is broken", roleName)
+                                logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
                             else
-                                logger.LogWarning(err, "Marking {role} as broken", roleName)
-                    | EDatabase errs ->
-                        for KeyValue(allowedSchemaName, allowedSchema) in errs do
-                            for KeyValue(allowedEntityName, err) in allowedSchema do
-                                let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()
-                                let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()
-                                if isSystem then
-                                    logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
-                                else
-                                    logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
-            if critical then
-                failwith "Broken system roles"
-            do! markBrokenPermissions conn.System brokenPerms cancellationToken
+                                logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
+        if critical then
+            failwith "Broken system roles"
+        do! markBrokenPermissions conn.System brokenPerms cancellationToken
     }
 
 // Returns only user meta
