@@ -100,13 +100,14 @@ let instanceIsInitialized (conn : DatabaseTransaction) =
         return stateCount > 0
     }
 
-type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, connectionString : string, eventLogger : EventLogger) =
+type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPreload, connectionString : string, eventLogger : EventLogger) =
+    let preload = hashedPreload.Preload
     let logger = loggerFactory.CreateLogger<ContextCacheStore>()
     // FIXME: random values
     let anonymousViewsCache = FluidCache<AnonymousUserView>(64, TimeSpan.FromSeconds(0.0), TimeSpan.FromSeconds(600.0), fun () -> DateTime.Now)
     let anonymousViewsIndex = anonymousViewsCache.AddIndex("byQuery", fun uv -> uv.Query)
 
-    let currentDatabaseVersion = sprintf "%s %i" assemblyHash (hash preload)
+    let currentDatabaseVersion = sprintf "%s %s" assemblyHash hashedPreload.Hash
 
     let jsIsolates =
         DefaultObjectPool

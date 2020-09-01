@@ -96,6 +96,16 @@
           "Npgsql": "4.1.4"
         }
       },
+      "System.Data.HashFunction.CityHash": {
+        "type": "Direct",
+        "requested": "[2.0.*, )",
+        "resolved": "2.0.0",
+        "contentHash": "ESdi+70t/QZNLwgLTO/Xf2XK4CGlOyDSjXn9tEl9+DLQ/vWtinykSN4C9l4QMEIh/r2rnG76TLPWq53z4/qdig==",
+        "dependencies": {
+          "NETStandard.Library": "1.6.1",
+          "System.Data.HashFunction.Core": "2.0.0"
+        }
+      },
       "Z.EntityFramework.Plus.EFCore": {
         "type": "Direct",
         "requested": "[3.0.59, )",
@@ -421,6 +431,24 @@
           "System.Threading.Tasks": "4.3.0"
         }
       },
+      "System.Data.HashFunction.Core": {
+        "type": "Transitive",
+        "resolved": "2.0.0",
+        "contentHash": "EOb5GB6QTumYBvl0P/uL1m8hVkUwdwnIiwYPzfRKn+zZPtVkruyOrl/cMnNOGRny68xkswvOSo9NytWoR/6ABw==",
+        "dependencies": {
+          "NETStandard.Library": "1.6.1",
+          "System.Data.HashFunction.Interfaces": "2.0.0",
+          "System.Runtime.Numerics": "4.3.0"
+        }
+      },
+      "System.Data.HashFunction.Interfaces": {
+        "type": "Transitive",
+        "resolved": "2.0.0",
+        "contentHash": "ESxg15JHcRWXfRgzVUF8FhRZ1xAuXo6zgaL4kCdB9DV2cnrAwRGiycCMlMsfOLXOMrkHZZbcBuKlO8pyxDCCOg==",
+        "dependencies": {
+          "NETStandard.Library": "1.6.1"
+        }
+      },
       "System.Diagnostics.Debug": {
         "type": "Transitive",
         "resolved": "4.3.0",
@@ -704,6 +732,17 @@
           "System.Reflection.Primitives": "4.3.0",
           "System.Runtime": "4.3.0",
           "System.Runtime.Handles": "4.3.0"
+        }
+      },
+      "System.Runtime.Numerics": {
+        "type": "Transitive",
+        "resolved": "4.3.0",
+        "contentHash": "yMH+MfdzHjy17l2KESnPiF2dwq7T+xLnSJar7slyimAkUh/gTrS9/UQOtv7xarskJ2/XDSNvfLGOBQPjL7PaHQ==",
+        "dependencies": {
+          "System.Globalization": "4.3.0",
+          "System.Resources.ResourceManager": "4.3.0",
+          "System.Runtime": "4.3.0",
+          "System.Runtime.Extensions": "4.3.0"
         }
       },
       "System.Security.AccessControl": {

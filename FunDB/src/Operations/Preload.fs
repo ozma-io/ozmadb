@@ -1,12 +1,14 @@
 module FunWithFlags.FunDB.Operations.Preload
 
 open System.IO
+open System.Text
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 open FSharp.Control.Tasks.Affine
 open Npgsql
+open System.Data.HashFunction.CityHash
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Meta
@@ -84,6 +86,16 @@ let readSourcePreload (path : string) : SourcePreloadFile =
     { Preload = preload
       DirName = Path.GetDirectoryName path
     }
+
+let preloadHasher = CityHashFactory.Instance.Create()
+
+type HashedPreload (preload : Preload) =
+    let preloadStr = JsonConvert.SerializeObject preload
+    let preloadBytes = Encoding.UTF8.GetBytes preloadStr
+    let preloadHash = preloadHasher.ComputeHash(preloadBytes).AsHexString()
+
+    member this.Preload = preload
+    member this.Hash = preloadHash
 
 // Empty schemas in Roles aren't reflected in the database so we need to remove them -- otherwise a "change" will always be detected.
 let private normalizeRole (role : SourceRole) =

@@ -12,14 +12,14 @@ open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.API.ContextCache
 
 type InstancesCacheStore (loggerFactory : ILoggerFactory, preload : Preload, eventLogger : EventLogger) =
-    let logger = loggerFactory.CreateLogger<InstancesCacheStore>()
+    let hashedPreload = HashedPreload preload
 
     // FIXME: random values
     let instancesMemCache = FluidCache<ContextCacheStore>(8, TimeSpan.FromSeconds(60.0), TimeSpan.FromSeconds(3600.0), (fun () -> DateTime.Now))
     let instancesMemIndex = instancesMemCache.AddIndex("ByConnectionString", fun entry -> entry.ConnectionString)
 
     let createInstance (connectionString : string) =
-        Task.FromResult <| ContextCacheStore (loggerFactory, preload, connectionString, eventLogger)
+        Task.FromResult <| ContextCacheStore (loggerFactory, hashedPreload, connectionString, eventLogger)
 
     let instanceCreator = ItemCreator createInstance
 
