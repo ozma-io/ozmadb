@@ -3,12 +3,14 @@
 open System
 open System.Reflection
 open System.IO
+open System.Linq
+open Z.EntityFramework.Plus
+open Microsoft.EntityFrameworkCore
 open System.Security.Cryptography
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.ObjectPool
-open Microsoft.EntityFrameworkCore
 open FluidCaching
 open Npgsql
 open FSharp.Control.Tasks.Affine
@@ -26,17 +28,13 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Schema
 open FunWithFlags.FunDB.Permissions.Resolve
-open FunWithFlags.FunDB.Permissions.Update
-open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Attributes.Schema
 open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Merge
-open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Schema
 open FunWithFlags.FunDB.Triggers.Resolve
 open FunWithFlags.FunDB.Triggers.Merge
-open FunWithFlags.FunDB.Triggers.Update
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Resolve
@@ -592,20 +590,15 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, preload : Preload, conne
                         // We update state now and check user views _after_ that.
                         // At this point we are sure there is a valid versionEntry because GetCache should have been called.
                         let newVersion = oldState.Version + 1
-                        let! versionEntry = transaction.System.State.AsTracking().FirstAsync((fun x -> x.Name = versionField), cancellationToken)
-                        versionEntry.Value <- string newVersion
                         // Serialized access error: 40001, may need to process it differently later (retry with fallback?)
                         try
-                            let! _ = transaction.System.SaveChangesAsync(cancellationToken)
+                            let! _ = transaction.System.State.AsQueryable().Where(fun x -> x.Name = versionField).UpdateAsync(Expr.toMemberInit <@ fun x -> StateValue(Value = string newVersion) @>, cancellationToken)
+                            let! _ = transaction.Commit (cancellationToken)
                             ()
                         with
                         | :? DbUpdateException as err -> raisefWithInner ContextException err "State update error"
 
-                        let! _ = transaction.Commit (cancellationToken)
-
                         let! (_, goodUserViews) = dryRunUserViews conn.Query layout false (Some true) newUserViewsSource userViews cancellationToken
-
-                        (conn :> IDisposable).Dispose()
 
                         let newState =
                             { Layout = layout

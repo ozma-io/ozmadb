@@ -20,12 +20,10 @@ type APITemplate (isolate : Isolate) =
     let mutable currentHandle = None : APIHandle option
     let mutable errorConstructor = None : Value.Function option
 
-    let returnResult = function
+    let returnResult context = function
     | Ok r ->
-        let context = isolate.CurrentContext
         V8JsonWriter.Serialize(context, r)
     | Error e ->
-        let context = isolate.CurrentContext
         let body = V8JsonWriter.Serialize(context, e)
         let constructor = Option.get errorConstructor
         let exc = constructor.NewInstance(body)
@@ -57,7 +55,7 @@ type APITemplate (isolate : Isolate) =
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.UserViews.GetUserView source args false
-                return returnResult ret
+                return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
         fundbTemplate.Set("getUserViewInfo", Template.FunctionTemplate.New(isolate, fun args ->
@@ -68,7 +66,7 @@ type APITemplate (isolate : Isolate) =
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.UserViews.GetUserViewInfo source false
-                return returnResult ret
+                return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
 
@@ -80,7 +78,7 @@ type APITemplate (isolate : Isolate) =
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.GetEntityInfo ref
-                return returnResult ret
+                return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
         fundbTemplate.Set("insertEntity", Template.FunctionTemplate.New(isolate, fun args ->
@@ -92,7 +90,7 @@ type APITemplate (isolate : Isolate) =
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.InsertEntity ref rawArgs
-                return returnResult ret
+                return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
         fundbTemplate.Set("updateEntity", Template.FunctionTemplate.New(isolate, fun args ->
@@ -105,7 +103,7 @@ type APITemplate (isolate : Isolate) =
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.UpdateEntity ref id rawArgs
-                return returnResult ret
+                return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
         fundbTemplate.Set("deleteEntity", Template.FunctionTemplate.New(isolate, fun args ->
@@ -117,7 +115,7 @@ type APITemplate (isolate : Isolate) =
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.DeleteEntity ref id
-                return returnResult ret
+                return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
 
@@ -127,6 +125,19 @@ type APITemplate (isolate : Isolate) =
             let details = args.[0].GetString().Get()
             let handle = Option.get currentHandle
             handle.Logger.LogInformation("Source {} wrote event from JavaScript: {}", string handle.API.Request.Source, details)
+            handle.API.Request.WriteEvent (fun event ->
+                event.Type <- "jsEvent"
+                event.Details <- details
+            )
+            Value.Undefined.New(isolate)
+        ))
+
+        fundbTemplate.Set("writeEventSync", Template.FunctionTemplate.New(isolate, fun args ->
+            if args.Length <> 1 then
+                invalidArg "args" "Number of arguments must be 1"
+            let details = args.[0].GetString().Get()
+            let handle = Option.get currentHandle
+            handle.Logger.LogInformation("Source {} wrote sync event from JavaScript: {}", string handle.API.Request.Source, details)
             handle.API.Request.WriteEventSync (fun event ->
                 event.Type <- "jsEvent"
                 event.Details <- details
