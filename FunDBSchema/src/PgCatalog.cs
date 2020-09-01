@@ -63,7 +63,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
             }
         }
 
-        public async Task<IEnumerable<Namespace>> GetObjects(IEnumerable<string> withoutSchemas, CancellationToken cancellationToken)
+        public async Task<IEnumerable<Namespace>> GetObjects(CancellationToken cancellationToken)
         {
             // All this circus because just running:
             //
@@ -71,12 +71,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
             //
             // Makes EFCore get Foos two times! This leads to a cartesian explosion quickly.
             // Instead we avoid `Include` and manually merge related entries.
-            var withoutSchemasArr = withoutSchemas.ToArray();
             return await this.Namespaces
                 .AsNoTracking()
                 .Include(ns => ns.Procs).ThenInclude(proc => proc.RetType)
                 .Include(ns => ns.Procs).ThenInclude(proc => proc.Language)
-                .Where(ns => !ns.NspName.StartsWith("pg_") && ns.NspName != "information_schema" && !withoutSchemasArr.Contains(ns.NspName))
+                .Where(ns => !ns.NspName.StartsWith("pg_") && ns.NspName != "information_schema")
                 .Select(ns => new
                     {
                         Namespace = ns,
