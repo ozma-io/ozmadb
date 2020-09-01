@@ -10,6 +10,7 @@ export interface IFunDBAPI {
   updateEntity: (ref: Api.IEntityRef, id: number, args: Record<string, any>) => Promise<Api.IUpdateEntityResult>;
   deleteEntity: (ref: Api.IEntityRef, id: number) => Promise<Api.IDeleteEntityResult>;
   writeEvent: (message: string) => void;
+  writeEventSync: (message: string) => void;
 }
 
 export declare const FunDB: IFunDBAPI
