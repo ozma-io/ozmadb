@@ -41,9 +41,9 @@ export interface ITriggerEvent {
   source: TriggerSource;
 }
 
-export type BeforeInsertTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<Record<string, any> | undefined>;
-export type BeforeUpdateTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<Record<string, any> | undefined>;
-export type BeforeDeleteTrigger = (event: ITriggerEvent) => Promise<true | undefined>;
+export type BeforeInsertTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<Record<string, any> | boolean>;
+export type BeforeUpdateTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<Record<string, any> | boolean>;
+export type BeforeDeleteTrigger = (event: ITriggerEvent) => Promise<boolean>;
 export type AfterInsertTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<void>;
 export type AfterUpdateTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<void>;
 export type AfterDeleteTrigger = (event: ITriggerEvent) => Promise<void>;
