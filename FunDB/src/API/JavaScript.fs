@@ -2,14 +2,15 @@ module FunWithFlags.FunDB.API.JavaScript
 
 open NetJs
 open NetJs.Json
+open NetJs.Template
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.JavaScript.Runtime
+open FunWithFlags.FunDB.JavaScript.Common
 
 type private APIHandle =
     { API : IFunDBAPI
@@ -30,19 +31,13 @@ type APITemplate (isolate : Isolate) =
         raise <| JSException("Exception while making API call", exc.Value)
 
     let template =
-        let template = Template.ObjectTemplate.New(isolate)
+        let template = ObjectTemplate.New(isolate)
+        addCommonFunQLAPI template
 
-        template.Set("renderSqlName", Template.FunctionTemplate.New(isolate, fun args ->
-            if args.Length <> 1 then
-                invalidArg "args" "Number of arguments must be 1"
-            let ret = args.[0].GetString().Get() |> renderSqlName
-            Value.String.New(isolate, ret).Value
-        ))
-
-        let fundbTemplate = Template.ObjectTemplate.New(isolate)
+        let fundbTemplate = ObjectTemplate.New(isolate)
         template.Set("FunDB", fundbTemplate)
 
-        fundbTemplate.Set("getUserView", Template.FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("getUserView", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length < 1 || args.Length > 2 then
                 invalidArg "args" "Number of arguments must be between 1 and 2"
@@ -58,7 +53,7 @@ type APITemplate (isolate : Isolate) =
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
-        fundbTemplate.Set("getUserViewInfo", Template.FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("getUserViewInfo", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then
                 invalidArg "args" "Number of arguments must be 1"
@@ -70,7 +65,7 @@ type APITemplate (isolate : Isolate) =
             }, isolate.CurrentCancellationToken).Value
         ))
 
-        fundbTemplate.Set("getEntityInfo", Template.FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("getEntityInfo", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then
                 invalidArg "args" "Number of arguments must be 1"
@@ -81,7 +76,7 @@ type APITemplate (isolate : Isolate) =
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
-        fundbTemplate.Set("insertEntity", Template.FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("insertEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 2 then
                 invalidArg "args" "Number of arguments must be 2"
@@ -93,7 +88,7 @@ type APITemplate (isolate : Isolate) =
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
-        fundbTemplate.Set("updateEntity", Template.FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("updateEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 3 then
                 invalidArg "args" "Number of arguments must be 3"
@@ -106,7 +101,7 @@ type APITemplate (isolate : Isolate) =
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
-        fundbTemplate.Set("deleteEntity", Template.FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("deleteEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 2 then
                 invalidArg "args" "Number of arguments must be 2"
@@ -119,7 +114,7 @@ type APITemplate (isolate : Isolate) =
             }, isolate.CurrentCancellationToken).Value
         ))
 
-        fundbTemplate.Set("writeEvent", Template.FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("writeEvent", FunctionTemplate.New(isolate, fun args ->
             if args.Length <> 1 then
                 invalidArg "args" "Number of arguments must be 1"
             let details = args.[0].GetString().Get()
@@ -132,7 +127,7 @@ type APITemplate (isolate : Isolate) =
             Value.Undefined.New(isolate)
         ))
 
-        fundbTemplate.Set("writeEventSync", Template.FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("writeEventSync", FunctionTemplate.New(isolate, fun args ->
             if args.Length <> 1 then
                 invalidArg "args" "Number of arguments must be 1"
             let details = args.[0].GetString().Get()

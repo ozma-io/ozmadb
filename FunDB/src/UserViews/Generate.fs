@@ -12,6 +12,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.JavaScript.Runtime
+open FunWithFlags.FunDB.JavaScript.Common
 
 type UserViewGenerateException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -31,12 +32,7 @@ let private convertUserView (KeyValue (k, v : Value.Value)) =
 type UserViewGeneratorTemplate (isolate : Isolate) =
     let template =
         let template = Template.ObjectTemplate.New(isolate)
-
-        template.Set("renderSqlName", Template.FunctionTemplate.New(isolate, fun args ->
-            let ret = args.[0].GetString().Get() |> renderSqlName
-            Value.String.New(isolate, ret).Value
-        ))
-
+        addCommonFunQLAPI template
         template
 
     member this.Isolate = isolate

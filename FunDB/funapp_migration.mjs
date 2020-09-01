@@ -43,17 +43,17 @@ const generateDefaultViews = (layout) => {
             if (entity.isHidden) {
                 return [];
             }
-            const sqlName = `${renderSqlName(schemaName)}.${renderSqlName(entityName)}`;
+            const sqlName = `${renderFunQLName(schemaName)}.${renderFunQLName(entityName)}`;
             const fields = [];
             if (entity.children.length > 0) {
-                fields.push(renderSqlName("sub_entity"));
+                fields.push(renderFunQLName("sub_entity"));
             }
             Object.keys(entity.columnFields).forEach(columnField => {
-                fields.push(renderSqlName(columnField));
+                fields.push(renderFunQLName(columnField));
             });
             Object.entries(entity.computedFields).forEach(([computedField, comp]) => {
                 if (!comp.isBroken) {
-                    fields.push(renderSqlName(computedField));
+                    fields.push(renderFunQLName(computedField));
                 }
             });
 
