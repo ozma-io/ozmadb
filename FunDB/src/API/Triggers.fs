@@ -55,13 +55,10 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                 let newArgs = func.Function.Call(cancellationToken, null, [|eventValue; oldArgs|])
                 do! template.Isolate.EventLoop.Run ()
                 let newArgs = newArgs.GetValueOrPromiseResult ()
-                if not <| newArgs.BooleanValue () then
-                    return ATCancelled
-                else
-                    if newArgs.Data = (true :> obj) then
-                        return ATUntouched
-                    else
-                        return ATTouched <| V8JsonReader.Deserialize(newArgs)
+                return
+                    match newArgs.Data with
+                    | :? bool as ret -> if ret then ATUntouched else ATCancelled
+                    | _ -> ATTouched <| V8JsonReader.Deserialize(newArgs)
             with
             | :? JSException as e ->
                 return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
@@ -112,7 +109,7 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                 let maybeContinue = func.Function.Call(cancellationToken, null, [|eventValue|])
                 do! template.Isolate.EventLoop.Run ()
                 let maybeContinue = maybeContinue.GetValueOrPromiseResult ()
-                return maybeContinue.BooleanValue ()
+                return maybeContinue.GetBoolean ()
             with
             | :? JSException as e ->
                 return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
