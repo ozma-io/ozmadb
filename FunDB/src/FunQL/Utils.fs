@@ -25,10 +25,10 @@ let rec renderFunQLJson (j : JToken) : string =
     | JTokenType.Array ->
         let arr = j :?> JArray :> JToken seq
         arr |> Seq.map renderFunQLJson |> String.concat "," |> sprintf "[%s]"
-    | JTokenType.Integer -> renderSqlInt <| JToken.op_Explicit j
-    | JTokenType.Float -> renderSqlDecimal <| JToken.op_Explicit j
-    | JTokenType.String -> escapeSqlSingleQuotes <| JToken.op_Explicit j
-    | JTokenType.Boolean -> renderSqlBool <| JToken.op_Explicit j
+    | JTokenType.Integer -> renderFunQLInt <| JToken.op_Explicit j
+    | JTokenType.Float -> renderFunQLDecimal <| JToken.op_Explicit j
+    | JTokenType.String -> renderFunQLString <| JToken.op_Explicit j
+    | JTokenType.Boolean -> renderFunQLBool <| JToken.op_Explicit j
     | JTokenType.Null -> "null"
     | typ -> failwith <| sprintf "Unknown JSON token type %O" typ
 

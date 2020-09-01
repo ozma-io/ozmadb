@@ -15,14 +15,7 @@ let addCommonFunQLAPI (template : ObjectTemplate) =
         Value.String.New(template.Isolate, ret).Value
     ))
 
-    template.Set("renderFunQLString", FunctionTemplate.New(template.Isolate, fun args ->
-        if args.Length <> 1 then
-            invalidArg "args" "Number of arguments must be 1"
-        let ret = args.[0].GetString().Get() |> renderFunQLString
-        Value.String.New(template.Isolate, ret).Value
-    ))
-
-    template.Set("renderFunQLJson", FunctionTemplate.New(template.Isolate, fun args ->
+    template.Set("renderFunQLValue", FunctionTemplate.New(template.Isolate, fun args ->
         if args.Length <> 1 then
             invalidArg "args" "Number of arguments must be 1"
         let source = V8JsonReader.Deserialize<JToken>(args.[0])
