@@ -1,9 +1,11 @@
 import * as Api from "./index";
 
-export declare const renderSqlName: (name: string) => string;
+export declare const renderFunQLName: (name: string) => string;
+export declare const renderFunQLString: (name: string) => string;
+export declare const renderFunQLJson: (obj: any) => string;
 
 export interface IFunDBAPI {
-  getUserView: (source: Api.UserViewSource, args: Record<string, any>) => Promise<Api.IViewExprResult>;
+  getUserView: (source: Api.UserViewSource, args?: Record<string, any>) => Promise<Api.IViewExprResult>;
   getUserViewInfo: (source: Api.UserViewSource) => Promise<Api.IViewInfoResult>;
   getEntityInfo: (ref: Api.IEntityRef) => Promise<Api.IEntity>;
   insertEntity: (ref: Api.IEntityRef, args: Record<string, any>) => Promise<Api.IInsertEntityResult>;
