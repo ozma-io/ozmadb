@@ -314,42 +314,53 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =
     let makeConstraintMeta (tableName : TableName) (columnIds : TableColumnIds) (constr : Constraint) : (ConstraintName * ConstraintMeta) option =
-        let makeLocalColumn (num : ColumnNum) =
-            try
-                Map.find num columnIds
-            with
-            | e ->
-                eprintfn "Table name: %O, columnIds: %s, column num: %i, constraint name: %s, constraint id: %i" tableName (JsonConvert.SerializeObject columnIds) num constr.ConName constr.Oid
-                reraise ()
-        let ret =
-            match constr.ConType with
-            | 'c' ->
-                Some <| CMCheck (parseLocalExpr constr.Source)
-            | 'f' ->
-                let refSchema = SQLName constr.FRelClass.Namespace.NspName
-                let refName = SQLName constr.FRelClass.RelName
-                let refTable = Map.find refName (Map.find refSchema schemaIds).Tables
-                let makeRefColumn (fromNum : ColumnNum) (toNum : ColumnNum) =
-                    let fromName = makeLocalColumn fromNum
-                    let toName =
+        try
+            let makeLocalColumn (num : ColumnNum) =
+                try
+                    Map.find num columnIds
+                with
+                | e ->
+                    eprintfn "Error, column num: %i" num
+                    reraise ()
+            let ret =
+                match constr.ConType with
+                | 'c' ->
+                    Some <| CMCheck (parseLocalExpr constr.Source)
+                | 'f' ->
+                    let refSchema = SQLName constr.FRelClass.Namespace.NspName
+                    let refName = SQLName constr.FRelClass.RelName
+                    let refTable =
                         try
-                            Map.find toNum refTable.Columns
+                            Map.find refName (Map.find refSchema schemaIds).Tables
                         with
                         | e ->
-                            eprintfn "Table name: %O, columnIds: %s, to column num: %i, constraint name: %s, constraint id: %i" tableName (JsonConvert.SerializeObject columnIds) toNum constr.ConName constr.Oid
+                            eprintfn "Error, ref schema: %O, ref name: %O" refSchema refName
                             reraise ()
-                    (fromName, toName)
+                    let makeRefColumn (fromNum : ColumnNum) (toNum : ColumnNum) =
+                        let fromName = makeLocalColumn fromNum
+                        let toName =
+                            try
+                                Map.find toNum refTable.Columns
+                            with
+                            | e ->
+                                eprintfn "Error, to column num: %i" toNum
+                                reraise ()
+                        (fromName, toName)
 
-                let tableRef = { schema = Some refSchema; name = refName }
-                let cols = Seq.map2 makeRefColumn constr.ConKey constr.ConFKey |> Seq.toArray
-                Some <| CMForeignKey (tableRef, cols)
-            | 'p' ->
-                Some <| CMPrimaryKey (Array.map makeLocalColumn constr.ConKey)
-            | 'u' ->
-                Some <| CMUnique (Array.map makeLocalColumn constr.ConKey)
-            | _ -> None
+                    let tableRef = { schema = Some refSchema; name = refName }
+                    let cols = Seq.map2 makeRefColumn constr.ConKey constr.ConFKey |> Seq.toArray
+                    Some <| CMForeignKey (tableRef, cols)
+                | 'p' ->
+                    Some <| CMPrimaryKey (Array.map makeLocalColumn constr.ConKey)
+                | 'u' ->
+                    Some <| CMUnique (Array.map makeLocalColumn constr.ConKey)
+                | _ -> None
 
-        Option.map (fun r -> (SQLName constr.ConName, r)) ret
+            Option.map (fun r -> (SQLName constr.ConName, r)) ret
+        with
+        | e ->
+            eprintfn "Constraint meta, table name: %O, columnIds: %s, constraint name: %s, constraint id: %i" tableName (JsonConvert.SerializeObject columnIds) constr.ConName constr.Oid
+            reraise ()
 
     let makeIndexMeta (tableName : TableName) (columnIds : TableColumnIds) (index : Index) : (IndexName * IndexMeta) option =
         let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
