@@ -64,7 +64,7 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                         return ATTouched <| V8JsonReader.Deserialize(newArgs)
             with
             | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger: %s" (e.JSStackTrace.ToPrettyString())
+                return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
             | :? NetJsException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
@@ -89,7 +89,7 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                 ignore <| maybePromise.GetValueOrPromiseResult ()
             with
             | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger: %s" (e.JSStackTrace.ToPrettyString())
+                return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
             | :? NetJsException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
@@ -115,7 +115,7 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                 return maybeContinue.BooleanValue ()
             with
             | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger: %s" (e.JSStackTrace.ToPrettyString())
+                return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
             | :? NetJsException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }

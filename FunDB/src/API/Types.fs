@@ -114,9 +114,9 @@ type UserViewErrorInfo =
             match this with
             | UVENotFound -> "User view not found"
             | UVEAccessDenied -> "User view access denied"
-            | UVEResolution msg -> "User view typecheck failed"
-            | UVEExecution msg -> "User view execution failed"
-            | UVEArguments msg -> "Invalid user view arguments"
+            | UVEResolution msg -> sprintf  "User view compilation failed: %s" msg
+            | UVEExecution msg -> sprintf "User view execution failed: %s" msg
+            | UVEArguments msg -> sprintf "Invalid user view arguments: %s" msg
 
 [<SerializeAsObject("type")>]
 type UserViewSource =
@@ -156,10 +156,10 @@ type EntityErrorInfo =
             | EENotFound -> "Entity not found"
             | EEFrozen -> "Entity is frozen"
             | EEAccessDenied -> "Entity access denied"
-            | EEArguments msg -> "Invalid operation arguments"
-            | EEExecution msg -> "Operation execution failed"
-            | EEException msg -> "Exception during running user code"
-            | EETrigger (schema, name, inner) -> "Error while running trigger"
+            | EEArguments msg -> sprintf "Invalid operation arguments: %s" msg
+            | EEExecution msg -> sprintf "Operation execution failed: %s" msg
+            | EEException msg -> sprintf "Exception during running user code: %s" msg
+            | EETrigger (schema, name, inner) -> sprintf "Error while running trigger %O.%O: %s" schema name inner.Message
 
 [<SerializeAsObject("type")>]
 [<NoEquality; NoComparison>]
