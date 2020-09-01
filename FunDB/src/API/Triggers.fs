@@ -58,7 +58,7 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                 if not <| newArgs.BooleanValue () then
                     return ATCancelled
                 else
-                    if oldArgs.HandleEquals(newArgs) then
+                    if newArgs.Data = (true :> obj) then
                         return ATUntouched
                     else
                         return ATTouched <| V8JsonReader.Deserialize(newArgs)
