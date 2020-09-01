@@ -158,7 +158,7 @@ type EntityErrorInfo =
             | EEAccessDenied -> "Entity access denied"
             | EEArguments msg -> sprintf "Invalid operation arguments: %s" msg
             | EEExecution msg -> sprintf "Operation execution failed: %s" msg
-            | EEException msg -> sprintf "Exception during running user code: %s" msg
+            | EEException msg -> msg
             | EETrigger (schema, name, inner) -> sprintf "Error while running trigger %O.%O: %s" schema name inner.Message
 
 [<SerializeAsObject("type")>]
