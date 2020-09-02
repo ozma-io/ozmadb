@@ -5,6 +5,7 @@ let
     name = "fundb";
     targetPkgs = pkgs: with pkgs; [
       dotnet-sdk_3
+      zlib
       mono
       gcc
       gnumake

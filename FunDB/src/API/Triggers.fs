@@ -34,10 +34,10 @@ type SerializedTriggerEvent =
       Source : SerializedTriggerSource
     }
 
-type TriggerScript (template : APITemplate, name : string, scriptSource : string) =
+type TriggerScript (runtime : JSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            CachedFunction.FromScript template name scriptSource
+            runtime.CreateDefaultFunction name scriptSource
         with
         | :? NetJsException as e ->
             raisefWithInner TriggerRunException e "Couldn't initialize trigger"
@@ -49,11 +49,11 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                   Time = TTBefore
                   Source = source
                 }
-            let eventValue = V8JsonWriter.Serialize(func.Context, event)
-            let oldArgs = V8JsonWriter.Serialize(func.Context, args)
+            let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
+            let oldArgs = V8JsonWriter.Serialize(runtime.Context, args)
             try
-                let newArgs = func.Function.Call(cancellationToken, null, [|eventValue; oldArgs|])
-                do! template.Isolate.EventLoop.Run ()
+                let newArgs = func.Call(cancellationToken, null, [|eventValue; oldArgs|])
+                do! runtime.Isolate.EventLoop.Run ()
                 let newArgs = newArgs.GetValueOrPromiseResult ()
                 return
                     match newArgs.Data with
@@ -73,16 +73,16 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                   Time = TTAfter
                   Source = source
                 }
-            let eventValue = V8JsonWriter.Serialize(func.Context, event)
+            let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             try
                 let functionArgs =
                     match args with
                     | Some oldArgsObj ->
-                        let oldArgs = V8JsonWriter.Serialize(func.Context, oldArgsObj)
+                        let oldArgs = V8JsonWriter.Serialize(runtime.Context, oldArgsObj)
                         [|eventValue; oldArgs|]
                     | None -> [|eventValue|]
-                let maybePromise = func.Function.Call(cancellationToken, null, functionArgs)
-                do! template.Isolate.EventLoop.Run ()
+                let maybePromise = func.Call(cancellationToken, null, functionArgs)
+                do! runtime.Isolate.EventLoop.Run ()
                 ignore <| maybePromise.GetValueOrPromiseResult ()
             with
             | :? JSException as e ->
@@ -104,10 +104,10 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
                   Time = TTBefore
                   Source = TSDelete (Some id)
                 }
-            let eventValue = V8JsonWriter.Serialize(func.Context, event)
+            let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             try
-                let maybeContinue = func.Function.Call(cancellationToken, null, [|eventValue|])
-                do! template.Isolate.EventLoop.Run ()
+                let maybeContinue = func.Call(cancellationToken, null, [|eventValue|])
+                do! runtime.Isolate.EventLoop.Run ()
                 let maybeContinue = maybeContinue.GetValueOrPromiseResult ()
                 return maybeContinue.GetBoolean ()
             with
@@ -125,7 +125,7 @@ type TriggerScript (template : APITemplate, name : string, scriptSource : string
     member this.RunDeleteTriggerAfter (entity : ResolvedEntityRef) (cancellationToken : CancellationToken) : Task =
         runAfterTrigger entity (TSDelete None) None cancellationToken
 
-    member this.Context = func.Context
+    member this.Runtime = runtime
 
     interface ITriggerScript with
         member this.RunInsertTriggerBefore entity args cancellationToken = this.RunInsertTriggerBefore entity args cancellationToken
@@ -161,33 +161,30 @@ type TriggerScripts =
 let private triggerName (triggerRef : TriggerRef) =
     sprintf "%O/triggers/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.schema triggerRef.Entity.name triggerRef.Name
 
-let private prepareTriggerScriptsEntity (template : APITemplate) (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : TriggerScriptsEntity =
+let private prepareTriggerScriptsEntity (runtime : JSRuntime) (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : TriggerScriptsEntity =
     let getOne name = function
     | Error e -> None
-    | Ok trigger -> Some (TriggerScript(template, triggerName { Schema = schemaName; Entity = triggerEntity; Name = name }, trigger.Procedure) :> ITriggerScript)
+    | Ok trigger -> Some (TriggerScript(runtime, triggerName { Schema = schemaName; Entity = triggerEntity; Name = name }, trigger.Procedure) :> ITriggerScript)
 
     { Triggers = Map.mapMaybe getOne triggers.Triggers
     }
 
-let private prepareTriggerScriptsSchema (template : APITemplate) (schemaName : SchemaName) (triggerSchema : SchemaName) (triggers : TriggersSchema) : TriggerScriptsSchema =
-    let getOne name = prepareTriggerScriptsEntity template schemaName { schema = triggerSchema; name = name }
+let private prepareTriggerScriptsSchema (runtime : JSRuntime) (schemaName : SchemaName) (triggerSchema : SchemaName) (triggers : TriggersSchema) : TriggerScriptsSchema =
+    let getOne name = prepareTriggerScriptsEntity runtime schemaName { schema = triggerSchema; name = name }
     { Entities = Map.map getOne triggers.Entities
     }
 
-let private prepareTriggerScriptsDatabase (template : APITemplate) (schemaName : SchemaName) (triggers : TriggersDatabase) : TriggerScriptsDatabase =
-    { Schemas = Map.map (prepareTriggerScriptsSchema template schemaName) triggers.Schemas
+let private prepareTriggerScriptsDatabase (runtime : JSRuntime) (schemaName : SchemaName) (triggers : TriggersDatabase) : TriggerScriptsDatabase =
+    { Schemas = Map.map (prepareTriggerScriptsSchema runtime schemaName) triggers.Schemas
     }
 
-let prepareTriggerScripts (template : APITemplate) (triggers : ResolvedTriggers) : TriggerScripts =
-    { Schemas = Map.map (prepareTriggerScriptsDatabase template) triggers.Schemas
+let prepareTriggerScripts (runtime : JSRuntime) (triggers : ResolvedTriggers) : TriggerScripts =
+    { Schemas = Map.map (prepareTriggerScriptsDatabase runtime) triggers.Schemas
     }
 
-type private TestTriggerEvaluator (forceAllowBroken : bool) =
-    let isolate = Isolate.NewWithHeapSize (1024UL * 1024UL, 16UL * 1024UL * 1024UL)
-    let apiTemplate = APITemplate(isolate)
-
+type private TestTriggerEvaluator (runtime : JSRuntime, forceAllowBroken : bool) =
     let testTrigger (triggerRef : TriggerRef) (trigger : ResolvedTrigger) : unit =
-        ignore <| TriggerScript(apiTemplate, triggerName triggerRef, trigger.Procedure)
+        ignore <| TriggerScript(runtime, triggerName triggerRef, trigger.Procedure)
 
     let testTriggersEntity (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (sourceTriggers : SourceTriggersEntity) (entityTriggers : TriggersEntity) : ErroredTriggersEntity * TriggersEntity =
         let mutable errors = Map.empty
@@ -264,6 +261,6 @@ type private TestTriggerEvaluator (forceAllowBroken : bool) =
 
     member this.TestTriggers sourceTriggers triggers = testTriggers sourceTriggers triggers
 
-let testEvalTriggers (forceAllowBroken : bool) (source : SourceTriggers) (triggers : ResolvedTriggers) : ErroredTriggers * ResolvedTriggers =
-    let eval = TestTriggerEvaluator (forceAllowBroken)
+let testEvalTriggers (runtime : JSRuntime) (forceAllowBroken : bool) (source : SourceTriggers) (triggers : ResolvedTriggers) : ErroredTriggers * ResolvedTriggers =
+    let eval = TestTriggerEvaluator(runtime, forceAllowBroken)
     eval.TestTriggers source triggers

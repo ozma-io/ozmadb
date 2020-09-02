@@ -10,16 +10,12 @@ open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
-open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.JavaScript.Runtime
-open FunWithFlags.FunDB.JavaScript.Common
 
 type UserViewGenerateException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
 
     new (message : string) = UserViewGenerateException (message, null)
-
-let userViewsFunction = "getUserViews"
 
 let private convertUserView (KeyValue (k, v : Value.Value)) =
     let query = v.GetString().Get()
@@ -29,29 +25,17 @@ let private convertUserView (KeyValue (k, v : Value.Value)) =
         }
     (FunQLName k, uv)
 
-type UserViewGeneratorTemplate (isolate : Isolate) =
-    let template =
-        let template = Template.ObjectTemplate.New(isolate)
-        addCommonFunQLAPI template
-        template
-
-    member this.Isolate = isolate
-
-    interface IJavaScriptTemplate with
-        member this.ObjectTemplate = template
-        member this.FinishInitialization context = ()
-
-type private UserViewsGeneratorScript (template : UserViewGeneratorTemplate, name : string, scriptSource : string) =
+type private UserViewsGeneratorScript (runtime : JSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            CachedFunction.FromScript template name scriptSource
+            runtime.CreateDefaultFunction name scriptSource
         with
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't initialize user view generator"
 
     let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
         try
-            let newViews = func.Function.Call(cancellationToken, null, [|layout|])
+            let newViews = func.Call(cancellationToken, null, [|layout|])
             newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
         with
         | :? JSException as e ->
@@ -60,7 +44,7 @@ type private UserViewsGeneratorScript (template : UserViewGeneratorTemplate, nam
             raisefWithInner UserViewGenerateException e "Couldn't generate user views"
 
     member this.Generate layout cancellationToken = generateUserViews layout cancellationToken
-    member this.Context = func.Context
+    member this.Runtime = runtime
 
 type private UserViewGenerator =
     { Generator : UserViewsGeneratorScript
@@ -77,7 +61,7 @@ type private UserViewsGenerators = Map<SchemaName, PreparedUserViewSchema>
 
 type private UserViewsGeneratorState (layout : Layout, cancellationToken : CancellationToken, forceAllowBroken : bool) =
     let generateUserViewsSchema (gen : UserViewGenerator) : Result<SourceUserViewsSchema, UserViewsSchemaError> =
-        let layout = V8JsonWriter.Serialize(gen.Generator.Context, serializeLayout layout)
+        let layout = V8JsonWriter.Serialize(gen.Generator.Runtime.Context, serializeLayout layout)
         try
             let uvs = gen.Generator.Generate layout cancellationToken
             Ok { UserViews = uvs
@@ -107,13 +91,13 @@ type private UserViewsGeneratorState (layout : Layout, cancellationToken : Cance
 
     member this.GenerateUserViews gens = generateUserViews gens
 
-type UserViewsGenerator (template : UserViewGeneratorTemplate, userViews : SourceUserViews, createForceAllowBroken : bool) =
+type UserViewsGenerator (runtime : JSRuntime, userViews : SourceUserViews, createForceAllowBroken : bool) =
     let prepareGenerator (name : SchemaName) (schema : SourceUserViewsSchema) =
         match schema.GeneratorScript with
         | None -> PUVStatic schema
         | Some script ->
             try
-                let gen = UserViewsGeneratorScript (template, sprintf "%O/user_views_generator.mjs" name, script.Script)
+                let gen = UserViewsGeneratorScript (runtime, sprintf "%O/user_views_generator.mjs" name, script.Script)
                 let ret =
                     { Generator = gen
                       Source = script

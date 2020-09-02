@@ -98,7 +98,6 @@
     <Compile Include="src/JavaScript/AST.fs" />
     <Compile Include="src/JavaScript/FunQL.fs" />
     <Compile Include="src/JavaScript/Runtime.fs" />
-    <Compile Include="src/JavaScript/Common.fs" />
 
     <Compile Include="src/UserViews/Source.fs" />
     <Compile Include="src/UserViews/Types.fs" />

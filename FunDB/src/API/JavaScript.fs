@@ -5,12 +5,13 @@ open NetJs.Json
 open NetJs.Template
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.JavaScript.Runtime
-open FunWithFlags.FunDB.JavaScript.Common
 
 type private APIHandle =
     { API : IFunDBAPI
@@ -32,7 +33,22 @@ type APITemplate (isolate : Isolate) =
 
     let template =
         let template = ObjectTemplate.New(isolate)
-        addCommonFunQLAPI template
+
+        template.Set("renderFunQLName", FunctionTemplate.New(template.Isolate, fun args ->
+            if args.Length <> 1 then
+                invalidArg "args" "Number of arguments must be 1"
+            let ret = args.[0].GetString().Get() |> renderFunQLName
+            Value.String.New(template.Isolate, ret).Value
+        ))
+
+        template.Set("renderFunQLValue", FunctionTemplate.New(template.Isolate, fun args ->
+            if args.Length <> 1 then
+                invalidArg "args" "Number of arguments must be 1"
+            use reader = new V8JsonReader(args.[0])
+            let source = JToken.Load(reader)
+            let ret = renderFunQLJson source
+            Value.String.New(template.Isolate, ret).Value
+        ))
 
         let fundbTemplate = ObjectTemplate.New(isolate)
         template.Set("FunDB", fundbTemplate)

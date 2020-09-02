@@ -75,12 +75,18 @@ let private assemblyHash =
     use assembly = File.OpenRead(Assembly.GetCallingAssembly().Location)
     hasher.ComputeHash(assembly) |> Array.map (fun x -> x.ToString("x2")) |> String.concat ""
 
+type private APIWithRuntime =
+    { Runtime : JSRuntime
+      API : APITemplate
+    }
+
 [<NoEquality; NoComparison>]
 type private CachedContext =
     { Layout : Layout
       UserViews : PrefetchedUserViews
       Permissions : Permissions
       DefaultAttrs : MergedDefaultAttributes
+      JSRuntime : IsolateLocal<APIWithRuntime>
       TriggerScripts : IsolateLocal<TriggerScripts>
       Triggers : MergedTriggers
       SystemViews : SourceUserViews
@@ -190,41 +196,50 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
             | _ -> ()
         }
 
-    let apiTemplate = IsolateLocal(APITemplate)
-
-    let uvGeneratorTemplate = IsolateLocal(UserViewGeneratorTemplate)
-
-    let generateViews' isolate layout userViews cancellationToken forceAllowBroken =
-        let template = uvGeneratorTemplate.GetValue(isolate)
-        let generator = UserViewsGenerator(template, userViews, forceAllowBroken)
+    let generateViews runtime layout userViews cancellationToken forceAllowBroken =
+        let generator = UserViewsGenerator(runtime, userViews, forceAllowBroken)
         generator.GenerateUserViews layout cancellationToken forceAllowBroken
 
-    let generateViews layout userViews cancellationToken forceAllowBroken =
+    let runWithRuntime (jsRuntime : IsolateLocal<APIWithRuntime>) (func : APIWithRuntime -> 'a) : 'a =
         let isolate = jsIsolates.Get()
         try
-            generateViews' isolate layout userViews cancellationToken forceAllowBroken
+            let runtime = jsRuntime.GetValue isolate
+            func runtime
         finally
             jsIsolates.Return(isolate)
 
+    let makeRuntime () =
+        IsolateLocal(fun isolate ->
+            let api = APITemplate isolate
+            let runtime = JSRuntime(api, Seq.empty)
+            { API = api; Runtime = runtime }
+        )
+
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let! (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews) = task {
+        let! (transaction, currentVersion, jsRuntime, brokenViews, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews) = task {
             try
                 let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
                 let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
                 let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
+
                 let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                 let (brokenTriggers1, triggers) = resolveTriggers layout true sourceTriggers
-                let (brokenTriggers2, triggers) = testEvalTriggers true sourceTriggers triggers
-                let brokenTriggers = unionErroredTriggers brokenTriggers1 brokenTriggers2
-                let mergedTriggers = mergeTriggers layout triggers
 
                 let systemViews = preloadUserViews preload
                 let! sourceViews = buildSchemaUserViews transaction.System cancellationToken
                 let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
-                let (brokenViews1, sourceViews) = generateViews layout sourceViews cancellationToken true
+
+                let jsRuntime = makeRuntime ()
+                let (brokenViews1, sourceViews, brokenTriggers2, triggers) = runWithRuntime jsRuntime <| fun api ->
+                    let (brokenViews1, sourceViews) = generateViews api.Runtime layout sourceViews cancellationToken true
+                    let (brokenTriggers2, triggers) = testEvalTriggers api.Runtime true sourceTriggers triggers
+                    (brokenViews1, sourceViews, brokenTriggers2, triggers)
+
                 let! isChanged2 = updateUserViews transaction.System sourceViews cancellationToken
                 let (brokenViews2, userViews) = resolveUserViews layout mergedAttrs true sourceViews
+                let brokenTriggers = unionErroredTriggers brokenTriggers1 brokenTriggers2
+                let mergedTriggers = mergeTriggers layout triggers
 
                 let! currentVersion = ensureCurrentVersion transaction (isChanged || isChanged2) cancellationToken
 
@@ -233,7 +248,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 let! (brokenViews3, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
                 let transaction = new DatabaseTransaction (transaction.Connection)
                 let brokenViews = unionErroredUserViews (unionErroredUserViews brokenViews1 brokenViews2) brokenViews3
-                return (transaction, currentVersion, brokenViews, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews)
+                return (transaction, currentVersion, jsRuntime, brokenViews, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, prefetchedViews, sourceViews)
             with
             | ex ->
                 do! transaction.Rollback ()
@@ -272,7 +287,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
                       Triggers = mergedTriggers
-                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (apiTemplate.GetValue isolate) triggers)
+                      JSRuntime = jsRuntime
+                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate).Runtime triggers)
                       UserViews = prefetchedViews
                       SystemViews = systemViews
                       UserMeta = userMeta
@@ -332,7 +348,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
 
     // Called when state update by another instance is detected. More lightweight than full `coldRebuildFromDatabase`.
     let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews) = task {
+        let! (transaction, layout, jsRuntime, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews) = task {
             try
                 let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
                 let (_, layout) = resolveLayout sourceLayout false
@@ -343,7 +359,12 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
 
                 let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                 let (_, triggers) = resolveTriggers layout false sourceTriggers
-                let (_, triggers) = testEvalTriggers false sourceTriggers triggers
+
+                let jsRuntime = makeRuntime ()
+                let triggers = runWithRuntime jsRuntime <| fun api ->
+                    let (_, triggers) = testEvalTriggers api.Runtime false sourceTriggers triggers
+                    triggers
+
                 let mergedTriggers = mergeTriggers layout triggers
 
                 let! sourceUvs = buildSchemaUserViews transaction.System cancellationToken
@@ -354,7 +375,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 // We dry-run those views that _can_ be failed here, outside of a transaction.
                 let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews cancellationToken
                 let transaction = new DatabaseTransaction(transaction.Connection)
-                return (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews)
+                return (transaction, layout, jsRuntime, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews)
             with
             | ex ->
                 do! transaction.Rollback ()
@@ -393,7 +414,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
                       Triggers = mergedTriggers
-                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (apiTemplate.GetValue isolate) triggers)
+                      JSRuntime = jsRuntime
+                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate).Runtime triggers)
                       UserViews = prefetchedViews
                       SystemViews = systemViews
                       UserMeta = userMeta
@@ -533,6 +555,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
                         let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
+                        let jsRuntime = makeRuntime ()
+
                         let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                         if not <| preloadTriggersAreUnchanged sourceTriggers preload then
                             raisef ContextException "Cannot modify system triggers"
@@ -541,9 +565,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 resolveTriggers layout false sourceTriggers
                             with
                             | :? ResolveTriggersException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
-                        let (_, triggers) =
+                        let (_, triggers) = runWithRuntime jsRuntime <| fun api ->
                             try
-                                testEvalTriggers false sourceTriggers triggers
+                                testEvalTriggers api.Runtime false sourceTriggers triggers
                             with
                             | :? TriggerRunException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
                         let mergedTriggers = mergeTriggers layout triggers
@@ -563,8 +587,11 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                         }
 
                         logger.LogInformation("Updating generated user views")
-                        let isolate = getIsolate ()
-                        let (_, userViewsSource) = generateViews' isolate layout sourceUserViews cancellationToken false
+                        let (_, userViewsSource) = runWithRuntime jsRuntime <| fun api ->
+                            try
+                                generateViews api.Runtime layout sourceUserViews cancellationToken false
+                            with
+                            | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
                         let! _ = updateUserViews transaction.System userViewsSource cancellationToken
 
                         let! newUserViewsSource = buildSchemaUserViews transaction.System cancellationToken
@@ -606,7 +633,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                               Permissions = permissions
                               DefaultAttrs = mergedAttrs
                               Triggers = mergedTriggers
-                              TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (apiTemplate.GetValue isolate) triggers)
+                              JSRuntime = jsRuntime
+                              TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate).Runtime triggers)
                               UserViews = mergePrefetchedUserViews badUserViews goodUserViews
                               SystemViews = filterSystemViews userViewsSource
                               UserMeta = wantedUserMeta
@@ -656,14 +684,14 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                         | :? DbUpdateException as ex -> return raisefWithInner ContextException ex "Failed to commit"
                 }
 
-            let mutable maybeAPITemplate = None
+            let mutable maybeJSAPI = None
             let setAPI api =
-                match maybeAPITemplate with
-                | Some template -> failwith "Cannot set API more than once"
+                match maybeJSAPI with
+                | Some jsApi -> failwith "Cannot set API more than once"
                 | None ->
-                    let template = apiTemplate.GetValue (getIsolate ())
-                    template.SetAPI api
-                    maybeAPITemplate <- Some template
+                    let jsApi = oldState.Context.JSRuntime.GetValue (getIsolate ())
+                    jsApi.API.SetAPI api
+                    maybeJSAPI <- Some jsApi
 
             let mutable maybeTriggerScripts = None
             let getTriggerScripts () =
@@ -706,8 +734,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                       member this.FindTrigger ref = (getTriggerScripts ()).FindTrigger ref
 
                       member this.Dispose () =
-                          match maybeAPITemplate with
-                          | Some template -> template.ResetAPI ()
+                          match maybeJSAPI with
+                          | Some jsApi -> jsApi.API.ResetAPI ()
                           | None -> ()
                           match maybeIsolate with
                           | Some isolate -> jsIsolates.Return isolate
@@ -716,8 +744,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           (conn :> IDisposable).Dispose ()
                       member this.DisposeAsync () =
                           unitVtask {
-                              match maybeAPITemplate with
-                              | Some template -> template.ResetAPI ()
+                              match maybeJSAPI with
+                              | Some jsApi -> jsApi.API.ResetAPI ()
                               | None -> ()
                               match maybeIsolate with
                               | Some isolate -> jsIsolates.Return isolate
