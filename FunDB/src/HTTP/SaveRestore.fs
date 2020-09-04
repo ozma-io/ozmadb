@@ -25,6 +25,13 @@ let private restoreError e =
         | RREInvalidFormat _ -> RequestErrors.unprocessableEntity
     handler (json e)
 
+let private massRestoreError e =
+    let handler =
+        match e with
+        | ZRESchemaFailed _ -> RequestErrors.badRequest
+        | ZREInvalidFormat _ -> RequestErrors.unprocessableEntity
+    handler (json e)
+
 let saveRestoreApi : HttpHandler =
     let saveZipSchema (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         let (schemaName, api) = arg :?> (SchemaName * IFunDBAPI)
@@ -59,19 +66,24 @@ let saveRestoreApi : HttpHandler =
         | Error err -> return! restoreError err next ctx
     }
 
-    let restoreZipSchema (schemaName : SchemaName) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+    let restoreZipSchemas (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         use stream = new MemoryStream()
         do! ctx.Request.Body.CopyToAsync(stream)
         ignore <| stream.Seek(0L, SeekOrigin.Begin)
-        match! api.SaveRestore.RestoreZipSchema schemaName stream with
+        match! api.SaveRestore.RestoreZipSchemas stream with
         | Ok () -> return! commitAndOk api next ctx
-        | Error err -> return! restoreError err next ctx
+        | Error err -> return! massRestoreError err next ctx
     }
 
     let restoreSchema (schemaName : SchemaName) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         match ctx.TryGetRequestHeader "Content-Type" with
-        | Some "application/zip" -> return! restoreZipSchema schemaName api next ctx
         | Some "application/json" -> return! restoreJsonSchema schemaName api next ctx
+        | _ -> return! RequestErrors.unsupportedMediaType (errorJson "Unsupported media type") next ctx
+    }
+
+    let massRestore (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+        match ctx.TryGetRequestHeader "Content-Type" with
+        | Some "application/zip" -> return! restoreZipSchemas api next ctx
         | _ -> return! RequestErrors.unsupportedMediaType (errorJson "Unsupported media type") next ctx
     }
 
@@ -82,6 +94,12 @@ let saveRestoreApi : HttpHandler =
               PUT >=> withContext (restoreSchema schemaName)
             ]
 
+    let massSaveRestoreApi =
+        choose
+            [ PUT >=> withContext massRestore
+            ]
+
     choose
         [ subRoutef "/layouts/%s" saveRestoreApi
+          subRoute "/layouts" massSaveRestoreApi
         ]

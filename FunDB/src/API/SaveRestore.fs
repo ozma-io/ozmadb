@@ -90,21 +90,29 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                 return Ok ()
         }
 
-    member this.RestoreZipSchema (name : SchemaName) (stream : Stream) : Task<Result<unit, RestoreErrorInfo>> =
+    member this.RestoreZipSchemas (stream : Stream) : Task<Result<unit, ZipRestoreErrorInfo>> =
         task {
             let maybeDumps =
                 try
                     Ok <| schemasFromZipFile stream
                 with
-                | :? RestoreSchemaException as e -> Error (RREInvalidFormat <| exceptionString e)
-            match Result.map (Map.toList) maybeDumps with
+                | :? RestoreSchemaException as e -> Error (ZREInvalidFormat <| exceptionString e)
+            match maybeDumps with
             | Error e -> return Error e
-            | Ok [(dumpName, dump)] when name = dumpName -> return! this.RestoreSchema name dump
-            | Ok _ -> return Error (RREInvalidFormat <| sprintf "Archive should only contain directory %O" name)
+            | Ok dumps ->
+                let handleOne (schemaName, schema) : Task<Result<unit, ZipRestoreErrorInfo>> =
+                    task {
+                        match! this.RestoreSchema schemaName schema with
+                        | Ok () -> return Ok ()
+                        | Error e -> return Error <| ZRESchemaFailed (schemaName, e)
+                    }
+                match! dumps |> Map.toSeq |> Seq.traverseResultTask handleOne with
+                | Ok results -> return Ok ()
+                | Error err -> return Error err
         }
 
     interface ISaveRestoreAPI with
         member this.SaveSchema name = this.SaveSchema name
         member this.SaveZipSchema name = this.SaveZipSchema name
         member this.RestoreSchema name dump = this.RestoreSchema name dump
-        member this.RestoreZipSchema name stream = this.RestoreZipSchema name stream
+        member this.RestoreZipSchemas stream = this.RestoreZipSchemas stream

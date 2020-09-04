@@ -351,15 +351,13 @@ type EntitiesAPI (rctx : IRequestContext) =
                             Task.map (Result.map (fun _ -> TRUpdateEntity)) <| this.UpdateEntity ref id entries
                         | TDeleteEntity (ref, id) ->
                             Task.map (Result.map (fun _ -> TRDeleteEntity)) <| this.DeleteEntity ref id
-                    return Result.mapError (fun err -> (i, err)) res
+                    return Result.mapError (fun err -> { Operation = i; Details = err }) res
                 }
             match! transaction.Operations |> Seq.indexed |> Seq.traverseResultTask handleOne with
             | Ok results ->
                 return Ok { Results = Array.ofSeq results }
-            | Error (i, err) ->
-                return Error { Details = err
-                               Operation = i
-                             }
+            | Error e ->
+                return Error e
         }
 
     interface IEntitiesAPI with

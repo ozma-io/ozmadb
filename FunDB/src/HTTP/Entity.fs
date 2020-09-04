@@ -1,12 +1,9 @@
 ﻿module FunWithFlags.FunDB.HTTP.Entity
 
-open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open Giraffe
 
-open FunWithFlags.FunUtils
-open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.API.Types

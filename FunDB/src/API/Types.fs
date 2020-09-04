@@ -180,8 +180,8 @@ type Transaction =
     }
 
 type TransactionError =
-    { Details : EntityErrorInfo
-      Operation : int
+    { Operation : int
+      Details : EntityErrorInfo
     } with
         [<DataMember>]
         member this.Error = "transaction"
@@ -223,13 +223,24 @@ type RestoreErrorInfo =
             match this with
             | RREAccessDenied -> "Restore access denied"
             | RREPreloaded -> "Cannot restore preloaded schemas"
-            | RREInvalidFormat msg -> "Invalid data format"
+            | RREInvalidFormat msg -> sprintf "Invalid data format: %s" msg
+
+[<SerializeAsObject("error")>]
+type ZipRestoreErrorInfo =
+    | [<CaseName("invalid_format")>] ZREInvalidFormat of Details : string
+    | [<CaseName("schema_failed")>] ZRESchemaFailed of Schema : SchemaName * Details : RestoreErrorInfo
+    with
+        [<DataMember>]
+        member this.Message =
+            match this with
+            | ZRESchemaFailed (schema, details) -> sprintf "Failed to restore schema %O: %s" schema details.Message
+            | ZREInvalidFormat msg -> sprintf "Invalid data format: %s" msg
 
 type ISaveRestoreAPI =
     abstract member SaveSchema : SchemaName -> Task<Result<SchemaDump, SaveErrorInfo>>
     abstract member SaveZipSchema : SchemaName -> Task<Result<Stream, SaveErrorInfo>>
     abstract member RestoreSchema : SchemaName -> SchemaDump -> Task<Result<unit, RestoreErrorInfo>>
-    abstract member RestoreZipSchema : SchemaName -> Stream -> Task<Result<unit, RestoreErrorInfo>>
+    abstract member RestoreZipSchemas : Stream -> Task<Result<unit, ZipRestoreErrorInfo>>
 
 type IFunDBAPI =
     abstract member Request : IRequestContext
