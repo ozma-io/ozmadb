@@ -409,7 +409,7 @@ export default class FunDBAPI {
     return await this.fetchGetFileApi(`layouts/${schema}`, token, "application/zip");
   };
 
-  restoreSchema = async (token: string | null, schema: string, data: Blob): Promise<void> => {
-    await this.fetchSendFileApi(`layouts/${schema}`, token, "PUT", "application/zip", data);
+  restoreSchemas = async (token: string | null, data: Blob): Promise<void> => {
+    await this.fetchSendFileApi(`layouts`, token, "PUT", "application/zip", data);
   };
 }
