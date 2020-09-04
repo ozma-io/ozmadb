@@ -58,10 +58,10 @@
       "NetJs.Json": {
         "type": "Direct",
         "requested": "[1.1.*, )",
-        "resolved": "1.1.2",
-        "contentHash": "pPCFF8HPMULfThA1zF82l2w86xz5ChASOeEq8x4tVEggqXqgp/zoQBW9DL66I3ICwhyDyD215B42uDSe7S2cIg==",
+        "resolved": "1.1.3",
+        "contentHash": "jfWA7tGI1+L/vEpdvecrsHbJxo2ZLUBddaNJJpQOm+y6QA5jVXUMiWuYSxG/ROKu06xjqw3FRGXLB+iCt5beAg==",
         "dependencies": {
-          "NetJs": "1.1.4",
+          "NetJs": "1.1.9",
           "Newtonsoft.Json": "12.0.3"
         }
       },
