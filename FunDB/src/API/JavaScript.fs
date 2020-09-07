@@ -65,7 +65,7 @@ type APITemplate (isolate : Isolate) =
                 failwith "Number of arguments must be between 1 and 2"
             let source = jsDeserialize<UserViewSource>(args.[0])
             let args =
-                if args.Length >= 2 then
+                if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
                     jsDeserialize<RawArguments>(args.[1])
                 else
                     Map.empty
