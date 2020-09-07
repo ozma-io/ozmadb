@@ -1,7 +1,9 @@
 module FunWithFlags.FunDB.JavaScript.Runtime
 
 open System
+open System.Threading.Tasks
 open System.Runtime.CompilerServices
+open FSharp.Control.Tasks.Affine
 open NetJs
 open NetJs.Value
 open NetJs.Template
@@ -23,10 +25,6 @@ type IsolateLocal<'a when 'a : not struct> (create : Isolate -> 'a) =
     member this.GetValue (isolate : Isolate) =
         table.GetValue(isolate, ConditionalWeakTable.CreateValueCallback<Isolate,'a> create)
 
-type IJavaScriptTemplate =
-    abstract member ObjectTemplate : ObjectTemplate
-    abstract member FinishInitialization : Context -> unit
-
 type Path = string
 type Source = string
 
@@ -42,13 +40,26 @@ let private pathAliases (path : Path) =
         POSIXPath.trimExtension path
     }
 
-type JSRuntime (template : IJavaScriptTemplate, moduleSources : (Path * Source) seq) =
-    let isolate = template.ObjectTemplate.Isolate
+type IJavaScriptTemplate =
+    abstract member ObjectTemplate : ObjectTemplate
+    abstract member FinishInitialization : IJSRuntime -> Context -> unit
+
+and IJSRuntime =
+    abstract member CreateModule : string -> string -> Module
+    abstract member CreateDefaultFunction : string -> string -> Function
+    abstract member Context : Context
+    abstract member Isolate : Isolate
+    abstract member EventLoop : EventLoop
+    abstract member EventLoopScope : (unit -> Task<'a>) -> Task<'a>
+
+type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateConstructor : Isolate -> 'a, moduleSources : (Path * Source) seq) as this =
+    let mutable currentEventLoop = None : EventLoop option
+    let template = templateConstructor isolate
 
     let context = Context.New(isolate, template.ObjectTemplate)
     do
         context.Global.Set("global", context.Global.Value)
-        template.FinishInitialization context
+        template.FinishInitialization this context
 
     let makeModule (path : Path) src =
         let modul = Module.Compile(String.New(context.Isolate, src), ScriptOrigin(path, IsModule = true))
@@ -87,3 +98,24 @@ type JSRuntime (template : IJavaScriptTemplate, moduleSources : (Path * Source) 
 
     member this.Context = context
     member this.Isolate = isolate
+    member this.EventLoop = Option.get currentEventLoop
+    member this.API = template
+
+    member this.EventLoopScope (f : unit -> Task<'r>) =
+        task {
+            let oldEventLoop = currentEventLoop
+            let loop = EventLoop ()
+            currentEventLoop <- Some loop
+            try
+                return! f ()
+            finally
+                currentEventLoop <- oldEventLoop
+        }
+
+    interface IJSRuntime with
+        member this.CreateModule path script = this.CreateModule path script
+        member this.CreateDefaultFunction path script = this.CreateDefaultFunction path script
+        member this.Context = context
+        member this.Isolate = isolate
+        member this.EventLoop = this.EventLoop
+        member this.EventLoopScope f = this.EventLoopScope f

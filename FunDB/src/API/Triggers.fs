@@ -34,7 +34,7 @@ type SerializedTriggerEvent =
       Source : SerializedTriggerSource
     }
 
-type TriggerScript (runtime : JSRuntime, name : string, scriptSource : string) =
+type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
             runtime.CreateDefaultFunction name scriptSource
@@ -52,13 +52,16 @@ type TriggerScript (runtime : JSRuntime, name : string, scriptSource : string) =
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             let oldArgs = V8JsonWriter.Serialize(runtime.Context, args)
             try
-                let newArgs = func.Call(cancellationToken, null, [|eventValue; oldArgs|])
-                do! runtime.Isolate.EventLoop.Run ()
-                let newArgs = newArgs.GetValueOrPromiseResult ()
-                return
-                    match newArgs.Data with
-                    | :? bool as ret -> if ret then ATUntouched else ATCancelled
-                    | _ -> ATTouched <| jsDeserialize newArgs
+                return! runtime.EventLoopScope <| fun () ->
+                    task {
+                        let newArgs = func.Call(cancellationToken, null, [|eventValue; oldArgs|])
+                        do! runtime.EventLoop.Run ()
+                        let newArgs = newArgs.GetValueOrPromiseResult ()
+                        return
+                            match newArgs.Data with
+                            | :? bool as ret -> if ret then ATUntouched else ATCancelled
+                            | _ -> ATTouched <| jsDeserialize newArgs
+                    }
             with
             | :? JSException as e ->
                 return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
@@ -81,9 +84,12 @@ type TriggerScript (runtime : JSRuntime, name : string, scriptSource : string) =
                         let oldArgs = V8JsonWriter.Serialize(runtime.Context, oldArgsObj)
                         [|eventValue; oldArgs|]
                     | None -> [|eventValue|]
-                let maybePromise = func.Call(cancellationToken, null, functionArgs)
-                do! runtime.Isolate.EventLoop.Run ()
-                ignore <| maybePromise.GetValueOrPromiseResult ()
+                return! runtime.EventLoopScope <| fun () ->
+                    task {
+                        let maybePromise = func.Call(cancellationToken, null, functionArgs)
+                        do! runtime.EventLoop.Run ()
+                        ignore <| maybePromise.GetValueOrPromiseResult ()
+                    }
             with
             | :? JSException as e ->
                 return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
@@ -106,10 +112,13 @@ type TriggerScript (runtime : JSRuntime, name : string, scriptSource : string) =
                 }
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             try
-                let maybeContinue = func.Call(cancellationToken, null, [|eventValue|])
-                do! runtime.Isolate.EventLoop.Run ()
-                let maybeContinue = maybeContinue.GetValueOrPromiseResult ()
-                return maybeContinue.GetBoolean ()
+                return! runtime.EventLoopScope <| fun () ->
+                    task {
+                        let maybeContinue = func.Call(cancellationToken, null, [|eventValue|])
+                        do! runtime.EventLoop.Run ()
+                        let maybeContinue = maybeContinue.GetValueOrPromiseResult ()
+                        return maybeContinue.GetBoolean ()
+                    }
             with
             | :? JSException as e ->
                 return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
@@ -161,7 +170,7 @@ type TriggerScripts =
 let private triggerName (triggerRef : TriggerRef) =
     sprintf "%O/triggers/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.schema triggerRef.Entity.name triggerRef.Name
 
-let private prepareTriggerScriptsEntity (runtime : JSRuntime) (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : TriggerScriptsEntity =
+let private prepareTriggerScriptsEntity (runtime : IJSRuntime) (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : TriggerScriptsEntity =
     let getOne name = function
     | Error e -> None
     | Ok trigger -> Some (TriggerScript(runtime, triggerName { Schema = schemaName; Entity = triggerEntity; Name = name }, trigger.Procedure) :> ITriggerScript)
@@ -169,20 +178,20 @@ let private prepareTriggerScriptsEntity (runtime : JSRuntime) (schemaName : Sche
     { Triggers = Map.mapMaybe getOne triggers.Triggers
     }
 
-let private prepareTriggerScriptsSchema (runtime : JSRuntime) (schemaName : SchemaName) (triggerSchema : SchemaName) (triggers : TriggersSchema) : TriggerScriptsSchema =
+let private prepareTriggerScriptsSchema (runtime : IJSRuntime) (schemaName : SchemaName) (triggerSchema : SchemaName) (triggers : TriggersSchema) : TriggerScriptsSchema =
     let getOne name = prepareTriggerScriptsEntity runtime schemaName { schema = triggerSchema; name = name }
     { Entities = Map.map getOne triggers.Entities
     }
 
-let private prepareTriggerScriptsDatabase (runtime : JSRuntime) (schemaName : SchemaName) (triggers : TriggersDatabase) : TriggerScriptsDatabase =
+let private prepareTriggerScriptsDatabase (runtime : IJSRuntime) (schemaName : SchemaName) (triggers : TriggersDatabase) : TriggerScriptsDatabase =
     { Schemas = Map.map (prepareTriggerScriptsSchema runtime schemaName) triggers.Schemas
     }
 
-let prepareTriggerScripts (runtime : JSRuntime) (triggers : ResolvedTriggers) : TriggerScripts =
+let prepareTriggerScripts (runtime : IJSRuntime) (triggers : ResolvedTriggers) : TriggerScripts =
     { Schemas = Map.map (prepareTriggerScriptsDatabase runtime) triggers.Schemas
     }
 
-type private TestTriggerEvaluator (runtime : JSRuntime, forceAllowBroken : bool) =
+type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool) =
     let testTrigger (triggerRef : TriggerRef) (trigger : ResolvedTrigger) : unit =
         ignore <| TriggerScript(runtime, triggerName triggerRef, trigger.Procedure)
 
@@ -261,6 +270,6 @@ type private TestTriggerEvaluator (runtime : JSRuntime, forceAllowBroken : bool)
 
     member this.TestTriggers sourceTriggers triggers = testTriggers sourceTriggers triggers
 
-let testEvalTriggers (runtime : JSRuntime) (forceAllowBroken : bool) (source : SourceTriggers) (triggers : ResolvedTriggers) : ErroredTriggers * ResolvedTriggers =
+let testEvalTriggers (runtime : IJSRuntime) (forceAllowBroken : bool) (source : SourceTriggers) (triggers : ResolvedTriggers) : ErroredTriggers * ResolvedTriggers =
     let eval = TestTriggerEvaluator(runtime, forceAllowBroken)
     eval.TestTriggers source triggers

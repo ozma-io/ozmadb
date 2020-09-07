@@ -18,6 +18,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Merge
+open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Attributes.Merge
 open FunWithFlags.FunDB.Layout.Info
@@ -47,13 +48,13 @@ type IContext =
     inherit IDisposable
     inherit IAsyncDisposable
 
-    abstract member Transaction : DatabaseTransaction with get
-    abstract member Preload : Preload with get
-    abstract member TransactionId : int with get
-    abstract member TransactionTime : NpgsqlDateTime with get
-    abstract member LoggerFactory : ILoggerFactory with get
-    abstract member CancellationToken : CancellationToken with get
-    abstract member Isolate : Isolate
+    abstract member Transaction : DatabaseTransaction
+    abstract member Preload : Preload
+    abstract member TransactionId : int
+    abstract member TransactionTime : NpgsqlDateTime
+    abstract member LoggerFactory : ILoggerFactory
+    abstract member CancellationToken : CancellationToken
+    abstract member Runtime : IJSRuntime
 
     abstract member Layout : Layout
     abstract member UserViews : PrefetchedUserViews

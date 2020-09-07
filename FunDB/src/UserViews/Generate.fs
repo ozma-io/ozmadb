@@ -25,7 +25,7 @@ let private convertUserView (KeyValue (k, v : Value.Value)) =
         }
     (FunQLName k, uv)
 
-type private UserViewsGeneratorScript (runtime : JSRuntime, name : string, scriptSource : string) =
+type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
             runtime.CreateDefaultFunction name scriptSource
@@ -91,7 +91,7 @@ type private UserViewsGeneratorState (layout : Layout, cancellationToken : Cance
 
     member this.GenerateUserViews gens = generateUserViews gens
 
-type UserViewsGenerator (runtime : JSRuntime, userViews : SourceUserViews, createForceAllowBroken : bool) =
+type UserViewsGenerator (runtime : IJSRuntime, userViews : SourceUserViews, createForceAllowBroken : bool) =
     let prepareGenerator (name : SchemaName) (schema : SourceUserViewsSchema) =
         match schema.GeneratorScript with
         | None -> PUVStatic schema

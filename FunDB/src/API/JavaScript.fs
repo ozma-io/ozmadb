@@ -3,9 +3,9 @@ module FunWithFlags.FunDB.API.JavaScript
 open NetJs
 open NetJs.Json
 open NetJs.Template
-open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json.Linq
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Utils
@@ -27,6 +27,7 @@ let inline jsDeserialize< ^a when ^a : not struct > (v : Value.Value) =
 type APITemplate (isolate : Isolate) =
     let mutable currentHandle = None : APIHandle option
     let mutable errorConstructor = None : Value.Function option
+    let mutable runtime = Unchecked.defaultof<IJSRuntime>
 
     let returnResult context = function
     | Ok r ->
@@ -70,7 +71,7 @@ type APITemplate (isolate : Isolate) =
                 else
                     Map.empty
             let handle = Option.get currentHandle
-            isolate.EventLoop.NewPromise(context, fun () -> task {
+            runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.UserViews.GetUserView source args false
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
@@ -81,7 +82,7 @@ type APITemplate (isolate : Isolate) =
                 failwith "Number of arguments must be 1"
             let source = jsDeserialize<UserViewSource>(args.[0])
             let handle = Option.get currentHandle
-            isolate.EventLoop.NewPromise(context, fun () -> task {
+            runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.UserViews.GetUserViewInfo source false
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
@@ -93,7 +94,7 @@ type APITemplate (isolate : Isolate) =
                 failwith "Number of arguments must be 1"
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let handle = Option.get currentHandle
-            isolate.EventLoop.NewPromise(context, fun () -> task {
+            runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.GetEntityInfo ref
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
@@ -105,7 +106,7 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let rawArgs = jsDeserialize<RawArguments>(args.[1])
             let handle = Option.get currentHandle
-            isolate.EventLoop.NewPromise(context, fun () -> task {
+            runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.InsertEntity ref rawArgs
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
@@ -118,7 +119,7 @@ type APITemplate (isolate : Isolate) =
             let id = int (args.[1].Data :?> double)
             let rawArgs = jsDeserialize<RawArguments>(args.[2])
             let handle = Option.get currentHandle
-            isolate.EventLoop.NewPromise(context, fun () -> task {
+            runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.UpdateEntity ref id rawArgs
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
@@ -130,7 +131,7 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let id = int (args.[1].Data :?> double)
             let handle = Option.get currentHandle
-            isolate.EventLoop.NewPromise(context, fun () -> task {
+            runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.DeleteEntity ref id
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
@@ -189,7 +190,8 @@ global.FunDBError = FunDBError;
 
     interface IJavaScriptTemplate with
         member this.ObjectTemplate = template
-        member this.FinishInitialization context =
+        member this.FinishInitialization newRuntime context =
+            runtime <- newRuntime
             let p = preludeScript.Bind(context)
             ignore <| p.Run()
             errorConstructor <- Some <| context.Global.Get("FunDBError").GetFunction()
