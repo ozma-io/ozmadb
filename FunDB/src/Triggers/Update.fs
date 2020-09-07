@@ -14,6 +14,11 @@ open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
+type UpdateTriggersException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = UpdateTriggersException (message, null)
+
 type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
@@ -42,7 +47,10 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) =
 
         let updateFunc _ = updateTriggersField
         let createFunc (entityRef, FunQLName triggerName) =
-            let entityId = Map.find entityRef allEntitiesMap
+            let entityId =
+                match Map.tryFind entityRef allEntitiesMap with
+                | Some id -> id
+                | None -> raisef UpdateTriggersException "Unknown entity %O for trigger %O" entityRef triggerName
             let newTrigger =
                 Trigger (
                     TriggerEntityId = entityId,
@@ -53,8 +61,12 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) =
         ignore <| updateDifference db updateFunc createFunc newTriggersMap oldTriggersMap
 
     let updateSchemas (schemas : Map<SchemaName, SourceTriggersDatabase>) (oldSchemas : Map<SchemaName, Schema>) =
-        let updateFunc _ = updateTriggersDatabase
-        let createFunc name = failwith <| sprintf "Schema %O doesn't exist" name
+        let updateFunc name schema existingSchema = 
+            try
+                updateTriggersDatabase schema existingSchema
+            with
+            | :? UpdateTriggersException as e -> raisefWithInner UpdateTriggersException e.InnerException "In schema %O: %s" name e.Message
+        let createFunc name = raisef UpdateTriggersException "Schema %O doesn't exist" name
         ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
 
     member this.UpdateSchemas = updateSchemas

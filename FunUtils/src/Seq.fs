@@ -139,6 +139,16 @@ let foldResult (func : 'acc -> 'a -> Result<'acc, 'e>) (init : 'acc) (vals : seq
     | None -> Ok acc
     | Some e -> Error e
 
+
+let foldTask (func : 'acc -> 'a -> Task<'acc>) (init : 'acc) (vals : seq<'a>) : Task<'acc> =
+    task {
+        let mutable acc = init
+        for a in vals do
+            let! newAcc = func acc a
+            acc <- newAcc
+        return acc
+    }
+
 let foldOptionTask (func : 'acc -> 'a -> Task<'acc option>) (init : 'acc) (vals : seq<'a>) : Task<'acc option> =
     task {
         let mutable acc = init

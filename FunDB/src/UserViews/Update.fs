@@ -15,6 +15,11 @@ open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
+type UpdateUserViewsException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = UpdateUserViewsException (message, null)
+
 type private UserViewsUpdater (db : SystemContext) =
     let updateUserView (uv : SourceUserView) (existingUv : UserView) : unit =
         existingUv.AllowBroken <- uv.AllowBroken
@@ -41,10 +46,9 @@ type private UserViewsUpdater (db : SystemContext) =
             newUv
         ignore <| updateDifference db updateFunc createFunc schema.UserViews oldUserViewsMap
 
-
     let updateSchemas (schemas : Map<SchemaName, SourceUserViewsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
         let updateFunc _ = updateUserViewsSchema
-        let createFunc name = failwith <| sprintf "Schema %O doesn't exist" name
+        let createFunc name = raisef UpdateUserViewsException "Schema %O doesn't exist" name
         ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
 
     member this.UpdateSchemas = updateSchemas

@@ -209,7 +209,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                     errors <- Map.add name (e :> exn) errors
                     Error { Source = Map.find name sourceTriggers.Triggers; Error = e }
             with
-            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "Error in trigger %O: %s" name e.Message
+            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In trigger %O: %s" name e.Message
 
         let ret =
             { Triggers = entityTriggers.Triggers |> Map.map (fun name -> Result.bind (mapTrigger name))
@@ -227,7 +227,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                     errors <- Map.add name entityErrors errors
                 newEntity
             with
-            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "Error in triggers entity %O: %s" name e.Message
+            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In triggers entity %O: %s" name e.Message
 
         let ret =
             { Entities = schemaTriggers.Entities |> Map.map mapEntity
@@ -244,7 +244,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                     errors <- Map.add name schemaErrors errors
                 newSchema
             with
-            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "Error in triggers schema %O: %s" name e.Message
+            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In triggers schema %O: %s" name e.Message
 
         let ret =
             { Schemas = db.Schemas |> Map.map mapSchema
@@ -261,7 +261,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                     errors <- Map.add name dbErrors errors
                 newDb
             with
-            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "Error in schema %O: %s" name e.Message
+            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In schema %O: %s" name e.Message
 
         let ret =
             { Schemas = triggers.Schemas |> Map.map mapDatabase

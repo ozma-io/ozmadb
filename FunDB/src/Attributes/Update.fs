@@ -14,6 +14,11 @@ open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
+type UpdateAttributesException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = UpdateAttributesException (message, null)
+
 type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
@@ -38,7 +43,10 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
 
         let updateFunc _ = updateAttributesField
         let createFunc (entityRef, FunQLName fieldName) =
-            let entityId = Map.find entityRef allEntitiesMap
+            let entityId =
+                match Map.tryFind entityRef allEntitiesMap with
+                | Some id -> id
+                | None -> raisef UpdateAttributesException "Unknown entity %O" entityRef
             let newAttrs =
                 FieldAttributes (
                     FieldEntityId = entityId,
@@ -49,8 +57,12 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
         ignore <| updateDifference db updateFunc createFunc newAttrsMap oldAttrsMap
 
     let updateSchemas (schemas : Map<SchemaName, SourceAttributesDatabase>) (oldSchemas : Map<SchemaName, Schema>) =
-        let updateFunc _ = updateAttributesDatabase
-        let createFunc name = failwith <| sprintf "Schema %O doesn't exist" name
+        let updateFunc name schema existingSchema =
+            try
+                updateAttributesDatabase schema existingSchema
+            with
+            | :? UpdateAttributesException as e -> raisefWithInner UpdateAttributesException e.InnerException "In schema %O: %s" name e.Message
+        let createFunc name = raisef UpdateAttributesException "Schema %O doesn't exist" name
         ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
 
     member this.UpdateSchemas = updateSchemas

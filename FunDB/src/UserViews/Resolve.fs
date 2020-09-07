@@ -76,7 +76,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                         } : UserViewError
                     Error err
             with
-            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "Error in user view %O: %s" name e.Message
+            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "In user view %O: %s" name e.Message
 
         let uvs = schema.UserViews |> Map.map mapUserView
 
@@ -91,7 +91,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     raisef UserViewResolveException "Unknown schema name"
                 resolveUserViewsSchema schema
             with
-            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
+            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "In schema %O: %s" name e.Message
         uvs.Schemas |> Map.map mapSchema
 
     member this.ResolveUserView = resolveUserView
@@ -167,7 +167,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
                                   Source = uv.Source
                                 } : UserViewError
                             Error err
-                        | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "Error in user view %O" ref
+                        | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "In user view %O" ref
                     cachedViews <- Map.add ref r cachedViews
                     r
 
@@ -190,7 +190,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
                     Ok newSchema
                 with
                 | :? UserViewResolveException as e ->
-                    raisefWithInner UserViewResolveException e.InnerException "Error in schema %O: %s" name e.Message
+                    raisefWithInner UserViewResolveException e.InnerException "In schema %O: %s" name e.Message
             | Error err ->
                 errors <- Map.add name (UEGenerator err.Error) errors
                 Error err

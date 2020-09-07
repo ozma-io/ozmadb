@@ -149,24 +149,39 @@ let saveSchema (db : SystemContext) (name : SchemaName) (cancellationToken : Can
             }
     }
 
-let restoreSchema (db : SystemContext) (name : SchemaName) (dump : SchemaDump) (cancellationToken : CancellationToken) : Task<bool> =
+let restoreSchemas (db : SystemContext) (dumps : Map<SchemaName, SchemaDump>) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let newLayout = { Schemas = Map.singleton name { Entities = dump.Entities } } : SourceLayout
-        let newPerms = { Schemas = Map.singleton name { Roles = dump.Roles } } : SourcePermissions
-        let newUserViews =
-            let uvs =
-                { UserViews = if Option.isSome dump.UserViewsGeneratorScript then Map.empty else dump.UserViews
-                  GeneratorScript = dump.UserViewsGeneratorScript
-                }
-            { Schemas = Map.singleton name uvs } : SourceUserViews
-        let newAttributes = { Schemas = Map.singleton name { Schemas = dump.DefaultAttributes } } : SourceDefaultAttributes
-        let newTriggers = { Schemas = Map.singleton name { Schemas = dump.Triggers } } : SourceTriggers
+        let newLayout = { Schemas = Map.map (fun name dump -> { Entities = dump.Entities }) dumps } : SourceLayout
+        let newPerms = { Schemas = Map.map (fun name dump -> { Roles = dump.Roles }) dumps } : SourcePermissions
+        let makeUserView name dump =
+            { UserViews = if Option.isSome dump.UserViewsGeneratorScript then Map.empty else dump.UserViews
+              GeneratorScript = dump.UserViewsGeneratorScript
+            }
+        let newUserViews = { Schemas = Map.map makeUserView dumps } : SourceUserViews
+        let newAttributes = { Schemas = Map.map (fun name dump -> { Schemas = dump.DefaultAttributes }) dumps } : SourceDefaultAttributes
+        let newTriggers = { Schemas = Map.map (fun name dump -> { Schemas = dump.Triggers }) dumps } : SourceTriggers
 
         let! updated1 = updateLayout db newLayout cancellationToken
-        let! updated2 = updatePermissions db newPerms cancellationToken
-        let! updated3 = updateUserViews db newUserViews cancellationToken
-        let! updated4 = updateAttributes db newAttributes cancellationToken
-        let! updated5 = updateTriggers db newTriggers cancellationToken
+        let! updated2 =
+            try
+                updatePermissions db newPerms cancellationToken
+            with
+            | :? UpdatePermissionsException as e -> raisefWithInner RestoreSchemaException e "Failed to restore permissions"
+        let! updated3 =
+            try
+                updateUserViews db newUserViews cancellationToken
+            with
+            | :? UpdateUserViewsException as e -> raisefWithInner UpdateUserViewsException e "Failed to restore user views"
+        let! updated4 =
+            try
+                updateAttributes db newAttributes cancellationToken
+            with
+            | :? UpdateAttributesException as e -> raisefWithInner UpdateAttributesException e "Failed to restore attributes"
+        let! updated5 =
+            try
+                updateTriggers db newTriggers cancellationToken
+            with
+            | :? UpdateTriggersException as e -> raisefWithInner UpdateTriggersException e "Failed to restore triggers"
 
         return updated1 || updated2 || updated3 || updated4 || updated5
     }

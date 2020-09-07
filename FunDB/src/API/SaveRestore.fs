@@ -63,7 +63,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                 return Ok (stream :> Stream)
         }
 
-    member this.RestoreSchema (name : SchemaName) (dump : SchemaDump) : Task<Result<unit, RestoreErrorInfo>> =
+    member this.RestoreSchemas (dumps : Map<SchemaName, SchemaDump>) : Task<Result<unit, RestoreErrorInfo>> =
         task {
             if not (isRootRole rctx.User.Type) then
                 logger.LogError("Restore access denied")
@@ -72,7 +72,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                     event.Error <- "access_denied"
                 )
                 return Error RREAccessDenied
-            else if Map.containsKey name ctx.Preload.Schemas then
+            else if not <| Set.isEmpty (Set.intersect (Map.keysSet dumps) (Map.keysSet ctx.Preload.Schemas)) then
                 logger.LogError("Cannot restore preloaded schemas")
                 rctx.WriteEvent (fun event ->
                     event.Type <- "restoreSchema"
@@ -80,39 +80,36 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                 )
                 return Error RREPreloaded
             else
-                let! modified = restoreSchema ctx.Transaction.System name dump ctx.CancellationToken
-                if modified then
-                    ctx.ScheduleMigration ()
-                rctx.WriteEventSync (fun event ->
-                    event.Type <- "restoreSchema"
-                    event.Details <- JsonConvert.SerializeObject dump
-                )
-                return Ok ()
+                try
+                    let! modified = restoreSchemas ctx.Transaction.System dumps ctx.CancellationToken
+                    if modified then
+                        ctx.ScheduleMigration ()
+                    rctx.WriteEventSync (fun event ->
+                        event.Type <- "restoreSchemas"
+                        event.Details <- JsonConvert.SerializeObject dumps
+                    )
+                    return Ok ()
+                with
+                | :? RestoreSchemaException as e -> return Error <| RREConsistency (exceptionString e)
         }
 
-    member this.RestoreZipSchemas (stream : Stream) : Task<Result<unit, ZipRestoreErrorInfo>> =
+    member this.RestoreZipSchemas (stream : Stream) : Task<Result<unit, RestoreErrorInfo>> =
         task {
             let maybeDumps =
                 try
                     Ok <| schemasFromZipFile stream
                 with
-                | :? RestoreSchemaException as e -> Error (ZREInvalidFormat <| exceptionString e)
+                | :? RestoreSchemaException as e -> Error (RREInvalidFormat <| exceptionString e)
             match maybeDumps with
             | Error e -> return Error e
             | Ok dumps ->
-                let handleOne (schemaName, schema) : Task<Result<unit, ZipRestoreErrorInfo>> =
-                    task {
-                        match! this.RestoreSchema schemaName schema with
-                        | Ok () -> return Ok ()
-                        | Error e -> return Error <| ZRESchemaFailed (schemaName, e)
-                    }
-                match! dumps |> Map.toSeq |> Seq.traverseResultTask handleOne with
-                | Ok results -> return Ok ()
-                | Error err -> return Error err
+                match! this.RestoreSchemas dumps with
+                | Ok () -> return Ok ()
+                | Error e -> return Error e
         }
 
     interface ISaveRestoreAPI with
         member this.SaveSchema name = this.SaveSchema name
         member this.SaveZipSchema name = this.SaveZipSchema name
-        member this.RestoreSchema name dump = this.RestoreSchema name dump
+        member this.RestoreSchemas dumps = this.RestoreSchemas dumps
         member this.RestoreZipSchemas stream = this.RestoreZipSchemas stream

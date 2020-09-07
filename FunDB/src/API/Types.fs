@@ -218,6 +218,7 @@ type RestoreErrorInfo =
     | [<CaseName("access_denied")>] RREAccessDenied
     | [<CaseName("preloaded")>] RREPreloaded
     | [<CaseName("invalid_format")>] RREInvalidFormat of Details : string
+    | [<CaseName("consistency")>] RREConsistency of Details : string
     with
         [<DataMember>]
         member this.Message =
@@ -225,23 +226,13 @@ type RestoreErrorInfo =
             | RREAccessDenied -> "Restore access denied"
             | RREPreloaded -> "Cannot restore preloaded schemas"
             | RREInvalidFormat msg -> sprintf "Invalid data format: %s" msg
-
-[<SerializeAsObject("error")>]
-type ZipRestoreErrorInfo =
-    | [<CaseName("invalid_format")>] ZREInvalidFormat of Details : string
-    | [<CaseName("schema_failed")>] ZRESchemaFailed of Schema : SchemaName * Details : RestoreErrorInfo
-    with
-        [<DataMember>]
-        member this.Message =
-            match this with
-            | ZRESchemaFailed (schema, details) -> sprintf "Failed to restore schema %O: %s" schema details.Message
-            | ZREInvalidFormat msg -> sprintf "Invalid data format: %s" msg
+            | RREConsistency msg -> sprintf "Inconsistent dump: %s" msg
 
 type ISaveRestoreAPI =
     abstract member SaveSchema : SchemaName -> Task<Result<SchemaDump, SaveErrorInfo>>
     abstract member SaveZipSchema : SchemaName -> Task<Result<Stream, SaveErrorInfo>>
-    abstract member RestoreSchema : SchemaName -> SchemaDump -> Task<Result<unit, RestoreErrorInfo>>
-    abstract member RestoreZipSchemas : Stream -> Task<Result<unit, ZipRestoreErrorInfo>>
+    abstract member RestoreSchemas : Map<SchemaName, SchemaDump> -> Task<Result<unit, RestoreErrorInfo>>
+    abstract member RestoreZipSchemas : Stream -> Task<Result<unit, RestoreErrorInfo>>
 
 type IFunDBAPI =
     abstract member Request : IRequestContext

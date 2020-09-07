@@ -5,6 +5,7 @@ open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open Giraffe
 
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Operations.SaveRestore
@@ -23,13 +24,7 @@ let private restoreError e =
         | RREAccessDenied -> RequestErrors.forbidden
         | RREPreloaded -> RequestErrors.unprocessableEntity
         | RREInvalidFormat _ -> RequestErrors.unprocessableEntity
-    handler (json e)
-
-let private massRestoreError e =
-    let handler =
-        match e with
-        | ZRESchemaFailed _ -> RequestErrors.badRequest
-        | ZREInvalidFormat _ -> RequestErrors.unprocessableEntity
+        | RREConsistency _ -> RequestErrors.badRequest
     handler (json e)
 
 let saveRestoreApi : HttpHandler =
@@ -61,7 +56,7 @@ let saveRestoreApi : HttpHandler =
 
     let restoreJsonSchema (schemaName : SchemaName) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         let! dump = ctx.BindJsonAsync<SchemaDump>()
-        match! api.SaveRestore.RestoreSchema schemaName dump with
+        match! api.SaveRestore.RestoreSchemas (Map.singleton schemaName dump) with
         | Ok () -> return! commitAndOk api next ctx
         | Error err -> return! restoreError err next ctx
     }
@@ -72,7 +67,7 @@ let saveRestoreApi : HttpHandler =
         ignore <| stream.Seek(0L, SeekOrigin.Begin)
         match! api.SaveRestore.RestoreZipSchemas stream with
         | Ok () -> return! commitAndOk api next ctx
-        | Error err -> return! massRestoreError err next ctx
+        | Error err -> return! restoreError err next ctx
     }
 
     let restoreSchema (schemaName : SchemaName) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {

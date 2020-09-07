@@ -184,7 +184,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             try
                 resolveAllowedField { entity = entityRef; name = name } entity allowedField
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed field %O: %s" name e.Message
+            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "In allowed field %O: %s" name e.Message
 
         let resolveOne allowIds = Option.map (resolveRestriction entityRef entity allowIds) >> Option.defaultValue emptyRestriction
         let fields = allowedEntity.Fields |> Map.map mapField
@@ -223,7 +223,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     if allowedField.Change && optimizedIsFalse myPerms.Check.Expression then
                         raisef ResolvePermissionsException "Cannot allow to change without providing check expression"
                 with
-                | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed field %O: %s" ref e.Message
+                | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "In allowed field %O: %s" ref e.Message
 
         Map.iter iterField flat.Fields
 
@@ -290,7 +290,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             | Some right ->
                 match resolveAllowedEntity parentRef right with
                 | Ok ret -> Seq.singleton ret.Flat
-                | Error err -> raisefWithInner ResolvePermissionsParentException err.Error "Error in parent %O" parentRef
+                | Error err -> raisefWithInner ResolvePermissionsParentException err.Error "In parent %O" parentRef
             | None ->
                 let parentEntity = layout.FindEntity parentRef |> Option.get
                 match parentEntity.inheritance with
@@ -360,7 +360,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                             errors <- Map.add name e.Error errors
                         Error e
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed entity %O: %s" name e.Message
+            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "In allowed entity %O: %s" name e.Message
 
         let ret =
             { Entities = allowedSchema.Entities |> Map.map mapEntity
@@ -381,7 +381,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     errors <- Map.add name schemaErrors errors
                 newAllowed
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in allowed schema %O: %s" name e.Message
+            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "In allowed schema %O: %s" name e.Message
 
         let ret =
             { Schemas = allowedDb.Schemas |> Map.map mapSchema
@@ -457,7 +457,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                             errors <- Map.add name (ERFatal e.Error) errors
                         Error e
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in role %O: %s" name e.Message
+            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "In role %O: %s" name e.Message
 
         let ret =
             { Roles = schema.Roles |> Map.map mapRole
@@ -476,7 +476,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     errors <- Map.add name schemaErrors errors
                 newSchema
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "Error in schema %O: %s" name e.Message
+            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "In schema %O: %s" name e.Message
 
         let ret =
             { Schemas = permissions.Schemas |> Map.map mapSchema

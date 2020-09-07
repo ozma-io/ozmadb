@@ -59,7 +59,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                         errors <- Map.add name (e :> exn) errors
                     Error { Source = trigger; Error = e }
             with
-            | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "Error in trigger %O: %s" name e.Message
+            | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "In trigger %O: %s" name e.Message
 
         let ret =
             { Triggers = entityTriggers.Triggers |> Map.map mapTrigger
@@ -80,7 +80,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     errors <- Map.add name entityErrors errors
                 newEntity
             with
-            | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "Error in triggers entity %O: %s" name e.Message
+            | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "In triggers entity %O: %s" name e.Message
 
         let ret =
             { Entities = schemaTriggers.Entities |> Map.map mapEntity
@@ -101,7 +101,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     errors <- Map.add name schemaErrors errors
                 newSchema
             with
-            | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "Error in triggers schema %O: %s" name e.Message
+            | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "In triggers schema %O: %s" name e.Message
 
         let ret =
             { Schemas = db.Schemas |> Map.map mapSchema
@@ -120,7 +120,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     errors <- Map.add name dbErrors errors
                 newDb
             with
-            | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "Error in schema %O: %s" name e.Message
+            | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "In schema %O: %s" name e.Message
 
         let ret =
             { Schemas = triggers.Schemas |> Map.map mapDatabase

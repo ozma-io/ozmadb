@@ -15,6 +15,11 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
+type UpdatePermissionsException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = UpdatePermissionsException (message, null)
+
 type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
@@ -63,7 +68,10 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
 
         let updateFunc = updateAllowedEntity
         let createFunc entityRef =
-            let entityId = Map.find entityRef allEntitiesMap
+            let entityId =
+                match Map.tryFind entityRef allEntitiesMap with
+                | Some id -> id
+                | None -> raisef UpdatePermissionsException "Unknown entity %O" entityRef
             let newEntity =
                 RoleEntity (
                     EntityId = entityId,
@@ -77,7 +85,11 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
         let oldRolesMap =
             existingSchema.Roles |> Seq.map (fun role -> (FunQLName role.Name, role)) |> Map.ofSeq
 
-        let updateFunc _ = updateAllowedDatabase
+        let updateFunc name schema existingSchema =
+            try
+                updateAllowedDatabase schema existingSchema
+            with
+            | :? UpdatePermissionsException as e -> raisefWithInner UpdatePermissionsException e.InnerException "In allowed schema %O: %s" name e.Message
         let createFunc (FunQLName name) =
             let newRole =
                 Role (
@@ -89,8 +101,12 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
         ignore <| updateDifference db updateFunc createFunc schema.Roles oldRolesMap
 
     let updateSchemas (schemas : Map<SchemaName, SourcePermissionsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
-        let updateFunc _ = updatePermissionsSchema
-        let createFunc name = failwith <| sprintf "Schema %O doesn't exist" name
+        let updateFunc name schema existingSchema =
+            try
+                updatePermissionsSchema schema existingSchema
+            with
+            | :? UpdatePermissionsException as e -> raisefWithInner UpdatePermissionsException e.InnerException "In schema %O: %s" name e.Message
+        let createFunc name = raisef UpdatePermissionsException "Schema %O doesn't exist" name
         ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
 
     member this.UpdateSchemas = updateSchemas

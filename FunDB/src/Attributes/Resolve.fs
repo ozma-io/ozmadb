@@ -79,7 +79,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             try
                 mapFieldExpr mapper expr
             with
-            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attribute %O: %s" name e.Message
+            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "In attribute %O: %s" name e.Message
         let resolvedMap = Map.map resolveAttribute attrsMap
 
         { AllowBroken = fieldAttrs.AllowBroken
@@ -104,7 +104,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                         errors <- Map.add name (e :> exn) errors
                     Error { Source = fieldAttrs; Error = e }
             with
-            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attributes field %O: %s" name e.Message
+            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "In field %O: %s" name e.Message
 
         let ret =
             { Fields = entityAttrs.Fields |> Map.map mapField
@@ -126,7 +126,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     errors <- Map.add name entityErrors errors
                 newEntity
             with
-            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attributes entity %O: %s" name e.Message
+            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "In entity %O: %s" name e.Message
 
         let ret =
             { Entities = schemaAttrs.Entities |> Map.map mapEntity
@@ -147,7 +147,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     errors <- Map.add name schemaErrors errors
                 newSchema
             with
-            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in attributes schema %O: %s" name e.Message
+            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "For schema %O: %s" name e.Message
 
         let ret =
             { Schemas = db.Schemas |> Map.map mapSchema
@@ -166,7 +166,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     errors <- Map.add name dbErrors errors
                 newDb
             with
-            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "Error in schema %O: %s" name e.Message
+            | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "In schema %O: %s" name e.Message
 
         let ret =
             { Schemas = defaultAttrs.Schemas |> Map.map mapDatabase

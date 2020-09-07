@@ -253,13 +253,13 @@ type private Phase1Resolver (layout : SourceLayout) =
                 checkFieldName name
                 resolveColumnField entityRef entity name field
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in column field %O: %s" name e.Message
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In column field %O: %s" name e.Message
         let mapComputedField name (field : SourceComputedField) =
             try
                 checkFieldName name
                 HRSource (makeHashName name, field)
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in computed field %O: %s" name e.Message
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In computed field %O: %s" name e.Message
 
         let selfColumnFields = Map.map mapColumnField entity.ColumnFields
         let columnFields =
@@ -296,7 +296,7 @@ type private Phase1Resolver (layout : SourceLayout) =
             let computedNames = selfComputedFields |> Map.values |> Seq.map (function | HRSource (hashName, comp) -> hashName | _ -> failwith "impossible")
             Seq.append columnNames computedNames |> Set.ofSeqUnique |> ignore
         with
-        | Failure msg -> raisef ResolveLayoutException "Field names clash (first %i characters): %s" hashNameLength msg
+        | Failure msg -> raisef ResolveLayoutException "Field names hash clash: %s" msg
 
         let root =
             match parent with
@@ -369,7 +369,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 cachedEntities <- Map.add ref entityWithChild cachedEntities
                 entity
         with
-        | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in entity %O: %s" ref e.Message
+        | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In entity %O: %s" ref e.Message
 
     let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) =
         let rec iterEntity name entity =
@@ -384,7 +384,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 checkSchemaName name
                 resolveSchema name schema
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in schema %O: %s" name e.Message
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In schema %O: %s" name e.Message
         Map.iter iterSchema layout.Schemas
 
     member this.ResolveLayout () =
@@ -527,15 +527,15 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                             if comp.isLocal then
                                 name
                             else
-                                raise (ResolveLayoutException <| sprintf "Non-local computed field reference in check expression: %O" name)
+                                raisef ResolveLayoutException "Non-local computed field reference in check expression: %O" name
                         | _ when name = funId -> funId
                         | _ when name = funSubEntity -> funSubEntity
-                        | _ -> raise (ResolveLayoutException <| sprintf "Column not found in check expression: %O" name)
+                        | _ -> raisef ResolveLayoutException "Column not found in check expression: %O" name
                 res
             | ref ->
-                raise (ResolveLayoutException <| sprintf "Invalid reference in check expression: %O" ref)
+                raisef ResolveLayoutException "Invalid reference in check expression: %O" ref
         let voidQuery query =
-            raise (ResolveLayoutException <| sprintf "Queries are not allowed in check expressions: %O" query)
+            raisef ResolveLayoutException "Queries are not allowed in check expressions: %O" query
         let voidAggr aggr =
             raisef ResolveLayoutException "Aggregate functions are not allowed in check expressions"
         let resolveLocalSubEntity ctx (field : FieldName) subEntity =
@@ -554,7 +554,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let checkExpr =
             match parse tokenizeFunQL fieldExpr constr.Expression with
             | Ok r -> r
-            | Error msg -> raise (ResolveLayoutException <| sprintf "Error parsing check constraint expression: %s" msg)
+            | Error msg -> raisef ResolveLayoutException "Error parsing check constraint expression: %s" msg
         { expression = resolveCheckExpr entityRef entity checkExpr
           hashName = makeHashName constrName
         }
@@ -571,7 +571,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 | _ -> ()
                 ret
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in computed field %O: %s" name e.Message
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In computed field %O: %s" name e.Message
 
         let computedFields = Map.map mapComputedField entity.ComputedFields
 
@@ -623,7 +623,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 checkName name
                 resolveUniqueConstraint tempEntity name constr
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in unique constraint %O: %s" name e.Message
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In unique constraint %O: %s" name e.Message
         let uniqueConstraints = Map.map mapUniqueConstraint entity.Source.UniqueConstraints
 
         try
@@ -636,7 +636,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 checkName name
                 resolveCheckConstraint entityRef tempEntity name constr
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in check constraint %O: %s" name e.Message
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In check constraint %O: %s" name e.Message
         let checkConstraints = Map.map mapCheckConstraint entity.Source.CheckConstraints
 
         try
@@ -668,14 +668,14 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     errors <- Map.add name entityErrors errors
                 entity
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in entity %O: %s" name e.Message
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In entity %O: %s" name e.Message
 
         let entities = schema.Entities |> Map.map mapEntity
 
         try
             entities |> Map.values |> Seq.map (fun ent -> ent.hashName) |> Set.ofSeqUnique |> ignore
         with
-        | Failure msg -> raisef ResolveLayoutException "Entity names clash (first %i characters): %s" hashNameLength msg
+        | Failure msg -> raisef ResolveLayoutException "Entity names hash clash: %s" msg
 
         let ret =
             { entities = entities
@@ -693,7 +693,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     errors <- Map.add name schemaErrors errors
                 ret
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "Error in schema %O: %s" name e.Message
+            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In schema %O: %s" name e.Message
 
         let ret =
             { schemas = Map.map mapSchema layout.Schemas
