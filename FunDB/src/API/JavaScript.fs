@@ -21,7 +21,7 @@ type private APIHandle =
 let inline jsDeserialize< ^a when ^a : not struct > (v : Value.Value) =
     let ret = V8JsonReader.Deserialize< ^a >(v)
     if isRefNull ret then
-        invalidArg "args" "Value must not be null"
+        failwith "Value must not be null"
     ret
 
 type APITemplate (isolate : Isolate) =
@@ -42,14 +42,14 @@ type APITemplate (isolate : Isolate) =
 
         template.Set("renderFunQLName", FunctionTemplate.New(template.Isolate, fun args ->
             if args.Length <> 1 then
-                invalidArg "args" "Number of arguments must be 1"
+                failwith "Number of arguments must be 1"
             let ret = args.[0].GetString().Get() |> renderFunQLName
             Value.String.New(template.Isolate, ret).Value
         ))
 
         template.Set("renderFunQLValue", FunctionTemplate.New(template.Isolate, fun args ->
             if args.Length <> 1 then
-                invalidArg "args" "Number of arguments must be 1"
+                failwith "Number of arguments must be 1"
             use reader = new V8JsonReader(args.[0])
             let source = JToken.Load(reader)
             let ret = renderFunQLJson source
@@ -62,7 +62,7 @@ type APITemplate (isolate : Isolate) =
         fundbTemplate.Set("getUserView", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length < 1 || args.Length > 2 then
-                invalidArg "args" "Number of arguments must be between 1 and 2"
+                failwith "Number of arguments must be between 1 and 2"
             let source = jsDeserialize<UserViewSource>(args.[0])
             let args =
                 if args.Length >= 2 then
@@ -78,7 +78,7 @@ type APITemplate (isolate : Isolate) =
         fundbTemplate.Set("getUserViewInfo", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then
-                invalidArg "args" "Number of arguments must be 1"
+                failwith "Number of arguments must be 1"
             let source = jsDeserialize<UserViewSource>(args.[0])
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
@@ -90,7 +90,7 @@ type APITemplate (isolate : Isolate) =
         fundbTemplate.Set("getEntityInfo", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then
-                invalidArg "args" "Number of arguments must be 1"
+                failwith "Number of arguments must be 1"
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
@@ -101,7 +101,7 @@ type APITemplate (isolate : Isolate) =
         fundbTemplate.Set("insertEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 2 then
-                invalidArg "args" "Number of arguments must be 2"
+                failwith "Number of arguments must be 2"
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let rawArgs = jsDeserialize<RawArguments>(args.[1])
             let handle = Option.get currentHandle
@@ -113,7 +113,7 @@ type APITemplate (isolate : Isolate) =
         fundbTemplate.Set("updateEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 3 then
-                invalidArg "args" "Number of arguments must be 3"
+                failwith "Number of arguments must be 3"
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let id = int (args.[1].Data :?> double)
             let rawArgs = jsDeserialize<RawArguments>(args.[2])
@@ -126,7 +126,7 @@ type APITemplate (isolate : Isolate) =
         fundbTemplate.Set("deleteEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 2 then
-                invalidArg "args" "Number of arguments must be 2"
+                failwith "Number of arguments must be 2"
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let id = int (args.[1].Data :?> double)
             let handle = Option.get currentHandle
@@ -138,7 +138,7 @@ type APITemplate (isolate : Isolate) =
 
         fundbTemplate.Set("writeEvent", FunctionTemplate.New(isolate, fun args ->
             if args.Length <> 1 then
-                invalidArg "args" "Number of arguments must be 1"
+                failwith "Number of arguments must be 1"
             let details = args.[0].GetString().Get()
             let handle = Option.get currentHandle
             handle.Logger.LogInformation("Source {} wrote event from JavaScript: {}", string handle.API.Request.Source, details)
@@ -151,7 +151,7 @@ type APITemplate (isolate : Isolate) =
 
         fundbTemplate.Set("writeEventSync", FunctionTemplate.New(isolate, fun args ->
             if args.Length <> 1 then
-                invalidArg "args" "Number of arguments must be 1"
+                failwith "Number of arguments must be 1"
             let details = args.[0].GetString().Get()
             let handle = Option.get currentHandle
             handle.Logger.LogInformation("Source {} wrote sync event from JavaScript: {}", string handle.API.Request.Source, details)
