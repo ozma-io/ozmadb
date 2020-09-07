@@ -192,9 +192,9 @@ type [<NoEquality; NoComparison>] FieldValue =
             | FDecimal d -> renderFunQLDecimal d
             | FString s -> renderFunQLString s
             | FBool b -> renderFunQLBool b
-            | FDateTime dt -> sprintf "%s :: datetime" (dt |> string |> renderFunQLString)
-            | FDate d -> sprintf "%s :: date" (d |> string |> renderFunQLString)
-            | FInterval int -> sprintf "%s :: interval" (int |> string |> renderFunQLString)
+            | FDateTime dt -> renderFunQLDateTime dt
+            | FDate d -> renderFunQLDate d
+            | FInterval int -> renderFunQLInterval int
             | FJson j -> renderFunQLJson j
             | FUserViewRef r -> sprintf "&%s" (r.ToFunQLString())
             | FIntArray vals -> renderArray renderFunQLInt "int" vals

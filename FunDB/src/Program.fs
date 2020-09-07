@@ -19,6 +19,7 @@ open Microsoft.EntityFrameworkCore
 open Giraffe
 open Giraffe.Serialization.Json
 open Npgsql
+open NetJs.Json
 
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils.Serialization.Json
@@ -171,6 +172,8 @@ let main (args : string[]) : int =
     JsonConvert.DefaultSettings <- fun () -> httpJsonSettings
     // Enable JSON for PostgreSQL.
     ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
+    // Use JavaScript Date objects.
+    V8SerializationSettings.Default.UseDate <- true
 
     let configPath = args.[0]
 

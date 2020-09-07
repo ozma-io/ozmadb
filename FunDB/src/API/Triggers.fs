@@ -58,7 +58,7 @@ type TriggerScript (runtime : JSRuntime, name : string, scriptSource : string) =
                 return
                     match newArgs.Data with
                     | :? bool as ret -> if ret then ATUntouched else ATCancelled
-                    | _ -> ATTouched <| V8JsonReader.Deserialize(newArgs)
+                    | _ -> ATTouched <| jsDeserialize newArgs
             with
             | :? JSException as e ->
                 return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())

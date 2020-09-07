@@ -18,6 +18,12 @@ type private APIHandle =
       Logger : ILogger
     }
 
+let inline jsDeserialize< ^a when ^a : not struct > (v : Value.Value) =
+    let ret = V8JsonReader.Deserialize< ^a >(v)
+    if isRefNull ret then
+        invalidArg "args" "Value must not be null"
+    ret
+
 type APITemplate (isolate : Isolate) =
     let mutable currentHandle = None : APIHandle option
     let mutable errorConstructor = None : Value.Function option
@@ -57,10 +63,10 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length < 1 || args.Length > 2 then
                 invalidArg "args" "Number of arguments must be between 1 and 2"
-            let source = V8JsonReader.Deserialize<UserViewSource>(args.[0])
+            let source = jsDeserialize<UserViewSource>(args.[0])
             let args =
                 if args.Length >= 2 then
-                    V8JsonReader.Deserialize<RawArguments>(args.[1])
+                    jsDeserialize<RawArguments>(args.[1])
                 else
                     Map.empty
             let handle = Option.get currentHandle
@@ -73,7 +79,7 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length <> 1 then
                 invalidArg "args" "Number of arguments must be 1"
-            let source = V8JsonReader.Deserialize<UserViewSource>(args.[0])
+            let source = jsDeserialize<UserViewSource>(args.[0])
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.UserViews.GetUserViewInfo source false
@@ -85,7 +91,7 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length <> 1 then
                 invalidArg "args" "Number of arguments must be 1"
-            let ref = V8JsonReader.Deserialize<ResolvedEntityRef>(args.[0])
+            let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.GetEntityInfo ref
@@ -96,8 +102,8 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length <> 2 then
                 invalidArg "args" "Number of arguments must be 2"
-            let ref = V8JsonReader.Deserialize<ResolvedEntityRef>(args.[0])
-            let rawArgs = V8JsonReader.Deserialize<RawArguments>(args.[1])
+            let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
+            let rawArgs = jsDeserialize<RawArguments>(args.[1])
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.InsertEntity ref rawArgs
@@ -108,9 +114,9 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length <> 3 then
                 invalidArg "args" "Number of arguments must be 3"
-            let ref = V8JsonReader.Deserialize<ResolvedEntityRef>(args.[0])
+            let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let id = int (args.[1].Data :?> double)
-            let rawArgs = V8JsonReader.Deserialize<RawArguments>(args.[2])
+            let rawArgs = jsDeserialize<RawArguments>(args.[2])
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.UpdateEntity ref id rawArgs
@@ -121,7 +127,7 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length <> 2 then
                 invalidArg "args" "Number of arguments must be 2"
-            let ref = V8JsonReader.Deserialize<ResolvedEntityRef>(args.[0])
+            let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let id = int (args.[1].Data :?> double)
             let handle = Option.get currentHandle
             isolate.EventLoop.NewPromise(context, fun () -> task {

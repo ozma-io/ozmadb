@@ -52,16 +52,16 @@
       "NetJs": {
         "type": "Direct",
         "requested": "[1.1.*, )",
-        "resolved": "1.1.9",
-        "contentHash": "4ntcYLI/1kywQ6faABveoiQ1NU3QerBP0VGnLIRzwdfxhlZMsEMbxQlsXtOptqoT01TIQeNKbMHDSsKV0GnI9Q=="
+        "resolved": "1.1.10",
+        "contentHash": "53ai+ii27KVqeXdoyqzpT8z6VecdBnXH4l4YDOG0Jg75XjV+kKDO1E9pyEfM3eIuBckx9ylpYbdgBWBQypelXg=="
       },
       "NetJs.Json": {
         "type": "Direct",
         "requested": "[1.1.*, )",
-        "resolved": "1.1.3",
-        "contentHash": "jfWA7tGI1+L/vEpdvecrsHbJxo2ZLUBddaNJJpQOm+y6QA5jVXUMiWuYSxG/ROKu06xjqw3FRGXLB+iCt5beAg==",
+        "resolved": "1.1.11",
+        "contentHash": "jGuq5tjc2IWD7fBzxAPKpW53NpsY6dgQCRE9FH8f9nzlNATXLGEC7ECR3ijAz851WMNsvFtwOC5LFjqCpi403g==",
         "dependencies": {
-          "NetJs": "1.1.9",
+          "NetJs": "1.1.10",
           "Newtonsoft.Json": "12.0.3"
         }
       },

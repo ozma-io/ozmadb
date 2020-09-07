@@ -83,6 +83,8 @@ let readSourcePreload (path : string) : SourcePreloadFile =
     use jsonStream = new JsonTextReader(stream)
     let serializer = JsonSerializer.CreateDefault()
     let preload = serializer.Deserialize<SourcePreload>(jsonStream)
+    if isRefNull preload then
+        invalidArg "path" "Preload cannot be null"
     { Preload = preload
       DirName = Path.GetDirectoryName path
     }

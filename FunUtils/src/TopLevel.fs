@@ -26,6 +26,8 @@ module POSIXPath = POSIXPath
 type Void = private Void of unit
 type Exception = System.Exception
 
+let inline isRefNull (x : ^a when ^a : not struct) = obj.ReferenceEquals(x, null)
+
 let inline curry f a b = f (a, b)
 let inline uncurry f (a, b) = f a b
 
