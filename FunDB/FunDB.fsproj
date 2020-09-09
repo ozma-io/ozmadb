@@ -152,8 +152,10 @@
     <PackageReference Include="Giraffe" Version="4.0.*" />
     <PackageReference Include="System.Data.HashFunction.CityHash" Version="2.0.*" />
 
-    <PackageReference Include="NetJs" Version="1.1.*" />
-    <PackageReference Include="NetJs.Json" Version="1.1.*" />
+    <!--<PackageReference Include="NetJs" Version="1.1.*" />
+    <PackageReference Include="NetJs.Json" Version="1.1.*" />-->
+    <ProjectReference Include="../../netjs/NetJs/NetJs.csproj" />
+    <ProjectReference Include="../../netjs/NetJs.Json/NetJs.Json.csproj" />
   </ItemGroup>
 
 </Project>

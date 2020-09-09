@@ -646,6 +646,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
         let ret =
             { tempEntity with
+                  uniqueConstraints = uniqueConstraints
                   checkConstraints = checkConstraints
             }
         let errors =
