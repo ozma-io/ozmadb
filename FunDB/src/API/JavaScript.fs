@@ -71,8 +71,10 @@ type APITemplate (isolate : Isolate) =
                 else
                     Map.empty
             let handle = Option.get currentHandle
+            eprintfn "Starting getUserView(%O, %O) task from thread %i" source uvArgs System.Threading.Thread.CurrentThread.ManagedThreadId
             runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.UserViews.GetUserView source uvArgs false
+                eprintfn "Finishing getUserView task from thread %i" System.Threading.Thread.CurrentThread.ManagedThreadId
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
@@ -82,8 +84,10 @@ type APITemplate (isolate : Isolate) =
                 failwith "Number of arguments must be 1"
             let source = jsDeserialize<UserViewSource>(args.[0])
             let handle = Option.get currentHandle
+            eprintfn "Starting getUserViewInfo(%O) task from thread %i" source System.Threading.Thread.CurrentThread.ManagedThreadId
             runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.UserViews.GetUserViewInfo source false
+                eprintfn "Finishing getUserViewInfo(%O) task from thread %i" source System.Threading.Thread.CurrentThread.ManagedThreadId
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
@@ -94,8 +98,10 @@ type APITemplate (isolate : Isolate) =
                 failwith "Number of arguments must be 1"
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let handle = Option.get currentHandle
+            eprintfn "Starting getEntityInfo(%O) task from thread %i" ref System.Threading.Thread.CurrentThread.ManagedThreadId
             runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.GetEntityInfo ref
+                eprintfn "Finishing getEntityInfo(%O) task from thread %i" ref System.Threading.Thread.CurrentThread.ManagedThreadId
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
@@ -106,8 +112,10 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let rawArgs = jsDeserialize<RawArguments>(args.[1])
             let handle = Option.get currentHandle
+            eprintfn "Starting insertEntity(%O, %O) task from thread %i" ref rawArgs System.Threading.Thread.CurrentThread.ManagedThreadId
             runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.InsertEntity ref rawArgs
+                eprintfn "Finishing getEntityInfo(%O) task from thread %i" ref System.Threading.Thread.CurrentThread.ManagedThreadId
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
@@ -119,8 +127,10 @@ type APITemplate (isolate : Isolate) =
             let id = int (args.[1].Data :?> double)
             let rawArgs = jsDeserialize<RawArguments>(args.[2])
             let handle = Option.get currentHandle
+            eprintfn "Starting updateEntity(%O, %O, %O) task from thread %i" ref id rawArgs System.Threading.Thread.CurrentThread.ManagedThreadId
             runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.UpdateEntity ref id rawArgs
+                eprintfn "Finishing updateEntity(%O, %O, %O) task from thread %i" ref id rawArgs System.Threading.Thread.CurrentThread.ManagedThreadId
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
@@ -131,8 +141,10 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize<ResolvedEntityRef>(args.[0])
             let id = int (args.[1].Data :?> double)
             let handle = Option.get currentHandle
+            eprintfn "Starting deleteEntity(%O, %O) task from thread %i" ref id System.Threading.Thread.CurrentThread.ManagedThreadId
             runtime.EventLoop.NewPromise(context, fun () -> task {
                 let! ret = handle.API.Entities.DeleteEntity ref id
+                eprintfn "Finishing deleteEntity(%O, %O) task from thread %i" ref id System.Threading.Thread.CurrentThread.ManagedThreadId
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))

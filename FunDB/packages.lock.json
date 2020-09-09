@@ -49,22 +49,6 @@
           "Microsoft.IdentityModel.Protocols.OpenIdConnect": "5.5.0"
         }
       },
-      "NetJs": {
-        "type": "Direct",
-        "requested": "[1.1.*, )",
-        "resolved": "1.1.14",
-        "contentHash": "NO6gdUZvoObjOsHkQdqnWneWiHdG3qhsy8B97jfekXNZoG2hZZEu0fEhiOtNzA2mPkMjpP9Vx8nzTx/9UgdCFQ=="
-      },
-      "NetJs.Json": {
-        "type": "Direct",
-        "requested": "[1.1.*, )",
-        "resolved": "1.1.11",
-        "contentHash": "jGuq5tjc2IWD7fBzxAPKpW53NpsY6dgQCRE9FH8f9nzlNATXLGEC7ECR3ijAz851WMNsvFtwOC5LFjqCpi403g==",
-        "dependencies": {
-          "NetJs": "1.1.10",
-          "Newtonsoft.Json": "12.0.3"
-        }
-      },
       "Npgsql": {
         "type": "Direct",
         "requested": "[4.1.*, )",
@@ -997,6 +981,16 @@
           "Newtonsoft.Json": "12.0.0",
           "Ply": "0.3.0",
           "YamlDotNet": "8.1.0"
+        }
+      },
+      "netjs": {
+        "type": "Project"
+      },
+      "netjs.json": {
+        "type": "Project",
+        "dependencies": {
+          "NetJs": "1.1.14",
+          "Newtonsoft.Json": "12.0.0"
         }
       }
     }
