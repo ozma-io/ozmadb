@@ -50,7 +50,7 @@ and IJSRuntime =
     abstract member Context : Context
     abstract member Isolate : Isolate
     abstract member EventLoop : EventLoop
-    abstract member EventLoopScope : (unit -> Task<'a>) -> Task<'a>
+    abstract member EventLoopScope : (EventLoop -> Task<'a>) -> Task<'a>
 
 type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateConstructor : Isolate -> 'a, moduleSources : (Path * Source) seq) as this =
     let mutable currentEventLoop = None : EventLoop option
@@ -101,13 +101,19 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
     member this.EventLoop = Option.get currentEventLoop
     member this.API = template
 
-    member this.EventLoopScope (f : unit -> Task<'r>) =
+    member this.EventLoopScope (f : EventLoop -> Task<'r>) =
         task {
+            if Option.isNone currentEventLoop then
+                // Yield to ensure all uses of current event loop are finished. Otherwise, tasks meant for outer
+                // loop can escape to the inner loop due to eager evaluation of tasks.
+                //
+                // Is there any better way to ensure this?
+                do! Task.Yield ()
             let oldEventLoop = currentEventLoop
             let loop = EventLoop ()
             currentEventLoop <- Some loop
             try
-                return! f ()
+                return! f loop
             finally
                 currentEventLoop <- oldEventLoop
         }

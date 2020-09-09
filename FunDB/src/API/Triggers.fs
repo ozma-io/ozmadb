@@ -52,10 +52,10 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             let oldArgs = V8JsonWriter.Serialize(runtime.Context, args)
             try
-                return! runtime.EventLoopScope <| fun () ->
+                return! runtime.EventLoopScope <| fun eventLoop ->
                     task {
                         let newArgs = func.Call(cancellationToken, null, [|eventValue; oldArgs|])
-                        do! runtime.EventLoop.Run ()
+                        do! eventLoop.Run ()
                         let newArgs = newArgs.GetValueOrPromiseResult ()
                         return
                             match newArgs.Data with
@@ -69,7 +69,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
-    let runAfterTrigger (entity : ResolvedEntityRef)(source : SerializedTriggerSource) (args : EntityArguments option) (cancellationToken : CancellationToken) : Task =
+    let runAfterTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : EntityArguments option) (cancellationToken : CancellationToken) : Task =
         unitTask {
             let event =
                 { Entity = entity
@@ -84,10 +84,10 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                         let oldArgs = V8JsonWriter.Serialize(runtime.Context, oldArgsObj)
                         [|eventValue; oldArgs|]
                     | None -> [|eventValue|]
-                return! runtime.EventLoopScope <| fun () ->
+                return! runtime.EventLoopScope <| fun eventLoop ->
                     task {
                         let maybePromise = func.Call(cancellationToken, null, functionArgs)
-                        do! runtime.EventLoop.Run ()
+                        do! eventLoop.Run ()
                         ignore <| maybePromise.GetValueOrPromiseResult ()
                     }
             with
@@ -112,10 +112,10 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                 }
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             try
-                return! runtime.EventLoopScope <| fun () ->
+                return! runtime.EventLoopScope <| fun eventLoop ->
                     task {
                         let maybeContinue = func.Call(cancellationToken, null, [|eventValue|])
-                        do! runtime.EventLoop.Run ()
+                        do! eventLoop.Run ()
                         let maybeContinue = maybeContinue.GetValueOrPromiseResult ()
                         return maybeContinue.GetBoolean ()
                     }

@@ -65,14 +65,14 @@ type APITemplate (isolate : Isolate) =
             if args.Length < 1 || args.Length > 2 then
                 failwith "Number of arguments must be between 1 and 2"
             let source = jsDeserialize<UserViewSource>(args.[0])
-            let args =
+            let uvArgs =
                 if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
                     jsDeserialize<RawArguments>(args.[1])
                 else
                     Map.empty
             let handle = Option.get currentHandle
             runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.UserViews.GetUserView source args false
+                let! ret = handle.API.UserViews.GetUserView source uvArgs false
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
