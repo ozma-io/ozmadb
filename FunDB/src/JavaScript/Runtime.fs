@@ -103,7 +103,7 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
 
     member this.EventLoopScope (f : EventLoop -> Task<'r>) =
         task {
-            if Option.isNone currentEventLoop then
+            if Option.isSome currentEventLoop then
                 // Yield to ensure all uses of current event loop are finished. Otherwise, tasks meant for outer
                 // loop can escape to the inner loop due to eager evaluation of tasks.
                 //
