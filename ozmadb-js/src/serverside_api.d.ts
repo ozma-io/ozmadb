@@ -7,9 +7,9 @@ export interface IFunDBAPI {
   getUserView: (source: Api.UserViewSource, args?: Record<string, any>) => Promise<Api.IViewExprResult>;
   getUserViewInfo: (source: Api.UserViewSource) => Promise<Api.IViewInfoResult>;
   getEntityInfo: (ref: Api.IEntityRef) => Promise<Api.IEntity>;
-  insertEntity: (ref: Api.IEntityRef, args: Record<string, any>) => Promise<Api.IInsertEntityResult>;
-  updateEntity: (ref: Api.IEntityRef, id: number, args: Record<string, any>) => Promise<Api.IUpdateEntityResult>;
-  deleteEntity: (ref: Api.IEntityRef, id: number) => Promise<Api.IDeleteEntityResult>;
+  insertEntity: (ref: Api.IEntityRef, args: Record<string, any>) => Promise<number | undefined>;
+  updateEntity: (ref: Api.IEntityRef, id: number, args: Record<string, any>) => Promise<void>;
+  deleteEntity: (ref: Api.IEntityRef, id: number) => Promise<void>;
   writeEvent: (message: string) => void;
   writeEventSync: (message: string) => void;
 }
