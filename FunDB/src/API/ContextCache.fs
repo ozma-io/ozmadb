@@ -493,6 +493,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
         try
             let! (transaction, oldState) = getCachedState conn cancellationToken
 
+            let mutable isDisposed = false
+
             let mutable maybeIsolate = None
             let getIsolate () =
                 match maybeIsolate with
@@ -734,24 +736,28 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                       member this.FindTrigger ref = (getTriggerScripts ()).FindTrigger ref
 
                       member this.Dispose () =
-                          match maybeJSAPI with
-                          | Some jsApi -> jsApi.API.ResetAPI ()
-                          | None -> ()
-                          match maybeIsolate with
-                          | Some isolate -> jsIsolates.Return isolate
-                          | None -> ()
-                          (transaction :> IDisposable).Dispose ()
-                          (conn :> IDisposable).Dispose ()
-                      member this.DisposeAsync () =
-                          unitVtask {
+                          if not isDisposed then
+                              isDisposed <- true
                               match maybeJSAPI with
                               | Some jsApi -> jsApi.API.ResetAPI ()
                               | None -> ()
                               match maybeIsolate with
                               | Some isolate -> jsIsolates.Return isolate
                               | None -> ()
-                              do! (transaction :> IAsyncDisposable).DisposeAsync ()
-                              do! (conn :> IAsyncDisposable).DisposeAsync ()
+                              (transaction :> IDisposable).Dispose ()
+                              (conn :> IDisposable).Dispose ()
+                      member this.DisposeAsync () =
+                          unitVtask {
+                              if not isDisposed then
+                                  isDisposed <- true
+                                  match maybeJSAPI with
+                                  | Some jsApi -> jsApi.API.ResetAPI ()
+                                  | None -> ()
+                                  match maybeIsolate with
+                                  | Some isolate -> jsIsolates.Return isolate
+                                  | None -> ()
+                                  do! (transaction :> IAsyncDisposable).DisposeAsync ()
+                                  do! (conn :> IAsyncDisposable).DisposeAsync ()
                           }
                 }
         with
