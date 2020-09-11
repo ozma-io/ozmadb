@@ -1042,6 +1042,7 @@ let allowedFunctions : Set<FunctionName> =
           FunQLName "date_part"
           FunQLName "date_trunc"
           FunQLName "to_char"
+          FunQLName "round"
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
