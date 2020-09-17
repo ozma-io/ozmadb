@@ -28,35 +28,42 @@ let private restoreError e =
     handler (json e)
 
 let saveRestoreApi : HttpHandler =
-    let saveZipSchema (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        let (schemaName, api) = arg :?> (SchemaName * IFunDBAPI)
-        match! api.SaveRestore.SaveZipSchema schemaName with
-        | Ok dumpStream -> return! ctx.WriteStreamAsync false dumpStream None None
+    let saveZipSchemas (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+        let (names, api) = arg :?> (SchemaName seq * IFunDBAPI)
+        match! api.SaveRestore.SaveZipSchemas names with
+        | Ok dumpStream ->
+            ctx.SetHttpHeader "Content-Type" "application/zip"
+            return! ctx.WriteStreamAsync false dumpStream None None
         | Error err -> return! saveError err next ctx
     }
 
-    let saveJsonSchema (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        let (schemaName, api) = arg :?> (SchemaName * IFunDBAPI)
-        match! api.SaveRestore.SaveSchema schemaName with
+    let saveJsonSchemas (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+        let (names, api) = arg :?> (SchemaName seq * IFunDBAPI)
+        match! api.SaveRestore.SaveSchemas names with
         | Ok dump -> return! Successful.ok (json dump) next ctx
         | Error err -> return! saveError err next ctx
     }
 
+
     let saveSchemaNegotiationRules =
         dict [
-            "*/*"             , saveZipSchema
-            "application/json", saveJsonSchema
-            "application/zip" , saveZipSchema
+            "*/*"             , saveZipSchemas
+            "application/json", saveJsonSchemas
+            "application/zip" , saveZipSchemas
         ]
 
-    let saveSchema (schemaName : SchemaName) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+    let saveSchemas (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+        let names =
+            match ctx.Request.Query.TryGetValue "schema" with
+            | (false, _) -> Map.keys api.Request.Context.Layout.schemas
+            | (true, schemas) -> Seq.map FunQLName schemas
         let negotiateConfig = ctx.GetService<INegotiationConfig>()
-        return! negotiateWith saveSchemaNegotiationRules negotiateConfig.UnacceptableHandler (schemaName, api) next ctx
+        return! negotiateWith saveSchemaNegotiationRules negotiateConfig.UnacceptableHandler (names, api) next ctx
     }
 
-    let restoreJsonSchema (schemaName : SchemaName) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        let! dump = ctx.BindJsonAsync<SchemaDump>()
-        match! api.SaveRestore.RestoreSchemas (Map.singleton schemaName dump) with
+    let restoreJsonSchemas (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+        let! dump = ctx.BindJsonAsync<Map<SchemaName, SchemaDump>>()
+        match! api.SaveRestore.RestoreSchemas dump with
         | Ok () -> return! commitAndOk api next ctx
         | Error err -> return! restoreError err next ctx
     }
@@ -70,31 +77,19 @@ let saveRestoreApi : HttpHandler =
         | Error err -> return! restoreError err next ctx
     }
 
-    let restoreSchema (schemaName : SchemaName) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
+    let restoreSchemas (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
         match ctx.TryGetRequestHeader "Content-Type" with
-        | Some "application/json" -> return! restoreJsonSchema schemaName api next ctx
-        | _ -> return! RequestErrors.unsupportedMediaType (errorJson "Unsupported media type") next ctx
-    }
-
-    let massRestore (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        match ctx.TryGetRequestHeader "Content-Type" with
+        | Some "application/json" -> return! restoreJsonSchemas api next ctx
         | Some "application/zip" -> return! restoreZipSchemas api next ctx
         | _ -> return! RequestErrors.unsupportedMediaType (errorJson "Unsupported media type") next ctx
     }
 
-    let saveRestoreApi (schema : string) =
-        let schemaName = FunQLName schema
-        choose
-            [ GET >=> withContext (saveSchema schemaName)
-              PUT >=> withContext (restoreSchema schemaName)
-            ]
-
     let massSaveRestoreApi =
         choose
-            [ PUT >=> withContext massRestore
+            [ GET >=> withContext saveSchemas
+              PUT >=> withContext restoreSchemas
             ]
 
     choose
-        [ subRoutef "/layouts/%s" saveRestoreApi
-          subRoute "/layouts" massSaveRestoreApi
+        [ subRoute "/layouts" massSaveRestoreApi
         ]

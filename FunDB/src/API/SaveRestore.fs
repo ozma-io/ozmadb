@@ -33,7 +33,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<SaveRestoreAPI>()
 
-    member this.SaveSchema (name : SchemaName) : Task<Result<SchemaDump, SaveErrorInfo>> =
+    member this.SaveSchemas (names : SchemaName seq) : Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>> =
         task {
             if not (isRootRole rctx.User.Type) then
                 logger.LogError("Dump access denied")
@@ -44,21 +44,21 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                 return Error RSEAccessDenied
             else
                 try
-                    let! schema = saveSchema ctx.Transaction.System name ctx.CancellationToken
-                    return Ok schema
+                    let! schemasSeq = names |> Seq.mapTask (fun name -> saveSchema ctx.Transaction.System name ctx.CancellationToken |> Task.map (fun x -> (name, x)))
+                    return Ok (Map.ofSeq schemasSeq)
                 with
                 | :? SaveSchemaException as ex ->
                     match ex.Info with
                     | SENotFound -> return Error RSENotFound
         }
 
-    member this.SaveZipSchema (name : SchemaName) : Task<Result<Stream, SaveErrorInfo>> =
+    member this.SaveZipSchemas (names : SchemaName seq) : Task<Result<Stream, SaveErrorInfo>> =
         task {
-            match! this.SaveSchema name with
+            match! this.SaveSchemas names with
             | Error e -> return Error e
             | Ok dump ->
                 let stream = new MemoryStream()
-                schemasToZipFile (Map.singleton name dump) stream
+                schemasToZipFile dump stream
                 ignore <| stream.Seek(0L, SeekOrigin.Begin)
                 return Ok (stream :> Stream)
         }
@@ -109,7 +109,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
         }
 
     interface ISaveRestoreAPI with
-        member this.SaveSchema name = this.SaveSchema name
-        member this.SaveZipSchema name = this.SaveZipSchema name
+        member this.SaveSchemas names = this.SaveSchemas names
+        member this.SaveZipSchemas names = this.SaveZipSchemas names
         member this.RestoreSchemas dumps = this.RestoreSchemas dumps
         member this.RestoreZipSchemas stream = this.RestoreZipSchemas stream

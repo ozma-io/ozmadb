@@ -229,8 +229,8 @@ type RestoreErrorInfo =
             | RREConsistency msg -> sprintf "Inconsistent dump: %s" msg
 
 type ISaveRestoreAPI =
-    abstract member SaveSchema : SchemaName -> Task<Result<SchemaDump, SaveErrorInfo>>
-    abstract member SaveZipSchema : SchemaName -> Task<Result<Stream, SaveErrorInfo>>
+    abstract member SaveSchemas : SchemaName seq -> Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>>
+    abstract member SaveZipSchemas : SchemaName seq -> Task<Result<Stream, SaveErrorInfo>>
     abstract member RestoreSchemas : Map<SchemaName, SchemaDump> -> Task<Result<unit, RestoreErrorInfo>>
     abstract member RestoreZipSchemas : Stream -> Task<Result<unit, RestoreErrorInfo>>
 
