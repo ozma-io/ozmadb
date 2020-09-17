@@ -405,8 +405,16 @@ export default class FunDBAPI {
     return await this.fetchJsonApi("transaction", token, "POST", action);
   };
 
-  saveSchema = async (token: string | null, schema: string): Promise<Blob> => {
-    return await this.fetchGetFileApi(`layouts/${schema}`, token, "application/zip");
+  saveSchemas = async (token: string | null, schemas: string[] | null): Promise<Blob> => {
+    let url = "layouts";
+    if (schemas !== null) {
+      const params = new URLSearchParams();
+      schemas.forEach(name => {
+        params.append("schema", name);
+      });
+      url += `?${params}`;
+    }
+    return await this.fetchGetFileApi(url, token, "application/zip");
   };
 
   restoreSchemas = async (token: string | null, data: Blob): Promise<void> => {
