@@ -20,14 +20,8 @@ type ResolvedUserView =
     }
 
 [<NoEquality; NoComparison>]
-type UserViewError =
-  { Source : SourceUserView
-    Error : exn
-  }
-
-[<NoEquality; NoComparison>]
 type UserViewsSchema =
-    { UserViews : Map<UserViewName, Result<ResolvedUserView, UserViewError>>
+    { UserViews : Map<UserViewName, Result<ResolvedUserView, exn>>
       GeneratorScript : SourceUserViewsGeneratorScript option
     }
 

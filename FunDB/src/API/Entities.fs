@@ -69,12 +69,13 @@ type EntitiesAPI (rctx : IRequestContext) =
                 with
                 | :? TriggerRunException as ex ->
                         logger.LogError(ex, "Exception in trigger {}", ref)
+                        let str = exceptionString ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "triggerError"
                             event.Error <- "exception"
-                            event.Details <- exceptionString ex
+                            event.Details <- str
                         )
-                        return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (exceptionString ex)))
+                        return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException str))
             }
 
     let runAfterTrigger (run : ITriggerScript -> Task) (entityRef : ResolvedEntityRef) (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
@@ -92,12 +93,13 @@ type EntitiesAPI (rctx : IRequestContext) =
                 with
                 | :? TriggerRunException as ex ->
                         logger.LogError(ex, "Exception in trigger {}", ref)
+                        let str = exceptionString ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "triggerError"
                             event.Error <- "exception"
-                            event.Details <- exceptionString ex
+                            event.Details <- str
                         )
-                        return Error <| EETrigger (ref.Schema, ref.Name, EEException (exceptionString ex))
+                        return Error <| EETrigger (ref.Schema, ref.Name, EEException str)
             }
 
     let applyInsertTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, BeforeTriggerError>> =
@@ -124,12 +126,13 @@ type EntitiesAPI (rctx : IRequestContext) =
                 with
                 | :? TriggerRunException as ex ->
                         logger.LogError(ex, "Exception in trigger {}", ref)
+                        let str = exceptionString ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "triggerError"
                             event.Error <- "exception"
-                            event.Details <- exceptionString ex
+                            event.Details <- str
                         )
-                        return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (exceptionString ex)))
+                        return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException str))
             }
 
     let applyInsertTriggerAfter (entityRef : ResolvedEntityRef) (id : int) (args : EntityArguments) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
@@ -194,14 +197,15 @@ type EntitiesAPI (rctx : IRequestContext) =
                         with
                         | :? EntityExecutionException as ex ->
                             logger.LogError(ex, "Failed to insert entry")
+                            let str = exceptionString ex
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "insertEntity"
                                 event.SchemaName <- entityRef.schema.ToString()
                                 event.EntityName <- entityRef.name.ToString()
                                 event.Error <- "execution"
-                                event.Details <- exceptionString ex
+                                event.Details <- str
                             )
-                            return Error (EEExecution <| exceptionString ex)
+                            return Error (EEExecution str)
                         | :? EntityDeniedException as ex ->
                             logger.LogError(ex, "Access denied")
                             rctx.WriteEvent (fun event ->
@@ -245,15 +249,16 @@ type EntitiesAPI (rctx : IRequestContext) =
                         with
                         | :? EntityExecutionException as ex ->
                             logger.LogError(ex, "Failed to update entry")
+                            let str = exceptionString ex
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "updateEntity"
                                 event.SchemaName <- entityRef.schema.ToString()
                                 event.EntityName <- entityRef.name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Error <- "execution"
-                                event.Details <- exceptionString ex
+                                event.Details <- str
                             )
-                            return Error (EEExecution <| exceptionString ex)
+                            return Error (EEExecution str)
                         | :? EntityNotFoundException as ex ->
                             logger.LogError(ex, "Not found")
                             rctx.WriteEvent (fun event ->
@@ -306,15 +311,16 @@ type EntitiesAPI (rctx : IRequestContext) =
                     with
                         | :? EntityExecutionException as ex ->
                             logger.LogError(ex, "Failed to delete entry")
+                            let str = exceptionString ex
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "deleteEntity"
                                 event.SchemaName <- entityRef.schema.ToString()
                                 event.EntityName <- entityRef.name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Error <- "execution"
-                                event.Details <- exceptionString ex
+                                event.Details <- str
                             )
-                            return Error (EEExecution <| exceptionString ex)
+                            return Error (EEExecution str)
                         | :? EntityNotFoundException as ex ->
                             logger.LogError(ex, "Not found")
                             rctx.WriteEvent (fun event ->

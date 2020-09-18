@@ -20,16 +20,12 @@ type UserViewsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<UserViewsAPI>()
 
-    let resolveSource (source : UserViewSource) (recompileQuery : bool) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
+    let resolveSource (source : UserViewSource) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
         task {
             match source with
             | UVAnonymous query ->
                 try
-                    let! anon =
-                        if not recompileQuery then
-                            ctx.GetAnonymousView query
-                        else
-                            ctx.ResolveAnonymousView None query
+                    let! anon = ctx.GetAnonymousView query
                     return Ok anon
                 with
                 | :? UserViewResolveException as err ->
@@ -47,22 +43,10 @@ type UserViewsAPI (rctx : IRequestContext) =
                 }
                 match ctx.UserViews.Find ref with
                 | None -> return Error UVENotFound
-                | Some (Error err) ->
-                    if not recompileQuery then
-                        logger.LogError(err.Error, "Requested user view {uv} is broken", ref.ToString())
-                        return Error <| UVEResolution (exceptionString err.Error)
-                    else
-                        return! recompileView err.Source.Query
-                | Some (Ok cached) ->
-                    if not recompileQuery then
-                        return Ok cached
-                    else
-                        let! query =
-                            ctx.Transaction.System.UserViews
-                                .Where(fun uv -> uv.Schema.Name = ref.schema.ToString() && uv.Name = ref.name.ToString())
-                                .Select(fun uv -> uv.Query)
-                                .FirstAsync()
-                        return! recompileView query
+                | Some (Error e) ->
+                    logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
+                    return Error <| UVEResolution (exceptionString e)
+                | Some (Ok cached) -> return Ok cached
         }
 
     let convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValues, string> =
@@ -79,9 +63,9 @@ type UserViewsAPI (rctx : IRequestContext) =
         compiled.query.Arguments.Types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
 
 
-    member this.GetUserViewInfo (source : UserViewSource) (recompileQuery : bool) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
+    member this.GetUserViewInfo (source : UserViewSource) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
         task {
-            match! resolveSource source recompileQuery with
+            match! resolveSource source with
             | Error e -> return Error e
             | Ok uv ->
                 try
@@ -98,14 +82,14 @@ type UserViewsAPI (rctx : IRequestContext) =
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getUserViewInfo"
                         event.Error <- "access_denied"
-                        event.Details <- sprintf "Failed to get info for %O: %s" source (exceptionString err)
+                        event.Details <- exceptionString err
                     )
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (recompileQuery : bool) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
+    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
         task {
-            match! resolveSource source recompileQuery with
+            match! resolveSource source with
             | Error e -> return Error e
             | Ok uv ->
                 try
@@ -122,7 +106,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                         rctx.WriteEvent (fun event ->
                             event.Type <- "getUserView"
                             event.Error <- "arguments"
-                            event.Details <- sprintf "Invalid arguments for %O: %s" source msg
+                            event.Details <- msg
                         )
                         return Error <| UVEArguments msg
                     | Ok arguments ->
@@ -136,11 +120,11 @@ type UserViewsAPI (rctx : IRequestContext) =
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getUserView"
                         event.Error <- "access_denied"
-                        event.Details <- sprintf "Failed to execute %O: %s" source (exceptionString err)
+                        event.Details <- exceptionString err
                     )
                     return Error UVEAccessDenied
         }
 
     interface IUserViewsAPI with
-        member this.GetUserViewInfo source recompileQuery = this.GetUserViewInfo source recompileQuery
-        member this.GetUserView source rawArguments recompileQuery = this.GetUserView source rawArguments recompileQuery
+        member this.GetUserViewInfo source = this.GetUserViewInfo source
+        member this.GetUserView source rawArguments = this.GetUserView source rawArguments

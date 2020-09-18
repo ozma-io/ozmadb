@@ -57,7 +57,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                 | :? ResolveTriggersException as e when trigger.AllowBroken || forceAllowBroken ->
                     if not trigger.AllowBroken then
                         errors <- Map.add name (e :> exn) errors
-                    Error { Source = trigger; Error = e }
+                    Error (e :> exn)
             with
             | :? ResolveTriggersException as e -> raisefWithInner ResolveTriggersException e.InnerException "In trigger %O: %s" name e.Message
 

@@ -39,8 +39,15 @@ type private HalfResolvedView =
     }
 
 [<NoEquality; NoComparison>]
+type private UserViewError =
+    { AllowBroken : bool
+      Error : exn
+    }
+
+[<NoEquality; NoComparison>]
 type private HalfResolvedSchema =
     { Source : SourceUserViewsSchema
+      // bool : allow_broken
       UserViews : Map<UserViewName, Result<HalfResolvedView, UserViewError>>
     }
 
@@ -70,11 +77,11 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     Ok <| resolveUserView uv
                 with
                 | :? UserViewResolveException as e when (forceAllowBroken || uv.AllowBroken) ->
-                    let err =
-                        { Error = e :> exn
-                          Source = uv
-                        } : UserViewError
-                    Error err
+                    let ret =
+                        { AllowBroken = uv.AllowBroken
+                          Error = e :> exn
+                        }
+                    Error ret
             with
             | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "In user view %O: %s" name e.Message
 
@@ -97,17 +104,17 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     member this.ResolveUserView = resolveUserView
     member this.ResolveUserViews = resolveUserViews
 
-type FindExistingView = ResolvedUserViewRef -> Result<ResolvedUserView, UserViewError> option
+type FindExistingView = ResolvedUserViewRef -> Result<ResolvedUserView, exn> option
 
 type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttributes, findExistingView : FindExistingView, halfResolved : HalfResolvedViews, forceAllowBroken : bool) =
-    let mutable cachedViews : Map<ResolvedUserViewRef, Result<ResolvedUserView, UserViewError>> = Map.empty
+    let mutable cachedViews : Map<ResolvedUserViewRef, Result<ResolvedUserView, exn>> = Map.empty
 
     let findCached (ref : ResolvedUserViewRef) =
         match Map.tryFind ref cachedViews with
         | Some r -> Some r
         | None -> findExistingView ref
 
-    let rec resolveUserView (stack : Set<ResolvedUserViewRef>) (homeSchema : SchemaName option) (uv : HalfResolvedView) : ResolvedUserView =
+    let resolveUserView (homeSchema : SchemaName option) (uv : HalfResolvedView) : ResolvedUserView =
         let checkView ref =
             match findExistingView ref with
             | Some _ -> ()
@@ -142,31 +149,27 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
             let ref = { schema = schemaName; name = name }
             match maybeUv with
             | Error e ->
-                cachedViews <- Map.add ref (Error e) cachedViews
-                if not e.Source.AllowBroken then
+                cachedViews <- Map.add ref (Error e.Error) cachedViews
+                if not e.AllowBroken then
                     errors <- Map.add name e.Error errors
-                Error e
-            | Ok uv ->
+                Error e.Error
+            | Ok (uv : HalfResolvedView) ->
                 match findCached ref with
                 | Some (Error e) ->
-                    if not e.Source.AllowBroken then
-                        errors <- Map.add name e.Error errors
+                    if not uv.AllowBroken then
+                        errors <- Map.add name e errors
                     Error e
-                | Some (Ok uv) -> Ok uv
+                | Some (Ok cached) -> Ok cached
                 | None ->
                     let r =
                         try
-                            let r = resolveUserView (Set.singleton ref) (Some schemaName) uv
+                            let r = resolveUserView (Some schemaName) uv
                             Ok r
                         with
                         | :? UserViewResolveException as e when uv.AllowBroken || forceAllowBroken ->
-                            if not uv.Source.AllowBroken then
+                            if not uv.AllowBroken then
                                 errors <- Map.add name (e :> exn) errors
-                            let err =
-                                { Error = e :> exn
-                                  Source = uv.Source
-                                } : UserViewError
-                            Error err
+                            Error (e :> exn)
                         | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "In user view %O" ref
                     cachedViews <- Map.add ref r cachedViews
                     r
@@ -201,7 +204,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
 
     member this.ResolveAnonymousUserView homeSchema uv =
         assert (Map.isEmpty halfResolved)
-        resolveUserView Set.empty homeSchema uv
+        resolveUserView homeSchema uv
     member this.ResolveUserViews () = resolveUserViews ()
 
 // Warning: this should be executed outside of any transactions because of test runs.

@@ -23,22 +23,15 @@ let private error e =
     handler (json e)
 
 let viewsApi : HttpHandler =
-    let getRecompile (ctx : HttpContext) =
-#if DEBUG
-            ctx.GetQueryStringValue "__recompile" |> Result.getOption |> Option.bind tryBool |> Option.defaultValue false
-#else
-            false
-#endif
-
     let selectFromView (viewRef : UserViewSource) (api : IFunDBAPI) =
         queryArgs <| fun rawArgs next ctx -> task {
-            match! api.UserViews.GetUserView viewRef rawArgs (getRecompile ctx) with
+            match! api.UserViews.GetUserView viewRef rawArgs with
             | Ok res -> return! Successful.ok (json res) next ctx
             | Result.Error err -> return! error err next ctx
         }
 
     let infoView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        match! api.UserViews.GetUserViewInfo viewRef (getRecompile ctx) with
+        match! api.UserViews.GetUserViewInfo viewRef with
             | Ok res -> return! Successful.ok (json res) next ctx
             | Result.Error err -> return! error err next ctx
     }

@@ -100,13 +100,6 @@ type GenericResolvedField<'col, 'comp> =
 type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedField>
 
 [<NoEquality; NoComparison>]
-type ComputedFieldError =
-    { Source : SourceComputedField
-      InheritedFrom : ResolvedEntityRef option
-      Error : exn
-    }
-
-[<NoEquality; NoComparison>]
 type ChildEntity =
     { direct : bool
     }
@@ -142,7 +135,7 @@ let inline genericFindField (getColumnField : FieldName -> 'col option) (getComp
 [<NoEquality; NoComparison>]
 type ResolvedEntity =
     { columnFields : Map<FieldName, ResolvedColumnField>
-      computedFields : Map<FieldName, Result<ResolvedComputedField, ComputedFieldError>>
+      computedFields : Map<FieldName, Result<ResolvedComputedField, exn>>
       uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
       checkConstraints : Map<ConstraintName, ResolvedCheckConstraint>
       mainField : FieldName

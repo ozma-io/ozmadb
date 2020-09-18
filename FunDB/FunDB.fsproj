@@ -62,7 +62,6 @@
     <Compile Include="src/FunQL/Query.fs" />
 
     <Compile Include="src/Layout/Schema.fs" />
-    <Compile Include="src/Layout/Render.fs" />
     <Compile Include="src/Layout/Update.fs" />
     <Compile Include="src/Layout/Info.fs" />
     <Compile Include="src/Layout/Resolve.fs" />
@@ -72,22 +71,12 @@
   
     <Compile Include="src/Attributes/Resolve.fs" />
     <Compile Include="src/Attributes/Schema.fs" />
-    <Compile Include="src/Attributes/Render.fs" />
     <Compile Include="src/Attributes/Update.fs" />
-
-    <Compile Include="src/Triggers/Source.fs" />
-    <Compile Include="src/Triggers/Types.fs" />
-    <Compile Include="src/Triggers/Resolve.fs" />
-    <Compile Include="src/Triggers/Schema.fs" />
-    <Compile Include="src/Triggers/Render.fs" />
-    <Compile Include="src/Triggers/Update.fs" />
-    <Compile Include="src/Triggers/Merge.fs" />
 
     <Compile Include="src/Permissions/Source.fs" />
     <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Resolve.fs" />
     <Compile Include="src/Permissions/Schema.fs" />
-    <Compile Include="src/Permissions/Render.fs" />
     <Compile Include="src/Permissions/Update.fs" />
     <Compile Include="src/Permissions/Apply.fs" />
     <Compile Include="src/Permissions/Compile.fs" />
@@ -99,11 +88,24 @@
     <Compile Include="src/JavaScript/FunQL.fs" />
     <Compile Include="src/JavaScript/Runtime.fs" />
 
+    <Compile Include="src/Actions/Source.fs" />
+    <Compile Include="src/Actions/Types.fs" />
+    <Compile Include="src/Actions/Resolve.fs" />
+    <Compile Include="src/Actions/Schema.fs" />
+    <Compile Include="src/Actions/Update.fs" />
+    <Compile Include="src/Actions/Run.fs" />
+
+    <Compile Include="src/Triggers/Source.fs" />
+    <Compile Include="src/Triggers/Types.fs" />
+    <Compile Include="src/Triggers/Resolve.fs" />
+    <Compile Include="src/Triggers/Schema.fs" />
+    <Compile Include="src/Triggers/Update.fs" />
+    <Compile Include="src/Triggers/Merge.fs" />
+
     <Compile Include="src/UserViews/Source.fs" />
     <Compile Include="src/UserViews/Types.fs" />
     <Compile Include="src/UserViews/Resolve.fs" />
     <Compile Include="src/UserViews/Schema.fs" />
-    <Compile Include="src/UserViews/Render.fs" />
     <Compile Include="src/UserViews/Generate.fs" />
     <Compile Include="src/UserViews/Update.fs" />
     <Compile Include="src/UserViews/DryRun.fs" />
@@ -121,12 +123,14 @@
     <Compile Include="src/API/UserViews.fs" />
     <Compile Include="src/API/Entities.fs" />
     <Compile Include="src/API/SaveRestore.fs" />
+    <Compile Include="src/API/Actions.fs" />
     <Compile Include="src/API/API.fs" />
 
     <Compile Include="src/HTTP/Utils.fs" />
     <Compile Include="src/HTTP/Info.fs" />
     <Compile Include="src/HTTP/View.fs" />
     <Compile Include="src/HTTP/Entity.fs" />
+    <Compile Include="src/HTTP/Action.fs" />
     <Compile Include="src/HTTP/SaveRestore.fs" />
     
     <Compile Include="src/Program.fs" />

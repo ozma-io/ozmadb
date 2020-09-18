@@ -72,7 +72,7 @@ type APITemplate (isolate : Isolate) =
                     Map.empty
             let handle = Option.get currentHandle
             runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.UserViews.GetUserView source uvArgs false
+                let! ret = handle.API.UserViews.GetUserView source uvArgs
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))
@@ -83,7 +83,7 @@ type APITemplate (isolate : Isolate) =
             let source = jsDeserialize<UserViewSource>(args.[0])
             let handle = Option.get currentHandle
             runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.UserViews.GetUserViewInfo source false
+                let! ret = handle.API.UserViews.GetUserViewInfo source
                 return returnResult context ret
             }, isolate.CurrentCancellationToken).Value
         ))

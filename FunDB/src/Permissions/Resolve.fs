@@ -392,7 +392,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
     member this.Flattened = flattened
 
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissions : SourcePermissions) =
-    let mutable resolved : Map<ResolvedRoleRef, Result<ErroredAllowedDatabase * ResolvedRole, RoleError>> = Map.empty
+    let mutable resolved : Map<ResolvedRoleRef, Result<ErroredAllowedDatabase * ResolvedRole, exn>> = Map.empty
 
     let rec resolveOneRole (stack : Set<ResolvedRoleRef>) (ref : ResolvedRoleRef) (role : SourceRole) : ErroredAllowedDatabase * ResolvedRole =
         if Set.contains ref stack then
@@ -409,7 +409,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                 | Some s -> s
             match resolveRole newStack parentRef parentRole with
             | Ok (errors, role) -> role.Flattened
-            | Error e -> raisefWithInner ResolvePermissionsParentException e.Error "Error in parent %O" parentRef
+            | Error e -> raisefWithInner ResolvePermissionsParentException e "Error in parent %O" parentRef
         let flattenedParents = role.Parents |> Set.toSeq |> Seq.map resolveParent |> Seq.fold (Map.unionWith (fun name -> mergeFlatEntity)) Map.empty
         let resolver = RoleResolver (layout, forceAllowBroken, role.Permissions, flattenedParents)
         let (errors, resolved) = resolver.ResolveAllowedDatabase ()
@@ -422,7 +422,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             }
         (errors, ret)
 
-    and resolveRole (stack : Set<ResolvedRoleRef>) (ref : ResolvedRoleRef) (role : SourceRole) : Result<ErroredAllowedDatabase * ResolvedRole, RoleError> =
+    and resolveRole (stack : Set<ResolvedRoleRef>) (ref : ResolvedRoleRef) (role : SourceRole) : Result<ErroredAllowedDatabase * ResolvedRole, exn> =
         match Map.tryFind ref resolved with
         | Some ret -> ret
         | None ->
@@ -432,7 +432,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                 Ok ret
             with
             | :? ResolvePermissionsException as e when role.AllowBroken || forceAllowBroken ->
-                let ret = Error ({ Source = role; Error = e } : RoleError)
+                let ret = Error (e :> exn)
                 resolved <- Map.add ref ret resolved
                 ret
 
@@ -448,14 +448,12 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     if not <| Map.isEmpty error then
                         errors <- Map.add name (ERDatabase error) errors
                     Ok ret
+                | Error (:? ResolvePermissionsParentException as e) ->
+                    Error (e :> exn)
                 | Error e ->
-                    match e.Error with
-                    | :? ResolvePermissionsParentException ->
-                        Error e
-                    | _ ->
-                        if not role.AllowBroken then
-                            errors <- Map.add name (ERFatal e.Error) errors
-                        Error e
+                    if not role.AllowBroken then
+                        errors <- Map.add name (ERFatal e) errors
+                    Error e
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e.InnerException "In role %O: %s" name e.Message
 

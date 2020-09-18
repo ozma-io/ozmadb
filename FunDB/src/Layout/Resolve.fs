@@ -402,7 +402,7 @@ type private ComputedFieldProperties =
 //
 
 type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntities, forceAllowBroken : bool) =
-    let mutable cachedComputedFields : Map<ResolvedFieldRef, Result<ResolvedComputedField, ComputedFieldError>> = Map.empty
+    let mutable cachedComputedFields : Map<ResolvedFieldRef, Result<ResolvedComputedField, exn>> = Map.empty
 
     let layoutFields =
         { new ILayoutFields with
@@ -422,7 +422,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | Some (_, RComputedField comp) ->
                 match resolveComputedField stack entity fieldRef comp with
                 | Ok field -> { IsLocal = field.isLocal; HasId = field.hasId; UsedSchemas = mergeUsedSchemas usedSchemas field.usedSchemas }
-                | Error e -> raisefWithInner ResolveLayoutException e.Error "Computed field %O is broken" fieldRef
+                | Error e -> raisefWithInner ResolveLayoutException e "Computed field %O is broken" fieldRef
             | Some (newName, RColumnField _) ->
                 let usedSchemas = addUsedField fieldRef.entity.schema fieldRef.entity.name newName usedSchemas
                 { IsLocal = true; HasId = false; UsedSchemas = usedSchemas }
@@ -489,17 +489,17 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           virtualCases = if comp.IsVirtual then Some [||] else None
         }
 
-    and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) : HalfResolvedComputedField -> Result<ResolvedComputedField, ComputedFieldError> = function
+    and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) : HalfResolvedComputedField -> Result<ResolvedComputedField, exn> = function
         | HRInherited parentRef ->
             let origFieldRef = { fieldRef with entity = parentRef }
             match Map.tryFind origFieldRef cachedComputedFields with
             | Some (Ok f) -> Ok { f with inheritedFrom = Some parentRef }
-            | Some (Error e) -> Error { e with InheritedFrom = Some parentRef }
+            | Some (Error e) -> Error e
             | None ->
                 let origEntity = Map.find parentRef entities
                 match resolveComputedField stack origEntity origFieldRef (Map.find fieldRef.name origEntity.ComputedFields) with
                 | Ok f -> Ok { f with inheritedFrom = Some parentRef }
-                | Error e -> Error { e with InheritedFrom = Some parentRef }
+                | Error e -> Error e
         | HRSource (hashName, comp) ->
             match Map.tryFind fieldRef cachedComputedFields with
             | Some f -> f
@@ -513,7 +513,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     field
                 with
                 | :? ResolveLayoutException as e when comp.AllowBroken || forceAllowBroken ->
-                    Error { Source = comp; Error = e; InheritedFrom = None }
+                    Error (e :> exn)
 
     let resolveCheckExpr (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : ParsedFieldExpr -> LocalFieldExpr =
         let resolveReference : LinkedFieldRef -> FieldName = function
@@ -566,10 +566,13 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             try
                 let ret = resolveComputedField Set.empty entity { entity = entityRef; name = name } field
                 match ret with
-                | Error e when Option.isNone e.InheritedFrom && not e.Source.AllowBroken ->
-                    computedErrors <- Map.add name e.Error computedErrors
-                | _ -> ()
-                ret
+                | Error e ->
+                    match field with
+                    | HRSource (_, comp) when not comp.AllowBroken ->
+                        computedErrors <- Map.add name e computedErrors
+                    | _ -> ()
+                    Error e
+                | Ok r -> Ok r
             with
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e.InnerException "In computed field %O: %s" name e.Message
 

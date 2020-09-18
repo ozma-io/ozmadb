@@ -102,7 +102,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                 | :? ResolveAttributesException as e when fieldAttrs.AllowBroken || forceAllowBroken ->
                     if not fieldAttrs.AllowBroken then
                         errors <- Map.add name (e :> exn) errors
-                    Error { Source = fieldAttrs; Error = e }
+                    Error (e :> exn)
             with
             | :? ResolveAttributesException as e -> raisefWithInner ResolveAttributesException e.InnerException "In field %O: %s" name e.Message
 

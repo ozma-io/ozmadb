@@ -28,14 +28,8 @@ type ResolvedTrigger =
     }
 
 [<NoEquality; NoComparison>]
-type TriggerError =
-    { Source : SourceTrigger
-      Error : exn
-    }
-
-[<NoEquality; NoComparison>]
 type TriggersEntity =
-    { Triggers : Map<TriggerName, Result<ResolvedTrigger, TriggerError>>
+    { Triggers : Map<TriggerName, Result<ResolvedTrigger, exn>>
     }
 
 [<NoEquality; NoComparison>]

@@ -49,6 +49,6 @@ let entitiesApi : HttpHandler =
         POST >=> withContext runTransaction
 
     choose
-        [ subRoutef "/entity/%s/%s" entityApi
+        [ subRoutef "/entities/%s/%s" entityApi
           subRoute "/transaction" transactionApi
         ]

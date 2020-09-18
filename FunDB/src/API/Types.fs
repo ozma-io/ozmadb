@@ -16,6 +16,8 @@ open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.UserViews.DryRun
+open FunWithFlags.FunDB.Actions.Types
+open FunWithFlags.FunDB.Actions.Run
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.JavaScript.Runtime
@@ -68,6 +70,7 @@ type IContext =
     abstract member ResolveAnonymousView : SchemaName option -> string -> Task<PrefetchedUserView>
     abstract member WriteEvent : EventEntry -> unit
     abstract member SetAPI : IFunDBAPI -> unit
+    abstract member FindAction : ActionRef -> ActionScript option
     abstract member FindTrigger : TriggerRef -> ITriggerScript option
 
 [<NoEquality; NoComparison>]
@@ -86,11 +89,13 @@ type RequestUser =
 type EventSource =
     | [<CaseName("api")>] ESAPI
     | [<CaseName("trigger", InnerObject=true)>] ESTrigger of TriggerRef
+    | [<CaseName("action", InnerObject=true)>] ESAction of ActionRef
     with
         override this.ToString () =
             match this with
             | ESAPI -> "API"
             | ESTrigger trig -> sprintf "(trigger %O)" trig
+            | ESAction ref -> sprintf "(action %O)" ref
 
 type IRequestContext =
     abstract Context : IContext with get
@@ -138,8 +143,8 @@ type UserViewInfoResult =
     }
 
  type IUserViewsAPI =
-    abstract member GetUserViewInfo : UserViewSource -> bool -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
-    abstract member GetUserView : UserViewSource -> RawArguments -> bool -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
+    abstract member GetUserViewInfo : UserViewSource -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
+    abstract member GetUserView : UserViewSource -> RawArguments -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
 
 [<SerializeAsObject("error")>]
 type EntityErrorInfo =
@@ -234,11 +239,31 @@ type ISaveRestoreAPI =
     abstract member RestoreSchemas : Map<SchemaName, SchemaDump> -> Task<Result<unit, RestoreErrorInfo>>
     abstract member RestoreZipSchemas : Stream -> Task<Result<unit, RestoreErrorInfo>>
 
+[<NoEquality; NoComparison>]
+type ActionResult =
+    { Result : JObject option
+    }
+
+[<SerializeAsObject("error")>]
+type ActionErrorInfo =
+    | [<CaseName("not_found")>] AENotFound
+    | [<CaseName("exception")>] AEException of Details : string
+    with
+        [<DataMember>]
+        member this.Message =
+            match this with
+            | AENotFound -> "Entity not found"
+            | AEException msg -> msg
+
+type IActionsAPI =
+    abstract member RunAction : ActionRef -> JObject -> Task<Result<JObject option, ActionErrorInfo>>
+
 type IFunDBAPI =
     abstract member Request : IRequestContext
     abstract member UserViews : IUserViewsAPI
     abstract member Entities : IEntitiesAPI
     abstract member SaveRestore : ISaveRestoreAPI
+    abstract member Actions : IActionsAPI
 
 let dummyFunDBAPI =
     { new IFunDBAPI with
@@ -246,4 +271,5 @@ let dummyFunDBAPI =
           member this.UserViews = failwith "Attempted to access dummy API"
           member this.Entities = failwith "Attempted to access dummy API"
           member this.SaveRestore = failwith "Attempted to access dummy API"
+          member this.Actions = failwith "Attempted to access dummy API"
     }

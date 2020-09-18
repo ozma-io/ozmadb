@@ -4,7 +4,6 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.Layout.Render
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 [<NoEquality; NoComparison>]
@@ -66,14 +65,6 @@ let serializeComputedField (comp : ResolvedComputedField) : SerializedComputedFi
       IsVirtual = Option.isSome comp.virtualCases
     }
 
-let serializeComputedFieldError (comp : ComputedFieldError) : SerializedComputedField =
-    { Expression = comp.Source.Expression
-      InheritedFrom = comp.InheritedFrom
-      AllowBroken = comp.Source.AllowBroken
-      IsBroken = true
-      IsVirtual = comp.Source.IsVirtual
-    }
-
 let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField =
     { FieldType = column.fieldType
       ValueType = column.valueType
@@ -83,14 +74,19 @@ let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField 
       InheritedFrom = column.inheritedFrom
     }
 
+let serializeCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckConstraint =
+    { Expression = constr.expression.ToFunQLString()
+    }
+
+let serializeUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUniqueConstraint =
+    { Columns = constr.columns
+    }
+
 let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
-    let mapComputed name = function
-        | Ok f -> serializeComputedField f
-        | Error e -> serializeComputedFieldError e
     { ColumnFields = Map.map (fun name col -> serializeColumnField col) entity.columnFields
-      ComputedFields = Map.map mapComputed entity.computedFields
-      UniqueConstraints = Map.map (fun name constr -> renderUniqueConstraint constr) entity.uniqueConstraints
-      CheckConstraints = Map.map (fun name constr -> renderCheckConstraint constr) entity.checkConstraints
+      ComputedFields =  Map.mapMaybe (fun name col -> col |> Result.getOption |> Option.map serializeComputedField) entity.computedFields
+      UniqueConstraints = Map.map (fun name constr -> serializeUniqueConstraint constr) entity.uniqueConstraints
+      CheckConstraints = Map.map (fun name constr -> serializeCheckConstraint constr) entity.checkConstraints
       MainField = entity.mainField
       ForbidExternalReferences = entity.forbidExternalReferences
       Parent = entity.inheritance |> Option.map (fun inher -> inher.parent)

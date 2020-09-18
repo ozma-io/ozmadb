@@ -89,6 +89,11 @@ namespace FunWithFlags.FunDBSchema.System
         public DbSet<FieldAttributes> FieldsAttributes { get; set; } = null!;
 
         [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
+        [ComputedField("full_name", "schema_id=>__main || '.' || name")]
+        [UniqueConstraint("entry", new [] {"schema_id", "name"})]
+        public DbSet<Action> Actions { get; set; } = null!;
+
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || trigger_entity_id=>__main || '.' || name")]
         [UniqueConstraint("entry", new [] {"schema_id", "trigger_entity_id", "name"})]
         public DbSet<Trigger> Triggers { get; set; } = null!;
@@ -127,15 +132,10 @@ namespace FunWithFlags.FunDBSchema.System
             }
         }
 
-        private static IQueryable<Schema> IncludeFieldsObjects(IQueryable<Schema> schemas)
-        {
-            return schemas
-                .Include(sch => sch.Entities).ThenInclude(ent => ent.ColumnFields);
-        }
-
         public IQueryable<Schema> GetLayoutObjects()
         {
-            return IncludeFieldsObjects(this.Schemas)
+            return this.Schemas
+                .Include(sch => sch.Entities).ThenInclude(ent => ent.ColumnFields)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.ComputedFields)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.UniqueConstraints)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.CheckConstraints)
@@ -144,7 +144,7 @@ namespace FunWithFlags.FunDBSchema.System
 
         public IQueryable<Schema> GetRolesObjects()
         {
-            return IncludeFieldsObjects(this.Schemas)
+            return this.Schemas
                 .Include(sch => sch.Roles).ThenInclude(role => role.Parents).ThenInclude(roleParent => roleParent.Parent).ThenInclude(role => role.Schema)
                 .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.Entity).ThenInclude(ent => ent.Schema)
                 .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.ColumnFields);
@@ -152,13 +152,19 @@ namespace FunWithFlags.FunDBSchema.System
 
         public IQueryable<Schema> GetAttributesObjects()
         {
-            return IncludeFieldsObjects(this.Schemas)
+            return this.Schemas
                 .Include(sch => sch.FieldsAttributes).ThenInclude(attr => attr.FieldEntity).ThenInclude(ent => ent.Schema);
+        }
+
+        public IQueryable<Schema> GetActionsObjects()
+        {
+            return this.Schemas
+                .Include(sch => sch.Actions);
         }
 
         public IQueryable<Schema> GetTriggersObjects()
         {
-            return IncludeFieldsObjects(this.Schemas)
+            return this.Schemas
                 .Include(sch => sch.Triggers).ThenInclude(attr => attr.TriggerEntity).ThenInclude(ent => ent.Schema);
         }
 
@@ -194,6 +200,7 @@ namespace FunWithFlags.FunDBSchema.System
         public List<Entity> Entities { get; set; } = null!;
         public List<Role> Roles { get; set; } = null!;
         public List<FieldAttributes> FieldsAttributes { get; set; } = null!;
+        public List<Action> Actions { get; set; } = null!;
         public List<Trigger> Triggers { get; set; } = null!;
         public List<UserView> UserViews { get; set; } = null!;
     }
@@ -413,6 +420,22 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Attributes { get; set; } = null!;
+    }
+
+    public class Action
+    {
+        public int Id { get; set; }
+        [ColumnField("reference(public.schemas)")]
+        public int SchemaId { get; set; }
+        public Schema Schema { get; set; } = null!;
+        [ColumnField("string")]
+        [Required]
+        public string Name { get; set; } = null!;
+        [ColumnField("bool", Default="false")]
+        public bool AllowBroken { get; set; }
+        [ColumnField("string")]
+        [Required]
+        public string Function { get; set; } = null!;
     }
 
     public class Trigger

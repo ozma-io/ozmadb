@@ -66,7 +66,7 @@ type PrefetchedUserView =
 
 [<NoEquality; NoComparison>]
 type PrefetchedViewsSchema =
-    { UserViews : Map<UserViewName, Result<PrefetchedUserView, UserViewError>>
+    { UserViews : Map<UserViewName, Result<PrefetchedUserView, exn>>
     }
 
 [<NoEquality; NoComparison>]
@@ -211,11 +211,10 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
     let resolveUserViewsSchema (schemaName : SchemaName) (sourceSchema : SourceUserViewsSchema) (schema : UserViewsSchema) : Task<Map<UserViewName, exn> * PrefetchedViewsSchema> = task {
         let mutable errors = Map.empty
 
-        let mapUserView (name, maybeUv : Result<ResolvedUserView, UserViewError>) =
+        let mapUserView (name, maybeUv : Result<ResolvedUserView, exn>) =
             task {
                 let ref = { schema = schemaName; name = name }
                 match maybeUv with
-                | Error e when not (withThisBroken e.Source.AllowBroken) -> return None
                 | Error e -> return Some (name, Error e)
                 | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
                 | Ok uv ->
@@ -227,11 +226,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                         if uv.AllowBroken || forceAllowBroken then
                             if not uv.AllowBroken then
                                 errors <- Map.add name (e :> exn) errors
-                            let err =
-                                { Error = e :> exn
-                                  Source = Map.find name sourceSchema.UserViews
-                                } : UserViewError
-                            return Some (name, Error err)
+                            return Some (name, Error (e :> exn))
                         else
                             return raisefWithInner UserViewDryRunException e "Error in user view %O" ref
             }
@@ -277,23 +272,3 @@ let dryRunUserViews (conn : QueryConnection) (layout : Layout) (forceAllowBroken
 let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (q: ResolvedUserView) (cancellationToken : CancellationToken) : Task<PrefetchedUserView> =
     let runner = DryRunner(layout, conn, false, None, cancellationToken)
     runner.DryRunAnonymousUserView q
-
-let private renderPrefetchedUserView : Result<PrefetchedUserView, UserViewError> -> SourceUserView = function
-    | Ok uv ->
-        { Query = uv.UserView.Resolved.ToFunQLString()
-          AllowBroken = uv.UserView.AllowBroken
-        }
-    | Error e -> e.Source
-
-let renderPrefetchedUserViewsSchema (schema : PrefetchedViewsSchema) : SourceUserViewsSchema =
-    { UserViews = Map.map (fun name -> renderPrefetchedUserView) schema.UserViews
-      GeneratorScript = None
-    }
-
-let renderPrefetchedUserViews (uvs : PrefetchedUserViews) : SourceUserViews =
-    let renderOne : Result<_, UserViewsSchemaError> -> SourceUserViewsSchema = function
-    | Ok schema -> renderPrefetchedUserViewsSchema schema
-    | Error e -> e.Source
-
-    { Schemas = Map.map (fun schemaName -> renderOne) uvs.Schemas
-    }

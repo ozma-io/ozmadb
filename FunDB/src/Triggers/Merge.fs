@@ -110,7 +110,7 @@ let private mergeTriggersPair (a : MergedTriggers) (b : MergedTriggers) : Merged
     { Schemas = Map.unionWith (fun name -> mergeTriggersSchema) a.Schemas b.Schemas
     }
 
-let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : TriggerName) : Result<ResolvedTrigger, TriggerError> -> MergedTriggersEntity option = function
+let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : TriggerName) : Result<ResolvedTrigger, exn> -> MergedTriggersEntity option = function
     | Ok trigger when trigger.OnInsert || trigger.OnUpdateFields <> TUFSet Set.empty || trigger.OnDelete ->
         let merged =
             { Schema = schemaName
@@ -148,7 +148,7 @@ let private markEntityInherited (originalRef : ResolvedEntityRef) (entityTrigger
     }
 
 type private TriggersMerger (layout : Layout) =
-    let emitMergedTriggersEntity (schemaName : SchemaName) (triggerName : TriggerName) (triggerEntityRef : ResolvedEntityRef) (triggerEntity : ResolvedEntity) (trigger : Result<ResolvedTrigger,TriggerError>) =
+    let emitMergedTriggersEntity (schemaName : SchemaName) (triggerName : TriggerName) (triggerEntityRef : ResolvedEntityRef) (triggerEntity : ResolvedEntity) (trigger : Result<ResolvedTrigger, exn>) =
         seq {
             match makeOneMergedTriggerEntity schemaName triggerName trigger with
             | None -> ()

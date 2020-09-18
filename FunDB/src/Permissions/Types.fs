@@ -105,14 +105,8 @@ type ResolvedRole =
     }
 
 [<NoEquality; NoComparison>]
-type RoleError =
-    { Source : SourceRole
-      Error : exn
-    }
-
-[<NoEquality; NoComparison>]
 type PermissionsSchema =
-    { Roles : Map<RoleName, Result<ResolvedRole, RoleError>>
+    { Roles : Map<RoleName, Result<ResolvedRole, exn>>
     }
 
 [<NoEquality; NoComparison>]

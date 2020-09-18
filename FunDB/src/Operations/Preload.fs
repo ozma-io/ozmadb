@@ -14,7 +14,6 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.System
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
@@ -32,6 +31,10 @@ open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
+open FunWithFlags.FunDB.Actions.Resolve
+open FunWithFlags.FunDB.Actions.Types
+open FunWithFlags.FunDB.Actions.Source
+open FunWithFlags.FunDB.Actions.Update
 open FunWithFlags.FunDB.Triggers.Resolve
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Source
@@ -47,6 +50,7 @@ type SourcePreloadedSchema =
     { Entities : Map<EntityName, SourceEntity>
       Roles : Map<RoleName, SourceRole>
       DefaultAttributes : Map<SchemaName, SourceAttributesSchema>
+      Actions : Map<ActionName, SourceAction>
       Triggers : Map<SchemaName, SourceTriggersSchema>
       UserViewGenerator : string option // Path to .js file
     }
@@ -70,6 +74,7 @@ type PreloadedSchema =
     { Schema : SourceSchema
       Permissions : SourcePermissionsSchema
       DefaultAttributes : SourceAttributesDatabase
+      Actions : SourceActionsSchema
       Triggers : SourceTriggersDatabase
       UserViews : SourceUserViewsSchema
     }
@@ -114,6 +119,7 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
         } : SourceSchema
     let permissions = { Roles = Map.map (fun name -> normalizeRole) preload.Roles }
     let defaultAttributes = { Schemas = preload.DefaultAttributes } : SourceAttributesDatabase
+    let actions = { Actions = preload.Actions } : SourceActionsSchema
     let triggers = { Schemas = preload.Triggers } : SourceTriggersDatabase
     let readUserViewScript (path : string) =
         let realPath =
@@ -131,6 +137,7 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
     { Schema = schema
       Permissions = permissions
       DefaultAttributes = defaultAttributes
+      Actions = actions
       Triggers = triggers
       UserViews = userViews
     }
@@ -143,6 +150,9 @@ let preloadPermissions (preload : Preload) : SourcePermissions =
 
 let preloadDefaultAttributes (preload : Preload) : SourceDefaultAttributes =
     { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.DefaultAttributes) }
+
+let preloadActions (preload : Preload) : SourceActions =
+    { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.Actions) }
 
 let preloadTriggers (preload : Preload) : SourceTriggers =
     { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.Triggers) }
@@ -158,6 +168,7 @@ let resolvePreload (source : SourcePreloadFile) : Preload =
         { Schema = buildSystemSchema typeof<SystemContext>
           Permissions = emptySourcePermissionsSchema
           DefaultAttributes = emptySourceAttributesDatabase
+          Actions = emptySourceActionsSchema
           Triggers = emptySourceTriggersDatabase
           UserViews = emptySourceUserViewsSchema
         }
@@ -184,6 +195,13 @@ let preloadAttributesAreUnchanged (sourceAttrs : SourceDefaultAttributes) (prelo
         | Some existing -> schema = existing.DefaultAttributes
         | None -> true
     sourceAttrs.Schemas |> Map.toSeq |> Seq.forall notChanged
+
+let preloadActionsAreUnchanged (sourceActions : SourceActions) (preload : Preload) =
+    let notChanged (name : SchemaName, schema : SourceActionsSchema) =
+        match Map.tryFind name preload.Schemas with
+        | Some existing -> schema = existing.Actions
+        | None -> true
+    sourceActions.Schemas |> Map.toSeq |> Seq.forall notChanged
 
 let preloadTriggersAreUnchanged (sourceTriggers : SourceTriggers) (preload : Preload) =
     let notChanged (name : SchemaName, schema : SourceTriggersDatabase) =
@@ -262,6 +280,25 @@ let checkBrokenAttributes (logger :ILogger) (preload : Preload) (conn : Database
         do! markBrokenAttributes conn.System brokenAttrs cancellationToken
     }
 
+let checkBrokenActions (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenActions : ErroredActions) (cancellationToken : CancellationToken) =
+    unitTask {
+        let mutable critical = false
+        for KeyValue(schemaName, schema) in brokenActions do
+            let isSystem = Map.containsKey schemaName preload.Schemas
+            if isSystem then
+                critical <- true
+            for KeyValue(actionName, err) in schema do
+                let schemaStr = schemaName.ToString()
+                let actionNameStr = ({ schema = schemaName; name = actionName } : ActionRef).ToString()
+                if isSystem then
+                    logger.LogError(err, "System action {name} from {schema} is broken", actionNameStr, schemaStr)
+                else
+                    logger.LogWarning(err, "Marking action {name} from {schema} as broken", actionNameStr, schemaStr)
+        if critical then
+            failwith "Broken system actions"
+        do! markBrokenActions conn.System brokenActions cancellationToken
+    }
+
 let checkBrokenTriggers (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenTriggers : ErroredTriggers) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
@@ -273,11 +310,11 @@ let checkBrokenTriggers (logger :ILogger) (preload : Preload) (conn : DatabaseTr
                 for KeyValue(triggerEntityName, triggersEntity) in triggersSchema do
                     for KeyValue(triggerName, err) in triggersEntity do
                         let schemaStr = schemaName.ToString()
-                        let triggerName = ({ entity = { schema = triggerSchemaName; name = triggerEntityName }; name = triggerName } : ResolvedFieldRef).ToString()
+                        let triggerNameStr = ({ Schema = schemaName; Entity = { schema = triggerSchemaName; name = triggerEntityName }; Name = triggerName } : TriggerRef).ToString()
                         if isSystem then
-                            logger.LogError(err, "System trigger {name} from {schema} is broken", triggerName, schemaStr)
+                            logger.LogError(err, "System trigger {name} from {schema} is broken", triggerNameStr, schemaStr)
                         else
-                            logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerName, schemaStr)
+                            logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerNameStr, schemaStr)
         if critical then
             failwith "Broken system triggers"
         do! markBrokenTriggers conn.System brokenTriggers cancellationToken
@@ -363,33 +400,50 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
 
         // We migrate layout first so that permissions and attributes have schemas in the table.
         let! changed1 = updateLayout conn.System sourcePreloadLayout cancellationToken
-        let permissions = preloadPermissions preload
-        let defaultAttributes = preloadDefaultAttributes preload
-        let triggers = preloadTriggers preload
         let! changed2 =
-            try
-                updatePermissions conn.System permissions cancellationToken
-            with
-            | _ ->
-                // Maybe we'll get a better error
-                let (errors, perms) = resolvePermissions preloadLayout false permissions
-                reraise ()
+            task {
+                let permissions = preloadPermissions preload
+                try
+                    return! updatePermissions conn.System permissions cancellationToken
+                with
+                | e ->
+                    // Maybe we'll get a better error
+                    let (errors, perms) = resolvePermissions preloadLayout false permissions
+                    return reraise' e
+            }
         let! changed3 =
-            try
-                updateAttributes conn.System defaultAttributes cancellationToken
-            with
-            | _ ->
-                // Maybe we'll get a better error
-                let (errors, attrs) = resolveAttributes preloadLayout false defaultAttributes
-                reraise ()
+            task {
+                let defaultAttributes = preloadDefaultAttributes preload
+                try
+                    return! updateAttributes conn.System defaultAttributes cancellationToken
+                with
+                | e ->
+                    // Maybe we'll get a better error
+                    let (errors, attrs) = resolveAttributes preloadLayout false defaultAttributes
+                    return reraise' e
+            }
         let! changed4 =
-            try
-                updateTriggers conn.System triggers cancellationToken
-            with
-            | _ ->
-                // Maybe we'll get a better error
-                let (errors, triggers) = resolveTriggers preloadLayout false triggers
-                reraise ()
+            task {
+                let actions = preloadActions preload
+                try
+                    return! updateActions conn.System actions cancellationToken
+                with
+                | e ->
+                    // Maybe we'll get a better error
+                    let (errors, actions) = resolveActions preloadLayout false actions
+                    return reraise' e
+            }
+        let! changed5 =
+            task {
+                let triggers = preloadTriggers preload
+                try
+                    return! updateTriggers conn.System triggers cancellationToken
+                with
+                | e ->
+                    // Maybe we'll get a better error
+                    let (errors, triggers) = resolveTriggers preloadLayout false triggers
+                    return reraise' e
+            }
 
         let! sourceUserLayout = buildSchemaLayout conn.System (Map.keys preload.Schemas) cancellationToken
         let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout
@@ -417,5 +471,5 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
         }
         assert (Task.awaitSync <| sanityCheck ())
 
-        return (changed1 || changed2 || changed3 || changed4, layout, newUserMeta)
+        return (changed1 || changed2 || changed3 || changed4 || changed5, layout, newUserMeta)
     }

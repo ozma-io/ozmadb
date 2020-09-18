@@ -19,14 +19,8 @@ type AttributesField =
     }
 
 [<NoEquality; NoComparison>]
-type AttributesError =
-    { Source : SourceAttributesField
-      Error : exn
-    }
-
-[<NoEquality; NoComparison>]
 type AttributesEntity =
-    { Fields : Map<FieldName, Result<AttributesField, AttributesError>>
+    { Fields : Map<FieldName, Result<AttributesField, exn>>
     } with
         member this.FindField (name : FieldName) =
             Map.tryFind name this.Fields

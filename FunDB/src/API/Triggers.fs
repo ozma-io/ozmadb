@@ -4,7 +4,6 @@ open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 open NetJs
-open NetJs.Value
 open NetJs.Json
 
 open FunWithFlags.FunUtils
@@ -195,7 +194,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
     let testTrigger (triggerRef : TriggerRef) (trigger : ResolvedTrigger) : unit =
         ignore <| TriggerScript(runtime, triggerName triggerRef, trigger.Procedure)
 
-    let testTriggersEntity (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (sourceTriggers : SourceTriggersEntity) (entityTriggers : TriggersEntity) : ErroredTriggersEntity * TriggersEntity =
+    let testTriggersEntity (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef)(entityTriggers : TriggersEntity) : ErroredTriggersEntity * TriggersEntity =
         let mutable errors = Map.empty
 
         let mapTrigger name (trigger : ResolvedTrigger) =
@@ -207,7 +206,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                 with
                 | :? TriggerRunException as e when trigger.AllowBroken || forceAllowBroken ->
                     errors <- Map.add name (e :> exn) errors
-                    Error { Source = Map.find name sourceTriggers.Triggers; Error = e }
+                    Error (e :> exn)
             with
             | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In trigger %O: %s" name e.Message
 
@@ -216,13 +215,13 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
             } : TriggersEntity
         (errors, ret)
 
-    let testTriggersSchema (schemaName : SchemaName) (triggerSchema : SchemaName) (sourceTriggers : SourceTriggersSchema) (schemaTriggers : TriggersSchema) : ErroredTriggersSchema * TriggersSchema =
+    let testTriggersSchema (schemaName : SchemaName) (triggerSchema : SchemaName) (schemaTriggers : TriggersSchema) : ErroredTriggersSchema * TriggersSchema =
         let mutable errors = Map.empty
 
         let mapEntity name entityTriggers =
             try
                 let ref = { schema = triggerSchema; name = name }
-                let (entityErrors, newEntity) = testTriggersEntity schemaName ref (Map.find name sourceTriggers.Entities) entityTriggers
+                let (entityErrors, newEntity) = testTriggersEntity schemaName ref entityTriggers
                 if not <| Map.isEmpty entityErrors then
                     errors <- Map.add name entityErrors errors
                 newEntity
@@ -234,12 +233,12 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
             } : TriggersSchema
         (errors, ret)
 
-    let testTriggersDatabase (schemaName : SchemaName) (sourceTriggers : SourceTriggersDatabase) (db : TriggersDatabase) : ErroredTriggersDatabase * TriggersDatabase =
+    let testTriggersDatabase (schemaName : SchemaName) (db : TriggersDatabase) : ErroredTriggersDatabase * TriggersDatabase =
         let mutable errors = Map.empty
 
         let mapSchema name schemaTriggers =
             try
-                let (schemaErrors, newSchema) = testTriggersSchema schemaName name (Map.find name sourceTriggers.Schemas) schemaTriggers
+                let (schemaErrors, newSchema) = testTriggersSchema schemaName name schemaTriggers
                 if not <| Map.isEmpty schemaErrors then
                     errors <- Map.add name schemaErrors errors
                 newSchema
@@ -251,12 +250,12 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
             } : TriggersDatabase
         (errors, ret)
 
-    let testTriggers (sourceTriggers : SourceTriggers) (triggers : ResolvedTriggers) : ErroredTriggers * ResolvedTriggers =
+    let testTriggers (triggers : ResolvedTriggers) : ErroredTriggers * ResolvedTriggers =
         let mutable errors = Map.empty
 
         let mapDatabase name db =
             try
-                let (dbErrors, newDb) = testTriggersDatabase name (Map.find name sourceTriggers.Schemas) db
+                let (dbErrors, newDb) = testTriggersDatabase name db
                 if not <| Map.isEmpty dbErrors then
                     errors <- Map.add name dbErrors errors
                 newDb
@@ -268,8 +267,8 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
             } : ResolvedTriggers
         (errors, ret)
 
-    member this.TestTriggers sourceTriggers triggers = testTriggers sourceTriggers triggers
+    member this.TestTriggers triggers = testTriggers triggers
 
-let testEvalTriggers (runtime : IJSRuntime) (forceAllowBroken : bool) (source : SourceTriggers) (triggers : ResolvedTriggers) : ErroredTriggers * ResolvedTriggers =
+let testEvalTriggers (runtime : IJSRuntime) (forceAllowBroken : bool) (triggers : ResolvedTriggers) : ErroredTriggers * ResolvedTriggers =
     let eval = TestTriggerEvaluator(runtime, forceAllowBroken)
-    eval.TestTriggers source triggers
+    eval.TestTriggers triggers
