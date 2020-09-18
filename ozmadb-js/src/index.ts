@@ -10,6 +10,7 @@ export type SchemaName = string;
 export type ColumnName = string;
 export type AttributeName = string;
 export type UserViewName = string;
+export type ActionName = string;
 export type ConstraintName = string;
 
 /*
@@ -29,6 +30,11 @@ export interface IFieldRef {
 export interface IUserViewRef {
   schema: SchemaName;
   name: UserViewName;
+}
+
+export interface IActionRef {
+  schema: SchemaName;
+  name: ActionName;
 }
 
 export interface IAnonymousUserView {
@@ -282,6 +288,14 @@ export interface ITransactionResult {
 }
 
 /*
+ * Action results.
+ */
+
+export interface IActionResult {
+  result: any;
+}
+
+/*
  * Error types.
  */
 
@@ -398,11 +412,15 @@ export default class FunDBAPI {
   }
 
   getEntityInfo = async (token: string | null, ref: IEntityRef): Promise<IEntity> => {
-    return await this.fetchJsonApi(`entity/${ref.schema}/${ref.name}`, token, "GET");
+    return await this.fetchJsonApi(`entities/${ref.schema}/${ref.name}`, token, "GET");
   }
 
   runTransaction = async (token: string | null, action: ITransaction): Promise<ITransactionResult> => {
     return await this.fetchJsonApi("transaction", token, "POST", action);
+  };
+
+  runAction = async (token: string | null, ref: IActionRef, args: Record<string, any>): Promise<IActionResult> => {
+    return await this.fetchJsonApi(`entities/${ref.schema}/${ref.name}`, token, "POST", args);
   };
 
   saveSchemas = async (token: string | null, schemas: string[] | null): Promise<Blob> => {
