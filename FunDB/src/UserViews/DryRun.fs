@@ -85,6 +85,7 @@ let mergePrefetchedUserViews (a : PrefetchedUserViews) (b : PrefetchedUserViews)
     let mergeOne a b =
         match (a, b) with
         | (Ok schema1, Ok schema2) -> Ok (mergePrefetchedViewsSchema schema1 schema2)
+        | (Error e1, Error e2) when obj.ReferenceEquals(e1, e2) -> Error e1
         | _ -> failwith "Cannot merge different error types"
     { Schemas = Map.unionWith (fun name -> mergeOne) a.Schemas b.Schemas }
 
