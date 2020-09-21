@@ -25,9 +25,10 @@ open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.HTTP.Info
-open FunWithFlags.FunDB.HTTP.View
-open FunWithFlags.FunDB.HTTP.Entity
+open FunWithFlags.FunDB.HTTP.Views
+open FunWithFlags.FunDB.HTTP.Entities
 open FunWithFlags.FunDB.HTTP.SaveRestore
+open FunWithFlags.FunDB.HTTP.Actions
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.API.InstancesCache
@@ -82,6 +83,7 @@ type Startup (config : IConfiguration) =
             [ viewsApi
               entitiesApi
               saveRestoreApi
+              actionsApi
               infoApi
               notFoundHandler
             ]

@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.HTTP.View
+module FunWithFlags.FunDB.HTTP.Views
 
 open Microsoft.AspNetCore.Http
 open Giraffe

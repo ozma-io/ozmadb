@@ -134,9 +134,9 @@
 
     <Compile Include="src/HTTP/Utils.fs" />
     <Compile Include="src/HTTP/Info.fs" />
-    <Compile Include="src/HTTP/View.fs" />
-    <Compile Include="src/HTTP/Entity.fs" />
-    <Compile Include="src/HTTP/Action.fs" />
+    <Compile Include="src/HTTP/Views.fs" />
+    <Compile Include="src/HTTP/Entities.fs" />
+    <Compile Include="src/HTTP/Actions.fs" />
     <Compile Include="src/HTTP/SaveRestore.fs" />
     
     <Compile Include="src/Program.fs" />

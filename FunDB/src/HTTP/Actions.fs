@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.HTTP.Action
+module FunWithFlags.FunDB.HTTP.Actions
 
 open Newtonsoft.Json.Linq
 open Microsoft.AspNetCore.Http
