@@ -420,7 +420,7 @@ export default class FunDBAPI {
   };
 
   runAction = async (token: string | null, ref: IActionRef, args: Record<string, any>): Promise<IActionResult> => {
-    return await this.fetchJsonApi(`entities/${ref.schema}/${ref.name}`, token, "POST", args);
+    return await this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args);
   };
 
   saveSchemas = async (token: string | null, schemas: string[] | null): Promise<Blob> => {
