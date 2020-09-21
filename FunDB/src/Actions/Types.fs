@@ -2,7 +2,6 @@ module FunWithFlags.FunDB.Actions.Types
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.Actions.Source
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ActionRef = ResolvedEntityRef

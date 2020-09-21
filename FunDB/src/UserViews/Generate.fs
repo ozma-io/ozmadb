@@ -28,7 +28,7 @@ let private convertUserView (KeyValue (k, v : Value.Value)) =
 type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction name scriptSource
+            runtime.CreateDefaultFunction { Path = name; Source = scriptSource; IsModule = true }
         with
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't initialize user view generator"
@@ -91,13 +91,16 @@ type private UserViewsGeneratorState (layout : Layout, cancellationToken : Cance
 
     member this.GenerateUserViews gens = generateUserViews gens
 
+let private generatorName (schemaName : SchemaName) =
+    sprintf "user_views_generators/%O.mjs" schemaName
+
 type UserViewsGenerator (runtime : IJSRuntime, userViews : SourceUserViews, createForceAllowBroken : bool) =
     let prepareGenerator (name : SchemaName) (schema : SourceUserViewsSchema) =
         match schema.GeneratorScript with
         | None -> PUVStatic schema
         | Some script ->
             try
-                let gen = UserViewsGeneratorScript (runtime, sprintf "%O/user_views_generator.mjs" name, script.Script)
+                let gen = UserViewsGeneratorScript (runtime, generatorName name, script.Script)
                 let ret =
                     { Generator = gen
                       Source = script

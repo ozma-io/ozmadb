@@ -35,6 +35,10 @@ open FunWithFlags.FunDB.Actions.Resolve
 open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Update
+open FunWithFlags.FunDB.Modules.Resolve
+open FunWithFlags.FunDB.Modules.Types
+open FunWithFlags.FunDB.Modules.Source
+open FunWithFlags.FunDB.Modules.Update
 open FunWithFlags.FunDB.Triggers.Resolve
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Source
@@ -50,6 +54,7 @@ type SourcePreloadedSchema =
     { Entities : Map<EntityName, SourceEntity>
       Roles : Map<RoleName, SourceRole>
       DefaultAttributes : Map<SchemaName, SourceAttributesSchema>
+      Modules : Map<ModulePath, SourceModule>
       Actions : Map<ActionName, SourceAction>
       Triggers : Map<SchemaName, SourceTriggersSchema>
       UserViewGenerator : string option // Path to .js file
@@ -74,6 +79,7 @@ type PreloadedSchema =
     { Schema : SourceSchema
       Permissions : SourcePermissionsSchema
       DefaultAttributes : SourceAttributesDatabase
+      Modules : SourceModulesSchema
       Actions : SourceActionsSchema
       Triggers : SourceTriggersDatabase
       UserViews : SourceUserViewsSchema
@@ -119,6 +125,7 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
         } : SourceSchema
     let permissions = { Roles = Map.map (fun name -> normalizeRole) preload.Roles }
     let defaultAttributes = { Schemas = preload.DefaultAttributes } : SourceAttributesDatabase
+    let modules = { Modules = preload.Modules } : SourceModulesSchema
     let actions = { Actions = preload.Actions } : SourceActionsSchema
     let triggers = { Schemas = preload.Triggers } : SourceTriggersDatabase
     let readUserViewScript (path : string) =
@@ -137,6 +144,7 @@ let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloaded
     { Schema = schema
       Permissions = permissions
       DefaultAttributes = defaultAttributes
+      Modules = modules
       Actions = actions
       Triggers = triggers
       UserViews = userViews
@@ -150,6 +158,9 @@ let preloadPermissions (preload : Preload) : SourcePermissions =
 
 let preloadDefaultAttributes (preload : Preload) : SourceDefaultAttributes =
     { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.DefaultAttributes) }
+
+let preloadModules (preload : Preload) : SourceModules =
+    { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.Modules) }
 
 let preloadActions (preload : Preload) : SourceActions =
     { Schemas = preload.Schemas |> Map.map (fun name schema -> schema.Actions) }
@@ -168,6 +179,7 @@ let resolvePreload (source : SourcePreloadFile) : Preload =
         { Schema = buildSystemSchema typeof<SystemContext>
           Permissions = emptySourcePermissionsSchema
           DefaultAttributes = emptySourceAttributesDatabase
+          Modules = emptySourceModulesSchema
           Actions = emptySourceActionsSchema
           Triggers = emptySourceTriggersDatabase
           UserViews = emptySourceUserViewsSchema
@@ -195,6 +207,13 @@ let preloadAttributesAreUnchanged (sourceAttrs : SourceDefaultAttributes) (prelo
         | Some existing -> schema = existing.DefaultAttributes
         | None -> true
     sourceAttrs.Schemas |> Map.toSeq |> Seq.forall notChanged
+
+let preloadModulesAreUnchanged (sourceModules : SourceModules) (preload : Preload) =
+    let notChanged (name : SchemaName, schema : SourceModulesSchema) =
+        match Map.tryFind name preload.Schemas with
+        | Some existing -> schema = existing.Modules
+        | None -> true
+    sourceModules.Schemas |> Map.toSeq |> Seq.forall notChanged
 
 let preloadActionsAreUnchanged (sourceActions : SourceActions) (preload : Preload) =
     let notChanged (name : SchemaName, schema : SourceActionsSchema) =
@@ -444,6 +463,17 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
                     let (errors, triggers) = resolveTriggers preloadLayout false triggers
                     return reraise' e
             }
+        let! changed6 =
+            task {
+                let modules = preloadModules preload
+                try
+                    return! updateModules conn.System modules cancellationToken
+                with
+                | e ->
+                    // Maybe we'll get a better error
+                    let modules = resolveModules preloadLayout modules
+                    return reraise' e
+            }
 
         let! sourceUserLayout = buildSchemaLayout conn.System (Map.keys preload.Schemas) cancellationToken
         let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout
@@ -471,5 +501,5 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
         }
         assert (Task.awaitSync <| sanityCheck ())
 
-        return (changed1 || changed2 || changed3 || changed4 || changed5, layout, newUserMeta)
+        return (changed1 || changed2 || changed3 || changed4 || changed5 || changed6, layout, newUserMeta)
     }

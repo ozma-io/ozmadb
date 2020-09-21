@@ -36,7 +36,7 @@ type SerializedTriggerEvent =
 type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction name scriptSource
+            runtime.CreateDefaultFunction { Path = name; Source = scriptSource; IsModule = true }
         with
         | :? NetJsException as e ->
             raisefWithInner TriggerRunException e "Couldn't initialize trigger"
@@ -167,7 +167,7 @@ type TriggerScripts =
                 |> Option.bind (fun entity -> Map.tryFind ref.Name entity.Triggers)
 
 let private triggerName (triggerRef : TriggerRef) =
-    sprintf "%O/triggers/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.schema triggerRef.Entity.name triggerRef.Name
+    sprintf "triggers/%O/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.schema triggerRef.Entity.name triggerRef.Name
 
 let private prepareTriggerScriptsEntity (runtime : IJSRuntime) (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : TriggerScriptsEntity =
     let getOne name = function
@@ -205,7 +205,8 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                     Ok trigger
                 with
                 | :? TriggerRunException as e when trigger.AllowBroken || forceAllowBroken ->
-                    errors <- Map.add name (e :> exn) errors
+                    if not trigger.AllowBroken then
+                        errors <- Map.add name (e :> exn) errors
                     Error (e :> exn)
             with
             | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In trigger %O: %s" name e.Message

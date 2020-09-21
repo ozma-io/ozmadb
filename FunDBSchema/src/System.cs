@@ -89,6 +89,11 @@ namespace FunWithFlags.FunDBSchema.System
         public DbSet<FieldAttributes> FieldsAttributes { get; set; } = null!;
 
         [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
+        [ComputedField("full_name", "schema_id=>__main || '.' || path")]
+        [UniqueConstraint("entry", new [] {"schema_id", "path"})]
+        public DbSet<Module> Modules { get; set; } = null!;
+
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
         [UniqueConstraint("entry", new [] {"schema_id", "name"})]
         public DbSet<Action> Actions { get; set; } = null!;
@@ -156,6 +161,12 @@ namespace FunWithFlags.FunDBSchema.System
                 .Include(sch => sch.FieldsAttributes).ThenInclude(attr => attr.FieldEntity).ThenInclude(ent => ent.Schema);
         }
 
+        public IQueryable<Schema> GetModulesObjects()
+        {
+            return this.Schemas
+                .Include(sch => sch.Modules);
+        }
+
         public IQueryable<Schema> GetActionsObjects()
         {
             return this.Schemas
@@ -200,6 +211,7 @@ namespace FunWithFlags.FunDBSchema.System
         public List<Entity> Entities { get; set; } = null!;
         public List<Role> Roles { get; set; } = null!;
         public List<FieldAttributes> FieldsAttributes { get; set; } = null!;
+        public List<Module> Modules { get; set; } = null!;
         public List<Action> Actions { get; set; } = null!;
         public List<Trigger> Triggers { get; set; } = null!;
         public List<UserView> UserViews { get; set; } = null!;
@@ -420,6 +432,20 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Attributes { get; set; } = null!;
+    }
+
+    public class Module
+    {
+        public int Id { get; set; }
+        [ColumnField("reference(public.schemas)")]
+        public int SchemaId { get; set; }
+        public Schema Schema { get; set; } = null!;
+        [ColumnField("string")]
+        [Required]
+        public string Path { get; set; } = null!;
+        [ColumnField("string")]
+        [Required]
+        public string Source { get; set; } = null!;
     }
 
     public class Action

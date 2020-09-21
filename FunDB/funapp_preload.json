@@ -108,6 +108,22 @@
                   "attributes": "@{ text_type = 'codeeditor', language = 'javascript' }"
                 }
               }
+            },
+
+            "actions": {
+              "fields": {
+                "function": {
+                  "attributes": "@{ text_type = 'codeeditor', language = 'javascript' }"
+                }
+              }
+            },
+
+            "modules": {
+              "fields": {
+                "source": {
+                  "attributes": "@{ text_type = 'codeeditor', language = 'javascript' }"
+                }
+              }
             }
           }
         }

@@ -15,6 +15,11 @@ open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDBSchema.System
 
+type UpdateActionsException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = UpdateActionsException (message, null)
+
 type private ActionsUpdater (db : SystemContext) =
     let updateActionsField (action : SourceAction) (existingAction : Action) : unit =
         existingAction.AllowBroken <- action.AllowBroken
@@ -36,7 +41,7 @@ type private ActionsUpdater (db : SystemContext) =
 
     let updateSchemas (schemas : Map<SchemaName, SourceActionsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
         let updateFunc _ = updateActionsDatabase
-        let createFunc name = failwith <| sprintf "Schema %O doesn't exist" name
+        let createFunc name = raisef UpdateActionsException "Schema %O doesn't exist" name
         ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
 
     member this.UpdateSchemas = updateSchemas
@@ -76,7 +81,7 @@ let private findBrokenActions (actions : ErroredActions) : ActionRef seq =
 let private checkActionName (ref : ActionRef) : Expr<Action -> bool> =
     let checkSchema = checkSchemaName ref.schema
     let uvName = string ref.name
-    <@ fun uv -> (%checkSchema) uv.Schema && uv.Name = uvName @>
+    <@ fun action -> (%checkSchema) action.Schema && action.Name = uvName @>
 
 let markBrokenActions (db : SystemContext) (actions : ErroredActions) (cancellationToken : CancellationToken) : Task =
     unitTask {

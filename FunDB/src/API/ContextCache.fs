@@ -35,6 +35,9 @@ open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Schema
 open FunWithFlags.FunDB.Triggers.Resolve
 open FunWithFlags.FunDB.Triggers.Merge
+open FunWithFlags.FunDB.Modules.Types
+open FunWithFlags.FunDB.Modules.Schema
+open FunWithFlags.FunDB.Modules.Resolve
 open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDB.Actions.Schema
 open FunWithFlags.FunDB.Actions.Resolve
@@ -208,7 +211,13 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
         finally
             jsIsolates.Return(isolate)
 
-    let makeRuntime () = IsolateLocal(fun isolate -> JSRuntime(isolate, APITemplate, Seq.empty))
+    let makeRuntime files = IsolateLocal(fun isolate ->
+        let env =
+            { Files = files
+              SearchPath = seq { moduleDirectory }
+            }
+        JSRuntime(isolate, APITemplate, env)
+    )
 
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
         let! (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews) = task {
@@ -220,7 +229,11 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 let systemViews = preloadUserViews preload
                 let! sourceViews = buildSchemaUserViews transaction.System cancellationToken
                 let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
-                let jsRuntime = makeRuntime ()
+
+                let! sourceModules = buildSchemaModules transaction.System cancellationToken
+                let modules = resolveModules layout sourceModules
+
+                let jsRuntime = makeRuntime (moduleFiles modules)
                 let (brokenViews, sourceViews) = runWithRuntime jsRuntime <| fun api -> generateViews api layout sourceViews cancellationToken true
                 let! isChanged2 = updateUserViews transaction.System sourceViews cancellationToken
 
@@ -389,12 +402,15 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 let! (_, prefetchedGoodViews) = dryRunUserViews transaction.Connection.Query layout false (Some false) sourceUvs userViews cancellationToken
                 let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
 
-                let jsRuntime = makeRuntime ()
+                let! sourceModules = buildSchemaModules transaction.System cancellationToken
+                let modules = resolveModules layout sourceModules
+
+                let jsRuntime = makeRuntime (moduleFiles modules)
 
                 let! sourceActions = buildSchemaActions transaction.System cancellationToken
                 let (_, actions) = resolveActions layout false sourceActions
                 let (_, actions) = runWithRuntime jsRuntime <| fun api -> testEvalActions api false actions
-    
+
                 let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                 let (_, triggers) = resolveTriggers layout false sourceTriggers
                 let (_, triggers) = runWithRuntime jsRuntime <| fun api -> testEvalTriggers api false triggers
@@ -559,7 +575,16 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
                         let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
-                        let jsRuntime = makeRuntime ()
+                        let! sourceModules = buildSchemaModules transaction.System cancellationToken
+                        if not <| preloadModulesAreUnchanged sourceModules preload then
+                            raisef ContextException "Cannot modify system modules"
+                        let modules =
+                            try
+                                resolveModules layout sourceModules
+                            with
+                            | :? ResolveModulesException as err -> raisefWithInner ContextException err "Failed to resolve modules"
+
+                        let jsRuntime = makeRuntime (moduleFiles modules)
 
                         let! sourceActions = buildSchemaActions transaction.System cancellationToken
                         if not <| preloadActionsAreUnchanged sourceActions preload then

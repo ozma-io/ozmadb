@@ -25,8 +25,21 @@ type IsolateLocal<'a when 'a : not struct> (create : Isolate -> 'a) =
     member this.GetValue (isolate : Isolate) =
         table.GetValue(isolate, ConditionalWeakTable.CreateValueCallback<Isolate,'a> create)
 
-type Path = string
+type Path = POSIXPath.Path
 type Source = string
+
+// Returns if file is a JavaScript script by extension.
+let fileIsJavaScript (p : Path) : bool option =
+    match POSIXPath.extension p with
+    | Some "js" -> Some false
+    | Some "mjs" -> Some true
+    | _ -> None
+
+type ModuleFile =
+    { Path : Path
+      Source : Source
+      IsModule : bool
+    }
 
 type private VirtualFSModule =
     { Path : Path
@@ -45,14 +58,25 @@ type IJavaScriptTemplate =
     abstract member FinishInitialization : IJSRuntime -> Context -> unit
 
 and IJSRuntime =
-    abstract member CreateModule : string -> string -> Module
-    abstract member CreateDefaultFunction : string -> string -> Function
+    abstract member CreateModule : ModuleFile -> Module
+    abstract member CreateDefaultFunction : ModuleFile -> Function
     abstract member Context : Context
     abstract member Isolate : Isolate
     abstract member EventLoop : EventLoop
     abstract member EventLoopScope : (EventLoop -> Task<'a>) -> Task<'a>
 
-type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateConstructor : Isolate -> 'a, moduleSources : (Path * Source) seq) as this =
+type JSEnvironment =
+    { Files : ModuleFile seq
+      SearchPath : Path seq
+    }
+
+let private convertPath (p : Path) =
+        let normalized = POSIXPath.normalize p
+        if POSIXPath.isAbsolute normalized then
+            failwithf "Absolute path is not expected: %s" p
+        normalized
+
+type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateConstructor : Isolate -> 'a, env : JSEnvironment) as this =
     let mutable currentEventLoop = None : EventLoop option
     let template = templateConstructor isolate
 
@@ -61,38 +85,61 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
         context.Global.Set("global", context.Global.Value)
         template.FinishInitialization this context
 
-    let makeModule (path : Path) src =
-        let modul = Module.Compile(String.New(context.Isolate, src), ScriptOrigin(path, IsModule = true))
-        { Path = path
+    let makeModule (file : ModuleFile) =
+        let normalized = convertPath file.Path
+        let modul = Module.Compile(String.New(context.Isolate, file.Source), ScriptOrigin(normalized, IsModule = file.IsModule))
+        { Path = normalized
           Module = modul
-          DirPath = POSIXPath.dirName path
+          DirPath = POSIXPath.dirName normalized
         }
 
     let modules =
-        moduleSources |> Map.ofSeqUnique |> Map.toSeq |> Seq.map (uncurry makeModule) |> Seq.cache
+        env.Files |> Seq.map makeModule |> Seq.cache
     let modulePathsMap =
-        modules |> Seq.collect (fun modul -> Seq.map (fun npath -> (npath, modul)) (pathAliases modul.Path)) |> Map.ofSeq
+        modules |> Seq.collect (fun modul -> Seq.map (fun npath -> (npath, modul)) (pathAliases modul.Path)) |> Map.ofSeqUnique
     let moduleIdsMap =
         modules |> Seq.map (fun modul -> (modul.Module.IdentityHash, modul)) |> Map.ofSeq
 
-    let resolveModule path id =
-        let currentModule = Map.find id moduleIdsMap
-        let fullPath = POSIXPath.normalizePath (POSIXPath.combinePath currentModule.DirPath path)
+    let searchPath = env.SearchPath |> Seq.map convertPath |> Seq.distinct |> Seq.toArray
+
+    let resolveModule currentModule path =
+        if POSIXPath.isAbsolute path then
+            raise <| JSException.NewFromString(context, "Module not found")
+        let fullPath = POSIXPath.normalize (POSIXPath.combine currentModule.DirPath path)
         match Map.tryFind fullPath modulePathsMap with
-        | None -> raise <| JSException.NewFromString(context, "Module not found")
         | Some modul -> modul.Module
+        | None ->
+            let firstComponent = (POSIXPath.splitComponents path).[0]
+            if firstComponent = "." || firstComponent = ".." then
+                raise <| JSException.NewFromString(context, "Module not found")
+            let trySearch (search : Path) =
+                let fullPath = POSIXPath.normalize (POSIXPath.combine search path)
+                Map.tryFind fullPath modulePathsMap
+            match Seq.tryPick trySearch searchPath with
+            | Some modul -> modul.Module
+            | None -> raise <| JSException.NewFromString(context, "Module not found")
 
     do
+        let resolveOne path id =
+            let currentModule = Map.find id moduleIdsMap
+            resolveModule currentModule path
         for modul in modules do
-            modul.Module.Instantiate(context, Func<_, _, _> resolveModule)
+            modul.Module.Instantiate(context, Func<_, _, _> resolveOne)
 
-    member this.CreateModule (path : string) (script : string) =
-        let jsModule = Module.Compile(String.New(context.Isolate, script), ScriptOrigin(path, IsModule = true))
-        jsModule.Instantiate(context, Func<_, _, _> resolveModule)
-        jsModule
+    member this.CreateModule (file : ModuleFile) =
+        let jsModule = makeModule file
+        let resolveOne path id =
+            let currentModule =
+                if id = jsModule.Module.IdentityHash then
+                    jsModule
+                else
+                    Map.find id moduleIdsMap
+            resolveModule currentModule path
+        jsModule.Module.Instantiate(context, Func<_, _, _> resolveOne)
+        jsModule.Module
 
-    member this.CreateDefaultFunction (path : string) (script : string) =
-        let jsModule = this.CreateModule path script
+    member this.CreateDefaultFunction (file : ModuleFile) =
+        let jsModule = this.CreateModule file
         ignore <| jsModule.Evaluate()
         jsModule.Namespace.Get("default").GetFunction()
 
@@ -119,8 +166,8 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
         }
 
     interface IJSRuntime with
-        member this.CreateModule path script = this.CreateModule path script
-        member this.CreateDefaultFunction path script = this.CreateDefaultFunction path script
+        member this.CreateModule file = this.CreateModule file
+        member this.CreateDefaultFunction file = this.CreateDefaultFunction file
         member this.Context = context
         member this.Isolate = isolate
         member this.EventLoop = this.EventLoop

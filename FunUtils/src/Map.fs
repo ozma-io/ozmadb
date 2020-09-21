@@ -74,6 +74,12 @@ let keysSet (map : Map<'k, 'v>) : Set<'k> =
 let mapWithKeys (func : 'k1 -> 'a -> ('k2 * 'b)) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
     map |> Map.toSeq |> Seq.map (fun (k, a) -> func k a) |> Map.ofSeq
 
+let mapWithKeysWith (func : 'k1 -> 'a -> ('k2 * 'b)) (decide : 'k2 -> 'b -> 'b -> 'b) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
+    map |> Map.toSeq |> Seq.map (fun (k, a) -> func k a) |> ofSeqWith decide
+
+let mapWithKeysUnique (func : 'k1 -> 'a -> ('k2 * 'b)) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
+    map |> Map.toSeq |> Seq.map (fun (k, a) -> func k a) |> ofSeqUnique
+
 let mapWithKeysMaybe (func : 'k1 -> 'a -> ('k2 * 'b) option) (map : Map<'k1, 'a>) : Map<'k2, 'b> =
     map |> Map.toSeq |> Seq.mapMaybe (fun (k, a) -> func k a) |> Map.ofSeq
 

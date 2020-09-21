@@ -22,7 +22,7 @@ type ActionRunException (message : string, innerException : Exception) =
 type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction name scriptSource
+            runtime.CreateDefaultFunction { Path = name; Source = scriptSource; IsModule = true }
         with
         | :? NetJsException as e ->
             raisefWithInner ActionRunException e "Couldn't initialize"
@@ -68,7 +68,7 @@ type ActionScripts =
                 |> Option.bind (fun schema -> Map.tryFind ref.name schema.Actions)
 
 let private actionName (actionRef : ActionRef) =
-    sprintf "%O/actions/%O.mjs" actionRef.schema actionRef.name
+    sprintf "actions/%O/%O.mjs" actionRef.schema actionRef.name
 
 let private prepareActionScriptsSchema (runtime : IJSRuntime) (schemaName : SchemaName) (actions : ActionsSchema) : ActionScriptsSchema =
     let getOne name = function
@@ -97,7 +97,8 @@ type private TestActionEvaluator (runtime : IJSRuntime, forceAllowBroken : bool)
                     Ok action
                 with
                 | :? ActionRunException as e when action.AllowBroken || forceAllowBroken ->
-                    errors <- Map.add name (e :> exn) errors
+                    if not action.AllowBroken then
+                        errors <- Map.add name (e :> exn) errors
                     Error (e :> exn)
             with
             | :? ActionRunException as e -> raisefWithInner ActionRunException e.InnerException "Error in action %O: %s" name e.Message

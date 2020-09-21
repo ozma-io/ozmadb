@@ -213,22 +213,23 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
 
         let mapUserView (name, maybeUv : Result<ResolvedUserView, exn>) =
             task {
-                let ref = { schema = schemaName; name = name }
-                match maybeUv with
-                | Error e -> return None
-                | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
-                | Ok uv ->
-                    try
-                        let! r = dryRunUserView uv
-                        return Some (name, Ok r)
-                    with
-                    | :? UserViewDryRunException as e ->
-                        if uv.AllowBroken || forceAllowBroken then
+                try
+                    let ref = { schema = schemaName; name = name }
+                    match maybeUv with
+                    | Error e -> return None
+                    | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
+                    | Ok uv ->
+                        try
+                            let! r = dryRunUserView uv
+                            return Some (name, Ok r)
+                        with
+                        | :? UserViewDryRunException as e when uv.AllowBroken || forceAllowBroken ->
                             if not uv.AllowBroken then
                                 errors <- Map.add name (e :> exn) errors
                             return Some (name, Error (e :> exn))
-                        else
-                            return raisefWithInner UserViewDryRunException e "Error in user view %O" ref
+                with
+                | :? UserViewDryRunException as e ->
+                    return raisefWithInner UserViewDryRunException e "Error in user view %O" ref
             }
 
         let! userViews = schema.UserViews |> Map.toSeq |> Seq.mapTask mapUserView |> Task.map (Seq.catMaybes >> Map.ofSeq)

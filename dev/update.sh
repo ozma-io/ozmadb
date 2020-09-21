@@ -7,4 +7,4 @@ if [ -z "$dump" ]; then
 fi
 shift
 
-zcat "$dump" | psql "$@"
+(zcat "$dump" && echo 'drop table public.state;') | psql "$@"
