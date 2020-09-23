@@ -213,7 +213,7 @@ type SimpleType =
     | [<CaseName("int")>] STInt
     | [<CaseName("bigint")>] STBigInt
     | [<CaseName("string")>] STString
-    | [<CaseName("numeric")>] STDecimal
+    | [<CaseName("decimal")>] STDecimal
     | [<CaseName("bool")>] STBool
     | [<CaseName("datetime")>] STDateTime
     | [<CaseName("date")>] STDate
@@ -228,7 +228,7 @@ type SimpleType =
             | STInt -> "int4"
             | STBigInt -> "int8"
             | STString -> "text"
-            | STDecimal -> "numeric"
+            | STDecimal -> "decimal"
             | STBool -> "bool"
             | STDateTime -> "timestamp"
             | STDate -> "date"
