@@ -240,6 +240,26 @@ type MapTypeConverter () =
     override this.Accepts (someType : Type) : bool =
         someType.IsGenericType && someType.GetGenericTypeDefinition() = typedefof<Map<_, _>>
 
+type SpecializedSetConverter<'K when 'K : comparison> (converter : CrutchTypeConverter) =
+    interface IYamlTypeConverter with
+        override this.Accepts someType =
+            someType = typeof<Set<'K>>
+
+        override this.ReadYaml (parser : IParser, someType : Type) =
+            let seq = converter.Deserialize<List<'K>>(parser)
+            seq |> Set.ofSeq :> obj
+
+        override this.WriteYaml (emitter, value, someType) = failwith "Not implemented"
+
+type SetTypeConverter () =
+    inherit SpecializedTypeConverter ()
+
+    override this.GetConverterType (someType : Type) : Type =
+        typedefof<SpecializedSetConverter<_>>.MakeGenericType(someType.GetGenericArguments())
+
+    override this.Accepts (someType : Type) : bool =
+        someType.IsGenericType && someType.GetGenericTypeDefinition() = typedefof<Set<_>>
+
 type YamlSerializerSettings =
     { NamingConvention : INamingConvention
       CrutchTypeConverters : unit -> CrutchTypeConverter seq
@@ -287,6 +307,7 @@ let makeYamlDeserializer (settings : YamlDeserializerSettings) : IDeserializer =
         UnionTypeConverter() :> CrutchTypeConverter
         RecordTypeConverter() :> CrutchTypeConverter
         MapTypeConverter() :> CrutchTypeConverter
+        SetTypeConverter() :> CrutchTypeConverter
     }
     let converters = Seq.append myConverters (settings.CrutchTypeConverters ()) |> Seq.cache
     let builder = DeserializerBuilder()
