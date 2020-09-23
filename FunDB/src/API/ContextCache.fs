@@ -123,7 +123,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
             { new IPooledObjectPolicy<Isolate> with
                   member this.Create () =
                     Isolate.NewWithHeapSize(1UL * 1024UL * 1024UL, 32UL * 1024UL * 1024UL)
-                  member this.Return _ = true
+                  member this.Return isolate = not isolate.WasNearHeapLimit
             }
 
     let filterSystemViews (views : SourceUserViews) : SourceUserViews =
