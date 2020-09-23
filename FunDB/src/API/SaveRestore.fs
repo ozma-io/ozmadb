@@ -1,8 +1,10 @@
 module FunWithFlags.FunDB.API.SaveRestore
 
 open System.IO
+open System.Linq
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
+open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 
@@ -63,7 +65,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                 return Ok (stream :> Stream)
         }
 
-    member this.RestoreSchemas (dumps : Map<SchemaName, SchemaDump>) : Task<Result<unit, RestoreErrorInfo>> =
+    member this.RestoreSchemas (dumps : Map<SchemaName, SchemaDump>) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
         task {
             if not (isRootRole rctx.User.Type) then
                 logger.LogError("Restore access denied")
@@ -72,28 +74,48 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                     event.Error <- "access_denied"
                 )
                 return Error RREAccessDenied
-            else if not <| Set.isEmpty (Set.intersect (Map.keysSet dumps) (Map.keysSet ctx.Preload.Schemas)) then
-                logger.LogError("Cannot restore preloaded schemas")
-                rctx.WriteEvent (fun event ->
-                    event.Type <- "restoreSchema"
-                    event.Error <- "preloaded"
-                )
-                return Error RREPreloaded
             else
-                try
-                    let! modified = restoreSchemas ctx.Transaction.System dumps ctx.CancellationToken
-                    if modified then
-                        ctx.ScheduleMigration ()
-                    rctx.WriteEventSync (fun event ->
-                        event.Type <- "restoreSchemas"
-                        event.Details <- JsonConvert.SerializeObject dumps
+                let restoredSchemas = Map.keysSet dumps
+                let preloadSchemas = Map.keysSet ctx.Preload.Schemas
+                if not <| Set.isEmpty (Set.intersect restoredSchemas preloadSchemas) then
+                    logger.LogError("Cannot restore preloaded schemas")
+                    rctx.WriteEvent (fun event ->
+                        event.Type <- "restoreSchema"
+                        event.Error <- "preloaded"
                     )
-                    return Ok ()
-                with
-                | :? RestoreSchemaException as e -> return Error <| RREConsistency (exceptionString e)
+                    return Error RREPreloaded
+                else
+                    try
+                        let droppedSchemas =
+                            if not dropOthers then
+                                Set.empty
+                            else
+                                let emptySchemas = Set.difference (Map.keysSet ctx.Layout.schemas) preloadSchemas
+                                Set.difference emptySchemas restoredSchemas
+                        let dumps =
+                            let emptyDumps = droppedSchemas |> Seq.map (fun name -> (name, emptySchemaDump)) |> Map.ofSeq
+                            Map.union emptyDumps dumps
+                        let! modified = restoreSchemas ctx.Transaction.System dumps ctx.CancellationToken
+                        let! affected =
+                            task {
+                                if Set.isEmpty droppedSchemas then
+                                    return 0
+                                else
+                                    let schemasArray = droppedSchemas |> Seq.map string |> Array.ofSeq
+                                    return! ctx.Transaction.System.Schemas.AsQueryable().Where(fun schema -> schemasArray.Contains(schema.Name)).DeleteFromQueryAsync(ctx.CancellationToken)
+                            }
+                        if modified || affected > 0 then
+                            ctx.ScheduleMigration ()
+                        rctx.WriteEventSync (fun event ->
+                            event.Type <- "restoreSchemas"
+                            event.Details <- sprintf "{\"dropOthers\":%b,\"dumps\":%s}" dropOthers (JsonConvert.SerializeObject dumps)
+                        )
+                        return Ok ()
+                    with
+                    | :? RestoreSchemaException as e -> return Error <| RREConsistency (exceptionString e)
         }
 
-    member this.RestoreZipSchemas (stream : Stream) : Task<Result<unit, RestoreErrorInfo>> =
+    member this.RestoreZipSchemas (stream : Stream) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
         task {
             let maybeDumps =
                 try
@@ -103,7 +125,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
             match maybeDumps with
             | Error e -> return Error e
             | Ok dumps ->
-                match! this.RestoreSchemas dumps with
+                match! this.RestoreSchemas dumps dropOthers with
                 | Ok () -> return Ok ()
                 | Error e -> return Error e
         }
@@ -111,5 +133,5 @@ type SaveRestoreAPI (rctx : IRequestContext) =
     interface ISaveRestoreAPI with
         member this.SaveSchemas names = this.SaveSchemas names
         member this.SaveZipSchemas names = this.SaveZipSchemas names
-        member this.RestoreSchemas dumps = this.RestoreSchemas dumps
-        member this.RestoreZipSchemas stream = this.RestoreZipSchemas stream
+        member this.RestoreSchemas dumps dropOthers = this.RestoreSchemas dumps dropOthers
+        member this.RestoreZipSchemas stream dropOthers = this.RestoreZipSchemas stream dropOthers

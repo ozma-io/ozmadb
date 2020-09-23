@@ -228,7 +228,7 @@ type SimpleType =
             | STInt -> "int4"
             | STBigInt -> "int8"
             | STString -> "text"
-            | STDecimal -> "decimal"
+            | STDecimal -> "numeric"
             | STBool -> "bool"
             | STDateTime -> "timestamp"
             | STDate -> "date"

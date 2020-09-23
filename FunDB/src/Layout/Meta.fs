@@ -9,6 +9,11 @@ open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 
+let private deferrableConstraint =
+    { SQL.defaultDeferrableConstraint with
+          Deferrable = true
+    }
+
 type private MetaBuilder (layout : Layout) =
     let rec compileComputedExpr (entity : ResolvedEntity) : ResolvedFieldExpr -> SQL.ValueExpr =
         let makeFullName (ctx : ReferenceContext) : LinkedBoundFieldRef -> SQL.ValueExpr = function
@@ -36,7 +41,7 @@ type private MetaBuilder (layout : Layout) =
         let compileColumn name =
             let col = Map.find name entity.columnFields
             col.columnName
-        SQL.CMUnique <| Array.map compileColumn constr.columns
+        SQL.CMUnique (Array.map compileColumn constr.columns, SQL.defaultDeferrableConstraint)
 
     let makeColumnFieldMeta (ref : ResolvedFieldRef) (columnName : SQL.ColumnName) (entity : ResolvedEntity) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.MigrationKey * (SQL.ConstraintName * SQL.ConstraintMeta)) seq =
         let makeDefaultValue def =
@@ -57,7 +62,7 @@ type private MetaBuilder (layout : Layout) =
                     let tableRef = compileResolvedEntityRef refEntity.root
                     let constrName = SQL.SQLName <| sprintf "__foreign__%s__%s"  entity.hashName field.hashName
                     let constrKey = sprintf "__foreign__%s__%s"  entity.hashName field.hashName
-                    Seq.singleton (constrKey, (constrName, SQL.CMForeignKey (tableRef, [| (columnName, sqlFunId) |])))
+                    Seq.singleton (constrKey, (constrName, SQL.CMForeignKey (tableRef, [| (columnName, sqlFunId) |], deferrableConstraint)))
                 | FTEnum vals ->
                     let expr =
                         let col = SQL.VEColumn { table = None; name = columnName }
@@ -93,7 +98,7 @@ type private MetaBuilder (layout : Layout) =
             let idConstraints =
                 let name = SQL.SQLName <| sprintf "__primary__%s" entity.hashName
                 let key = sprintf "__primary__%s"entity.hashName
-                let constr = SQL.CMPrimaryKey [| sqlFunId |]
+                let constr = SQL.CMPrimaryKey ([| sqlFunId |], SQL.defaultDeferrableConstraint)
                 Seq.singleton (key, (name, constr))
 
             let idColumns =

@@ -48,4 +48,3 @@ let resolveActions (layout : Layout) (forceAllowBroken : bool) (source : SourceA
     let phase1 = Phase1Resolver (layout)
     let ret = phase1.ResolveActions source
     (Map.empty, ret)
-    

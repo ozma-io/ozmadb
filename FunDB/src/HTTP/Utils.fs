@@ -8,9 +8,7 @@ open System.Security.Claims
 open Microsoft.Extensions.Primitives
 open Microsoft.Extensions.Logging
 open Microsoft.AspNetCore.Http
-open Microsoft.AspNetCore.Authentication
 open Microsoft.AspNetCore.Authentication.JwtBearer
-open Microsoft.Extensions.DependencyInjection
 open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 open Giraffe
@@ -102,6 +100,9 @@ let instanceConnectionString (instance : Instance) =
     builder.Database <- instance.Database
     builder.Username <- instance.Username
     builder.Password <- instance.Password
+#if DEBUG
+    builder.IncludeErrorDetails <- true
+#endif
     builder.ConnectionString
 
 let resolveUser (f : string -> bool -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =

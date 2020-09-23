@@ -236,8 +236,8 @@ type RestoreErrorInfo =
 type ISaveRestoreAPI =
     abstract member SaveSchemas : SchemaName seq -> Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>>
     abstract member SaveZipSchemas : SchemaName seq -> Task<Result<Stream, SaveErrorInfo>>
-    abstract member RestoreSchemas : Map<SchemaName, SchemaDump> -> Task<Result<unit, RestoreErrorInfo>>
-    abstract member RestoreZipSchemas : Stream -> Task<Result<unit, RestoreErrorInfo>>
+    abstract member RestoreSchemas : Map<SchemaName, SchemaDump> -> bool -> Task<Result<unit, RestoreErrorInfo>>
+    abstract member RestoreZipSchemas : Stream -> bool -> Task<Result<unit, RestoreErrorInfo>>
 
 [<NoEquality; NoComparison>]
 type ActionResult =

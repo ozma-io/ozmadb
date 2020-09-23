@@ -52,7 +52,8 @@ let private schemaOperationOrder = function
     | SORenameIndex _ -> 10
     | SOCreateTrigger _ -> 10
     | SORenameTrigger _ -> 10
-    // Finally, create other constraints.
+    // Finally, create and alter other constraints.
+    | SOAlterConstraint _ -> 11
     | SOCreateConstraint _ -> 11
 
 type private OrderedSchemaOperation = SchemaOperation * int
@@ -177,12 +178,6 @@ let private migrateAlterTable (objRef : SchemaObject) (fromMeta : TableMeta) (to
             yield (SOAlterTable (objRef, changes |> Array.sortBy tableOperationOrder), 0)
     }
 
-let private normalizeConstraint : ConstraintMeta -> ConstraintMeta = function
-    | CMCheck expr -> CMCheck (normalizeLocalExpr expr)
-    | CMForeignKey (ref, f) -> CMForeignKey (ref, f)
-    | CMPrimaryKey p -> CMPrimaryKey p
-    | CMUnique u -> CMUnique u
-
 let private migrateOverloads (objRef : SchemaObject) (oldOverloads : Map<FunctionSignature, FunctionDefinition>) (newOverloads : Map<FunctionSignature, FunctionDefinition>) : OrderedSchemaOperation seq =
     seq {
         for KeyValue (signature, newDefinition) in newOverloads do
@@ -193,6 +188,21 @@ let private migrateOverloads (objRef : SchemaObject) (oldOverloads : Map<Functio
             match Map.tryFind signature newOverloads with
             | Some _ -> ()
             | None -> yield (SODropFunction (objRef, signature), 0)
+    }
+
+let private migrateBool (oldVal : bool) (newVal : bool) =
+    if oldVal = newVal then None else Some newVal
+
+let private migrateDeferrableConstraint (objRef : SchemaObject) (tableName : TableName) (oldDefer : DeferrableConstraint) (newDefer : DeferrableConstraint) : OrderedSchemaOperation seq =
+    seq {
+        let deferrable = migrateBool oldDefer.Deferrable newDefer.Deferrable
+        let initiallyDeferred = migrateBool oldDefer.InitiallyDeferred newDefer.InitiallyDeferred
+        if Option.isSome deferrable || Option.isSome initiallyDeferred then
+            let alter =
+                { Deferrable = deferrable
+                  InitiallyDeferred = initiallyDeferred
+                }
+            yield (SOAlterConstraint (objRef, tableName, alter), 0)
     }
 
 let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMeta) : OrderedSchemaOperation seq =
@@ -220,16 +230,35 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
             | OMConstraint (tableName, constraintType) ->
                 match Map.tryFind objectKey fromObjects with
                 | Some (oldObjectName, OMConstraint (oldTableName, oldConstraintType)) ->
-                    if tableName <> oldTableName || normalizeConstraint constraintType <> normalizeConstraint oldConstraintType then
+                    let mutable oldIsGood = false
+                    match (oldConstraintType, constraintType) with
+                    | (CMCheck expr1, CMCheck expr2) ->
+                        oldIsGood <- normalizeLocalExpr expr1 = normalizeLocalExpr expr2
+                    | (CMForeignKey (ref1, f1, oldDefer), CMForeignKey (ref2, f2, newDefer)) ->
+                        if ref1 = ref2 && f1 = f2 then
+                            yield! migrateDeferrableConstraint objRef tableName oldDefer newDefer
+                            oldIsGood <- true
+                    | (CMPrimaryKey (p1, oldDefer), CMPrimaryKey (p2, newDefer)) ->
+                        if p1 = p2 then
+                            yield! migrateDeferrableConstraint objRef tableName oldDefer newDefer
+                            oldIsGood <- true
+                    | (CMUnique (u1, oldDefer), CMUnique (u2, newDefer)) ->
+                        if u1 = u2 then
+                            yield! migrateDeferrableConstraint objRef tableName oldDefer newDefer
+                            oldIsGood <- true
+                    | _ -> ()
+
+                    if oldIsGood then
+                        if oldObjectName <> objectName then
+                            let oldObjRef = { schema = Some toMeta.Name; name = oldObjectName }
+                            yield (SORenameConstraint (oldObjRef, tableName, objectName), 0)
+                    else
                         let isPrimaryKey =
                             match oldConstraintType with
                             | CMPrimaryKey _ -> 1
                             | _ -> 0
                         yield (SODropConstraint (objRef, oldTableName), isPrimaryKey)
                         yield (SOCreateConstraint (objRef, tableName, constraintType), 0)
-                    else if oldObjectName <> objectName then
-                        let oldObjRef = { schema = Some toMeta.Name; name = oldObjectName }
-                        yield (SORenameConstraint (oldObjRef, tableName, objectName), 0)
                 | _ -> yield (SOCreateConstraint (objRef, tableName, constraintType), 0)
             | OMIndex (tableName, index) ->
                 match Map.tryFind objectKey fromObjects with

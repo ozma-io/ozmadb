@@ -3,9 +3,11 @@ module FunWithFlags.FunDB.Operations.SaveRestore
 open System.ComponentModel
 open System.Threading
 open System.Threading.Tasks
+open System.Linq
 open System.IO
 open System.IO.Compression
 open Newtonsoft.Json
+open Microsoft.EntityFrameworkCore
 open YamlDotNet.Serialization.NamingConventions
 open FSharp.Control.Tasks.Affine
 
@@ -195,6 +197,8 @@ let restoreSchemas (db : SystemContext) (dumps : Map<SchemaName, SchemaDump>) (c
         let newActions = { Schemas = Map.map (fun name dump -> { Actions = dump.Actions }) dumps } : SourceActions
         let newTriggers = { Schemas = Map.map (fun name dump -> { Schemas = dump.Triggers }) dumps } : SourceTriggers
 
+        let! _ = db.Database.ExecuteSqlRawAsync("SET CONSTRAINTS ALL DEFERRED")
+
         let! updated1 = updateLayout db newLayout cancellationToken
         let! updated2 =
             try
@@ -226,6 +230,8 @@ let restoreSchemas (db : SystemContext) (dumps : Map<SchemaName, SchemaDump>) (c
                 updateTriggers db newTriggers cancellationToken
             with
             | :? UpdateTriggersException as e -> raisefWithInner RestoreSchemaException e "Failed to restore triggers"
+
+        let! _ = db.Database.ExecuteSqlRawAsync("SET CONSTRAINTS ALL IMMEDIATE")
 
         return updated1 || updated2 || updated3 || updated4 || updated5 || updated6 || updated7
     }

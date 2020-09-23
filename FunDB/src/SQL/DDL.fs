@@ -25,11 +25,33 @@ type ConstraintType =
     | CTForeignKey
 
 [<StructuralEquality; NoComparison>]
+type DeferrableConstraint =
+    { Deferrable : bool
+      InitiallyDeferred : bool
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let deferrableStr =
+                if this.Deferrable then "DEFERRABLE" else "NOT DEFERRABLE"
+            let initiallyDeferredStr =
+                if this.InitiallyDeferred then "INITIALLY DEFERRED" else "INITIALLY IMMEDIATE"
+            sprintf "%s %s" deferrableStr initiallyDeferredStr
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+let defaultDeferrableConstraint =
+    { Deferrable = false
+      InitiallyDeferred = false
+    }
+
+[<StructuralEquality; NoComparison>]
 type ConstraintMeta =
-    | CMUnique of ColumnName[]
+    | CMUnique of ColumnName[] * DeferrableConstraint
     | CMCheck of ValueExpr
-    | CMPrimaryKey of ColumnName[]
-    | CMForeignKey of TableRef * (ColumnName * ColumnName)[]
+    | CMPrimaryKey of ColumnName[] * DeferrableConstraint
+    | CMForeignKey of TableRef * (ColumnName * ColumnName)[] * DeferrableConstraint
 
 [<StructuralEquality; NoComparison>]
 type IndexMeta =
@@ -268,6 +290,34 @@ type TableOperation =
             member this.ToSQLString () = this.ToSQLString()
 
 [<NoEquality; NoComparison>]
+type AlterConstraint =
+    { Deferrable : bool option
+      InitiallyDeferred : bool option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let deferrableStr =
+                match this.Deferrable with
+                | None -> ""
+                | Some false -> "NOT DEFERRABLE"
+                | Some true -> "DEFERRABLE"
+            let initiallyDeferredStr =
+                match this.InitiallyDeferred with
+                | None -> ""
+                | Some false -> "INITIALLY IMMEDIATE"
+                | Some true -> "INITIALLY DEFERRED"
+            String.concatWithWhitespaces [deferrableStr; initiallyDeferredStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+let emptyAlterConstraint =
+    { Deferrable = None
+      InitiallyDeferred = None
+    }
+
+[<NoEquality; NoComparison>]
 type SchemaOperation =
     | SOCreateSchema of SchemaName
     | SORenameSchema of SchemaName * SchemaName
@@ -282,6 +332,7 @@ type SchemaOperation =
     | SODropSequence of SchemaObject
     | SOCreateConstraint of SchemaObject * TableName * ConstraintMeta
     | SORenameConstraint of SchemaObject * TableName * ConstraintName
+    | SOAlterConstraint of SchemaObject * TableName * AlterConstraint
     | SODropConstraint of SchemaObject * TableName
     | SOCreateIndex of SchemaObject * TableName * IndexMeta
     | SORenameIndex of SchemaObject * IndexName
@@ -311,19 +362,25 @@ type SchemaOperation =
             | SOCreateConstraint (constr, table, pars) ->
                 let constraintStr =
                     match pars with
-                    | CMUnique exprs ->
+                    | CMUnique (exprs, defer) ->
                         assert (not <| Array.isEmpty exprs)
-                        exprs |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "UNIQUE (%s)"
-                    | CMPrimaryKey cols ->
+                        let exprsStr = exprs |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                        sprintf "UNIQUE (%s) %s" exprsStr (defer.ToSQLString())
+                    | CMPrimaryKey (cols, defer) ->
                         assert (not <| Array.isEmpty cols)
-                        cols |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "PRIMARY KEY (%s)"
-                    | CMForeignKey (ref, cols) ->
+                        let colsStr = cols |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                        sprintf "PRIMARY KEY (%s) %s" colsStr (defer.ToSQLString())
+                    | CMForeignKey (ref, cols, defer) ->
                         let myCols = cols |> Seq.map (fun (name, refName) -> name.ToSQLString()) |> String.concat ", "
                         let refCols = cols |> Seq.map (fun (name, refName) -> refName.ToSQLString()) |> String.concat ", "
-                        sprintf "FOREIGN KEY (%s) REFERENCES %s (%s)" myCols (ref.ToSQLString()) refCols
+                        sprintf "FOREIGN KEY (%s) REFERENCES %s (%s) %s" myCols (ref.ToSQLString()) refCols (defer.ToSQLString())
                     | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
                 sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) constraintStr
             | SORenameConstraint (constr, table, toName) -> sprintf "ALTER TABLE %s RENAME CONSTRAINT %s TO %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) (toName.ToSQLString())
+            | SOAlterConstraint (constr, table, alter) ->
+                let initStr = sprintf "ALTER TABLE %s ALTER CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
+                let alterStr = alter.ToSQLString()
+                String.concatWithWhitespaces [initStr; alterStr]
             | SODropConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
             | SOCreateIndex (index, table, pars) ->
                 let cols =

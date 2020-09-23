@@ -276,7 +276,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 let (newBrokenActions, actions) = runWithRuntime jsRuntime <| fun api -> testEvalActions api true actions
                 let brokenActions = unionErroredActions brokenActions newBrokenActions
                 do! checkBrokenActions logger preload transaction brokenActions cancellationToken
-    
+
                 let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                 let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
                 let (newBrokenTriggers, triggers) = runWithRuntime jsRuntime <| fun api -> testEvalTriggers api true triggers

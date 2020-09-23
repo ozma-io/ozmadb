@@ -309,6 +309,11 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
     with
     | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in schema %s: %s" ns.NspName e.Message
 
+let private makeDeferrableConstraint (constr : Constraint) : DeferrableConstraint =
+    { Deferrable = constr.ConDeferrable
+      InitiallyDeferred = constr.ConDeferred
+    }
+
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =
     let makeConstraintMeta (tableName : TableName) (columnIds : TableColumnIds) (constr : Constraint) : (ConstraintName * ConstraintMeta) option =
@@ -328,11 +333,11 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 
                 let tableRef = { schema = Some refSchema; name = refName }
                 let cols = Seq.map2 makeRefColumn constr.ConKey constr.ConFKey |> Seq.toArray
-                Some <| CMForeignKey (tableRef, cols)
+                Some <| CMForeignKey (tableRef, cols, makeDeferrableConstraint constr)
             | 'p' ->
-                Some <| CMPrimaryKey (Array.map makeLocalColumn constr.ConKey)
+                Some <| CMPrimaryKey (Array.map makeLocalColumn constr.ConKey, makeDeferrableConstraint constr)
             | 'u' ->
-                Some <| CMUnique (Array.map makeLocalColumn constr.ConKey)
+                Some <| CMUnique (Array.map makeLocalColumn constr.ConKey, makeDeferrableConstraint constr)
             | _ -> None
 
         Option.map (fun r -> (SQLName constr.ConName, r)) ret

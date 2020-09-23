@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Attributes.Update
 
+open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.FSharp.Quotations
@@ -29,12 +30,12 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     let updateAttributesDatabase (schema : SourceAttributesDatabase) (existingSchema : Schema) : unit =
         let addOldAttrsKey (attrs : FieldAttributes) =
-            (({ schema = FunQLName attrs.FieldEntity.Schema.Name; name = FunQLName attrs.FieldEntity.Name }, FunQLName attrs.FieldName), attrs)
+            ({ entity = { schema = FunQLName attrs.FieldEntity.Schema.Name; name = FunQLName attrs.FieldEntity.Name }; name = FunQLName attrs.FieldName }, attrs)
         let oldAttrsMap =
             existingSchema.FieldsAttributes |> Seq.map addOldAttrsKey |> Map.ofSeq
 
         let addNewAttrsFieldKey schemaName entityName (fieldName, attrs : SourceAttributesField) =
-            (({ schema = schemaName; name = entityName }, fieldName), attrs)
+            ({ entity = { schema = schemaName; name = entityName }; name = fieldName }, attrs)
         let addNewAttrsEntityKey schemaName (entityName, entity : SourceAttributesEntity) =
             entity.Fields |> Map.toSeq |> Seq.map (addNewAttrsFieldKey schemaName entityName)
         let addNewAttrsSchemaKey (schemaName, schema : SourceAttributesSchema) =
@@ -42,15 +43,15 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
         let newAttrsMap = schema.Schemas |> Map.toSeq |> Seq.collect addNewAttrsSchemaKey |> Map.ofSeq
 
         let updateFunc _ = updateAttributesField
-        let createFunc (entityRef, FunQLName fieldName) =
+        let createFunc fieldRef =
             let entityId =
-                match Map.tryFind entityRef allEntitiesMap with
+                match Map.tryFind fieldRef.entity allEntitiesMap with
                 | Some id -> id
-                | None -> raisef UpdateAttributesException "Unknown entity %O" entityRef
+                | None -> raisef UpdateAttributesException "Unknown entity %O" fieldRef.entity
             let newAttrs =
                 FieldAttributes (
                     FieldEntityId = entityId,
-                    FieldName = fieldName
+                    FieldName = string fieldRef.name
                 )
             existingSchema.FieldsAttributes.Add(newAttrs)
             newAttrs

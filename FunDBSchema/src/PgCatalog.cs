@@ -265,6 +265,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public int? ConFRelId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
         public Int16[] ConKey { get; set; } = null!;
         public Int16[] ConFKey { get; set; } = null!;
+        public bool ConDeferrable { get; set; }
+        public bool ConDeferred { get; set; }
 
         [NotMapped]
         public string Source { get; set; } = null!;

@@ -61,7 +61,7 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) =
         ignore <| updateDifference db updateFunc createFunc newTriggersMap oldTriggersMap
 
     let updateSchemas (schemas : Map<SchemaName, SourceTriggersDatabase>) (oldSchemas : Map<SchemaName, Schema>) =
-        let updateFunc name schema existingSchema = 
+        let updateFunc name schema existingSchema =
             try
                 updateTriggersDatabase schema existingSchema
             with
