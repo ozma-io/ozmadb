@@ -101,7 +101,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
 // and views that are broken while resolving user views.
 let dereferenceViewExpr (checkViewExists : ResolvedUserViewRef -> unit) (homeSchema : SchemaName option) (expr : ResolvedViewExpr) : ResolvedViewExpr =
     let resolver = ReferenceResolver (checkViewExists, homeSchema)
-    let select' = resolver.ResolveSelectExpr expr.select
+    let select' = resolver.ResolveSelectExpr expr.Select
     { expr with
-          select = select'
+          Select = select'
     }

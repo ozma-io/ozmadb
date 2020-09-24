@@ -750,25 +750,25 @@ and mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1
     | AEStar -> AEStar
 
 type FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQLName and 'e2 :> IFunQLName and 'f2 :> IFunQLName =
-    { value : FieldValue -> Task<FieldValue>
-      fieldReference : 'f1 -> Task<'f2>
-      query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>
-      aggregate : AggExpr<'e1, 'f1> -> Task<AggExpr<'e1, 'f1>>
-      subEntity : SubEntityContext -> 'f2 -> SubEntityRef -> Task<SubEntityRef>
+    { Value : FieldValue -> Task<FieldValue>
+      FieldReference : 'f1 -> Task<'f2>
+      Query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>
+      Aggregate : AggExpr<'e1, 'f1> -> Task<AggExpr<'e1, 'f1>>
+      SubEntity : SubEntityContext -> 'f2 -> SubEntityRef -> Task<SubEntityRef>
     }
 
 let idFieldExprTaskMapper (fieldReference : 'f1 -> Task<'f2>) (query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) =
-    { value = Task.result
-      fieldReference = fieldReference
-      query = query
-      aggregate = Task.result
-      subEntity = fun _ _ r -> Task.result r
+    { Value = Task.result
+      FieldReference = fieldReference
+      Query = query
+      Aggregate = Task.result
+      SubEntity = fun _ _ r -> Task.result r
     }
 
 let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
     let rec traverse = function
-        | FEValue value -> Task.map FEValue (mapper.value value)
-        | FERef r -> Task.map FERef (mapper.fieldReference r)
+        | FEValue value -> Task.map FEValue (mapper.Value value)
+        | FERef r -> Task.map FERef (mapper.FieldReference r)
         | FENot e -> Task.map FENot (traverse e)
         | FEAnd (a, b) -> Task.map2 (curry FEAnd) (traverse a) (traverse b)
         | FEOr (a, b) -> Task.map2 (curry FEOr) (traverse a) (traverse b)
@@ -785,8 +785,8 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
         | FEGreaterEq (a, b) -> Task.map2 (curry FEGreaterEq) (traverse a) (traverse b)
         | FEIn (e, vals) -> Task.map2 (curry FEIn) (traverse e) (Array.mapTask traverse vals)
         | FENotIn (e, vals) -> Task.map2 (curry FENotIn) (traverse e) (Array.mapTask traverse vals)
-        | FEInQuery (e, query) -> Task.map2 (curry FEInQuery) (traverse e) (mapper.query query)
-        | FENotInQuery (e, query) -> Task.map2 (curry FENotInQuery) (traverse e) (mapper.query query)
+        | FEInQuery (e, query) -> Task.map2 (curry FEInQuery) (traverse e) (mapper.Query query)
+        | FENotInQuery (e, query) -> Task.map2 (curry FENotInQuery) (traverse e) (mapper.Query query)
         | FECast (e, typ) -> Task.map (fun newE -> FECast (newE, typ)) (traverse e)
         | FEIsNull e -> Task.map FEIsNull (traverse e)
         | FEIsNotNull e -> Task.map FEIsNotNull (traverse e)
@@ -809,20 +809,20 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
         | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTask traverse args)
         | FEAggFunc (name, args) ->
             task {
-                let! args1 = mapper.aggregate args
+                let! args1 = mapper.Aggregate args
                 return! Task.map (fun x -> FEAggFunc (name, x)) (mapTaskAggExpr traverse args1)
             }
-        | FESubquery query -> Task.map FESubquery (mapper.query query)
+        | FESubquery query -> Task.map FESubquery (mapper.Query query)
         | FEInheritedFrom (f, nam) ->
             task {
-                let! field = mapper.fieldReference f
-                let! subEntity = mapper.subEntity SECInheritedFrom field nam
+                let! field = mapper.FieldReference f
+                let! subEntity = mapper.SubEntity SECInheritedFrom field nam
                 return FEInheritedFrom (field, subEntity)
             }
         | FEOfType (f, nam) ->
             task {
-                let! field = mapper.fieldReference f
-                let! subEntity = mapper.subEntity SECOfType field nam
+                let! field = mapper.FieldReference f
+                let! subEntity = mapper.SubEntity SECOfType field nam
                 return FEOfType (field, subEntity)
             }
     traverse
@@ -833,25 +833,25 @@ and mapTaskAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>) : A
     | AEStar -> Task.result AEStar
 
 type FieldExprIter<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    { value : FieldValue -> unit
-      fieldReference : 'f -> unit
-      query : SelectExpr<'e, 'f> -> unit
-      aggregate : AggExpr<'e, 'f> -> unit
-      subEntity : SubEntityContext -> 'f -> SubEntityRef -> unit
+    { Value : FieldValue -> unit
+      FieldReference : 'f -> unit
+      Query : SelectExpr<'e, 'f> -> unit
+      Aggregate : AggExpr<'e, 'f> -> unit
+      SubEntity : SubEntityContext -> 'f -> SubEntityRef -> unit
     }
 
 let idFieldExprIter =
-    { value = fun _ -> ()
-      fieldReference = fun _ -> ()
-      query = fun _ -> ()
-      aggregate = fun _ -> ()
-      subEntity = fun _ _ _ -> ()
+    { Value = fun _ -> ()
+      FieldReference = fun _ -> ()
+      Query = fun _ -> ()
+      Aggregate = fun _ -> ()
+      SubEntity = fun _ _ _ -> ()
     }
 
 let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> unit =
     let rec traverse = function
-        | FEValue value -> mapper.value value
-        | FERef r -> mapper.fieldReference r
+        | FEValue value -> mapper.Value value
+        | FERef r -> mapper.FieldReference r
         | FENot e -> traverse e
         | FEAnd (a, b) -> traverse a; traverse b
         | FEOr (a, b) -> traverse a; traverse b
@@ -868,8 +868,8 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FEGreaterEq (a, b) -> traverse a; traverse b
         | FEIn (e, vals) -> traverse e; Array.iter traverse vals
         | FENotIn (e, vals) -> traverse e; Array.iter traverse vals
-        | FEInQuery (e, query) -> traverse e; mapper.query query
-        | FENotInQuery (e, query) -> traverse e; mapper.query query
+        | FEInQuery (e, query) -> traverse e; mapper.Query query
+        | FENotInQuery (e, query) -> traverse e; mapper.Query query
         | FECast (e, typ) -> traverse e
         | FEIsNull e -> traverse e
         | FEIsNotNull e -> traverse e
@@ -887,11 +887,11 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FEDivide (a, b) -> traverse a; traverse b
         | FEFunc (name, args) -> Array.iter traverse args
         | FEAggFunc (name, args) ->
-            mapper.aggregate args
+            mapper.Aggregate args
             iterAggExpr traverse args
-        | FESubquery query -> mapper.query query
-        | FEInheritedFrom (f, nam) -> mapper.fieldReference f; mapper.subEntity SECInheritedFrom f nam
-        | FEOfType (f, nam) -> mapper.fieldReference f; mapper.subEntity SECOfType f nam
+        | FESubquery query -> mapper.Query query
+        | FEInheritedFrom (f, nam) -> mapper.FieldReference f; mapper.SubEntity SECInheritedFrom f nam
+        | FEOfType (f, nam) -> mapper.FieldReference f; mapper.SubEntity SECOfType f nam
     traverse
 
 and iterAggExpr (func : FieldExpr<'e, 'f> -> unit) : AggExpr<'e, 'f> -> unit = function
@@ -917,8 +917,8 @@ type LocalFieldExpr = FieldExpr<FunQLVoid, FieldName>
 
 [<NoEquality; NoComparison>]
 type BoundField =
-    { ref : ResolvedFieldRef
-      immediate : bool // Set if field references value from a table directly, not via a subexpression.
+    { Ref : ResolvedFieldRef
+      Immediate : bool // Set if field references value from a table directly, not via a subexpression.
     }
 
 [<NoEquality; NoComparison>]
@@ -951,14 +951,14 @@ type ResolvedOrderLimitClause = OrderLimitClause<ResolvedEntityRef, LinkedBoundF
 
 [<NoEquality; NoComparison>]
 type Argument<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    { argType: FieldType<'e, 'f>
-      optional: bool
+    { ArgType: FieldType<'e, 'f>
+      Optional: bool
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            let typeStr = this.argType.ToFunQLString()
-            if this.optional then
+            let typeStr = this.ArgType.ToFunQLString()
+            if this.Optional then
                 sprintf "%s NULL" typeStr
             else
                 typeStr
@@ -1009,16 +1009,16 @@ let mergeUsedSchemas : UsedSchemas -> UsedSchemas -> UsedSchemas =
 // Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
 let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
     Map.ofSeq
-        [ (FunQLName "lang", { argType = FTType <| FETScalar SFTString
-                               optional = false })
-          (FunQLName "user", { argType = FTType <| FETScalar SFTString
-                               optional = false })
-          (FunQLName "user_id", { argType = FTReference ({ schema = funSchema; name = funUsers }, None)
-                                  optional = true })
-          (FunQLName "transaction_time", { argType = FTType <| FETScalar SFTDateTime
-                                           optional = false })
-          (FunQLName "transaction_id", { argType = FTType <| FETScalar SFTInt
-                                         optional = false })
+        [ (FunQLName "lang", { ArgType = FTType <| FETScalar SFTString
+                               Optional = false })
+          (FunQLName "user", { ArgType = FTType <| FETScalar SFTString
+                               Optional = false })
+          (FunQLName "user_id", { ArgType = FTReference ({ schema = funSchema; name = funUsers }, None)
+                                  Optional = true })
+          (FunQLName "transaction_time", { ArgType = FTType <| FETScalar SFTDateTime
+                                           Optional = false })
+          (FunQLName "transaction_id", { ArgType = FTType <| FETScalar SFTInt
+                                         Optional = false })
         ]
 
 let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal

@@ -12,7 +12,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 // Rename top-level entities in a restriction expression
 let private renameRestriction (boundRef : ResolvedEntityRef) (entityRef : ResolvedEntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
     let renameBound (bound : BoundField) : BoundField =
-        { bound with ref = { entity = boundRef; name = bound.ref.name } }
+        { bound with Ref = { entity = boundRef; name = bound.Ref.name } }
     let resetReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
         let link =
             match ref.ref with
@@ -49,12 +49,12 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
             else
                 let expr = renameRestriction currRef entityRef restrs.Expression
                 let fieldRef = { entity = entityRef; name = funSubEntity }
-                let bound = { ref = fieldRef; immediate = true }
+                let bound = { Ref = fieldRef; Immediate = true }
                 let boundFieldRef = { ref = VRColumn { ref = relaxFieldRef fieldRef; bound = Some bound }; path = [||] }
                 let subEntityRef =
                     { ref = relaxEntityRef currRef
                       extra =
-                        { alwaysTrue = false
+                        { AlwaysTrue = false
                         }
                     }
 

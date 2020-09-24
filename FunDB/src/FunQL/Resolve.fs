@@ -16,11 +16,11 @@ type ViewResolveException (message : string) =
 
 [<NoEquality; NoComparison>]
 type private BoundFieldInfo =
-    { ref : ResolvedFieldRef
-      entity : IEntityFields
-      field : ResolvedField
+    { Ref : ResolvedFieldRef
+      Entity : IEntityFields
+      Field : ResolvedField
       // Means that field is selected directly from an entity and not from a subexpression.
-      immediate : bool
+      Immediate : bool
     }
 
 [<NoEquality; NoComparison>]
@@ -44,40 +44,40 @@ type private SomeArgumentsMap = Map<ArgumentName, ParsedFieldType>
 
 [<NoEquality; NoComparison>]
 type private QSelectResults =
-    { fields : QSubqueryFields
-      fieldAttributeNames : (FieldName * Set<FieldName>)[]
-      attributes : ResolvedAttributeMap
+    { Fields : QSubqueryFields
+      FieldAttributeNames : (FieldName * Set<FieldName>)[]
+      Attributes : ResolvedAttributeMap
     }
 
 // If a query has a main entity it satisfies two properties:
 // 1. All rows can be bound to some entry of that entity;
 // 2. Columns contain all required fields of that entity.
 type ResolvedMainEntity =
-    { entity : ResolvedEntityRef
-      columnsToFields : Map<FieldName, FieldName>
-      fieldsToColumns : Map<FieldName, FieldName>
+    { Entity : ResolvedEntityRef
+      ColumnsToFields : Map<FieldName, FieldName>
+      FieldsToColumns : Map<FieldName, FieldName>
     }
 
 type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
 
 [<NoEquality; NoComparison>]
 type ResolvedViewExpr =
-    { arguments : ResolvedArgumentsMap
-      select : ResolvedSelectExpr
-      mainEntity : ResolvedMainEntity option
+    { Arguments : ResolvedArgumentsMap
+      Select : ResolvedSelectExpr
+      MainEntity : ResolvedMainEntity option
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            let selectStr = this.select.ToFunQLString()
-            if Map.isEmpty this.arguments
+            let selectStr = this.Select.ToFunQLString()
+            if Map.isEmpty this.Arguments
             then selectStr
             else
                 let printArgument (name : Placeholder, arg : ResolvedArgument) =
                     match name with
                     | PGlobal _ -> None
                     | PLocal _ -> Some <| sprintf "%s %s" (name.ToFunQLString()) (arg.ToFunQLString())
-                let argStr = this.arguments |> Map.toSeq |> Seq.mapMaybe printArgument |> String.concat ", "
+                let argStr = this.Arguments |> Map.toSeq |> Seq.mapMaybe printArgument |> String.concat ", "
                 sprintf "(%s): %s" argStr selectStr
 
         interface IFunQLString with
@@ -87,7 +87,7 @@ let private unboundSubqueryField = QField None
 
 let private mergeSubqueryField (f1 : QSubqueryField) (f2 : QSubqueryField) =
     match (f1, f2) with
-    | (QField (Some bf1), QField (Some bf2)) when bf1.ref = bf2.ref -> QField (Some bf1)
+    | (QField (Some bf1), QField (Some bf2)) when bf1.Ref = bf2.Ref -> QField (Some bf1)
     | _ -> unboundSubqueryField
 
 let rec private findRootField (name : FieldName) (fields : QSubqueryFields) : (FieldName * BoundFieldInfo option) option =
@@ -130,8 +130,8 @@ let private resolveArgumentFieldType (layout : Layout) : ParsedFieldType -> Argu
         FTEnum vals
 
 let resolveArgument (layout : Layout) (arg : ParsedArgument) : ResolvedArgument =
-    { argType = resolveArgumentFieldType layout arg.argType
-      optional = arg.optional
+    { ArgType = resolveArgumentFieldType layout arg.ArgType
+      Optional = arg.Optional
     }
 
 let rec private findMainEntityRef : ResolvedFromExpr -> ResolvedEntityRef option = function
@@ -154,7 +154,7 @@ let rec private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFiel
             let getField (result : ResolvedQueryResult) : (FieldName * FieldName) option =
                 let name = result.result.TryToName () |> Option.get
                 match Map.find name fields with
-                | QField (Some { ref = boundRef; field = RColumnField _ }) when boundRef.entity = ref -> Some (name, boundRef.name)
+                | QField (Some { Ref = boundRef; Field = RColumnField _ }) when boundRef.entity = ref -> Some (name, boundRef.name)
                 | QRename newName -> failwith <| sprintf "Unexpected rename which should have been removed: %O -> %O" name newName
                 | _ -> None
             let columnsToFields = results |> Seq.mapMaybe getField |> Map.ofSeqUnique
@@ -172,21 +172,21 @@ let rec private findMainEntity (ref : ResolvedEntityRef) (fields : QSubqueryFiel
         )
 
 type private ResolvedExprInfo =
-    { isLocal : bool
-      hasAggregates : bool
+    { IsLocal : bool
+      HasAggregates : bool
     }
 
 type private ResolvedResultInfo =
-    { subquery : QSubqueryField
-      hasAggregates : bool
+    { Subquery : QSubqueryField
+      HasAggregates : bool
     }
 
 type ResolvedSelectInfo =
-    { hasAggregates : bool
+    { HasAggregates : bool
     }
 
 type ResolvedSubEntityInfo =
-    { alwaysTrue : bool
+    { AlwaysTrue : bool
     }
 
 let rec followPath (layout : ILayoutFields) (fieldRef : ResolvedFieldRef) : FieldName list -> ResolvedFieldRef = function
@@ -206,7 +206,7 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
             match field.ref with
             | VRColumn { bound = Some bound } -> bound
             | _ -> raisef ViewResolveException "Unbound field in a type assertion"
-        followPath layout bound.ref (Array.toList field.path)
+        followPath layout bound.Ref (Array.toList field.path)
     let fields = layout.FindEntity fieldRef.entity |> Option.get
     match fields.FindField fieldRef.name with
     | Some (_, RSubEntity) -> ()
@@ -216,9 +216,9 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
         match ctx with
         | SECInheritedFrom ->
             if checkInheritance layout subEntityRef fieldRef.entity then
-                { alwaysTrue = true }
+                { AlwaysTrue = true }
             else if checkInheritance layout fieldRef.entity subEntityRef then
-                { alwaysTrue = false }
+                { AlwaysTrue = false }
             else
                 raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
         | SECOfType ->
@@ -230,7 +230,7 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
                 raisef ViewResolveException "Instances of abstract entity %O do not exist" subEntityRef
             if not <| checkInheritance layout fieldRef.entity subEntityRef then
                 raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
-            { alwaysTrue = not <| hasSubType subEntity }
+            { AlwaysTrue = not <| hasSubType subEntity }
     { ref = relaxEntityRef subEntityRef; extra = info }
 
 type private SelectFlags =
@@ -259,19 +259,19 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
     let rec resolvePath (useMain : bool) (boundField : BoundFieldInfo) : FieldName list -> BoundFieldInfo = function
         | [] -> boundField
         | (ref :: refs) ->
-            match boundField.field with
+            match boundField.Field with
             | RColumnField { fieldType = FTReference (entityRef, _) } ->
                 let newEntity = layout.FindEntity entityRef |> Option.get
                 match newEntity.FindField ref with
                 | Some (newRef, refField) ->
                     let nextBoundField =
-                        { ref =
+                        { Ref =
                               { entity = entityRef
                                 name = newRef
                               }
-                          field = refField
-                          entity = newEntity
-                          immediate = false
+                          Field = refField
+                          Entity = newEntity
+                          Immediate = false
                         }
                     resolvePath useMain nextBoundField refs
                 | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
@@ -311,8 +311,8 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 match outerBoundField with
                 | Some field ->
                     // FIXME: why immediate = false here?
-                    let inner = resolvePath useMain { field with immediate = false } (Array.toList f.path)
-                    (Some inner, Some { ref = field.ref; immediate = field.immediate })
+                    let inner = resolvePath useMain { field with Immediate = false } (Array.toList f.path)
+                    (Some inner, Some { Ref = field.Ref; Immediate = field.Immediate })
                 | None when Array.isEmpty f.path ->
                     (None, None)
                 | _ ->
@@ -329,22 +329,22 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 if Array.isEmpty f.path then
                     None
                 else
-                    match argInfo.argType with
+                    match argInfo.ArgType with
                     | FTReference (entityRef, where) ->
                         let (name, remainingPath) =
                             match Array.toList f.path with
                             | head :: tail -> (head, tail)
-                            | _ -> failwith "impossible"
+                            | _ -> failwith "imposssible"
                         let argEntity = layout.FindEntity entityRef |> Option.get
                         let argField =
                             match argEntity.FindField name with
                             | None -> raisef ViewResolveException "Field doesn't exist in %O: %O" entityRef name
                             | Some (_, argField) -> argField
                         let fieldInfo =
-                            { ref = { entity = entityRef; name = name }
-                              entity = argEntity
-                              field = argField
-                              immediate = false
+                            { Ref = { entity = entityRef; name = name }
+                              Entity = argEntity
+                              Field = argField
+                              Immediate = false
                             }
                         let inner = resolvePath useMain fieldInfo remainingPath
                         Some inner
@@ -387,8 +387,8 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             Option.iter checkName name
             let (boundField, _, f') = resolveReference true mapping f
             let info =
-                { subquery = boundField
-                  hasAggregates = false
+                { Subquery = boundField
+                  HasAggregates = false
                 }
             (info, QRExpr (name, FERef f'))
         | QRExpr (name, e) ->
@@ -398,8 +398,8 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             | None -> ()
             let (exprInfo, expr) = resolveFieldExpr true mapping e
             let info =
-                { subquery = unboundSubqueryField
-                  hasAggregates = exprInfo.hasAggregates
+                { Subquery = unboundSubqueryField
+                  HasAggregates = exprInfo.HasAggregates
                 }
             (info, QRExpr (name, expr))
 
@@ -408,7 +408,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
 
     and resolveNonaggrFieldExpr (mapping : QMapping) (expr : ParsedFieldExpr) : ResolvedFieldExpr =
         let (info, res) = resolveFieldExpr false mapping expr
-        if info.hasAggregates then
+        if info.HasAggregates then
             raisef ViewResolveException "Aggregate functions are not allowed here"
         res
 
@@ -421,7 +421,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             if not <| Array.isEmpty col.path then
                 isLocal <- false
             match outer with
-            | Some { field = RComputedField { isLocal = false } } ->
+            | Some { Field = RComputedField { isLocal = false } } ->
                 isLocal <- false
             | _ -> ()
 
@@ -439,8 +439,8 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         let ret = mapFieldExpr mapper expr
         let info =
-            { isLocal = isLocal
-              hasAggregates = hasAggregates
+            { IsLocal = isLocal
+              HasAggregates = hasAggregates
             }
         (info, ret)
 
@@ -448,9 +448,9 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         let mutable isLocal = true
         let resolveOrderBy (ord, expr) =
             let (info, ret) = resolveFieldExpr false mapping expr
-            if info.hasAggregates then
+            if info.HasAggregates then
                 raisef ViewResolveException "Aggregates are not allowed here"
-            if not info.isLocal then
+            if not info.IsLocal then
                 isLocal <- false
             (ord, ret)
         let ret =
@@ -464,9 +464,9 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         | SSelect query ->
             let (fields, res) = resolveSingleSelectExpr flags query
             let results = {
-                fields = fields
-                attributes = res.attributes
-                fieldAttributeNames =
+                Fields = fields
+                Attributes = res.attributes
+                FieldAttributeNames =
                     if flags.noAttributes then
                         Array.empty
                     else
@@ -476,14 +476,14 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         | SSetOp (op, a, b, limits) ->
             let (results1, a') = resolveSelectExpr flags a
             let (results2, b') = resolveSelectExpr { flags with requireNames = false } b
-            if Array.length results1.fieldAttributeNames <> Array.length results2.fieldAttributeNames then
+            if Array.length results1.FieldAttributeNames <> Array.length results2.FieldAttributeNames then
                 raisef ViewResolveException "Different number of columns in a set operation expression"
-            let newFields = Map.unionWith (fun name -> mergeSubqueryField) results1.fields results2.fields
+            let newFields = Map.unionWith (fun name -> mergeSubqueryField) results1.Fields results2.Fields
             let orderLimitMapping = Map.singleton None (None, newFields)
             let (limitsAreLocal, resolvedLimits) = resolveOrderLimitClause orderLimitMapping limits
             if not limitsAreLocal then
                 raisef ViewResolveException "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.orderBy
-            ({ results1 with fields = newFields }, SSetOp (op, a', b', resolvedLimits))
+            ({ results1 with Fields = newFields }, SSetOp (op, a', b', resolvedLimits))
 
     and resolveSingleSelectExpr (flags : SelectFlags) (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
         if flags.noAttributes && not (Map.isEmpty query.attributes) then
@@ -499,10 +499,10 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         let qWhere = Option.map (resolveNonaggrFieldExpr fromMapping) query.where
         let qGroupBy = Array.map (resolveNonaggrFieldExpr fromMapping) query.groupBy
         let rawResults = Array.map (resolveResult flags fromMapping) query.results
-        let hasAggregates = Array.exists (fun (info : ResolvedResultInfo, expr) -> info.hasAggregates) rawResults || not (Array.isEmpty qGroupBy)
+        let hasAggregates = Array.exists (fun (info : ResolvedResultInfo, expr) -> info.HasAggregates) rawResults || not (Array.isEmpty qGroupBy)
         let results = Array.map snd rawResults
         let makeField (info, res) =
-            let bound = if hasAggregates then unboundSubqueryField else info.subquery
+            let bound = if hasAggregates then unboundSubqueryField else info.Subquery
             (res.result.TryToName () |> Option.get, bound)
         let newFields =
             if flags.oneColumn then
@@ -514,7 +514,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                     | Failure msg -> raisef ViewResolveException "Clashing result names: %s" msg
 
         let extra =
-            { hasAggregates = hasAggregates
+            { HasAggregates = hasAggregates
             }
 
         let newQuery = {
@@ -538,7 +538,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
 
             let makeBoundField (name : FieldName) (field : ResolvedField) =
                 let ref = { entity = resName; name = name } : ResolvedFieldRef
-                QField <| Some { ref = ref; entity = entity; field = field; immediate = true }
+                QField <| Some { Ref = ref; Entity = entity; Field = field; Immediate = true }
 
             let realFields = mapAllFields makeBoundField entity
             let fields = Map.add funMain (QRename entity.MainField) realFields
@@ -555,15 +555,15 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 | Failure msg -> raisef ViewResolveException "Clashing entity names in a join: %s" msg
 
             let (info, newFieldExpr) = resolveFieldExpr false newMapping where
-            if not info.isLocal then
+            if not info.IsLocal then
                 raisef ViewResolveException "Cannot use dereferences in join expressions: %O" where
-            if info.hasAggregates then
+            if info.HasAggregates then
                 raisef ViewResolveException "Cannot use aggregate functions in join expression"
             (newMapping, FJoin (jt, newE1, newE2, newFieldExpr))
         | FSubExpr (name, q) ->
             checkName name
             let (info, newQ) = resolveSelectExpr { flags with requireNames = true } q
-            (Map.singleton (Some name) (None, info.fields), FSubExpr (name, newQ))
+            (Map.singleton (Some name) (None, info.Fields), FSubExpr (name, newQ))
         | FValues (name, fieldNames, values) ->
             checkName name
 
@@ -604,9 +604,9 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                     raisef ViewResolveException "Required inserted entity field is not in the view expression: %O" fieldName
         entity.columnFields |> Map.iter checkField
 
-        { entity = ref
-          fieldsToColumns = Map.reverse mappedResults
-          columnsToFields = mappedResults
+        { Entity = ref
+          FieldsToColumns = Map.reverse mappedResults
+          ColumnsToFields = mappedResults
         }
 
     member this.ResolveSelectExpr flags select = resolveSelectExpr flags select
@@ -624,9 +624,9 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let allArguments = Map.union localArguments globalArgumentsMap
     let qualifier = QueryResolver (layout, allArguments)
     let (results, qQuery) = qualifier.ResolveSelectExpr viewExprSelectFlags viewExpr.select
-    let mainEntity = Option.map (qualifier.ResolveMainEntity results.fields qQuery) viewExpr.mainEntity
+    let mainEntity = Option.map (qualifier.ResolveMainEntity results.Fields qQuery) viewExpr.mainEntity
 
-    { arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArgumentsMap)
-      select = qQuery
-      mainEntity = mainEntity
+    { Arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArgumentsMap)
+      Select = qQuery
+      MainEntity = mainEntity
     }

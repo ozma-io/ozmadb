@@ -219,7 +219,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
             match values.[i] with
                 | SQL.VString subEntityString ->
                     let field = Map.find name domainInfo
-                    Some <| parseTypeName field.ref.entity subEntityString
+                    Some <| parseTypeName field.Ref.entity subEntityString
                 | SQL.VNull -> None
                 | _ -> failwith "Entity subtype is not a string"
 
@@ -259,12 +259,12 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
 
 let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValues) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
-        let parameters = prepareArguments viewExpr.query.Arguments arguments
+        let parameters = prepareArguments viewExpr.Query.Arguments arguments
 
         let! attrsResult = task {
-            match viewExpr.attributesQuery with
+            match viewExpr.AttributesQuery with
             | Some attributesExpr ->
-                return! connection.ExecuteQuery attributesExpr.query parameters cancellationToken (parseAttributesResult attributesExpr.columns >> Task.FromResult)
+                return! connection.ExecuteQuery attributesExpr.Query parameters cancellationToken (parseAttributesResult attributesExpr.Columns >> Task.FromResult)
             | None ->
                 return
                     { Attributes = Map.empty
@@ -285,8 +285,8 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | None -> Map.empty
             | Some (attrTypes, attrs) -> attrs
 
-        return! connection.ExecuteQuery (viewExpr.query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
-            let (info, rows) = parseResult viewExpr.mainEntity viewExpr.domains viewExpr.columns rawResult
+        return! connection.ExecuteQuery (viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
+            let (info, rows) = parseResult viewExpr.MainEntity viewExpr.Domains viewExpr.Columns rawResult
 
             let mergedInfo =
                 { info with

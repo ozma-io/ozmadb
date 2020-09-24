@@ -40,8 +40,8 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             | { ref = VRColumn { entity = None; name = name }; path = path } ->
                 checkPath entity name (Array.toList path)
                 let bound =
-                    { ref = { entity = entityRef; name = name }
-                      immediate = true
+                    { Ref = { entity = entityRef; name = name }
+                      Immediate = true
                     }
                 { ref = VRColumn { ref = ({ entity = None; name = name } : FieldRef); bound = Some bound }; path = path }
             | { ref = VRPlaceholder (PLocal name) } ->
@@ -52,7 +52,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     | None -> raisef ResolveAttributesException "Unknown global argument: %O" ref
                     | Some argInfo -> argInfo
                 if not <| Array.isEmpty path then
-                    match argInfo.argType with
+                    match argInfo.ArgType with
                     | FTReference (entityRef, where) ->
                         let (name, remainingPath) =
                             match Array.toList path with

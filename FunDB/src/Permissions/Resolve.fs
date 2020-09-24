@@ -121,7 +121,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             | { ref = VRColumn { entity = None; name = name }; path = path } ->
                 checkPath allowIds entity name (Array.toList path)
                 let fieldRef = { entity = entityRef; name = name }
-                let bound = { ref = fieldRef; immediate = true }
+                let bound = { Ref = fieldRef; Immediate = true }
                 { ref = VRColumn { ref = { entity = Some relaxedRef; name = name }; bound = Some bound }; path = path }
             | { ref = VRPlaceholder (PLocal name) } ->
                 raisef ResolvePermissionsException "Local argument %O is not allowed" name
@@ -131,7 +131,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     | None -> raisef ResolvePermissionsException "Unknown global argument: %O" ref
                     | Some argInfo -> argInfo
                 if not <| Array.isEmpty path then
-                    match argInfo.argType with
+                    match argInfo.ArgType with
                     | FTReference (entityRef, where) ->
                         let (name, remainingPath) =
                             match Array.toList path with

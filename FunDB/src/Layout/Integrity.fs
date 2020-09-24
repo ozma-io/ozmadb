@@ -77,12 +77,12 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
         let toColumn = SQL.VEColumn { table = Some toRef; name = sqlFunId }
         let whereExpr = SQL.VEEq (fromColumn, toColumn)
         let singleSelect =
-            { columns = [| SQL.SCExpr (None, inheritance.checkExpr) |]
-              from = Some <| SQL.FTable (null, None, toRef)
-              where = Some whereExpr
-              groupBy = [||]
-              orderLimit = SQL.emptyOrderLimitClause
-              extra = null
+            { Columns = [| SQL.SCExpr (None, inheritance.checkExpr) |]
+              From = Some <| SQL.FTable (null, None, toRef)
+              Where = Some whereExpr
+              GroupBy = [||]
+              OrderLimit = SQL.emptyOrderLimitClause
+              Extra = null
             } : SQL.SingleSelectExpr
         let raiseCall =
             { level = PLPgSQL.RLException
@@ -95,7 +95,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
                       (PLPgSQL.ROSchema, SQL.VEValue (SQL.VString <| fromFieldRef.entity.schema.ToString()))
                     ]
             } : PLPgSQL.RaiseStatement
-        let selectExpr = { ctes = Map.empty; tree = SQL.SSelect singleSelect } : SQL.SelectExpr
+        let selectExpr = { CTEs = None; Tree = SQL.SSelect singleSelect } : SQL.SelectExpr
         let checkStmt = PLPgSQL.StIfThenElse ([| (SQL.VENot (SQL.VESubquery selectExpr), [| PLPgSQL.StRaise raiseCall |]) |], None)
         // A small hack; we don't return a "column" but a full row.
         let returnStmt = PLPgSQL.StReturn (SQL.VEColumn { table = None; name = SQL.SQLName "new" })
@@ -176,14 +176,14 @@ let private compileAssertionCheck (layout : Layout) : LayoutAssertion -> SQL.Sel
         let subEntityRef = { table = Some joinRef; name = sqlFunSubEntity } : SQL.ColumnRef
         let checkExpr = replaceColumnRefs subEntityRef inheritance.checkExpr
         let singleSelect =
-            { columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "bool_and", SQL.AEAll [| checkExpr |])) |]
-              from = Some join
-              where = None
-              groupBy = [||]
-              orderLimit = SQL.emptyOrderLimitClause
-              extra = null
+            { Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "bool_and", SQL.AEAll [| checkExpr |])) |]
+              From = Some join
+              Where = None
+              GroupBy = [||]
+              OrderLimit = SQL.emptyOrderLimitClause
+              Extra = null
             } : SQL.SingleSelectExpr
-        { ctes = Map.empty; tree = SQL.SSelect singleSelect }
+        { CTEs = None; Tree = SQL.SSelect singleSelect }
 
 let checkAssertion (conn : QueryConnection) (layout : Layout) (assertion : LayoutAssertion) (cancellationToken : CancellationToken) : Task =
     unitTask {

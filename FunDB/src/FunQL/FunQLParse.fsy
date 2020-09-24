@@ -242,6 +242,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token ARRAY
 %token INHERITED
 %token OFTYPE
+%token WITH
+%token RECURSIVE
 
 // Types
 %token INT_TYPE
@@ -316,8 +318,8 @@ ArgumentEntry:
     | ARGUMENT_ID Argument { (FunQLName $1, $2) }
 
 Argument:
-    | ArgumentFieldType      { { argType = $1; optional = false } }
-    | ArgumentFieldType NULL { { argType = $1; optional = true } }
+    | ArgumentFieldType      { { ArgType = $1; Optional = false } }
+    | ArgumentFieldType NULL { { ArgType = $1; Optional = true } }
 
 SelectVal:
     | SingleUnlimitedSelectExpr { SSelect $1 }

@@ -534,54 +534,54 @@ and [<NoEquality; NoComparison>] SelectedColumn =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] SingleSelectExpr =
-    { columns : SelectedColumn[]
-      from : FromExpr option
-      where : ValueExpr option
-      groupBy : ValueExpr[]
-      orderLimit : OrderLimitClause
-      extra : obj
+    { Columns : SelectedColumn[]
+      From : FromExpr option
+      Where : ValueExpr option
+      GroupBy : ValueExpr[]
+      OrderLimit : OrderLimitClause
+      Extra : obj
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            let resultsStr = this.columns |> Seq.map (fun res -> res.ToSQLString()) |> String.concat ", "
+            let resultsStr = this.Columns |> Seq.map (fun res -> res.ToSQLString()) |> String.concat ", "
             let fromStr =
-                match this.from with
+                match this.From with
                 | None -> ""
                 | Some from -> sprintf "FROM %s" (from.ToSQLString())
             let whereStr =
-                match this.where with
+                match this.Where with
                 | None -> ""
                 | Some cond -> sprintf "WHERE %s" (cond.ToSQLString())
             let groupByStr =
-                if Array.isEmpty this.groupBy then
+                if Array.isEmpty this.GroupBy then
                     ""
                 else
-                    sprintf "GROUP BY %s" (this.groupBy |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+                    sprintf "GROUP BY %s" (this.GroupBy |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", ")
 
-            sprintf "SELECT %s" (String.concatWithWhitespaces [resultsStr; fromStr; whereStr; groupByStr; this.orderLimit.ToSQLString()])
+            sprintf "SELECT %s" (String.concatWithWhitespaces [resultsStr; fromStr; whereStr; groupByStr; this.OrderLimit.ToSQLString()])
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] OrderLimitClause =
-    { orderBy : (SortOrder * ValueExpr)[]
-      limit : ValueExpr option
-      offset : ValueExpr option
+    { OrderBy : (SortOrder * ValueExpr)[]
+      Limit : ValueExpr option
+      Offset : ValueExpr option
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
                 let orderByStr =
-                    if Array.isEmpty this.orderBy
+                    if Array.isEmpty this.OrderBy
                     then ""
-                    else sprintf "ORDER BY %s" (this.orderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToSQLString()) (ord.ToSQLString())) |> String.concat ", ")
+                    else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToSQLString()) (ord.ToSQLString())) |> String.concat ", ")
                 let limitStr =
-                    match this.limit with
+                    match this.Limit with
                     | Some e -> sprintf "LIMIT %s" (e.ToSQLString())
                     | None -> ""
                 let offsetStr =
-                    match this.offset with
+                    match this.Offset with
                     | Some e -> sprintf "OFFSET %s" (e.ToSQLString())
                     | None -> ""
                 String.concatWithWhitespaces [orderByStr; limitStr; offsetStr]
@@ -610,47 +610,55 @@ and [<NoEquality; NoComparison>] SelectTreeExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+and [<NoEquality; NoComparison>] CommonTableExprs =
+    { Recursive : bool
+      Exprs : Map<TableName, SelectExpr>
+    }
+
 and [<NoEquality; NoComparison>] SelectExpr =
-    { ctes : Map<TableName, SelectExpr>
-      tree : SelectTreeExpr
+    { CTEs : CommonTableExprs option
+      Tree : SelectTreeExpr
     }
     with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
             let ctesStr =
-                if Map.isEmpty this.ctes then
-                    ""
-                else
-                    this.ctes
+                match this.CTEs with
+                | None -> ""
+                | Some ctes ->
+                    assert (not (Map.isEmpty ctes.Exprs))
+                    let exprs =
+                        ctes.Exprs
                         |> Map.toSeq
                         |> Seq.map (fun (name, expr) -> sprintf "%s AS (%s)" (name.ToSQLString()) (expr.ToSQLString()))
                         |> String.concat ", "
-                        |> sprintf "WITH %s"
-            String.concatWithWhitespaces [ctesStr; this.tree.ToSQLString()]
+                    let recursive = if ctes.Recursive then "RECURSIVE" else ""
+                    String.concatWithWhitespaces ["WITH"; recursive; exprs]
+            String.concatWithWhitespaces [ctesStr; this.Tree.ToSQLString()]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
 type ValueExprGenericMapper =
-    { value : Value -> ValueExpr
-      columnReference : ColumnRef -> ValueExpr
-      placeholder : int -> ValueExpr
-      query : SelectExpr -> SelectExpr
+    { Value : Value -> ValueExpr
+      ColumnReference : ColumnRef -> ValueExpr
+      Placeholder : int -> ValueExpr
+      Query : SelectExpr -> SelectExpr
     }
 
 let idValueExprGenericMapper =
-    { value = VEValue
-      columnReference = VEColumn
-      placeholder = VEPlaceholder
-      query = id
+    { Value = VEValue
+      ColumnReference = VEColumn
+      Placeholder = VEPlaceholder
+      Query = id
     }
 
 let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> ValueExpr =
     let rec traverse = function
-        | VEValue value -> mapper.value value
-        | VEColumn c -> mapper.columnReference c
-        | VEPlaceholder i -> mapper.placeholder i
+        | VEValue value -> mapper.Value value
+        | VEColumn c -> mapper.ColumnReference c
+        | VEPlaceholder i -> mapper.Placeholder i
         | VENot e -> VENot <| traverse e
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
@@ -669,8 +677,8 @@ let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> Val
         | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
         | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
         | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
-        | VEInQuery (e, query) -> VEInQuery (traverse e, mapper.query query)
-        | VENotInQuery (e, query) -> VENotInQuery (traverse e, mapper.query query)
+        | VEInQuery (e, query) -> VEInQuery (traverse e, mapper.Query query)
+        | VENotInQuery (e, query) -> VENotInQuery (traverse e, mapper.Query query)
         | VEIsNull e -> VEIsNull <| traverse e
         | VEIsNotNull e -> VEIsNotNull <| traverse e
         | VEFunc (name, args) -> VEFunc (name, Array.map traverse args)
@@ -688,7 +696,7 @@ let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> Val
         | VEMultiply (a, b) -> VEMultiply (traverse a, traverse b)
         | VEDivide (a, b) -> VEDivide (traverse a, traverse b)
         | VEArray vals -> VEArray <| Array.map traverse vals
-        | VESubquery query -> VESubquery (mapper.query query)
+        | VESubquery query -> VESubquery (mapper.Query query)
     traverse
 
 and mapAggExpr (func : ValueExpr -> ValueExpr) : AggExpr -> AggExpr = function
@@ -697,46 +705,46 @@ and mapAggExpr (func : ValueExpr -> ValueExpr) : AggExpr -> AggExpr = function
     | AEStar -> AEStar
 
 type ValueExprMapper =
-    { value : Value -> Value
-      columnReference : ColumnRef -> ColumnRef
-      placeholder : int -> int
-      query : SelectExpr -> SelectExpr
+    { Value : Value -> Value
+      ColumnReference : ColumnRef -> ColumnRef
+      Placeholder : int -> int
+      Query : SelectExpr -> SelectExpr
     }
 
 let idValueExprMapper =
-    { value = id
-      columnReference = id
-      placeholder = id
-      query = id
+    { Value = id
+      ColumnReference = id
+      Placeholder = id
+      Query = id
     }
 
 let mapValueExpr (mapper : ValueExprMapper) : ValueExpr -> ValueExpr =
     genericMapValueExpr
-        { value = mapper.value >> VEValue
-          columnReference = mapper.columnReference >> VEColumn
-          placeholder = mapper.placeholder >> VEPlaceholder
-          query = mapper.query
+        { Value = mapper.Value >> VEValue
+          ColumnReference = mapper.ColumnReference >> VEColumn
+          Placeholder = mapper.Placeholder >> VEPlaceholder
+          Query = mapper.Query
         }
 
 type ValueExprIter =
-    { value : Value -> unit
-      columnReference : ColumnRef -> unit
-      placeholder : int -> unit
-      query : SelectExpr -> unit
+    { Value : Value -> unit
+      ColumnReference : ColumnRef -> unit
+      Placeholder : int -> unit
+      Query : SelectExpr -> unit
     }
 
 let idValueExprIter =
-    { value = fun _ -> ()
-      columnReference = fun _ -> ()
-      placeholder = fun _ -> ()
-      query = fun _ -> ()
+    { Value = fun _ -> ()
+      ColumnReference = fun _ -> ()
+      Placeholder = fun _ -> ()
+      Query = fun _ -> ()
     }
 
 let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
     let rec traverse = function
-        | VEValue value -> mapper.value value
-        | VEColumn c -> mapper.columnReference c
-        | VEPlaceholder i -> mapper.placeholder i
+        | VEValue value -> mapper.Value value
+        | VEColumn c -> mapper.ColumnReference c
+        | VEPlaceholder i -> mapper.Placeholder i
         | VENot e -> traverse e
         | VEAnd (a, b) -> traverse a; traverse b
         | VEOr (a, b) -> traverse a; traverse b
@@ -755,8 +763,8 @@ let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
         | VEGreaterEq (a, b) -> traverse a; traverse b
         | VEIn (e, vals) -> traverse e; Array.iter traverse vals
         | VENotIn (e, vals) -> traverse e; Array.iter traverse vals
-        | VEInQuery (e, query) -> traverse e; mapper.query query
-        | VENotInQuery (e, query) -> traverse e; mapper.query query
+        | VEInQuery (e, query) -> traverse e; mapper.Query query
+        | VENotInQuery (e, query) -> traverse e; mapper.Query query
         | VEIsNull e -> traverse e
         | VEIsNotNull e -> traverse e
         | VEFunc (name, args) -> Array.iter traverse args
@@ -773,7 +781,7 @@ let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
         | VEMultiply (a, b) -> traverse a; traverse b
         | VEDivide (a, b) -> traverse a; traverse b
         | VEArray vals -> Array.iter traverse vals
-        | VESubquery query -> mapper.query query
+        | VESubquery query -> mapper.Query query
     traverse
 
 and iterAggExpr (func : ValueExpr -> unit) : AggExpr -> unit = function
@@ -781,7 +789,7 @@ and iterAggExpr (func : ValueExpr -> unit) : AggExpr -> unit = function
     | AEDistinct expr -> func expr
     | AEStar -> ()
 
-let emptyOrderLimitClause = { orderBy = [||]; limit = None; offset = None }
+let emptyOrderLimitClause = { OrderBy = [||]; Limit = None; Offset = None }
 
 let rec private normalizeArrayValue (constr : 'a -> Value) : ArrayValue<'a> -> ValueExpr = function
     | AVArray arr -> normalizeArray constr arr

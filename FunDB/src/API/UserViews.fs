@@ -60,8 +60,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     | Some arg -> Ok (Some (name, arg))
                 | _ -> Ok None
             | PGlobal gname -> Ok (Some (name, Map.find gname rctx.GlobalArguments))
-        compiled.query.Arguments.Types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
-
+        compiled.Query.Arguments.Types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
 
     member this.GetUserViewInfo (source : UserViewSource) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
         task {

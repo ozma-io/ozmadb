@@ -18,7 +18,7 @@ type CompiledArgument =
     { PlaceholderId : PlaceholderId
       FieldType : ArgumentFieldType
       DbType : SQL.DBValueType
-      optional : bool
+      Optional : bool
     }
 
 type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
@@ -59,9 +59,9 @@ let compileFieldType : FieldType<_, _> -> SQL.SimpleValueType = function
 
 let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgument) : CompiledArgument =
     { PlaceholderId = placeholderId
-      FieldType = arg.argType
-      DbType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType arg.argType)
-      optional = arg.optional
+      FieldType = arg.ArgType
+      DbType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType arg.ArgType)
+      Optional = arg.Optional
     }
 
 let emptyArguments =
@@ -135,12 +135,12 @@ let prepareArguments (args : QueryArguments) (values : ArgumentValues) : ExprPar
         let (notFound, value) =
             match Map.tryFind name values with
             | None ->
-                if mapping.optional then
+                if mapping.Optional then
                     (true, FNull)
                 else
                     raisef ArgumentCheckException "Argument not found: %O" name
             | Some value -> (false, value)
-        if not (mapping.optional && notFound) then
+        if not (mapping.Optional && notFound) then
             typecheckArgument mapping.FieldType value
         (mapping.PlaceholderId, compileFieldValueSingle value)
     args.Types |> Map.mapWithKeys makeParameter

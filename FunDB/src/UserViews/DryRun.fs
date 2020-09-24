@@ -98,37 +98,42 @@ let private getColumn : ColumnType -> FunQLName option = function
     | _ -> None
 
 let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (res : ExecutedViewExpr) : PureAttributes =
-    match compiled.attributesQuery with
+    match compiled.AttributesQuery with
     | None ->
         { Attributes = Map.empty
           ColumnAttributes = Array.map (fun _ -> Map.empty) res.ColumnAttributes
         }
     | Some attrInfo ->
         let filterPure name attrs =
-            match Map.tryFind name attrInfo.pureColumnAttributes with
+            match Map.tryFind name attrInfo.PureColumnAttributes with
             | None -> Map.empty
             | Some pureAttrs -> attrs |> Map.filter (fun name _ -> Set.contains name pureAttrs)
-        { Attributes = res.Attributes |> Map.filter (fun name _ -> Set.contains name attrInfo.pureAttributes)
-          ColumnAttributes = Seq.map2 filterPure (Seq.mapMaybe getColumn compiled.columns) res.ColumnAttributes |> Seq.toArray
+        { Attributes = res.Attributes |> Map.filter (fun name _ -> Set.contains name attrInfo.PureAttributes)
+          ColumnAttributes = Seq.map2 filterPure (Seq.mapMaybe getColumn compiled.Columns) res.ColumnAttributes |> Seq.toArray
         }
 
 let private limitOrderLimit (orderLimit : SQL.OrderLimitClause) : SQL.OrderLimitClause =
     let newLimit =
-        match orderLimit.limit with
+        match orderLimit.Limit with
         | None -> SQL.VEValue <| SQL.VInt 0
         | Some oldLimit ->
             // FIXME: multiply by zero here
             oldLimit
-    { orderLimit with limit = Some newLimit }
+    { orderLimit with Limit = Some newLimit }
 
 let rec private limitTreeView : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
-    | SQL.SSelect sel -> SQL.SSelect { sel with orderLimit = limitOrderLimit sel.orderLimit }
+    | SQL.SSelect sel -> SQL.SSelect { sel with OrderLimit = limitOrderLimit sel.OrderLimit }
     | SQL.SValues values -> SQL.SValues values
     | SQL.SSetOp (op, a, b, limit) -> SQL.SSetOp (op, limitTreeView a, limitTreeView b, limit)
 
-let rec private limitView (select : SQL.SelectExpr) : SQL.SelectExpr =
-    { ctes = Map.map (fun name -> limitView) select.ctes
-      tree = limitTreeView select.tree
+let rec private limitCommonTableExprs (ctes : SQL.CommonTableExprs) : SQL.CommonTableExprs =
+    { Recursive = ctes.Recursive
+      Exprs = Map.map (fun name -> limitView) ctes.Exprs
+    }
+
+and private limitView (select : SQL.SelectExpr) : SQL.SelectExpr =
+    { CTEs = Option.map limitCommonTableExprs select.CTEs
+      Tree = limitTreeView select.Tree
     }
 
 type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
@@ -146,9 +151,9 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             | _ -> None
 
     let mergeDomainField (f : DomainField) : UVDomainField =
-        { Ref = f.ref
-          Field = getSerializedField f.ref
-          IdColumn = f.idColumn
+        { Ref = f.Ref
+          Field = getSerializedField f.Ref
+          IdColumn = f.IdColumn
         }
 
     let withThisBroken (allowBroken : bool) =
@@ -157,17 +162,17 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         | Some b -> b = allowBroken
 
     let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) : UserViewInfo =
-        let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.entity |> Option.get, main)) viewExpr.mainEntity
+        let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.Entity |> Option.get, main)) viewExpr.MainEntity
         let getResultColumn name (column : ExecutedColumnInfo) : UserViewColumn =
             let mainField =
                 match mainEntity with
                 | None -> None
                 | Some (entity, insertInfo) ->
-                    match Map.tryFind name insertInfo.columnsToFields with
+                    match Map.tryFind name insertInfo.ColumnsToFields with
                     | None -> None
                     | Some fieldName ->
                         Some { Name = fieldName
-                               Field = getSerializedField { entity = insertInfo.entity; name = fieldName } |> Option.get
+                               Field = getSerializedField { entity = insertInfo.Entity; name = fieldName } |> Option.get
                              }
 
             { Name = column.Name
@@ -180,21 +185,21 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
 
         { AttributeTypes = viewInfo.AttributeTypes
           RowAttributeTypes = viewInfo.RowAttributeTypes
-          Domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.flattenedDomains
-          Columns = Seq.map2 getResultColumn (Seq.mapMaybe getColumn compiled.columns) viewInfo.Columns |> Seq.toArray
-          MainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.entity) viewExpr.mainEntity
+          Domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.FlattenedDomains
+          Columns = Seq.map2 getResultColumn (Seq.mapMaybe getColumn compiled.Columns) viewInfo.Columns |> Seq.toArray
+          MainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.Entity) viewExpr.MainEntity
         }
 
     let rec dryRunUserView (uv : ResolvedUserView) : Task<PrefetchedUserView> =
         task {
             let limited =
                 { uv.Compiled with
-                      query =
-                          { uv.Compiled.query with
-                                Expression = limitView uv.Compiled.query.Expression
+                      Query =
+                          { uv.Compiled.Query with
+                                Expression = limitView uv.Compiled.Query.Expression
                           }
                 }
-            let arguments = uv.Compiled.query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
+            let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
 
             try
                 return! runViewExpr conn limited arguments cancellationToken <| fun info res ->

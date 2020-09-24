@@ -455,8 +455,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 if res.HasId then
                     hasId <- true
                 let bound =
-                    { ref = { entity = entityRef; name = name }
-                      immediate = true
+                    { Ref = { entity = entityRef; name = name }
+                      Immediate = true
                     }
                 { ref = VRColumn { ref = ({ entity = None; name = name } : FieldRef); bound = Some bound }; path = path }
             // Placeholders are forbidden because computed fields might be used in check expressions.
@@ -540,7 +540,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             raisef ResolveLayoutException "Aggregate functions are not allowed in check expressions"
         let resolveLocalSubEntity ctx (field : FieldName) subEntity =
             let fieldRef = { entity = entityRef; name = field }
-            let boundField = { ref = fieldRef; immediate = true }
+            let boundField = { Ref = fieldRef; Immediate = true }
             let linkedField = { ref = VRColumn { ref = { entity = None; name = field }; bound = Some boundField }; path = [||] } : LinkedBoundFieldRef
             resolveSubEntity layoutFields ctx linkedField subEntity
 

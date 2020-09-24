@@ -74,12 +74,12 @@ let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRe
     unitTask {
         let testExpr =
             SQL.SSelect
-                { columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
-                  from = Some <| SQL.FTable (null, None, tableRef)
-                  where = Some whereExpr
-                  groupBy = [||]
-                  orderLimit = SQL.emptyOrderLimitClause
-                  extra = null
+                { Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
+                  From = Some <| SQL.FTable (null, None, tableRef)
+                  Where = Some whereExpr
+                  GroupBy = [||]
+                  OrderLimit = SQL.emptyOrderLimitClause
+                  Extra = null
                 }
         let testQuery =
             { Expression = testExpr
@@ -111,7 +111,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | Some arg ->
                 Some
                     { Placeholder = PLocal fieldName
-                      Argument = { argType = clearFieldType field.fieldType; optional = isOptional }
+                      Argument = { ArgType = clearFieldType field.fieldType; Optional = isOptional }
                       Column = field.columnName
                       Extra = ({ name = fieldName } : RestrictedColumnInfo)
                     }
@@ -126,7 +126,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             if hasSubType entity then
                 let value =
                     { Placeholder = PLocal funSubEntity
-                      Argument = { argType = FTType (FETScalar SFTString); optional = false }
+                      Argument = { ArgType = FTType (FETScalar SFTString); Optional = false }
                       Column = sqlFunSubEntity
                       Extra = null
                     }
@@ -167,7 +167,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         return! runIntQuery connection globalArgs query rawArgs cancellationToken
     }
 
-let private funIdArg = { argType = FTType (FETScalar SFTInt); optional = false }
+let private funIdArg = { ArgType = FTType (FETScalar SFTInt); Optional = false }
 
 let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) (cancellationToken : CancellationToken) : Task =
     unitTask {
@@ -178,7 +178,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | Some arg ->
                 Some
                     { Placeholder = PLocal fieldName
-                      Argument = { argType = clearFieldType field.fieldType; optional = fieldIsOptional field }
+                      Argument = { ArgType = clearFieldType field.fieldType; Optional = fieldIsOptional field }
                       Column = field.columnName
                       Extra = ({ name = fieldName } : RestrictedColumnInfo)
                     }

@@ -11,12 +11,12 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.SingleSelectExpr =
     let entity = layout.FindEntity ref |> Option.get
     let (from, where) = compileSingleFromClause layout arguments (FEntity (None, ref)) (Some <| restr.Expression.ToFieldExpr())
-    { columns = [| compileNoSchemaResolvedEntityRef ref |> Some |> SQL.SCAll |]
-      from = Some from
-      where = where
-      groupBy = [||]
-      orderLimit = SQL.emptyOrderLimitClause
-      extra = null
+    { Columns = [| compileNoSchemaResolvedEntityRef ref |> Some |> SQL.SCAll |]
+      From = Some from
+      Where = where
+      GroupBy = [||]
+      OrderLimit = SQL.emptyOrderLimitClause
+      Extra = null
     }
 
 let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : CompiledArgumentsMap) (restr : Restriction) : SQL.ValueExpr =
@@ -26,13 +26,13 @@ let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (argumen
     | SQL.FTable _ -> where |> Option.get
     | _ ->
         let select =
-            { columns = [| SQL.SCExpr (None, SQL.VEColumn { table = Some <| compileNoSchemaResolvedEntityRef ref; name = sqlFunId }) |]
-              from = Some from
-              where = where
-              groupBy = [||]
-              orderLimit = SQL.emptyOrderLimitClause
-              extra = null
+            { Columns = [| SQL.SCExpr (None, SQL.VEColumn { table = Some <| compileNoSchemaResolvedEntityRef ref; name = sqlFunId }) |]
+              From = Some from
+              Where = where
+              GroupBy = [||]
+              OrderLimit = SQL.emptyOrderLimitClause
+              Extra = null
             } : SQL.SingleSelectExpr
-        let subexpr = { ctes = Map.empty; tree = SQL.SSelect select } : SQL.SelectExpr
+        let subexpr = { CTEs = None; Tree = SQL.SSelect select } : SQL.SelectExpr
         let idColumn = SQL.VEColumn { table = None; name = sqlFunId }
         SQL.VEInQuery (idColumn, subexpr)

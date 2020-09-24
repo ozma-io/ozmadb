@@ -150,6 +150,8 @@ and tokenizeFunQL = parse
     | a r r a y         { Parse.ARRAY }
     | i n h e r i t e d { Parse.INHERITED }
     | o f t y p e       { Parse.OFTYPE }
+    | w i t h           { Parse.WITH }
+    | r e c u r s i v e { Parse.RECURSIVE }
 
     // Types
     | i n t             { Parse.INT_TYPE }
