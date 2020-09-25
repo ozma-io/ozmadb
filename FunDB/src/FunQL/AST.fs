@@ -1025,25 +1025,31 @@ let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal
 
 let allowedAggregateFunctions : Set<FunctionName> =
     Set.ofList
-        [ FunQLName "sum"
+        [ // Generic
+          FunQLName "count"
+          // Numbers
+          FunQLName "sum"
           FunQLName "avg"
           FunQLName "min"
           FunQLName "max"
-          FunQLName "count"
+          // Booleans
           FunQLName "bool_and"
+          // Strings
           FunQLName "string_agg"
         ]
 
-// int is number of arguments
 let allowedFunctions : Set<FunctionName> =
     Set.ofList
-        [ FunQLName "abs"
+        [ // Numbers
+          FunQLName "abs"
           FunQLName "isfinite"
+          FunQLName "round"
+          // Strings
+          FunQLName "to_char"
+          // Dates
           FunQLName "age"
           FunQLName "date_part"
           FunQLName "date_trunc"
-          FunQLName "to_char"
-          FunQLName "round"
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
