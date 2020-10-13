@@ -479,6 +479,12 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                     let (prevMeta, prevFunc) = Map.findWithDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
                     encounteredActions <- Map.add ref (prevMeta, rawFunc) encounteredActions
                     emptySchemaDump
+                | CIRegex @"^modules/(.*)$" [rawModuleName] ->
+                    let rawModule = readEntry entry <| fun reader -> reader.ReadToEnd()
+                    let entry = { Source = rawModule }
+                    { emptySchemaDump with
+                        Modules = Map.singleton rawModuleName entry
+                    }
                 | CIRegex @"^roles/([^/]+)\.yaml$" [rawName] ->
                     let name = FunQLName rawName
                     let role : SourceRole = deserializeEntry entry
