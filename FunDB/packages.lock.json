@@ -68,8 +68,8 @@
       "Npgsql": {
         "type": "Direct",
         "requested": "[4.1.*, )",
-        "resolved": "4.1.4",
-        "contentHash": "qLwnSF7GAAxxrNFH3EprG352CJbhTCIDkk9PJ3/6aBeMOZBq+QMI1Yxsi9aUrBJwE51PaMLIYw0eq/bv9CGQTw==",
+        "resolved": "4.1.5",
+        "contentHash": "juDlNse+SKfXRP0VSgpJkpdCcaVLZt8m37EHdRX+8hw+GG69Eat1Y0MdEfl+oetdOnf9E133GjIDEjg9AF6HSQ==",
         "dependencies": {
           "System.Runtime.CompilerServices.Unsafe": "4.6.0"
         }
@@ -89,11 +89,11 @@
       "Npgsql.Json.NET": {
         "type": "Direct",
         "requested": "[4.1.*, )",
-        "resolved": "4.1.4",
-        "contentHash": "5uma2A2gkeo6pG/+tDRqiGaSa6dqp2lg1De0g52/ILf28ZP7bhtMV9DvdcNQk8VRyTtdBM2V8SMp+VxIE5IBpg==",
+        "resolved": "4.1.5",
+        "contentHash": "W7q//kuQ4CN9vj7JSh+3OlZsMUZrQ5xxf1JOGt9Tsq8eTKbfkH+HFBpyzsuAWcO/0O9hwd8qlDgTSJKtLRzS/g==",
         "dependencies": {
           "Newtonsoft.Json": "11.0.2",
-          "Npgsql": "4.1.4"
+          "Npgsql": "4.1.5"
         }
       },
       "System.Data.HashFunction.CityHash": {

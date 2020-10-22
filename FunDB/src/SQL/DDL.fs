@@ -421,7 +421,7 @@ type SchemaOperation =
                     | None -> ""
                     | Some cond -> sprintf "WHEN (%s)" (cond.ToSQLString())
                 let argsStr = def.FunctionArgs |> Seq.map renderSqlString |> String.concat ", "
-                let tailStr = sprintf "EXECUTE PROCEDURE %s (%s)" (def.FunctionName.ToSQLString()) argsStr
+                let tailStr = sprintf "EXECUTE FUNCTION %s (%s)" (def.FunctionName.ToSQLString()) argsStr
                 String.concatWithWhitespaces ["CREATE"; constraintStr; triggerStr; whenStr; tailStr]
             | SORenameTrigger (trigger, table, toName) ->
                 sprintf "ALTER TRIGGER %s ON %s RENAME TO %s" (trigger.name.ToSQLString()) ({ schema = trigger.schema; name = table }.ToSQLString()) (toName.ToSQLString())

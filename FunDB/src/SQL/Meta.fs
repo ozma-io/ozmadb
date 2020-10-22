@@ -225,7 +225,7 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
             // FIXME: Any better way???
             // See https://postgrespro.com/list/thread-id/1558141
             match trigger.Source with
-            | Regex @"WHEN \((.*)\) EXECUTE PROCEDURE" [cond] -> Some <| parseLocalExpr cond
+            | Regex @"WHEN \((.*)\) EXECUTE (?:PROCEDURE|FUNCTION)" [cond] -> Some <| parseLocalExpr cond
             | _ -> None
         let functionName =
             { schema = Some <| SQLName trigger.Function.Namespace.NspName
