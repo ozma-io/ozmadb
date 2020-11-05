@@ -14,6 +14,8 @@ open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.SQL.Utils
 
+module SQL = FunWithFlags.FunDB.SQL.AST
+
 type IFunQLName =
     interface
         inherit IFunQLString
@@ -1023,33 +1025,37 @@ let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
 
 let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal
 
-let allowedAggregateFunctions : Set<FunctionName> =
-    Set.ofList
+let allowedAggregateFunctions : Map<FunctionName, SQL.FunctionName> =
+    Map.ofList
         [ // Generic
-          FunQLName "count"
+          (FunQLName "count", SQL.SQLName "count")
           // Numbers
-          FunQLName "sum"
-          FunQLName "avg"
-          FunQLName "min"
-          FunQLName "max"
+          (FunQLName "sum", SQL.SQLName "sum")
+          (FunQLName "avg", SQL.SQLName "avg")
+          (FunQLName "min", SQL.SQLName "min")
+          (FunQLName "max", SQL.SQLName "max")
           // Booleans
-          FunQLName "bool_and"
+          (FunQLName "bool_and", SQL.SQLName "bool_and")
+          (FunQLName "every", SQL.SQLName "every")
           // Strings
-          FunQLName "string_agg"
+          (FunQLName "string_agg", SQL.SQLName "string_agg")
+          // JSON
+          (FunQLName "json_agg", SQL.SQLName "jsonb_agg")
+          (FunQLName "json_object_agg", SQL.SQLName "jsonb_object_agg")
         ]
 
-let allowedFunctions : Set<FunctionName> =
-    Set.ofList
+let allowedFunctions : Map<FunctionName, SQL.FunctionName> =
+    Map.ofList
         [ // Numbers
-          FunQLName "abs"
-          FunQLName "isfinite"
-          FunQLName "round"
+          (FunQLName "abs", SQL.SQLName "abs")
+          (FunQLName "isfinite", SQL.SQLName "isfinite")
+          (FunQLName "round", SQL.SQLName "round")
           // Strings
-          FunQLName "to_char"
+          (FunQLName "to_char", SQL.SQLName "to_char")
           // Dates
-          FunQLName "age"
-          FunQLName "date_part"
-          FunQLName "date_trunc"
+          (FunQLName "age", SQL.SQLName "age")
+          (FunQLName "date_part", SQL.SQLName "date_part")
+          (FunQLName "date_trunc", SQL.SQLName "date_trunc")
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =

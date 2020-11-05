@@ -385,8 +385,8 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
         | FEMinus (a, b) -> SQL.VEMinus (traverse a, traverse b)
         | FEMultiply (a, b) -> SQL.VEMultiply (traverse a, traverse b)
         | FEDivide (a, b) -> SQL.VEDivide (traverse a, traverse b)
-        | FEFunc (name,  args) -> SQL.VEFunc (compileName name, Array.map traverse args)
-        | FEAggFunc (name,  args) -> SQL.VEAggFunc (compileName name, genericCompileAggExpr traverse args)
+        | FEFunc (name,  args) -> SQL.VEFunc (Map.find name allowedFunctions, Array.map traverse args)
+        | FEAggFunc (name,  args) -> SQL.VEAggFunc (Map.find name allowedAggregateFunctions, genericCompileAggExpr traverse args)
         | FESubquery query -> SQL.VESubquery (queryFunc query)
         | FEInheritedFrom (c, subEntityRef) ->
             let info = subEntityRef.extra :?> ResolvedSubEntityInfo

@@ -139,15 +139,15 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
     | Some vals -> FEValue (FJson (vals |> Seq.map valueToJson |> jsonArray))
 
 let private makeFunc (name : FunQLName) (exprs : ParsedFieldExpr array) : ParsedFieldExpr =
-    if Set.contains name allowedFunctions then
+    if Map.containsKey name allowedFunctions then
         FEFunc (name, exprs)
-    else if Set.contains name allowedAggregateFunctions && Array.length exprs > 0 then
+    else if Map.containsKey name allowedAggregateFunctions && Array.length exprs > 0 then
         FEAggFunc (name, AEAll exprs)
     else
         failwithf "Unknown or applied incorrectly function %O" name
 
 let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldExpr =
-    if Set.contains name allowedAggregateFunctions then
+    if Map.containsKey name allowedAggregateFunctions then
         match expr with
         | AEAll exprs when Array.length exprs = 0 -> failwithf "No arguments to an aggregate function %O" name
         | _ -> ()
