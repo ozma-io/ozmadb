@@ -52,12 +52,12 @@ let private reduceDefaultExpr : ParsedFieldExpr -> FieldValue option = function
 
 let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : SourceEntity) : ParsedFieldExpr -> ResolvedReferenceFieldExpr =
     let resolveReference : LinkedFieldRef -> ReferenceRef = function
-        | { ref = VRColumn { entity = Some { schema = None; name = FunQLName "this" }; name = thisName }; path = [||] } ->
+        | { Ref = VRColumn { entity = Some { schema = None; name = FunQLName "this" }; name = thisName }; Path = [||] } ->
             match thisEntity.FindField thisName with
             | Some _ -> RThis thisName
             | None when thisName = funId -> RThis thisName
             | None -> raisef ResolveLayoutException "Local column not found in reference condition: %s" (thisName.ToFunQLString())
-        | { ref = VRColumn { entity = Some { schema = None; name = FunQLName "ref" }; name = refName }; path = [||] } ->
+        | { Ref = VRColumn { entity = Some { schema = None; name = FunQLName "ref" }; name = refName }; Path = [||] } ->
             match refEntity.FindField refName with
             | Some _ -> RRef refName
             | None when refName = funId -> RRef refName
@@ -72,8 +72,8 @@ let private resolveReferenceExpr (thisEntity : SourceEntity) (refEntity : Source
 
     mapFieldExpr
         { idFieldExprMapper resolveReference voidQuery with
-              aggregate = voidAggr
-              subEntity = voidSubEntity
+              Aggregate = voidAggr
+              SubEntity = voidSubEntity
         }
 
 let private hashNameSuffixLength = 4
@@ -447,7 +447,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let mutable usedSchemas = Map.empty
 
         let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
-            | { ref = VRColumn { entity = None; name = name }; path = path } ->
+            | { Ref = VRColumn { entity = None; name = name }; Path = path } ->
                 let res = checkPath stack usedSchemas entity { entity = entityRef; name = name } (Array.toList path)
                 usedSchemas <- mergeUsedSchemas usedSchemas res.UsedSchemas
                 if not res.IsLocal then
@@ -458,7 +458,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     { Ref = { entity = entityRef; name = name }
                       Immediate = true
                     }
-                { ref = VRColumn { ref = ({ entity = None; name = name } : FieldRef); bound = Some bound }; path = path }
+                { Ref = VRColumn { Ref = ({ entity = None; name = name } : FieldRef); Bound = Some bound }; Path = path }
             // Placeholders are forbidden because computed fields might be used in check expressions.
             | ref ->
                 raisef ResolveLayoutException "Invalid reference in computed column: %O" ref
@@ -475,8 +475,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let exprRes =
             mapFieldExpr
                 { idFieldExprMapper resolveReference resolveQuery with
-                      aggregate = voidAggr
-                      subEntity = resolveSubEntity layoutFields
+                      Aggregate = voidAggr
+                      SubEntity = resolveSubEntity layoutFields
                 } expr
         { expression = exprRes
           isLocal = isLocal
@@ -517,7 +517,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
     let resolveCheckExpr (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : ParsedFieldExpr -> LocalFieldExpr =
         let resolveReference : LinkedFieldRef -> FieldName = function
-            | { ref = VRColumn { entity = None; name = name }; path = [||] } ->
+            | { Ref = VRColumn { entity = None; name = name }; Path = [||] } ->
                 let res =
                     match Map.tryFind name entity.columnFields with
                     | Some col -> name
@@ -541,13 +541,13 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let resolveLocalSubEntity ctx (field : FieldName) subEntity =
             let fieldRef = { entity = entityRef; name = field }
             let boundField = { Ref = fieldRef; Immediate = true }
-            let linkedField = { ref = VRColumn { ref = { entity = None; name = field }; bound = Some boundField }; path = [||] } : LinkedBoundFieldRef
+            let linkedField = { Ref = VRColumn { Ref = { entity = None; name = field }; Bound = Some boundField }; Path = [||] } : LinkedBoundFieldRef
             resolveSubEntity layoutFields ctx linkedField subEntity
 
         mapFieldExpr
             { idFieldExprMapper resolveReference voidQuery with
-                  aggregate = voidAggr
-                  subEntity = resolveLocalSubEntity
+                  Aggregate = voidAggr
+                  SubEntity = resolveLocalSubEntity
             }
 
     let resolveCheckConstraint (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (constrName : ConstraintName) (constr : SourceCheckConstraint) : ResolvedCheckConstraint =

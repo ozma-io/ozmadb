@@ -91,6 +91,19 @@ let mapTask (f : 'a -> Task<'b>) (s : seq<'a>) : Task<seq<'b>> =
         return list :> seq<'b>
     }
 
+let mapTake (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
+    let i = s.GetEnumerator()
+    let rec iter () =
+        seq {
+            if i.MoveNext() then
+                match f i.Current with
+                | None -> ()
+                | Some r ->
+                    yield r
+                    yield! iter ()
+        }
+    iter ()
+
 let iterStop (f : 'a -> bool) (s : seq<'a>) : unit =
     let i = s.GetEnumerator()
     let mutable cont = true

@@ -142,9 +142,17 @@ type UserViewInfoResult =
       PureColumnAttributes : ExecutedAttributeMap array
     }
 
- type IUserViewsAPI =
-    abstract member GetUserViewInfo : UserViewSource -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
-    abstract member GetUserView : UserViewSource -> RawArguments -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
+type UserViewFlags =
+    { ForceRecompile : bool
+    }
+
+let emptyUserViewFlags =
+    { ForceRecompile = false
+    } : UserViewFlags
+
+type IUserViewsAPI =
+    abstract member GetUserViewInfo : UserViewSource -> UserViewFlags -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
+    abstract member GetUserView : UserViewSource -> RawArguments -> UserViewFlags -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
 
 [<SerializeAsObject("error")>]
 type EntityErrorInfo =

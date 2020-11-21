@@ -60,14 +60,14 @@ type RaiseOption =
 
 [<NoEquality; NoComparison>]
 type RaiseMessage =
-    { format : string
-      options : ValueExpr[]
+    { Format : string
+      Options : ValueExpr[]
     } with
         override this.ToString () = this.ToPLPgSQLString()
 
         member this.ToPLPgSQLString () =
-            let args = this.options |> Seq.map (fun o -> sprintf ", %s" (o.ToSQLString())) |> String.concat ""
-            String.concatWithWhitespaces [renderSqlString this.format; args]
+            let args = this.Options |> Seq.map (fun o -> sprintf ", %s" (o.ToSQLString())) |> String.concat ""
+            String.concatWithWhitespaces [renderSqlString this.Format; args]
 
         interface IPLPgSQLString with
             member this.ToPLPgSQLString () = this.ToPLPgSQLString()
@@ -111,23 +111,23 @@ type Statement =
             member this.ToPLPgSQLString () = this.ToPLPgSQLString()
 
 and [<NoEquality; NoComparison>] RaiseStatement =
-    { level : RaiseLevel
-      message : RaiseMessage option
-      options : Map<RaiseOption, ValueExpr>
+    { Level : RaiseLevel
+      Message : RaiseMessage option
+      Options : Map<RaiseOption, ValueExpr>
     } with
         override this.ToString () = this.ToPLPgSQLString()
 
         member this.ToPLPgSQLString () =
-            let initStr = sprintf "RAISE %s" (this.level.ToPLPgSQLString())
+            let initStr = sprintf "RAISE %s" (this.Level.ToPLPgSQLString())
             let messageStr =
-                match this.message with
+                match this.Message with
                 | None -> ""
                 | Some m -> m.ToPLPgSQLString()
             let optionsStr =
-                if Map.isEmpty this.options then
+                if Map.isEmpty this.Options then
                     ""
                 else
-                    let opts = this.options |> Map.toSeq |> Seq.map (fun (opt, v) -> sprintf "%s = %s" (opt.ToPLPgSQLString()) (v.ToSQLString())) |> String.concat ", "
+                    let opts = this.Options |> Map.toSeq |> Seq.map (fun (opt, v) -> sprintf "%s = %s" (opt.ToPLPgSQLString()) (v.ToSQLString())) |> String.concat ", "
                     sprintf "USING %s" opts
             String.concatWithWhitespaces [initStr; messageStr; optionsStr]
 
@@ -138,12 +138,12 @@ and Statements = Statement[]
 
 [<NoEquality; NoComparison>]
 type Program =
-    { body : Statements
+    { Body : Statements
     } with
         override this.ToString () = this.ToPLPgSQLString()
 
         member this.ToPLPgSQLString () =
-            sprintf "BEGIN %s END" (Statement.StatementsToString this.body)
+            sprintf "BEGIN %s END" (Statement.StatementsToString this.Body)
 
         interface IPLPgSQLString with
             member this.ToPLPgSQLString () = this.ToPLPgSQLString()

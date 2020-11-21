@@ -37,16 +37,16 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
         let mutable globalArguments = Set.empty
 
         let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
-            | { ref = VRColumn { entity = None; name = name }; path = path } ->
+            | { Ref = VRColumn { entity = None; name = name }; Path = path } ->
                 checkPath entity name (Array.toList path)
                 let bound =
                     { Ref = { entity = entityRef; name = name }
                       Immediate = true
                     }
-                { ref = VRColumn { ref = ({ entity = None; name = name } : FieldRef); bound = Some bound }; path = path }
-            | { ref = VRPlaceholder (PLocal name) } ->
+                { Ref = VRColumn { Ref = ({ entity = None; name = name } : FieldRef); Bound = Some bound }; Path = path }
+            | { Ref = VRPlaceholder (PLocal name) } ->
                 raisef ResolveAttributesException "Local argument %O is not allowed" name
-            | { ref = VRPlaceholder (PGlobal name as arg); path = path } ->
+            | { Ref = VRPlaceholder (PGlobal name as arg); Path = path } ->
                 let argInfo =
                     match Map.tryFind name globalArgumentTypes with
                     | None -> raisef ResolveAttributesException "Unknown global argument: %O" ref
@@ -61,7 +61,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                         let argEntity = layout.FindEntity entityRef |> Option.get
                         checkPath argEntity name remainingPath
                     | _ -> raisef ResolveAttributesException "Argument is not a reference: %O" ref
-                { ref = VRPlaceholder arg; path = path }
+                { Ref = VRPlaceholder arg; Path = path }
             | ref ->
                 raisef ResolveAttributesException "Invalid reference: %O" ref
         let resolveQuery query =
@@ -72,7 +72,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
 
         let mapper =
             { idFieldExprMapper resolveReference resolveQuery with
-                  aggregate = voidAggr
+                  Aggregate = voidAggr
             }
 
         let resolveAttribute name expr =

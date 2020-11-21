@@ -85,9 +85,9 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
               Extra = null
             } : SQL.SingleSelectExpr
         let raiseCall =
-            { level = PLPgSQL.RLException
-              message = None
-              options =
+            { Level = PLPgSQL.RLException
+              Message = None
+              Options =
                 Map.ofList
                     [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "integrity_constraint_violation"))
                       (PLPgSQL.ROColumn, SQL.VEValue (SQL.VString <| fromFieldRef.name.ToString()))
@@ -101,7 +101,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
         let returnStmt = PLPgSQL.StReturn (SQL.VEColumn { table = None; name = SQL.SQLName "new" })
 
         let checkProgram =
-            { body = [| checkStmt; returnStmt |]
+            { Body = [| checkStmt; returnStmt |]
             } : PLPgSQL.Program
         let checkFunctionDefinition =
             { Arguments = [||]
@@ -166,13 +166,20 @@ let private compileAssertionCheck (layout : Layout) : LayoutAssertion -> SQL.Sel
         let inheritance = Option.get refEntity.inheritance
 
         let joinName = SQL.SQLName "__joined"
+        let joinAlias = { Name = joinName; Columns = None } : SQL.TableAlias
         let joinRef = { schema = None; name = joinName } : SQL.TableRef
         let fromRef = compileResolvedEntityRef entity.root
         let toRef = compileResolvedEntityRef refEntity.root
         let fromColumn = SQL.VEColumn { table = Some fromRef; name = field.columnName }
         let toColumn = SQL.VEColumn { table = Some joinRef; name = sqlFunId }
         let joinExpr = SQL.VEEq (fromColumn, toColumn)
-        let join = SQL.FJoin (SQL.JoinType.Left, SQL.FTable (null, None, fromRef), SQL.FTable (null, Some joinName, toRef), joinExpr)
+        let join =
+            SQL.FJoin
+                { Type = SQL.JoinType.Left
+                  A = SQL.FTable (null, None, fromRef)
+                  B = SQL.FTable (null, Some joinAlias, toRef)
+                  Condition = joinExpr
+                }
         let subEntityRef = { table = Some joinRef; name = sqlFunSubEntity } : SQL.ColumnRef
         let checkExpr = replaceColumnRefs subEntityRef inheritance.checkExpr
         let singleSelect =

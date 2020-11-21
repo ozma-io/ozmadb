@@ -30,10 +30,10 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         | v -> v
 
     let rec resolveResult (result : ResolvedQueryResult) : ResolvedQueryResult =
-        let attributes = resolveAttributes result.attributes
-        let result = resolveResultExpr result.result
-        { attributes = attributes
-          result = result
+        let attributes = resolveAttributes result.Attributes
+        let result = resolveResultExpr result.Result
+        { Attributes = attributes
+          Result = result
         }
 
     and resolveResultExpr : ResolvedQueryResultExpr -> ResolvedQueryResultExpr = function
@@ -45,55 +45,82 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
     and resolveFieldExpr : ResolvedFieldExpr -> ResolvedFieldExpr =
         let mapper =
             { idFieldExprMapper id id with
-                value = resolveValue
+                Value = resolveValue
             }
         mapFieldExpr mapper
 
     and resolveOrderLimitClause (limits : ResolvedOrderLimitClause) : ResolvedOrderLimitClause =
         let resolveOrderBy (ord, expr) = (ord, resolveFieldExpr expr)
-        let orderBy = Array.map resolveOrderBy limits.orderBy
-        let limit = Option.map resolveFieldExpr limits.limit
-        let offset = Option.map resolveFieldExpr limits.offset
-        { orderBy = orderBy
-          limit = limit
-          offset = offset
+        let orderBy = Array.map resolveOrderBy limits.OrderBy
+        let limit = Option.map resolveFieldExpr limits.Limit
+        let offset = Option.map resolveFieldExpr limits.Offset
+        { OrderBy = orderBy
+          Limit = limit
+          Offset = offset
         }
 
-    and resolveSelectExpr : ResolvedSelectExpr -> ResolvedSelectExpr = function
+    and resolveSelectTreeExpr : ResolvedSelectTreeExpr -> ResolvedSelectTreeExpr = function
         | SSelect query -> SSelect <| resolveSingleSelectExpr query
-        | SSetOp (op, a, b, limits) ->
-            let a' = resolveSelectExpr a
-            let b' = resolveSelectExpr b
-            let limits' = resolveOrderLimitClause limits
-            SSetOp (op, a', b', limits')
+        | SSetOp setOp ->
+            SSetOp
+                { Operation = setOp.Operation
+                  AllowDuplicates = setOp.AllowDuplicates
+                  A = resolveSelectExpr setOp.A
+                  B = resolveSelectExpr setOp.B
+                  OrderLimit = resolveOrderLimitClause setOp.OrderLimit
+                }
+        | SValues values ->
+            let resolveOne = Array.map resolveFieldExpr
+            SValues (Array.map resolveOne values)
+
+    and resolveCommonTableExpr (cte : ResolvedCommonTableExpr) : ResolvedCommonTableExpr =
+        let expr = resolveSelectExpr cte.Expr
+        { Expr = expr
+          Fields = cte.Fields
+          Extra = cte.Extra
+        }
+
+    and resolveCommonTableExprs (ctes : ResolvedCommonTableExprs) : ResolvedCommonTableExprs =
+        let exprs = Array.map (fun (name, expr) -> (name, resolveCommonTableExpr expr)) ctes.Exprs
+        { Exprs = exprs
+          Recursive = ctes.Recursive
+          Extra = ctes.Extra
+        }
+
+    and resolveSelectExpr (select : ResolvedSelectExpr) : ResolvedSelectExpr =
+        let ctes = Option.map resolveCommonTableExprs select.CTEs
+        let tree = resolveSelectTreeExpr select.Tree
+        { CTEs = ctes
+          Tree = tree
+          Extra = select.Extra
+        }
 
     and resolveSingleSelectExpr (query : ResolvedSingleSelectExpr) : ResolvedSingleSelectExpr =
-            let attributes = resolveAttributes query.attributes
-            let from = Option.map resolveFromExpr query.from
-            let where = Option.map resolveFieldExpr query.where
-            let groupBy = Array.map resolveFieldExpr query.groupBy
-            let results = Array.map resolveResult query.results
-            let orderLimit = resolveOrderLimitClause query.orderLimit
-            { attributes = attributes
-              from = from
-              where = where
-              groupBy = groupBy
-              results = results
-              orderLimit = orderLimit
-              extra = query.extra
+            let attributes = resolveAttributes query.Attributes
+            let from = Option.map resolveFromExpr query.From
+            let where = Option.map resolveFieldExpr query.Where
+            let groupBy = Array.map resolveFieldExpr query.GroupBy
+            let results = Array.map resolveResult query.Results
+            let orderLimit = resolveOrderLimitClause query.OrderLimit
+            { Attributes = attributes
+              From = from
+              Where = where
+              GroupBy = groupBy
+              Results = results
+              OrderLimit = orderLimit
+              Extra = query.Extra
             }
 
     and resolveFromExpr : ResolvedFromExpr -> ResolvedFromExpr = function
         | FEntity (pun, name) -> FEntity (pun, name)
-        | FJoin (jt, e1, e2, where) ->
-            let e1' = resolveFromExpr e1
-            let e2' = resolveFromExpr e2
-            let where' = resolveFieldExpr where
-            FJoin (jt, e1', e2', where')
+        | FJoin join ->
+            FJoin
+                { Type = join.Type
+                  A = resolveFromExpr join.A
+                  B = resolveFromExpr join.B
+                  Condition = resolveFieldExpr join.Condition
+                }
         | FSubExpr (name, q) -> FSubExpr (name, resolveSelectExpr q)
-        | FValues (name, fieldNames, values) ->
-            let resolveOne = Array.map resolveFieldExpr
-            FValues (name, fieldNames, Array.map resolveOne values)
 
     member this.ResolveSelectExpr expr = resolveSelectExpr expr
 

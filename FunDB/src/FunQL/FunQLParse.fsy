@@ -9,22 +9,26 @@ open FunWithFlags.FunDB.FunQL.AST
 type ParsedFieldExpr = FieldExpr<EntityRef, LinkedFieldRef>
 type ParsedFromExpr = FromExpr<EntityRef, LinkedFieldRef>
 type ParsedSelectExpr = SelectExpr<EntityRef, LinkedFieldRef>
+type ParsedSelectTreeExpr = SelectTreeExpr<EntityRef, LinkedFieldRef>
+type ParsedSetOperationExpr = SetOperationExpr<EntityRef, LinkedFieldRef>
 type ParsedSingleSelectExpr = SingleSelectExpr<EntityRef, LinkedFieldRef>
 type ParsedQueryResult = QueryResult<EntityRef, LinkedFieldRef>
 type ParsedQueryResultExpr = QueryResultExpr<EntityRef, LinkedFieldRef>
 type ParsedAttributeMap = AttributeMap<EntityRef, LinkedFieldRef>
+type ParsedCommonTableExpr = CommonTableExpr<EntityRef, LinkedFieldRef>
+type ParsedCommonTableExprs = CommonTableExprs<EntityRef, LinkedFieldRef>
 type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
 type ParsedAggExpr = AggExpr<EntityRef, LinkedFieldRef>
 
 type ParsedMainEntity =
-    { entity : EntityRef
+    { Entity : EntityRef
     }
 
 [<NoComparison>]
 type ParsedViewExpr =
-    { arguments : Map<ArgumentName, ParsedArgument>
-      select : ParsedSelectExpr
-      mainEntity : ParsedMainEntity option
+    { Arguments : Map<ArgumentName, ParsedArgument>
+      Select : ParsedSelectExpr
+      MainEntity : ParsedMainEntity option
     }
 
 [<NoComparison>]
@@ -81,7 +85,7 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
     | _ -> failwith <| sprintf "Casting can only be performed on values: %O :: %O" expr exprType
 
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
-    FJoin (joinType, fromExpr1, fromExpr2, whereExpr)
+    FJoin { Type = joinType; A = fromExpr1; B = fromExpr2; Condition = whereExpr }
 
 let private valueToJson : FieldValue -> JToken = function
     | FInt i -> JToken.op_Implicit i
@@ -300,7 +304,7 @@ attributeMap : AttributeMap EOF { $1 }
 // Expressions
 
 ViewExpr:
-    | MaybeArguments UnparenSelectExpr InsertEntityClause { { arguments = $1; select = $2; mainEntity = $3 } }
+    | MaybeArguments UnparenSelectExpr InsertEntityClause { { Arguments = $1; Select = $2; MainEntity = $3 } }
 
 MaybeArguments:
     |                                            { Map.empty }
@@ -311,8 +315,8 @@ ArgumentsList:
     | ArgumentsListNonEmpty { parseMap "Clashing argument names" $1 }
 
 ArgumentsListNonEmpty:
-    | ArgumentEntry COMMA ArgumentsListNonEmpty { $1 :: $3 }
     | ArgumentEntry                             { [ $1 ] }
+    | ArgumentEntry COMMA ArgumentsListNonEmpty { $1 :: $3 }
 
 ArgumentEntry:
     | ARGUMENT_ID Argument { (FunQLName $1, $2) }
@@ -322,13 +326,39 @@ Argument:
     | ArgumentFieldType NULL { { ArgType = $1; Optional = true } }
 
 SelectVal:
-    | SingleUnlimitedSelectExpr { SSelect $1 }
+    | SingleUnlimitedSelectExpr { { CTEs = None; Tree = SSelect $1; Extra = null } }
+    | Values                    { { CTEs = None; Tree = $1; Extra = null } }
     | SubSelectExpr             { $1 }
+
+WithExpr:
+    | WITH WithBindings           { { Recursive = false; Exprs = Array.ofList $2; Extra = null } }
+    | WITH RECURSIVE WithBindings { { Recursive = true; Exprs = Array.ofList $3; Extra = null } }
+
+WithBinding:
+    | Name WithBindingBody { ($1, $2) }
+
+WithBindingBody:
+    | AS SubSelectExpr               { { Fields = None; Expr = $2; Extra = null } }
+    | ColumnAliases AS SubSelectExpr { { Fields = Some $1; Expr = $3; Extra = null } }
+
+WithBindings:
+    | WithBinding                    { [ $1 ] }
+    | WithBinding COMMA              { [ $1 ] }
+    | WithBinding COMMA WithBindings { $1 :: $3 }
 
 // We don't allow select expressions with nested parentheses now because it's difficult to implement as LALR(1) for all our cases (or I'm missing something obvious).
 UnparenSelectExpr:
-    | SingleSelectExpr                           { SSelect $1 }
-    | SelectVal SetOp SetOpExpr OrderLimitClause { SSetOp ($2, $1, $3, $4) }
+    | WithExpr SelectTreeExpr { { CTEs = Some $1; Tree = $2; Extra = null } }
+    | SelectTreeExpr          { { CTEs = None; Tree = $1; Extra = null } }
+
+Values:
+    | VALUES ValuesEntryList { SValues (List.toArray $2) }
+
+SelectTreeExpr:
+    | SingleSelectExpr                               { SSelect $1 }
+    | Values                                         { $1 }
+    | SelectVal SetOp SetOpExpr OrderLimitClause     { SSetOp { Operation = $2; AllowDuplicates = false; A = $1; B = $3; OrderLimit = $4 } }
+    | SelectVal SetOp ALL SetOpExpr OrderLimitClause { SSetOp { Operation = $2; AllowDuplicates = true; A = $1; B = $4; OrderLimit = $5 } }
 
 SubSelectExpr:
     | LEFT_PAREN UnparenSelectExpr RIGHT_PAREN { $2 }
@@ -339,35 +369,36 @@ SetOp:
     | EXCEPT    { Except }
 
 SetOpExpr:
-    | SelectVal                 { $1 }
-    | SelectVal SetOp SetOpExpr { SSetOp ($2, $1, $3, emptyOrderLimitClause) }
+    | SelectVal                     { $1 }
+    | SelectVal SetOp SetOpExpr     { { CTEs = None; Tree = SSetOp { Operation = $2; AllowDuplicates = false; A = $1; B = $3; OrderLimit = emptyOrderLimitClause }; Extra = null } }
+    | SelectVal SetOp ALL SetOpExpr { { CTEs = None; Tree = SSetOp { Operation = $2; AllowDuplicates = true; A = $1; B = $4; OrderLimit = emptyOrderLimitClause }; Extra = null } }
 
 SingleSelectExpr:
-    | SingleUnlimitedSelectExpr OrderLimitClause { { $1 with orderLimit = $2 } }
+    | SingleUnlimitedSelectExpr OrderLimitClause { { $1 with OrderLimit = $2 } }
 
 SingleUnlimitedSelectExpr:
     | SELECT QueryResults FromClause WhereClause GroupByClause {
         let (attributes, results) = splitResults $2
-        { attributes = attributes
-          results = results
-          from = $3
-          where = $4
-          groupBy = $5
-          orderLimit = emptyOrderLimitClause
-          extra = null
+        { Attributes = attributes
+          Results = results
+          From = $3
+          Where = $4
+          GroupBy = $5
+          OrderLimit = emptyOrderLimitClause
+          Extra = null
         }
     }
 
 OrderLimitClause:
-    | OrderByClause LimitClause OffsetClause { { orderBy = $1; limit = $2; offset = $3 } }
+    | OrderByClause LimitClause OffsetClause { { OrderBy = $1; Limit = $2; Offset = $3 } }
 
 OrderByClause:
     |                      { [||] }
     | ORDER BY OrderByList { List.toArray $3 }
 
 OrderByList:
-    | OrderByExpr                   { [ $1 ] }
-    | OrderByExpr COMMA             { [ $1 ] }
+    | OrderByExpr                   { [$1] }
+    | OrderByExpr COMMA             { [$1] }
     | OrderByExpr COMMA OrderByList { $1 :: $3 }
 
 OrderByExpr:
@@ -392,16 +423,20 @@ FromClause:
 
 InsertEntityClause:
     |                           { None }
-    | FOR INSERT INTO EntityRef { Some { entity = $4 } }
+    | FOR INSERT INTO EntityRef { Some { Entity = $4 } }
 
 QueryResults:
-    | QueryResult COMMA QueryResults { $1 :: $3 }
-    | QueryResult                    { [ $1 ] }
     |                                { [] }
+    | NonEmptyQueryResults           { $1 }
+
+NonEmptyQueryResults:
+    | QueryResult                            { [$1] }
+    | QueryResult COMMA                      { [$1] }
+    | QueryResult COMMA NonEmptyQueryResults { $1 :: $3 }
 
 QueryResult:
     | AT Name EQ FieldExpr                { AAttribute ($2, $4) }
-    | QueryResultExpr MaybeAttributeMap   { AResult { attributes = $2; result = $1 } }
+    | QueryResultExpr MaybeAttributeMap   { AResult { Attributes = $2; Result = $1 } }
 
 QueryResultExpr:
     | FieldExpr         { QRExpr (None, $1) }
@@ -420,32 +455,35 @@ AttributeValuesNonEmpty:
     | Name EQ FieldExpr COMMA                         { [($1, $3)] }
     | Name EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
 
+EntityAlias:
+    | AS Name               { { Name = $2; Fields = None } }
+    | AS Name ColumnAliases { { Name = $2; Fields = Some $3 } }
+
 QuerySource:
-    | SubSelectExpr AS Name                               { FSubExpr ($3, $1) }
-    | LEFT_PAREN Values RIGHT_PAREN AS Name ColumnAliases { FValues ($5, $6, $2) }
-    | EntityRef                                           { FEntity (None, $1) }
-    | EntityRef AS Name                                   { FEntity (Some $3, $1) }
-    | LEFT_PAREN FromExpr RIGHT_PAREN                     { $2 }
+    | SubSelectExpr EntityAlias       { FSubExpr ($2, $1) }
+    | EntityRef                       { FEntity (None, $1) }
+    | EntityRef AS Name               { FEntity (Some $3, $1) }
+    | LEFT_PAREN FromExpr RIGHT_PAREN { $2 }
 
 ColumnAliases:
     | LEFT_PAREN ColumnAliasesList RIGHT_PAREN { List.toArray $2 }
 
 ColumnAliasesList:
     | Name                         { [$1] }
+    | Name COMMA                   { [$1] }
     | Name COMMA ColumnAliasesList { $1 :: $3 }
-
-Values:
-    | VALUES ValuesEntryList { List.toArray $2 }
 
 ValuesEntryList:
     | ValuesEntry                       { [$1] }
-| ValuesEntry COMMA ValuesEntryList { $1 :: $3 }
+    | ValuesEntry COMMA                 { [$1] }
+    | ValuesEntry COMMA ValuesEntryList { $1 :: $3 }
 
 ValuesEntry:
     | LEFT_PAREN ValueItemsList RIGHT_PAREN { List.toArray $2 }
 
 ValueItemsList:
-    | FieldExpr                      { [$1]  }
+    | FieldExpr                      { [$1] }
+    | FieldExpr COMMA                { [$1] }
     | FieldExpr COMMA ValueItemsList { $1 :: $3 }
 
 JoinType:
@@ -464,7 +502,7 @@ FromExpr:
 
 EntityRef:
     | Name DOT Name { { schema = Some $1; name = $3; } }
-| Name          { { schema = None; name = $1; } }
+    | Name          { { schema = None; name = $1; } }
 
 ValueRef:
     | FieldRef           { VRColumn $1 }
@@ -472,7 +510,7 @@ ValueRef:
     | GLOBAL_ARGUMENT_ID { VRPlaceholder (PGlobal <| FunQLName $1) }
 
 LinkedValueRef:
-    | ValueRef LinkedFieldsList { { ref = $1; path = List.toArray $2 } }
+    | ValueRef LinkedFieldsList { { Ref = $1; Path = List.toArray $2 } }
 
 LinkedFieldsList:
     |                                  { List.empty }
@@ -553,8 +591,8 @@ FieldExprOp:
     | FieldExprVal                           { $1 }
 
 FieldExprVal:
-    | LinkedValueRef INHERITED FROM EntityRef { FEInheritedFrom ($1, { ref = $4; extra = null }) }
-    | LinkedValueRef OFTYPE EntityRef         { FEOfType ($1, { ref = $3; extra = null }) }
+    | LinkedValueRef INHERITED FROM EntityRef { FEInheritedFrom ($1, { Ref = $4; Extra = null }) }
+    | LinkedValueRef OFTYPE EntityRef         { FEOfType ($1, { Ref = $3; Extra = null }) }
     | LinkedValueRef                          { FERef $1 }
     | Value                                   { FEValue $1 }
     | Name ParenedExprList                    { makeFunc $1 $2 }
@@ -654,9 +692,13 @@ JsonArray:
     | LEFT_BRACKET JsonItems RIGHT_BRACKET { coalesceJsonArray $2 }
 
 JsonItems:
-    |                           { [] }
-    | FieldExpr                 { [$1] }
-    | FieldExpr COMMA JsonItems { $1 :: $3 }
+    |                   { [] }
+    | NonEmptyJsonItems { $1 }
+
+NonEmptyJsonItems:
+    | FieldExpr                         { [$1] }
+    | FieldExpr COMMA                   { [$1] }
+    | FieldExpr COMMA NonEmptyJsonItems { $1 :: $3 }
 
 ScalarType:
     | INT_TYPE      { SFTInt }

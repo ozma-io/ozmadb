@@ -26,7 +26,7 @@ type MainField =
 type UVDomainField =
     { Ref : ResolvedFieldRef
       Field : SerializedColumnField option // Can be None for `id` or `sub_entity`.
-      IdColumn : EntityName
+      IdColumn : DomainIdColumn
     }
 
 type UVDomain = Map<FieldName, UVDomainField>
@@ -121,19 +121,32 @@ let private limitOrderLimit (orderLimit : SQL.OrderLimitClause) : SQL.OrderLimit
             oldLimit
     { orderLimit with Limit = Some newLimit }
 
-let rec private limitTreeView : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
+let rec private limitSelectTreeExpr : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
     | SQL.SSelect sel -> SQL.SSelect { sel with OrderLimit = limitOrderLimit sel.OrderLimit }
     | SQL.SValues values -> SQL.SValues values
-    | SQL.SSetOp (op, a, b, limit) -> SQL.SSetOp (op, limitTreeView a, limitTreeView b, limit)
+    | SQL.SSetOp setOp ->
+        SQL.SSetOp
+            { Operation = setOp.Operation
+              AllowDuplicates = setOp.AllowDuplicates
+              A = limitSelectExpr setOp.A
+              B = limitSelectExpr setOp.B
+              OrderLimit = setOp.OrderLimit
+            }
 
-let rec private limitCommonTableExprs (ctes : SQL.CommonTableExprs) : SQL.CommonTableExprs =
-    { Recursive = ctes.Recursive
-      Exprs = Map.map (fun name -> limitView) ctes.Exprs
+and private limitCommonTableExpr (cte : SQL.CommonTableExpr) : SQL.CommonTableExpr =
+    { Fields = cte.Fields
+      Materialized = cte.Materialized
+      Expr = limitSelectExpr cte.Expr
     }
 
-and private limitView (select : SQL.SelectExpr) : SQL.SelectExpr =
+and private limitCommonTableExprs (ctes : SQL.CommonTableExprs) : SQL.CommonTableExprs =
+    { Recursive = ctes.Recursive
+      Exprs = Array.map (fun (name, expr) -> (name, limitCommonTableExpr expr)) ctes.Exprs
+    }
+
+and private limitSelectExpr (select : SQL.SelectExpr) : SQL.SelectExpr =
     { CTEs = Option.map limitCommonTableExprs select.CTEs
-      Tree = limitTreeView select.Tree
+      Tree = limitSelectTreeExpr select.Tree
     }
 
 type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
@@ -196,7 +209,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                 { uv.Compiled with
                       Query =
                           { uv.Compiled.Query with
-                                Expression = limitView uv.Compiled.Query.Expression
+                                Expression = limitSelectExpr uv.Compiled.Query.Expression
                           }
                 }
             let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)

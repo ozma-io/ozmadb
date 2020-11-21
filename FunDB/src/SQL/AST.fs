@@ -363,6 +363,22 @@ type SetOperation =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+type TableAlias =
+    { Name : TableName
+      Columns : ColumnName[] option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let columnsStr =
+                match this.Columns with
+                | None -> ""
+                | Some cols -> cols |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
+            String.concatWithWhitespaces ["AS"; this.Name.ToSQLString(); columnsStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
 type [<CustomEquality; NoComparison>] ValueExpr =
     | VEValue of Value
@@ -492,27 +508,38 @@ and [<NoEquality; NoComparison>] AggExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] FromExpr =
-    | FTable of obj * TableName option * TableRef // obj is extra meta info
-    | FJoin of JoinType * FromExpr * FromExpr * ValueExpr
-    | FSubExpr of TableName * ColumnName[] option * SelectExpr
+    | FTable of obj * TableAlias option * TableRef // obj is extra meta info
+    | FJoin of JoinExpr
+    | FSubExpr of TableAlias * SelectExpr
     with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
             match this with
-            | FTable (_, name, t) ->
-                match name with
-                | Some n -> sprintf "%s AS %s" (t.ToSQLString()) (n.ToSQLString())
-                | None -> t.ToSQLString()
-            | FJoin (joinType, a, b, cond) ->
-                sprintf "(%s %s JOIN %s ON %s)" (a.ToSQLString()) (joinType.ToSQLString()) (b.ToSQLString()) (cond.ToSQLString())
-            | FSubExpr (name, fieldNames, expr) ->
-                let fieldNamesStr =
-                    match fieldNames with
+            | FTable (_, malias, t) ->
+                let aliasStr =
+                    match malias with
                     | None -> ""
-                    | Some names -> names |> Seq.map (fun n -> n.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
-                let subStr = sprintf "(%s) AS %s" (expr.ToSQLString()) (name.ToSQLString())
-                String.concatWithWhitespaces [subStr; fieldNamesStr]
+                    | Some alias -> alias.ToSQLString()
+                String.concatWithWhitespaces [t.ToSQLString(); aliasStr]
+            | FSubExpr (alias, expr) ->
+                sprintf "(%s) %s" (expr.ToSQLString()) (alias.ToSQLString())
+            | FJoin join -> join.ToSQLString()
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] JoinExpr =
+    { Type : JoinType
+      A : FromExpr
+      B : FromExpr
+      Condition : ValueExpr
+    }
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            sprintf "(%s %s JOIN %s ON %s)" (this.A.ToSQLString()) (this.Type.ToSQLString()) (this.B.ToSQLString()) (this.Condition.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -592,7 +619,7 @@ and [<NoEquality; NoComparison>] OrderLimitClause =
 and [<NoEquality; NoComparison>] SelectTreeExpr =
     | SSelect of SingleSelectExpr
     | SValues of ValueExpr[][]
-    | SSetOp of SetOperation * SelectTreeExpr * SelectTreeExpr * OrderLimitClause
+    | SSetOp of SetOperationExpr
     with
         override this.ToString () = this.ToSQLString()
 
@@ -601,41 +628,86 @@ and [<NoEquality; NoComparison>] SelectTreeExpr =
             | SSelect e -> e.ToSQLString()
             | SValues values ->
                 assert not (Array.isEmpty values)
-                let valuesStr = values |> Seq.map (fun array -> array |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)") |> String.concat ", "
+                let printOne (array : ValueExpr array) =
+                    assert not (Array.isEmpty array)
+                    array |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
+                let valuesStr = values |> Seq.map printOne |> String.concat ", "
                 sprintf "VALUES %s" valuesStr
-            | SSetOp (op, a, b, order) ->
-                let setStr = sprintf "(%s) %s (%s)" (a.ToSQLString()) (op.ToSQLString()) (b.ToSQLString())
-                String.concatWithWhitespaces [setStr; order.ToSQLString()]
+            | SSetOp setOp -> setOp.ToSQLString()
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+and [<NoEquality; NoComparison>] CommonTableExpr =
+    { Fields : ColumnName[] option
+      Materialized : bool option
+      Expr : SelectExpr
+    }
+
 and [<NoEquality; NoComparison>] CommonTableExprs =
     { Recursive : bool
-      Exprs : Map<TableName, SelectExpr>
-    }
+      Exprs : (TableName * CommonTableExpr)[]
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            assert (not (Array.isEmpty this.Exprs))
+            let oneExpr (name : TableName, cte : CommonTableExpr) =
+                let nameStr =
+                    match cte.Fields with
+                    | None ->
+                        name.ToSQLString()
+                    | Some args ->
+                        assert (not (Array.isEmpty args))
+                        let argsStr = args |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                        sprintf "%s(%s)" (name.ToSQLString()) argsStr
+                let materialized =
+                    match cte.Materialized with
+                    | None -> ""
+                    | Some false -> "NOT MATERIALIZED"
+                    | Some true -> "MATERIALIZED"
+                let exprStr = sprintf "(%s)" (cte.Expr.ToSQLString())
+                String.concatWithWhitespaces [nameStr; "AS"; materialized; exprStr]
+            let exprs =
+                this.Exprs
+                |> Seq.map oneExpr
+                |> String.concat ", "
+            let recursive = if this.Recursive then "RECURSIVE" else ""
+            String.concatWithWhitespaces ["WITH"; recursive; exprs]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] SelectExpr =
     { CTEs : CommonTableExprs option
       Tree : SelectTreeExpr
-    }
-    with
+    } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
             let ctesStr =
                 match this.CTEs with
                 | None -> ""
-                | Some ctes ->
-                    assert (not (Map.isEmpty ctes.Exprs))
-                    let exprs =
-                        ctes.Exprs
-                        |> Map.toSeq
-                        |> Seq.map (fun (name, expr) -> sprintf "%s AS (%s)" (name.ToSQLString()) (expr.ToSQLString()))
-                        |> String.concat ", "
-                    let recursive = if ctes.Recursive then "RECURSIVE" else ""
-                    String.concatWithWhitespaces ["WITH"; recursive; exprs]
+                | Some ctes -> ctes.ToSQLString()
             String.concatWithWhitespaces [ctesStr; this.Tree.ToSQLString()]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] SetOperationExpr =
+    { Operation : SetOperation
+      AllowDuplicates : bool
+      A : SelectExpr
+      B : SelectExpr
+      OrderLimit : OrderLimitClause
+    } with
+        member this.ToSQLString () =
+            let allowDuplicatesStr = if this.AllowDuplicates then "ALL" else ""
+            let aStr = sprintf "(%s)" (this.A.ToSQLString())
+            let bStr = sprintf "(%s)" (this.B.ToSQLString())
+            String.concatWithWhitespaces [aStr; this.Operation.ToSQLString(); allowDuplicatesStr; bStr; this.OrderLimit.ToSQLString()]
+
+        override this.ToString () = this.ToSQLString()
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

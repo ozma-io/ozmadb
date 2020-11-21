@@ -17,7 +17,7 @@ let private deferrableConstraint =
 type private MetaBuilder (layout : Layout) =
     let rec compileComputedExpr (entity : ResolvedEntity) : ResolvedFieldExpr -> SQL.ValueExpr =
         let makeFullName (ctx : ReferenceContext) : LinkedBoundFieldRef -> SQL.ValueExpr = function
-            | { ref = VRColumn { ref = { entity = None; name = name }}; path = [||] } -> compileComputedName entity ctx name
+            | { Ref = VRColumn { Ref = { entity = None; name = name }}; Path = [||] } -> compileComputedName entity ctx name
             | c -> failwith <| sprintf "Unexpected reference in computed field expression: %O" c
         let voidQuery _ = failwith <| sprintf "Unexpected query in computed field expression"
         genericCompileFieldExpr layout makeFullName voidQuery

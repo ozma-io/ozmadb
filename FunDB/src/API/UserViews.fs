@@ -20,33 +20,41 @@ type UserViewsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<UserViewsAPI>()
 
-    let resolveSource (source : UserViewSource) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
+    let resolveSource (source : UserViewSource) (flags : UserViewFlags) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
         task {
             match source with
             | UVAnonymous query ->
                 try
-                    let! anon = ctx.GetAnonymousView query
+                    let! anon =
+                        if flags.ForceRecompile then
+                            ctx.ResolveAnonymousView None query
+                        else
+                            ctx.GetAnonymousView query
                     return Ok anon
                 with
                 | :? UserViewResolveException as err ->
                     logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
                     return Error <| UVEResolution (exceptionString err)
             | UVNamed ref ->
-                let recompileView query = task {
-                    try
-                        let! anon = ctx.ResolveAnonymousView (Some ref.schema) query
-                        return Ok anon
-                    with
-                    | :? UserViewResolveException as err ->
-                        logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
-                        return Error <| UVEResolution (exceptionString err)
-                }
-                match ctx.UserViews.Find ref with
-                | None -> return Error UVENotFound
-                | Some (Error e) ->
-                    logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
-                    return Error <| UVEResolution (exceptionString e)
-                | Some (Ok cached) -> return Ok cached
+                if flags.ForceRecompile then
+                    let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.schema && uv.Name = string ref.name).FirstOrDefaultAsync(ctx.CancellationToken)
+                    if isNull uv then
+                        return Error UVENotFound
+                    else
+                        try
+                            let! anon = ctx.ResolveAnonymousView (Some ref.schema) uv.Query
+                            return Ok anon
+                        with
+                        | :? UserViewResolveException as err ->
+                            logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
+                            return Error <| UVEResolution (exceptionString err)
+                else
+                    match ctx.UserViews.Find ref with
+                    | None -> return Error UVENotFound
+                    | Some (Error e) ->
+                        logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
+                        return Error <| UVEResolution (exceptionString e)
+                    | Some (Ok cached) -> return Ok cached
         }
 
     let convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValues, string> =
@@ -62,9 +70,9 @@ type UserViewsAPI (rctx : IRequestContext) =
             | PGlobal gname -> Ok (Some (name, Map.find gname rctx.GlobalArguments))
         compiled.Query.Arguments.Types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
 
-    member this.GetUserViewInfo (source : UserViewSource) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
+    member this.GetUserViewInfo (source : UserViewSource) (flags : UserViewFlags) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
         task {
-            match! resolveSource source with
+            match! resolveSource source flags with
             | Error e -> return Error e
             | Ok uv ->
                 try
@@ -86,9 +94,9 @@ type UserViewsAPI (rctx : IRequestContext) =
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
+    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
         task {
-            match! resolveSource source with
+            match! resolveSource source flags with
             | Error e -> return Error e
             | Ok uv ->
                 try
@@ -125,5 +133,5 @@ type UserViewsAPI (rctx : IRequestContext) =
         }
 
     interface IUserViewsAPI with
-        member this.GetUserViewInfo source = this.GetUserViewInfo source
-        member this.GetUserView source rawArguments = this.GetUserView source rawArguments
+        member this.GetUserViewInfo source flags = this.GetUserViewInfo source flags
+        member this.GetUserView source rawArguments flags = this.GetUserView source rawArguments flags

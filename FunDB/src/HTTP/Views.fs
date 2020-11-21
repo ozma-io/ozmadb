@@ -22,19 +22,32 @@ let private error e =
         | UVEExecution _ -> RequestErrors.unprocessableEntity
     handler (json e)
 
+let private getFlags (ctx : HttpContext) : UserViewFlags =
+    { ForceRecompile =
+#if DEBUG
+        ctx.Request.Query.ContainsKey("__force_recompile")
+#else
+        false
+#endif
+    }
+
 let viewsApi : HttpHandler =
     let selectFromView (viewRef : UserViewSource) (api : IFunDBAPI) =
-        queryArgs <| fun rawArgs next ctx -> task {
-            match! api.UserViews.GetUserView viewRef rawArgs with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Result.Error err -> return! error err next ctx
-        }
+        queryArgs <| fun rawArgs next ctx ->
+            task {
+                let flags = getFlags ctx
+                match! api.UserViews.GetUserView viewRef rawArgs flags with
+                | Ok res -> return! Successful.ok (json res) next ctx
+                | Result.Error err -> return! error err next ctx
+            }
 
-    let infoView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult = task {
-        match! api.UserViews.GetUserViewInfo viewRef with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Result.Error err -> return! error err next ctx
-    }
+    let infoView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+        task {
+            let flags = getFlags ctx
+            match! api.UserViews.GetUserViewInfo viewRef flags with
+                | Ok res -> return! Successful.ok (json res) next ctx
+                | Result.Error err -> return! error err next ctx
+        }
 
     let viewApi (viewRef : UserViewSource) =
         choose

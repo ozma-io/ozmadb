@@ -31,11 +31,11 @@ type [<NoEquality; NoComparison>] ExecutedEntityId =
 
 type [<NoEquality; NoComparison>] ExecutedRow =
     { Values : ExecutedValue array
-      DomainId : GlobalDomainId
+      DomainId : GlobalDomainId option
       [<DataMember(EmitDefaultValue = false)>]
       Attributes : ExecutedAttributeMap
       [<DataMember(EmitDefaultValue = false)>]
-      EntityIds : Map<EntityName, ExecutedEntityId>
+      EntityIds : Map<DomainIdColumn, ExecutedEntityId>
       MainId : int option
       MainSubEntity : ResolvedEntityRef option
     }
@@ -99,7 +99,7 @@ let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult
       ColumnAttributes = colAttributes
     }
 
-let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
+let private parseResult (mainEntity : ResolvedEntityRef option) (idColumnEntities : IdColumns) (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
     let takeRowAttribute i colType (_, valType) =
         match colType with
         | CTMeta (CMRowAttribute name) -> Some (name, (valType, i))
@@ -207,19 +207,21 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         let domainIds = Map.mapMaybe (fun ns i -> getDomainId i) domainColumns
 
         let rec getGlobalDomainId = function
-            | DSingle (id, info) -> (id, info)
+            | DSingle (id, info) -> Some id
             | DMulti (ns, subdoms) ->
-                let localId = Map.findOrFailWith (fun () -> sprintf "No domain namespace value: %i" ns) ns domainIds
-                let doms = Map.findOrFailWith (fun () -> sprintf "Unknown local domain id for namespace %i: %i" ns localId) localId subdoms
-                getGlobalDomainId doms
+                match Map.tryFind ns domainIds with
+                | None -> None
+                | Some localId ->
+                    let doms = Map.findOrFailWith (fun () -> sprintf "Unknown local domain id for namespace %i: %i" ns localId) localId subdoms
+                    getGlobalDomainId doms
 
-        let (domainId, domainInfo) = getGlobalDomainId domains
+        let domainId = getGlobalDomainId domains
 
         let getSubEntity name i =
             match values.[i] with
                 | SQL.VString subEntityString ->
-                    let field = Map.find name domainInfo
-                    Some <| parseTypeName field.Ref.entity subEntityString
+                    let entity = Map.find name idColumnEntities
+                    Some <| parseTypeName entity subEntityString
                 | SQL.VNull -> None
                 | _ -> failwith "Entity subtype is not a string"
 
@@ -286,7 +288,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | Some (attrTypes, attrs) -> attrs
 
         return! connection.ExecuteQuery (viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
-            let (info, rows) = parseResult viewExpr.MainEntity viewExpr.Domains viewExpr.Columns rawResult
+            let (info, rows) = parseResult viewExpr.MainEntity viewExpr.IdColumns viewExpr.Domains viewExpr.Columns rawResult
 
             let mergedInfo =
                 { info with

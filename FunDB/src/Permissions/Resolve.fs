@@ -118,14 +118,14 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let mutable globalArguments = Set.empty
 
         let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
-            | { ref = VRColumn { entity = None; name = name }; path = path } ->
+            | { Ref = VRColumn { entity = None; name = name }; Path = path } ->
                 checkPath allowIds entity name (Array.toList path)
                 let fieldRef = { entity = entityRef; name = name }
                 let bound = { Ref = fieldRef; Immediate = true }
-                { ref = VRColumn { ref = { entity = Some relaxedRef; name = name }; bound = Some bound }; path = path }
-            | { ref = VRPlaceholder (PLocal name) } ->
+                { Ref = VRColumn { Ref = { entity = Some relaxedRef; name = name }; Bound = Some bound }; Path = path }
+            | { Ref = VRPlaceholder (PLocal name) } ->
                 raisef ResolvePermissionsException "Local argument %O is not allowed" name
-            | { ref = VRPlaceholder (PGlobal name as arg); path = path } ->
+            | { Ref = VRPlaceholder (PGlobal name as arg); Path = path } ->
                 let argInfo =
                     match Map.tryFind name globalArgumentTypes with
                     | None -> raisef ResolvePermissionsException "Unknown global argument: %O" ref
@@ -141,7 +141,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                         checkPath allowIds argEntity name remainingPath
                     | _ -> raisef ResolvePermissionsException "Argument is not a reference: %O" ref
                 globalArguments <- Set.add name globalArguments
-                { ref = VRPlaceholder arg; path = path }
+                { Ref = VRPlaceholder arg; Path = path }
             | ref ->
                 raisef ResolvePermissionsException "Invalid reference: %O" ref
         let resolveQuery query =
@@ -157,7 +157,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
 
         let mapper =
             { idFieldExprMapper resolveReference resolveQuery with
-                  aggregate = voidAggr
+                  Aggregate = voidAggr
             }
         let expr = mapFieldExpr mapper whereExpr |> optimizeFieldExpr
         { Expression = expr
@@ -165,7 +165,6 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         }
 
     let resolveAllowedField (fieldRef : ResolvedFieldRef) (entity : ResolvedEntity) (allowedField : SourceAllowedField) : AllowedField =
-
         let field =
             match Map.tryFind fieldRef.name entity.columnFields with
             | None -> raisef ResolvePermissionsException "Unknown field"

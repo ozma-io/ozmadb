@@ -15,10 +15,10 @@ let private renameRestriction (boundRef : ResolvedEntityRef) (entityRef : Resolv
         { bound with Ref = { entity = boundRef; name = bound.Ref.name } }
     let resetReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
         let link =
-            match ref.ref with
-            | VRColumn c -> VRColumn { bound = Option.map renameBound c.bound; ref = ({ entity = Some { schema = None; name = entityRef.name }; name = c.ref.name } : FieldRef) }
+            match ref.Ref with
+            | VRColumn c -> VRColumn { Bound = Option.map renameBound c.Bound; Ref = ({ entity = Some { schema = None; name = entityRef.name }; name = c.Ref.name } : FieldRef) }
             | VRPlaceholder p -> VRPlaceholder p
-        { ref = link; path = ref.path }
+        { Ref = link; Path = ref.Path }
     let mapper = idFieldExprMapper resetReference id
     mapOptimizedFieldExpr mapper restr
 
@@ -50,10 +50,10 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
                 let expr = renameRestriction currRef entityRef restrs.Expression
                 let fieldRef = { entity = entityRef; name = funSubEntity }
                 let bound = { Ref = fieldRef; Immediate = true }
-                let boundFieldRef = { ref = VRColumn { ref = relaxFieldRef fieldRef; bound = Some bound }; path = [||] }
+                let boundFieldRef = { Ref = VRColumn { Ref = relaxFieldRef fieldRef; Bound = Some bound }; Path = [||] }
                 let subEntityRef =
-                    { ref = relaxEntityRef currRef
-                      extra =
+                    { Ref = relaxEntityRef currRef
+                      Extra =
                         { AlwaysTrue = false
                         }
                     }

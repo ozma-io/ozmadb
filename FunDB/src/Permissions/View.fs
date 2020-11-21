@@ -82,16 +82,25 @@ let private (|SubEntitySelect|_|) (expr : SingleSelectExpr) : FunQL.ResolvedEnti
 type private PermissionsApplier (access : SchemaAccess) =
     let rec applyToSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
         | SSelect query -> SSelect <| applyToSingleSelectExpr query
-        | SSetOp (op, a, b, limits) ->
-            let a' = applyToSelectTreeExpr a
-            let b' = applyToSelectTreeExpr b
-            let limits' = applyToOrderLimitClause limits
-            SSetOp (op, a', b', limits')
+        | SSetOp setOp ->
+            SSetOp
+                { Operation = setOp.Operation
+                  AllowDuplicates = setOp.AllowDuplicates
+                  A = applyToSelectExpr setOp.A
+                  B = applyToSelectExpr setOp.B
+                  OrderLimit = applyToOrderLimitClause setOp.OrderLimit
+                }
         | SValues values -> SValues values
 
-    and applyToCommonTableExprs (cte : CommonTableExprs) =
-        { Recursive = cte.Recursive
-          Exprs = Map.map (fun name -> applyToSelectExpr) cte.Exprs
+    and applyToCommonTableExpr (cte : CommonTableExpr) =
+        { Fields = cte.Fields
+          Materialized = cte.Materialized
+          Expr = applyToSelectExpr cte.Expr
+        }
+
+    and applyToCommonTableExprs (ctes : CommonTableExprs) =
+        { Recursive = ctes.Recursive
+          Exprs = Array.map (fun (name, expr) -> (name, applyToCommonTableExpr expr)) ctes.Exprs
         }
 
     and applyToSelectExpr (select : SelectExpr) : SelectExpr =
@@ -137,18 +146,20 @@ type private PermissionsApplier (access : SchemaAccess) =
             let accessSchema = Map.find entityRef.schema access
             let accessEntity = Map.find entityRef.name accessSchema
             match accessEntity with
-            | None -> FTable (extra, pun, entity)
+            | None -> FTable (null, pun, entity)
             | Some restr ->
-                let name = Option.defaultValue entity.name pun
+                let alias = Option.defaultWith (fun () -> { Name = entity.name; Columns = None }) pun
                 let select = { CTEs = None; Tree = SSelect restr }
-                FSubExpr (name, None, select)
-        | FJoin (jt, e1, e2, where) ->
-            let e1' = applyToFromExpr e1
-            let e2' = applyToFromExpr e2
-            let where' = applyToValueExpr where
-            FJoin (jt, e1', e2', where')
-        | FSubExpr (name, cols, q) ->
-            FSubExpr (name, cols, applyToSelectExpr q)
+                FSubExpr (alias, select)
+        | FJoin join ->
+            FJoin
+                { Type = join.Type
+                  A = applyToFromExpr join.A
+                  B = applyToFromExpr join.B
+                  Condition = applyToValueExpr join.Condition
+                }
+        | FSubExpr (alias, q) ->
+            FSubExpr (alias, applyToSelectExpr q)
 
     member this.ApplyToSelectExpr = applyToSelectExpr
 
