@@ -207,7 +207,7 @@ export interface IEntityId {
 
 export interface IExecutedRow {
   values: IExecutedValue[];
-  domainId: DomainId;
+  domainId: DomainId | null;
   attributes?: AttributesMap;
   entityIds?: Record<ColumnName, IEntityId>;
   mainId?: RowId;
