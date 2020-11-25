@@ -7,7 +7,7 @@
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
   </PropertyGroup>
 
-  <ItemGroup>    
+  <ItemGroup>
     <Compile Include="src/Task.fs" />
     <Compile Include="src/Option.fs" />
     <Compile Include="src/Result.fs" />

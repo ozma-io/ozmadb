@@ -1008,9 +1008,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             } : SQL.SetOperationExpr
                         // We don't use domains when `MetaColumns = false`, so we return a random value (`doms1` in this case).
                         (newSig, doms1, SQL.SSetOp ret)
-                        
+
                 and compileExpr = compileInsideSelectExpr flags compileTreeExpr
-                
+
                 compileExpr cteBindings expr
 
         let ret = setSelectColumns signature ret

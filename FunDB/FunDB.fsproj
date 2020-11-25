@@ -13,7 +13,7 @@
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
   </PropertyGroup>
 
-  <ItemGroup>    
+  <ItemGroup>
     <Compile Include="src/Parsing.fs" />
     <Compile Include="src/Schema.fs" />
 
@@ -68,7 +68,7 @@
     <Compile Include="src/Layout/System.fs" />
     <Compile Include="src/Layout/Meta.fs" />
     <Compile Include="src/Layout/Integrity.fs" />
-  
+
     <Compile Include="src/Attributes/Resolve.fs" />
     <Compile Include="src/Attributes/Schema.fs" />
     <Compile Include="src/Attributes/Update.fs" />
@@ -138,7 +138,7 @@
     <Compile Include="src/HTTP/Entities.fs" />
     <Compile Include="src/HTTP/Actions.fs" />
     <Compile Include="src/HTTP/SaveRestore.fs" />
-    
+
     <Compile Include="src/Program.fs" />
   </ItemGroup>
 

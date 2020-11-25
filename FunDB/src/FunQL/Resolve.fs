@@ -586,7 +586,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         let mutable resultsMap : Map<EntityName, QSubqueryFieldsMap * ResolvedCommonTableExpr> = Map.empty
         let mutable resolved : (EntityName * ResolvedCommonTableExpr) list = []
         let resolveOne (name : EntityName, cte : ParsedCommonTableExpr) =
-            if not (Map.containsKey name resultsMap) then            
+            if not (Map.containsKey name resultsMap) then
                 let mutable processing = Set.singleton name
 
                 let rec tmpResolveCte (currName : EntityName) =
@@ -734,7 +734,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
 
             let realFields = mapAllFields makeBoundField entity
             let fields = Map.add funMain (QRename entity.MainField) realFields
-            
+
             let newName = Option.defaultValue name pun
             (Map.singleton (Some newName) (Some resRef.schema, fields), FEntity (pun, ref))
         | FEntity (pun, ({ schema = None; name = name } as ref)) ->

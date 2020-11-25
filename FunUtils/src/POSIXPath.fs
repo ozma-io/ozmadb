@@ -58,8 +58,8 @@ let private replaceForwardBacksReplace (m : Match) =
 let normalize (path : Path) : Path =
     path
         |> shortenReplaceContinuously' removeDotsRegex removeDotsReplace
-        |> shortenReplaceContinuously removeRepeatingSlashesRegex removeRepeatingSlashesReplace 
-        |> shortenReplaceContinuously' removeForwardBacksRegex replaceForwardBacksReplace 
+        |> shortenReplaceContinuously removeRepeatingSlashesRegex removeRepeatingSlashesReplace
+        |> shortenReplaceContinuously' removeForwardBacksRegex replaceForwardBacksReplace
 
 let private startingBacksRegex = Regex(@"^/\.\./")
 let goesBack (path : Path) =
