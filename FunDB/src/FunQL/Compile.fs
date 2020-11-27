@@ -600,7 +600,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     | None ->
                         match metaSQLType metaCol with
                         | Some typ -> SQL.VECast (SQL.VEValue SQL.VNull, SQL.VTScalar (typ.ToSQLRawString()))
-                        | None -> failwithf "Failed to add type to meta column %O" metaCol
+                        // | None -> failwithf "Failed to add type to meta column %O" metaCol
+                        // FIXME: this needs typechecking support, but we don't have it and we already have user views in production which use this.
+                        // Somehow they work, so we just pray here.
+                        | None ->
+                            eprintfn "Failed to add type to meta column %O" metaCol
+                            SQL.VEValue SQL.VNull
                 yield SQL.SCExpr (name, expr)
             for colSig, col in Seq.zip sign.Columns half.Columns do
                 for metaCol in colSig.Meta do
@@ -612,7 +617,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         match Map.tryFind metaCol col.Meta with
                         | Some e -> e
                         | None when skipNames -> SQL.VEValue SQL.VNull
-                        | None -> failwithf "Failed to add type to meta column %O for column %O" metaCol col
+                        // | None -> failwithf "Failed to add type to meta column %O for column %O" metaCol col
+                        | None ->
+                            eprintfn "Failed to add type to meta column %O" metaCol
+                            SQL.VEValue SQL.VNull
                     yield SQL.SCExpr (name, expr)
                 let name =
                     match col.Name with
@@ -1350,8 +1358,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let (newPaths, ret) = compileOrderLimitClause cteBindings paths select.OrderLimit
             paths <- newPaths
             ret
-
-        eprintfn "Id columns: %O" idCols
 
         // At this point we need to ensure there are no lazy sequences left that could mutate paths when computed ;)
         let newFrom =
