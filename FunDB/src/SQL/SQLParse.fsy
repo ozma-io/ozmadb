@@ -36,13 +36,19 @@ open FunWithFlags.FunDB.SQL.AST
 %token MINUS
 %token MULTIPLY
 %token DIVIDE
+%token MATCH_REGEX
+%token MATCH_REGEX_CI
+%token NOT_MATCH_REGEX
+%token NOT_MATCH_REGEX_CI
 
 // Keywords
 %token AND
 %token OR
 %token LIKE
+%token SIMILAR
 %token IN
 %token IS
+%token TO
 %token NOT
 %token CASE
 %token WHEN
@@ -105,6 +111,12 @@ ValueExprLess:
     | ValueExprIs NOT LIKE ValueExprIs           { VENotLike ($1, $4) }
     | ValueExprIs LIKE_OP ValueExprIs            { VELike ($1, $3) }
     | ValueExprIs NOT_LIKE_OP ValueExprIs        { VENotLike ($1, $3) }
+    | ValueExprIs SIMILAR TO ValueExprIs         { VESimilarTo ($1, $4) }
+    | ValueExprIs NOT SIMILAR TO ValueExprIs     { VENotSimilarTo ($1, $5) }
+    | ValueExprIs MATCH_REGEX ValueExprIs        { VEMatchRegex ($1, $3) }
+    | ValueExprIs MATCH_REGEX_CI ValueExprIs     { VEMatchRegexCI ($1, $3) }
+    | ValueExprIs NOT_MATCH_REGEX ValueExprIs    { VENotMatchRegex ($1, $3) }
+    | ValueExprIs NOT_MATCH_REGEX_CI ValueExprIs { VENotMatchRegexCI ($1, $3) }
     | ValueExprIs IN ParenedNonEmptyExprList     { VEIn ($1, $3) }
     | ValueExprIs NOT IN ParenedNonEmptyExprList { VENotIn ($1, $4) }
     | ValueExprIs                                { $1 }

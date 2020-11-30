@@ -94,6 +94,10 @@ and tokenizeFunQL = parse
     | "@"   { Parse.AT }
     | "=>"  { Parse.BOLD_ARROW }
     | "||"  { Parse.CONCAT }
+    | "~"   { Parse.MATCH_REGEX }
+    | "~*"  { Parse.MATCH_REGEX_CI }
+    | "!~"  { Parse.NOT_MATCH_REGEX }
+    | "!~*" { Parse.NOT_MATCH_REGEX_CI }
     | "~~"  { Parse.LIKE_OP }
     | "!~~" { Parse.NOT_LIKE_OP }
     | "->"  { Parse.ARROW }
@@ -125,8 +129,10 @@ and tokenizeFunQL = parse
     | a n d             { Parse.AND }
     | o r               { Parse.OR }
     | l i k e           { Parse.LIKE }
+    | s i m i l a r     { Parse.SIMILAR }
     | i n               { Parse.IN }
     | i s               { Parse.IS }
+    | t o               { Parse.TO }
     | n o t             { Parse.NOT }
     | f o r             { Parse.FOR }
     | i n s e r t       { Parse.INSERT }

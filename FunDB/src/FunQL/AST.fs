@@ -427,6 +427,12 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
     | FENotEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FELike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FENotLike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FESimilarTo of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FENotSimilarTo of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEMatchRegex of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEMatchRegexCI of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FENotMatchRegex of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FENotMatchRegexCI of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FELess of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FELessEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEGreater of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
@@ -470,6 +476,12 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
             | FENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FENotLike (e, pat) -> sprintf "(%s) NOT LIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
+            | FESimilarTo (e, pat) -> sprintf "(%s) SIMILAR TO (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
+            | FENotSimilarTo (e, pat) -> sprintf "(%s) NOT SIMILAR TO (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
+            | FEMatchRegex (e, pat) -> sprintf "(%s) ~ (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
+            | FEMatchRegexCI (e, pat) -> sprintf "(%s) ~* (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
+            | FENotMatchRegex (e, pat) -> sprintf "(%s) !~ (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
+            | FENotMatchRegexCI (e, pat) -> sprintf "(%s) !~* (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FELess (a, b) -> sprintf "(%s) < (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FELessEq (a, b) -> sprintf "(%s) <= (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEGreater (a, b) -> sprintf "(%s) > (%s)" (a.ToFunQLString()) (b.ToFunQLString())
@@ -817,6 +829,12 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
         | FENotEq (a, b) -> FENotEq (traverse a, traverse b)
         | FELike (e, pat) -> FELike (traverse e, traverse pat)
         | FENotLike (e, pat) -> FENotLike (traverse e, traverse pat)
+        | FESimilarTo (e, pat) -> FESimilarTo (traverse e, traverse pat)
+        | FENotSimilarTo (e, pat) -> FENotSimilarTo (traverse e, traverse pat)
+        | FEMatchRegex (e, pat) -> FEMatchRegex (traverse e, traverse pat)
+        | FEMatchRegexCI (e, pat) -> FEMatchRegexCI (traverse e, traverse pat)
+        | FENotMatchRegex (e, pat) -> FENotMatchRegex (traverse e, traverse pat)
+        | FENotMatchRegexCI (e, pat) -> FENotMatchRegexCI (traverse e, traverse pat)
         | FELess (a, b) -> FELess (traverse a, traverse b)
         | FELessEq (a, b) -> FELessEq (traverse a, traverse b)
         | FEGreater (a, b) -> FEGreater (traverse a, traverse b)
@@ -884,6 +902,12 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
         | FENotEq (a, b) -> Task.map2 (curry FENotEq) (traverse a) (traverse b)
         | FELike (e, pat) -> Task.map2 (curry FELike) (traverse e) (traverse pat)
         | FENotLike (e, pat) -> Task.map2 (curry FENotLike) (traverse e) (traverse pat)
+        | FESimilarTo (e, pat) -> Task.map2 (curry FESimilarTo) (traverse e) (traverse pat)
+        | FENotSimilarTo (e, pat) -> Task.map2 (curry FENotSimilarTo) (traverse e) (traverse pat)
+        | FEMatchRegex (e, pat) -> Task.map2 (curry FEMatchRegex) (traverse e) (traverse pat)
+        | FEMatchRegexCI (e, pat) -> Task.map2 (curry FEMatchRegexCI) (traverse e) (traverse pat)
+        | FENotMatchRegex (e, pat) -> Task.map2 (curry FENotMatchRegex) (traverse e) (traverse pat)
+        | FENotMatchRegexCI (e, pat) -> Task.map2 (curry FENotMatchRegexCI) (traverse e) (traverse pat)
         | FELess (a, b) -> Task.map2 (curry FELess) (traverse a) (traverse b)
         | FELessEq (a, b) -> Task.map2 (curry FELessEq) (traverse a) (traverse b)
         | FEGreater (a, b) -> Task.map2 (curry FEGreater) (traverse a) (traverse b)
@@ -967,6 +991,12 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FENotEq (a, b) -> traverse a; traverse b
         | FELike (e, pat) -> traverse e; traverse pat
         | FENotLike (e, pat) -> traverse e; traverse pat
+        | FESimilarTo (e, pat) -> traverse e; traverse pat
+        | FENotSimilarTo (e, pat) -> traverse e; traverse pat
+        | FEMatchRegex (e, pat) -> traverse e; traverse pat
+        | FEMatchRegexCI (e, pat) -> traverse e; traverse pat
+        | FENotMatchRegex (e, pat) -> traverse e; traverse pat
+        | FENotMatchRegexCI (e, pat) -> traverse e; traverse pat
         | FELess (a, b) -> traverse a; traverse b
         | FELessEq (a, b) -> traverse a; traverse b
         | FEGreater (a, b) -> traverse a; traverse b

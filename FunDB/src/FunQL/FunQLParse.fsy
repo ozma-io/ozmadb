@@ -201,6 +201,10 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token MULTIPLY
 %token DIVIDE
 %token AMPERSAND
+%token MATCH_REGEX
+%token MATCH_REGEX_CI
+%token NOT_MATCH_REGEX
+%token NOT_MATCH_REGEX_CI
 
 // Keywords
 %token SELECT
@@ -220,8 +224,10 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token AND
 %token OR
 %token LIKE
+%token SIMILAR
 %token IN
 %token IS
+%token TO
 %token NOT
 %token FOR
 %token INSERT
@@ -573,6 +579,12 @@ FieldExprEq:
     | FieldExprOp NOT LIKE FieldExprOp             { FENotLike ($1, $4) }
     | FieldExprOp LIKE_OP FieldExprOp              { FELike ($1, $3) }
     | FieldExprOp NOT_LIKE_OP FieldExprOp          { FENotLike ($1, $3) }
+    | FieldExprOp SIMILAR TO FieldExprOp           { FESimilarTo ($1, $4) }
+    | FieldExprOp NOT SIMILAR TO FieldExprOp       { FENotSimilarTo ($1, $5) }
+    | FieldExprOp MATCH_REGEX FieldExprOp          { FEMatchRegex ($1, $3) }
+    | FieldExprOp MATCH_REGEX_CI FieldExprOp       { FEMatchRegexCI ($1, $3) }
+    | FieldExprOp NOT_MATCH_REGEX FieldExprOp      { FENotMatchRegex ($1, $3) }
+    | FieldExprOp NOT_MATCH_REGEX_CI FieldExprOp   { FENotMatchRegexCI ($1, $3) }
     | FieldExprOp IN FieldInSource                 { inExpr FEIn FEInQuery $1 $3 }
     | FieldExprOp NOT IN FieldInSource             { inExpr FENotIn FENotInQuery $1 $4 }
     | FieldExprOp                                  { $1 }
