@@ -11,7 +11,7 @@ FROM
 SELECT
   @type = 'menu',
   schemas.name AS category_name,
-  entities.name AS name @{ linked_view = { schema: 'funapp', name: 'table-' || schemas.name || '-' || entities.name } }
+  entities.name AS name @{ link = { schema: 'funapp', name: 'table-' || schemas.name || '-' || entities.name } }
 FROM
   public.entities
   LEFT JOIN public.schemas ON schemas.id = entities.schema_id
@@ -71,8 +71,8 @@ ${entity.isAbstract ? "" : `FOR INSERT INTO ${sqlName}`}`;
             const tableQuery = `
 SELECT
   @type = 'table',
-  @create_view = &"${formName}",
-  id @{ row_linked_view = &"${formName}" },
+  @create_link = &"${formName}",
+  id @{ row_link = &"${formName}" },
   ${fields.join(",\n  ")}
 FROM ${sqlName}
 ORDER BY id
