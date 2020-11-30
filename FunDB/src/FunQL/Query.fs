@@ -99,7 +99,7 @@ let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult
       ColumnAttributes = colAttributes
     }
 
-let private parseResult (mainEntity : ResolvedEntityRef option) (idColumnEntities : IdColumns) (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
+let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
     let takeRowAttribute i colType (_, valType) =
         match colType with
         | CTMeta (CMRowAttribute name) -> Some (name, (valType, i))
@@ -207,7 +207,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (idColumnEntitie
         let domainIds = Map.mapMaybe (fun ns i -> getDomainId i) domainColumns
 
         let rec getGlobalDomainId = function
-            | DSingle (id, info) -> Some id
+            | DSingle (id, info) -> Some (id, info)
             | DMulti (ns, subdoms) ->
                 match Map.tryFind ns domainIds with
                 | None -> None
@@ -217,33 +217,35 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (idColumnEntitie
 
         let domainId = getGlobalDomainId domains
 
-        let getSubEntity name i =
+        let getSubEntity entity i =
             match values.[i] with
                 | SQL.VString subEntityString ->
-                    let entity = Map.find name idColumnEntities
                     Some <| parseTypeName entity subEntityString
                 | SQL.VNull -> None
                 | _ -> failwith "Entity subtype is not a string"
 
-        let getEntityId name i =
-            match getId i with
-            | None -> None
-            | Some id ->
-                let subEntity = Option.bind (getSubEntity name) (Map.tryFind name subEntityColumns)
-                Some
-                    { Id = id
-                      SubEntity = subEntity
-                    }
+        let getEntityId info =
+            let id = idColumns |> Map.find info.IdColumn |> getId |> Option.get
+            let subEntity = Option.bind (getSubEntity info.Ref.entity) (Map.tryFind info.IdColumn subEntityColumns)
+            let ret =
+                { Id = id
+                  SubEntity = subEntity
+                }
+            (info.IdColumn, ret)
+
+        let getEntityIds fields =
+            fields |> Map.values |> Seq.map getEntityId |> Map.ofSeq
+
+        let entityIds = Option.map (snd >> getEntityIds) domainId |> Option.defaultValue Map.empty
 
         let rowAttrs = Map.map (fun name (valType, i) -> values.[i]) rowAttributes
         let values = Array.map getCell columnsMeta
-        let entityIds = Map.mapMaybe getEntityId idColumns
         let mainId = Option.map getMainId mainIdColumn
         let mainSubEntity = Option.map getMainSubEntity mainSubEntityColumn
 
         { Attributes = rowAttrs
           Values = values
-          DomainId = domainId
+          DomainId = Option.map fst domainId
           EntityIds = entityIds
           MainId = mainId
           MainSubEntity = mainSubEntity
@@ -288,7 +290,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | Some (attrTypes, attrs) -> attrs
 
         return! connection.ExecuteQuery (viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
-            let (info, rows) = parseResult viewExpr.MainEntity viewExpr.IdColumns viewExpr.Domains viewExpr.Columns rawResult
+            let (info, rows) = parseResult viewExpr.MainEntity viewExpr.Domains viewExpr.Columns rawResult
 
             let mergedInfo =
                 { info with

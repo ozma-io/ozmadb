@@ -251,8 +251,6 @@ type CompiledAttributesExpr =
       PureColumnAttributes : Map<FieldName, Set<AttributeName>>
     }
 
-type IdColumns =  Map<DomainIdColumn, ResolvedEntityRef>
-
 [<NoEquality; NoComparison>]
 type CompiledViewExpr =
     { AttributesQuery : CompiledAttributesExpr option
@@ -261,7 +259,6 @@ type CompiledViewExpr =
       Domains : Domains
       MainEntity : ResolvedEntityRef option
       FlattenedDomains : FlattenedDomains
-      IdColumns : IdColumns
       UsedSchemas : UsedSchemas
     }
 
@@ -606,9 +603,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     | None ->
                         match metaSQLType metaCol with
                         | Some typ -> SQL.VECast (SQL.VEValue SQL.VNull, SQL.VTScalar (typ.ToSQLRawString()))
-                        // | None -> failwithf "Failed to add type to meta column %O" metaCol
-                        // FIXME: this needs typechecking support, but we don't have it and we already have user views in production which use this.
-                        // Somehow they work, so we just pray here.
+                        // This will break when current query is a recursive one, because PostgreSQL can't derive
+                        // type of column and assumes it as `text`.
                         | None ->
                             eprintfn "Failed to add type to meta column %O" metaCol
                             SQL.VEValue SQL.VNull
@@ -622,11 +618,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     let expr =
                         match Map.tryFind metaCol col.Meta with
                         | Some e -> e
-                        | None when skipNames -> SQL.VEValue SQL.VNull
-                        // | None -> failwithf "Failed to add type to meta column %O for column %O" metaCol col
-                        | None ->
-                            eprintfn "Failed to add type to meta column %O" metaCol
-                            SQL.VEValue SQL.VNull
+                        | None -> SQL.VEValue SQL.VNull
                     yield SQL.SCExpr (name, expr)
                 let name =
                     match col.Name with
@@ -724,12 +716,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let id = lastTempFieldId
         lastTempFieldId <- lastTempFieldId + 1
         TTemp id
-
-    let mutable lastIdColumnId = 1 // To avoid clash with idDefault.
-    let newIdColumn () =
-        let id = lastIdColumnId
-        lastIdColumnId <- lastIdColumnId + 1
-        id
 
     let subentityFromInfo (mainEntity : ResolvedEntityRef option) (selectSig : SelectInfo) : FromInfo =
         let (mainId, mainSubEntity) =
@@ -1115,6 +1101,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let addMetaColumns = flags.MetaColumns && not extra.HasAggregates
 
         let mutable idCols = Map.empty : Map<string, DomainIdColumn>
+        let mutable lastIdCol = 1
 
         let getResultEntry (i : int) (result : ResolvedQueryResult) : ResultColumn =
             let currentAttrs = Map.keysSet result.Attributes
@@ -1182,7 +1169,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let name = idKey entityName fieldName resultRef.Path
                         match Map.tryFind name idCols with
                         | None ->
-                            let idCol = newIdColumn ()
+                            let idCol = lastIdCol
+                            lastIdCol <- lastIdCol + 1
                             let makeSubEntityColumn expr = (CMSubEntity idCol, expr)
 
                             let column = (CMId idCol, idExpr)
@@ -1691,7 +1679,6 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
 
     let domains = mapDomainsFields getFinalName info.Domains
     let flattenedDomains = flattenDomains domains
-    let idColumns = Map.values flattenedDomains |> Seq.collect (Map.values) |> Seq.map (fun dom -> (dom.IdColumn, dom.Ref.entity)) |> Map.ofSeq
 
     { AttributesQuery = attrQuery
       Query = { Expression = newExpr; Arguments = compiler.Arguments }
@@ -1699,6 +1686,5 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
       Domains = domains
       FlattenedDomains = flattenedDomains
       UsedSchemas = compiler.UsedSchemas
-      IdColumns = idColumns
       MainEntity = mainEntityRef
     }
