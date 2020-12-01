@@ -605,9 +605,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         | Some typ -> SQL.VECast (SQL.VEValue SQL.VNull, SQL.VTScalar (typ.ToSQLRawString()))
                         // This will break when current query is a recursive one, because PostgreSQL can't derive
                         // type of column and assumes it as `text`.
-                        | None ->
-                            eprintfn "Failed to add type to meta column %O" metaCol
-                            SQL.VEValue SQL.VNull
+                        | None -> SQL.VEValue SQL.VNull
                 yield SQL.SCExpr (name, expr)
             for colSig, col in Seq.zip sign.Columns half.Columns do
                 for metaCol in colSig.Meta do
