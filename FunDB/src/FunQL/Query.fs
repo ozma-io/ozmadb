@@ -225,16 +225,20 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
                 | _ -> failwith "Entity subtype is not a string"
 
         let getEntityId info =
-            let id = idColumns |> Map.find info.IdColumn |> getId |> Option.get
-            let subEntity = Option.bind (getSubEntity info.Ref.entity) (Map.tryFind info.IdColumn subEntityColumns)
-            let ret =
-                { Id = id
-                  SubEntity = subEntity
-                }
-            (info.IdColumn, ret)
+            let mid = idColumns |> Map.find info.IdColumn |> getId
+            match mid with
+            // ID can be NULL, for example, in case of JOINs.
+            | None -> None
+            | Some id ->
+                let subEntity = Option.bind (getSubEntity info.Ref.entity) (Map.tryFind info.IdColumn subEntityColumns)
+                let ret =
+                    { Id = id
+                      SubEntity = subEntity
+                    }
+                Some (info.IdColumn, ret)
 
         let getEntityIds fields =
-            fields |> Map.values |> Seq.map getEntityId |> Map.ofSeq
+            fields |> Map.values |> Seq.mapMaybe getEntityId |> Map.ofSeq
 
         let entityIds = Option.map (snd >> getEntityIds) domainId |> Option.defaultValue Map.empty
 
