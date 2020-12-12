@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Npgsql.NameTranslation;
 
 namespace FunWithFlags.FunDBSchema.Instances
@@ -27,7 +28,9 @@ namespace FunWithFlags.FunDBSchema.Instances
                 table.SetTableName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(table.GetTableName()));
                 foreach (var property in table.GetProperties())
                 {
-                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName()));
+                    var storeObjectId =
+                        StoreObjectIdentifier.Create(property.DeclaringEntityType, StoreObjectType.Table)!.Value;
+                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName(storeObjectId)));
                 }
             }
         }

@@ -4,7 +4,7 @@ let
   env = pkgs.buildFHSUserEnv {
     name = "fundb";
     targetPkgs = pkgs: with pkgs; [
-      dotnet-sdk_3
+      dotnet-sdk_5
       zlib
       mono
       gcc
@@ -16,7 +16,7 @@ let
     ];
     extraOutputsToInstall = [ "dev" ];
     profile = ''
-      export DOTNET_ROOT=${pkgs.dotnet-sdk_3}
+      export DOTNET_ROOT=${pkgs.dotnet-sdk_5}
     '';
     runScript = pkgs.writeScript "env-shell" ''
       #!${pkgs.stdenv.shell}

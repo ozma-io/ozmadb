@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Npgsql.NameTranslation;
 
 using FunWithFlags.FunDBSchema.Attributes;
@@ -132,7 +133,9 @@ namespace FunWithFlags.FunDBSchema.System
                 table.SetTableName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(table.GetTableName()));
                 foreach (var property in table.GetProperties())
                 {
-                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName()));
+                    var storeObjectId =
+                        StoreObjectIdentifier.Create(property.DeclaringEntityType, StoreObjectType.Table)!.Value;
+                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName(storeObjectId)));
                 }
             }
         }
@@ -140,6 +143,7 @@ namespace FunWithFlags.FunDBSchema.System
         public IQueryable<Schema> GetLayoutObjects()
         {
             return this.Schemas
+                .AsSplitQuery()
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.ColumnFields)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.ComputedFields)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.UniqueConstraints)
@@ -150,6 +154,7 @@ namespace FunWithFlags.FunDBSchema.System
         public IQueryable<Schema> GetRolesObjects()
         {
             return this.Schemas
+                .AsSplitQuery()
                 .Include(sch => sch.Roles).ThenInclude(role => role.Parents).ThenInclude(roleParent => roleParent.Parent).ThenInclude(role => role.Schema)
                 .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.Entity).ThenInclude(ent => ent.Schema)
                 .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.ColumnFields);
@@ -158,30 +163,35 @@ namespace FunWithFlags.FunDBSchema.System
         public IQueryable<Schema> GetAttributesObjects()
         {
             return this.Schemas
+                .AsSplitQuery()
                 .Include(sch => sch.FieldsAttributes).ThenInclude(attr => attr.FieldEntity).ThenInclude(ent => ent.Schema);
         }
 
         public IQueryable<Schema> GetModulesObjects()
         {
             return this.Schemas
+                .AsSingleQuery()
                 .Include(sch => sch.Modules);
         }
 
         public IQueryable<Schema> GetActionsObjects()
         {
             return this.Schemas
+                .AsSingleQuery()
                 .Include(sch => sch.Actions);
         }
 
         public IQueryable<Schema> GetTriggersObjects()
         {
             return this.Schemas
+                .AsSplitQuery()
                 .Include(sch => sch.Triggers).ThenInclude(attr => attr.TriggerEntity).ThenInclude(ent => ent.Schema);
         }
 
         public IQueryable<Schema> GetUserViewsObjects()
         {
             return this.Schemas
+                .AsSingleQuery()
                 .Include(sch => sch.UserViews);
         }
     }

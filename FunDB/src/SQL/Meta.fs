@@ -162,7 +162,7 @@ let private makeColumnMeta (attr : Attribute) : ColumnMeta =
             if attr.Type.TypType <> 'b' then
                 raisef SQLMetaException "Unsupported non-base type: %s" attr.Type.TypName
             parseUdtName attr.Type.TypName
-        let defaultExpr = attr.AttrDefs |> Seq.first |> Option.map (fun def -> parseLocalExpr def.Source)
+        let defaultExpr = attr.AttrDef |> Option.ofNull |> Option.map (fun def -> parseLocalExpr def.Source)
         { Name = SQLName attr.AttName
           ColumnType = columnType
           IsNullable = not attr.AttNotNull

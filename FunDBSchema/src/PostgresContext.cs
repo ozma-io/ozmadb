@@ -7,7 +7,6 @@ namespace FunWithFlags.FunDBSchema
 {
     public abstract class PostgresContext : DbContext
     {
-
         public PostgresContext()
             : base()
         {
@@ -35,12 +34,12 @@ namespace FunWithFlags.FunDBSchema
             var pgGetExprMethod = typeof(PostgresContext).GetRuntimeMethod(nameof(PgGetExpr), new[] { typeof(string), typeof(int) });
             modelBuilder
                 .HasDbFunction(pgGetExprMethod)
-                .HasTranslation(args => SqlFunctionExpression.Create("pg_get_expr", args, typeof(string), null));
+                .HasTranslation(args => new SqlFunctionExpression("pg_get_expr", args, false, new[] { true, true }, typeof(string), null));
 
             var pgGetTriggerDefMethod = typeof(PostgresContext).GetRuntimeMethod(nameof(PgGetTriggerDef), new[] { typeof(int) });
             modelBuilder
                 .HasDbFunction(pgGetTriggerDefMethod)
-                .HasTranslation(args => SqlFunctionExpression.Create("pg_get_triggerdef", args, typeof(string), null));
+                .HasTranslation(args => new SqlFunctionExpression("pg_get_triggerdef", args, false, new[] { true }, typeof(string), null));
         }
     }
 }

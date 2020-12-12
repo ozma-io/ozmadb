@@ -111,5 +111,5 @@ rule tokenizeSQL = parse
     | newline    { newline lexbuf; tokenizeSQL lexbuf }
 
     // Misc
-    | _    	  { failwith "Lexical error" }
-    | eof     { Parse.EOF }
+    | _   { failwith "Lexical error" }
+    | eof { Parse.EOF }

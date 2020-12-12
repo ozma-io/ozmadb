@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -16,6 +17,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public DbSet<Attribute> Attributes { get; set; } = null!;
         public DbSet<AttrDef> AttrDefs { get; set; } = null!;
         public DbSet<Constraint> Constraints { get; set; } = null!;
+        public DbSet<Trigger> Triggers { get; set; } = null!;
 
         public PgCatalogContext()
             : base()
@@ -36,10 +38,10 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
             modelBuilder.Entity<Attribute>()
                 .HasKey(attr => new { attr.AttRelId, attr.AttNum });
 
-            modelBuilder.Entity<AttrDef>()
-                .HasOne(def => def.Attribute)
-                .WithMany(attr => attr.AttrDefs)
-                .HasForeignKey(def => new { def.AdRelId, def.AdNum });
+            modelBuilder.Entity<Attribute>()
+                .HasOne(attr => attr.AttrDef)
+                .WithOne(def => def!.Attribute)
+                .HasForeignKey<AttrDef>(def => new { def.AdRelId, def.AdNum });
             // Not really a string, just a dummy type
             modelBuilder.Entity<AttrDef>()
                 .Property<string>("AdBin");
@@ -58,7 +60,9 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 table.SetTableName(tableName);
                 foreach (var property in table.GetProperties())
                 {
-                    property.SetColumnName(property.GetColumnName().ToLower());
+                    var storeObjectId =
+                        StoreObjectIdentifier.Create(property.DeclaringEntityType, StoreObjectType.Table)!.Value;
+                    property.SetColumnName(property.GetColumnName(storeObjectId).ToLower());
                 }
             }
         }
@@ -71,92 +75,99 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
             //
             // Makes EFCore get Foos two times! This leads to a cartesian explosion quickly.
             // Instead we avoid `Include` and manually merge related entries.
-            return await this.Namespaces
+            var ret = await this.Namespaces
                 .AsNoTracking()
+                .AsSplitQuery()
                 .Include(ns => ns.Procs).ThenInclude(proc => proc.RetType)
                 .Include(ns => ns.Procs).ThenInclude(proc => proc.Language)
+                .Include(ns => ns.Classes).ThenInclude(cl => cl.Indexes).ThenInclude(cl => cl.Class)
                 .Where(ns => !ns.NspName.StartsWith("pg_") && ns.NspName != "information_schema")
-                .Select(ns => new
-                    {
-                        Namespace = ns,
-                        Classes = ns.Classes.Select(cl => new
-                            {
-                                Class = cl,
-                                Attributes = cl.Attributes.Where(attr => attr.AttNum > 0 && !attr.AttIsDropped).Select(attr => new
-                                    {
-                                        Attribute = attr,
-                                        AttrType = attr.Type,
-                                        AttrDefs = attr.AttrDefs.Select(attrDef => new
-                                        {
-                                            AttrDef = attrDef,
-                                            Source = PgGetExpr(EF.Property<string>(attrDef, "AdBin"), attrDef.AdRelId),
-                                        }).ToList(),
-                                    }).ToList(),
-                                Constraints = cl.Constraints.Select(constr => new
-                                    {
-                                        Constraint = constr,
-                                        FRelClass = constr.FRelClass,
-                                        FRelClassNamespace = constr.FRelClass.Namespace,
-                                        Source = PgGetExpr(EF.Property<string>(constr, "ConBin"), constr.ConRelId),
-                                    }).ToList(),
-                                Indexes = cl.Indexes.Select(idx => new
-                                    {
-                                        Index = idx,
-                                        Class = idx.Class,
-                                    }),
-                                Triggers = cl.Triggers.Where(trig => !trig.TgIsInternal).Select(tg => new
-                                    {
-                                        Trigger = tg,
-                                        Func = tg.Function,
-                                        FuncNamespace = tg.Function.Namespace,
-                                        Source = PgGetTriggerDef(tg.Oid),
-                                    }).ToList(),
-                            }).ToList(),
-                    }
-                )
-                .AsAsyncEnumerable()
-                .Select(ns => 
-                    {
-                        ns.Namespace.Classes = ns.Classes.Select(cl =>
-                            {
-                                cl.Class.Attributes = cl.Attributes.Select(attr =>
-                                    {
-                                        attr.Attribute.Type = attr.AttrType;
-                                        attr.Attribute.AttrDefs = attr.AttrDefs.Select(attrDef =>
-                                            {
-                                                attrDef.AttrDef.Source = attrDef.Source;
-                                                return attrDef.AttrDef;
-                                            }).ToList();
-                                        return attr.Attribute;
-                                    }).ToList();
-                                cl.Class.Constraints = cl.Constraints.Select(constr =>
-                                    {
-                                        if (constr.FRelClass != null)
-                                        {
-                                            constr.Constraint.FRelClass = constr.FRelClass;
-                                            constr.Constraint.FRelClass.Namespace = constr.FRelClassNamespace;
-                                        }
-                                        constr.Constraint.Source = constr.Source;
-                                        return constr.Constraint;
-                                    }).ToList();
-                                cl.Class.Indexes = cl.Indexes.Select(idx =>
-                                    {
-                                        idx.Index.Class = idx.Class;
-                                        return idx.Index;
-                                    }).ToList();
-                                cl.Class.Triggers = cl.Triggers.Select(trig =>
-                                    {
-                                        trig.Trigger.Source = trig.Source;
-                                        trig.Trigger.Function = trig.Func;
-                                        trig.Trigger.Function.Namespace = trig.FuncNamespace;
-                                        return trig.Trigger;
-                                    }).ToList();
-                                return cl.Class;
-                            }).ToList();
-                        return ns.Namespace;
-                    }
-                )
                 .ToListAsync();
+
+            IList<int> classesIds = ret.SelectMany(ns => ns.Classes).Select(cl => cl.Oid).ToList();
+
+            var attrsList = await this.Attributes
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(attr => attr.Type)
+                .Include(attr => attr.AttrDef)
+                .Where(attr => classesIds.Contains(attr.AttRelId) && attr.AttNum > 0 && !attr.AttIsDropped)
+                .Select(attr => new
+                    {
+                        Attribute = attr,
+                        Source = PgGetExpr(EF.Property<string>(attr.AttrDef, "AdBin"), attr.AttrDef!.AdRelId),
+                    })
+                .ToListAsync();
+            var attrs = attrsList
+                .Select(attr =>
+                {
+                    if (attr.Attribute.AttrDef != null)
+                        attr.Attribute.AttrDef.Source = attr.Source;
+                    return attr.Attribute;
+                })
+                .GroupBy(attr => attr.AttRelId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var constrsList = await this.Constraints
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(constr => constr.FRelClass).ThenInclude(rcl => rcl.Namespace)
+                .Where(constr => classesIds.Contains(constr.ConRelId))
+                .Select(constr => new
+                    {
+                        Constraint = constr,
+                        Source = PgGetExpr(EF.Property<string>(constr, "ConBin"), constr.ConRelId),
+                    })
+                .ToListAsync();
+            var constrs = constrsList
+                .Select(constr =>
+                {
+                    constr.Constraint.Source = constr.Source;
+                    return constr.Constraint;
+                })
+                .GroupBy(constr => constr.ConRelId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var triggersList = await this.Triggers
+                .AsNoTracking()
+                .Where(trig => classesIds.Contains(trig.TgRelId) && !trig.TgIsInternal)
+                .Include(trig => trig.Function).ThenInclude(func => func.Namespace)
+                .Select(trig => new
+                    {
+                        Trigger = trig,
+                        Source = PgGetTriggerDef(trig.Oid),
+                    })
+                .ToListAsync();
+            var triggers = triggersList
+                .Select(trig =>
+                {
+                        trig.Trigger.Source = trig.Source;
+                        return trig.Trigger;
+                })
+                .GroupBy(trig => trig.TgRelId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            foreach (var ns in ret)
+            {
+                foreach (var cl in ns.Classes)
+                {
+                    var myAttrs = attrs.GetValueOrDefault(cl.Oid);
+                    if (myAttrs == null)
+                        myAttrs = new List<Attribute>();
+                    cl.Attributes = myAttrs;
+
+                    var myConstrs = constrs.GetValueOrDefault(cl.Oid);
+                    if (myConstrs == null)
+                        myConstrs = new List<Constraint>();
+                    cl.Constraints = myConstrs;
+
+                    var myTriggers = triggers.GetValueOrDefault(cl.Oid);
+                    if (myTriggers == null)
+                        myTriggers = new List<Trigger>();
+                    cl.Triggers = myTriggers;
+                }
+            }
+            return ret;
         }
     }
 
@@ -212,7 +223,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [ForeignKey("AttTypId")]
         public Type Type { get; set; } = null!;
 
-        public List<AttrDef> AttrDefs { get; set; } = null!;
+        public AttrDef? AttrDef { get; set; }
     }
 
     public class Type
@@ -263,8 +274,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public int ConRelId { get; set; }
         [Column(TypeName="oid")]
         public int? ConFRelId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
-        public Int16[] ConKey { get; set; } = null!;
-        public Int16[] ConFKey { get; set; } = null!;
+        public Int16[]? ConKey { get; set; }
+        public Int16[]? ConFKey { get; set; }
         public bool ConDeferrable { get; set; }
         public bool ConDeferred { get; set; }
 
