@@ -73,6 +73,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
         let mapper =
             { idFieldExprMapper resolveReference resolveQuery with
                   Aggregate = voidAggr
+                  SubEntity = resolveSubEntity layout
             }
 
         let resolveAttribute name expr =
