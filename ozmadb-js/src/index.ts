@@ -195,9 +195,9 @@ export interface IResultViewInfo {
  */
 
 export interface IExecutedValue {
-  value: any;
+  value: unknown;
   attributes?: AttributesMap;
-  pun?: any;
+  pun?: unknown;
 }
 
 export interface IEntityId {
@@ -242,14 +242,14 @@ export interface IViewInfoResult {
 export interface IInsertEntityOp {
   type: "insert";
   entity: IEntityRef;
-  entries: Record<FieldName, any>;
+  entries: Record<FieldName, unknown>;
 }
 
 export interface IUpdateEntityOp {
   type: "update";
   entity: IEntityRef;
   id: number;
-  entries: Record<FieldName, any>;
+  entries: Record<FieldName, unknown>;
 }
 
 export interface IDeleteEntityOp {
@@ -292,7 +292,7 @@ export interface ITransactionResult {
  */
 
 export interface IActionResult {
-  result: any;
+  result: unknown;
 }
 
 /*
@@ -310,7 +310,7 @@ export type UserViewErrorType = "access_denied" | "not_found" | "resolution" | "
  * Low-level API client.
  */
 
-const convertArgs = (args: Record<string, any>): URLSearchParams => {
+const convertArgs = (args: Record<string, unknown>): URLSearchParams => {
   const params = new URLSearchParams();
   Object.entries(args).forEach(([name, arg]) => {
     params.append(name, JSON.stringify(arg));
@@ -336,7 +336,7 @@ const fetchFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Respo
   return response;
 };
 
-const fetchJson = async (input: RequestInfo, init?: RequestInit): Promise<any> => {
+const fetchJson = async (input: RequestInfo, init?: RequestInit): Promise<unknown> => {
   const response = await fetchFunDB(input, init);
   return await response.json();
 };
@@ -361,7 +361,7 @@ export default class FunDBAPI {
     return await response.blob();
   }
 
-  private async fetchJsonApi(subUrl: string, token: string | null, method: string, body?: any): Promise<any> {
+  private async fetchJsonApi(subUrl: string, token: string | null, method: string, body?: unknown): Promise<unknown> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -375,7 +375,7 @@ export default class FunDBAPI {
     });
   }
 
-  private async fetchSendFileApi(subUrl: string, token: string | null, method: string, contentType: string, body: Blob): Promise<any> {
+  private async fetchSendFileApi(subUrl: string, token: string | null, method: string, contentType: string, body: Blob): Promise<unknown> {
     const headers: Record<string, string> = {
       "Content-Type": contentType,
     };
@@ -390,11 +390,11 @@ export default class FunDBAPI {
   }
 
   getUserView = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewExprResult> => {
-    return await this.fetchJsonApi(`views/${path}/entries?${args}`, token, "GET");
+    return await this.fetchJsonApi(`views/${path}/entries?${args}`, token, "GET") as IViewExprResult;
   }
 
   getUserViewInfo = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewInfoResult> => {
-    return await this.fetchJsonApi(`views/${path}/info?${args}`, token, "GET");
+    return await this.fetchJsonApi(`views/${path}/info?${args}`, token, "GET") as IViewInfoResult;
   }
 
   getAnonymousUserView = async (token: string | null, query: string, args: Record<string, any>): Promise<IViewExprResult> => {
@@ -412,15 +412,15 @@ export default class FunDBAPI {
   }
 
   getEntityInfo = async (token: string | null, ref: IEntityRef): Promise<IEntity> => {
-    return await this.fetchJsonApi(`entities/${ref.schema}/${ref.name}`, token, "GET");
+    return await this.fetchJsonApi(`entities/${ref.schema}/${ref.name}`, token, "GET") as IEntity;
   }
 
   runTransaction = async (token: string | null, action: ITransaction): Promise<ITransactionResult> => {
-    return await this.fetchJsonApi("transaction", token, "POST", action);
+    return await this.fetchJsonApi("transaction", token, "POST", action) as ITransactionResult;
   };
 
   runAction = async (token: string | null, ref: IActionRef, args: Record<string, any>): Promise<IActionResult> => {
-    return await this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args);
+    return await this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args) as IActionResult;
   };
 
   saveSchemas = async (token: string | null, schemas: string[] | null): Promise<Blob> => {

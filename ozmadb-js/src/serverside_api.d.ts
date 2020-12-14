@@ -1,14 +1,14 @@
 import * as Api from "./index";
 
 export declare const renderFunQLName: (name: string) => string;
-export declare const renderFunQLValue: (value: any) => string;
+export declare const renderFunQLValue: (value: unknown) => string;
 
 export interface IFunDBAPI {
-  getUserView: (source: Api.UserViewSource, args?: Record<string, any>) => Promise<Api.IViewExprResult>;
+  getUserView: (source: Api.UserViewSource, args?: Record<string, unknown>) => Promise<Api.IViewExprResult>;
   getUserViewInfo: (source: Api.UserViewSource) => Promise<Api.IViewInfoResult>;
   getEntityInfo: (ref: Api.IEntityRef) => Promise<Api.IEntity>;
-  insertEntity: (ref: Api.IEntityRef, args: Record<string, any>) => Promise<number | undefined>;
-  updateEntity: (ref: Api.IEntityRef, id: number, args: Record<string, any>) => Promise<void>;
+  insertEntity: (ref: Api.IEntityRef, args: Record<string, unknown>) => Promise<number | undefined>;
+  updateEntity: (ref: Api.IEntityRef, id: number, args: Record<string, unknown>) => Promise<void>;
   deleteEntity: (ref: Api.IEntityRef, id: number) => Promise<void>;
   writeEvent: (message: string) => void;
   writeEventSync: (message: string) => void;
@@ -41,11 +41,11 @@ export interface ITriggerEvent {
   source: TriggerSource;
 }
 
-export type BeforeInsertTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<Record<string, any> | boolean>;
-export type BeforeUpdateTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<Record<string, any> | boolean>;
+export type BeforeInsertTrigger = (event: ITriggerEvent, args: Record<string, unknown>) => Promise<Record<string, unknown> | boolean>;
+export type BeforeUpdateTrigger = (event: ITriggerEvent, args: Record<string, unknown>) => Promise<Record<string, unknown> | boolean>;
 export type BeforeDeleteTrigger = (event: ITriggerEvent) => Promise<boolean>;
-export type AfterInsertTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<void>;
-export type AfterUpdateTrigger = (event: ITriggerEvent, args: Record<string, any>) => Promise<void>;
+export type AfterInsertTrigger = (event: ITriggerEvent, args: Record<string, unknown>) => Promise<void>;
+export type AfterUpdateTrigger = (event: ITriggerEvent, args: Record<string, unknown>) => Promise<void>;
 export type AfterDeleteTrigger = (event: ITriggerEvent) => Promise<void>;
 
 export type UserViewGenerator = (layout: Api.ILayout) => Promise<Record<Api.UserViewName, string>>;
