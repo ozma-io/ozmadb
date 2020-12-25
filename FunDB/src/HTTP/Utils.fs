@@ -86,11 +86,13 @@ type IInstancesSource =
     abstract member GetInstance : string -> CancellationToken -> Task<Instance option>
 
 let private anonymousUsername = "anonymous@example.com"
+let private serviceDomain = "service"
 
 type InstanceContext =
     { Instance : Instance
       UserName : string
       IsRoot : bool
+      CanRead : bool
     }
 
 let instanceConnectionString (instance : Instance) =
@@ -105,11 +107,21 @@ let instanceConnectionString (instance : Instance) =
 #endif
     builder.ConnectionString
 
-let resolveUser (f : string -> bool -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
-    let userClaim = ctx.User.FindFirst ClaimTypes.Email
-    if isNull userClaim then
-        RequestErrors.badRequest (errorJson "No email claim in security token") next ctx
+type UserTokenInfo =
+    { Client : string
+      Email : string option
+      IsRoot : bool
+    }
+
+let resolveUser (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+    let clientClaim = ctx.User.FindFirst "azp"
+    if isNull clientClaim then
+        RequestErrors.badRequest (errorJson "No azp claim in security token") next ctx
     else
+        let client = clientClaim.Value
+        let emailClaim = ctx.User.FindFirst ClaimTypes.Email
+        let email =
+            if isNull emailClaim then None else Some emailClaim.Value
         let userRoles = ctx.User.FindFirst "realm_access"
         let isRoot =
             if not <| isNull userRoles then
@@ -117,7 +129,12 @@ let resolveUser (f : string -> bool -> HttpHandler) (next : HttpFunc) (ctx : Htt
                 roles.Roles |> Seq.contains "fundb_admin"
             else
                 false
-        f userClaim.Value isRoot next ctx
+        let info =
+            { Client = client
+              Email = email
+              IsRoot = isRoot
+            }
+        f info next ctx
 
 let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
     task {
@@ -132,9 +149,26 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
         | None -> return! RequestErrors.notFound (errorJson (sprintf "Instance %s not found" instanceName)) next ctx
         | Some instance ->
             if instance.DisableSecurity then
-                return! f { Instance = instance; UserName = anonymousUsername; IsRoot = true } next ctx
+                let ictx =
+                    { Instance = instance
+                      UserName = anonymousUsername
+                      IsRoot = true
+                      CanRead = true
+                    }
+                return! f ictx next ctx
             else
-                let f' userName isRoot = f { Instance = instance; UserName = userName; IsRoot = isRoot }
+                let f' info =
+                    let userName =
+                        match info.Email with
+                        | Some e -> e
+                        | None -> sprintf "%s@%s" info.Client serviceDomain
+                    let ictx =
+                        { Instance = instance
+                          UserName = userName
+                          IsRoot = info.IsRoot
+                          CanRead = instance.IsTemplate
+                        }
+                    f ictx
                 return! (authorize >=> resolveUser f') next ctx
     }
 
@@ -166,6 +200,7 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
                     RequestContext.Create
                         { UserName = inst.UserName
                           IsRoot = (inst.UserName = inst.Instance.Owner || inst.IsRoot)
+                          CanRead = inst.CanRead
                           Language = lang
                           Context = dbCtx
                           Source = ESAPI

@@ -74,9 +74,15 @@ type IContext =
     abstract member FindTrigger : TriggerRef -> ITriggerScript option
 
 [<NoEquality; NoComparison>]
+type RoleInfo =
+    { Role : ResolvedRole option
+      CanRead : bool
+    }
+
+[<NoEquality; NoComparison>]
 type RoleType =
     | RTRoot
-    | RTRole of ResolvedRole
+    | RTRole of RoleInfo
 
 [<NoEquality; NoComparison>]
 type RequestUser =

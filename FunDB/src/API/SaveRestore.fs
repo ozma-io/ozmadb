@@ -27,7 +27,11 @@ let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEn
     | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
     | Error err -> Error err
 
-let private isRootRole : RoleType -> bool = function
+let private canSave : RoleType -> bool = function
+    | RTRoot -> true
+    | RTRole role -> role.CanRead
+
+let private canRestore : RoleType -> bool = function
     | RTRoot -> true
     | RTRole _ -> false
 
@@ -37,7 +41,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
 
     member this.SaveSchemas (names : SchemaName seq) : Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>> =
         task {
-            if not (isRootRole rctx.User.Type) then
+            if not (canSave rctx.User.Type) then
                 logger.LogError("Dump access denied")
                 rctx.WriteEvent (fun event ->
                     event.Type <- "saveSchema"
@@ -67,7 +71,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
 
     member this.RestoreSchemas (dumps : Map<SchemaName, SchemaDump>) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
         task {
-            if not (isRootRole rctx.User.Type) then
+            if not (canRestore rctx.User.Type) then
                 logger.LogError("Restore access denied")
                 rctx.WriteEvent (fun event ->
                     event.Type <- "restoreSchema"

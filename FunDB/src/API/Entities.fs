@@ -10,6 +10,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
+open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Merge
@@ -29,9 +30,14 @@ let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEn
     | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
     | Error err -> Error err
 
-let private getRole = function
+let private getReadRole = function
     | RTRoot -> None
-    | RTRole role -> Some role
+    | RTRole role when role.CanRead -> None
+    | RTRole role -> role.Role
+
+let private getWriteRole = function
+    | RTRoot -> None
+    | RTRole role -> Some (Option.defaultValue emptyResolvedRole role.Role)
 
 type private BeforeTriggerError =
     | BEError of EntityErrorInfo
@@ -149,7 +155,7 @@ type EntitiesAPI (rctx : IRequestContext) =
             match ctx.Layout.FindEntity(entityRef) with
             | Some entity ->
                 try
-                    let res = getEntityInfo ctx.Layout (getRole rctx.User.Type) entityRef entity
+                    let res = getEntityInfo ctx.Layout (getReadRole rctx.User.Type) entityRef entity
                     return Ok res
                 with
                     | :? EntityDeniedException as ex ->
@@ -180,7 +186,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     | Error BECancelled -> return Ok None
                     | Ok args ->
                         try
-                            let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getRole rctx.User.Type) entityRef args ctx.CancellationToken
+                            let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Type) entityRef args ctx.CancellationToken
                             rctx.WriteEventSync (fun event ->
                                 event.Type <- "insertEntity"
                                 event.SchemaName <- entityRef.schema.ToString()
@@ -234,7 +240,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     | Error BECancelled -> return Ok ()
                     | Ok args ->
                         try
-                            do! updateEntity query rctx.GlobalArguments ctx.Layout (getRole rctx.User.Type) entityRef id args ctx.CancellationToken
+                            do! updateEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Type) entityRef id args ctx.CancellationToken
                             rctx.WriteEventSync (fun event ->
                                 event.Type <- "updateEntity"
                                 event.SchemaName <- entityRef.schema.ToString()
@@ -295,7 +301,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                 | Error BECancelled -> return Ok ()
                 | Ok () ->
                     try
-                        do! deleteEntity query rctx.GlobalArguments ctx.Layout (getRole rctx.User.Type) entityRef id ctx.CancellationToken
+                        do! deleteEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Type) entityRef id ctx.CancellationToken
                         rctx.WriteEventSync (fun event ->
                             event.Type <- "deleteEntity"
                             event.SchemaName <- entityRef.schema.ToString()

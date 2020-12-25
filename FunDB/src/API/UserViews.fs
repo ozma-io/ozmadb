@@ -11,6 +11,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.UserViews.Resolve
@@ -78,7 +79,8 @@ type UserViewsAPI (rctx : IRequestContext) =
                 try
                     match rctx.User.Type with
                     | RTRoot -> ()
-                    | RTRole role -> checkRoleViewExpr ctx.Layout role uv.UserView.Compiled
+                    | RTRole role when role.CanRead -> ()
+                    | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled
                     return Ok { Info = uv.Info
                                 PureAttributes = uv.PureAttributes.Attributes
                                 PureColumnAttributes = uv.PureAttributes.ColumnAttributes
@@ -103,8 +105,9 @@ type UserViewsAPI (rctx : IRequestContext) =
                     let restricted =
                         match rctx.User.Type with
                         | RTRoot -> uv.UserView.Compiled
+                        | RTRole role when role.CanRead -> uv.UserView.Compiled
                         | RTRole role ->
-                            applyRoleViewExpr ctx.Layout role uv.UserView.Compiled
+                            applyRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled
                     let getResult info (res : ExecutedViewExpr) = task {
                         return (uv, { res with Rows = Array.ofSeq res.Rows })
                     }

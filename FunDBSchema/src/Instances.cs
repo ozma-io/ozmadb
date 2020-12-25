@@ -54,5 +54,6 @@ namespace FunWithFlags.FunDBSchema.Instances
         [Required]
         public string Database { get; set; } = null!;
         public bool DisableSecurity { get; set; }
+        public bool IsTemplate { get; set; }
     }
 }

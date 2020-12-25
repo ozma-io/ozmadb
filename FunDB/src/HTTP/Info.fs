@@ -30,8 +30,8 @@ let infoApi : HttpHandler =
             return! Successful.ok (json ret) next ctx
         }
 
-    let clearInstancesCache userName isRoot (next : HttpFunc) (ctx : HttpContext) =
-        if not isRoot then
+    let clearInstancesCache info (next : HttpFunc) (ctx : HttpContext) =
+        if not info.IsRoot then
             RequestErrors.forbidden (errorJson "") next ctx
         else
             let instancesCache = ctx.GetService<InstancesCacheStore>()

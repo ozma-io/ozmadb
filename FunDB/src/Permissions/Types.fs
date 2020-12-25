@@ -79,6 +79,10 @@ type AllowedDatabase =
                 | None -> None
                 | Some schema -> Map.tryFind entity.name schema.Entities
 
+let emptyAllowedDatabase : AllowedDatabase =
+    { Schemas = Map.empty
+    }
+
 [<NoEquality; NoComparison>]
 type FlatAllowedDerivedEntity =
     { Insert : bool
@@ -102,6 +106,13 @@ type ResolvedRole =
       Permissions : AllowedDatabase
       Flattened : FlatAllowedDatabase
       AllowBroken : bool
+    }
+
+let emptyResolvedRole =
+    { Parents = Set.empty
+      Permissions = emptyAllowedDatabase
+      Flattened = Map.empty
+      AllowBroken = false
     }
 
 [<NoEquality; NoComparison>]

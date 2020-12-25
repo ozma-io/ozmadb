@@ -35,6 +35,7 @@ type RequestParams =
     { Context : IContext
       UserName : UserName
       IsRoot : bool
+      CanRead : bool
       Language : string
       Source : EventSource
     }
@@ -98,10 +99,15 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
                     match rawUser with
                     | None -> raise <| RequestException REUserNotFound
                     | Some user when user.IsRoot -> RTRoot
-                    | Some user when isNull user.Role -> raise <| RequestException RENoRole
+                    | Some user when isNull user.Role ->
+                        if opts.CanRead then
+                            RTRole { Role = None; CanRead = true }
+                        else
+                            raise <| RequestException RENoRole
                     | Some user ->
                         match ctx.Permissions.Find { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get with
-                        | Ok role -> RTRole role
+                        | Ok role -> RTRole { Role = Some role; CanRead = opts.CanRead }
+                        | Error _ when opts.CanRead -> RTRole { Role = None; CanRead = true }
                         | Error e -> raise <| RequestException RENoRole
             return RequestContext(opts, userId, roleType)
         }
