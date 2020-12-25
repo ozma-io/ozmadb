@@ -299,12 +299,14 @@ export interface IActionResult {
  * Error types.
  */
 
+export type RequestErrorType = "internal" | "request" | "no_endpoint" | "no_instance" | "access_denied";
+
 export interface IApiError {
   error: string;
   message: string;
 }
 
-export type UserViewErrorType = "access_denied" | "not_found" | "resolution" | "execution" | "arguments";
+export type UserViewErrorType = RequestErrorType | "not_found" | "resolution" | "execution" | "arguments";
 
 /*
  * Low-level API client.
