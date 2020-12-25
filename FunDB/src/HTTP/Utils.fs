@@ -17,25 +17,45 @@ open Npgsql
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
+open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.ContextCache
 open FunWithFlags.FunDB.API.Request
 open FunWithFlags.FunDB.API.InstancesCache
 open FunWithFlags.FunDB.API.API
 
-type GenericError =
-    { Message : string
-    } with
+[<SerializeAsObject("error")>]
+type RequestErrorInfo =
+    | [<CaseName("internal")>] REInternal of Message : string
+    | [<CaseName("request")>] RERequest of Message : string
+    | [<CaseName("no_endpoint")>] RENoEndpoint
+    | [<CaseName("no_instance")>] RENoInstance
+    | [<CaseName("access_denied")>] REAccessDenied
+    with
         [<DataMember>]
-        member this.Error = "generic"
+        member this.Message =
+            match this with
+            | REInternal msg -> msg
+            | RERequest msg -> msg
+            | RENoEndpoint -> "API endpoint doesn't exist"
+            | RENoInstance -> "Instance not found"
+            | REAccessDenied -> "Database access denied"
 
-let errorJson str = json { Message = str }
+let requestError e =
+    let handler =
+        match e with
+        | REInternal _ -> ServerErrors.internalError
+        | RERequest _ -> RequestErrors.badRequest
+        | RENoEndpoint -> RequestErrors.notFound
+        | RENoInstance -> RequestErrors.notFound
+        | REAccessDenied _ -> RequestErrors.forbidden
+    handler (json e)
 
 let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
     logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
-    clearResponse >=> setStatusCode 500 >=> errorJson ex.Message
+    clearResponse >=> requestError (REInternal ex.Message)
 
-let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = setStatusCode 404 >=> errorJson "Not Found"
+let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError RENoEndpoint
 
 let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
     let getArg (KeyValue(name : string, par)) =
@@ -51,7 +71,7 @@ let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyV
         | Some r -> Ok (name, r)
 
     match Seq.traverseResult tryArg args1 with
-    | Error name -> sprintf "Invalid JSON value in argument %s" name |> errorJson |> RequestErrors.badRequest
+    | Error name -> sprintf "Invalid JSON value in argument %s" name |> RERequest |> requestError
     | Ok args2 -> f <| Map.ofSeq args2
 
 let queryArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
@@ -73,7 +93,7 @@ let commitAndReturn (handler : HttpHandler) (api : IFunDBAPI) (next : HttpFunc) 
             return! Successful.ok handler next ctx
         with
         | :? ContextException as e ->
-            return! RequestErrors.badRequest (errorJson (exceptionString e)) next ctx
+            return! requestError (RERequest (exceptionString e)) next ctx
     }
 
 let commitAndOk : IFunDBAPI -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
@@ -116,7 +136,7 @@ type UserTokenInfo =
 let resolveUser (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
     let clientClaim = ctx.User.FindFirst "azp"
     if isNull clientClaim then
-        RequestErrors.badRequest (errorJson "No azp claim in security token") next ctx
+        requestError (RERequest "No azp claim in security token") next ctx
     else
         let client = clientClaim.Value
         let emailClaim = ctx.User.FindFirst ClaimTypes.Email
@@ -146,7 +166,8 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
             else
                 xInstance.[0]
         match! instancesSource.GetInstance instanceName ctx.RequestAborted with
-        | None -> return! RequestErrors.notFound (errorJson (sprintf "Instance %s not found" instanceName)) next ctx
+        | None ->
+            return! requestError RENoInstance next ctx
         | Some instance ->
             if instance.DisableSecurity then
                 let ictx =
@@ -210,7 +231,7 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
             | :? RequestException as e ->
                 match e.Info with
                 | REUserNotFound
-                | RENoRole -> return! RequestErrors.forbidden (errorJson "") next ctx
+                | RENoRole -> return! requestError REAccessDenied next ctx
         }
 
     lookupInstance makeContext

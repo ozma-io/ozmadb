@@ -5,7 +5,6 @@ open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open Giraffe
 
-open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Actions.Types

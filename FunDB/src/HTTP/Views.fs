@@ -12,7 +12,7 @@ open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.HTTP.Utils
 
-let private error e =
+let private uvError e =
     let handler =
         match e with
         | UVEArguments _ -> RequestErrors.badRequest
@@ -38,7 +38,7 @@ let viewsApi : HttpHandler =
                 let flags = getFlags ctx
                 match! api.UserViews.GetUserView viewRef rawArgs flags with
                 | Ok res -> return! Successful.ok (json res) next ctx
-                | Result.Error err -> return! error err next ctx
+                | Result.Error err -> return! uvError err next ctx
             }
 
     let infoView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
@@ -46,7 +46,7 @@ let viewsApi : HttpHandler =
             let flags = getFlags ctx
             match! api.UserViews.GetUserViewInfo viewRef flags with
                 | Ok res -> return! Successful.ok (json res) next ctx
-                | Result.Error err -> return! error err next ctx
+                | Result.Error err -> return! uvError err next ctx
         }
 
     let viewApi (viewRef : UserViewSource) =

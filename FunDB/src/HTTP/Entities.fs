@@ -23,7 +23,7 @@ let entitiesApi : HttpHandler =
             match! api.Entities.GetEntityInfo entityRef with
             | Ok info ->
                 return! Successful.ok (json info) next ctx
-            | Result.Error err -> return! errorHandler err (json err) next ctx
+            | Error err -> return! errorHandler err (json err) next ctx
         }
 
     let entityApi (schema : string, name : string) =

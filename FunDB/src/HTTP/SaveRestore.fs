@@ -88,7 +88,7 @@ let saveRestoreApi : HttpHandler =
         match ctx.TryGetRequestHeader "Content-Type" with
         | Some "application/json" -> return! restoreJsonSchemas api dropOthers next ctx
         | Some "application/zip" -> return! restoreZipSchemas api dropOthers next ctx
-        | _ -> return! RequestErrors.unsupportedMediaType (errorJson "Unsupported media type") next ctx
+        | _ -> return! RequestErrors.unsupportedMediaType (json (RERequest "Unsupported media type")) next ctx
     }
 
     let massSaveRestoreApi =

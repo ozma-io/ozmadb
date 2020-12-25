@@ -32,7 +32,7 @@ let infoApi : HttpHandler =
 
     let clearInstancesCache info (next : HttpFunc) (ctx : HttpContext) =
         if not info.IsRoot then
-            RequestErrors.forbidden (errorJson "") next ctx
+            requestError REAccessDenied next ctx
         else
             let instancesCache = ctx.GetService<InstancesCacheStore>()
             instancesCache.Clear ()

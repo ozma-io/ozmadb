@@ -162,7 +162,8 @@ type Startup (config : IConfiguration) =
                         Database = instanceSection.GetValue("Database", username),
                         Username = username,
                         Password = instanceSection.["Password"],
-                        DisableSecurity = instanceSection.GetValue("DisableSecurity", false)
+                        DisableSecurity = instanceSection.GetValue("DisableSecurity", false),
+                        IsTemplate = instanceSection.GetValue("IsTemplate",false)
                     )
                 StaticInstance(instance) :> IInstancesSource
             | _ -> failwith "Invalid InstancesSource"

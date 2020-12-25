@@ -83,6 +83,8 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
     static member Create (opts : RequestParams) : Task<RequestContext> =
         task {
             let ctx = opts.Context
+            let logger = ctx.LoggerFactory.CreateLogger<RequestContext>()
+
             let lowerUserName = opts.UserName.ToLowerInvariant()
             // FIXME: SLOW!
             let! rawUsers =
@@ -92,23 +94,30 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
                     .ToListAsync(ctx.CancellationToken)
             let rawUser = rawUsers |> Seq.filter (fun user -> user.Name.ToLowerInvariant() = lowerUserName) |> Seq.first
             let userId = rawUser |> Option.map (fun u -> u.Id)
+
             let roleType =
                 if opts.IsRoot then
                     RTRoot
                 else
                     match rawUser with
-                    | None -> raise <| RequestException REUserNotFound
+                    | None when opts.CanRead -> RTRole { Role = None; CanRead = true }
+                    | None ->
+                        logger.LogError("User {} not found in users table", opts.UserName)
+                        raise <| RequestException REUserNotFound
                     | Some user when user.IsRoot -> RTRoot
                     | Some user when isNull user.Role ->
                         if opts.CanRead then
                             RTRole { Role = None; CanRead = true }
                         else
+                            logger.LogError("User {} has no role set", opts.UserName)
                             raise <| RequestException RENoRole
                     | Some user ->
                         match ctx.Permissions.Find { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get with
                         | Ok role -> RTRole { Role = Some role; CanRead = opts.CanRead }
                         | Error _ when opts.CanRead -> RTRole { Role = None; CanRead = true }
-                        | Error e -> raise <| RequestException RENoRole
+                        | Error e ->
+                            logger.LogError(e, "Role for user {} is broken", opts.UserName)
+                            raise <| RequestException RENoRole
             return RequestContext(opts, userId, roleType)
         }
 
