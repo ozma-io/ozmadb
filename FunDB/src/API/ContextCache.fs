@@ -132,19 +132,44 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
     let filterUserLayout (layout : Layout) : Layout =
         { schemas = filterUserSchemas preload layout.schemas }
 
-    // If `None` cold rebuild is needed.
-    let getCurrentVersion (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
+    let rec getCurrentVersionEntry (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * StateValue> =
         task {
-            let! (transaction, versionEntry) = task {
-                try
-                    let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
-                    return (transaction, versionEntry)
-                with
-                | :? PostgresException ->
+            try
+                let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
+                return (transaction, versionEntry)
+            with
+            | :? PostgresException as ex ->
+                // This request is always the first that we execute. Hence, it's an opportunity to detect stale connections.
+                // SQL states:
+                // 57P01: terminating connection due to administrator command
+                if ex.SqlState = "57P01" then
+                    let transaction = new DatabaseTransaction (transaction.Connection)
+                    return! getCurrentVersionEntry transaction cancellationToken
+                else
+                    // Most likely we couldn't execute the statement itself because there is no "state" table yet.
                     do! transaction.Rollback ()
                     let transaction = new DatabaseTransaction (transaction.Connection)
                     return (transaction, null)
-            }
+        }
+
+    // If `None` cold rebuild is needed.
+    let getCurrentVersion (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
+        task {
+            let! (transaction, versionEntry) =
+                task {
+                    try
+                        return! checkTransaction transaction <| fun transaction ->
+                            task {
+                                let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
+                                return (transaction, versionEntry)
+                            }
+                    with
+                    | :? PostgresException as ex ->
+                        // Most likely we couldn't execute the statement itself because there is no "state" table yet.
+                        do! transaction.Rollback ()
+                        let transaction = new DatabaseTransaction (transaction.Connection)
+                        return (transaction, null)
+                }
             match versionEntry with
             | null -> return (transaction, None)
             | entry -> return (transaction, tryIntInvariant entry.Value)
@@ -826,6 +851,6 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 }
         with
         | e ->
-            (conn :> IDisposable).Dispose()
+            do! (conn :> IAsyncDisposable).DisposeAsync()
             return reraise' e
     }

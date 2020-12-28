@@ -6,6 +6,7 @@ open System.Threading
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 open Npgsql
+open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunDBSchema.System
@@ -71,3 +72,20 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
     member this.System = system
     member this.Transaction = transaction
     member this.Connection = conn
+
+// Run the first request to the database for a given transaction, expecting it to fail because of stale connections.
+// If failed, we retry.
+let rec checkTransaction (transaction : DatabaseTransaction) (check : DatabaseTransaction -> Task<'a>) : Task<'a> =
+    task {
+        try
+            return! check transaction
+        with
+        // SQL states:
+        // 57P01: terminating connection due to administrator command
+        | :? PostgresException as ex when ex.SqlState = "57P01" ->
+            do! (transaction :> IAsyncDisposable).DisposeAsync ()
+            do! (transaction.Connection :> IAsyncDisposable).DisposeAsync ()
+            let connection = new DatabaseConnection (transaction.Connection.LoggerFactory, transaction.Connection.Connection.ConnectionString)
+            let transaction = new DatabaseTransaction (connection, transaction.Transaction.IsolationLevel)
+            return! checkTransaction transaction check
+    }

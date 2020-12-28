@@ -10,6 +10,7 @@ open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.Affine
 
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Connection
 
@@ -28,24 +29,30 @@ type EventLogger (loggerFactory : ILoggerFactory) =
                     let databaseConnections = Dictionary()
                     try
                         let rec addOne () =
-                            match chan.Reader.TryRead() with
-                            | (false, _) -> ()
-                            | (true, (connectionString, entry)) ->
-                                try
-                                    let transaction =
+                            task {
+                                match chan.Reader.TryRead() with
+                                | (false, _) -> ()
+                                | (true, (connectionString, entry)) ->
+                                    try
                                         match databaseConnections.TryGetValue(connectionString) with
                                         | (false, _) ->
                                             let conn = new DatabaseConnection(loggerFactory, connectionString)
                                             let transaction = new DatabaseTransaction(conn, IsolationLevel.ReadCommitted)
+                                            let! transaction = checkTransaction transaction <| fun transaction ->
+                                                task {
+                                                    let! _ = transaction.System.Events.AddAsync(entry)
+                                                    return transaction
+                                                }
                                             databaseConnections.Add(connectionString, transaction)
-                                            transaction
-                                        | (true, transaction) -> transaction
-                                    ignore <| transaction.System.Events.Add(entry)
-                                with
-                                | ex ->
-                                    logger.LogError(ex, "Exception while logging event")
-                                addOne ()
-                        addOne ()
+                                        | (true, transaction) ->
+                                            let! _ = transaction.System.Events.AddAsync(entry)
+                                            return ()
+                                    with
+                                    | ex ->
+                                        logger.LogError(ex, "Exception while logging event")
+                                    do! addOne ()
+                            }
+                        do! addOne ()
                         let mutable totalChanged = 0
                         for KeyValue(connectionString, transaction) in databaseConnections do
                             try
