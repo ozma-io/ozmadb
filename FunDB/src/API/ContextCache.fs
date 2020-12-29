@@ -2,6 +2,7 @@
 
 open System
 open System.Reflection
+open System.Data
 open System.IO
 open System.Linq
 open Z.EntityFramework.Plus
@@ -132,44 +133,22 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
     let filterUserLayout (layout : Layout) : Layout =
         { schemas = filterUserSchemas preload layout.schemas }
 
-    let rec getCurrentVersionEntry (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * StateValue> =
-        task {
-            try
-                let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
-                return (transaction, versionEntry)
-            with
-            | :? PostgresException as ex ->
-                // This request is always the first that we execute. Hence, it's an opportunity to detect stale connections.
-                // SQL states:
-                // 57P01: terminating connection due to administrator command
-                if ex.SqlState = "57P01" then
-                    let transaction = new DatabaseTransaction (transaction.Connection)
-                    return! getCurrentVersionEntry transaction cancellationToken
-                else
-                    // Most likely we couldn't execute the statement itself because there is no "state" table yet.
-                    do! transaction.Rollback ()
-                    let transaction = new DatabaseTransaction (transaction.Connection)
-                    return (transaction, null)
-        }
-
     // If `None` cold rebuild is needed.
-    let getCurrentVersion (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
+    let openAndGetCurrentVersion (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
         task {
             let! (transaction, versionEntry) =
-                task {
-                    try
-                        return! checkTransaction transaction <| fun transaction ->
-                            task {
-                                let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
-                                return (transaction, versionEntry)
-                            }
-                    with
-                    | :? PostgresException as ex ->
-                        // Most likely we couldn't execute the statement itself because there is no "state" table yet.
-                        do! transaction.Rollback ()
-                        let transaction = new DatabaseTransaction (transaction.Connection)
-                        return (transaction, null)
-                }
+                openAndCheckTransaction loggerFactory connectionString IsolationLevel.Serializable cancellationToken <| fun transaction ->
+                    task {
+                        try
+                            let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
+                            return (transaction, versionEntry)
+                        with
+                        | :? PostgresException when transaction.Connection.Connection.State = ConnectionState.Open ->
+                            // Most likely we couldn't execute the statement itself because there is no "state" table yet.
+                            do! transaction.Rollback ()
+                            let transaction = new DatabaseTransaction (transaction.Connection)
+                            return (transaction, null)
+                    }
             match versionEntry with
             | null -> return (transaction, None)
             | entry -> return (transaction, tryIntInvariant entry.Value)
@@ -491,10 +470,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                     ignore <| cachedStateLock.Release ()
         }
 
-    let rec getCachedState (conn : DatabaseConnection) (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> =
+    let rec getCachedState (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> =
         task {
-            let transaction = new DatabaseTransaction(conn)
-            let! (transaction, ret) = getCurrentVersion transaction cancellationToken
+            let! (transaction, ret) = openAndGetCurrentVersion cancellationToken
             match (cachedState, ret) with
             | (None, Some ver) ->
                 let! _ = tryWithStateLock transaction cancellationToken <| fun () ->
@@ -509,7 +487,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             | Some newState ->
                                 cachedState <- Some newState
                     }
-                return! getCachedState conn cancellationToken
+                return! getCachedState cancellationToken
             | (Some oldState, Some ver) ->
                 if oldState.Version <> ver then
                     let! _ = tryWithStateLock transaction cancellationToken <| fun () ->
@@ -519,7 +497,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             anonymousViewsCache.Clear()
                             cachedState <- Some newState
                         }
-                    return! getCachedState conn cancellationToken
+                    return! getCachedState cancellationToken
                 else
                     return (transaction, oldState)
             | (_, None)
@@ -533,7 +511,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             anonymousViewsCache.Clear()
                             cachedState <- Some newState
                     }
-                return! getCachedState conn cancellationToken
+                return! getCachedState cancellationToken
         }
 
     member this.LoggerFactory = loggerFactory
@@ -542,10 +520,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
     member this.ConnectionString = connectionString
 
     member this.GetCache (cancellationToken : CancellationToken) = task {
-        let conn = new DatabaseConnection(loggerFactory, connectionString)
+        let! (transaction, oldState) = getCachedState cancellationToken
         try
-            let! (transaction, oldState) = getCachedState conn cancellationToken
-
             let mutable isDisposed = false
 
             let mutable maybeIsolate = None
@@ -670,7 +646,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             | :? UserViewResolveException as err -> raisefWithInner ContextException err "Failed to resolve user views"
                         let! (_, badUserViews) = task {
                             try
-                                return! dryRunUserViews conn.Query layout false (Some false) newUserViewsSource userViews cancellationToken
+                                return! dryRunUserViews transaction.Connection.Query layout false (Some false) newUserViewsSource userViews cancellationToken
                             with
                             | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                         }
@@ -694,7 +670,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                         with
                         | :? DbUpdateException as err -> raisefWithInner ContextException err "State update error"
 
-                        let! (_, goodUserViews) = dryRunUserViews conn.Query layout false (Some true) newUserViewsSource userViews cancellationToken
+                        let! (_, goodUserViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) newUserViewsSource userViews cancellationToken
 
                         let newState =
                             { Layout = layout
@@ -718,27 +694,30 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                         ignore <| cachedStateLock.Release()
             }
 
-            let resolveAnonymousView homeSchema query = task {
-                let findExistingView =
-                    oldState.Context.UserViews.Find >> Option.map (Result.map (fun pref -> pref.UserView))
-                let uv = resolveAnonymousUserView oldState.Context.Layout oldState.Context.DefaultAttrs findExistingView homeSchema query
-                return! dryRunAnonymousUserView conn.Query oldState.Context.Layout uv cancellationToken
-            }
+            let resolveAnonymousView homeSchema query =
+                task {
+                    let findExistingView =
+                        oldState.Context.UserViews.Find >> Option.map (Result.map (fun pref -> pref.UserView))
+                    let uv = resolveAnonymousUserView oldState.Context.Layout oldState.Context.DefaultAttrs findExistingView homeSchema query
+                    return! dryRunAnonymousUserView transaction.Connection.Query oldState.Context.Layout uv cancellationToken
+                }
 
-            let createNewAnonymousView query = task {
-                let! uv = resolveAnonymousView None query
-                let ret =
-                    { UserView = uv
-                      Query = query
-                    }
-                return ret
-            }
+            let createNewAnonymousView query =
+                task {
+                    let! uv = resolveAnonymousView None query
+                    let ret =
+                        { UserView = uv
+                          Query = query
+                        }
+                    return ret
+                }
             let newAnonymousViewCreator = ItemCreator(createNewAnonymousView)
 
-            let getAnonymousView (query : string) : Task<PrefetchedUserView> = task {
-                let! ret = anonymousViewsIndex.GetItem(query, newAnonymousViewCreator)
-                return ret.UserView
-            }
+            let getAnonymousView (query : string) : Task<PrefetchedUserView> =
+                task {
+                    let! ret = anonymousViewsIndex.GetItem(query, newAnonymousViewCreator)
+                    return ret.UserView
+                }
 
             let mutable needMigration = false
             let commit () =
@@ -834,7 +813,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                               | Some isolate -> jsIsolates.Return isolate
                               | None -> ()
                               (transaction :> IDisposable).Dispose ()
-                              (conn :> IDisposable).Dispose ()
+                              (transaction.Connection :> IDisposable).Dispose ()
                       member this.DisposeAsync () =
                           unitVtask {
                               if not isDisposed then
@@ -846,11 +825,12 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                   | Some isolate -> jsIsolates.Return isolate
                                   | None -> ()
                                   do! (transaction :> IAsyncDisposable).DisposeAsync ()
-                                  do! (conn :> IAsyncDisposable).DisposeAsync ()
+                                  do! (transaction.Connection :> IAsyncDisposable).DisposeAsync ()
                           }
                 }
         with
         | e ->
-            do! (conn :> IAsyncDisposable).DisposeAsync()
+            do! (transaction :> IAsyncDisposable).DisposeAsync()
+            do! (transaction.Connection :> IAsyncDisposable).DisposeAsync ()
             return reraise' e
     }

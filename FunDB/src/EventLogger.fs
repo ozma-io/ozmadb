@@ -36,9 +36,7 @@ type EventLogger (loggerFactory : ILoggerFactory) =
                                     try
                                         match databaseConnections.TryGetValue(connectionString) with
                                         | (false, _) ->
-                                            let conn = new DatabaseConnection(loggerFactory, connectionString)
-                                            let transaction = new DatabaseTransaction(conn, IsolationLevel.ReadCommitted)
-                                            let! transaction = checkTransaction transaction <| fun transaction ->
+                                            let! transaction = openAndCheckTransaction loggerFactory connectionString IsolationLevel.ReadCommitted cancellationToken <| fun transaction ->
                                                 task {
                                                     let! _ = transaction.System.Events.AddAsync(entry)
                                                     return transaction

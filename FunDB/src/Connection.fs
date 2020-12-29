@@ -9,13 +9,12 @@ open Npgsql
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 
+open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.SQL.Query
 
 type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
-    do
-        connection.Open()
     let query = QueryConnection(loggerFactory, connection)
 
     interface IDisposable with
@@ -29,6 +28,12 @@ type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : stri
     member this.Query = query
     member this.Connection = connection
     member this.LoggerFactory = loggerFactory
+
+    member this.OpenAsync (cancellationToken : CancellationToken) =
+        connection.OpenAsync cancellationToken
+
+    member this.CloseAsync () =
+        connection.CloseAsync ()
 
 type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationLevel) =
     let transaction = conn.Connection.BeginTransaction(isolationLevel)
@@ -73,19 +78,29 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
     member this.Transaction = transaction
     member this.Connection = conn
 
-// Run the first request to the database for a given transaction, expecting it to fail because of stale connections.
+// Create a connection and run the first request to the database for a given transaction, expecting it to maybe fail because of stale connections.
 // If failed, we retry.
-let rec checkTransaction (transaction : DatabaseTransaction) (check : DatabaseTransaction -> Task<'a>) : Task<'a> =
-    task {
-        try
-            return! check transaction
-        with
-        // SQL states:
-        // 57P01: terminating connection due to administrator command
-        | :? PostgresException as ex when ex.SqlState = "57P01" ->
-            do! (transaction :> IAsyncDisposable).DisposeAsync ()
-            do! (transaction.Connection :> IAsyncDisposable).DisposeAsync ()
-            let connection = new DatabaseConnection (transaction.Connection.LoggerFactory, transaction.Connection.Connection.ConnectionString)
-            let transaction = new DatabaseTransaction (connection, transaction.Transaction.IsolationLevel)
-            return! checkTransaction transaction check
-    }
+// Transfers ownership of `DatabaseTransaction` instance to the given `check` function.
+let openAndCheckTransaction (loggerFactory : ILoggerFactory) (connectionString : string) (isolationLevel : IsolationLevel) (cancellationToken : CancellationToken) (check : DatabaseTransaction -> Task<'a>) : Task<'a> =
+    let logger = loggerFactory.CreateLogger("openAndCheckTransaction")
+    let rec tryOne () =
+        task {
+            let connection = new DatabaseConnection(loggerFactory, connectionString)
+            do! connection.OpenAsync cancellationToken
+            let transaction = new DatabaseTransaction (connection, isolationLevel)
+            try
+                return! check transaction
+            with
+            // SQL states:
+            // 57P01: terminating connection due to administrator command
+            | :? PostgresException as ex when ex.SqlState = "57P01" ->
+                do! (transaction :> IAsyncDisposable).DisposeAsync ()
+                do! (connection :> IAsyncDisposable).DisposeAsync ()
+                logger.LogWarning("Stale connection detected, trying to reconnect")
+                return! tryOne ()
+            | e ->
+                do! (transaction :> IAsyncDisposable).DisposeAsync ()
+                do! (connection :> IAsyncDisposable).DisposeAsync ()
+                return reraise' e
+        }
+    tryOne ()
