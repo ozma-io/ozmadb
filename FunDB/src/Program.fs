@@ -77,11 +77,11 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
                                   member this.Database = instance.Database
                                   member this.DisableSecurity = instance.DisableSecurity
                                   member this.IsTemplate = instance.IsTemplate
-                                  member this.AccessedAt = instance.AccessedAt |> Option.ofNullable |> Option.map (fun x -> DateTimeOffset(x.ToDateTime()))
+                                  member this.AccessedAt = Option.ofNullable instance.AccessedAt
 
                                   member this.UpdateAccessedAt newTime =
                                       unitTask {
-                                          instance.AccessedAt <- NpgsqlDateTime(newTime.DateTime)
+                                          instance.AccessedAt <- newTime
                                           let! _ = instances.SaveChangesAsync ()
                                           ()
                                       }
@@ -111,7 +111,7 @@ type StaticInstance (instance : Instance) =
                       member this.Database = instance.Database
                       member this.DisableSecurity = instance.DisableSecurity
                       member this.IsTemplate = instance.IsTemplate
-                      member this.AccessedAt = Some DateTimeOffset.UtcNow
+                      member this.AccessedAt = Some DateTime.UtcNow
 
                       member this.UpdateAccessedAt newTime = unitTask { () }
 
@@ -215,7 +215,7 @@ type Startup (config : IConfiguration) =
                         Password = instanceSection.["Password"],
                         DisableSecurity = instanceSection.GetValue("DisableSecurity", false),
                         IsTemplate = instanceSection.GetValue("IsTemplate",false),
-                        CreatedAt = NpgsqlDateTime()
+                        CreatedAt = DateTime.UtcNow
                     )
                 StaticInstance(instance) :> IInstancesSource
             | _ -> failwith "Invalid InstancesSource"

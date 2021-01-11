@@ -121,9 +121,9 @@ type IInstance =
     abstract member Database : string
     abstract member DisableSecurity : bool
     abstract member IsTemplate : bool
-    abstract member AccessedAt : DateTimeOffset option
+    abstract member AccessedAt : DateTime option
 
-    abstract member UpdateAccessedAt : DateTimeOffset -> Task
+    abstract member UpdateAccessedAt : DateTime -> Task
 
 type IInstancesSource =
     abstract member GetInstance : string -> CancellationToken -> Task<IInstance option>
@@ -258,7 +258,7 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
                           Context = dbCtx
                           Source = ESAPI
                         }
-                let currTime = DateTimeOffset.UtcNow
+                let currTime = DateTime.UtcNow
                 match inst.Instance.AccessedAt with
                 | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
                 | _ ->  do! inst.Instance.UpdateAccessedAt currTime

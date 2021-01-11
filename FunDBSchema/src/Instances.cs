@@ -58,7 +58,7 @@ namespace FunWithFlags.FunDBSchema.Instances
         public bool DisableSecurity { get; set; }
         public bool IsTemplate { get; set; }
         [Required]
-        public NpgsqlDateTime CreatedAt { get; set; }
-        public Nullable<NpgsqlDateTime> AccessedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public Nullable<DateTime> AccessedAt { get; set; }
     }
 }
