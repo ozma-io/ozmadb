@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.HTTP.Utils
 
+open System
 open System.Collections.Generic
 open System.Runtime.Serialization
 open System.Threading
@@ -14,7 +15,6 @@ open Newtonsoft.Json
 open Giraffe
 open Npgsql
 
-open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunUtils.Serialization.Utils
@@ -108,20 +108,37 @@ type RealmAccess =
     { Roles : string[]
     }
 
+type IInstance =
+    inherit IDisposable
+    inherit IAsyncDisposable
+
+    abstract member Name : string
+    abstract member Owner : string
+    abstract member Host : string
+    abstract member Port : int
+    abstract member Username : string
+    abstract member Password : string
+    abstract member Database : string
+    abstract member DisableSecurity : bool
+    abstract member IsTemplate : bool
+    abstract member AccessedAt : DateTimeOffset option
+
+    abstract member UpdateAccessedAt : DateTimeOffset -> Task
+
 type IInstancesSource =
-    abstract member GetInstance : string -> CancellationToken -> Task<Instance option>
+    abstract member GetInstance : string -> CancellationToken -> Task<IInstance option>
 
 let private anonymousUsername = "anonymous@example.com"
 let private serviceDomain = "service"
 
 type InstanceContext =
-    { Instance : Instance
+    { Instance : IInstance
       UserName : string
       IsRoot : bool
       CanRead : bool
     }
 
-let instanceConnectionString (instance : Instance) =
+let instanceConnectionString (instance : IInstance) =
     let builder = NpgsqlConnectionStringBuilder ()
     builder.Host <- instance.Host
     builder.Port <- instance.Port
@@ -175,29 +192,38 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
         | None ->
             return! requestError RENoInstance next ctx
         | Some instance ->
-            if instance.DisableSecurity then
-                let ictx =
-                    { Instance = instance
-                      UserName = anonymousUsername
-                      IsRoot = true
-                      CanRead = true
-                    }
-                return! f ictx next ctx
-            else
-                let f' info =
-                    let userName =
-                        match info.Email with
-                        | Some e -> e
-                        | None -> sprintf "%s@%s" info.Client serviceDomain
+            try
+                if instance.DisableSecurity then
                     let ictx =
                         { Instance = instance
-                          UserName = userName
-                          IsRoot = info.IsRoot
-                          CanRead = instance.IsTemplate
+                          UserName = anonymousUsername
+                          IsRoot = true
+                          CanRead = true
                         }
-                    f ictx
-                return! (authorize >=> resolveUser f') next ctx
+                    return! f ictx next ctx
+                else
+                    let f' info =
+                        let userName =
+                            match info.Email with
+                            | Some e -> e
+                            | None -> sprintf "%s@%s" info.Client serviceDomain
+                        let ictx =
+                            { Instance = instance
+                              UserName = userName
+                              IsRoot = info.IsRoot
+                              CanRead = instance.IsTemplate
+                            }
+                        f ictx
+                    return! (authorize >=> resolveUser f') next ctx
+            finally
+                instance.Dispose ()
     }
+
+let private randomAccessedAtGen = new ThreadLocal<Random>(fun () -> Random())
+
+let private randomAccessedAtLaxSpan () =
+    // A minute +/- ~5 seconds.
+    TimeSpan.FromMinutes(1.0 + (2.0 * randomAccessedAtGen.Value.NextDouble() - 0.5) * 0.09)
 
 let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
     let makeContext (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
@@ -232,6 +258,11 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
                           Context = dbCtx
                           Source = ESAPI
                         }
+                let currTime = DateTimeOffset.UtcNow
+                match inst.Instance.AccessedAt with
+                | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
+                | _ ->  do! inst.Instance.UpdateAccessedAt currTime
+                do! inst.Instance.DisposeAsync ()
                 return! f (FunDBAPI rctx) next ctx
             with
             | :? RequestException as e ->

@@ -19,6 +19,7 @@ open Microsoft.EntityFrameworkCore
 open Giraffe
 open Giraffe.Serialization.Json
 open Npgsql
+open NpgsqlTypes
 open NetJs.Json
 
 open FunWithFlags.FunDBSchema.Instances
@@ -53,21 +54,71 @@ let httpJsonSettings =
 
 type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
     interface IInstancesSource with
-        member this.GetInstance (host : string) (cancellationToken : CancellationToken) = task {
-            use instances =
-                let systemOptions =
-                    (DbContextOptionsBuilder<InstancesContext> ())
-                        .UseLoggerFactory(loggerFactory)
-                        .UseNpgsql(connectionString)
-                new InstancesContext(systemOptions.Options)
-            match! instances.Instances.FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken) with
-            | null -> return None
-            | instance -> return Some instance
-        }
+        member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
+            task {
+                let instances =
+                    let systemOptions =
+                        (DbContextOptionsBuilder<InstancesContext> ())
+                            .UseLoggerFactory(loggerFactory)
+                            .UseNpgsql(connectionString)
+                    new InstancesContext(systemOptions.Options)
+                try
+                    match! instances.Instances.FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken) with
+                    | null -> return None
+                    | instance ->
+                        let obj =
+                            { new IInstance with
+                                  member this.Name = instance.Name
+                                  member this.Owner = instance.Owner
+                                  member this.Host = instance.Host
+                                  member this.Port = instance.Port
+                                  member this.Username = instance.Username
+                                  member this.Password = instance.Password
+                                  member this.Database = instance.Database
+                                  member this.DisableSecurity = instance.DisableSecurity
+                                  member this.IsTemplate = instance.IsTemplate
+                                  member this.AccessedAt = instance.AccessedAt |> Option.ofNullable |> Option.map (fun x -> DateTimeOffset(x.ToDateTime()))
+
+                                  member this.UpdateAccessedAt newTime =
+                                      unitTask {
+                                          instance.AccessedAt <- NpgsqlDateTime(newTime.DateTime)
+                                          let! _ = instances.SaveChangesAsync ()
+                                          ()
+                                      }
+
+                                  member this.Dispose () = instances.Dispose ()
+                                  member this.DisposeAsync () = instances.DisposeAsync ()
+                            }
+                        return Some obj
+                with
+                | e ->
+                    do! instances.DisposeAsync ()
+                    return reraise' e
+            }
+
 
 type StaticInstance (instance : Instance) =
     interface IInstancesSource with
-        member this.GetInstance (host : string) (cancellationToken : CancellationToken) = Task.result (Some instance)
+        member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
+            let obj =
+                { new IInstance with
+                      member this.Name = instance.Name
+                      member this.Owner = instance.Owner
+                      member this.Host = instance.Host
+                      member this.Port = instance.Port
+                      member this.Username = instance.Username
+                      member this.Password = instance.Password
+                      member this.Database = instance.Database
+                      member this.DisableSecurity = instance.DisableSecurity
+                      member this.IsTemplate = instance.IsTemplate
+                      member this.AccessedAt = Some DateTimeOffset.UtcNow
+
+                      member this.UpdateAccessedAt newTime = unitTask { () }
+
+                      member this.Dispose () = ()
+                      member this.DisposeAsync () = unitVtask { () }
+                }
+            Task.result (Some obj)
 
 type Startup (config : IConfiguration) =
     let fundbSection = config.GetSection("FunDB")
@@ -163,7 +214,8 @@ type Startup (config : IConfiguration) =
                         Username = username,
                         Password = instanceSection.["Password"],
                         DisableSecurity = instanceSection.GetValue("DisableSecurity", false),
-                        IsTemplate = instanceSection.GetValue("IsTemplate",false)
+                        IsTemplate = instanceSection.GetValue("IsTemplate",false),
+                        CreatedAt = NpgsqlDateTime()
                     )
                 StaticInstance(instance) :> IInstancesSource
             | _ -> failwith "Invalid InstancesSource"

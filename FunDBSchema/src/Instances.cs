@@ -1,6 +1,8 @@
+using System;
 using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using NpgsqlTypes;
 using Npgsql.NameTranslation;
 
 namespace FunWithFlags.FunDBSchema.Instances
@@ -55,5 +57,8 @@ namespace FunWithFlags.FunDBSchema.Instances
         public string Database { get; set; } = null!;
         public bool DisableSecurity { get; set; }
         public bool IsTemplate { get; set; }
+        [Required]
+        public NpgsqlDateTime CreatedAt { get; set; }
+        public Nullable<NpgsqlDateTime> AccessedAt { get; set; }
     }
 }
