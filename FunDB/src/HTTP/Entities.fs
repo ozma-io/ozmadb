@@ -18,8 +18,8 @@ let private errorHandler = function
     | EETrigger _ -> ServerErrors.internalError
 
 let entitiesApi : HttpHandler =
-    let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) : HttpHandler =
-        fun next ctx -> task {
+    let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+        task {
             match! api.Entities.GetEntityInfo entityRef with
             | Ok info ->
                 return! Successful.ok (json info) next ctx

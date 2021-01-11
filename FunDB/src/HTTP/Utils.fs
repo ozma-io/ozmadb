@@ -57,6 +57,12 @@ let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -
 
 let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError RENoEndpoint
 
+let boolRequestArg (name : string) (ctx: HttpContext) : bool =
+    match ctx.Request.Query.TryGetValue name with
+    | (true, values) when values.Count = 0 -> true
+    | (true, values) -> Option.defaultValue false (Parsing.tryBool values.[0])
+    | (false, _) -> false
+
 let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
     let getArg (KeyValue(name : string, par)) =
         if name.StartsWith("__") then

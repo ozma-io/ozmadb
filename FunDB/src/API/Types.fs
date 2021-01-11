@@ -247,9 +247,14 @@ type RestoreErrorInfo =
             | RREInvalidFormat msg -> sprintf "Invalid data format: %s" msg
             | RREConsistency msg -> sprintf "Inconsistent dump: %s" msg
 
+type SaveSchemas =
+    | SSNames of SchemaName[]
+    | SSAll
+    | SSNonPreloaded
+
 type ISaveRestoreAPI =
-    abstract member SaveSchemas : SchemaName seq -> Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>>
-    abstract member SaveZipSchemas : SchemaName seq -> Task<Result<Stream, SaveErrorInfo>>
+    abstract member SaveSchemas : SaveSchemas -> Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>>
+    abstract member SaveZipSchemas : SaveSchemas -> Task<Result<Stream, SaveErrorInfo>>
     abstract member RestoreSchemas : Map<SchemaName, SchemaDump> -> bool -> Task<Result<unit, RestoreErrorInfo>>
     abstract member RestoreZipSchemas : Stream -> bool -> Task<Result<unit, RestoreErrorInfo>>
 

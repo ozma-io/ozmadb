@@ -39,8 +39,16 @@ type SaveRestoreAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<SaveRestoreAPI>()
 
-    member this.SaveSchemas (names : SchemaName seq) : Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>> =
+    member this.SaveSchemas (schemas : SaveSchemas) : Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>> =
         task {
+            let names =
+                match schemas with
+                | SSNames names -> Array.toSeq names
+                | SSAll -> Map.keys ctx.Layout.schemas
+                | SSNonPreloaded ->
+                    let preloadSchemas = Map.keysSet ctx.Preload.Schemas
+                    let allSchemas = Map.keysSet ctx.Layout.schemas
+                    Set.toSeq (Set.difference allSchemas preloadSchemas)
             if not (canSave rctx.User.Type) then
                 logger.LogError("Dump access denied")
                 rctx.WriteEvent (fun event ->
@@ -58,9 +66,9 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                     | SENotFound -> return Error RSENotFound
         }
 
-    member this.SaveZipSchemas (names : SchemaName seq) : Task<Result<Stream, SaveErrorInfo>> =
+    member this.SaveZipSchemas (schemas : SaveSchemas) : Task<Result<Stream, SaveErrorInfo>> =
         task {
-            match! this.SaveSchemas names with
+            match! this.SaveSchemas schemas with
             | Error e -> return Error e
             | Ok dump ->
                 let stream = new MemoryStream()
