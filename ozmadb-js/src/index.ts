@@ -101,7 +101,7 @@ export type FieldType = IScalarFieldType | IArrayFieldType | IReferenceFieldType
 export interface IColumnField {
   fieldType: FieldType;
   valueType: ValueType;
-  defaultValue: any;
+  defaultValue: unknown;
   isNullable: boolean;
   isImmutable: boolean;
   inheritedFrom?: IEntityRef;
@@ -164,7 +164,7 @@ export interface IMainFieldInfo {
   field: IColumnField;
 }
 
-export type AttributesMap = Record<AttributeName, any>;
+export type AttributesMap = Record<AttributeName, unknown>;
 export type AttributeTypesMap = Record<AttributeName, ValueType>;
 
 export interface IResultColumnInfo {
@@ -399,13 +399,13 @@ export default class FunDBAPI {
     return await this.fetchJsonApi(`views/${path}/info?${args}`, token, "GET") as IViewInfoResult;
   }
 
-  getAnonymousUserView = async (token: string | null, query: string, args: Record<string, any>): Promise<IViewExprResult> => {
+  getAnonymousUserView = async (token: string | null, query: string, args: Record<string, unknown>): Promise<IViewExprResult> => {
     const search = convertArgs(args);
     search.set("__query", query);
     return await this.getUserView("anonymous", token, search);
   }
 
-  getNamedUserView = async (token: string | null, ref: IUserViewRef, args: Record<string, any>): Promise<IViewExprResult> => {
+  getNamedUserView = async (token: string | null, ref: IUserViewRef, args: Record<string, unknown>): Promise<IViewExprResult> => {
     return await this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, convertArgs(args));
   }
 
@@ -421,7 +421,7 @@ export default class FunDBAPI {
     return await this.fetchJsonApi("transaction", token, "POST", action) as ITransactionResult;
   };
 
-  runAction = async (token: string | null, ref: IActionRef, args: Record<string, any>): Promise<IActionResult> => {
+  runAction = async (token: string | null, ref: IActionRef, args: Record<string, unknown>): Promise<IActionResult> => {
     return await this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args) as IActionResult;
   };
 
