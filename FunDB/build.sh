@@ -1,7 +1,7 @@
-#!/bin/sh -e
+#!/usr/bin/env bash
 # Build and publish the application.
 
-set -x
+set -ex
 
 dotnet --info
 rm -rf bin publish
