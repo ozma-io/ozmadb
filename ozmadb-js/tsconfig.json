@@ -7,7 +7,7 @@
     "rootDir": "./src",
     "moduleResolution": "node",
     "outDir": "dist",
-    "baseUrl": ".",
+    "baseUrl": "./src",
     "paths": {
         "*": [
             "node_modules/*"
