@@ -14,7 +14,7 @@ export interface IFunDBAPI {
   writeEventSync: (message: string) => void;
 }
 
-export declare const FunDB: IFunDBAPI
+export declare const FunDB: IFunDBAPI;
 
 export interface ITriggerInsertSource {
   type: "insert";

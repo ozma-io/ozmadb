@@ -47,7 +47,7 @@ export interface INamedUserView {
   ref: IUserViewRef;
 }
 
-export type UserViewSource = IAnonymousUserView | INamedUserView
+export type UserViewSource = IAnonymousUserView | INamedUserView;
 
 /*
  * Database result types.
@@ -340,7 +340,7 @@ const fetchFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Respo
 
 const fetchJson = async (input: RequestInfo, init?: RequestInit): Promise<unknown> => {
   const response = await fetchFunDB(input, init);
-  return await response.json();
+  return response.json();
 };
 
 export default class FunDBAPI {
@@ -360,7 +360,7 @@ export default class FunDBAPI {
       method: "GET",
       headers,
     });
-    return await response.blob();
+    return response.blob();
   }
 
   private async fetchJsonApi(subUrl: string, token: string | null, method: string, body?: unknown): Promise<unknown> {
@@ -370,7 +370,7 @@ export default class FunDBAPI {
     if (token !== null) {
       headers["Authorization"] = `Bearer ${token}`;
     }
-    return await fetchJson(`${this.apiUrl}/${subUrl}`, {
+    return fetchJson(`${this.apiUrl}/${subUrl}`, {
       method,
       headers,
       body: JSON.stringify(body),
@@ -384,7 +384,7 @@ export default class FunDBAPI {
     if (token !== null) {
       headers["Authorization"] = `Bearer ${token}`;
     }
-    return await fetchJson(`${this.apiUrl}/${subUrl}`, {
+    return fetchJson(`${this.apiUrl}/${subUrl}`, {
       method,
       headers,
       body,
@@ -392,37 +392,37 @@ export default class FunDBAPI {
   }
 
   getUserView = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewExprResult> => {
-    return await this.fetchJsonApi(`views/${path}/entries?${args}`, token, "GET") as IViewExprResult;
-  }
+    return this.fetchJsonApi(`views/${path}/entries?${args}`, token, "GET") as Promise<IViewExprResult>;
+  };
 
   getUserViewInfo = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewInfoResult> => {
-    return await this.fetchJsonApi(`views/${path}/info?${args}`, token, "GET") as IViewInfoResult;
-  }
+    return this.fetchJsonApi(`views/${path}/info?${args}`, token, "GET") as Promise<IViewInfoResult>;
+  };
 
   getAnonymousUserView = async (token: string | null, query: string, args: Record<string, unknown>): Promise<IViewExprResult> => {
     const search = convertArgs(args);
     search.set("__query", query);
-    return await this.getUserView("anonymous", token, search);
-  }
+    return this.getUserView("anonymous", token, search);
+  };
 
   getNamedUserView = async (token: string | null, ref: IUserViewRef, args: Record<string, unknown>): Promise<IViewExprResult> => {
-    return await this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, convertArgs(args));
-  }
+    return this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, convertArgs(args));
+  };
 
   getNamedUserViewInfo = async (token: string | null, ref: IUserViewRef): Promise<IViewInfoResult> => {
-    return await this.getUserViewInfo(`by_name/${ref.schema}/${ref.name}`, token, new URLSearchParams());
-  }
+    return this.getUserViewInfo(`by_name/${ref.schema}/${ref.name}`, token, new URLSearchParams());
+  };
 
   getEntityInfo = async (token: string | null, ref: IEntityRef): Promise<IEntity> => {
-    return await this.fetchJsonApi(`entities/${ref.schema}/${ref.name}`, token, "GET") as IEntity;
-  }
+    return this.fetchJsonApi(`entities/${ref.schema}/${ref.name}`, token, "GET") as Promise<IEntity>;
+  };
 
   runTransaction = async (token: string | null, action: ITransaction): Promise<ITransactionResult> => {
-    return await this.fetchJsonApi("transaction", token, "POST", action) as ITransactionResult;
+    return this.fetchJsonApi("transaction", token, "POST", action) as Promise<ITransactionResult>;
   };
 
   runAction = async (token: string | null, ref: IActionRef, args: Record<string, unknown>): Promise<IActionResult> => {
-    return await this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args) as IActionResult;
+    return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args) as Promise<IActionResult>;
   };
 
   saveSchemas = async (token: string | null, schemas: string[] | null): Promise<Blob> => {
@@ -434,7 +434,7 @@ export default class FunDBAPI {
       });
       url += `?${params}`;
     }
-    return await this.fetchGetFileApi(url, token, "application/zip");
+    return this.fetchGetFileApi(url, token, "application/zip");
   };
 
   restoreSchemas = async (token: string | null, dropOthers: boolean, data: Blob): Promise<void> => {
