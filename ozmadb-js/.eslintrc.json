@@ -14,7 +14,7 @@
     "project": "tsconfig.json",
     "sourceType": "module"
   },
-  "ignorePatterns": ["*.config.js", "node_modules/"],
+  "ignorePatterns": ["dist/", "node_modules/"],
   "plugins": [
     "@typescript-eslint"
   ],
