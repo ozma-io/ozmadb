@@ -17,7 +17,7 @@ type IsInitializedResponse =
     }
 
 let infoApi : HttpHandler =
-    let ping = GET >=> (Map.empty |> json |> Successful.ok)
+    let ping = Map.empty |> json |> Successful.ok
 
     let isInitialized inst (next : HttpFunc) (ctx : HttpContext) =
         task {
@@ -40,8 +40,8 @@ let infoApi : HttpHandler =
             Successful.ok (json Map.empty) next ctx
 
     choose
-        [ route "/check_access" >=> withContext (fun _ -> ping)
+        [ route "/check_access" >=> GET >=> withContext (fun _ -> ping)
           route "/is_initialized" >=> GET >=> lookupInstance isInitialized
           route "/clear_instances_cache" >=> POST >=> resolveUser clearInstancesCache
-          route "/ping" >=> ping
+          route "/ping" >=> GET >=> ping
         ]

@@ -130,6 +130,7 @@
     <Compile Include="src/API/Entities.fs" />
     <Compile Include="src/API/SaveRestore.fs" />
     <Compile Include="src/API/Actions.fs" />
+    <Compile Include="src/API/Permissions.fs" />
     <Compile Include="src/API/API.fs" />
 
     <Compile Include="src/HTTP/Utils.fs" />
@@ -138,6 +139,7 @@
     <Compile Include="src/HTTP/Entities.fs" />
     <Compile Include="src/HTTP/Actions.fs" />
     <Compile Include="src/HTTP/SaveRestore.fs" />
+    <Compile Include="src/HTTP/Permissions.fs" />
 
     <Compile Include="src/Program.fs" />
   </ItemGroup>

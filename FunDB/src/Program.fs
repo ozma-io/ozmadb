@@ -30,6 +30,7 @@ open FunWithFlags.FunDB.HTTP.Views
 open FunWithFlags.FunDB.HTTP.Entities
 open FunWithFlags.FunDB.HTTP.SaveRestore
 open FunWithFlags.FunDB.HTTP.Actions
+open FunWithFlags.FunDB.HTTP.Permissions
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.API.InstancesCache
@@ -136,6 +137,7 @@ type Startup (config : IConfiguration) =
               saveRestoreApi
               actionsApi
               infoApi
+              permissionsApi
               notFoundHandler
             ]
 

@@ -23,7 +23,7 @@ let actionsApi : HttpHandler =
             let! args = ctx.BindModelAsync<JObject>()
             match! api.Actions.RunAction ref args with
             | Ok ret ->
-                return! commitAndReturn (json { Result = ret }) api next ctx
+                return! commitAndReturn (json ret) api next ctx
             | Error err ->
                 return! actionError err next ctx
         }

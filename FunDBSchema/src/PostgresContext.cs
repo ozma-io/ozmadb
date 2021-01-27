@@ -16,12 +16,12 @@ namespace FunWithFlags.FunDBSchema
             : base(options)
         {
         }
-        
+
         public static string PgGetExpr(string pg_node_tree, int relation_oid)
         {
             throw new InvalidOperationException();
         }
-    
+
         public static string PgGetTriggerDef(int trigger_oid)
         {
             throw new InvalidOperationException();

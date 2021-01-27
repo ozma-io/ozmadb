@@ -14,7 +14,7 @@ type ActionsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<ActionsAPI>()
 
-    member this.RunAction (ref : ActionRef) (args : JObject) : Task<Result<JObject option, ActionErrorInfo>> =
+    member this.RunAction (ref : ActionRef) (args : JObject) : Task<Result<ActionResult, ActionErrorInfo>> =
         task {
             match ctx.FindAction(ref) with
             | Some action ->
@@ -22,7 +22,7 @@ type ActionsAPI (rctx : IRequestContext) =
                     return! rctx.RunWithSource (ESAction ref) <| fun () ->
                         task {
                             let! res = action.Run(args, ctx.CancellationToken)
-                            return Ok res
+                            return Ok { Result = res }
                         }
                 with
                     | :? ActionRunException as ex ->

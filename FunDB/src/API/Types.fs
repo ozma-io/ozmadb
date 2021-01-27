@@ -83,6 +83,11 @@ type RoleInfo =
 type RoleType =
     | RTRoot
     | RTRole of RoleInfo
+    with
+        member this.IsRoot =
+            match this with
+            | RTRoot -> true
+            | _ -> false
 
 [<NoEquality; NoComparison>]
 type RequestUser =
@@ -275,7 +280,15 @@ type ActionErrorInfo =
             | AEException msg -> msg
 
 type IActionsAPI =
-    abstract member RunAction : ActionRef -> JObject -> Task<Result<JObject option, ActionErrorInfo>>
+    abstract member RunAction : ActionRef -> JObject -> Task<Result<ActionResult, ActionErrorInfo>>
+
+[<NoEquality; NoComparison>]
+type UserPermissions =
+    { IsRoot : bool
+    }
+
+type IPermissionsAPI =
+    abstract member UserPermissions : UserPermissions
 
 type IFunDBAPI =
     abstract member Request : IRequestContext
@@ -283,6 +296,7 @@ type IFunDBAPI =
     abstract member Entities : IEntitiesAPI
     abstract member SaveRestore : ISaveRestoreAPI
     abstract member Actions : IActionsAPI
+    abstract member Permissions : IPermissionsAPI
 
 let dummyFunDBAPI =
     { new IFunDBAPI with
@@ -291,4 +305,5 @@ let dummyFunDBAPI =
           member this.Entities = failwith "Attempted to access dummy API"
           member this.SaveRestore = failwith "Attempted to access dummy API"
           member this.Actions = failwith "Attempted to access dummy API"
+          member this.Permissions = failwith "Attempted to access dummy API"
     }

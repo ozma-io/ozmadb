@@ -18,6 +18,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public DbSet<AttrDef> AttrDefs { get; set; } = null!;
         public DbSet<Constraint> Constraints { get; set; } = null!;
         public DbSet<Trigger> Triggers { get; set; } = null!;
+        public DbSet<Depend> Depends { get; set; } = null!;
 
         public PgCatalogContext()
             : base()
@@ -49,6 +50,9 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
             modelBuilder.Entity<Constraint>()
                 .Property<string>("ConBin");
 
+            modelBuilder.Entity<Depend>()
+                .HasNoKey();
+
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {
                 // Needs to be idempotent.
@@ -69,6 +73,12 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
         public async Task<IEnumerable<Namespace>> GetObjects(CancellationToken cancellationToken)
         {
+            /* var classOid = await this.Classes
+                .AsNoTracking()
+                .Where(cl => cl.Namespace.NspName == "pg_catalog" && cl.RelName == "pg_class")
+                .Select(cl => cl.Oid)
+                .SingleAsync(cancellationToken); */
+
             // All this circus because just running:
             //
             // Include(x => x.foos).Select(x => new { X = x; Foos = x.foos.Select(..).ToList(); })
@@ -360,5 +370,20 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Class Class { get; set; } = null!;
         [ForeignKey("IndRelId")]
         public Class RelClass { get; set; } = null!;
+    }
+
+    public class Depend
+    {
+        [Column(TypeName="oid")]
+        public int ClassId { get; set; }
+        [Column(TypeName="oid")]
+        public int ObjId { get; set; }
+        public int ObjSubId { get; set; }
+        [Column(TypeName="oid")]
+        public int RefClassId { get; set; }
+        [Column(TypeName="oid")]
+        public int RefObjId { get; set; }
+        public int RefObjSubId { get; set; }
+        public char DepType { get; set; }
     }
 }
