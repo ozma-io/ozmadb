@@ -11,6 +11,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.UserViews.DryRun
@@ -96,22 +97,23 @@ type UserViewsAPI (rctx : IRequestContext) =
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
+    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (chunk : ViewChunk) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
         task {
             match! resolveSource source flags with
             | Error e -> return Error e
             | Ok uv ->
                 try
-                    let restricted =
+                    let compiled =
                         match rctx.User.Type with
                         | RTRoot -> uv.UserView.Compiled
                         | RTRole role when role.CanRead -> uv.UserView.Compiled
                         | RTRole role ->
                             applyRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled
-                    let getResult info (res : ExecutedViewExpr) = task {
-                        return (uv, { res with Rows = Array.ofSeq res.Rows })
-                    }
-                    match convertViewArguments rawArgs restricted with
+                    let getResult info (res : ExecutedViewExpr) =
+                        task {
+                            return (uv, { res with Rows = Array.ofSeq res.Rows })
+                        }
+                    match convertViewArguments rawArgs compiled with
                     | Error msg ->
                         rctx.WriteEvent (fun event ->
                             event.Type <- "getUserView"
@@ -120,10 +122,12 @@ type UserViewsAPI (rctx : IRequestContext) =
                         )
                         return Error <| UVEArguments msg
                     | Ok arguments ->
-                            let! (uv, res) = runViewExpr ctx.Transaction.Connection.Query restricted arguments ctx.CancellationToken getResult
-                            return Ok { Info = uv.Info
-                                        Result = res
-                                      }
+                        let (extraArguments, compiled) = viewExprChunk chunk compiled
+                        let arguments = Map.union arguments extraArguments
+                        let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled arguments ctx.CancellationToken getResult
+                        return Ok { Info = puv.Info
+                                    Result = res
+                                  }
                 with
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view")
@@ -137,4 +141,4 @@ type UserViewsAPI (rctx : IRequestContext) =
 
     interface IUserViewsAPI with
         member this.GetUserViewInfo source flags = this.GetUserViewInfo source flags
-        member this.GetUserView source rawArguments flags = this.GetUserView source rawArguments flags
+        member this.GetUserView source rawArguments page flags = this.GetUserView source rawArguments page flags

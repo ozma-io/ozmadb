@@ -18,6 +18,7 @@ open Npgsql
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.ContextCache
 open FunWithFlags.FunDB.API.Request
@@ -31,15 +32,17 @@ type RequestErrorInfo =
     | [<CaseName("no_endpoint")>] RENoEndpoint
     | [<CaseName("no_instance")>] RENoInstance
     | [<CaseName("access_denied")>] REAccessDenied
+    | [<CaseName("concurrent_update")>] REConcurrentUpdate
     with
         [<DataMember>]
         member this.Message =
             match this with
-            | REInternal msg -> msg
+            | REInternal msg -> msg 
             | RERequest msg -> msg
             | RENoEndpoint -> "API endpoint doesn't exist"
             | RENoInstance -> "Instance not found"
             | REAccessDenied -> "Database access denied"
+            | REConcurrentUpdate -> "Concurrent update detected; try again"
 
 let requestError e =
     let handler =
@@ -49,6 +52,7 @@ let requestError e =
         | RENoEndpoint -> RequestErrors.notFound
         | RENoInstance -> RequestErrors.notFound
         | REAccessDenied _ -> RequestErrors.forbidden
+        | REConcurrentUpdate _ -> ServerErrors.serviceUnavailable
     handler (json e)
 
 let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
@@ -62,6 +66,9 @@ let boolRequestArg (name : string) (ctx: HttpContext) : bool =
     | (true, values) when values.Count = 0 -> true
     | (true, values) -> Option.defaultValue false (Parsing.tryBool values.[0])
     | (false, _) -> false
+
+let intRequestArg (name : string) (ctx: HttpContext) : int option =
+    ctx.TryGetQueryStringValue name |> Option.bind Parsing.tryIntInvariant
 
 let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
     let getArg (KeyValue(name : string, par)) =
@@ -265,6 +272,9 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
                 do! inst.Instance.DisposeAsync ()
                 return! f (FunDBAPI rctx) next ctx
             with
+            | :? ConcurrentUpdateException ->
+                // We may want to retry here in future.
+                return! requestError REConcurrentUpdate next ctx
             | :? RequestException as e ->
                 match e.Info with
                 | REUserNotFound

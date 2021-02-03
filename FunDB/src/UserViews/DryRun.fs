@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.SQL.Chunk
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -112,41 +113,9 @@ let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : Compiled
           ColumnAttributes = Seq.map2 filterPure (Seq.mapMaybe getColumn compiled.Columns) res.ColumnAttributes |> Seq.toArray
         }
 
-let private limitOrderLimit (orderLimit : SQL.OrderLimitClause) : SQL.OrderLimitClause =
-    let newLimit =
-        match orderLimit.Limit with
-        | None -> SQL.VEValue <| SQL.VInt 0
-        | Some oldLimit ->
-            // FIXME: multiply by zero here
-            oldLimit
-    { orderLimit with Limit = Some newLimit }
-
-let rec private limitSelectTreeExpr : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
-    | SQL.SSelect sel -> SQL.SSelect { sel with OrderLimit = limitOrderLimit sel.OrderLimit }
-    | SQL.SValues values -> SQL.SValues values
-    | SQL.SSetOp setOp ->
-        SQL.SSetOp
-            { Operation = setOp.Operation
-              AllowDuplicates = setOp.AllowDuplicates
-              A = limitSelectExpr setOp.A
-              B = limitSelectExpr setOp.B
-              OrderLimit = setOp.OrderLimit
-            }
-
-and private limitCommonTableExpr (cte : SQL.CommonTableExpr) : SQL.CommonTableExpr =
-    { Fields = cte.Fields
-      Materialized = cte.Materialized
-      Expr = limitSelectExpr cte.Expr
-    }
-
-and private limitCommonTableExprs (ctes : SQL.CommonTableExprs) : SQL.CommonTableExprs =
-    { Recursive = ctes.Recursive
-      Exprs = Array.map (fun (name, expr) -> (name, limitCommonTableExpr expr)) ctes.Exprs
-    }
-
-and private limitSelectExpr (select : SQL.SelectExpr) : SQL.SelectExpr =
-    { CTEs = Option.map limitCommonTableExprs select.CTEs
-      Tree = limitSelectTreeExpr select.Tree
+let private emptyLimit =
+    { Offset = None
+      Limit = Some (SQL.VEValue (SQL.VInt 0))
     }
 
 type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
@@ -209,7 +178,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                 { uv.Compiled with
                       Query =
                           { uv.Compiled.Query with
-                                Expression = limitSelectExpr uv.Compiled.Query.Expression
+                                Expression = selectExprChunk emptyLimit uv.Compiled.Query.Expression
                           }
                 }
             let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)

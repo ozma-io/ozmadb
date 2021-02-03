@@ -1,6 +1,5 @@
 module FunWithFlags.FunDB.Attributes.Update
 
-open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.FSharp.Quotations
@@ -9,6 +8,7 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Types
@@ -70,7 +70,7 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
 
 let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync(cancellationToken)
+        let! _ = serializedSaveChangesAsync db cancellationToken
 
         let currentSchemas = db.GetAttributesObjects ()
 
@@ -84,7 +84,7 @@ let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (can
 
         let updater = AttributesUpdater(db, allSchemas)
         updater.UpdateSchemas attrs.Schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync(cancellationToken)
+        let! changedEntries = serializedSaveChangesAsync db cancellationToken
         return changedEntries > 0
     }
 

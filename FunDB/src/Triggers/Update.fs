@@ -8,6 +8,7 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types
@@ -73,7 +74,7 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) =
 
 let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync(cancellationToken)
+        let! _ = serializedSaveChangesAsync db cancellationToken
 
         let currentSchemas = db.GetTriggersObjects ()
 
@@ -87,7 +88,7 @@ let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellatio
 
         let updater = TriggersUpdater(db, allSchemas)
         updater.UpdateSchemas triggers.Schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync(cancellationToken)
+        let! changedEntries = serializedSaveChangesAsync db cancellationToken
         return changedEntries > 0
     }
 

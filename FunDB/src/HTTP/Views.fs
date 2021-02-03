@@ -5,6 +5,7 @@ open Giraffe
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.HTTP.Utils
 
@@ -32,7 +33,11 @@ let viewsApi : HttpHandler =
         queryArgs <| fun rawArgs next ctx ->
             task {
                 let flags = getFlags ctx
-                match! api.UserViews.GetUserView viewRef rawArgs flags with
+                let chunk =
+                    { Offset = intRequestArg "__offset" ctx
+                      Limit = intRequestArg "__limit" ctx
+                    } : ViewChunk
+                match! api.UserViews.GetUserView viewRef rawArgs chunk flags with
                 | Ok res -> return! Successful.ok (json res) next ctx
                 | Result.Error err -> return! uvError err next ctx
             }

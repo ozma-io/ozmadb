@@ -1192,6 +1192,8 @@ let allowedFunctions : Map<FunctionName, SQL.FunctionName> =
           (FunQLName "age", SQL.SQLName "age")
           (FunQLName "date_part", SQL.SQLName "date_part")
           (FunQLName "date_trunc", SQL.SQLName "date_trunc")
+          (FunQLName "greatest", SQL.SQLName "greatest")
+          (FunQLName "least", SQL.SQLName "least")
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =

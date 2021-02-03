@@ -2,7 +2,6 @@ module FunWithFlags.FunDB.API.InstancesCache
 
 open System
 open System.Threading.Tasks
-open System.Collections.Concurrent
 open Microsoft.Extensions.Logging
 open FluidCaching
 

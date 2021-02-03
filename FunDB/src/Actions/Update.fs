@@ -9,6 +9,7 @@ open Microsoft.FSharp.Quotations
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDB.Actions.Source
@@ -48,7 +49,7 @@ type private ActionsUpdater (db : SystemContext) =
 
 let updateActions (db : SystemContext) (actions : SourceActions) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync(cancellationToken)
+        let! _ = serializedSaveChangesAsync db cancellationToken
 
         let currentSchemas = db.GetActionsObjects ()
         // We don't touch in any way schemas not in layout.
@@ -62,7 +63,7 @@ let updateActions (db : SystemContext) (actions : SourceActions) (cancellationTo
 
         let updater = ActionsUpdater(db)
         updater.UpdateSchemas actions.Schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync(cancellationToken)
+        let! changedEntries = serializedSaveChangesAsync db cancellationToken
         return changedEntries > 0
     }
 

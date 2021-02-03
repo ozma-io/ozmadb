@@ -22,6 +22,11 @@ type QueryException (message : string, innerException : Exception) =
 
     new (message : string) = QueryException (message, null)
 
+type ConcurrentUpdateException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = ConcurrentUpdateException (message, null)
+
 type ExprParameters = Map<int, Value>
 
 [<NoEquality; NoComparison>]
@@ -146,11 +151,15 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             try
                 try
                     do! command.PrepareAsync(cancellationToken)
-                with :? PostgresException as ex ->
+                with
+                | :? PostgresException as ex ->
                     logger.LogError(ex, "Failed to prepare {query}", queryStr)
                     reraise' ex
                 return! runFunc command
             with
+            // 40001: could not serialize access due to concurrent update
+            | :? PostgresException as ex when ex.SqlState = "40001" ->
+                return raisefWithInner ConcurrentUpdateException ex "Concurrent update detected"
             | :? PostgresException as ex ->
                 return raisefWithInner QueryException ex "Error while executing"
         }

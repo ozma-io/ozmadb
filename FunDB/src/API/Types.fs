@@ -28,6 +28,7 @@ open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.Operations.Entity
+open FunWithFlags.FunDB.FunQL.Chunk
 module SQL = FunWithFlags.FunDB.SQL.DDL
 
 type RawArguments = Map<string, JToken>
@@ -169,7 +170,7 @@ let emptyUserViewFlags =
 
 type IUserViewsAPI =
     abstract member GetUserViewInfo : UserViewSource -> UserViewFlags -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
-    abstract member GetUserView : UserViewSource -> RawArguments -> UserViewFlags -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
+    abstract member GetUserView : UserViewSource -> RawArguments -> ViewChunk -> UserViewFlags -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
 
 [<SerializeAsObject("error")>]
 type EntityErrorInfo =

@@ -8,6 +8,7 @@ open Microsoft.EntityFrameworkCore;
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
@@ -113,7 +114,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
 
 let updatePermissions (db : SystemContext) (roles : SourcePermissions) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync(cancellationToken)
+        let! _ = serializedSaveChangesAsync db cancellationToken
 
         let currentSchemas = db.GetRolesObjects ()
 
@@ -127,7 +128,7 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) (cancella
 
         let updater = PermissionsUpdater(db, allSchemas)
         updater.UpdateSchemas roles.Schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync(cancellationToken)
+        let! changedEntries = serializedSaveChangesAsync db cancellationToken
         return changedEntries > 0
     }
 

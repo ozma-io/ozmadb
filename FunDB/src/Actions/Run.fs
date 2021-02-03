@@ -11,7 +11,6 @@ open NetJs.Json
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.JavaScript.Runtime
-open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Types
 
 type ActionRunException (message : string, innerException : Exception) =

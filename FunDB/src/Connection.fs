@@ -35,6 +35,23 @@ type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : stri
     member this.CloseAsync () =
         connection.CloseAsync ()
 
+let inline private tryEFUpdateQuery (f : unit -> Task<'a>) : Task<'a> =
+    task {
+        try
+            return! f ()
+        with
+        | :? DbUpdateException as err ->
+            match err.InnerException with
+            // 40001: could not serialize access due to concurrent update
+            | :? PostgresException as perr when perr.SqlState = "40001" ->
+                return raisefWithInner ConcurrentUpdateException err "Concurrent update detected"
+            | _ ->
+                return reraise' err
+    }
+
+let serializedSaveChangesAsync (db : DbContext) (cancellationToken : CancellationToken) =
+    tryEFUpdateQuery <| fun () -> db.SaveChangesAsync cancellationToken
+
 type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationLevel) =
     let transaction = conn.Connection.BeginTransaction(isolationLevel)
 
@@ -57,9 +74,13 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
             do! transaction.DisposeAsync ()
             do! system.DisposeAsync ()
         }
+    
+    // Consumers should use this method instead of `System.SaveChangesAsync` to properly handle serialization errors.
+    member this.SystemSaveChangesAsync (cancellationToken : CancellationToken) =
+        serializedSaveChangesAsync system cancellationToken
 
     member this.Commit (cancellationToken : CancellationToken) =
-        task {
+        tryEFUpdateQuery <| fun () -> task {
             let! changed = system.SaveChangesAsync (cancellationToken)
             do! transaction.CommitAsync (cancellationToken)
             do! this.Rollback ()

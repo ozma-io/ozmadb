@@ -12,6 +12,7 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
@@ -153,7 +154,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
     member this.UpdateSchemas = updateSchemas
     member this.NeedsParentPass = needsParentPass
 
-let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) : Task =
+let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let currentSchemas = db.GetLayoutObjects ()
         let! schemas = currentSchemas.AsTracking().ToListAsync()
@@ -172,13 +173,13 @@ let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) : T
                         let id = Map.find ref allEntitiesMap
                         entity.ParentId <- Nullable(id)
 
-        let! changedEntries = db.SaveChangesAsync()
+        let! changedEntries = serializedSaveChangesAsync db cancellationToken
         return ()
     }
 
 let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync(cancellationToken)
+        let! _ = serializedSaveChangesAsync db cancellationToken
 
         let currentSchemas = db.GetLayoutObjects ()
         let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
@@ -192,10 +193,10 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken
 
         let updater = LayoutUpdater (db, schemas)
         updater.UpdateSchemas layout.Schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync(cancellationToken)
+        let! changedEntries = serializedSaveChangesAsync db cancellationToken
 
         if updater.NeedsParentPass then
-            do! updateLayoutParents db layout
+            do! updateLayoutParents db layout cancellationToken
 
         return changedEntries > 0
     }

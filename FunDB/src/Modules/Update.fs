@@ -5,14 +5,12 @@ open System.Linq
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
-open Microsoft.FSharp.Quotations
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDB.Modules.Source
-open FunWithFlags.FunDB.Modules.Types
 open FunWithFlags.FunDBSchema.System
 
 type UpdateModulesException (message : string, innerException : Exception) =
@@ -47,7 +45,7 @@ type private ModulesUpdater (db : SystemContext) =
 
 let updateModules (db : SystemContext) (modules : SourceModules) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync(cancellationToken)
+        let! _ = serializedSaveChangesAsync db cancellationToken
 
         let currentSchemas = db.GetModulesObjects ()
         // We don't touch in any way schemas not in layout.
@@ -61,6 +59,6 @@ let updateModules (db : SystemContext) (modules : SourceModules) (cancellationTo
 
         let updater = ModulesUpdater(db)
         updater.UpdateSchemas modules.Schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync(cancellationToken)
+        let! changedEntries = serializedSaveChangesAsync db cancellationToken
         return changedEntries > 0
     }

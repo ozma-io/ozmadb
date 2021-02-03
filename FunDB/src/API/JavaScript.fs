@@ -4,6 +4,8 @@ open Printf
 open NetJs
 open NetJs.Json
 open NetJs.Template
+open System
+open System.Threading.Tasks
 open System.Runtime.Serialization
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
@@ -14,6 +16,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.JavaScript.Runtime
 
@@ -70,10 +73,15 @@ type APITemplate (isolate : Isolate) =
         | :? Value.String as s -> s.Get()
         | _ -> throwCallError context "Unexpected value type: %O, expected string" v.ValueType
 
-    let returnResult (context : Context) (res : Result<'a, 'e>) : Value.Value =
-        match res with
-        | Ok r -> V8JsonWriter.Serialize(context, r)
-        | Error e -> throwError context e
+    let runApiCall (context : Context) (f : unit -> Task<Result<'a, 'e>>) : Func<Task<Value.Value>> =
+        let run () =
+            task {
+                let! res = f ()
+                match res with
+                | Ok r -> return V8JsonWriter.Serialize(context, r)
+                | Error e -> return throwError context e
+            }
+        Func<_>(run)
 
     let template =
         let template = ObjectTemplate.New(isolate)
@@ -113,11 +121,14 @@ type APITemplate (isolate : Isolate) =
                     jsDeserialize context args.[1] : RawArguments
                 else
                     Map.empty
+            let chunk =
+                if args.Length >= 3 && args.[2].ValueType <> Value.ValueType.Undefined then
+                    jsDeserialize context args.[2] : ViewChunk
+                else
+                    emptyViewChunk
             let handle = Option.get currentHandle
-            runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.UserViews.GetUserView source uvArgs emptyUserViewFlags
-                return returnResult context ret
-            }, isolate.CurrentCancellationToken).Value
+            let run = runApiCall context <| fun () -> handle.API.UserViews.GetUserView source uvArgs chunk emptyUserViewFlags
+            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
         ))
         fundbTemplate.Set("getUserViewInfo", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -125,10 +136,8 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let source = jsDeserialize context args.[0] : UserViewSource
             let handle = Option.get currentHandle
-            runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.UserViews.GetUserViewInfo source emptyUserViewFlags
-                return returnResult context ret
-            }, isolate.CurrentCancellationToken).Value
+            let run = runApiCall context <| fun () -> handle.API.UserViews.GetUserViewInfo source emptyUserViewFlags
+            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
         ))
 
         fundbTemplate.Set("getEntityInfo", FunctionTemplate.New(isolate, fun args ->
@@ -137,10 +146,8 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
             let handle = Option.get currentHandle
-            runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.Entities.GetEntityInfo ref
-                return returnResult context ret
-            }, isolate.CurrentCancellationToken).Value
+            let run = runApiCall context <| fun () -> handle.API.Entities.GetEntityInfo ref
+            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
         ))
         fundbTemplate.Set("insertEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -149,10 +156,8 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
             let rawArgs = jsDeserialize context args.[1] : RawArguments
             let handle = Option.get currentHandle
-            runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.Entities.InsertEntity ref rawArgs
-                return returnResult context ret
-            }, isolate.CurrentCancellationToken).Value
+            let run = runApiCall context <| fun () -> handle.API.Entities.InsertEntity ref rawArgs
+            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
         ))
         fundbTemplate.Set("updateEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -162,10 +167,8 @@ type APITemplate (isolate : Isolate) =
             let id = jsInt context args.[1]
             let rawArgs = jsDeserialize context args.[2] : RawArguments
             let handle = Option.get currentHandle
-            runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.Entities.UpdateEntity ref id rawArgs
-                return returnResult context ret
-            }, isolate.CurrentCancellationToken).Value
+            let run = runApiCall context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
+            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
         ))
         fundbTemplate.Set("deleteEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -174,10 +177,8 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
             let id = jsInt context args.[1]
             let handle = Option.get currentHandle
-            runtime.EventLoop.NewPromise(context, fun () -> task {
-                let! ret = handle.API.Entities.DeleteEntity ref id
-                return returnResult context ret
-            }, isolate.CurrentCancellationToken).Value
+            let run = runApiCall context <| fun () -> handle.API.Entities.DeleteEntity ref id
+            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
         ))
 
         fundbTemplate.Set("writeEvent", FunctionTemplate.New(isolate, fun args ->

@@ -1627,9 +1627,7 @@ let rec private flattenDomains : Domains -> FlattenedDomains = function
 
 let compileSingleFromClause (layout : Layout) (argumentsMap : CompiledArgumentsMap) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : SQL.FromExpr * SQL.ValueExpr option =
     let bogusArguments =
-        { Types = argumentsMap
-          LastPlaceholderId = 0
-        }
+        { emptyArguments with Types = argumentsMap }
     let compiler = QueryCompiler (layout, emptyMergedDefaultAttributes, bogusArguments)
     compiler.CompileSingleFromClause from where
 

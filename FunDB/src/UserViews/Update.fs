@@ -9,6 +9,7 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Schema
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
@@ -55,7 +56,7 @@ type private UserViewsUpdater (db : SystemContext) =
 
 let updateUserViews (db : SystemContext) (uvs : SourceUserViews) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let! _ = db.SaveChangesAsync(cancellationToken)
+        let! _ = serializedSaveChangesAsync db cancellationToken
 
         let currentSchemas = db.GetUserViewsObjects ()
 
@@ -68,7 +69,7 @@ let updateUserViews (db : SystemContext) (uvs : SourceUserViews) (cancellationTo
 
         let updater = UserViewsUpdater(db)
         updater.UpdateSchemas uvs.Schemas schemasMap
-        let! changedEntries = db.SaveChangesAsync(cancellationToken)
+        let! changedEntries = serializedSaveChangesAsync db cancellationToken
         return changedEntries > 0
     }
 

@@ -28,7 +28,8 @@ type ArgumentValues = Map<Placeholder, FieldValue>
 [<NoEquality; NoComparison>]
 type QueryArguments =
     { Types : CompiledArgumentsMap
-      LastPlaceholderId : PlaceholderId
+      NextPlaceholderId : PlaceholderId
+      NextAnonymousId : int
     }
 
 [<NoEquality; NoComparison>]
@@ -66,35 +67,51 @@ let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgum
 
 let emptyArguments =
     { Types = Map.empty
-      LastPlaceholderId = 0
+      NextPlaceholderId = 0
+      NextAnonymousId = 0
     }
 
 let addArgument (name : Placeholder) (arg : ResolvedArgument) (args : QueryArguments) : PlaceholderId * QueryArguments =
     match Map.tryFind name args.Types with
     | Some oldArg -> (oldArg.PlaceholderId, args)
     | None ->
-        let nextArg = args.LastPlaceholderId + 1
+        let argId = args.NextPlaceholderId
         let ret =
-            { Types = Map.add name (compileArgument nextArg arg) args.Types
-              LastPlaceholderId = nextArg
+            { args with
+                  Types = Map.add name (compileArgument argId arg) args.Types
+                  NextPlaceholderId = argId + 1
             }
-        (nextArg, ret)
+        (argId, ret)
+
+let addAnonymousArgument (arg : ResolvedArgument) (args : QueryArguments) : PlaceholderId * Placeholder * QueryArguments =
+    let argId = args.NextPlaceholderId
+    let name = sprintf "__%i" args.NextAnonymousId |> FunQLName |> PLocal
+    let ret =
+        { args with
+              Types = Map.add name (compileArgument argId arg) args.Types
+              NextPlaceholderId = argId + 1
+              NextAnonymousId = args.NextAnonymousId + 1
+        }
+    (argId, name, ret)
 
 let mergeArguments (a : QueryArguments) (b : QueryArguments) : QueryArguments =
     { Types = Map.unionUnique a.Types b.Types
-      LastPlaceholderId = max a.LastPlaceholderId b.LastPlaceholderId
+      NextPlaceholderId = max a.NextPlaceholderId b.NextPlaceholderId
+      NextAnonymousId = max a.NextAnonymousId b.NextAnonymousId
     }
 
 let compileArguments (args : ResolvedArgumentsMap) : QueryArguments =
-    let mutable lastPlaceholderId = 0
+    let mutable nextPlaceholderId = 0
 
     let convertArgument name arg =
-        lastPlaceholderId <- lastPlaceholderId + 1
-        compileArgument lastPlaceholderId arg
+        let ret = compileArgument nextPlaceholderId arg
+        nextPlaceholderId <- nextPlaceholderId + 1
+        ret
 
     let arguments = args |> Map.map convertArgument
     { Types = arguments
-      LastPlaceholderId = lastPlaceholderId
+      NextPlaceholderId = nextPlaceholderId
+      NextAnonymousId = 0
     }
 
 let private typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : unit =
