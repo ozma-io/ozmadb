@@ -422,6 +422,8 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
         | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
         | FECase (es, els) -> SQL.VECase (Array.map (fun (cond, expr) -> (traverse cond, traverse expr)) es, Option.map traverse els)
         | FECoalesce arr -> SQL.VECoalesce (Array.map traverse arr)
+        | FEGreatest arr -> SQL.VEGreatest (Array.map traverse arr)
+        | FELeast arr -> SQL.VELeast (Array.map traverse arr)
         | FEJsonArray vals ->
             let compiled = Array.map traverse vals
 

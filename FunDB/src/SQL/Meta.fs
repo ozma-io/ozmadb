@@ -135,6 +135,8 @@ let private castLocalExpr : ValueExpr -> ValueExpr =
         | VEAggFunc (name, args) -> raisef SQLMetaException "Invalid aggregate function in local expression: %O" name
         | VECase (es, els) -> VECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
         | VECoalesce vals -> VECoalesce (Array.map traverse vals)
+        | VEGreatest vals -> VEGreatest (Array.map traverse vals)
+        | VELeast vals -> VELeast (Array.map traverse vals)
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
         | VEPlus (a, b) -> VEPlus (traverse a, traverse b)

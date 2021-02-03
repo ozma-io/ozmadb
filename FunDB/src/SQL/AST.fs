@@ -417,6 +417,8 @@ type [<CustomEquality; NoComparison>] ValueExpr =
     | VECast of ValueExpr * DBValueType
     | VECase of (ValueExpr * ValueExpr)[] * (ValueExpr option)
     | VECoalesce of ValueExpr[]
+    | VEGreatest of ValueExpr[]
+    | VELeast of ValueExpr[]
     | VEJsonArrow of ValueExpr * ValueExpr
     | VEJsonTextArrow of ValueExpr * ValueExpr
     | VEPlus of ValueExpr * ValueExpr
@@ -481,6 +483,12 @@ type [<CustomEquality; NoComparison>] ValueExpr =
             | VECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+            | VEGreatest vals ->
+                assert (not <| Array.isEmpty vals)
+                sprintf "GREATEST(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+            | VELeast vals ->
+                assert (not <| Array.isEmpty vals)
+                sprintf "LEAST(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEPlus (a, b) -> sprintf "(%s) + (%s)" (a.ToSQLString()) (b.ToSQLString())
@@ -779,6 +787,8 @@ let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> Val
             let els' = Option.map traverse els
             VECase (es', els')
         | VECoalesce vals -> VECoalesce <| Array.map traverse vals
+        | VEGreatest vals -> VEGreatest <| Array.map traverse vals
+        | VELeast vals -> VELeast <| Array.map traverse vals
         | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
         | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
         | VEPlus (a, b) -> VEPlus (traverse a, traverse b)
@@ -870,6 +880,8 @@ let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
             Option.iter traverse els
         | VECoalesce vals -> Array.iter traverse vals
+        | VEGreatest vals -> Array.iter traverse vals
+        | VELeast vals -> Array.iter traverse vals
         | VEJsonArrow (a, b) -> traverse a; traverse b
         | VEJsonTextArrow (a, b) -> traverse a; traverse b
         | VEPlus (a, b) -> traverse a; traverse b

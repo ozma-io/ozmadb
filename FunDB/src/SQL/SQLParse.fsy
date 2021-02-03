@@ -56,6 +56,8 @@ open FunWithFlags.FunDB.SQL.AST
 %token ELSE
 %token END
 %token COALESCE
+%token GREATEST
+%token LEAST
 %token ARRAY
 %token ANY
 %token SOME
@@ -139,9 +141,10 @@ ValueExprMisc:
     | ValueExprMisc NOT_EQ ALL LEFT_PAREN ValueExpr RIGHT_PAREN { VENotEqAll ($1, $5) }
     | ValueExprMisc LESS_EQ ValueExprMisc                       { VELessEq ($1, $3) }
     | ValueExprMisc GREATER_EQ ValueExprMisc                    { VEGreaterEq ($1, $3) }
-
     | ValueExprMisc DOUBLE_COLON ValueType                      { VECast ($1, $3) }
     | COALESCE ParenedNonEmptyExprList                          { VECoalesce $2 }
+    | GREATEST ParenedNonEmptyExprList                          { VEGreatest $2 }
+    | LEAST ParenedNonEmptyExprList                             { VELeast $2 }
     | CaseExpr                                                  { $1 }
     | Name ParenedExprList                                      { VEFunc ($1, $2) }
     | ColumnRef                                                 { VEColumn $1 }

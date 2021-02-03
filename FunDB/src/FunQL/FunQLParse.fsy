@@ -238,6 +238,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token ELSE
 %token END
 %token COALESCE
+%token GREATEST
+%token LEAST
 %token LIMIT
 %token OFFSET
 %token UNION
@@ -599,6 +601,8 @@ FieldExprOp:
     | FieldExprOp MULTIPLY FieldExprOp       { FEMultiply ($1, $3) }
     | FieldExprOp DIVIDE FieldExprOp         { FEDivide ($1, $3) }
     | COALESCE ParenedNonEmptyExprList       { FECoalesce $2 }
+    | GREATEST ParenedNonEmptyExprList       { FEGreatest $2 }
+    | LEAST ParenedNonEmptyExprList          { FELeast $2 }
     | CaseExpr                               { $1 }
     | FieldExprVal                           { $1 }
 

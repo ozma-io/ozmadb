@@ -446,6 +446,8 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
     | FEIsNotNull of FieldExpr<'e, 'f>
     | FECase of (FieldExpr<'e, 'f> * FieldExpr<'e, 'f>)[] * (FieldExpr<'e, 'f> option)
     | FECoalesce of FieldExpr<'e, 'f>[]
+    | FEGreatest of FieldExpr<'e, 'f>[]
+    | FELeast of FieldExpr<'e, 'f>[]
     | FEJsonArray of FieldExpr<'e, 'f>[]
     | FEJsonObject of Map<FunQLName, FieldExpr<'e, 'f>>
     | FEJsonArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
@@ -507,6 +509,12 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
             | FECoalesce vals ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
+            | FEGreatest vals ->
+                assert (not <| Array.isEmpty vals)
+                sprintf "GREATEST(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
+            | FELeast vals ->
+                assert (not <| Array.isEmpty vals)
+                sprintf "LEAST(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
             | FEJsonArray vals -> vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", " |> sprintf "[%s]"
             | FEJsonObject obj -> obj |> Map.toSeq |> Seq.map (fun (k, v) -> sprintf "%s: %s" (k.ToFunQLString()) (v.ToFunQLString())) |> String.concat ", " |> sprintf "{%s}"
             | FEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToFunQLString()) (b.ToFunQLString())
@@ -848,6 +856,8 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
         | FEIsNotNull e -> FEIsNotNull (traverse e)
         | FECase (es, els) -> FECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
         | FECoalesce vals -> FECoalesce (Array.map traverse vals)
+        | FEGreatest vals -> FEGreatest (Array.map traverse vals)
+        | FELeast vals -> FELeast (Array.map traverse vals)
         | FEJsonArray vals -> FEJsonArray (Array.map traverse vals)
         | FEJsonObject obj -> FEJsonObject (Map.map (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> FEJsonArrow (traverse a, traverse b)
@@ -927,6 +937,8 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
             }
             Task.map2 (curry FECase) (Array.mapTask mapOne es) (Option.mapTask traverse els)
         | FECoalesce vals -> Task.map FECoalesce (Array.mapTask traverse vals)
+        | FEGreatest vals -> Task.map FEGreatest (Array.mapTask traverse vals)
+        | FELeast vals -> Task.map FELeast (Array.mapTask traverse vals)
         | FEJsonArray vals -> Task.map FEJsonArray (Array.mapTask traverse vals)
         | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTask (fun name -> traverse) obj)
         | FEJsonArrow (a, b) -> Task.map2 (curry FEJsonArrow) (traverse a) (traverse b)
@@ -1012,6 +1024,8 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
             Option.iter traverse els
         | FECoalesce vals -> Array.iter traverse vals
+        | FEGreatest vals -> Array.iter traverse vals
+        | FELeast vals -> Array.iter traverse vals
         | FEJsonArray vals -> Array.iter traverse vals
         | FEJsonObject obj -> Map.iter (fun name -> traverse) obj
         | FEJsonArrow (a, b) -> traverse a; traverse b
@@ -1192,8 +1206,6 @@ let allowedFunctions : Map<FunctionName, SQL.FunctionName> =
           (FunQLName "age", SQL.SQLName "age")
           (FunQLName "date_part", SQL.SQLName "date_part")
           (FunQLName "date_trunc", SQL.SQLName "date_trunc")
-          (FunQLName "greatest", SQL.SQLName "greatest")
-          (FunQLName "least", SQL.SQLName "least")
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =

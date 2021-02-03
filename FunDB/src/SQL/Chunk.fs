@@ -16,6 +16,7 @@ let private applyToOrderLimit (chunk : QueryChunk) (orderLimit : OrderLimitClaus
     let offsetExpr =
         match chunk.Offset with
         | None -> orderLimit.Offset
+        | Some (VEValue (VInt n)) when n <= 0 -> orderLimit.Offset
         | Some offset ->
             Some <|
                 match orderLimit.Offset with
@@ -24,10 +25,11 @@ let private applyToOrderLimit (chunk : QueryChunk) (orderLimit : OrderLimitClaus
     let limitExpr =
         match chunk.Limit with
         | None -> orderLimit.Limit
+        | Some (VEValue (VInt n)) when n <= 0 -> Some (VEValue (VInt 0))
         | Some limit ->
             Some <|
                 match orderLimit.Limit with
-                | Some oldLimit -> VEFunc(SQLName "least", [|oldLimit; limit|])
+                | Some oldLimit -> VELeast [|oldLimit; limit|]
                 | None -> limit
     { orderLimit with
           Offset = offsetExpr
