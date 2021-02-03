@@ -264,6 +264,10 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
     | Some (_, RSubEntity) -> ()
     | _ -> raisef ViewResolveException "Bound field in a type assertion is not a SubEntity field"
     let subEntityRef = { schema = Option.defaultValue fieldRef.entity.schema subEntityInfo.Ref.schema; name = subEntityInfo.Ref.name }
+    let subEntity =
+        match layout.FindEntity subEntityRef with
+        | None -> raisef ViewResolveException "Couldn't find subentity %O" subEntityInfo.Ref
+        | Some r -> r
     let info =
         match ctx with
         | SECInheritedFrom ->
@@ -274,15 +278,15 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
             else
                 raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
         | SECOfType ->
-            let subEntity =
-                match layout.FindEntity subEntityRef with
-                | None -> raisef ViewResolveException "Couldn't find subentity %O" subEntityInfo.Ref
-                | Some r -> r
             if subEntity.IsAbstract then
                 raisef ViewResolveException "Instances of abstract entity %O do not exist" subEntityRef
-            if not <| checkInheritance layout fieldRef.entity subEntityRef then
+            if subEntityRef = fieldRef.entity then
+                { AlwaysTrue = true }
+            else if checkInheritance layout fieldRef.entity subEntityRef then
+                { AlwaysTrue = false }
+            else
                 raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
-            { AlwaysTrue = not <| hasSubType subEntity }
+
     { Ref = relaxEntityRef subEntityRef; Extra = info }
 
 type private SelectFlags =
