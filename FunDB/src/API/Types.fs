@@ -118,6 +118,9 @@ type IRequestContext =
     abstract member WriteEventSync : (EventEntry -> unit) -> unit
     abstract member RunWithSource : EventSource -> (unit -> Task<'a>) -> Task<'a>
 
+type IAPIError =
+    abstract member Message : string
+
 [<SerializeAsObject("error")>]
 type UserViewErrorInfo =
     | [<CaseName("not_found")>] UVENotFound
@@ -134,6 +137,9 @@ type UserViewErrorInfo =
             | UVEResolution msg -> sprintf  "User view compilation failed: %s" msg
             | UVEExecution msg -> sprintf "User view execution failed: %s" msg
             | UVEArguments msg -> sprintf "Invalid user view arguments: %s" msg
+
+        interface IAPIError with
+            member this.Message = this.Message
 
 [<SerializeAsObject("type")>]
 type UserViewSource =
@@ -186,6 +192,9 @@ type EntityErrorInfo =
             | EEException msg -> msg
             | EETrigger (schema, name, inner) -> sprintf "Error while running trigger %O.%O: %s" schema name inner.Message
 
+        interface IAPIError with
+            member this.Message = this.Message
+
 [<SerializeAsObject("type")>]
 [<NoEquality; NoComparison>]
 type TransactionOp =
@@ -214,6 +223,9 @@ type TransactionError =
         [<DataMember>]
         member this.Message = this.Details.Message
 
+        interface IAPIError with
+            member this.Message = this.Message
+
 [<NoEquality; NoComparison>]
 type TransactionResult =
     { Results : TransactionOpResult[]
@@ -237,6 +249,9 @@ type SaveErrorInfo =
             | RSEAccessDenied -> "Dump access denied"
             | RSENotFound -> "Schema not found"
 
+        interface IAPIError with
+            member this.Message = this.Message
+
 [<SerializeAsObject("error")>]
 type RestoreErrorInfo =
     | [<CaseName("access_denied")>] RREAccessDenied
@@ -251,6 +266,9 @@ type RestoreErrorInfo =
             | RREPreloaded -> "Cannot restore preloaded schemas"
             | RREInvalidFormat msg -> sprintf "Invalid data format: %s" msg
             | RREConsistency msg -> sprintf "Inconsistent dump: %s" msg
+
+        interface IAPIError with
+            member this.Message = this.Message
 
 type SaveSchemas =
     | SSNames of SchemaName[]
@@ -278,6 +296,9 @@ type ActionErrorInfo =
             match this with
             | AENotFound -> "Entity not found"
             | AEException msg -> msg
+
+        interface IAPIError with
+            member this.Message = this.Message
 
 type IActionsAPI =
     abstract member RunAction : ActionRef -> JObject -> Task<Result<ActionResult, ActionErrorInfo>>

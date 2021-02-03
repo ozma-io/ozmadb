@@ -5,6 +5,7 @@ open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 open NetJs
 open NetJs.Json
+open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
@@ -14,7 +15,6 @@ open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.API.Types
-open FunWithFlags.FunDB.API.JavaScript
 
 type TriggerRunException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)
@@ -59,7 +59,15 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                         return
                             match newArgs.Data with
                             | :? bool as ret -> if ret then ATUntouched else ATCancelled
-                            | _ -> ATTouched <| jsDeserialize newArgs
+                            | _ ->
+                                let ret =
+                                    try
+                                        V8JsonReader.Deserialize(newArgs)
+                                    with
+                                    | :? JsonReaderException as e -> raisefWithInner TriggerRunException e "Failed to parse value"
+                                if isRefNull ret then
+                                    raisef TriggerRunException "Value must not be null"
+                                ATTouched ret
                     }
             with
             | :? JSException as e ->
