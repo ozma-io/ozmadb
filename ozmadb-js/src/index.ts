@@ -299,7 +299,7 @@ export interface IActionResult {
  * Error types.
  */
 
-export type RequestErrorType = "internal" | "request" | "no_endpoint" | "no_instance" | "access_denied";
+export type RequestErrorType = "internal" | "request" | "no_endpoint" | "no_instance" | "access_denied" | "concurrent_update";
 
 export interface IApiError {
   error: string;
@@ -309,14 +309,31 @@ export interface IApiError {
 export type UserViewErrorType = RequestErrorType | "not_found" | "resolution" | "execution" | "arguments";
 
 /*
+ * Extra types.
+ */
+
+export interface IViewChunk {
+  limit?: number;
+  offset?: number;
+}
+
+/*
  * Low-level API client.
  */
 
-const convertArgs = (args: Record<string, unknown>): URLSearchParams => {
+const convertArgs = (args?: Record<string, unknown>, chunk?: IViewChunk): URLSearchParams => {
   const params = new URLSearchParams();
-  Object.entries(args).forEach(([name, arg]) => {
-    params.append(name, JSON.stringify(arg));
-  });
+  if (args) {
+    Object.entries(args).forEach(([name, arg]) => {
+      params.append(name, JSON.stringify(arg));
+    });
+  }
+  if (chunk?.limit !== undefined) {
+    params.append("__limit", String(chunk.limit));
+  }
+  if (chunk?.offset !== undefined) {
+    params.append("__offset", String(chunk.offset));
+  }
   return params;
 };
 
@@ -391,22 +408,22 @@ export default class FunDBAPI {
     });
   }
 
-  getUserView = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewExprResult> => {
+  private getUserView = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewExprResult> => {
     return this.fetchJsonApi(`views/${path}/entries?${args}`, token, "GET") as Promise<IViewExprResult>;
   };
 
-  getUserViewInfo = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewInfoResult> => {
+  private getUserViewInfo = async (path: string, token: string | null, args: URLSearchParams): Promise<IViewInfoResult> => {
     return this.fetchJsonApi(`views/${path}/info?${args}`, token, "GET") as Promise<IViewInfoResult>;
   };
 
-  getAnonymousUserView = async (token: string | null, query: string, args: Record<string, unknown>): Promise<IViewExprResult> => {
-    const search = convertArgs(args);
+  getAnonymousUserView = async (token: string | null, query: string, args?: Record<string, unknown>, chunk?: IViewChunk): Promise<IViewExprResult> => {
+    const search = convertArgs(args, chunk);
     search.set("__query", query);
     return this.getUserView("anonymous", token, search);
   };
 
-  getNamedUserView = async (token: string | null, ref: IUserViewRef, args: Record<string, unknown>): Promise<IViewExprResult> => {
-    return this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, convertArgs(args));
+  getNamedUserView = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, chunk?: IViewChunk): Promise<IViewExprResult> => {
+    return this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, convertArgs(args, chunk));
   };
 
   getNamedUserViewInfo = async (token: string | null, ref: IUserViewRef): Promise<IViewInfoResult> => {
@@ -421,8 +438,8 @@ export default class FunDBAPI {
     return this.fetchJsonApi("transaction", token, "POST", action) as Promise<ITransactionResult>;
   };
 
-  runAction = async (token: string | null, ref: IActionRef, args: Record<string, unknown>): Promise<IActionResult> => {
-    return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args) as Promise<IActionResult>;
+  runAction = async (token: string | null, ref: IActionRef, args?: Record<string, unknown>): Promise<IActionResult> => {
+    return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args ?? {}) as Promise<IActionResult>;
   };
 
   saveSchemas = async (token: string | null, schemas: string[] | null): Promise<Blob> => {
