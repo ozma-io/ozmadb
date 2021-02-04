@@ -81,10 +81,13 @@ export interface IArrayFieldType {
   subtype: FieldValueType;
 }
 
-export interface IReferenceFieldType {
-  type: "reference";
+export interface IReferenceEntity {
   entity: IEntityRef;
   where?: string;
+}
+
+export interface IReferenceFieldType extends IReferenceEntity {
+  type: "reference";
 }
 
 export interface IEnumFieldType {
@@ -315,6 +318,14 @@ export type UserViewErrorType = RequestErrorType | "not_found" | "resolution" | 
 export interface IViewChunk {
   limit?: number;
   offset?: number;
+}
+
+/*
+ * Helpful functions.
+ */
+
+export const goodName = (name: string): boolean => {
+  return !(name === "" || name.includes(' ') || name.includes('/') || name.includes("__"));
 }
 
 /*
