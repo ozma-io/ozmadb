@@ -31,6 +31,8 @@ open FunWithFlags.FunDB.SQL.AST
 %token CONCAT
 %token LIKE_OP
 %token NOT_LIKE_OP
+%token ILIKE_OP
+%token NOT_ILIKE_OP
 %token ARROW
 %token PLUS
 %token MINUS
@@ -45,6 +47,7 @@ open FunWithFlags.FunDB.SQL.AST
 %token AND
 %token OR
 %token LIKE
+%token ILIKE
 %token SIMILAR
 %token IN
 %token IS
@@ -73,7 +76,7 @@ open FunWithFlags.FunDB.SQL.AST
 %right NOT
 %right EQ
 %nonassoc LESS GREATER
-%nonassoc LIKE LIKE_OP NOT_LIKE_OP
+%nonassoc LIKE ILIKE LIKE_OP NOT_LIKE_OP ILIKE_OP NOT_ILIKE_OP
 %nonassoc IN
 %left NOT_EQ LESS_EQ GREATER_EQ CONCAT ARROW
 %nonassoc IS FROM
@@ -113,6 +116,10 @@ ValueExprLess:
     | ValueExprIs NOT LIKE ValueExprIs           { VENotLike ($1, $4) }
     | ValueExprIs LIKE_OP ValueExprIs            { VELike ($1, $3) }
     | ValueExprIs NOT_LIKE_OP ValueExprIs        { VENotLike ($1, $3) }
+    | ValueExprIs ILIKE ValueExprIs              { VEILike ($1, $3) }
+    | ValueExprIs NOT ILIKE ValueExprIs          { VENotILike ($1, $4) }
+    | ValueExprIs ILIKE_OP ValueExprIs           { VEILike ($1, $3) }
+    | ValueExprIs NOT_ILIKE_OP ValueExprIs       { VENotILike ($1, $3) }
     | ValueExprIs SIMILAR TO ValueExprIs         { VESimilarTo ($1, $4) }
     | ValueExprIs NOT SIMILAR TO ValueExprIs     { VENotSimilarTo ($1, $5) }
     | ValueExprIs MATCH_REGEX ValueExprIs        { VEMatchRegex ($1, $3) }

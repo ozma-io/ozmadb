@@ -427,6 +427,8 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
     | FENotEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FELike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FENotLike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEILike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FENotILike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FESimilarTo of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FENotSimilarTo of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEMatchRegex of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
@@ -478,6 +480,8 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
             | FENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FENotLike (e, pat) -> sprintf "(%s) NOT LIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
+            | FEILike (e, pat) -> sprintf "(%s) ILIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
+            | FENotILike (e, pat) -> sprintf "(%s) NOT ILIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FESimilarTo (e, pat) -> sprintf "(%s) SIMILAR TO (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FENotSimilarTo (e, pat) -> sprintf "(%s) NOT SIMILAR TO (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FEMatchRegex (e, pat) -> sprintf "(%s) ~ (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
@@ -837,6 +841,8 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
         | FENotEq (a, b) -> FENotEq (traverse a, traverse b)
         | FELike (e, pat) -> FELike (traverse e, traverse pat)
         | FENotLike (e, pat) -> FENotLike (traverse e, traverse pat)
+        | FEILike (e, pat) -> FEILike (traverse e, traverse pat)
+        | FENotILike (e, pat) -> FENotILike (traverse e, traverse pat)
         | FESimilarTo (e, pat) -> FESimilarTo (traverse e, traverse pat)
         | FENotSimilarTo (e, pat) -> FENotSimilarTo (traverse e, traverse pat)
         | FEMatchRegex (e, pat) -> FEMatchRegex (traverse e, traverse pat)
@@ -912,6 +918,8 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
         | FENotEq (a, b) -> Task.map2 (curry FENotEq) (traverse a) (traverse b)
         | FELike (e, pat) -> Task.map2 (curry FELike) (traverse e) (traverse pat)
         | FENotLike (e, pat) -> Task.map2 (curry FENotLike) (traverse e) (traverse pat)
+        | FEILike (e, pat) -> Task.map2 (curry FEILike) (traverse e) (traverse pat)
+        | FENotILike (e, pat) -> Task.map2 (curry FENotILike) (traverse e) (traverse pat)
         | FESimilarTo (e, pat) -> Task.map2 (curry FESimilarTo) (traverse e) (traverse pat)
         | FENotSimilarTo (e, pat) -> Task.map2 (curry FENotSimilarTo) (traverse e) (traverse pat)
         | FEMatchRegex (e, pat) -> Task.map2 (curry FEMatchRegex) (traverse e) (traverse pat)
@@ -1003,6 +1011,8 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FENotEq (a, b) -> traverse a; traverse b
         | FELike (e, pat) -> traverse e; traverse pat
         | FENotLike (e, pat) -> traverse e; traverse pat
+        | FEILike (e, pat) -> traverse e; traverse pat
+        | FENotILike (e, pat) -> traverse e; traverse pat
         | FESimilarTo (e, pat) -> traverse e; traverse pat
         | FENotSimilarTo (e, pat) -> traverse e; traverse pat
         | FEMatchRegex (e, pat) -> traverse e; traverse pat

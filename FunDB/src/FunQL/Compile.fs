@@ -403,6 +403,8 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
         | FENotEq (a, b) -> SQL.VENotEq (traverse a, traverse b)
         | FELike (e, pat) -> SQL.VELike (traverse e, traverse pat)
         | FENotLike (e, pat) -> SQL.VENotLike (traverse e, traverse pat)
+        | FEILike (e, pat) -> SQL.VEILike (traverse e, traverse pat)
+        | FENotILike (e, pat) -> SQL.VENotILike (traverse e, traverse pat)
         | FESimilarTo (e, pat) -> SQL.VESimilarTo (traverse e, traverse pat)
         | FENotSimilarTo (e, pat) -> SQL.VENotSimilarTo (traverse e, traverse pat)
         | FEMatchRegex (e, pat) -> SQL.VEMatchRegex (traverse e, traverse pat)

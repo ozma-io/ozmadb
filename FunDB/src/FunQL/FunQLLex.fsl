@@ -73,40 +73,42 @@ and tokenizeFunQL = parse
     | "$" unescapedId  { Parse.ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 1).ToLower()) }
 
     // Symbols
-    | "@{"  { Parse.AT_LEFT_BRACE }
-    | "{"   { Parse.LEFT_BRACE }
-    | "}"   { Parse.RIGHT_BRACE }
-    | "("   { Parse.LEFT_PAREN }
-    | ")"   { Parse.RIGHT_PAREN }
-    | "["   { Parse.LEFT_BRACKET }
-    | "]"   { Parse.RIGHT_BRACKET }
-    | "::"  { Parse.DOUBLE_COLON }
-    | ":"   { Parse.COLON }
-    | ","   { Parse.COMMA }
-    | "."   { Parse.DOT }
-    | "="   { Parse.EQ }
-    | "<>"  { Parse.NOT_EQ }
-    | "!="  { Parse.NOT_EQ }
-    | ">="  { Parse.GREATER_EQ }
-    | ">"   { Parse.GREATER }
-    | "<="  { Parse.LESS_EQ }
-    | "<"   { Parse.LESS }
-    | "@"   { Parse.AT }
-    | "=>"  { Parse.BOLD_ARROW }
-    | "||"  { Parse.CONCAT }
-    | "~"   { Parse.MATCH_REGEX }
-    | "~*"  { Parse.MATCH_REGEX_CI }
-    | "!~"  { Parse.NOT_MATCH_REGEX }
-    | "!~*" { Parse.NOT_MATCH_REGEX_CI }
-    | "~~"  { Parse.LIKE_OP }
-    | "!~~" { Parse.NOT_LIKE_OP }
-    | "->"  { Parse.ARROW }
-    | "+"   { Parse.PLUS }
-    | "-"   { Parse.MINUS }
-    | "*"   { Parse.MULTIPLY }
-    | "/"   { Parse.DIVIDE }
-    | "&"   { Parse.AMPERSAND }
-    | "->>" { Parse.DOUBLE_ARROW }
+    | "@{"   { Parse.AT_LEFT_BRACE }
+    | "{"    { Parse.LEFT_BRACE }
+    | "}"    { Parse.RIGHT_BRACE }
+    | "("    { Parse.LEFT_PAREN }
+    | ")"    { Parse.RIGHT_PAREN }
+    | "["    { Parse.LEFT_BRACKET }
+    | "]"    { Parse.RIGHT_BRACKET }
+    | "::"   { Parse.DOUBLE_COLON }
+    | ":"    { Parse.COLON }
+    | ","    { Parse.COMMA }
+    | "."    { Parse.DOT }
+    | "="    { Parse.EQ }
+    | "<>"   { Parse.NOT_EQ }
+    | "!="   { Parse.NOT_EQ }
+    | ">="   { Parse.GREATER_EQ }
+    | ">"    { Parse.GREATER }
+    | "<="   { Parse.LESS_EQ }
+    | "<"    { Parse.LESS }
+    | "@"    { Parse.AT }
+    | "=>"   { Parse.BOLD_ARROW }
+    | "||"   { Parse.CONCAT }
+    | "~"    { Parse.MATCH_REGEX }
+    | "~*"   { Parse.MATCH_REGEX_CI }
+    | "!~"   { Parse.NOT_MATCH_REGEX }
+    | "!~*"  { Parse.NOT_MATCH_REGEX_CI }
+    | "~~"   { Parse.LIKE_OP }
+    | "!~~"  { Parse.NOT_LIKE_OP }
+    | "~~*"  { Parse.ILIKE_OP }
+    | "!~~*" { Parse.NOT_ILIKE_OP }
+    | "->"   { Parse.ARROW }
+    | "+"    { Parse.PLUS }
+    | "-"    { Parse.MINUS }
+    | "*"    { Parse.MULTIPLY }
+    | "/"    { Parse.DIVIDE }
+    | "&"    { Parse.AMPERSAND }
+    | "->>"  { Parse.DOUBLE_ARROW }
 
     // Keywords
     | t r u e           { Parse.BOOL true }
@@ -129,6 +131,7 @@ and tokenizeFunQL = parse
     | a n d             { Parse.AND }
     | o r               { Parse.OR }
     | l i k e           { Parse.LIKE }
+    | i l i k e         { Parse.ILIKE }
     | s i m i l a r     { Parse.SIMILAR }
     | i n               { Parse.IN }
     | i s               { Parse.IS }

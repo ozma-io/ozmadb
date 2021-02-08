@@ -51,32 +51,34 @@ rule tokenizeSQL = parse
     | "'" ( [^ '\''] | "''" )* "'" { Parse.STRING (sqlString 0 lexbuf) }
 
     // Symbols
-    | "::"  { Parse.DOUBLE_COLON }
-    | "("   { Parse.LEFT_PAREN }
-    | ")"   { Parse.RIGHT_PAREN }
-    | "["   { Parse.LEFT_BRACKET }
-    | "]"   { Parse.RIGHT_BRACKET }
-    | ","   { Parse.COMMA }
-    | "."   { Parse.DOT }
-    | "="   { Parse.EQ }
-    | "<>"  { Parse.NOT_EQ }
-    | "!="  { Parse.NOT_EQ }
-    | ">="  { Parse.GREATER_EQ }
-    | ">"   { Parse.GREATER }
-    | "<="  { Parse.LESS_EQ }
-    | "<"   { Parse.LESS }
-    | "||"  { Parse.CONCAT }
-    | "~~"  { Parse.LIKE_OP }
-    | "!~~" { Parse.NOT_LIKE_OP }
-    | "~"   { Parse.MATCH_REGEX }
-    | "~*"  { Parse.MATCH_REGEX_CI }
-    | "!~"  { Parse.NOT_MATCH_REGEX }
-    | "!~*" { Parse.NOT_MATCH_REGEX_CI }
-    | "->"  { Parse.ARROW }
-    | "+"   { Parse.PLUS }
-    | "-"   { Parse.MINUS }
-    | "*"   { Parse.MULTIPLY }
-    | "/"   { Parse.DIVIDE }
+    | "::"   { Parse.DOUBLE_COLON }
+    | "("    { Parse.LEFT_PAREN }
+    | ")"    { Parse.RIGHT_PAREN }
+    | "["    { Parse.LEFT_BRACKET }
+    | "]"    { Parse.RIGHT_BRACKET }
+    | ","    { Parse.COMMA }
+    | "."    { Parse.DOT }
+    | "="    { Parse.EQ }
+    | "<>"   { Parse.NOT_EQ }
+    | "!="   { Parse.NOT_EQ }
+    | ">="   { Parse.GREATER_EQ }
+    | ">"    { Parse.GREATER }
+    | "<="   { Parse.LESS_EQ }
+    | "<"    { Parse.LESS }
+    | "||"   { Parse.CONCAT }
+    | "~~"   { Parse.LIKE_OP }
+    | "!~~"  { Parse.NOT_LIKE_OP }
+    | "~~*"  { Parse.ILIKE_OP }
+    | "!~~*" { Parse.NOT_ILIKE_OP }
+    | "~"    { Parse.MATCH_REGEX }
+    | "~*"   { Parse.MATCH_REGEX_CI }
+    | "!~"   { Parse.NOT_MATCH_REGEX }
+    | "!~*"  { Parse.NOT_MATCH_REGEX_CI }
+    | "->"   { Parse.ARROW }
+    | "+"    { Parse.PLUS }
+    | "-"    { Parse.MINUS }
+    | "*"    { Parse.MULTIPLY }
+    | "/"    { Parse.DIVIDE }
 
     // Keywords
     | t r u e         { Parse.BOOL true }
@@ -93,6 +95,7 @@ rule tokenizeSQL = parse
     | e n d           { Parse.END }
     | c o a l e s c e { Parse.COALESCE }
     | l i k e         { Parse.LIKE }
+    | i l i k e       { Parse.ILIKE }
     | s i m i l a r   { Parse.SIMILAR }
     | t o             { Parse.TO }
     | i n             { Parse.IN }

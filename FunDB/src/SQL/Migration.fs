@@ -124,6 +124,8 @@ let private normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VENotEqAll (e, arr) -> VENotEqAll (traverse e, traverse arr)
         | VELike (e, pat) -> VELike (traverse e, traverse pat)
         | VENotLike (e, pat) -> VENotLike (traverse e, traverse pat)
+        | VEILike (e, pat) -> VEILike (traverse e, traverse pat)
+        | VENotILike (e, pat) -> VENotILike (traverse e, traverse pat)
         | VESimilarTo (e, pat) -> VESimilarTo (traverse e, traverse pat)
         | VENotSimilarTo (e, pat) -> VENotSimilarTo (traverse e, traverse pat)
         | VEMatchRegex (e, pat) -> VEMatchRegex (traverse e, traverse pat)

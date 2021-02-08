@@ -396,6 +396,8 @@ type [<CustomEquality; NoComparison>] ValueExpr =
     | VENotEqAll of ValueExpr * ValueExpr
     | VELike of ValueExpr * ValueExpr
     | VENotLike of ValueExpr * ValueExpr
+    | VEILike of ValueExpr * ValueExpr
+    | VENotILike of ValueExpr * ValueExpr
     | VESimilarTo of ValueExpr * ValueExpr
     | VENotSimilarTo of ValueExpr * ValueExpr
     | VEMatchRegex of ValueExpr * ValueExpr
@@ -450,6 +452,8 @@ type [<CustomEquality; NoComparison>] ValueExpr =
             | VENotEqAll (e, arr) -> sprintf "(%s) <> ALL (%s)" (e.ToSQLString()) (arr.ToSQLString())
             | VELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
             | VENotLike (e, pat) -> sprintf "(%s) NOT LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
+            | VEILike (e, pat) -> sprintf "(%s) ILIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
+            | VENotILike (e, pat) -> sprintf "(%s) NOT ILIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
             | VESimilarTo (e, pat) -> sprintf "(%s) SIMILAR TO (%s)" (e.ToSQLString()) (pat.ToSQLString())
             | VENotSimilarTo (e, pat) -> sprintf "(%s) NOT SIMILAR TO (%s)" (e.ToSQLString()) (pat.ToSQLString())
             | VEMatchRegex (e, pat) -> sprintf "(%s) ~ (%s)" (e.ToSQLString()) (pat.ToSQLString())
@@ -763,6 +767,8 @@ let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> Val
         | VENotEqAll (e, arr) -> VENotEqAll (traverse e, traverse arr)
         | VELike (e, pat) -> VELike (traverse e, traverse pat)
         | VENotLike (e, pat) -> VENotLike (traverse e, traverse pat)
+        | VEILike (e, pat) -> VEILike (traverse e, traverse pat)
+        | VENotILike (e, pat) -> VENotILike (traverse e, traverse pat)
         | VESimilarTo (e, pat) -> VESimilarTo (traverse e, traverse pat)
         | VENotSimilarTo (e, pat) -> VENotSimilarTo (traverse e, traverse pat)
         | VEMatchRegex (e, pat) -> VEMatchRegex (traverse e, traverse pat)
@@ -857,6 +863,8 @@ let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
         | VENotEqAll (e, arr) -> traverse e; traverse arr
         | VELike (e, pat) -> traverse e; traverse pat
         | VENotLike (e, pat) -> traverse e; traverse pat
+        | VEILike (e, pat) -> traverse e; traverse pat
+        | VENotILike (e, pat) -> traverse e; traverse pat
         | VESimilarTo (e, pat) -> traverse e; traverse pat
         | VENotSimilarTo (e, pat) -> traverse e; traverse pat
         | VEMatchRegex (e, pat) -> traverse e; traverse pat

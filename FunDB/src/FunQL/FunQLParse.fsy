@@ -194,6 +194,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token AT_LEFT_BRACE
 %token LIKE_OP
 %token NOT_LIKE_OP
+%token ILIKE_OP
+%token NOT_ILIKE_OP
 %token ARROW
 %token DOUBLE_ARROW
 %token PLUS
@@ -224,6 +226,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token AND
 %token OR
 %token LIKE
+%token ILIKE
 %token SIMILAR
 %token IN
 %token IS
@@ -278,7 +281,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %right NOT
 %nonassoc EQ NOT_EQ
 %nonassoc LESS GREATER LESS_EQ GREATER_EQ
-%nonassoc LIKE LIKE_OP NOT_LIKE_OP
+%nonassoc LIKE ILIKE LIKE_OP ILIKE_OP NOT_LIKE_OP NOT_ILIKE_OP
 %nonassoc IN
 %left CONCAT ARROW DOUBLE_ARROW
 %nonassoc IS
@@ -579,8 +582,12 @@ FieldExprEq:
     | FieldExprOp IS NOT DISTINCT FROM FieldExprOp { FENotDistinct ($1, $6) }
     | FieldExprOp LIKE FieldExprOp                 { FELike ($1, $3) }
     | FieldExprOp NOT LIKE FieldExprOp             { FENotLike ($1, $4) }
+    | FieldExprOp ILIKE FieldExprOp                { FEILike ($1, $3) }
+    | FieldExprOp NOT ILIKE FieldExprOp            { FENotILike ($1, $4) }
     | FieldExprOp LIKE_OP FieldExprOp              { FELike ($1, $3) }
     | FieldExprOp NOT_LIKE_OP FieldExprOp          { FENotLike ($1, $3) }
+    | FieldExprOp ILIKE_OP FieldExprOp             { FEILike ($1, $3) }
+    | FieldExprOp NOT_ILIKE_OP FieldExprOp         { FENotILike ($1, $3) }
     | FieldExprOp SIMILAR TO FieldExprOp           { FESimilarTo ($1, $4) }
     | FieldExprOp NOT SIMILAR TO FieldExprOp       { FENotSimilarTo ($1, $5) }
     | FieldExprOp MATCH_REGEX FieldExprOp          { FEMatchRegex ($1, $3) }
