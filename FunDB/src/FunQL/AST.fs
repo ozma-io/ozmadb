@@ -395,6 +395,58 @@ type EntityAlias =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+type [<NoEquality; NoComparison>] BinaryOperator =
+    | BOLess
+    | BOLessEq
+    | BOGreater
+    | BOGreaterEq
+    | BOEq
+    | BONotEq
+    | BOConcat
+    | BOLike
+    | BOILike
+    | BONotLike
+    | BONotILike
+    | BOMatchRegex
+    | BOMatchRegexCI
+    | BONotMatchRegex
+    | BONotMatchRegexCI
+    | BOPlus
+    | BOMinus
+    | BOMultiply
+    | BODivide
+    | BOJsonArrow
+    | BOJsonTextArrow
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | BOLess -> "<"
+            | BOLessEq -> "<="
+            | BOGreater -> ">"
+            | BOGreaterEq -> ">="
+            | BOEq -> "="
+            | BONotEq -> "<>"
+            | BOConcat -> "||"
+            | BOLike -> "~~"
+            | BOILike -> "~~*"
+            | BONotLike -> "!~~"
+            | BONotILike -> "!~~*"
+            | BOMatchRegex -> "~"
+            | BOMatchRegexCI -> "~*"
+            | BONotMatchRegex -> "!~"
+            | BONotMatchRegexCI -> "!~*"
+            | BOPlus -> "+"
+            | BOMinus -> "-"
+            | BOMultiply -> "*"
+            | BODivide -> "/"
+            | BOJsonArrow -> "->"
+            | BOJsonTextArrow -> "->>"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString ()
+
 type [<NoEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | [<CaseName(null, InnerObject=true)>] FTType of FieldExprType
     | [<CaseName("reference")>] FTReference of reference : 'e * where : FieldExpr<'e, 'f> option
@@ -420,44 +472,23 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
     | FENot of FieldExpr<'e, 'f>
     | FEAnd of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEOr of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEConcat of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
+    | FEBinaryOp of FieldExpr<'e, 'f> * BinaryOperator * FieldExpr<'e, 'f>
     | FEDistinct of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FENotDistinct of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FENotEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FELike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FENotLike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEILike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FENotILike of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FESimilarTo of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FENotSimilarTo of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEMatchRegex of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEMatchRegexCI of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FENotMatchRegex of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FENotMatchRegexCI of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FELess of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FELessEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEGreater of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEGreaterEq of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEIn of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>[]
     | FENotIn of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>[]
     | FEInQuery of FieldExpr<'e, 'f> * SelectExpr<'e, 'f>
     | FENotInQuery of FieldExpr<'e, 'f> * SelectExpr<'e, 'f>
+    | FEAny of FieldExpr<'e, 'f> * BinaryOperator * FieldExpr<'e, 'f>
+    | FEAll of FieldExpr<'e, 'f> * BinaryOperator * FieldExpr<'e, 'f>
     | FECast of FieldExpr<'e, 'f> * FieldExprType
     | FEIsNull of FieldExpr<'e, 'f>
     | FEIsNotNull of FieldExpr<'e, 'f>
     | FECase of (FieldExpr<'e, 'f> * FieldExpr<'e, 'f>)[] * (FieldExpr<'e, 'f> option)
-    | FECoalesce of FieldExpr<'e, 'f>[]
-    | FEGreatest of FieldExpr<'e, 'f>[]
-    | FELeast of FieldExpr<'e, 'f>[]
     | FEJsonArray of FieldExpr<'e, 'f>[]
     | FEJsonObject of Map<FunQLName, FieldExpr<'e, 'f>>
-    | FEJsonArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEJsonTextArrow of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEPlus of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEMinus of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEMultiply of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
-    | FEDivide of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEFunc of FunQLName * FieldExpr<'e, 'f>[]
     | FEAggFunc of FunQLName * AggExpr<'e, 'f>
     | FESubquery of SelectExpr<'e, 'f>
@@ -473,25 +504,11 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
             | FENot e -> sprintf "NOT (%s)" (e.ToFunQLString())
             | FEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToFunQLString()) (b.ToFunQLString())
+            | FEBinaryOp (a, op, b) -> sprintf "(%s) %s (%s)" (a.ToFunQLString()) (op.ToFunQLString()) (b.ToFunQLString())
             | FEDistinct (a, b) -> sprintf "(%s) IS DISTINCT FROM (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FENotDistinct (a, b) -> sprintf "(%s) IS NOT DISTINCT FROM (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
-            | FENotLike (e, pat) -> sprintf "(%s) NOT LIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
-            | FEILike (e, pat) -> sprintf "(%s) ILIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
-            | FENotILike (e, pat) -> sprintf "(%s) NOT ILIKE (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FESimilarTo (e, pat) -> sprintf "(%s) SIMILAR TO (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FENotSimilarTo (e, pat) -> sprintf "(%s) NOT SIMILAR TO (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
-            | FEMatchRegex (e, pat) -> sprintf "(%s) ~ (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
-            | FEMatchRegexCI (e, pat) -> sprintf "(%s) ~* (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
-            | FENotMatchRegex (e, pat) -> sprintf "(%s) !~ (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
-            | FENotMatchRegexCI (e, pat) -> sprintf "(%s) !~* (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
-            | FELess (a, b) -> sprintf "(%s) < (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FELessEq (a, b) -> sprintf "(%s) <= (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEGreater (a, b) -> sprintf "(%s) > (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEGreaterEq (a, b) -> sprintf "(%s) >= (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEIn (e, vals) ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "(%s) IN (%s)" (e.ToFunQLString()) (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
@@ -500,6 +517,8 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
                 sprintf "(%s) NOT IN (%s)" (e.ToFunQLString()) (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
             | FEInQuery (e, query) -> sprintf "(%s) IN (%s)" (e.ToFunQLString()) (query.ToFunQLString())
             | FENotInQuery (e, query) -> sprintf "(%s) NOT IN (%s)" (e.ToFunQLString()) (query.ToFunQLString())
+            | FEAny (e, op, arr) -> sprintf "(%s) %s ANY (%s)" (e.ToFunQLString()) (op.ToFunQLString()) (arr.ToFunQLString())
+            | FEAll (e, op, arr) -> sprintf "(%s) %s ALL (%s)" (e.ToFunQLString()) (op.ToFunQLString()) (arr.ToFunQLString())
             | FECast (e, typ) -> sprintf "(%s) :: %s" (e.ToFunQLString()) (typ.ToFunQLString())
             | FEIsNull e -> sprintf "(%s) IS NULL" (e.ToFunQLString())
             | FEIsNotNull e -> sprintf "(%s) IS NOT NULL" (e.ToFunQLString())
@@ -510,23 +529,8 @@ and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f 
                     | None -> ""
                     | Some e -> sprintf "ELSE %s" (e.ToFunQLString())
                 String.concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
-            | FECoalesce vals ->
-                assert (not <| Array.isEmpty vals)
-                sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
-            | FEGreatest vals ->
-                assert (not <| Array.isEmpty vals)
-                sprintf "GREATEST(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
-            | FELeast vals ->
-                assert (not <| Array.isEmpty vals)
-                sprintf "LEAST(%s)" (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
             | FEJsonArray vals -> vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", " |> sprintf "[%s]"
             | FEJsonObject obj -> obj |> Map.toSeq |> Seq.map (fun (k, v) -> sprintf "%s: %s" (k.ToFunQLString()) (v.ToFunQLString())) |> String.concat ", " |> sprintf "{%s}"
-            | FEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEPlus (a, b) -> sprintf "(%s) + (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEMinus (a, b) -> sprintf "(%s) - (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEMultiply (a, b) -> sprintf "(%s) * (%s)" (a.ToFunQLString()) (b.ToFunQLString())
-            | FEDivide (a, b) -> sprintf "(%s) / (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args |> Seq.map (fun arg -> arg.ToFunQLString()) |> String.concat ", ")
             | FEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args.ToFunQLString())
             | FESubquery q -> sprintf "(%s)" (q.ToFunQLString())
@@ -834,44 +838,23 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
         | FENot e -> FENot (traverse e)
         | FEAnd (a, b) -> FEAnd (traverse a, traverse b)
         | FEOr (a, b) -> FEOr (traverse a, traverse b)
-        | FEConcat (a, b) -> FEConcat (traverse a, traverse b)
         | FEDistinct (a, b) -> FEDistinct (traverse a, traverse b)
         | FENotDistinct (a, b) -> FENotDistinct (traverse a, traverse b)
-        | FEEq (a, b) -> FEEq (traverse a, traverse b)
-        | FENotEq (a, b) -> FENotEq (traverse a, traverse b)
-        | FELike (e, pat) -> FELike (traverse e, traverse pat)
-        | FENotLike (e, pat) -> FENotLike (traverse e, traverse pat)
-        | FEILike (e, pat) -> FEILike (traverse e, traverse pat)
-        | FENotILike (e, pat) -> FENotILike (traverse e, traverse pat)
+        | FEBinaryOp (a, op, b) -> FEBinaryOp (traverse a, op, traverse b)
         | FESimilarTo (e, pat) -> FESimilarTo (traverse e, traverse pat)
         | FENotSimilarTo (e, pat) -> FENotSimilarTo (traverse e, traverse pat)
-        | FEMatchRegex (e, pat) -> FEMatchRegex (traverse e, traverse pat)
-        | FEMatchRegexCI (e, pat) -> FEMatchRegexCI (traverse e, traverse pat)
-        | FENotMatchRegex (e, pat) -> FENotMatchRegex (traverse e, traverse pat)
-        | FENotMatchRegexCI (e, pat) -> FENotMatchRegexCI (traverse e, traverse pat)
-        | FELess (a, b) -> FELess (traverse a, traverse b)
-        | FELessEq (a, b) -> FELessEq (traverse a, traverse b)
-        | FEGreater (a, b) -> FEGreater (traverse a, traverse b)
-        | FEGreaterEq (a, b) -> FEGreaterEq (traverse a, traverse b)
         | FEIn (e, vals) -> FEIn (traverse e, Array.map traverse vals)
         | FENotIn (e, vals) -> FENotIn (traverse e, Array.map traverse vals)
         | FEInQuery (e, query) -> FEInQuery (traverse e, mapper.Query query)
         | FENotInQuery (e, query) -> FENotInQuery (traverse e, mapper.Query query)
+        | FEAny (e, op, arr) -> FEAny (traverse e, op, traverse arr)
+        | FEAll (e, op, arr) -> FEAll (traverse e, op, traverse arr)
         | FECast (e, typ) -> FECast (traverse e, typ)
         | FEIsNull e -> FEIsNull (traverse e)
         | FEIsNotNull e -> FEIsNotNull (traverse e)
         | FECase (es, els) -> FECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
-        | FECoalesce vals -> FECoalesce (Array.map traverse vals)
-        | FEGreatest vals -> FEGreatest (Array.map traverse vals)
-        | FELeast vals -> FELeast (Array.map traverse vals)
         | FEJsonArray vals -> FEJsonArray (Array.map traverse vals)
         | FEJsonObject obj -> FEJsonObject (Map.map (fun name -> traverse) obj)
-        | FEJsonArrow (a, b) -> FEJsonArrow (traverse a, traverse b)
-        | FEJsonTextArrow (a, b) -> FEJsonTextArrow (traverse a, traverse b)
-        | FEPlus (a, b) -> FEPlus (traverse a, traverse b)
-        | FEMinus (a, b) -> FEMinus (traverse a, traverse b)
-        | FEMultiply (a, b) -> FEMultiply (traverse a, traverse b)
-        | FEDivide (a, b) -> FEDivide (traverse a, traverse b)
         | FEFunc (name, args) -> FEFunc (name, Array.map traverse args)
         | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse (mapper.Aggregate args))
         | FESubquery query -> FESubquery (mapper.Query query)
@@ -911,50 +894,30 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
         | FENot e -> Task.map FENot (traverse e)
         | FEAnd (a, b) -> Task.map2 (curry FEAnd) (traverse a) (traverse b)
         | FEOr (a, b) -> Task.map2 (curry FEOr) (traverse a) (traverse b)
-        | FEConcat (a, b) -> Task.map2 (curry FEConcat) (traverse a) (traverse b)
         | FEDistinct (a, b) -> Task.map2 (curry FEDistinct) (traverse a) (traverse b)
         | FENotDistinct (a, b) -> Task.map2 (curry FENotDistinct) (traverse a) (traverse b)
-        | FEEq (a, b) -> Task.map2 (curry FEEq) (traverse a) (traverse b)
-        | FENotEq (a, b) -> Task.map2 (curry FENotEq) (traverse a) (traverse b)
-        | FELike (e, pat) -> Task.map2 (curry FELike) (traverse e) (traverse pat)
-        | FENotLike (e, pat) -> Task.map2 (curry FENotLike) (traverse e) (traverse pat)
-        | FEILike (e, pat) -> Task.map2 (curry FEILike) (traverse e) (traverse pat)
-        | FENotILike (e, pat) -> Task.map2 (curry FENotILike) (traverse e) (traverse pat)
+        | FEBinaryOp (a, op, b) -> Task.map2 (fun a b -> FEBinaryOp (a, op, b)) (traverse a) (traverse b)
         | FESimilarTo (e, pat) -> Task.map2 (curry FESimilarTo) (traverse e) (traverse pat)
         | FENotSimilarTo (e, pat) -> Task.map2 (curry FENotSimilarTo) (traverse e) (traverse pat)
-        | FEMatchRegex (e, pat) -> Task.map2 (curry FEMatchRegex) (traverse e) (traverse pat)
-        | FEMatchRegexCI (e, pat) -> Task.map2 (curry FEMatchRegexCI) (traverse e) (traverse pat)
-        | FENotMatchRegex (e, pat) -> Task.map2 (curry FENotMatchRegex) (traverse e) (traverse pat)
-        | FENotMatchRegexCI (e, pat) -> Task.map2 (curry FENotMatchRegexCI) (traverse e) (traverse pat)
-        | FELess (a, b) -> Task.map2 (curry FELess) (traverse a) (traverse b)
-        | FELessEq (a, b) -> Task.map2 (curry FELessEq) (traverse a) (traverse b)
-        | FEGreater (a, b) -> Task.map2 (curry FEGreater) (traverse a) (traverse b)
-        | FEGreaterEq (a, b) -> Task.map2 (curry FEGreaterEq) (traverse a) (traverse b)
         | FEIn (e, vals) -> Task.map2 (curry FEIn) (traverse e) (Array.mapTask traverse vals)
         | FENotIn (e, vals) -> Task.map2 (curry FENotIn) (traverse e) (Array.mapTask traverse vals)
         | FEInQuery (e, query) -> Task.map2 (curry FEInQuery) (traverse e) (mapper.Query query)
         | FENotInQuery (e, query) -> Task.map2 (curry FENotInQuery) (traverse e) (mapper.Query query)
+        | FEAny (e, op, arr) -> Task.map2 (fun e arr -> FEAny (e, op, arr)) (traverse e) (traverse arr)
+        | FEAll (e, op, arr) -> Task.map2 (fun e arr -> FEAll (e, op, arr)) (traverse e) (traverse arr)
         | FECast (e, typ) -> Task.map (fun newE -> FECast (newE, typ)) (traverse e)
         | FEIsNull e -> Task.map FEIsNull (traverse e)
         | FEIsNotNull e -> Task.map FEIsNotNull (traverse e)
         | FECase (es, els) ->
-            let mapOne (cond, e) = task {
-                let! newCond = traverse cond
-                let! newE = traverse e
-                return (newCond, newE)
-            }
+            let mapOne (cond, e) =
+                task {
+                    let! newCond = traverse cond
+                    let! newE = traverse e
+                    return (newCond, newE)
+                }
             Task.map2 (curry FECase) (Array.mapTask mapOne es) (Option.mapTask traverse els)
-        | FECoalesce vals -> Task.map FECoalesce (Array.mapTask traverse vals)
-        | FEGreatest vals -> Task.map FEGreatest (Array.mapTask traverse vals)
-        | FELeast vals -> Task.map FELeast (Array.mapTask traverse vals)
         | FEJsonArray vals -> Task.map FEJsonArray (Array.mapTask traverse vals)
         | FEJsonObject obj -> Task.map FEJsonObject (Map.mapTask (fun name -> traverse) obj)
-        | FEJsonArrow (a, b) -> Task.map2 (curry FEJsonArrow) (traverse a) (traverse b)
-        | FEJsonTextArrow (a, b) -> Task.map2 (curry FEJsonTextArrow) (traverse a) (traverse b)
-        | FEPlus (a, b) -> Task.map2 (curry FEPlus) (traverse a) (traverse b)
-        | FEMinus (a, b) -> Task.map2 (curry FEMinus) (traverse a) (traverse b)
-        | FEMultiply (a, b) -> Task.map2 (curry FEMultiply) (traverse a) (traverse b)
-        | FEDivide (a, b) -> Task.map2 (curry FEDivide) (traverse a) (traverse b)
         | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTask traverse args)
         | FEAggFunc (name, args) ->
             task {
@@ -1004,46 +967,25 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FENot e -> traverse e
         | FEAnd (a, b) -> traverse a; traverse b
         | FEOr (a, b) -> traverse a; traverse b
-        | FEConcat (a, b) -> traverse a; traverse b
         | FEDistinct (a, b) -> traverse a; traverse b
         | FENotDistinct (a, b) -> traverse a; traverse b
-        | FEEq (a, b) -> traverse a; traverse b
-        | FENotEq (a, b) -> traverse a; traverse b
-        | FELike (e, pat) -> traverse e; traverse pat
-        | FENotLike (e, pat) -> traverse e; traverse pat
-        | FEILike (e, pat) -> traverse e; traverse pat
-        | FENotILike (e, pat) -> traverse e; traverse pat
+        | FEBinaryOp (a, op, b) -> traverse a; traverse b
         | FESimilarTo (e, pat) -> traverse e; traverse pat
         | FENotSimilarTo (e, pat) -> traverse e; traverse pat
-        | FEMatchRegex (e, pat) -> traverse e; traverse pat
-        | FEMatchRegexCI (e, pat) -> traverse e; traverse pat
-        | FENotMatchRegex (e, pat) -> traverse e; traverse pat
-        | FENotMatchRegexCI (e, pat) -> traverse e; traverse pat
-        | FELess (a, b) -> traverse a; traverse b
-        | FELessEq (a, b) -> traverse a; traverse b
-        | FEGreater (a, b) -> traverse a; traverse b
-        | FEGreaterEq (a, b) -> traverse a; traverse b
         | FEIn (e, vals) -> traverse e; Array.iter traverse vals
         | FENotIn (e, vals) -> traverse e; Array.iter traverse vals
         | FEInQuery (e, query) -> traverse e; mapper.Query query
         | FENotInQuery (e, query) -> traverse e; mapper.Query query
+        | FEAny (e, op, arr) -> traverse e; traverse arr
+        | FEAll (e, op, arr) -> traverse e; traverse arr
         | FECast (e, typ) -> traverse e
         | FEIsNull e -> traverse e
         | FEIsNotNull e -> traverse e
         | FECase (es, els) ->
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
             Option.iter traverse els
-        | FECoalesce vals -> Array.iter traverse vals
-        | FEGreatest vals -> Array.iter traverse vals
-        | FELeast vals -> Array.iter traverse vals
         | FEJsonArray vals -> Array.iter traverse vals
         | FEJsonObject obj -> Map.iter (fun name -> traverse) obj
-        | FEJsonArrow (a, b) -> traverse a; traverse b
-        | FEJsonTextArrow (a, b) -> traverse a; traverse b
-        | FEPlus (a, b) -> traverse a; traverse b
-        | FEMinus (a, b) -> traverse a; traverse b
-        | FEMultiply (a, b) -> traverse a; traverse b
-        | FEDivide (a, b) -> traverse a; traverse b
         | FEFunc (name, args) -> Array.iter traverse args
         | FEAggFunc (name, args) ->
             mapper.Aggregate args
@@ -1204,18 +1146,26 @@ let allowedAggregateFunctions : Map<FunctionName, SQL.FunctionName> =
           (FunQLName "json_object_agg", SQL.SQLName "jsonb_object_agg")
         ]
 
-let allowedFunctions : Map<FunctionName, SQL.FunctionName> =
+type FunctionRepr =
+    | FRFunction of SQL.SQLName
+    | FRSpecial of SQL.SpecialFunction
+
+let allowedFunctions : Map<FunctionName, FunctionRepr> =
     Map.ofList
         [ // Numbers
-          (FunQLName "abs", SQL.SQLName "abs")
-          (FunQLName "isfinite", SQL.SQLName "isfinite")
-          (FunQLName "round", SQL.SQLName "round")
+          (FunQLName "abs", FRFunction <| SQL.SQLName "abs")
+          (FunQLName "isfinite", FRFunction <| SQL.SQLName "isfinite")
+          (FunQLName "round", FRFunction <| SQL.SQLName "round")
           // Strings
-          (FunQLName "to_char", SQL.SQLName "to_char")
+          (FunQLName "to_char", FRFunction <| SQL.SQLName "to_char")
           // Dates
-          (FunQLName "age", SQL.SQLName "age")
-          (FunQLName "date_part", SQL.SQLName "date_part")
-          (FunQLName "date_trunc", SQL.SQLName "date_trunc")
+          (FunQLName "age", FRFunction <| SQL.SQLName "age")
+          (FunQLName "date_part", FRFunction <| SQL.SQLName "date_part")
+          (FunQLName "date_trunc", FRFunction <| SQL.SQLName "date_trunc")
+          // Special
+          (FunQLName "coalesce", FRSpecial SQL.SFCoalesce)
+          (FunQLName "least", FRSpecial SQL.SFLeast)
+          (FunQLName "greatest", FRSpecial SQL.SFGreatest)
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =

@@ -193,7 +193,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let (idPlaceholder, arguments) = addArgument (PLocal funId) funIdArg arguments
 
         let tableRef = compileResolvedEntityRef entity.root
-        let whereId = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder idPlaceholder)
+        let whereId = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idPlaceholder)
         let whereExpr =
             match entity.inheritance with
             | Some inheritance -> SQL.VEAnd (inheritance.checkExpr, whereId)
@@ -234,10 +234,10 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             raisef EntityExecutionException "Entity %O is abstract" entityRef
 
         let (idPlaceholder, arguments) = addArgument (PLocal funId) funIdArg emptyArguments
-        let whereExpr = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunId }, SQL.VEPlaceholder idPlaceholder)
+        let whereExpr = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idPlaceholder)
         let whereExpr =
             if hasSubType entity then
-                let subEntityCheck = SQL.VEEq (SQL.VEColumn { table = None; name = sqlFunSubEntity }, SQL.VEValue (SQL.VString entity.typeName))
+                let subEntityCheck = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.typeName))
                 SQL.VEAnd (subEntityCheck, whereExpr)
             else
                 whereExpr

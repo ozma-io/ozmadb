@@ -162,7 +162,7 @@ let private makeCheckExprGeneric (getTypeName : 'a -> string) (getIsAbstract : '
     if Array.isEmpty options then
         SQL.VEValue (SQL.VBool false)
     else if Array.length options = 1 then
-        SQL.VEEq (subEntityColumn, options.[0])
+        SQL.VEBinaryOp (subEntityColumn, SQL.BOEq, options.[0])
     else
         SQL.VEIn (subEntityColumn, options)
 
@@ -598,7 +598,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             let options = allEntities |> Seq.mapMaybe getName |> Seq.toArray
 
             let compileTag (entity : HalfResolvedEntity) =
-                SQL.VEEq (column, SQL.VEValue (SQL.VString entity.TypeName))
+                SQL.VEBinaryOp (column, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
             composeExhaustingIf compileTag options
 
         let tempEntity =
@@ -739,7 +739,7 @@ type private Phase3Resolver (layout : Layout) =
             let checkExpr =
                 if Array.length options = 1 then
                     let (_, entityValue) = options.[0]
-                    SQL.VEEq (subEntityColumn, entityValue)
+                    SQL.VEBinaryOp (subEntityColumn, SQL.BOEq, entityValue)
                 else
                     SQL.VEIn (subEntityColumn, Array.map snd options)
             let myCase =

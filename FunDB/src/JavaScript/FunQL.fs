@@ -45,19 +45,20 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
         | FENot e -> JSNot <| go e
         | FEAnd (a, b) -> JSAnd (go a, go b)
         | FEOr (a, b) -> JSOr (go a, go b)
-        | FEConcat (a, b) -> JSPlus (go a, go b)
-        | FEEq (a, b) -> JSCall (JSObjectAccess (JSVar "context", "isEqual"), [| go a; go b |])
-        | FENotEq (a, b) -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isEqual"), [| go a; go b |])
-        | FELike (a, b) -> JSCall (JSObjectAccess (JSVar "context", "isLike"), [| go a; go b |])
-        | FENotLike (a, b) -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isLike"), [| go a; go b |])
-        | FELess (a, b) -> JSCall (JSObjectAccess (JSVar "context", "isLess"), [| go a; go b |])
-        | FELessEq (a, b) -> JSCall (JSObjectAccess (JSVar "context", "isLessEq"), [| go a; go b |])
-        | FEGreater (a, b) -> JSCall (JSObjectAccess (JSVar "context", "isGreater"), [| go a; go b |])
-        | FEGreaterEq (a, b) -> JSCall (JSObjectAccess (JSVar "context", "isGreaterEq"), [| go a; go b |])
+        | FEBinaryOp (a, op, b) ->
+            match op with
+            | BOConcat -> JSPlus (go a, go b)
+            | BOEq -> JSCall (JSObjectAccess (JSVar "context", "isEqual"), [| go a; go b |])
+            | BONotEq -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isEqual"), [| go a; go b |])
+            | BOLike -> JSCall (JSObjectAccess (JSVar "context", "isLike"), [| go a; go b |])
+            | BONotLike -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isLike"), [| go a; go b |])
+            | BOLess -> JSCall (JSObjectAccess (JSVar "context", "isLess"), [| go a; go b |])
+            | BOLessEq -> JSCall (JSObjectAccess (JSVar "context", "isLessEq"), [| go a; go b |])
+            | BOGreater -> JSCall (JSObjectAccess (JSVar "context", "isGreater"), [| go a; go b |])
+            | BOGreaterEq -> JSCall (JSObjectAccess (JSVar "context", "isGreaterEq"), [| go a; go b |])
+            | _ -> failwith "Not implemented"
         | FEIn (e, items) -> JSCall (JSObjectAccess (JSVar "context", "isIn"), [| go e; JSArray <| Array.map go items |])
         | FENotIn (e, items) -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isIn"), [| go e; JSArray <| Array.map go items |])
-        | FEInQuery (e, query) -> failwith "Not implemented"
-        | FENotInQuery (e, query) -> failwith "Not implemented"
         | FECast (e, typ) ->
             let (isArray, scalarName) =
                 match typ with
@@ -66,11 +67,5 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
             JSCall (JSObjectAccess (JSVar "context", "cast"), [| go e; JSValue (JSBool isArray); JSValue (JSString (scalarName.ToFunQLString())) |])
         | FEIsNull e -> JSStrictEq (go e, JSValue JSNull)
         | FEIsNotNull e -> JSStrictNotEq (go e, JSValue JSNull)
-        | FECase (es, els) -> failwith "Not implemented"
-        | FECoalesce items -> JSCall (JSObjectAccess (JSVar "context", "coalesce"), Array.map go items)
-        | FEJsonArray items -> failwith "Not implemented"
-        | FEJsonObject obj -> failwith "Not implemented"
-        | FEJsonArrow (a, b) -> failwith "Not implemented"
-        | FEJsonTextArrow (a, b) -> failwith "Not implemented"
-        | _ -> failwith "impossible"
+        | _ -> failwith "Not implemented"
     go

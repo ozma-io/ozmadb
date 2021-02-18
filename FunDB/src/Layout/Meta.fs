@@ -74,7 +74,7 @@ type private MetaBuilder (layout : Layout) =
                             else
                                 SQL.VEValue (SQL.VBool false)
                         else if Array.length exprs = 1 then
-                            SQL.VEEq (col, exprs.[0])
+                            SQL.VEBinaryOp (col, SQL.BOEq, exprs.[0])
                         else
                             SQL.VEIn (col, exprs)
                     let constrName = SQL.SQLName <| sprintf "__enum__%s__%s" entity.hashName field.hashName

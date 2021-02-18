@@ -20,7 +20,7 @@ let private applyToOrderLimit (chunk : QueryChunk) (orderLimit : OrderLimitClaus
         | Some offset ->
             Some <|
                 match orderLimit.Offset with
-                | Some oldOffset -> VEPlus (oldOffset, offset)
+                | Some oldOffset -> VEBinaryOp (oldOffset, BOPlus, offset)
                 | None -> offset
     let limitExpr =
         match chunk.Limit with
@@ -29,7 +29,7 @@ let private applyToOrderLimit (chunk : QueryChunk) (orderLimit : OrderLimitClaus
         | Some limit ->
             Some <|
                 match orderLimit.Limit with
-                | Some oldLimit -> VELeast [|oldLimit; limit|]
+                | Some oldLimit -> VESpecialFunc (SFLeast, [|oldLimit; limit|])
                 | None -> limit
     { orderLimit with
           Offset = offsetExpr

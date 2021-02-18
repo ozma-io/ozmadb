@@ -75,7 +75,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
         let fromTable = compileName entity.root.name
         let fromColumn = SQL.VEColumn { table = Some sqlNewRow; name = field.columnName }
         let toColumn = SQL.VEColumn { table = Some toRef; name = sqlFunId }
-        let whereExpr = SQL.VEEq (fromColumn, toColumn)
+        let whereExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
         let singleSelect =
             { Columns = [| SQL.SCExpr (None, inheritance.checkExpr) |]
               From = Some <| SQL.FTable (null, None, toRef)
@@ -120,7 +120,7 @@ let buildAssertionMeta (layout : Layout) : LayoutAssertion -> SQL.DatabaseMeta =
             if field.isNullable then
                 SQL.VEAnd (SQL.VEIsNotNull (checkNewColumn), SQL.VEDistinct (checkOldColumn, checkNewColumn))
             else
-                SQL.VENotEq (checkOldColumn, checkNewColumn)
+                SQL.VEBinaryOp (checkOldColumn, SQL.BONotEq, checkNewColumn)
         let checkUpdateTriggerDefinition =
             { IsConstraint = true
               Order = SQL.TOAfter
@@ -172,7 +172,7 @@ let private compileAssertionCheck (layout : Layout) : LayoutAssertion -> SQL.Sel
         let toRef = compileResolvedEntityRef refEntity.root
         let fromColumn = SQL.VEColumn { table = Some fromRef; name = field.columnName }
         let toColumn = SQL.VEColumn { table = Some joinRef; name = sqlFunId }
-        let joinExpr = SQL.VEEq (fromColumn, toColumn)
+        let joinExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
         let join =
             SQL.FJoin
                 { Type = SQL.JoinType.Left

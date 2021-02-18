@@ -145,9 +145,6 @@ and tokenizeFunQL = parse
     | t h e n           { Parse.THEN }
     | e l s e           { Parse.ELSE }
     | e n d             { Parse.END }
-    | c o a l e s c e   { Parse.COALESCE }
-    | g r e a t e s t   { Parse.GREATEST }
-    | l e a s t         { Parse.LEAST }
     | l i m i t         { Parse.LIMIT }
     | o f f s e t       { Parse.OFFSET }
     | u n i o n         { Parse.UNION }
@@ -163,6 +160,8 @@ and tokenizeFunQL = parse
     | o f t y p e       { Parse.OFTYPE }
     | w i t h           { Parse.WITH }
     | r e c u r s i v e { Parse.RECURSIVE }
+    | a n y             { Parse.ANY }
+    | s o m e           { Parse.SOME }
 
     // Types
     | i n t             { Parse.INT_TYPE }

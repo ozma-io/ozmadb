@@ -240,9 +240,6 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token THEN
 %token ELSE
 %token END
-%token COALESCE
-%token GREATEST
-%token LEAST
 %token LIMIT
 %token OFFSET
 %token UNION
@@ -259,6 +256,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token OFTYPE
 %token WITH
 %token RECURSIVE
+%token ANY
+%token SOME
 
 // Types
 %token INT_TYPE
@@ -276,15 +275,15 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 // Misc
 %token EOF
 
+
 %left OR
 %left AND
 %right NOT
-%nonassoc EQ NOT_EQ
-%nonassoc LESS GREATER LESS_EQ GREATER_EQ
-%nonassoc LIKE ILIKE LIKE_OP ILIKE_OP NOT_LIKE_OP NOT_ILIKE_OP
-%nonassoc IN
-%left CONCAT ARROW DOUBLE_ARROW
+// Non-assoc doesn't work correctly in F#: https://github.com/fsprojects/FsLexYacc/issues/39
 %nonassoc IS
+%nonassoc EQ NOT_EQ LESS_EQ LESS GREATER GREATER_EQ
+%nonassoc IN LIKE ILIKE SIMILAR
+%left LIKE_OP NOT_LIKE_OP ILIKE_OP NOT_ILIKE_OP MATCH_REGEX MATCH_REGEX_CI NOT_MATCH_REGEX NOT_MATCH_REGEX_CI CONCAT ARROW DOUBLE_ARROW
 %left PLUS MINUS
 %left MULTIPLY DIVIDE
 %left DOUBLE_COLON
@@ -558,72 +557,104 @@ ExprList:
 ParenedExprList:
     | LEFT_PAREN ExprList RIGHT_PAREN { $2 }
 
+
+// See SQLParse for explanation on this.
+AnyAllOp:
+    | Any LEFT_PAREN FieldExpr RIGHT_PAREN { fun op a -> FEAny (a, op, $3) }
+    | ALL LEFT_PAREN FieldExpr RIGHT_PAREN { fun op a -> FEAll (a, op, $3) }
+
+Any:
+    | ANY  { () }
+    | SOME { () }
+
 FieldExpr:
     | FieldExpr OR FieldExpr  { FEOr ($1, $3) }
     | FieldExpr AND FieldExpr { FEAnd ($1, $3) }
     | NOT FieldExpr           { FENot $2 }
-    | FieldExprEq             { $1 }
+    | FieldExprIs             { $1 }
+
+FieldExprIs:
+    | FieldExprEq IS NULL                          { FEIsNull $1 }
+    | FieldExprEq IS NOT NULL                      { FEIsNotNull $1 }
+    | FieldExprEq IS DISTINCT FROM FieldExprEq     { FEDistinct ($1, $5) }
+    | FieldExprEq IS NOT DISTINCT FROM FieldExprEq { FENotDistinct ($1, $6) }
+    | FieldExprEq                                  { $1 }
+
+FieldExprEq:
+    | FieldExprLike EQ FieldExprLikeOp2         { $3 BOEq $1 }
+    | FieldExprLike LESS FieldExprLikeOp2       { $3 BOLess $1 }
+    | FieldExprLike GREATER FieldExprLikeOp2    { $3 BOGreater $1 }
+    | FieldExprLike NOT_EQ FieldExprLikeOp2     { $3 BONotEq $1 }
+    | FieldExprLike LESS_EQ FieldExprLikeOp2    { $3 BOLessEq $1 }
+    | FieldExprLike GREATER_EQ FieldExprLikeOp2 { $3 BOGreaterEq $1 }
+    | FieldExprLike                             { $1 }
+
+FieldExprLikeOp2:
+    | FieldExprLike { fun op a -> FEBinaryOp (a, op, $1) }
+    | AnyAllOp      { $1 }
+
+FieldExprLike:
+    | FieldExprMisc LIKE FieldExprMisc           { FEBinaryOp ($1, BOLike, $3) }
+    | FieldExprMisc NOT LIKE FieldExprMisc       { FEBinaryOp ($1, BONotLike, $4) }
+    | FieldExprMisc ILIKE FieldExprMisc          { FEBinaryOp ($1, BOILike, $3) }
+    | FieldExprMisc NOT ILIKE FieldExprMisc      { FEBinaryOp ($1, BONotILike, $4) }
+    | FieldExprMisc SIMILAR TO FieldExprMisc     { FESimilarTo ($1, $4) }
+    | FieldExprMisc NOT SIMILAR TO FieldExprMisc { FENotSimilarTo ($1, $5) }
+    | FieldExprMisc                              { $1 }
 
 // Implemented in this way because there is a conflict between multi-paren-ed SelectExpr and FieldExpr with a SelectExpr inside.
 FieldInSource:
     | SubSelectExpr           { ISSelect $1 }
     | ParenedNonEmptyExprList { extractInOneSource $1 }
 
-FieldExprEq:
-    | FieldExprOp EQ FieldExprOp                   { FEEq ($1, $3) }
-    | FieldExprOp NOT_EQ FieldExprOp               { FENotEq ($1, $3) }
-    | FieldExprOp LESS FieldExprOp                 { FELess ($1, $3) }
-    | FieldExprOp LESS_EQ FieldExprOp              { FELessEq ($1, $3) }
-    | FieldExprOp GREATER FieldExprOp              { FEGreater ($1, $3) }
-    | FieldExprOp GREATER_EQ FieldExprOp           { FEGreaterEq ($1, $3) }
-    | FieldExprOp IS NULL                          { FEIsNull $1 }
-    | FieldExprOp IS NOT NULL                      { FEIsNotNull $1 }
-    | FieldExprOp IS DISTINCT FROM FieldExprOp     { FEDistinct ($1, $5) }
-    | FieldExprOp IS NOT DISTINCT FROM FieldExprOp { FENotDistinct ($1, $6) }
-    | FieldExprOp LIKE FieldExprOp                 { FELike ($1, $3) }
-    | FieldExprOp NOT LIKE FieldExprOp             { FENotLike ($1, $4) }
-    | FieldExprOp ILIKE FieldExprOp                { FEILike ($1, $3) }
-    | FieldExprOp NOT ILIKE FieldExprOp            { FENotILike ($1, $4) }
-    | FieldExprOp LIKE_OP FieldExprOp              { FELike ($1, $3) }
-    | FieldExprOp NOT_LIKE_OP FieldExprOp          { FENotLike ($1, $3) }
-    | FieldExprOp ILIKE_OP FieldExprOp             { FEILike ($1, $3) }
-    | FieldExprOp NOT_ILIKE_OP FieldExprOp         { FENotILike ($1, $3) }
-    | FieldExprOp SIMILAR TO FieldExprOp           { FESimilarTo ($1, $4) }
-    | FieldExprOp NOT SIMILAR TO FieldExprOp       { FENotSimilarTo ($1, $5) }
-    | FieldExprOp MATCH_REGEX FieldExprOp          { FEMatchRegex ($1, $3) }
-    | FieldExprOp MATCH_REGEX_CI FieldExprOp       { FEMatchRegexCI ($1, $3) }
-    | FieldExprOp NOT_MATCH_REGEX FieldExprOp      { FENotMatchRegex ($1, $3) }
-    | FieldExprOp NOT_MATCH_REGEX_CI FieldExprOp   { FENotMatchRegexCI ($1, $3) }
-    | FieldExprOp IN FieldInSource                 { inExpr FEIn FEInQuery $1 $3 }
-    | FieldExprOp NOT IN FieldInSource             { inExpr FENotIn FENotInQuery $1 $4 }
-    | FieldExprOp                                  { $1 }
+FieldExprMisc:
+    | FieldExprMisc LIKE_OP FieldExprMisc            { FEBinaryOp ($1, BOLike, $3) }
+    | FieldExprMisc NOT_LIKE_OP FieldExprMisc        { FEBinaryOp ($1, BONotLike, $3) }
+    | FieldExprMisc ILIKE_OP FieldExprMisc           { FEBinaryOp ($1, BOILike, $3) }
+    | FieldExprMisc NOT_ILIKE_OP FieldExprMisc       { FEBinaryOp ($1, BONotILike, $3) }
+    | FieldExprMisc MATCH_REGEX FieldExprMisc        { FEBinaryOp ($1, BOMatchRegex, $3) }
+    | FieldExprMisc MATCH_REGEX_CI FieldExprMisc     { FEBinaryOp ($1, BOMatchRegexCI, $3) }
+    | FieldExprMisc NOT_MATCH_REGEX FieldExprMisc    { FEBinaryOp ($1, BONotMatchRegex, $3) }
+    | FieldExprMisc NOT_MATCH_REGEX_CI FieldExprMisc { FEBinaryOp ($1, BONotMatchRegexCI, $3) }
+    | FieldExprMisc CONCAT FieldExprMisc             { FEBinaryOp ($1, BOConcat, $3) }
+    | FieldExprMisc ARROW FieldExprMisc              { FEBinaryOp ($1, BOJsonArrow, $3) }
+    | FieldExprMisc DOUBLE_ARROW FieldExprMisc       { FEBinaryOp ($1, BOJsonTextArrow, $3) }
+    | FieldExprMisc PLUS FieldExprMisc               { FEBinaryOp ($1, BOPlus, $3) }
+    | FieldExprMisc MINUS FieldExprMisc              { FEBinaryOp ($1, BOMinus, $3) }
+    | FieldExprMisc MULTIPLY FieldExprMisc           { FEBinaryOp ($1, BOMultiply, $3) }
+    | FieldExprMisc DIVIDE FieldExprMisc             { FEBinaryOp ($1, BODivide, $3) }
 
-FieldExprOp:
-    | FieldExprOp CONCAT FieldExprOp         { FEConcat ($1, $3) }
-    | FieldExprOp ARROW FieldExprOp          { FEJsonArrow ($1, $3) }
-    | FieldExprOp DOUBLE_ARROW FieldExprOp   { FEJsonTextArrow ($1, $3) }
-    | FieldExprOp DOUBLE_COLON FieldExprType { restrictCast $1 $3; FECast ($1, $3) }
-    | FieldExprOp PLUS FieldExprOp           { FEPlus ($1, $3) }
-    | FieldExprOp MINUS FieldExprOp          { FEMinus ($1, $3) }
-    | FieldExprOp MULTIPLY FieldExprOp       { FEMultiply ($1, $3) }
-    | FieldExprOp DIVIDE FieldExprOp         { FEDivide ($1, $3) }
-    | COALESCE ParenedNonEmptyExprList       { FECoalesce $2 }
-    | GREATEST ParenedNonEmptyExprList       { FEGreatest $2 }
-    | LEAST ParenedNonEmptyExprList          { FELeast $2 }
-    | CaseExpr                               { $1 }
-    | FieldExprVal                           { $1 }
+    // Now the same, but for ANY/ALL. I hate this.
+    | FieldExprMisc LIKE_OP AnyAllOp                  { $3 BOLike $1 }
+    | FieldExprMisc NOT_LIKE_OP AnyAllOp              { $3 BONotLike $1 }
+    | FieldExprMisc ILIKE_OP AnyAllOp                 { $3 BOILike $1 }
+    | FieldExprMisc NOT_ILIKE_OP AnyAllOp             { $3 BONotILike $1 }
+    | FieldExprMisc MATCH_REGEX AnyAllOp              { $3 BOMatchRegex $1 }
+    | FieldExprMisc MATCH_REGEX_CI AnyAllOp           { $3 BOMatchRegexCI $1 }
+    | FieldExprMisc NOT_MATCH_REGEX AnyAllOp          { $3 BONotMatchRegex $1 }
+    | FieldExprMisc NOT_MATCH_REGEX_CI AnyAllOp       { $3 BONotMatchRegexCI $1 }
+    | FieldExprMisc CONCAT AnyAllOp                   { $3 BOConcat $1 }
+    | FieldExprMisc ARROW AnyAllOp                    { $3 BOJsonArrow $1 }
+    | FieldExprMisc DOUBLE_ARROW AnyAllOp             { $3 BOJsonTextArrow $1 }
+    | FieldExprMisc PLUS AnyAllOp                     { $3 BOPlus $1 }
+    | FieldExprMisc MINUS AnyAllOp                    { $3 BOMinus $1 }
+    | FieldExprMisc MULTIPLY AnyAllOp                 { $3 BOMultiply $1 }
+    | FieldExprMisc DIVIDE AnyAllOp                   { $3 BODivide $1 }
 
-FieldExprVal:
-    | LinkedValueRef INHERITED FROM EntityRef { FEInheritedFrom ($1, { Ref = $4; Extra = null }) }
-    | LinkedValueRef OFTYPE EntityRef         { FEOfType ($1, { Ref = $3; Extra = null }) }
-    | LinkedValueRef                          { FERef $1 }
-    | Value                                   { FEValue $1 }
-    | Name ParenedExprList                    { makeFunc $1 $2 }
-    | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN { makeAggFunc $1 $3 }
-    | JsonObject                              { $1 }
-    | JsonArray                               { $1 }
-    | SubSelectExpr                           { FESubquery $1 }
-    | LEFT_PAREN FieldExpr RIGHT_PAREN        { $2 }
+    | FieldExprMisc IN FieldInSource                  { inExpr FEIn FEInQuery $1 $3 }
+    | FieldExprMisc NOT IN FieldInSource              { inExpr FENotIn FENotInQuery $1 $4 }
+    | FieldExprMisc DOUBLE_COLON FieldExprType        { restrictCast $1 $3; FECast ($1, $3) }
+    | CaseExpr                                        { $1 }
+    | LinkedValueRef INHERITED FROM EntityRef         { FEInheritedFrom ($1, { Ref = $4; Extra = null }) }
+    | LinkedValueRef OFTYPE EntityRef                 { FEOfType ($1, { Ref = $3; Extra = null }) }
+    | LinkedValueRef                                  { FERef $1 }
+    | Value                                           { FEValue $1 }
+    | Name ParenedExprList                            { makeFunc $1 $2 }
+    | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN         { makeAggFunc $1 $3 }
+    | JsonObject                                      { $1 }
+    | JsonArray                                       { $1 }
+    | SubSelectExpr                                   { FESubquery $1 }
+    | LEFT_PAREN FieldExpr RIGHT_PAREN                { $2 }
 
 AggFuncArgs:
     | ALL ExprList       { AEAll $2 }

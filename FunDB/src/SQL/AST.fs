@@ -379,54 +379,100 @@ type TableAlias =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+type [<NoEquality; NoComparison>] BinaryOperator =
+    | BOLess
+    | BOLessEq
+    | BOGreater
+    | BOGreaterEq
+    | BOEq
+    | BONotEq
+    | BOConcat
+    | BOLike
+    | BOILike
+    | BONotLike
+    | BONotILike
+    | BOMatchRegex
+    | BOMatchRegexCI
+    | BONotMatchRegex
+    | BONotMatchRegexCI
+    | BOPlus
+    | BOMinus
+    | BOMultiply
+    | BODivide
+    | BOJsonArrow
+    | BOJsonTextArrow
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | BOLess -> "<"
+            | BOLessEq -> "<="
+            | BOGreater -> ">"
+            | BOGreaterEq -> ">="
+            | BOEq -> "="
+            | BONotEq -> "<>"
+            | BOConcat -> "||"
+            | BOLike -> "~~"
+            | BOILike -> "~~*"
+            | BONotLike -> "!~~"
+            | BONotILike -> "!~~*"
+            | BOMatchRegex -> "~"
+            | BOMatchRegexCI -> "~*"
+            | BONotMatchRegex -> "!~"
+            | BONotMatchRegexCI -> "!~*"
+            | BOPlus -> "+"
+            | BOMinus -> "-"
+            | BOMultiply -> "*"
+            | BODivide -> "/"
+            | BOJsonArrow -> "->"
+            | BOJsonTextArrow -> "->>"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString ()
+
+type [<NoEquality; NoComparison>] SpecialFunction =
+    | SFCoalesce
+    | SFGreatest
+    | SFLeast
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | SFCoalesce -> "COALESCE"
+            | SFGreatest -> "GREATEST"
+            | SFLeast -> "LEAST"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString ()
+
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
 type [<CustomEquality; NoComparison>] ValueExpr =
     | VEValue of Value
     | VEColumn of ColumnRef
     | VEPlaceholder of int
     | VENot of ValueExpr
-    | VEAnd of ValueExpr * ValueExpr
     | VEOr of ValueExpr * ValueExpr
-    | VEConcat of ValueExpr * ValueExpr
+    | VEAnd of ValueExpr * ValueExpr
+    | VEBinaryOp of ValueExpr * BinaryOperator * ValueExpr
     | VEDistinct of ValueExpr * ValueExpr
     | VENotDistinct of ValueExpr * ValueExpr
-    | VEEq of ValueExpr * ValueExpr
-    | VEEqAny of ValueExpr * ValueExpr
-    | VENotEq of ValueExpr * ValueExpr
-    | VENotEqAll of ValueExpr * ValueExpr
-    | VELike of ValueExpr * ValueExpr
-    | VENotLike of ValueExpr * ValueExpr
-    | VEILike of ValueExpr * ValueExpr
-    | VENotILike of ValueExpr * ValueExpr
+    | VEAny of ValueExpr * BinaryOperator * ValueExpr
+    | VEAll of ValueExpr * BinaryOperator * ValueExpr
     | VESimilarTo of ValueExpr * ValueExpr
     | VENotSimilarTo of ValueExpr * ValueExpr
-    | VEMatchRegex of ValueExpr * ValueExpr
-    | VEMatchRegexCI of ValueExpr * ValueExpr
-    | VENotMatchRegex of ValueExpr * ValueExpr
-    | VENotMatchRegexCI of ValueExpr * ValueExpr
-    | VELess of ValueExpr * ValueExpr
-    | VELessEq of ValueExpr * ValueExpr
-    | VEGreater of ValueExpr * ValueExpr
-    | VEGreaterEq of ValueExpr * ValueExpr
     | VEIn of ValueExpr * ValueExpr[]
     | VENotIn of ValueExpr * ValueExpr[]
     | VEInQuery of ValueExpr * SelectExpr
     | VENotInQuery of ValueExpr * SelectExpr
     | VEIsNull of ValueExpr
     | VEIsNotNull of ValueExpr
+    | VESpecialFunc of SpecialFunction * ValueExpr[]
     | VEFunc of FunctionName * ValueExpr[]
     | VEAggFunc of FunctionName * AggExpr
     | VECast of ValueExpr * DBValueType
     | VECase of (ValueExpr * ValueExpr)[] * (ValueExpr option)
-    | VECoalesce of ValueExpr[]
-    | VEGreatest of ValueExpr[]
-    | VELeast of ValueExpr[]
-    | VEJsonArrow of ValueExpr * ValueExpr
-    | VEJsonTextArrow of ValueExpr * ValueExpr
-    | VEPlus of ValueExpr * ValueExpr
-    | VEMinus of ValueExpr * ValueExpr
-    | VEMultiply of ValueExpr * ValueExpr
-    | VEDivide of ValueExpr * ValueExpr
     | VEArray of ValueExpr[]
     | VESubquery of SelectExpr
     with
@@ -441,29 +487,15 @@ type [<CustomEquality; NoComparison>] ValueExpr =
             // FunQL argument names.
             | VEPlaceholder i -> sprintf "@%s" (renderSqlInt i)
             | VENot a -> sprintf "NOT (%s)" (a.ToSQLString())
-            | VEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEConcat (a, b) -> sprintf "(%s) || (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToSQLString()) (b.ToSQLString())
+            | VEBinaryOp (a, op, b) -> sprintf "(%s) %s (%s)" (a.ToSQLString()) (op.ToSQLString()) (b.ToSQLString())
             | VEDistinct (a, b) -> sprintf "(%s) IS DISTINCT FROM (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VENotDistinct (a, b) -> sprintf "(%s) IS NOT DISTINCT FROM (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEEq (a, b) -> sprintf "(%s) = (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEEqAny (e, arr) -> sprintf "(%s) = ANY (%s)" (e.ToSQLString()) (arr.ToSQLString())
-            | VENotEq (a, b) -> sprintf "(%s) <> (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VENotEqAll (e, arr) -> sprintf "(%s) <> ALL (%s)" (e.ToSQLString()) (arr.ToSQLString())
-            | VELike (e, pat) -> sprintf "(%s) LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VENotLike (e, pat) -> sprintf "(%s) NOT LIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VEILike (e, pat) -> sprintf "(%s) ILIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VENotILike (e, pat) -> sprintf "(%s) NOT ILIKE (%s)" (e.ToSQLString()) (pat.ToSQLString())
+            | VEAny (e, op, arr) -> sprintf "(%s) %s ANY (%s)" (e.ToSQLString()) (op.ToSQLString()) (arr.ToSQLString())
+            | VEAll (e, op, arr) -> sprintf "(%s) %s ALL (%s)" (e.ToSQLString()) (op.ToSQLString()) (arr.ToSQLString())
             | VESimilarTo (e, pat) -> sprintf "(%s) SIMILAR TO (%s)" (e.ToSQLString()) (pat.ToSQLString())
             | VENotSimilarTo (e, pat) -> sprintf "(%s) NOT SIMILAR TO (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VEMatchRegex (e, pat) -> sprintf "(%s) ~ (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VEMatchRegexCI (e, pat) -> sprintf "(%s) ~* (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VENotMatchRegex (e, pat) -> sprintf "(%s) !~ (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VENotMatchRegexCI (e, pat) -> sprintf "(%s) !~* (%s)" (e.ToSQLString()) (pat.ToSQLString())
-            | VELess (a, b) -> sprintf "(%s) < (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VELessEq (a, b) -> sprintf "(%s) <= (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEGreater (a, b) -> sprintf "(%s) > (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEGreaterEq (a, b) -> sprintf "(%s) >= (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEIn (e, vals) ->
                 assert (not <| Array.isEmpty vals)
                 sprintf "(%s) IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
@@ -474,6 +506,7 @@ type [<CustomEquality; NoComparison>] ValueExpr =
             | VENotInQuery (e, query) -> sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (query.ToSQLString())
             | VEIsNull a -> sprintf "(%s) IS NULL" (a.ToSQLString())
             | VEIsNotNull a -> sprintf "(%s) IS NOT NULL" (a.ToSQLString())
+            | VESpecialFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
             | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
             | VEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args.ToSQLString())
             | VECast (e, typ) -> sprintf "(%s) :: %s" (e.ToSQLString()) (typ.ToSQLString())
@@ -484,21 +517,6 @@ type [<CustomEquality; NoComparison>] ValueExpr =
                     | None -> ""
                     | Some e -> sprintf "ELSE %s" (e.ToSQLString())
                 String.concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
-            | VECoalesce vals ->
-                assert (not <| Array.isEmpty vals)
-                sprintf "COALESCE(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
-            | VEGreatest vals ->
-                assert (not <| Array.isEmpty vals)
-                sprintf "GREATEST(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
-            | VELeast vals ->
-                assert (not <| Array.isEmpty vals)
-                sprintf "LEAST(%s)" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
-            | VEJsonArrow (a, b) -> sprintf "(%s)->(%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEJsonTextArrow (a, b) -> sprintf "(%s)->>(%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEPlus (a, b) -> sprintf "(%s) + (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEMinus (a, b) -> sprintf "(%s) - (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEMultiply (a, b) -> sprintf "(%s) * (%s)" (a.ToSQLString()) (b.ToSQLString())
-            | VEDivide (a, b) -> sprintf "(%s) / (%s)" (a.ToSQLString()) (b.ToSQLString())
             | VEArray vals -> sprintf "ARRAY[%s]" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VESubquery query -> sprintf "(%s)" (query.ToSQLString())
 
@@ -758,33 +776,20 @@ let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> Val
         | VENot e -> VENot <| traverse e
         | VEAnd (a, b) -> VEAnd (traverse a, traverse b)
         | VEOr (a, b) -> VEOr (traverse a, traverse b)
-        | VEConcat (a, b) -> VEConcat (traverse a, traverse b)
+        | VEBinaryOp (a, op, b) -> VEBinaryOp (traverse a, op, traverse b)
+        | VEAny (a, op, b) -> VEAny (traverse a, op, traverse b)
+        | VEAll (a, op, b) -> VEAll (traverse a, op, traverse b)
         | VEDistinct (a, b) -> VEDistinct (traverse a, traverse b)
         | VENotDistinct (a, b) -> VENotDistinct (traverse a, traverse b)
-        | VEEq (a, b) -> VEEq (traverse a, traverse b)
-        | VEEqAny (e, arr) -> VEEqAny (traverse e, traverse arr)
-        | VENotEq (a, b) -> VENotEq (traverse a, traverse b)
-        | VENotEqAll (e, arr) -> VENotEqAll (traverse e, traverse arr)
-        | VELike (e, pat) -> VELike (traverse e, traverse pat)
-        | VENotLike (e, pat) -> VENotLike (traverse e, traverse pat)
-        | VEILike (e, pat) -> VEILike (traverse e, traverse pat)
-        | VENotILike (e, pat) -> VENotILike (traverse e, traverse pat)
         | VESimilarTo (e, pat) -> VESimilarTo (traverse e, traverse pat)
         | VENotSimilarTo (e, pat) -> VENotSimilarTo (traverse e, traverse pat)
-        | VEMatchRegex (e, pat) -> VEMatchRegex (traverse e, traverse pat)
-        | VEMatchRegexCI (e, pat) -> VEMatchRegexCI (traverse e, traverse pat)
-        | VENotMatchRegex (e, pat) -> VENotMatchRegex (traverse e, traverse pat)
-        | VENotMatchRegexCI (e, pat) -> VENotMatchRegexCI (traverse e, traverse pat)
-        | VELess (a, b) -> VELess (traverse a, traverse b)
-        | VELessEq (a, b) -> VELessEq (traverse a, traverse b)
-        | VEGreater (a, b) -> VEGreater (traverse a, traverse b)
-        | VEGreaterEq (a, b) -> VEGreaterEq (traverse a, traverse b)
         | VEIn (e, vals) -> VEIn (traverse e, Array.map traverse vals)
         | VENotIn (e, vals) -> VENotIn (traverse e, Array.map traverse vals)
         | VEInQuery (e, query) -> VEInQuery (traverse e, mapper.Query query)
         | VENotInQuery (e, query) -> VENotInQuery (traverse e, mapper.Query query)
         | VEIsNull e -> VEIsNull <| traverse e
         | VEIsNotNull e -> VEIsNotNull <| traverse e
+        | VESpecialFunc (name, args) -> VESpecialFunc (name, Array.map traverse args)
         | VEFunc (name, args) -> VEFunc (name, Array.map traverse args)
         | VEAggFunc (name, args) -> VEAggFunc (name, mapAggExpr traverse args)
         | VECast (e, typ) -> VECast (traverse e, typ)
@@ -792,15 +797,6 @@ let rec genericMapValueExpr (mapper : ValueExprGenericMapper) : ValueExpr -> Val
             let es' = Array.map (fun (cond, e) -> (traverse cond, traverse e)) es
             let els' = Option.map traverse els
             VECase (es', els')
-        | VECoalesce vals -> VECoalesce <| Array.map traverse vals
-        | VEGreatest vals -> VEGreatest <| Array.map traverse vals
-        | VELeast vals -> VELeast <| Array.map traverse vals
-        | VEJsonArrow (a, b) -> VEJsonArrow (traverse a, traverse b)
-        | VEJsonTextArrow (a, b) -> VEJsonTextArrow (traverse a, traverse b)
-        | VEPlus (a, b) -> VEPlus (traverse a, traverse b)
-        | VEMinus (a, b) -> VEMinus (traverse a, traverse b)
-        | VEMultiply (a, b) -> VEMultiply (traverse a, traverse b)
-        | VEDivide (a, b) -> VEDivide (traverse a, traverse b)
         | VEArray vals -> VEArray <| Array.map traverse vals
         | VESubquery query -> VESubquery (mapper.Query query)
     traverse
@@ -854,48 +850,26 @@ let rec iterValueExpr (mapper : ValueExprIter) : ValueExpr -> unit =
         | VENot e -> traverse e
         | VEAnd (a, b) -> traverse a; traverse b
         | VEOr (a, b) -> traverse a; traverse b
-        | VEConcat (a, b) -> traverse a; traverse b
+        | VEBinaryOp (a, op, b) -> traverse a; traverse b
         | VEDistinct (a, b) -> traverse a; traverse b
         | VENotDistinct (a, b) -> traverse a; traverse b
-        | VEEq (a, b) -> traverse a; traverse b
-        | VEEqAny (e, arr) -> traverse e; traverse arr
-        | VENotEq (a, b) -> traverse a; traverse b
-        | VENotEqAll (e, arr) -> traverse e; traverse arr
-        | VELike (e, pat) -> traverse e; traverse pat
-        | VENotLike (e, pat) -> traverse e; traverse pat
-        | VEILike (e, pat) -> traverse e; traverse pat
-        | VENotILike (e, pat) -> traverse e; traverse pat
+        | VEAny (e, op, arr) -> traverse e; traverse arr
+        | VEAll (e, op, arr) -> traverse e; traverse arr
         | VESimilarTo (e, pat) -> traverse e; traverse pat
         | VENotSimilarTo (e, pat) -> traverse e; traverse pat
-        | VEMatchRegex (e, pat) -> traverse e; traverse pat
-        | VEMatchRegexCI (e, pat) -> traverse e; traverse pat
-        | VENotMatchRegex (e, pat) -> traverse e; traverse pat
-        | VENotMatchRegexCI (e, pat) -> traverse e; traverse pat
-        | VELess (a, b) -> traverse a; traverse b
-        | VELessEq (a, b) -> traverse a; traverse b
-        | VEGreater (a, b) -> traverse a; traverse b
-        | VEGreaterEq (a, b) -> traverse a; traverse b
         | VEIn (e, vals) -> traverse e; Array.iter traverse vals
         | VENotIn (e, vals) -> traverse e; Array.iter traverse vals
         | VEInQuery (e, query) -> traverse e; mapper.Query query
         | VENotInQuery (e, query) -> traverse e; mapper.Query query
         | VEIsNull e -> traverse e
         | VEIsNotNull e -> traverse e
+        | VESpecialFunc (name, args) -> Array.iter traverse args
         | VEFunc (name, args) -> Array.iter traverse args
         | VEAggFunc (name, args) -> iterAggExpr traverse args
         | VECast (e, typ) -> traverse e
         | VECase (es, els) ->
             Array.iter (fun (cond, e) -> traverse cond; traverse e) es
             Option.iter traverse els
-        | VECoalesce vals -> Array.iter traverse vals
-        | VEGreatest vals -> Array.iter traverse vals
-        | VELeast vals -> Array.iter traverse vals
-        | VEJsonArrow (a, b) -> traverse a; traverse b
-        | VEJsonTextArrow (a, b) -> traverse a; traverse b
-        | VEPlus (a, b) -> traverse a; traverse b
-        | VEMinus (a, b) -> traverse a; traverse b
-        | VEMultiply (a, b) -> traverse a; traverse b
-        | VEDivide (a, b) -> traverse a; traverse b
         | VEArray vals -> Array.iter traverse vals
         | VESubquery query -> mapper.Query query
     traverse

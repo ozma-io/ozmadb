@@ -75,6 +75,7 @@ rule tokenizeSQL = parse
     | "!~"   { Parse.NOT_MATCH_REGEX }
     | "!~*"  { Parse.NOT_MATCH_REGEX_CI }
     | "->"   { Parse.ARROW }
+    | "->>"  { Parse.DOUBLE_ARROW }
     | "+"    { Parse.PLUS }
     | "-"    { Parse.MINUS }
     | "*"    { Parse.MULTIPLY }
@@ -94,6 +95,8 @@ rule tokenizeSQL = parse
     | e l s e         { Parse.ELSE }
     | e n d           { Parse.END }
     | c o a l e s c e { Parse.COALESCE }
+    | g r e a t e s t { Parse.GREATEST }
+    | l e a s t       { Parse.LEAST }
     | l i k e         { Parse.LIKE }
     | i l i k e       { Parse.ILIKE }
     | s i m i l a r   { Parse.SIMILAR }

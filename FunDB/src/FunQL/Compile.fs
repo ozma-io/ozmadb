@@ -389,6 +389,29 @@ type ReferenceContext =
     | RCExpr
     | RCTypeExpr
 
+let private compileBinaryOp = function
+    | BOLess -> SQL.BOLess
+    | BOLessEq -> SQL.BOLessEq
+    | BOGreater -> SQL.BOGreater
+    | BOGreaterEq -> SQL.BOGreaterEq
+    | BOEq -> SQL.BOEq
+    | BONotEq -> SQL.BONotEq
+    | BOConcat -> SQL.BOConcat
+    | BOLike -> SQL.BOLike
+    | BOILike -> SQL.BOILike
+    | BONotLike -> SQL.BONotLike
+    | BONotILike -> SQL.BONotILike
+    | BOMatchRegex -> SQL.BOMatchRegex
+    | BOMatchRegexCI -> SQL.BOMatchRegexCI
+    | BONotMatchRegex -> SQL.BONotMatchRegex
+    | BONotMatchRegexCI -> SQL.BONotMatchRegexCI
+    | BOPlus -> SQL.BOPlus
+    | BOMinus -> SQL.BOMinus
+    | BOMultiply -> SQL.BOMultiply
+    | BODivide -> SQL.BODivide
+    | BOJsonArrow -> SQL.BOJsonArrow
+    | BOJsonTextArrow -> SQL.BOJsonTextArrow
+
 let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext -> 'f -> SQL.ValueExpr) (queryFunc : SelectExpr<'e, 'f> -> SQL.SelectExpr) : FieldExpr<'e, 'f> -> SQL.ValueExpr =
     let rec traverse = function
         | FEValue v -> compileFieldValue v
@@ -396,36 +419,21 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
         | FENot a -> SQL.VENot (traverse a)
         | FEAnd (a, b) -> SQL.VEAnd (traverse a, traverse b)
         | FEOr (a, b) -> SQL.VEOr (traverse a, traverse b)
-        | FEConcat (a, b) -> SQL.VEConcat (traverse a, traverse b)
         | FEDistinct (a, b) -> SQL.VEDistinct (traverse a, traverse b)
         | FENotDistinct (a, b) -> SQL.VENotDistinct (traverse a, traverse b)
-        | FEEq (a, b) -> SQL.VEEq (traverse a, traverse b)
-        | FENotEq (a, b) -> SQL.VENotEq (traverse a, traverse b)
-        | FELike (e, pat) -> SQL.VELike (traverse e, traverse pat)
-        | FENotLike (e, pat) -> SQL.VENotLike (traverse e, traverse pat)
-        | FEILike (e, pat) -> SQL.VEILike (traverse e, traverse pat)
-        | FENotILike (e, pat) -> SQL.VENotILike (traverse e, traverse pat)
+        | FEBinaryOp (a, op, b) -> SQL.VEBinaryOp (traverse a, compileBinaryOp op, traverse b)
         | FESimilarTo (e, pat) -> SQL.VESimilarTo (traverse e, traverse pat)
         | FENotSimilarTo (e, pat) -> SQL.VENotSimilarTo (traverse e, traverse pat)
-        | FEMatchRegex (e, pat) -> SQL.VEMatchRegex (traverse e, traverse pat)
-        | FEMatchRegexCI (e, pat) -> SQL.VEMatchRegexCI (traverse e, traverse pat)
-        | FENotMatchRegex (e, pat) -> SQL.VENotMatchRegex (traverse e, traverse pat)
-        | FENotMatchRegexCI (e, pat) -> SQL.VENotMatchRegexCI (traverse e, traverse pat)
-        | FELess (a, b) -> SQL.VELess (traverse a, traverse b)
-        | FELessEq (a, b) -> SQL.VELessEq (traverse a, traverse b)
-        | FEGreater (a, b) -> SQL.VEGreater (traverse a, traverse b)
-        | FEGreaterEq (a, b) -> SQL.VEGreaterEq (traverse a, traverse b)
         | FEIn (a, arr) -> SQL.VEIn (traverse a, Array.map traverse arr)
         | FENotIn (a, arr) -> SQL.VENotIn (traverse a, Array.map traverse arr)
         | FEInQuery (a, query) -> SQL.VEInQuery (traverse a, queryFunc query)
         | FENotInQuery (a, query) -> SQL.VENotInQuery (traverse a, queryFunc query)
+        | FEAny (e, op, arr) -> SQL.VEAny (traverse e, compileBinaryOp op, traverse arr)
+        | FEAll (e, op, arr) -> SQL.VEAll (traverse e, compileBinaryOp op, traverse arr)
         | FECast (e, typ) -> SQL.VECast (traverse e, SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldExprType typ))
         | FEIsNull a -> SQL.VEIsNull (traverse a)
         | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
         | FECase (es, els) -> SQL.VECase (Array.map (fun (cond, expr) -> (traverse cond, traverse expr)) es, Option.map traverse els)
-        | FECoalesce arr -> SQL.VECoalesce (Array.map traverse arr)
-        | FEGreatest arr -> SQL.VEGreatest (Array.map traverse arr)
-        | FELeast arr -> SQL.VELeast (Array.map traverse arr)
         | FEJsonArray vals ->
             let compiled = Array.map traverse vals
 
@@ -452,13 +460,11 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
             | None ->
                 let args = obj |> Map.toSeq |> Seq.collect (fun (FunQLName name, v) -> [SQL.VEValue <| SQL.VString name; traverse v]) |> Seq.toArray
                 SQL.VEFunc (SQL.SQLName "jsonb_build_object", args)
-        | FEJsonArrow (a, b) -> SQL.VEJsonArrow (traverse a, traverse b)
-        | FEJsonTextArrow (a, b) -> SQL.VEJsonTextArrow (traverse a, traverse b)
-        | FEPlus (a, b) -> SQL.VEPlus (traverse a, traverse b)
-        | FEMinus (a, b) -> SQL.VEMinus (traverse a, traverse b)
-        | FEMultiply (a, b) -> SQL.VEMultiply (traverse a, traverse b)
-        | FEDivide (a, b) -> SQL.VEDivide (traverse a, traverse b)
-        | FEFunc (name,  args) -> SQL.VEFunc (Map.find name allowedFunctions, Array.map traverse args)
+        | FEFunc (name,  args) ->
+            let compArgs = Array.map traverse args
+            match Map.find name allowedFunctions with
+            | FRFunction name -> SQL.VEFunc (name, compArgs)
+            | FRSpecial special -> SQL.VESpecialFunc (special, compArgs)
         | FEAggFunc (name,  args) -> SQL.VEAggFunc (Map.find name allowedAggregateFunctions, genericCompileAggExpr traverse args)
         | FESubquery query -> SQL.VESubquery (queryFunc query)
         | FEInheritedFrom (c, subEntityRef) ->
@@ -477,7 +483,7 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
             else
                 let col = refFunc RCTypeExpr c
                 let entity = layout.FindEntity (tryResolveEntityRef subEntityRef.Ref |> Option.get) |> Option.get
-                SQL.VEEq (col, SQL.VEValue (SQL.VString entity.typeName))
+                SQL.VEBinaryOp (col, SQL.BOEq, SQL.VEValue (SQL.VString entity.typeName))
     traverse
 
 and genericCompileAggExpr (func : FieldExpr<'e, 'f> -> SQL.ValueExpr) : AggExpr<'e, 'f> -> SQL.AggExpr = function
@@ -672,7 +678,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | DSingle (id, dom) -> f dom
         | DMulti (ns, nested) ->
             let makeCase (localId, subcase) =
-                let case = SQL.VEEq (SQL.VEColumn { table = Some tableRef; name = columnName (CTMeta (CMDomain ns)) }, SQL.VEValue (SQL.VInt localId))
+                let case = SQL.VEBinaryOp (SQL.VEColumn { table = Some tableRef; name = columnName (CTMeta (CMDomain ns)) }, SQL.BOEq, SQL.VEValue (SQL.VInt localId))
                 (case, domainExpression tableRef f subcase)
             SQL.VECase (nested |> Map.toSeq |> Seq.map makeCase |> Seq.toArray, None)
 
@@ -867,7 +873,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         { Attributes = Map.empty
                           Results = [| result |]
                           From = Some <| FEntity (None, argEntityRef')
-                          Where = Some <| FEEq (FERef idColumn, FERef arg)
+                          Where = Some <| FEBinaryOp (FERef idColumn, BOEq, FERef arg)
                           GroupBy = [||]
                           OrderLimit = emptyOrderLimitClause
                           Extra = null
@@ -1418,7 +1424,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let fromColumn = SQL.VEColumn { table = Some tableRef; name = joinKey.Column }
         let toColumn = SQL.VEColumn { table = Some toTableRef; name = sqlFunId }
-        let joinExpr = SQL.VEEq (fromColumn, toColumn)
+        let joinExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
         let alias = { Name = path.Name; Columns = None } : SQL.TableAlias
         let subquery = SQL.FTable ({ RealEntity = joinKey.ToEntity }, Some alias, compileResolvedEntityRef entity.root)
         let currJoin = SQL.FJoin { Type = SQL.Left; A = from; B = subquery; Condition = joinExpr }
