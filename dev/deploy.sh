@@ -23,6 +23,5 @@ set -x
 
 rsync -ravlL --delete FunDB/publish/ "$server_name:$deployment_name/FunDB"
 rsync -ravlL --delete FunApp/dist/ "$server_name:$deployment_name/FunApp"
-rsync -ravlL --delete FunApp/storybook-static/ "$server_name:$deployment_name/FunApp-storybook"
 
 ssh "$server_name" -- nixops deploy -d "$deployment_name"
