@@ -526,8 +526,8 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
             |> Seq.map (parseZipEntry >> uncurry Map.singleton)
             |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) Map.empty
 
-    let convertAction (KeyValue(ref : ActionRef, (meta : PrettyActionMeta, uv))) =
-        let ret = { emptySchemaDump with UserViews = Map.singleton ref.name { Query = uv; AllowBroken = meta.AllowBroken } }
+    let convertAction (KeyValue(ref : ActionRef, (meta : PrettyActionMeta, source))) =
+        let ret = { emptySchemaDump with Actions = Map.singleton ref.name { Function = source; AllowBroken = meta.AllowBroken } }
         (ref.schema, ret)
     let dump =
         encounteredActions
