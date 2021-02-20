@@ -371,6 +371,14 @@ const fetchJson = async (input: RequestInfo, init?: RequestInit): Promise<unknow
   return response.json();
 };
 
+export interface ISaveSchemasOptions {
+  skipPreloaded?: boolean;
+}
+
+export interface IRestoreSchemasOptions {
+  dropOthers?: boolean;
+}
+
 export default class FunDBAPI {
   private apiUrl: string;
 
@@ -453,21 +461,22 @@ export default class FunDBAPI {
     return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args ?? {}) as Promise<IActionResult>;
   };
 
-  saveSchemas = async (token: string | null, schemas: string[] | null): Promise<Blob> => {
-    let url = "layouts";
-    if (schemas !== null) {
-      const params = new URLSearchParams();
+  saveSchemas = async (token: string | null, schemas: string[] | "all", options?: ISaveSchemasOptions): Promise<Blob> => {
+    const params = new URLSearchParams();
+    if (schemas !== "all") {
       schemas.forEach(name => {
         params.append("schema", name);
       });
-      url += `?${params}`;
     }
-    return this.fetchGetFileApi(url, token, "application/zip");
+    if (options?.skipPreloaded) {
+      params.append("skip_preloaded", "true");
+    }
+    return this.fetchGetFileApi(`layouts?${params}`, token, "application/zip");
   };
 
-  restoreSchemas = async (token: string | null, dropOthers: boolean, data: Blob): Promise<void> => {
+  restoreSchemas = async (token: string | null, data: Blob, options?: IRestoreSchemasOptions): Promise<void> => {
     const params = new URLSearchParams();
-    if (dropOthers) {
+    if (options?.dropOthers) {
       params.append("drop_others", "true");
     }
     await this.fetchSendFileApi(`layouts?${params}`, token, "PUT", "application/zip", data);
