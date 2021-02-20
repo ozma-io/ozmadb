@@ -4,6 +4,6 @@
 set -x
 
 test -f yarn.lock
-rm -rf dist
+rm -rf dist *.tsbuildinfo
 yarn
 yarn build
