@@ -36,7 +36,7 @@ type SerializedTriggerEvent =
 type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction { Path = name; Source = scriptSource; IsModule = true }
+            runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
         with
         | :? NetJsException as e ->
             raisefWithInner TriggerRunException e "Couldn't initialize trigger"

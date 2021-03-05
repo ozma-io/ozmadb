@@ -28,17 +28,9 @@ type IsolateLocal<'a when 'a : not struct> (create : Isolate -> 'a) =
 type Path = POSIXPath.Path
 type Source = string
 
-// Returns if file is a JavaScript script by extension.
-let fileIsJavaScript (p : Path) : bool option =
-    match POSIXPath.extension p with
-    | Some "js" -> Some false
-    | Some "mjs" -> Some true
-    | _ -> None
-
 type ModuleFile =
     { Path : Path
       Source : Source
-      IsModule : bool
     }
 
 type private VirtualFSModule =
@@ -87,7 +79,7 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
 
     let makeModule (file : ModuleFile) =
         let normalized = convertPath file.Path
-        let modul = Module.Compile(String.New(context.Isolate, file.Source), ScriptOrigin(normalized, IsModule = file.IsModule))
+        let modul = Module.Compile(String.New(context.Isolate, file.Source), ScriptOrigin(normalized, IsModule = true))
         { Path = normalized
           Module = modul
           DirPath = POSIXPath.dirName normalized

@@ -28,12 +28,9 @@ type private Phase1Resolver (layout : Layout) =
                     raisef ResolveModulesException "Path shouldn't contain .."
                 if POSIXPath.isAbsolute path then
                     raisef ResolveModulesException "Path shouldn't be absolute"
-                let isModule =
-                    match fileIsJavaScript path with
-                    | Some r -> r
-                    | None -> raisef ResolveModulesException "File should have .mjs or .js extension"
-                { IsModule = isModule
-                  Source = modul.Source
+                if POSIXPath.extension path <> Some "mjs" then
+                    raisef ResolveModulesException "File should have .mjs extension"
+                { Source = modul.Source
                 }
             with
             | :? ResolveModulesException as e -> raisefWithInner ResolveModulesException e.InnerException "Error in module %O: %s" path e.Message

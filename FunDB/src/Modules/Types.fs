@@ -13,8 +13,7 @@ type ModuleRef =
 
 [<NoEquality; NoComparison>]
 type ResolvedModule =
-    { IsModule : bool
-      Source : string
+    { Source : string
     }
 
 [<NoEquality; NoComparison>]
@@ -43,6 +42,5 @@ let moduleFiles (modules : ResolvedModules) : ModuleFile seq =
                 yield {
                     Path = moduleName ref
                     Source = modul.Source
-                    IsModule = modul.IsModule
                 }
     }
