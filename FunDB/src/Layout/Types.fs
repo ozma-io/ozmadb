@@ -99,13 +99,22 @@ type GenericResolvedField<'col, 'comp> =
 
 type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedField>
 
+type FieldInfo<'col, 'comp> =
+    { Name : FieldName
+      // If a field is considered to not have an implicit name (so an explicit one is required in `SELECT`).
+      ForceRename : bool
+      Field : GenericResolvedField<'col, 'comp>
+    }
+
+type ResolvedFieldInfo = FieldInfo<ResolvedColumnField, ResolvedComputedField>
+
 [<NoEquality; NoComparison>]
 type ChildEntity =
     { direct : bool
     }
 
 type IEntityFields =
-    abstract member FindField : FieldName -> (FunQLName * ResolvedField) option
+    abstract member FindField : FieldName ->  ResolvedFieldInfo option
     abstract member Fields : (FieldName * ResolvedField) seq
     abstract member MainField : FieldName
     abstract member Parent : ResolvedEntityRef option
@@ -115,20 +124,21 @@ type IEntityFields =
 let hasSubType (entity : IEntityFields) =
         Option.isSome entity.Parent || entity.IsAbstract || not (Seq.isEmpty entity.Children)
 
-let inline genericFindField (getColumnField : FieldName -> 'col option) (getComputedField : FieldName -> 'comp option) (fields : IEntityFields) =
+let inline genericFindField (getColumnField : FieldName -> 'col option) (getComputedField : FieldName -> 'comp option) (fields : IEntityFields) : FieldName -> FieldInfo<'col, 'comp> option =
     let rec traverse (name : FieldName) =
         if name = funId then
-            Some (funId, RId)
+            Some { Name = funId; ForceRename = false; Field = RId }
         else if name = funSubEntity && hasSubType fields then
-            Some (funSubEntity, RSubEntity)
+            Some { Name = funSubEntity; ForceRename = false; Field = RSubEntity }
         else if name = funMain then
-            traverse fields.MainField
+            // We set name `main` by default for main fields, otherwise name may spontaneously clash in the future.
+            Option.map (fun f -> { f with ForceRename = true }) <| traverse fields.MainField
         else
             match getColumnField name with
-            | Some col -> Some (name, RColumnField col)
+            | Some col -> Some { Name = name; ForceRename = false; Field = RColumnField col }
             | None ->
                 match getComputedField name with
-                | Some comp -> Some (name, RComputedField comp)
+                | Some comp -> Some { Name = name; ForceRename = false; Field = RComputedField comp }
                 | None -> None
     traverse
 

@@ -89,14 +89,14 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         | [] ->
             match entity.FindField name with
             | None -> raisef ResolvePermissionsException "Column not found: %O" name
-            | Some (_, RId) ->
+            | Some { Field = RId } ->
                 if allowIds then
                     ()
                 else
                     raisef ResolvePermissionsException "Ids aren't allowed: %O" name
-            | Some (_, RSubEntity)
-            | Some (_, RColumnField _) -> ()
-            | Some (_, RComputedField comp) ->
+            | Some { Field = RSubEntity }
+            | Some { Field = RColumnField _ } -> ()
+            | Some { Field = RComputedField comp } ->
                 if allowIds || not comp.hasId then
                     ()
                 else

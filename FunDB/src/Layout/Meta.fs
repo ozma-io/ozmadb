@@ -23,14 +23,14 @@ type private MetaBuilder (layout : Layout) =
         genericCompileFieldExpr layout makeFullName voidQuery
 
     and compileComputedName (entity : ResolvedEntity) (ctx : ReferenceContext) (name : FieldName) : SQL.ValueExpr =
-        let (realName, field) = entity.FindField name |> Option.get
-        match field with
+        let fieldInfo = entity.FindField name |> Option.get
+        match fieldInfo.Field with
         | RId
-        | RColumnField _ -> SQL.VEColumn { table = None; name = compileName realName }
+        | RColumnField _ -> SQL.VEColumn { table = None; name = compileName fieldInfo.Name }
         | RSubEntity ->
             match ctx with
             | RCExpr -> entity.subEntityParseExpr
-            | RCTypeExpr -> SQL.VEColumn { table = None; name = compileName realName }
+            | RCTypeExpr -> SQL.VEColumn { table = None; name = compileName fieldInfo.Name }
         | RComputedField comp -> compileComputedExpr entity comp.expression
 
     let compileCheckExpr (entity : ResolvedEntity) : LocalFieldExpr -> SQL.ValueExpr =

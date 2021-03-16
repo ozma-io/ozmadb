@@ -126,7 +126,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         | Some f -> Some f
         | None ->
             match layout.FindField ref.entity ref.name with
-            | Some (_, RColumnField src) ->
+            | Some { Field = RColumnField src } ->
                 let res = serializeColumnField src
                 serializedFields <- Map.add ref res serializedFields
                 Some res

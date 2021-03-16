@@ -413,17 +413,17 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         match fields with
         | [] ->
             match entity.FindField fieldRef.name with
-            | Some (_, RId) ->
+            | Some { Field = RId } ->
                 let usedSchemas = addUsedEntityRef fieldRef.entity usedSchemas
                 { IsLocal = true; HasId = true; UsedSchemas = usedSchemas }
-            | Some (_, RSubEntity) ->
+            | Some { Field = RSubEntity } ->
                 let usedSchemas = addUsedEntityRef fieldRef.entity usedSchemas
                 { IsLocal = true; HasId = false; UsedSchemas = usedSchemas }
-            | Some (_, RComputedField comp) ->
+            | Some { Field = RComputedField comp } ->
                 match resolveComputedField stack entity fieldRef comp with
                 | Ok field -> { IsLocal = field.isLocal; HasId = field.hasId; UsedSchemas = mergeUsedSchemas usedSchemas field.usedSchemas }
                 | Error e -> raisefWithInner ResolveLayoutException e "Computed field %O is broken" fieldRef
-            | Some (newName, RColumnField _) ->
+            | Some { Name = newName; Field = RColumnField _ } ->
                 let usedSchemas = addUsedField fieldRef.entity.schema fieldRef.entity.name newName usedSchemas
                 { IsLocal = true; HasId = false; UsedSchemas = usedSchemas }
             | None -> raisef ResolveLayoutException "Column field not found in path: %O" fieldRef.name
