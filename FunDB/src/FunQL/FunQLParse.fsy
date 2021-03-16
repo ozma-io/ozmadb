@@ -71,18 +71,40 @@ let private splitResults (results : Result seq) : ParsedAttributeMap * QueryResu
     let results = results |> Seq.mapMaybe getResult |> Seq.toArray
     (attributes, results)
 
-// We restrict casts to work only on values to clarify their types. This is because arbitrary casting breaks abstraction
+// We restrict casts to work only on values to clarify their types. This is because arbitrary casting breaks array abstraction, allowing to create nested arrays.
 let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : unit =
     match expr with
     | FEValue v ->
-        match (v, exprType) with
-        | (FStringArray _, FETArray _) -> ()
-        | (FString _, FETScalar _) -> ()
-        | (FInt _, FETScalar _) -> ()
-        | (FBool _, FETScalar _) -> ()
-        | (FNull, _) -> ()
-        | _ -> failwith "Casting cannot be performed between arrays and scalars"
-    | _ -> failwith <| sprintf "Casting can only be performed on values: %O :: %O" expr exprType
+        match v with
+        | FNull -> ()
+        | FStringArray _
+        | FIntArray _
+        | FBoolArray _
+        | FDecimalArray _
+        | FJsonArray _
+        | FUserViewRefArray _
+        | FDateArray _
+        | FDateTimeArray _
+        | FIntervalArray _ ->
+            match exprType with
+            | FETArray _ -> ()
+            | FETScalar _ -> failwith "Casting cannot be performed between arrays and scalars"
+        | FString _
+        | FInt _
+        | FDecimal _
+        | FBool _
+        | FJson _
+        | FUserViewRef _
+        | FDate _
+        | FDateTime _
+        | FInterval _ ->
+            match exprType with
+            | FETScalar _ -> ()
+            | FETArray _ -> failwith "Casting cannot be performed between arrays and scalars"
+    | _ ->
+        match exprType with
+        | FETScalar _ -> ()
+        | FETArray _ -> failwith "Cannot cast arbitrary values to arrays"
 
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin { Type = joinType; A = fromExpr1; B = fromExpr2; Condition = whereExpr }
