@@ -241,7 +241,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
 
                 let jsRuntime = makeRuntime (moduleFiles modules)
                 let (brokenViews, sourceViews) = runWithRuntime jsRuntime <| fun api -> generateViews api layout sourceViews cancellationToken true
-                let! isChanged2 = updateUserViews transaction.System sourceViews cancellationToken
+                let! userViewsUpdater = updateUserViews transaction.System sourceViews cancellationToken
+                let! isChanged2 = userViewsUpdater ()
 
                 let (newBrokenViews, userViews) = resolveUserViews layout mergedAttrs true sourceViews
                 let brokenViews = unionErroredUserViews brokenViews newBrokenViews
@@ -634,22 +635,23 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             }
 
                             logger.LogInformation("Updating generated user views")
-                            let (_, userViewsSource) = runWithRuntime jsRuntime <| fun api ->
+                            let (_, generatedUserViews) = runWithRuntime jsRuntime <| fun api ->
                                 try
                                     generateViews api layout sourceUserViews cancellationToken false
                                 with
                                 | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
-                            let! _ = updateUserViews transaction.System userViewsSource cancellationToken
+                            let! userViewsUpdater = updateUserViews transaction.System generatedUserViews cancellationToken
+                            let! _ = userViewsUpdater ()
+                            let sourceUserViews = { Schemas = Map.union sourceUserViews.Schemas generatedUserViews.Schemas } : SourceUserViews
 
-                            let! newUserViewsSource = buildSchemaUserViews transaction.System cancellationToken
                             let (_, userViews) =
                                 try
-                                    resolveUserViews layout mergedAttrs false newUserViewsSource
+                                    resolveUserViews layout mergedAttrs false sourceUserViews
                                 with
                                 | :? UserViewResolveException as err -> raisefWithInner ContextException err "Failed to resolve user views"
                             let! (_, badUserViews) = task {
                                 try
-                                    return! dryRunUserViews transaction.Connection.Query layout false (Some false) newUserViewsSource userViews cancellationToken
+                                    return! dryRunUserViews transaction.Connection.Query layout false (Some false) sourceUserViews userViews cancellationToken
                                 with
                                 | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                             }
@@ -675,7 +677,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             with
                             | :? DbUpdateException as err -> raisefWithInner ContextException err "State update error"
 
-                            let! (_, goodUserViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) newUserViewsSource userViews cancellationToken
+                            let! (_, goodUserViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUserViews userViews cancellationToken
 
                             let newState =
                                 { Layout = layout
@@ -686,7 +688,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                   Triggers = mergedTriggers
                                   TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
                                   UserViews = mergePrefetchedUserViews badUserViews goodUserViews
-                                  SystemViews = filterSystemViews userViewsSource
+                                  SystemViews = filterSystemViews sourceUserViews
                                   UserMeta = wantedUserMeta
                                 }
 

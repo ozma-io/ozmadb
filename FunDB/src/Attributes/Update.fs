@@ -68,7 +68,7 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     member this.UpdateSchemas = updateSchemas
 
-let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (cancellationToken : CancellationToken) : Task<bool> =
+let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
     task {
         let! _ = serializedSaveChangesAsync db cancellationToken
 
@@ -82,10 +82,14 @@ let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (can
             |> Seq.filter (fun (name, schema) -> Map.containsKey name attrs.Schemas)
             |> Map.ofSeq
 
-        let updater = AttributesUpdater(db, allSchemas)
-        updater.UpdateSchemas attrs.Schemas schemasMap
-        let! changedEntries = serializedSaveChangesAsync db cancellationToken
-        return changedEntries > 0
+        // See `Layout.Update` for explanation on why is this in a lambda.
+        return fun () ->
+            task {
+                let updater = AttributesUpdater(db, allSchemas)
+                updater.UpdateSchemas attrs.Schemas schemasMap
+                let! changedEntries = serializedSaveChangesAsync db cancellationToken
+                return changedEntries
+            }
     }
 
 let private findBrokenAttributesEntity (schemaName : SchemaName) (attrEntityRef : ResolvedEntityRef) (entity : ErroredAttributesEntity) : DefaultAttributeRef seq =

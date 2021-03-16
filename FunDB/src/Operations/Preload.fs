@@ -417,13 +417,24 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
         }
         assert (Task.awaitSync <| sanityCheck ())
 
+        let! layoutUpdater = updateLayout conn.System sourcePreloadLayout cancellationToken
+        let permissions = preloadPermissions preload
+        let! permissionsUpdater = updatePermissions conn.System permissions cancellationToken
+        let defaultAttributes = preloadDefaultAttributes preload
+        let! attributesUpdater = updateAttributes conn.System defaultAttributes cancellationToken
+        let modules = preloadModules preload
+        let! modulesUpdater = updateModules conn.System modules cancellationToken
+        let actions = preloadActions preload
+        let! actionsUpdater = updateActions conn.System actions cancellationToken
+        let triggers = preloadTriggers preload
+        let! triggersUpdater = updateTriggers conn.System triggers cancellationToken
+
         // We migrate layout first so that permissions and attributes have schemas in the table.
-        let! changed1 = updateLayout conn.System sourcePreloadLayout cancellationToken
+        let! changed1 = layoutUpdater ()
         let! changed2 =
             task {
-                let permissions = preloadPermissions preload
                 try
-                    return! updatePermissions conn.System permissions cancellationToken
+                    return! permissionsUpdater ()
                 with
                 | e ->
                     // Maybe we'll get a better error
@@ -432,9 +443,8 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
             }
         let! changed3 =
             task {
-                let defaultAttributes = preloadDefaultAttributes preload
                 try
-                    return! updateAttributes conn.System defaultAttributes cancellationToken
+                    return! attributesUpdater ()
                 with
                 | e ->
                     // Maybe we'll get a better error
@@ -443,9 +453,8 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
             }
         let! changed4 =
             task {
-                let actions = preloadActions preload
                 try
-                    return! updateActions conn.System actions cancellationToken
+                    return! modulesUpdater ()
                 with
                 | e ->
                     // Maybe we'll get a better error
@@ -454,9 +463,8 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
             }
         let! changed5 =
             task {
-                let triggers = preloadTriggers preload
                 try
-                    return! updateTriggers conn.System triggers cancellationToken
+                    return! triggersUpdater ()
                 with
                 | e ->
                     // Maybe we'll get a better error
@@ -465,9 +473,8 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
             }
         let! changed6 =
             task {
-                let modules = preloadModules preload
                 try
-                    return! updateModules conn.System modules cancellationToken
+                    return! modulesUpdater ()
                 with
                 | e ->
                     // Maybe we'll get a better error

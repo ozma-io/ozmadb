@@ -50,7 +50,11 @@ let inline private tryEFUpdateQuery (f : unit -> Task<'a>) : Task<'a> =
     }
 
 let serializedSaveChangesAsync (db : DbContext) (cancellationToken : CancellationToken) =
-    tryEFUpdateQuery <| fun () -> db.SaveChangesAsync cancellationToken
+    tryEFUpdateQuery <| fun () ->
+        task {
+            let! changed = db.SaveChangesAsync cancellationToken
+            return changed > 0
+        }
 
 type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationLevel) =
     let transaction = conn.Connection.BeginTransaction(isolationLevel)

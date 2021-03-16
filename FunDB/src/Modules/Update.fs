@@ -43,7 +43,7 @@ type private ModulesUpdater (db : SystemContext) =
 
     member this.UpdateSchemas = updateSchemas
 
-let updateModules (db : SystemContext) (modules : SourceModules) (cancellationToken : CancellationToken) : Task<bool> =
+let updateModules (db : SystemContext) (modules : SourceModules) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
     task {
         let! _ = serializedSaveChangesAsync db cancellationToken
 
@@ -57,8 +57,12 @@ let updateModules (db : SystemContext) (modules : SourceModules) (cancellationTo
             |> Seq.filter (fun (name, schema) -> Map.containsKey name modules.Schemas)
             |> Map.ofSeq
 
-        let updater = ModulesUpdater(db)
-        updater.UpdateSchemas modules.Schemas schemasMap
-        let! changedEntries = serializedSaveChangesAsync db cancellationToken
-        return changedEntries > 0
+        // See `Layout.Update` for explanation on why is this in a lambda.
+        return fun () ->
+            task {
+                let updater = ModulesUpdater(db)
+                updater.UpdateSchemas modules.Schemas schemasMap
+                let! changedEntries = serializedSaveChangesAsync db cancellationToken
+                return changedEntries
+            }
     }

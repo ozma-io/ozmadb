@@ -47,7 +47,7 @@ type private ActionsUpdater (db : SystemContext) =
 
     member this.UpdateSchemas = updateSchemas
 
-let updateActions (db : SystemContext) (actions : SourceActions) (cancellationToken : CancellationToken) : Task<bool> =
+let updateActions (db : SystemContext) (actions : SourceActions) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
     task {
         let! _ = serializedSaveChangesAsync db cancellationToken
 
@@ -61,10 +61,14 @@ let updateActions (db : SystemContext) (actions : SourceActions) (cancellationTo
             |> Seq.filter (fun (name, schema) -> Map.containsKey name actions.Schemas)
             |> Map.ofSeq
 
-        let updater = ActionsUpdater(db)
-        updater.UpdateSchemas actions.Schemas schemasMap
-        let! changedEntries = serializedSaveChangesAsync db cancellationToken
-        return changedEntries > 0
+        // See `Layout.Update` for explanation on why is this in a lambda.
+        return fun () ->
+            task {
+                let updater = ActionsUpdater(db)
+                updater.UpdateSchemas actions.Schemas schemasMap
+                let! changedEntries = serializedSaveChangesAsync db cancellationToken
+                return changedEntries
+            }
     }
 
 let private findBrokenActionsSchema (schemaName : SchemaName) (schema : ErroredActionsSchema) : ActionRef seq =

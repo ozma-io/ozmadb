@@ -199,35 +199,43 @@ let restoreSchemas (db : SystemContext) (dumps : Map<SchemaName, SchemaDump>) (c
 
         let! _ = db.Database.ExecuteSqlRawAsync("SET CONSTRAINTS ALL DEFERRED")
 
-        let! updated1 = updateLayout db newLayout cancellationToken
+        let! layoutUpdater = updateLayout db newLayout cancellationToken
+        let! permissionsUpdater = updatePermissions db newPerms cancellationToken
+        let! userViewsUpdater = updateUserViews db newUserViews cancellationToken
+        let! attributesUpdater = updateAttributes db newAttributes cancellationToken
+        let! modulesUpdater = updateModules db newModules cancellationToken
+        let! actionsUpdater = updateActions db newActions cancellationToken
+        let! triggersUpdater = updateTriggers db newTriggers cancellationToken
+
+        let! updated1 = layoutUpdater ()
         let! updated2 =
             try
-                updatePermissions db newPerms cancellationToken
+                permissionsUpdater ()
             with
             | :? UpdatePermissionsException as e -> raisefWithInner RestoreSchemaException e "Failed to restore permissions"
         let! updated3 =
             try
-                updateUserViews db newUserViews cancellationToken
+                userViewsUpdater ()
             with
             | :? UpdateUserViewsException as e -> raisefWithInner RestoreSchemaException e "Failed to restore user views"
         let! updated4 =
             try
-                updateAttributes db newAttributes cancellationToken
+                attributesUpdater ()
             with
             | :? UpdateAttributesException as e -> raisefWithInner RestoreSchemaException e "Failed to restore attributes"
         let! updated5 =
             try
-                updateModules db newModules cancellationToken
+                modulesUpdater ()
             with
             | :? UpdateModulesException as e -> raisefWithInner RestoreSchemaException e "Failed to restore modules"
         let! updated6 =
             try
-                updateActions db newActions cancellationToken
+                actionsUpdater ()
             with
             | :? UpdateActionsException as e -> raisefWithInner RestoreSchemaException e "Failed to restore actions"
         let! updated7 =
             try
-                updateTriggers db newTriggers cancellationToken
+                triggersUpdater ()
             with
             | :? UpdateTriggersException as e -> raisefWithInner RestoreSchemaException e "Failed to restore triggers"
 

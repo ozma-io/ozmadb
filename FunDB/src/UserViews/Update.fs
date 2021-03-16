@@ -54,7 +54,7 @@ type private UserViewsUpdater (db : SystemContext) =
 
     member this.UpdateSchemas = updateSchemas
 
-let updateUserViews (db : SystemContext) (uvs : SourceUserViews) (cancellationToken : CancellationToken) : Task<bool> =
+let updateUserViews (db : SystemContext) (uvs : SourceUserViews) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
     task {
         let! _ = serializedSaveChangesAsync db cancellationToken
 
@@ -67,10 +67,14 @@ let updateUserViews (db : SystemContext) (uvs : SourceUserViews) (cancellationTo
             schemasList
             |> Seq.map (fun schema -> (FunQLName schema.Name, schema)) |> Map.ofSeq
 
-        let updater = UserViewsUpdater(db)
-        updater.UpdateSchemas uvs.Schemas schemasMap
-        let! changedEntries = serializedSaveChangesAsync db cancellationToken
-        return changedEntries > 0
+        // See `Layout.Update` for explanation on why is this in a lambda.
+        return fun () ->
+            task {
+                let updater = UserViewsUpdater(db)
+                updater.UpdateSchemas uvs.Schemas schemasMap
+                let! changedEntries = serializedSaveChangesAsync db cancellationToken
+                return changedEntries
+            }
     }
 
 type private UserViewErrorRef = ERGenerator of SchemaName

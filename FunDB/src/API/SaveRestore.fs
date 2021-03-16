@@ -108,15 +108,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                             let emptyDumps = droppedSchemas |> Seq.map (fun name -> (name, emptySchemaDump)) |> Map.ofSeq
                             Map.union emptyDumps dumps
                         let! modified = restoreSchemas ctx.Transaction.System dumps ctx.CancellationToken
-                        let! affected =
-                            task {
-                                if Set.isEmpty droppedSchemas then
-                                    return 0
-                                else
-                                    let schemasArray = droppedSchemas |> Seq.map string |> Array.ofSeq
-                                    return! ctx.Transaction.System.Schemas.AsQueryable().Where(fun schema -> schemasArray.Contains(schema.Name)).DeleteFromQueryAsync(ctx.CancellationToken)
-                            }
-                        if modified || affected > 0 then
+                        if modified then
                             ctx.ScheduleMigration ()
                         rctx.WriteEventSync (fun event ->
                             event.Type <- "restoreSchemas"

@@ -72,7 +72,7 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) =
 
     member this.UpdateSchemas = updateSchemas
 
-let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellationToken : CancellationToken) : Task<bool> =
+let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
     task {
         let! _ = serializedSaveChangesAsync db cancellationToken
 
@@ -86,10 +86,14 @@ let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellatio
             |> Seq.filter (fun (name, schema) -> Map.containsKey name triggers.Schemas)
             |> Map.ofSeq
 
-        let updater = TriggersUpdater(db, allSchemas)
-        updater.UpdateSchemas triggers.Schemas schemasMap
-        let! changedEntries = serializedSaveChangesAsync db cancellationToken
-        return changedEntries > 0
+        // See `Layout.Update` for explanation on why is this in a lambda.
+        return fun () ->
+            task {
+                let updater = TriggersUpdater(db, allSchemas)
+                updater.UpdateSchemas triggers.Schemas schemasMap
+                let! changedEntries = serializedSaveChangesAsync db cancellationToken
+                return changedEntries
+            }
     }
 
 let private findBrokenTriggersEntity (schemaName : SchemaName) (trigEntityRef : ResolvedEntityRef) (entity : ErroredTriggersEntity) : TriggerRef seq =

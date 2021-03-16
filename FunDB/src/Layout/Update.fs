@@ -177,7 +177,7 @@ let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) (ca
         return ()
     }
 
-let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task<bool> =
+let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
     task {
         let! _ = serializedSaveChangesAsync db cancellationToken
 
@@ -191,14 +191,22 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken
             |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
             |> Map.ofSeq
 
-        let updater = LayoutUpdater (db, schemas)
-        updater.UpdateSchemas layout.Schemas schemasMap
-        let! changedEntries = serializedSaveChangesAsync db cancellationToken
+        // We delay the actual update so that we can load all data first when performing several updates at once.
+        // Otherwise an issue may happen:
+        // 1. A different `update` function deletes a referenced row;
+        // 2. Now this `update` function will miss all rows which reference deleted row because EF Core uses `INNER JOIN`, and the deleted row, well, doesn't exist.
+        // For example: an entity is removed and we don't remove all default attributes with `field_entity` referencing this one.
+        return fun () ->
+            task {
+                let updater = LayoutUpdater (db, schemas)
+                updater.UpdateSchemas layout.Schemas schemasMap
+                let! changedEntries = serializedSaveChangesAsync db cancellationToken
 
-        if updater.NeedsParentPass then
-            do! updateLayoutParents db layout cancellationToken
+                if updater.NeedsParentPass then
+                    do! updateLayoutParents db layout cancellationToken
 
-        return changedEntries > 0
+                return changedEntries
+            }
     }
 
 let private findBrokenComputedFieldsEntity (entityRef : ResolvedEntityRef) (entity : ErroredEntity) : ResolvedFieldRef seq =
