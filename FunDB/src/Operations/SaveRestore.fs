@@ -15,6 +15,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.IO
 open FunWithFlags.FunUtils.Parsing
 open FunWithFlags.FunUtils.Serialization.Yaml
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Schema
@@ -200,44 +201,44 @@ let restoreSchemas (db : SystemContext) (dumps : Map<SchemaName, SchemaDump>) (c
         let! _ = db.Database.ExecuteSqlRawAsync("SET CONSTRAINTS ALL DEFERRED")
 
         let! layoutUpdater = updateLayout db newLayout cancellationToken
-        let! permissionsUpdater = updatePermissions db newPerms cancellationToken
-        let! userViewsUpdater = updateUserViews db newUserViews cancellationToken
-        let! attributesUpdater = updateAttributes db newAttributes cancellationToken
-        let! modulesUpdater = updateModules db newModules cancellationToken
-        let! actionsUpdater = updateActions db newActions cancellationToken
-        let! triggersUpdater = updateTriggers db newTriggers cancellationToken
+        let! permissionsUpdater =
+            try
+                updatePermissions db newPerms cancellationToken
+            with
+            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore permissions"
+        let! userViewsUpdater =
+            try
+                updateUserViews db newUserViews cancellationToken
+            with
+            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore user views"
+        let! attributesUpdater =
+            try
+                updateAttributes db newAttributes cancellationToken
+            with
+            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore attributes"
+        let! modulesUpdater =
+            try
+                updateModules db newModules cancellationToken
+            with
+            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore modules"
+        let! actionsUpdater =
+            try
+                updateActions db newActions cancellationToken
+            with
+            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore actions"
+        let! triggersUpdater =
+            try
+                updateTriggers db newTriggers cancellationToken
+            with
+            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore triggers"
 
         let! updated1 = layoutUpdater ()
-        let! updated2 =
-            try
-                permissionsUpdater ()
-            with
-            | :? UpdatePermissionsException as e -> raisefWithInner RestoreSchemaException e "Failed to restore permissions"
-        let! updated3 =
-            try
-                userViewsUpdater ()
-            with
-            | :? UpdateUserViewsException as e -> raisefWithInner RestoreSchemaException e "Failed to restore user views"
-        let! updated4 =
-            try
-                attributesUpdater ()
-            with
-            | :? UpdateAttributesException as e -> raisefWithInner RestoreSchemaException e "Failed to restore attributes"
-        let! updated5 =
-            try
-                modulesUpdater ()
-            with
-            | :? UpdateModulesException as e -> raisefWithInner RestoreSchemaException e "Failed to restore modules"
-        let! updated6 =
-            try
-                actionsUpdater ()
-            with
-            | :? UpdateActionsException as e -> raisefWithInner RestoreSchemaException e "Failed to restore actions"
-        let! updated7 =
-            try
-                triggersUpdater ()
-            with
-            | :? UpdateTriggersException as e -> raisefWithInner RestoreSchemaException e "Failed to restore triggers"
+        let! updated2 = permissionsUpdater ()
+        let! updated3 = userViewsUpdater ()
+        let! updated4 = attributesUpdater ()
+        let! updated5 = modulesUpdater ()
+        let! updated6 = actionsUpdater ()
+        let! updated7 = triggersUpdater ()
 
         let! _ = db.Database.ExecuteSqlRawAsync("SET CONSTRAINTS ALL IMMEDIATE")
 

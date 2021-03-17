@@ -8,7 +8,6 @@ open FSharp.Control.Tasks.Affine
 open Microsoft.FSharp.Quotations
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Update
@@ -16,12 +15,9 @@ open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDBSchema.System
 
-type UpdateActionsException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type private ActionsUpdater (db : SystemContext) as this =
+    inherit SystemUpdater(db)
 
-    new (message : string) = UpdateActionsException (message, null)
-
-type private ActionsUpdater (db : SystemContext) =
     let updateActionsField (action : SourceAction) (existingAction : Action) : unit =
         existingAction.AllowBroken <- action.AllowBroken
         existingAction.Function <- action.Function
@@ -32,44 +28,39 @@ type private ActionsUpdater (db : SystemContext) =
 
         let updateFunc _ = updateActionsField
         let createFunc (FunQLName actionName) =
-            let newAction =
-                Action (
-                    Name = actionName
-                )
-            existingSchema.Actions.Add(newAction)
-            newAction
-        ignore <| updateDifference db updateFunc createFunc schema.Actions oldActionsMap
+            Action (
+                Name = actionName,
+                Schema = existingSchema
+            )
+        ignore <| this.UpdateDifference updateFunc createFunc schema.Actions oldActionsMap
 
-    let updateSchemas (schemas : Map<SchemaName, SourceActionsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
-        let updateFunc _ = updateActionsDatabase
-        let createFunc name = raisef UpdateActionsException "Schema %O doesn't exist" name
-        ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
+    let updateSchemas (schemas : Map<SchemaName, SourceActionsSchema>) (existingSchemas : Map<SchemaName, Schema>) =
+        let updateFunc name schema existingSchema =
+            try
+                updateActionsDatabase schema existingSchema
+            with
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+        this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
-    member this.UpdateSchemas = updateSchemas
+    member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
 let updateActions (db : SystemContext) (actions : SourceActions) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
-    task {
-        let! _ = serializedSaveChangesAsync db cancellationToken
+    genericSystemUpdate db cancellationToken <| fun () ->
+        task {
+            let currentSchemas = db.GetActionsObjects ()
+            // We don't touch in any way schemas not in layout.
+            let wantedSchemas = actions.Schemas |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
+            let! allSchemas = currentSchemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync(cancellationToken)
+            let schemasMap =
+                allSchemas
+                |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
+                |> Seq.filter (fun (name, schema) -> Map.containsKey name actions.Schemas)
+                |> Map.ofSeq
 
-        let currentSchemas = db.GetActionsObjects ()
-        // We don't touch in any way schemas not in layout.
-        let wantedSchemas = actions.Schemas |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
-        let! allSchemas = currentSchemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync(cancellationToken)
-        let schemasMap =
-            allSchemas
-            |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
-            |> Seq.filter (fun (name, schema) -> Map.containsKey name actions.Schemas)
-            |> Map.ofSeq
-
-        // See `Layout.Update` for explanation on why is this in a lambda.
-        return fun () ->
-            task {
-                let updater = ActionsUpdater(db)
-                updater.UpdateSchemas actions.Schemas schemasMap
-                let! changedEntries = serializedSaveChangesAsync db cancellationToken
-                return changedEntries
-            }
-    }
+            let updater = ActionsUpdater(db)
+            ignore <| updater.UpdateSchemas actions.Schemas schemasMap
+            return updater
+        }
 
 let private findBrokenActionsSchema (schemaName : SchemaName) (schema : ErroredActionsSchema) : ActionRef seq =
     seq {

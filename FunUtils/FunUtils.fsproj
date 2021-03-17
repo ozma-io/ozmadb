@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <Compile Include="src/Task.fs" />
+    <Compile Include="src/Null.fs" />
     <Compile Include="src/Option.fs" />
     <Compile Include="src/Result.fs" />
     <Compile Include="src/Seq.fs" />

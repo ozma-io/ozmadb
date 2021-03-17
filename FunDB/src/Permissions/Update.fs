@@ -9,19 +9,15 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Connection
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
-type UpdatePermissionsException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as this =
+    inherit SystemUpdater(db)
 
-    new (message : string) = UpdatePermissionsException (message, null)
-
-type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
     let updateAllowedField (field : SourceAllowedField) (existingField : RoleColumnField) : unit =
@@ -36,13 +32,10 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
 
         let updateFunc _ = updateAllowedField
         let createFunc (FunQLName fieldName) =
-            let newField =
-                RoleColumnField (
-                    ColumnName = fieldName
-                )
-            existingEntity.ColumnFields.Add(newField)
-            newField
-        ignore <| updateDifference db updateFunc createFunc entity.Fields oldFieldsMap
+            RoleColumnField (
+                ColumnName = fieldName
+            )
+        ignore <| this.UpdateDifference updateFunc createFunc entity.Fields oldFieldsMap
 
     let updateAllowedEntity (entityRef : ResolvedEntityRef) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) : unit =
         updateAllowedFields entityRef entity existingEntity
@@ -69,18 +62,14 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
 
         let updateFunc = updateAllowedEntity
         let createFunc entityRef =
-            let entityId =
+            let entity =
                 match Map.tryFind entityRef allEntitiesMap with
                 | Some id -> id
-                | None -> raisef UpdatePermissionsException "Unknown entity %O" entityRef
-            let newEntity =
-                RoleEntity (
-                    EntityId = entityId,
-                    ColumnFields = List()
-                )
-            existingRole.Entities.Add(newEntity)
-            newEntity
-        ignore <| updateDifference db updateFunc createFunc entitiesMap oldEntitiesMap
+                | None -> raisef SystemUpdaterException "Unknown entity %O" entityRef
+            RoleEntity (
+                Entity = entity
+            )
+        ignore <| this.UpdateDifference updateFunc createFunc entitiesMap oldEntitiesMap
 
     let updatePermissionsSchema (schema : SourcePermissionsSchema) (existingSchema : Schema) : unit =
         let oldRolesMap =
@@ -90,7 +79,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
             try
                 updateAllowedDatabase schema existingSchema
             with
-            | :? UpdatePermissionsException as e -> raisefWithInner UpdatePermissionsException e.InnerException "In allowed schema %O: %s" name e.Message
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In allowed schema %O: %s" name e.Message
         let createFunc (FunQLName name) =
             let newRole =
                 Role (
@@ -99,42 +88,35 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) =
                 )
             existingSchema.Roles.Add(newRole)
             newRole
-        ignore <| updateDifference db updateFunc createFunc schema.Roles oldRolesMap
+        ignore <| this.UpdateDifference updateFunc createFunc schema.Roles oldRolesMap
 
-    let updateSchemas (schemas : Map<SchemaName, SourcePermissionsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
+    let updateSchemas (schemas : Map<SchemaName, SourcePermissionsSchema>) (existingSchemas : Map<SchemaName, Schema>) =
         let updateFunc name schema existingSchema =
             try
                 updatePermissionsSchema schema existingSchema
             with
-            | :? UpdatePermissionsException as e -> raisefWithInner UpdatePermissionsException e.InnerException "In schema %O: %s" name e.Message
-        let createFunc name = raisef UpdatePermissionsException "Schema %O doesn't exist" name
-        ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+        this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
-    member this.UpdateSchemas = updateSchemas
+    member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
 let updatePermissions (db : SystemContext) (roles : SourcePermissions) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
-    task {
-        let! _ = serializedSaveChangesAsync db cancellationToken
+    genericSystemUpdate db cancellationToken <| fun () ->
+        task {
+            let currentSchemas = db.GetRolesObjects ()
 
-        let currentSchemas = db.GetRolesObjects ()
+            let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
+            // We don't touch in any way schemas not in layout.
+            let schemasMap =
+                allSchemas
+                |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
+                |> Seq.filter (fun (name, schema) -> Map.containsKey name roles.Schemas)
+                |> Map.ofSeq
 
-        let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
-        // We don't touch in any way schemas not in layout.
-        let schemasMap =
-            allSchemas
-            |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
-            |> Seq.filter (fun (name, schema) -> Map.containsKey name roles.Schemas)
-            |> Map.ofSeq
-
-        // See `Layout.Update` for explanation on why is this in a lambda.
-        return fun () ->
-            task {
-                let updater = PermissionsUpdater(db, allSchemas)
-                updater.UpdateSchemas roles.Schemas schemasMap
-                let! changedEntries = serializedSaveChangesAsync db cancellationToken
-                return changedEntries
-            }
-    }
+            let updater = PermissionsUpdater(db, allSchemas)
+            ignore <| updater.UpdateSchemas roles.Schemas schemasMap
+            return updater
+        }
 
 type private RoleErrorRef = ERRole of RoleRef
                           | EREntity of AllowedEntityRef

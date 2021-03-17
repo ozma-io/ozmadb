@@ -7,7 +7,6 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
@@ -15,12 +14,9 @@ open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
-type UpdateAttributesException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) as this =
+    inherit SystemUpdater(db)
 
-    new (message : string) = UpdateAttributesException (message, null)
-
-type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
     let updateAttributesField (attrs : SourceAttributesField) (existingAttrs : FieldAttributes) : unit =
@@ -44,53 +40,44 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) =
 
         let updateFunc _ = updateAttributesField
         let createFunc fieldRef =
-            let entityId =
+            let entity =
                 match Map.tryFind fieldRef.entity allEntitiesMap with
                 | Some id -> id
-                | None -> raisef UpdateAttributesException "Unknown entity %O" fieldRef.entity
-            let newAttrs =
-                FieldAttributes (
-                    FieldEntityId = entityId,
-                    FieldName = string fieldRef.name
-                )
-            existingSchema.FieldsAttributes.Add(newAttrs)
-            newAttrs
-        ignore <| updateDifference db updateFunc createFunc newAttrsMap oldAttrsMap
+                | None -> raisef SystemUpdaterException "Unknown entity %O" fieldRef.entity
+            FieldAttributes (
+                FieldEntity = entity,
+                FieldName = string fieldRef.name,
+                Schema = existingSchema
+            )
+        ignore <| this.UpdateDifference updateFunc createFunc newAttrsMap oldAttrsMap
 
-    let updateSchemas (schemas : Map<SchemaName, SourceAttributesDatabase>) (oldSchemas : Map<SchemaName, Schema>) =
+    let updateSchemas (schemas : Map<SchemaName, SourceAttributesDatabase>) (existingSchemas : Map<SchemaName, Schema>) =
         let updateFunc name schema existingSchema =
             try
                 updateAttributesDatabase schema existingSchema
             with
-            | :? UpdateAttributesException as e -> raisefWithInner UpdateAttributesException e.InnerException "In schema %O: %s" name e.Message
-        let createFunc name = raisef UpdateAttributesException "Schema %O doesn't exist" name
-        ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+        this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
-    member this.UpdateSchemas = updateSchemas
+    member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
 let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
-    task {
-        let! _ = serializedSaveChangesAsync db cancellationToken
+    genericSystemUpdate db cancellationToken <| fun () ->
+        task {
+            let currentSchemas = db.GetAttributesObjects ()
 
-        let currentSchemas = db.GetAttributesObjects ()
+            let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
+            // We don't touch in any way schemas not in layout.
+            let schemasMap =
+                allSchemas
+                |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
+                |> Seq.filter (fun (name, schema) -> Map.containsKey name attrs.Schemas)
+                |> Map.ofSeq
 
-        let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
-        // We don't touch in any way schemas not in layout.
-        let schemasMap =
-            allSchemas
-            |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
-            |> Seq.filter (fun (name, schema) -> Map.containsKey name attrs.Schemas)
-            |> Map.ofSeq
-
-        // See `Layout.Update` for explanation on why is this in a lambda.
-        return fun () ->
-            task {
-                let updater = AttributesUpdater(db, allSchemas)
-                updater.UpdateSchemas attrs.Schemas schemasMap
-                let! changedEntries = serializedSaveChangesAsync db cancellationToken
-                return changedEntries
-            }
-    }
+            let updater = AttributesUpdater(db, allSchemas)
+            ignore <| updater.UpdateSchemas attrs.Schemas schemasMap
+            return updater
+        }
 
 let private findBrokenAttributesEntity (schemaName : SchemaName) (attrEntityRef : ResolvedEntityRef) (entity : ErroredAttributesEntity) : DefaultAttributeRef seq =
     seq {

@@ -8,7 +8,6 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
@@ -16,12 +15,9 @@ open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
-type UpdateUserViewsException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type private UserViewsUpdater (db : SystemContext) as this =
+    inherit SystemUpdater(db)
 
-    new (message : string) = UpdateUserViewsException (message, null)
-
-type private UserViewsUpdater (db : SystemContext) =
     let updateUserView (uv : SourceUserView) (existingUv : UserView) : unit =
         existingUv.AllowBroken <- uv.AllowBroken
         existingUv.Query <- uv.Query
@@ -45,37 +41,30 @@ type private UserViewsUpdater (db : SystemContext) =
                 )
             existingSchema.UserViews.Add(newUv)
             newUv
-        ignore <| updateDifference db updateFunc createFunc schema.UserViews oldUserViewsMap
+        ignore <| this.UpdateDifference updateFunc createFunc schema.UserViews oldUserViewsMap
 
-    let updateSchemas (schemas : Map<SchemaName, SourceUserViewsSchema>) (oldSchemas : Map<SchemaName, Schema>) =
+    let updateSchemas (schemas : Map<SchemaName, SourceUserViewsSchema>) (existingSchemas : Map<SchemaName, Schema>) =
         let updateFunc _ = updateUserViewsSchema
-        let createFunc name = raisef UpdateUserViewsException "Schema %O doesn't exist" name
-        ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
+        this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
-    member this.UpdateSchemas = updateSchemas
+    member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
 let updateUserViews (db : SystemContext) (uvs : SourceUserViews) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
-    task {
-        let! _ = serializedSaveChangesAsync db cancellationToken
+    genericSystemUpdate db cancellationToken <| fun () ->
+        task {
+            let currentSchemas = db.GetUserViewsObjects ()
 
-        let currentSchemas = db.GetUserViewsObjects ()
+            // We don't touch in any way schemas not in layout.
+            let wantedSchemas = uvs.Schemas |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
+            let! schemasList = currentSchemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync(cancellationToken)
+            let schemasMap =
+                schemasList
+                |> Seq.map (fun schema -> (FunQLName schema.Name, schema)) |> Map.ofSeq
 
-        // We don't touch in any way schemas not in layout.
-        let wantedSchemas = uvs.Schemas |> Map.toSeq |> Seq.map (fun (FunQLName name, schema) -> name) |> Seq.toArray
-        let! schemasList = currentSchemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync(cancellationToken)
-        let schemasMap =
-            schemasList
-            |> Seq.map (fun schema -> (FunQLName schema.Name, schema)) |> Map.ofSeq
-
-        // See `Layout.Update` for explanation on why is this in a lambda.
-        return fun () ->
-            task {
-                let updater = UserViewsUpdater(db)
-                updater.UpdateSchemas uvs.Schemas schemasMap
-                let! changedEntries = serializedSaveChangesAsync db cancellationToken
-                return changedEntries
-            }
-    }
+            let updater = UserViewsUpdater(db)
+            ignore <| updater.UpdateSchemas uvs.Schemas schemasMap
+            return updater
+        }
 
 type private UserViewErrorRef = ERGenerator of SchemaName
                               | ERUserView of ResolvedUserViewRef

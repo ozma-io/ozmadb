@@ -317,3 +317,8 @@ let mergeSortedBy (keyFunc : 'a -> 'k) (seq1 : seq<'a>) (seq2 : seq<'a>) : seq<'
     }
 
 let mergeSorted (seq1 : seq<'a>) (seq2 : seq<'a>) : seq<'a> = mergeSortedBy id seq1 seq2
+
+let ofNull (a : 'a seq) =
+    match a with
+    | null -> Seq.empty
+    | ra -> ra

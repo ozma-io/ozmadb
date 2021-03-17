@@ -123,10 +123,10 @@ namespace FunWithFlags.FunDBSchema.System
 
             modelBuilder.Entity<RoleParent>()
                 .HasOne(roleParent => roleParent.Role)
-                .WithMany(role => role.Parents);
+                .WithMany(role => role!.Parents);
             modelBuilder.Entity<RoleParent>()
                 .HasOne(roleParent => roleParent.Parent)
-                .WithMany(role => role.Children);
+                .WithMany(role => role!.Children);
 
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {
@@ -148,15 +148,15 @@ namespace FunWithFlags.FunDBSchema.System
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.ComputedFields)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.UniqueConstraints)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.CheckConstraints)
-                .Include(sch => sch.Entities).ThenInclude(ent => ent.Parent).ThenInclude(ent => ent.Schema);
+                .Include(sch => sch.Entities).ThenInclude(ent => ent.Parent).ThenInclude(ent => ent!.Schema);
         }
 
         public IQueryable<Schema> GetRolesObjects()
         {
             return this.Schemas
                 .AsSplitQuery()
-                .Include(sch => sch.Roles).ThenInclude(role => role.Parents).ThenInclude(roleParent => roleParent.Parent).ThenInclude(role => role.Schema)
-                .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.Entity).ThenInclude(ent => ent.Schema)
+                .Include(sch => sch.Roles).ThenInclude(role => role.Parents).ThenInclude(roleParent => roleParent.Parent).ThenInclude(role => role!.Schema)
+                .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.Entity).ThenInclude(ent => ent!.Schema)
                 .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.ColumnFields);
         }
 
@@ -164,7 +164,7 @@ namespace FunWithFlags.FunDBSchema.System
         {
             return this.Schemas
                 .AsSplitQuery()
-                .Include(sch => sch.FieldsAttributes).ThenInclude(attr => attr.FieldEntity).ThenInclude(ent => ent.Schema);
+                .Include(sch => sch.FieldsAttributes).ThenInclude(attr => attr.FieldEntity).ThenInclude(ent => ent!.Schema);
         }
 
         public IQueryable<Schema> GetModulesObjects()
@@ -185,7 +185,7 @@ namespace FunWithFlags.FunDBSchema.System
         {
             return this.Schemas
                 .AsSplitQuery()
-                .Include(sch => sch.Triggers).ThenInclude(attr => attr.TriggerEntity).ThenInclude(ent => ent.Schema);
+                .Include(sch => sch.Triggers).ThenInclude(attr => attr.TriggerEntity).ThenInclude(ent => ent!.Schema);
         }
 
         public IQueryable<Schema> GetUserViewsObjects()
@@ -218,13 +218,13 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("bool", Default="false")]
         public bool UserViewGeneratorScriptAllowBroken { get; set; }
 
-        public List<Entity> Entities { get; set; } = null!;
-        public List<Role> Roles { get; set; } = null!;
-        public List<FieldAttributes> FieldsAttributes { get; set; } = null!;
-        public List<Module> Modules { get; set; } = null!;
-        public List<Action> Actions { get; set; } = null!;
-        public List<Trigger> Triggers { get; set; } = null!;
-        public List<UserView> UserViews { get; set; } = null!;
+        public List<Entity>? Entities { get; set; }
+        public List<Role>? Roles { get; set; }
+        public List<FieldAttributes>? FieldsAttributes { get; set; }
+        public List<Module>? Modules { get; set; }
+        public List<Action>? Actions { get; set; }
+        public List<Trigger>? Triggers { get; set; }
+        public List<UserView>? UserViews { get; set; }
     }
 
     public class Entity
@@ -235,7 +235,7 @@ namespace FunWithFlags.FunDBSchema.System
         public string Name { get; set; } = null!;
         [ColumnField("reference(public.schemas)", IsImmutable=true)]
         public int SchemaId { get; set; }
-        public Schema Schema { get; set; } = null!;
+        public Schema? Schema { get; set; }
         [ColumnField("string")]
         public string? MainField { get; set; }
         [ColumnField("bool", Default="false")]
@@ -247,7 +247,7 @@ namespace FunWithFlags.FunDBSchema.System
         public bool IsFrozen { get; set; }
         [ColumnField("reference(public.entities)", IsImmutable=true)]
         public int? ParentId { get; set; }
-        public Entity Parent { get; set; } = null!;
+        public Entity? Parent { get; set; }
 
         public List<ColumnField> ColumnFields { get; set; } = null!;
         public List<ComputedField> ComputedFields { get; set; } = null!;
@@ -263,7 +263,7 @@ namespace FunWithFlags.FunDBSchema.System
         public string Name { get; set; } = null!;
         [ColumnField("reference(public.entities)", IsImmutable=true)]
         public int EntityId { get; set; }
-        public Entity Entity { get; set; } = null!;
+        public Entity? Entity { get; set; }
 
         [ColumnField("string")]
         [Required]
@@ -284,7 +284,7 @@ namespace FunWithFlags.FunDBSchema.System
         public string Name { get; set; } = null!;
         [ColumnField("reference(public.entities)", IsImmutable=true)]
         public int EntityId { get; set; }
-        public Entity Entity { get; set; } = null!;
+        public Entity? Entity { get; set; }
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
         [ColumnField("bool", Default="false")]
@@ -303,7 +303,7 @@ namespace FunWithFlags.FunDBSchema.System
         public string Name { get; set; } = null!;
         [ColumnField("reference(public.entities)")]
         public int EntityId { get; set; }
-        public Entity Entity { get; set; } = null!;
+        public Entity? Entity { get; set; }
         // Order is important here
         // Change this if/when we implement "ordered 1-N references".
         [ColumnField("array(string)")]
@@ -319,7 +319,7 @@ namespace FunWithFlags.FunDBSchema.System
         public string Name { get; set; } = null!;
         [ColumnField("reference(public.entities)")]
         public int EntityId { get; set; }
-        public Entity Entity { get; set; } = null!;
+        public Entity? Entity { get; set; }
         [ColumnField("string")]
         [Required]
         public string Expression { get; set; } = null!;
@@ -330,7 +330,7 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
-        public Schema Schema { get; set; } = null!;
+        public Schema? Schema { get; set; }
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
@@ -351,7 +351,7 @@ namespace FunWithFlags.FunDBSchema.System
         public bool IsRoot { get; set; }
         [ColumnField("reference(public.roles)")]
         public int? RoleId { get; set; }
-        public Role Role { get; set; } = null!;
+        public Role? Role { get; set; }
     }
 
     public class Role
@@ -359,16 +359,16 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
-        public Schema Schema { get; set; } = null!;
+        public Schema? Schema { get; set; }
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
 
-        public List<RoleParent> Parents { get; set; } = null!;
-        public List<RoleParent> Children { get; set; } = null!;
-        public List<RoleEntity> Entities { get; set; } = null!;
+        public List<RoleParent>? Parents { get; set; }
+        public List<RoleParent>? Children { get; set; }
+        public List<RoleEntity>? Entities { get; set; }
     }
 
     public class RoleParent
@@ -376,10 +376,10 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.roles)")]
         public int RoleId { get; set; }
-        public Role Role { get; set; } = null!;
+        public Role? Role { get; set; }
         [ColumnField("reference(public.roles)")]
         public int ParentId { get; set; }
-        public Role Parent { get; set; } = null!;
+        public Role? Parent { get; set; }
     }
 
     public class RoleEntity
@@ -387,10 +387,10 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.roles)")]
         public int RoleId { get; set; }
-        public Role Role { get; set; } = null!;
+        public Role? Role { get; set; }
         [ColumnField("reference(public.entities)")]
         public int EntityId { get; set; }
-        public Entity Entity { get; set; } = null!;
+        public Entity? Entity { get; set; }
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
         [ColumnField("bool", Default="false")]
@@ -404,7 +404,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         public string? Delete { get; set; }
 
-        public List<RoleColumnField> ColumnFields { get; set; } = null!;
+        public List<RoleColumnField>? ColumnFields { get; set; }
     }
 
     public class RoleColumnField
@@ -412,7 +412,7 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.role_entities)")]
         public int RoleEntityId { get; set; }
-        public RoleEntity RoleEntity { get; set; } = null!;
+        public RoleEntity? RoleEntity { get; set; }
         // FIXME: Make this ColumnField relation when we implement reference constraints.
         [ColumnField("string")]
         [Required]
@@ -428,10 +428,10 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
-        public Schema Schema { get; set; } = null!;
+        public Schema? Schema { get; set; }
         [ColumnField("reference(public.entities)")]
         public int FieldEntityId { get; set; }
-        public Entity FieldEntity { get; set; } = null!;
+        public Entity? FieldEntity { get; set; }
         [ColumnField("string")]
         [Required]
         public string FieldName { get; set; } = null!;
@@ -449,7 +449,7 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
-        public Schema Schema { get; set; } = null!;
+        public Schema? Schema { get; set; }
         [ColumnField("string")]
         [Required]
         public string Path { get; set; } = null!;
@@ -463,7 +463,7 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
-        public Schema Schema { get; set; } = null!;
+        public Schema? Schema { get; set; }
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
@@ -479,10 +479,10 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
-        public Schema Schema { get; set; } = null!;
+        public Schema? Schema { get; set; }
         [ColumnField("reference(public.entities)")]
         public int TriggerEntityId { get; set; }
-        public Entity TriggerEntity { get; set; } = null!;
+        public Entity? TriggerEntity { get; set; }
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;

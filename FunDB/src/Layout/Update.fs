@@ -4,29 +4,25 @@ open System
 open System.Linq
 open Microsoft.FSharp.Quotations
 open Z.EntityFramework.Plus
-open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDBSchema.System
 
-let private entityToInfo (entity : Entity) = entity.Id
-let private makeEntity schemaName (entity : Entity) = ({ schema = schemaName; name = FunQLName entity.Name }, entityToInfo entity)
+let private makeEntity schemaName (entity : Entity) = ({ schema = schemaName; name = FunQLName entity.Name }, entity)
 let private makeSchema (schema : Schema) = Seq.map (makeEntity (FunQLName schema.Name)) schema.Entities
 
-let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, int> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
+let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, Entity> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
 
-type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
-    let allEntitiesMap = makeAllEntitiesMap allSchemas
-    let mutable needsParentPass = false
+type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) as this =
+    inherit SystemUpdater(db)
 
     let updateColumnFields (entity : Entity) : Map<FieldName, SourceColumnField> -> Map<FieldName, ColumnField> -> Map<FieldName, ColumnField> =
         let updateColumnFunc _ (newColumn : SourceColumnField) (oldColumn : ColumnField) =
@@ -39,13 +35,11 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
             oldColumn.Default <- def
             oldColumn.Type <- newColumn.Type
         let createColumnFunc (FunQLName name) =
-            let newColumn =
-                ColumnField (
-                    Name = name
-                )
-            entity.ColumnFields.Add(newColumn)
-            newColumn
-        updateDifference db updateColumnFunc createColumnFunc
+            ColumnField (
+                Name = name,
+                Entity = entity
+            )
+        this.UpdateDifference updateColumnFunc createColumnFunc
 
     let updateComputedFields (entity : Entity) : Map<FieldName, SourceComputedField> -> Map<FieldName, ComputedField> -> Map<FieldName, ComputedField> =
         let updateComputedFunc _ (newComputed : SourceComputedField) (oldComputed : ComputedField) =
@@ -53,52 +47,38 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
             oldComputed.AllowBroken <- newComputed.AllowBroken
             oldComputed.IsVirtual <- newComputed.IsVirtual
         let createComputedFunc (FunQLName name) =
-            let newComputed =
-                ComputedField (
-                    Name = name
-                )
-            entity.ComputedFields.Add(newComputed)
-            newComputed
-        updateDifference db updateComputedFunc createComputedFunc
+            ComputedField (
+                Name = name,
+                Entity = entity
+            )
+        this.UpdateDifference updateComputedFunc createComputedFunc
 
     let updateUniqueConstraints (entity : Entity) : Map<FieldName, SourceUniqueConstraint> -> Map<FieldName, UniqueConstraint> -> Map<FieldName, UniqueConstraint> =
         let updateUniqueFunc _ (newUnique : SourceUniqueConstraint) (oldUnique : UniqueConstraint) =
             let columnNames = Array.map (fun x -> x.ToString()) newUnique.Columns
             oldUnique.Columns <- columnNames
         let createUniqueFunc (FunQLName name) =
-            let newUnique =
-                UniqueConstraint (
-                    Name = name
-                )
-            entity.UniqueConstraints.Add(newUnique)
-            newUnique
-        updateDifference db updateUniqueFunc createUniqueFunc
+            UniqueConstraint (
+                Name = name,
+                Entity = entity
+            )
+        this.UpdateDifference updateUniqueFunc createUniqueFunc
 
     let updateCheckConstraints (entity : Entity) : Map<FieldName, SourceCheckConstraint> -> Map<FieldName, CheckConstraint> -> Map<FieldName, CheckConstraint> =
         let updateCheckFunc _ (newCheck : SourceCheckConstraint) (oldCheck : CheckConstraint) =
             oldCheck.Expression <- newCheck.Expression
         let createCheckFunc (FunQLName name) =
-            let newCheck =
-                CheckConstraint (
-                    Name = name
-                )
-            entity.CheckConstraints.Add(newCheck)
-            newCheck
-        updateDifference db updateCheckFunc createCheckFunc
-
-    let setParent (existingEntity : Entity) (ref : ResolvedEntityRef) =
-        match Map.tryFind ref allEntitiesMap with
-        | None ->
-            existingEntity.ParentId <- Nullable()
-            needsParentPass <- true
-        | Some id ->
-            existingEntity.ParentId <- Nullable(id)
+            CheckConstraint (
+                Name = name,
+                Entity = entity
+            )
+        this.UpdateDifference updateCheckFunc createCheckFunc
 
     let updateEntity (entity : SourceEntity) (existingEntity : Entity) : unit =
-        let columnFieldsMap = existingEntity.ColumnFields |> Seq.map (fun col -> (FunQLName col.Name, col)) |> Map.ofSeq
-        let computedFieldsMap = existingEntity.ComputedFields |> Seq.map (fun comp -> (FunQLName comp.Name, comp)) |> Map.ofSeq
-        let uniqueConstraintsMap = existingEntity.UniqueConstraints |> Seq.map (fun unique -> (FunQLName unique.Name, unique)) |> Map.ofSeq
-        let checkConstraintsMap = existingEntity.CheckConstraints |> Seq.map (fun check -> (FunQLName check.Name, check)) |> Map.ofSeq
+        let columnFieldsMap = existingEntity.ColumnFields |> Seq.ofNull |> Seq.map (fun col -> (FunQLName col.Name, col)) |> Map.ofSeq
+        let computedFieldsMap = existingEntity.ComputedFields |> Seq.ofNull |> Seq.map (fun comp -> (FunQLName comp.Name, comp)) |> Map.ofSeq
+        let uniqueConstraintsMap = existingEntity.UniqueConstraints |> Seq.ofNull |> Seq.map (fun unique -> (FunQLName unique.Name, unique)) |> Map.ofSeq
+        let checkConstraintsMap = existingEntity.CheckConstraints |> Seq.ofNull |> Seq.map (fun check -> (FunQLName check.Name, check)) |> Map.ofSeq
 
         ignore <| updateColumnFields existingEntity entity.ColumnFields columnFieldsMap
         ignore <| updateComputedFields existingEntity entity.ComputedFields computedFieldsMap
@@ -112,102 +92,63 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) =
         existingEntity.ForbidExternalReferences <- entity.ForbidExternalReferences
         existingEntity.IsAbstract <- entity.IsAbstract
         existingEntity.IsFrozen <- entity.IsFrozen
-        match entity.Parent with
-        | None ->
-            existingEntity.ParentId <- Nullable()
-        | Some ref ->
-            if not <| isNull existingEntity.Parent then
-                if not (FunQLName existingEntity.Parent.Schema.Name = ref.schema && FunQLName existingEntity.Parent.Name = ref.name) then
-                    setParent existingEntity ref
-            else
-                setParent existingEntity ref
 
-    let updateSchema (schema : SourceSchema) (existingSchema : Schema) : unit =
-        let entitiesMap = existingSchema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
+    let updateSchema (schema : SourceSchema) (existingSchema : Schema) =
+        let entitiesMap = existingSchema.Entities |> Seq.ofNull |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
 
         let updateFunc _ = updateEntity
         let createFunc (FunQLName name) =
-            let newEntity =
-                Entity (
-                    Name = name,
-                    ColumnFields = List(),
-                    ComputedFields = List(),
-                    UniqueConstraints = List(),
-                    CheckConstraints = List()
-                )
-            existingSchema.Entities.Add(newEntity)
-            newEntity
-        ignore <| updateDifference db updateFunc createFunc (Map.filter (fun name entity -> not entity.IsHidden) schema.Entities) entitiesMap
+            Entity (
+                Name = name,
+                Schema = existingSchema
+            )
+        ignore <| this.UpdateDifference updateFunc createFunc (Map.filter (fun name entity -> not entity.IsHidden) schema.Entities) entitiesMap
 
-    let updateSchemas schemas existingSchemas =
-        let updateFunc _ = updateSchema
+    let updateParents (schemas : Map<SchemaName, SourceSchema>) (existingSchemas : Map<SchemaName, Schema>) =
+        let parents = existingSchemas |> Map.values |> makeAllEntitiesMap
+
+        for KeyValue(schemaName, schema) in schemas do
+            for KeyValue(entityName, entity) in schema.Entities do
+                match entity.Parent with
+                | None -> ()
+                | Some parent ->
+                    let existingEntity = parents.[{ schema = schemaName; name = entityName }]
+                    let parentEntity = parents.[parent]
+                    existingEntity.Parent <- parentEntity
+
+    let updateSchemas (schemas : Map<SchemaName, SourceSchema>) (existingSchemas : Map<SchemaName, Schema>) =
+        let updateFunc name schema existingSchema =
+            try
+                updateSchema schema existingSchema
+            with
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
         let createFunc (FunQLName name) =
-            let newSchema =
-                Schema (
-                    Name = name,
-                    Entities = List()
-                )
-            ignore <| db.Schemas.Add(newSchema)
-            newSchema
-        ignore <| updateDifference db updateFunc createFunc schemas existingSchemas
+            Schema (
+                Name = name
+            )
+        let existingSchemas = this.UpdateDifference updateFunc createFunc schemas existingSchemas
+        updateParents schemas existingSchemas
+        existingSchemas
 
-    member this.UpdateSchemas = updateSchemas
-    member this.NeedsParentPass = needsParentPass
-
-let private updateLayoutParents (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task =
-    unitTask {
-        let currentSchemas = db.GetLayoutObjects ()
-        let! schemas = currentSchemas.AsTracking().ToListAsync()
-
-        let allEntitiesMap = makeAllEntitiesMap schemas
-        let neededSchemas =
-            schemas |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.Schemas)
-
-        for schema in neededSchemas do
-            for entity in schema.Entities do
-                if not entity.ParentId.HasValue then
-                    let newEntity = layout.FindEntity { schema = FunQLName schema.Name; name = FunQLName entity.Name } |> Option.get
-                    match newEntity.Parent with
-                    | None -> ()
-                    | Some ref ->
-                        let id = Map.find ref allEntitiesMap
-                        entity.ParentId <- Nullable(id)
-
-        let! changedEntries = serializedSaveChangesAsync db cancellationToken
-        return ()
-    }
+    member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
 let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
-    task {
-        let! _ = serializedSaveChangesAsync db cancellationToken
+    genericSystemUpdate db cancellationToken <| fun () ->
+        task {
+            let currentSchemas = db.GetLayoutObjects ()
+            let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
 
-        let currentSchemas = db.GetLayoutObjects ()
-        let! schemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
+            // We don't touch in any way schemas not in layout.
+            let schemasMap =
+                schemas
+                |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.Schemas)
+                |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
+                |> Map.ofSeq
 
-        // We don't touch in any way schemas not in layout.
-        let schemasMap =
-            schemas
-            |> Seq.filter (fun schema -> Map.containsKey (FunQLName schema.Name) layout.Schemas)
-            |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
-            |> Map.ofSeq
-
-        // We delay the actual update so that we can load all data first when performing several updates at once.
-        // Otherwise an issue may happen:
-        // 1. A different `update` function deletes a referenced row;
-        // 2. Now this `update` function will miss all rows which reference deleted row because EF Core uses `INNER JOIN`, and the deleted row, well, doesn't exist.
-        // For example: an entity is removed and we don't remove all default attributes with `field_entity` referencing this one.
-        return fun () ->
-            task {
-                let updater = LayoutUpdater (db, schemas)
-                updater.UpdateSchemas layout.Schemas schemasMap
-                let! changedEntries = serializedSaveChangesAsync db cancellationToken
-
-                if updater.NeedsParentPass then
-                    do! updateLayoutParents db layout cancellationToken
-
-                return changedEntries
-            }
-    }
+            let updater = LayoutUpdater (db, schemas)
+            ignore <| updater.UpdateSchemas layout.Schemas schemasMap
+            return updater
+        }
 
 let private findBrokenComputedFieldsEntity (entityRef : ResolvedEntityRef) (entity : ErroredEntity) : ResolvedFieldRef seq =
     seq {

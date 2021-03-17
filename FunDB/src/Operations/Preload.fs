@@ -417,70 +417,70 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
         }
         assert (Task.awaitSync <| sanityCheck ())
 
-        let! layoutUpdater = updateLayout conn.System sourcePreloadLayout cancellationToken
-        let permissions = preloadPermissions preload
-        let! permissionsUpdater = updatePermissions conn.System permissions cancellationToken
-        let defaultAttributes = preloadDefaultAttributes preload
-        let! attributesUpdater = updateAttributes conn.System defaultAttributes cancellationToken
-        let modules = preloadModules preload
-        let! modulesUpdater = updateModules conn.System modules cancellationToken
-        let actions = preloadActions preload
-        let! actionsUpdater = updateActions conn.System actions cancellationToken
-        let triggers = preloadTriggers preload
-        let! triggersUpdater = updateTriggers conn.System triggers cancellationToken
-
         // We migrate layout first so that permissions and attributes have schemas in the table.
-        let! changed1 = layoutUpdater ()
-        let! changed2 =
+        let! layoutUpdater = updateLayout conn.System sourcePreloadLayout cancellationToken
+        let! permissionsUpdater =
             task {
+                let permissions = preloadPermissions preload
                 try
-                    return! permissionsUpdater ()
+                    return! updatePermissions conn.System permissions cancellationToken
                 with
                 | e ->
                     // Maybe we'll get a better error
                     let (errors, perms) = resolvePermissions preloadLayout false permissions
                     return reraise' e
             }
-        let! changed3 =
+        let! attributesUpdater =
             task {
+                let defaultAttributes = preloadDefaultAttributes preload
                 try
-                    return! attributesUpdater ()
+                    return! updateAttributes conn.System defaultAttributes cancellationToken
                 with
                 | e ->
                     // Maybe we'll get a better error
                     let (errors, attrs) = resolveAttributes preloadLayout false defaultAttributes
                     return reraise' e
             }
-        let! changed4 =
+        let! actionsUpdater =
             task {
+                let actions = preloadActions preload
                 try
-                    return! modulesUpdater ()
+                    return! updateActions conn.System actions cancellationToken
                 with
                 | e ->
                     // Maybe we'll get a better error
                     let (errors, actions) = resolveActions preloadLayout false actions
                     return reraise' e
             }
-        let! changed5 =
+        let! triggersUpdater =
             task {
+                let triggers = preloadTriggers preload
                 try
-                    return! triggersUpdater ()
+                    return! updateTriggers conn.System triggers cancellationToken
                 with
                 | e ->
                     // Maybe we'll get a better error
                     let (errors, triggers) = resolveTriggers preloadLayout false triggers
                     return reraise' e
             }
-        let! changed6 =
+        let! modulesUpdater =
             task {
+                let modules = preloadModules preload
                 try
-                    return! modulesUpdater ()
+                    return! updateModules conn.System modules cancellationToken
                 with
                 | e ->
                     // Maybe we'll get a better error
                     let modules = resolveModules preloadLayout modules
                     return reraise' e
             }
+
+        let! changed1 = layoutUpdater ()
+        let! changed2 = permissionsUpdater ()
+        let! changed3 = attributesUpdater ()
+        let! changed4 = actionsUpdater ()
+        let! changed5 = triggersUpdater ()
+        let! changed6 = modulesUpdater ()
 
         let! sourceUserLayout = buildSchemaLayout conn.System (Map.keys preload.Schemas) cancellationToken
         let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout

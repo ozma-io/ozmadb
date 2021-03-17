@@ -10,6 +10,7 @@ open Microsoft.FSharp.Reflection
 open FunWithFlags.FunUtils
 
 module Task = Task
+module Null = Null
 module Option = Option
 module Result = Result
 module Seq = Seq

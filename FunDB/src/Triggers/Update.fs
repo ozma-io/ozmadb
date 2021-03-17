@@ -7,7 +7,6 @@ open Microsoft.FSharp.Quotations
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Triggers.Source
@@ -15,12 +14,9 @@ open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDBSchema.System
 
-type UpdateTriggersException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) as this =
+    inherit SystemUpdater(db)
 
-    new (message : string) = UpdateTriggersException (message, null)
-
-type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) =
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
     let updateTriggersField (trigger : SourceTrigger) (existingTrigger : Trigger) : unit =
@@ -48,53 +44,43 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) =
 
         let updateFunc _ = updateTriggersField
         let createFunc (entityRef, FunQLName triggerName) =
-            let entityId =
+            let entity =
                 match Map.tryFind entityRef allEntitiesMap with
                 | Some id -> id
-                | None -> raisef UpdateTriggersException "Unknown entity %O for trigger %O" entityRef triggerName
-            let newTrigger =
-                Trigger (
-                    TriggerEntityId = entityId,
-                    Name = triggerName
-                )
-            existingSchema.Triggers.Add(newTrigger)
-            newTrigger
-        ignore <| updateDifference db updateFunc createFunc newTriggersMap oldTriggersMap
+                | None -> raisef SystemUpdaterException "Unknown entity %O for trigger %O" entityRef triggerName
+            Trigger (
+                TriggerEntity = entity,
+                Name = triggerName
+            )
+        ignore <| this.UpdateDifference updateFunc createFunc newTriggersMap oldTriggersMap
 
-    let updateSchemas (schemas : Map<SchemaName, SourceTriggersDatabase>) (oldSchemas : Map<SchemaName, Schema>) =
+    let updateSchemas (schemas : Map<SchemaName, SourceTriggersDatabase>) (existingSchemas : Map<SchemaName, Schema>) =
         let updateFunc name schema existingSchema =
             try
                 updateTriggersDatabase schema existingSchema
             with
-            | :? UpdateTriggersException as e -> raisefWithInner UpdateTriggersException e.InnerException "In schema %O: %s" name e.Message
-        let createFunc name = raisef UpdateTriggersException "Schema %O doesn't exist" name
-        ignore <| updateDifference db updateFunc createFunc schemas oldSchemas
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+        this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
-    member this.UpdateSchemas = updateSchemas
+    member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
 let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
-    task {
-        let! _ = serializedSaveChangesAsync db cancellationToken
+    genericSystemUpdate db cancellationToken <| fun () ->
+        task {
+            let currentSchemas = db.GetTriggersObjects ()
 
-        let currentSchemas = db.GetTriggersObjects ()
+            let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
+            // We don't touch in any way schemas not in layout.
+            let schemasMap =
+                allSchemas
+                |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
+                |> Seq.filter (fun (name, schema) -> Map.containsKey name triggers.Schemas)
+                |> Map.ofSeq
 
-        let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
-        // We don't touch in any way schemas not in layout.
-        let schemasMap =
-            allSchemas
-            |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
-            |> Seq.filter (fun (name, schema) -> Map.containsKey name triggers.Schemas)
-            |> Map.ofSeq
-
-        // See `Layout.Update` for explanation on why is this in a lambda.
-        return fun () ->
-            task {
-                let updater = TriggersUpdater(db, allSchemas)
-                updater.UpdateSchemas triggers.Schemas schemasMap
-                let! changedEntries = serializedSaveChangesAsync db cancellationToken
-                return changedEntries
-            }
-    }
+            let updater = TriggersUpdater(db, allSchemas)
+            ignore <| updater.UpdateSchemas triggers.Schemas schemasMap
+            return updater
+        }
 
 let private findBrokenTriggersEntity (schemaName : SchemaName) (trigEntityRef : ResolvedEntityRef) (entity : ErroredTriggersEntity) : TriggerRef seq =
     seq {
