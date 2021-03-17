@@ -143,7 +143,7 @@ export interface IEntity {
   checkConstraints: Record<ConstraintName, ICheckConstraint>;
   mainField: FieldName;
   forbidExternalReferences: boolean;
-  parent?: IEntityRef;
+  parents: IEntityRef[];
   children: IChildEntity[];
   isAbstract: boolean;
   isFrozen: boolean;
