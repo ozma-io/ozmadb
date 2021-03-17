@@ -97,6 +97,10 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
                     return reraise' e
             }
 
+        member this.SetExtraConnectionOptions (builder : NpgsqlConnectionStringBuilder) =
+            builder.MaxPoolSize <- 20
+            builder.ConnectionIdleLifetime <- 30
+            builder.MaxAutoPrepare <- 50
 
 type StaticInstance (instance : Instance) =
     interface IInstancesSource with
@@ -120,6 +124,9 @@ type StaticInstance (instance : Instance) =
                       member this.DisposeAsync () = unitVtask { () }
                 }
             Task.result (Some obj)
+
+        member this.SetExtraConnectionOptions (builder : NpgsqlConnectionStringBuilder) =
+            ()
 
 type Startup (config : IConfiguration) =
     let fundbSection = config.GetSection("FunDB")

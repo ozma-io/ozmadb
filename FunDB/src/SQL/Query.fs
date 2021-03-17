@@ -149,12 +149,6 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                     ignore <| command.Parameters.AddWithValue(name.ToString(), typ, obj)
             logger.LogInformation("Executing query with args {args}: {query}", pars, queryStr)
             try
-                try
-                    do! command.PrepareAsync(cancellationToken)
-                with
-                | :? PostgresException as ex ->
-                    logger.LogError(ex, "Failed to prepare {query}", queryStr)
-                    reraise' ex
                 return! runFunc command
             with
             // 40001: could not serialize access due to concurrent update

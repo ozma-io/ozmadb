@@ -134,18 +134,20 @@ type IInstance =
 
 type IInstancesSource =
     abstract member GetInstance : string -> CancellationToken -> Task<IInstance option>
+    abstract member SetExtraConnectionOptions : NpgsqlConnectionStringBuilder -> unit
 
 let private anonymousUsername = "anonymous@example.com"
 let private serviceDomain = "service"
 
 type InstanceContext =
-    { Instance : IInstance
+    { Source : IInstancesSource
+      Instance : IInstance
       UserName : string
       IsRoot : bool
       CanRead : bool
     }
 
-let instanceConnectionString (instance : IInstance) =
+let instanceConnectionString (instance : IInstance) (modify : NpgsqlConnectionStringBuilder -> unit) =
     let builder = NpgsqlConnectionStringBuilder ()
     builder.Host <- instance.Host
     builder.Port <- instance.Port
@@ -155,6 +157,7 @@ let instanceConnectionString (instance : IInstance) =
 #if DEBUG
     builder.IncludeErrorDetails <- true
 #endif
+    modify builder
     builder.ConnectionString
 
 type UserTokenInfo =
@@ -202,7 +205,8 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
             try
                 if instance.DisableSecurity then
                     let ictx =
-                        { Instance = instance
+                        { Source = instancesSource
+                          Instance = instance
                           UserName = anonymousUsername
                           IsRoot = true
                           CanRead = true
@@ -215,7 +219,8 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                             | Some e -> e
                             | None -> sprintf "%s@%s" info.Client serviceDomain
                         let ictx =
-                            { Instance = instance
+                            { Source = instancesSource
+                              Instance = instance
                               UserName = userName
                               IsRoot = info.IsRoot
                               CanRead = instance.IsTemplate
@@ -237,7 +242,8 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
         task {
             let logger = ctx.GetLogger("withContext")
             use _ = logger.BeginScope("Creating context for instance {}, user {} (is root: {})", inst.Instance.Name, inst.UserName, inst.IsRoot)
-            let connectionString = instanceConnectionString inst.Instance
+            let connectionExtra = ctx.GetService<IInstancesSource>()
+            let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
             let instancesCache = ctx.GetService<InstancesCacheStore>()
             let! cacheStore = instancesCache.GetContextCache(connectionString)
 

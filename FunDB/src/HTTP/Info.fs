@@ -19,10 +19,10 @@ type IsInitializedResponse =
 let infoApi : HttpHandler =
     let ping = Map.empty |> json |> Successful.ok
 
-    let isInitialized inst (next : HttpFunc) (ctx : HttpContext) =
+    let isInitialized (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
         task {
             let logFactory = ctx.GetService<ILoggerFactory>()
-            let connectionString = instanceConnectionString inst.Instance
+            let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
             use conn = new DatabaseConnection(logFactory, connectionString)
             use trans = new DatabaseTransaction(conn, IsolationLevel.ReadCommitted)
             let! isInitialized = instanceIsInitialized trans
@@ -30,7 +30,7 @@ let infoApi : HttpHandler =
             return! Successful.ok (json ret) next ctx
         }
 
-    let clearInstancesCache info (next : HttpFunc) (ctx : HttpContext) =
+    let clearInstancesCache (info : UserTokenInfo) (next : HttpFunc) (ctx : HttpContext) =
         if not info.IsRoot then
             requestError REAccessDenied next ctx
         else
