@@ -35,15 +35,15 @@ let entitiesApi : HttpHandler =
             [ GET >=> withContext (getEntityInfo entityRef)
             ]
 
-    let runTransaction (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        task {
-            let! transaction = ctx.BindModelAsync<Transaction>()
-            match! api.Entities.RunTransaction transaction with
-            | Ok ret ->
-                return! commitAndReturn (json ret) api next ctx
-            | Error err ->
-                return! RequestErrors.badRequest (json err) next ctx
-        }
+    let runTransaction (api : IFunDBAPI) =
+        safeBindModel <| fun transaction (next : HttpFunc) (ctx : HttpContext) ->
+            task {
+                match! api.Entities.RunTransaction transaction with
+                | Ok ret ->
+                    return! commitAndReturn (json ret) api next ctx
+                | Error err ->
+                    return! RequestErrors.badRequest (json err) next ctx
+            }
 
     let transactionApi =
         POST >=> withContext runTransaction

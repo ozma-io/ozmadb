@@ -17,7 +17,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDBSchema.System
 
 let private makeEntity schemaName (entity : Entity) = ({ schema = schemaName; name = FunQLName entity.Name }, entity)
-let private makeSchema (schema : Schema) = Seq.map (makeEntity (FunQLName schema.Name)) schema.Entities
+let private makeSchema (schema : Schema) = schema.Entities |> Seq.ofNull |> Seq.map (makeEntity (FunQLName schema.Name))
 
 let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, Entity> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
 

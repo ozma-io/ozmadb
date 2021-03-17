@@ -18,15 +18,15 @@ let private actionError e =
     handler (json e)
 
 let actionsApi : HttpHandler =
-    let runAction (ref : ActionRef) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        task {
-            let! args = ctx.BindModelAsync<JObject>()
-            match! api.Actions.RunAction ref args with
-            | Ok ret ->
-                return! commitAndReturn (json ret) api next ctx
-            | Error err ->
-                return! actionError err next ctx
-        }
+    let runAction (ref : ActionRef) (api : IFunDBAPI) =
+        safeBindModel <| fun args (next : HttpFunc) (ctx : HttpContext) ->
+            task {
+                match! api.Actions.RunAction ref args with
+                | Ok ret ->
+                    return! commitAndReturn (json ret) api next ctx
+                | Error err ->
+                    return! actionError err next ctx
+            }
 
     let actionApi (schema, name) =
         let ref = { schema = FunQLName schema; name = FunQLName name }

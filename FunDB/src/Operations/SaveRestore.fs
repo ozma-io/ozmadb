@@ -354,6 +354,8 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
     let mutable totalSize = 0L
 
     for KeyValue(schemaName, dump) in schemas do
+        ignore <| zip.CreateEntry(sprintf "%O/" schemaName)
+
         let useEntry (path : string) (fn : StreamWriter -> unit) =
             let entry = zip.CreateEntry(sprintf "%O/%s" schemaName path)
             // https://superuser.com/questions/603068/unzipping-file-whilst-getting-correct-permissions

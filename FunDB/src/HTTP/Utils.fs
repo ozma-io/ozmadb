@@ -96,6 +96,15 @@ let formArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : H
         return! processArgs f form next ctx
     }
 
+let safeBindModel (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    task {
+        let! model = ctx.BindModelAsync<'a>()
+        if isRefNull model then
+            return! requestError (RERequest "Invalid JSON value") next ctx
+        else
+            return! f model next ctx
+    }
+
 let authorize =
     requiresAuthentication (challenge JwtBearerDefaults.AuthenticationScheme)
 

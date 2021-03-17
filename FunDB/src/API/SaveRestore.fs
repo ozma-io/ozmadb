@@ -5,6 +5,7 @@ open System.Linq
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 open Microsoft.EntityFrameworkCore
+open Z.EntityFramework
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 
@@ -108,7 +109,11 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                             let emptyDumps = droppedSchemas |> Seq.map (fun name -> (name, emptySchemaDump)) |> Map.ofSeq
                             Map.union emptyDumps dumps
                         let! modified = restoreSchemas ctx.Transaction.System dumps ctx.CancellationToken
-                        if modified then
+                        if not (Set.isEmpty droppedSchemas) then
+                            let droppedSchemasArr = droppedSchemas |> Seq.map string |> Array.ofSeq
+                            let! _ = ctx.Transaction.System.Schemas.AsQueryable().Where(fun entity -> droppedSchemasArr.Contains(entity.Name)).DeleteFromQueryAsync()
+                            ()
+                        if modified || not (Set.isEmpty droppedSchemas) then
                             ctx.ScheduleMigration ()
                         rctx.WriteEventSync (fun event ->
                             event.Type <- "restoreSchemas"

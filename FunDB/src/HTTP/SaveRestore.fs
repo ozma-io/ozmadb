@@ -75,13 +75,14 @@ let saveRestoreApi : HttpHandler =
             | None -> RequestErrors.BAD_REQUEST "Invalid value for drop_others" next ctx
         | Error _ -> nextOp false next ctx
 
-    let restoreJsonSchemas (api : IFunDBAPI) (dropOthers : bool) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        task {
-            let! dump = ctx.BindJsonAsync<Map<SchemaName, SchemaDump>>()
-            match! api.SaveRestore.RestoreSchemas dump dropOthers with
-            | Ok () -> return! commitAndOk api next ctx
-            | Error err -> return! restoreError err next ctx
-        }
+    let restoreJsonSchemas (api : IFunDBAPI) (dropOthers : bool) =
+        safeBindModel <| fun dump (next : HttpFunc) (ctx : HttpContext) ->
+            task {
+                eprintfn "%O" dump
+                match! api.SaveRestore.RestoreSchemas dump dropOthers with
+                | Ok () -> return! commitAndOk api next ctx
+                | Error err -> return! restoreError err next ctx
+            }
 
     let restoreZipSchemas (api : IFunDBAPI) (dropOthers : bool) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
