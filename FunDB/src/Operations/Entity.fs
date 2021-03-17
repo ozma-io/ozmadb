@@ -62,10 +62,10 @@ let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
 
 let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
     match role with
-    | None -> serializeEntity entity
+    | None -> serializeEntity layout entity
     | Some role ->
         try
-            applyRoleInfo layout role entityRef
+            serializeEntityRestricted layout role entityRef
         with
         | :? PermissionsEntityException as e ->
             raisefWithInner EntityDeniedException e.InnerException "%s" e.Message

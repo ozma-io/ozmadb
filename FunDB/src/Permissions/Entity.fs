@@ -131,7 +131,7 @@ let applyRoleDelete (layout : Layout) (role : ResolvedRole) (query : Query<SQL.D
           Expression = expr
         }
 
-let applyRoleInfo (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) : SerializedEntity =
+let serializeEntityRestricted (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) : SerializedEntity =
     let entity = layout.FindEntity entityRef |> Option.get
     let flattened =
         match Map.tryFind entity.root role.Flattened with
@@ -141,24 +141,18 @@ let applyRoleInfo (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedE
     | Some _ -> ()
     | _ -> raisef PermissionsEntityException" Access denied to get info"
 
-    let getField name (field : ResolvedColumnField) =
-        let parentEntity = Option.defaultValue entityRef field.inheritedFrom
-        match Map.tryFind { entity = parentEntity; name = name } flattened.Fields with
-        | Some allowedField -> serializeColumnField field |> Some
-        | _ -> None
+    let serialized = serializeEntity layout entity
 
-    let columnFields = entity.columnFields |> Map.mapMaybe getField
+    let filterField name (field : SerializedColumnField) =
+        let parentEntity = Option.defaultValue entityRef field.InheritedFrom
+        Map.containsKey { entity = parentEntity; name = name } flattened.Fields
 
-    { ColumnFields = columnFields
-      // FIXME!
-      ComputedFields = Map.empty
-      UniqueConstraints = Map.empty
-      CheckConstraints = Map.empty
-      MainField = entity.mainField
-      ForbidExternalReferences = entity.forbidExternalReferences
-      Parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
-      Children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.direct })
-      IsAbstract = entity.isAbstract
-      IsFrozen = entity.isFrozen
-      Root = entity.root
+    let columnFields = serialized.ColumnFields |> Map.filter filterField
+
+    { serialized with
+          ColumnFields = columnFields
+          // FIXME!
+          ComputedFields = Map.empty
+          UniqueConstraints = Map.empty
+          CheckConstraints = Map.empty
     }

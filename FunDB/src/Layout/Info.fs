@@ -39,7 +39,7 @@ type SerializedEntity =
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       MainField : FieldName
       ForbidExternalReferences : bool
-      Parent : ResolvedEntityRef option
+      Parents : ResolvedEntityRef array
       Children : SerializedChildEntity seq
       IsAbstract : bool
       IsFrozen : bool
@@ -82,25 +82,35 @@ let serializeUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUnique
     { Columns = constr.columns
     }
 
-let serializeEntity (entity : ResolvedEntity) : SerializedEntity =
+let rec private inheritanceChain (layout : Layout) (entity : ResolvedEntity) : ResolvedEntityRef seq =
+    seq {
+        match entity.inheritance with
+        | None -> ()
+        | Some parent ->
+            yield parent.parent
+            let parentEntity = layout.FindEntity parent.parent |> Option.get
+            yield! inheritanceChain layout parentEntity
+    }
+
+let serializeEntity (layout : Layout) (entity : ResolvedEntity) : SerializedEntity =
     { ColumnFields = Map.map (fun name col -> serializeColumnField col) entity.columnFields
       ComputedFields =  Map.mapMaybe (fun name col -> col |> Result.getOption |> Option.map serializeComputedField) entity.computedFields
       UniqueConstraints = Map.map (fun name constr -> serializeUniqueConstraint constr) entity.uniqueConstraints
       CheckConstraints = Map.map (fun name constr -> serializeCheckConstraint constr) entity.checkConstraints
       MainField = entity.mainField
       ForbidExternalReferences = entity.forbidExternalReferences
-      Parent = entity.inheritance |> Option.map (fun inher -> inher.parent)
+      Parents = inheritanceChain layout entity |> Seq.toArray
       IsAbstract = entity.isAbstract
       IsFrozen = entity.isFrozen
       Children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.direct })
       Root = entity.root
     }
 
-let serializeSchema (schema : ResolvedSchema) : SerializedSchema =
-    { Entities = Map.mapMaybe (fun name entity -> if entity.isHidden then None else Some <| serializeEntity entity) schema.entities
+let serializeSchema (layout : Layout) (schema : ResolvedSchema) : SerializedSchema =
+    { Entities = Map.mapMaybe (fun name entity -> if entity.isHidden then None else Some <| serializeEntity layout entity) schema.entities
       Roots = schema.roots
     }
 
 let serializeLayout (layout : Layout) : SerializedLayout =
-    { Schemas = Map.map (fun name schema -> serializeSchema schema) layout.schemas
+    { Schemas = Map.map (fun name schema -> serializeSchema layout schema) layout.schemas
     }
