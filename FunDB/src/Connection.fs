@@ -150,7 +150,6 @@ type SystemUpdater(db : SystemContext) =
             let entry = db.Entry(row)
             // This is to prevent double deletes; first cascaded and second explicit.
             if entry.State <> EntityState.Detached then
-                eprintfn "Deleting %O %O" row entry.State
                 ignore <| db.Remove(row)
 
     member this.UpdateDifference (updateFunc : 'k -> 'nobj -> 'eobj -> unit) (createFunc : 'k -> 'eobj) (newObjects : Map<'k, 'nobj>) (existingObjects : Map<'k, 'eobj>) : Map<'k, 'eobj> =
