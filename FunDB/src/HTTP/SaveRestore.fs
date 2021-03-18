@@ -76,7 +76,7 @@ let saveRestoreApi : HttpHandler =
         | Error _ -> nextOp false next ctx
 
     let restoreJsonSchemas (api : IFunDBAPI) (dropOthers : bool) =
-        safeBindModel <| fun dump (next : HttpFunc) (ctx : HttpContext) ->
+        safeBindJson <| fun dump (next : HttpFunc) (ctx : HttpContext) ->
             task {
                 match! api.SaveRestore.RestoreSchemas dump dropOthers with
                 | Ok () -> return! commitAndOk api next ctx

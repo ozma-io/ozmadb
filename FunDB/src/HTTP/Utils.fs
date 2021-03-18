@@ -96,13 +96,20 @@ let formArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : H
         return! processArgs f form next ctx
     }
 
-let safeBindModel (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {
-        let! model = ctx.BindModelAsync<'a>()
-        if isRefNull model then
-            return! requestError (RERequest "Invalid JSON value") next ctx
-        else
-            return! f model next ctx
+        let! model =
+            task {
+                try
+                    let! ret = ctx.BindJsonAsync<'a>()
+                    return Ok ret
+                with
+                | :? JsonSerializationException as e -> return Error e
+            }
+        match model with
+        | Error e -> return! requestError (RERequest <| exceptionString e) next ctx
+        | Ok ret when isRefNull ret -> return! requestError (RERequest "Invalid JSON value") next ctx
+        | Ok ret -> return! f ret next ctx
     }
 
 let authorize =

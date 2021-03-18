@@ -19,7 +19,7 @@ let private actionError e =
 
 let actionsApi : HttpHandler =
     let runAction (ref : ActionRef) (api : IFunDBAPI) =
-        safeBindModel <| fun args (next : HttpFunc) (ctx : HttpContext) ->
+        safeBindJson <| fun args (next : HttpFunc) (ctx : HttpContext) ->
             task {
                 match! api.Actions.RunAction ref args with
                 | Ok ret ->

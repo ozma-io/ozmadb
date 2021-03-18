@@ -36,7 +36,7 @@ let entitiesApi : HttpHandler =
             ]
 
     let runTransaction (api : IFunDBAPI) =
-        safeBindModel <| fun transaction (next : HttpFunc) (ctx : HttpContext) ->
+        safeBindJson <| fun transaction (next : HttpFunc) (ctx : HttpContext) ->
             task {
                 match! api.Entities.RunTransaction transaction with
                 | Ok ret ->
