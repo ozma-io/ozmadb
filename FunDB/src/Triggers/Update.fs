@@ -50,7 +50,8 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) as th
                 | None -> raisef SystemUpdaterException "Unknown entity %O for trigger %O" entityRef triggerName
             Trigger (
                 TriggerEntity = entity,
-                Name = triggerName
+                Name = triggerName,
+                Schema = existingSchema
             )
         ignore <| this.UpdateDifference updateFunc createFunc newTriggersMap oldTriggersMap
 
