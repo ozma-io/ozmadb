@@ -17,9 +17,8 @@ type ViewResolveException (message : string) =
 [<NoEquality; NoComparison>]
 type private BoundFieldInfo =
     { Ref : ResolvedFieldRef
-      // If set, replaces all occurences of this field with given name, and also forces user to explicitly name it.
-      // Used for `__main`: all `__main` occurences are renamed to main column name, and user cannot use `__main`
-      // without renaming in SELECT.
+      // If set, forces user to explicitly name the field.
+      // Used for `__main`: user cannot use `__main` without renaming in SELECT.
       ForceRename : bool
       Entity : IEntityFields
       Field : ResolvedField
