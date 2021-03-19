@@ -36,9 +36,38 @@ type private BoundFieldInfo =
 type private QSubqueryFieldsMap = Map<FieldName, BoundFieldInfo option>
 type private QSubqueryFields = (FieldName option * BoundFieldInfo option)[]
 
-// None as EntityName is used only for offset/limit expressions in set operations.
-type private QMapping = Map<EntityName option, SchemaName option * QSubqueryFieldsMap>
-type private CTEMapping = Map<EntityName, QSubqueryFieldsMap>
+type private FieldMappingValue =
+    | FVAmbiguous of Set<EntityRef>
+    | FVResolved of EntityRef option * BoundFieldInfo option
+
+type private FieldMapping = Map<FieldRef, FieldMappingValue>
+
+// None in EntityRef is used only for offset/limit expressions in set operations.
+let private getAmbiguousMapping = function
+    | FVAmbiguous set -> set
+    | FVResolved (None, _) -> Set.empty
+    | FVResolved (Some ref, _) -> Set.singleton ref
+
+let private unionFieldMappingValue (a : FieldMappingValue) (b : FieldMappingValue) : FieldMappingValue =
+    let setA = getAmbiguousMapping a
+    let setB = getAmbiguousMapping b
+    FVAmbiguous <| Set.union setA setB
+
+let private fieldsToFieldMapping (maybeEntityRef : EntityRef option) (fields : QSubqueryFieldsMap) =
+    let explodeVariations (fieldName, boundField) =
+        let value = FVResolved (maybeEntityRef, boundField)
+        seq {
+            yield (({ entity = None; name = fieldName } : FieldRef), value)
+            match maybeEntityRef with
+            | None -> ()
+            | Some { schema = maybeSchema; name = entityName } ->
+                yield (({ entity = Some { schema = None; name = entityName }; name = fieldName } : FieldRef), value)
+                match maybeSchema with
+                | None -> ()
+                | Some schemaName ->
+                    yield (({ entity = Some { schema = Some schemaName; name = entityName }; name = fieldName } : FieldRef), value)
+        }
+    fields |> Map.toSeq |> Seq.collect explodeVariations |> Map.ofSeq
 
 type private SomeArgumentsMap = Map<ArgumentName, ParsedFieldType>
 
@@ -228,8 +257,18 @@ let private findMainEntity (select : ResolvedSelectExpr) : (ResolvedEntityRef * 
 
 type private ResolveCTE = EntityName -> QSubqueryFieldsMap
 
+type private Context =
+    { ResolveCTE : ResolveCTE
+      FieldMaps : FieldMapping list
+    }
+
 let private failCte (name : EntityName) =
     raisef ViewResolveException "Table %O not found" name
+
+let private emptyContext =
+    { ResolveCTE = failCte
+      FieldMaps = []
+    }
 
 let rec followPath (layout : ILayoutFields) (fieldRef : ResolvedFieldRef) : FieldName list -> ResolvedFieldRef = function
     | [] -> fieldRef
@@ -331,30 +370,17 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 | None -> raisef ViewResolveException "Column not found in dereference: %O" ref
             | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
 
-    let resolveReference (useMain : bool) (mapping : QMapping) (f : LinkedFieldRef) : ReferenceInfo =
+    let resolveReference (useMain : bool) (mappings : FieldMapping list) (f : LinkedFieldRef) : ReferenceInfo =
         match f.Ref with
         | VRColumn ref ->
-            let (entityName, (schemaName, fields)) =
-                match ref.entity with
-                | None ->
-                    if mapping.Count = 1 then
-                        Map.toSeq mapping |> Seq.head
-                    else
-                        raisef ViewResolveException "None or more than one possible interpretation of %O in %O" f.Ref f
-                | Some ename ->
-                    let srcName = Some ename.name
-                    match Map.tryFind srcName mapping with
-                    | Some ((schema, ref) as ret) ->
-                        if Option.isSome ename.schema && schema <> ename.schema then
-                            raisef ViewResolveException "Invalid entity schema %O in %O" ename f
-                        else
-                            (srcName, ret)
-                    | None ->
-                        raisef ViewResolveException "Field entity not found for %O in %O" ename f
-            let outerBoundField =
-                match Map.tryFind ref.name fields with
-                | Some r -> r
-                | None -> raisef ViewResolveException "Unknown field %O in %O" ref.name f
+            let rec findInMappings = function
+                | [] -> raisef ViewResolveException "Unknown reference: %O" ref
+                | mapping :: mappings ->
+                    match Map.tryFind ref mapping with
+                    | Some (FVResolved (entityRef, fieldInfo)) -> (entityRef, fieldInfo)
+                    | Some (FVAmbiguous entities) -> raisef ViewResolveException "Ambiguous reference %O. Possible values: %O" ref entities
+                    | None -> findInMappings mappings
+            let (entityRef, outerBoundField) = findInMappings mappings
 
             let (innerBoundField, outerRef) =
                 match outerBoundField with
@@ -367,7 +393,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 | _ ->
                     raisef ViewResolveException "Dereference on an unbound field in %O" f
 
-            let newRef = { entity = Option.map (fun ename -> { schema = None; name = ename }) entityName; name = ref.name } : FieldRef
+            let newRef = { entity = entityRef; name = ref.name } : FieldRef
             { InnerField = innerBoundField
               OuterField = outerBoundField
               Ref = { Ref = VRColumn { Ref = newRef; Bound = outerRef }; Path = f.Path }
@@ -439,21 +465,21 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 | Failure msg -> raisef ViewResolveException "Clashing names: %s" msg
             renameFields fieldNames results
 
-    let rec resolveResult (flags : SelectFlags) (resolveCte : ResolveCTE) (mapping : QMapping) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
+    let rec resolveResult (flags : SelectFlags) (ctx : Context) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
         if not (Map.isEmpty result.Attributes) && flags.NoAttributes then
             raisef ViewResolveException "Attributes are not allowed in query expressions"
-        let (exprInfo, expr) = resolveResultExpr flags resolveCte mapping result.Result
+        let (exprInfo, expr) = resolveResultExpr flags ctx result.Result
         let ret = {
-            Attributes = resolveAttributes resolveCte mapping result.Attributes
+            Attributes = resolveAttributes ctx result.Attributes
             Result = expr
         }
         (exprInfo, ret)
 
     // Should be in sync with resultField
-    and resolveResultExpr (flags : SelectFlags) (resolveCte : ResolveCTE) (mapping : QMapping) : ParsedQueryResultExpr -> ResolvedResultInfo * ResolvedQueryResultExpr = function
+    and resolveResultExpr (flags : SelectFlags) (ctx : Context) : ParsedQueryResultExpr -> ResolvedResultInfo * ResolvedQueryResultExpr = function
         | QRExpr (name, FERef f) ->
             Option.iter checkName name
-            let ref = resolveReference true mapping f
+            let ref = resolveReference true ctx.FieldMaps f
             let innerField =
                 match ref.InnerField with
                 | Some field when field.ForceRename && Option.isNone name -> raisef ViewResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
@@ -469,27 +495,27 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             | Some n -> checkName n
             | None when flags.RequireNames -> raisef ViewResolveException "Unnamed results are allowed only inside expression queries"
             | None -> ()
-            let (exprInfo, expr) = resolveFieldExpr true resolveCte mapping e
+            let (exprInfo, expr) = resolveFieldExpr true ctx e
             let info =
                 { InnerField = None
                   HasAggregates = exprInfo.HasAggregates
                 }
             (info, QRExpr (name, expr))
 
-    and resolveAttributes (resolveCte : ResolveCTE) (mapping : QMapping) (attributes : ParsedAttributeMap) : ResolvedAttributeMap =
-        Map.map (fun name expr -> resolveNonaggrFieldExpr resolveCte mapping expr) attributes
+    and resolveAttributes (ctx : Context) (attributes : ParsedAttributeMap) : ResolvedAttributeMap =
+        Map.map (fun name expr -> resolveNonaggrFieldExpr ctx expr) attributes
 
-    and resolveNonaggrFieldExpr (resolveCte : ResolveCTE) (mapping : QMapping) (expr : ParsedFieldExpr) : ResolvedFieldExpr =
-        let (info, res) = resolveFieldExpr false resolveCte mapping expr
+    and resolveNonaggrFieldExpr (ctx : Context) (expr : ParsedFieldExpr) : ResolvedFieldExpr =
+        let (info, res) = resolveFieldExpr false ctx expr
         if info.HasAggregates then
             raisef ViewResolveException "Aggregate functions are not allowed here"
         res
 
-    and resolveFieldExpr (useMain : bool) (resolveCte : ResolveCTE) (mapping : QMapping) (expr : ParsedFieldExpr) : ResolvedExprInfo * ResolvedFieldExpr =
+    and resolveFieldExpr (useMain : bool) (ctx : Context) (expr : ParsedFieldExpr) : ResolvedExprInfo * ResolvedFieldExpr =
         let mutable isLocal = true
         let mutable hasAggregates = false
         let resolveExprReference col =
-            let ref = resolveReference useMain mapping col
+            let ref = resolveReference useMain ctx.FieldMaps col
 
             if not <| Array.isEmpty col.Path then
                 isLocal <- false
@@ -500,7 +526,9 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
 
             ref.Ref
         let resolveQuery query =
-            let (_, res) = resolveSelectExpr resolveCte subExprSelectFlags query
+            // FIXME: we don't support propagating field names into subqueries yet.
+            let ctx= { ctx with FieldMaps = [] }
+            let (_, res) = resolveSelectExpr ctx subExprSelectFlags query
             res
         let resolveAggr aggr =
             hasAggregates <- true
@@ -517,10 +545,10 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         (info, ret)
 
-    and resolveOrderLimitClause (resolveCte : ResolveCTE) (mapping : QMapping) (limits : ParsedOrderLimitClause) : bool * ResolvedOrderLimitClause =
+    and resolveOrderLimitClause (ctx : Context) (limits : ParsedOrderLimitClause) : bool * ResolvedOrderLimitClause =
         let mutable isLocal = true
         let resolveOrderBy (ord, expr) =
-            let (info, ret) = resolveFieldExpr false resolveCte mapping expr
+            let (info, ret) = resolveFieldExpr false ctx expr
             if info.HasAggregates then
                 raisef ViewResolveException "Aggregates are not allowed here"
             if not info.IsLocal then
@@ -533,13 +561,14 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         (isLocal, ret)
 
-    and resolveCommonTableExpr (resolveCte : ResolveCTE) (allowRecursive : bool) (name : EntityName) (cte : ParsedCommonTableExpr) : QSubqueryFieldsMap * ResolvedCommonTableExpr =
-        let (resolveCte, newCtes) =
+    and resolveCommonTableExpr (ctx : Context) (allowRecursive : bool) (name : EntityName) (cte : ParsedCommonTableExpr) : QSubqueryFieldsMap * ResolvedCommonTableExpr =
+        let (ctx, newCtes) =
             match cte.Expr.CTEs with
-            | None -> (resolveCte, None)
+            | None -> (ctx, None)
             | Some ctes ->
-                let (resolveCte, newCtes) = resolveCommonTableExprs resolveCte ctes
-                (resolveCte, Some newCtes)
+                let (resolveCte, newCtes) = resolveCommonTableExprs ctx ctes
+                let ctx = { ctx with ResolveCTE = resolveCte }
+                (ctx, Some newCtes)
 
         let cteFlags =
             { OneColumn = false
@@ -551,7 +580,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             match cte.Expr.Tree with
             | SSetOp setOp when allowRecursive ->
                 // We trait left side of outer UNION as a non-recursive side.
-                let (results1, a') = resolveSelectExpr resolveCte cteFlags setOp.A
+                let (results1, a') = resolveSelectExpr ctx cteFlags setOp.A
                 let recResults =
                     match cte.Fields with
                     | None -> results1
@@ -561,10 +590,11 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                     if currName = name then
                         fieldsMap
                     else
-                        resolveCte currName
-                let (results2, b') = resolveSelectExpr newResolveCte { cteFlags with RequireNames = false } setOp.B
-                finishResolveSetOpExpr resolveCte setOp results1 a' results2 b' cteFlags
-            | _ -> resolveSelectTreeExpr resolveCte cteFlags cte.Expr.Tree
+                        ctx.ResolveCTE currName
+                let newCtx = { ctx with ResolveCTE = newResolveCte }
+                let (results2, b') = resolveSelectExpr newCtx { cteFlags with RequireNames = false } setOp.B
+                finishResolveSetOpExpr ctx setOp results1 a' results2 b' cteFlags
+            | _ -> resolveSelectTreeExpr ctx cteFlags cte.Expr.Tree
 
         let results =
             match cte.Fields with
@@ -586,7 +616,8 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         (getFieldsMap results, newCte)
 
-    and resolveCommonTableExprs (resolveCte : ResolveCTE) (ctes : ParsedCommonTableExprs) : ResolveCTE * ResolvedCommonTableExprs =
+    and resolveCommonTableExprs (ctx : Context) (ctes : ParsedCommonTableExprs) : ResolveCTE * ResolvedCommonTableExprs =
+        let resolveCte = ctx.ResolveCTE
         let exprsMap =
             try
                 Map.ofSeqUnique ctes.Exprs
@@ -609,14 +640,15 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                             raisef ViewResolveException "Mutual recursion in WITH statement"
                         | Some cte ->
                             processing <- Set.add currName processing
-                            let (results, newCte) = resolveCommonTableExpr tmpResolveCte true currName cte
+                            let (results, newCte) = resolveCommonTableExpr tmpCtx true currName cte
                             resultsMap <- Map.add currName (results, newCte) resultsMap
                             resolved <- (currName, newCte) :: resolved
                             results
                     | None -> resolveCte currName
                     | Some (results, cte) -> results
+                and tmpCtx = { ctx with ResolveCTE = tmpResolveCte }
 
-                let (results, newCte) = resolveCommonTableExpr tmpResolveCte ctes.Recursive name cte
+                let (results, newCte) = resolveCommonTableExpr tmpCtx ctes.Recursive name cte
                 resultsMap <- Map.add name (results, newCte) resultsMap
                 resolved <- (name, newCte) :: resolved
 
@@ -636,14 +668,15 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         (newResolveCte, ret)
 
-    and resolveSelectExpr (resolveCte : ResolveCTE) (flags : SelectFlags) (select : ParsedSelectExpr) : QSubqueryFields * ResolvedSelectExpr =
-        let (resolveCte, newCtes) =
+    and resolveSelectExpr (ctx : Context) (flags : SelectFlags) (select : ParsedSelectExpr) : QSubqueryFields * ResolvedSelectExpr =
+        let (ctx, newCtes) =
             match select.CTEs with
-            | None -> (resolveCte, None)
+            | None -> (ctx, None)
             | Some ctes ->
-                let (resolveCte, newCtes) = resolveCommonTableExprs resolveCte ctes
-                (resolveCte, Some newCtes)
-        let (results, tree) = resolveSelectTreeExpr resolveCte flags select.Tree
+                let (resolveCte, newCtes) = resolveCommonTableExprs ctx ctes
+                let ctx = { ctx with ResolveCTE = resolveCte }
+                (ctx, Some newCtes)
+        let (results, tree) = resolveSelectTreeExpr ctx flags select.Tree
         let newSelect =
             { CTEs = newCtes
               Tree = tree
@@ -651,7 +684,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         (results, newSelect)
 
-    and finishResolveSetOpExpr (resolveCte : ResolveCTE) (setOp : ParsedSetOperationExpr) (results1 : QSubqueryFields) (a : ResolvedSelectExpr) (results2 : QSubqueryFields) (b : ResolvedSelectExpr) (flags : SelectFlags) =
+    and finishResolveSetOpExpr (ctx : Context) (setOp : ParsedSetOperationExpr) (results1 : QSubqueryFields) (a : ResolvedSelectExpr) (results2 : QSubqueryFields) (b : ResolvedSelectExpr) (flags : SelectFlags) =
         if Array.length results1 <> Array.length results2 then
             raisef ViewResolveException "Different number of columns in a set operation expression"
         if flags.RequireNames then
@@ -659,8 +692,13 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 if Option.isNone name then
                     raisef ViewResolveException "Name is required for column"
         let newResults = Array.map2 (fun (name1, info1) (name2, info2) -> (name1, unionBoundFieldInfo info1 info2)) results1 results2
-        let orderLimitMapping = Map.singleton None (None, getFieldsMap newResults)
-        let (limitsAreLocal, resolvedLimits) = resolveOrderLimitClause resolveCte orderLimitMapping setOp.OrderLimit
+        let orderLimitMapping =
+            getFieldsMap newResults
+            |> Map.toSeq
+            |> Seq.map (fun (fieldName, fieldInfo) -> (({ entity = None; name = fieldName } : FieldRef), FVResolved (None, fieldInfo)))
+            |> Map.ofSeq
+        let orderLimitCtx = { ctx with FieldMaps = orderLimitMapping :: ctx.FieldMaps }
+        let (limitsAreLocal, resolvedLimits) = resolveOrderLimitClause orderLimitCtx setOp.OrderLimit
         if not limitsAreLocal then
             raisef ViewResolveException "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.OrderBy
         let ret =
@@ -672,9 +710,9 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             }
         (newResults, SSetOp ret)
 
-    and resolveSelectTreeExpr (resolveCte : ResolveCTE) (flags : SelectFlags) : ParsedSelectTreeExpr -> QSubqueryFields * ResolvedSelectTreeExpr = function
+    and resolveSelectTreeExpr (ctx : Context) (flags : SelectFlags) : ParsedSelectTreeExpr -> QSubqueryFields * ResolvedSelectTreeExpr = function
         | SSelect query ->
-            let (results, res) = resolveSingleSelectExpr resolveCte flags query
+            let (results, res) = resolveSingleSelectExpr ctx flags query
             (results, SSelect res)
         | SValues values ->
             if flags.RequireNames then
@@ -683,29 +721,30 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             let mapEntry entry =
                 if Array.length entry <> valuesLength then
                     raisef ViewResolveException "Invalid number of items in VALUES entry: %i" (Array.length entry)
-                entry |> Array.map (resolveFieldExpr true resolveCte Map.empty >> snd)
+                entry |> Array.map (resolveFieldExpr true ctx >> snd)
             let newValues = values |> Array.map mapEntry
             let fields = Seq.init valuesLength (fun i -> (None, None)) |> Array.ofSeq
             (fields, SValues newValues)
         | SSetOp setOp ->
-            let (results1, a') = resolveSelectExpr resolveCte flags setOp.A
-            let (results2, b') = resolveSelectExpr resolveCte { flags with RequireNames = false } setOp.B
-            finishResolveSetOpExpr resolveCte setOp results1 a' results2 b' flags
+            let (results1, a') = resolveSelectExpr ctx flags setOp.A
+            let (results2, b') = resolveSelectExpr ctx { flags with RequireNames = false } setOp.B
+            finishResolveSetOpExpr ctx setOp results1 a' results2 b' flags
 
-    and resolveSingleSelectExpr (resolveCte : ResolveCTE) (flags : SelectFlags) (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
+    and resolveSingleSelectExpr (ctx : Context) (flags : SelectFlags) (query : ParsedSingleSelectExpr) : QSubqueryFields * ResolvedSingleSelectExpr =
         if flags.NoAttributes && not (Map.isEmpty query.Attributes) then
             raisef ViewResolveException "Attributes are not allowed in query expressions"
         if flags.OneColumn && Array.length query.Results <> 1 then
             raisef ViewResolveException "Expression queries must have only one resulting column"
-        let (fromMapping, qFrom) =
+        let (ctx, qFrom) =
             match query.From with
-            | None -> (Map.empty, None)
+            | None -> (ctx, None)
             | Some from ->
-                let (mapping, res) = resolveFromExpr resolveCte flags from
-                (mapping, Some res)
-        let qWhere = Option.map (resolveNonaggrFieldExpr resolveCte fromMapping) query.Where
-        let qGroupBy = Array.map (resolveNonaggrFieldExpr resolveCte fromMapping) query.GroupBy
-        let rawResults = Array.map (resolveResult flags resolveCte fromMapping) query.Results
+                let (newMapping, _, res) = resolveFromExpr ctx flags from
+                let ctx = { ctx with FieldMaps = newMapping :: ctx.FieldMaps }
+                (ctx, Some res)
+        let qWhere = Option.map (resolveNonaggrFieldExpr ctx) query.Where
+        let qGroupBy = Array.map (resolveNonaggrFieldExpr ctx) query.GroupBy
+        let rawResults = Array.map (resolveResult flags ctx) query.Results
         let hasAggregates = Array.exists (fun (info : ResolvedResultInfo, expr) -> info.HasAggregates) rawResults || not (Array.isEmpty qGroupBy)
         let results = Array.map snd rawResults
         let newFields = rawResults |> Array.map (fun (info, res) -> (res.Result.TryToName (), if hasAggregates then None else info.InnerField))
@@ -719,22 +758,22 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             } : ResolvedSingleSelectInfo
 
         let newQuery = {
-            Attributes = resolveAttributes resolveCte fromMapping query.Attributes
+            Attributes = resolveAttributes ctx query.Attributes
             From = qFrom
             Where = qWhere
             GroupBy = qGroupBy
             Results = results
-            OrderLimit = snd <| resolveOrderLimitClause resolveCte fromMapping query.OrderLimit
+            OrderLimit = snd <| resolveOrderLimitClause ctx query.OrderLimit
             Extra = extra
         }
         (newFields, newQuery)
 
-    and resolveFromExpr (resolveCte : ResolveCTE) (flags : SelectFlags) : ParsedFromExpr -> QMapping * ResolvedFromExpr = function
-        | FEntity (pun, ({ schema = Some schemaName; name = name } as ref)) ->
-            let resRef = { schema = schemaName; name = name }
+    and resolveFromExpr (ctx : Context) (flags : SelectFlags) : ParsedFromExpr -> FieldMapping * Set<EntityName> * ResolvedFromExpr = function
+        | FEntity (pun, ({ schema = Some schemaName; name = entityName } as ref)) ->
+            let resRef = { schema = schemaName; name = entityName }
             let entity =
                 match layout.FindEntity resRef with
-                | None -> raisef ViewResolveException "Entity not found: %O" name
+                | None -> raisef ViewResolveException "Entity not found: %O" entityName
                 | Some entity -> entity
 
             let makeBoundField (name : FieldName) (field : ResolvedField) =
@@ -745,24 +784,30 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             let mainFieldInfo = Option.get <| entity.FindField funMain
             let mainBoundField = { Ref = { entity = resRef; name = entity.MainField }; Entity = entity; Field = mainFieldInfo.Field; ForceRename = true; Immediate = true }
             let fields = Map.add funMain (Some mainBoundField) realFields
-
-            let newName = Option.defaultValue name pun
-            (Map.singleton (Some newName) (Some resRef.schema, fields), FEntity (pun, ref))
-        | FEntity (pun, ({ schema = None; name = name } as ref)) ->
-            let fields = resolveCte name
-            let newName = Option.defaultValue name pun
-            (Map.singleton (Some newName) (None, fields), FEntity (pun, ref))
+            let mappingRef =
+                match pun with
+                | None -> ref
+                | Some punName -> { schema = None; name = punName }
+            let mapping = fieldsToFieldMapping (Some mappingRef) fields
+            (mapping, Set.singleton mappingRef.name, FEntity (pun, ref))
+        | FEntity (pun, ({ schema = None; name = entityName } as ref)) ->
+            let fields = ctx.ResolveCTE entityName
+            let newName = Option.defaultValue entityName pun
+            let mapping = fieldsToFieldMapping (Some { schema = None; name = newName }) fields
+            (mapping, Set.singleton newName, FEntity (pun, ref))
         | FJoin join ->
-            let (newMapping1, newA) = resolveFromExpr resolveCte flags join.A
-            let (newMapping2, newB) = resolveFromExpr resolveCte flags join.B
+            let (newMapping1, namesA, newA) = resolveFromExpr ctx flags join.A
+            let (newMapping2, namesB, newB) = resolveFromExpr ctx flags join.B
 
-            let newMapping =
+            let names =
                 try
-                    Map.unionUnique newMapping1 newMapping2
+                    Set.unionUnique namesA namesB
                 with
                 | Failure msg -> raisef ViewResolveException "Clashing entity names in a join: %s" msg
+            let newMapping = Map.unionWith (fun _ -> unionFieldMappingValue) newMapping1 newMapping2
+            let newCtx = { ctx with FieldMaps = newMapping :: ctx.FieldMaps }
 
-            let (info, newFieldExpr) = resolveFieldExpr false resolveCte newMapping join.Condition
+            let (info, newFieldExpr) = resolveFieldExpr false newCtx join.Condition
             if not info.IsLocal then
                 raisef ViewResolveException "Cannot use dereferences in join expressions: %O" join.Condition
             if info.HasAggregates then
@@ -773,12 +818,13 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                   B = newB
                   Condition = newFieldExpr
                 }
-            (newMapping, FJoin ret)
+            (newMapping, names, FJoin ret)
         | FSubExpr (alias, q) ->
-            let (info, newQ) = resolveSelectExpr resolveCte { flags with RequireNames = Option.isNone alias.Fields; OneColumn = false } q
+            let (info, newQ) = resolveSelectExpr ctx { flags with RequireNames = Option.isNone alias.Fields; OneColumn = false } q
             let info = applyAlias alias info
-            let mapping = Map.singleton (Some alias.Name) (None, getFieldsMap info)
-            (mapping, FSubExpr (alias, newQ))
+            let fields = getFieldsMap info
+            let mapping = fieldsToFieldMapping (Some { schema = None; name = alias.Name }) fields
+            (mapping, Set.singleton alias.Name, FSubExpr (alias, newQ))
 
     let resolveMainEntity (fields : QSubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
         let ref = resolveEntityRef main.Entity
@@ -810,7 +856,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
           ColumnsToFields = mappedResults
         }
 
-    member this.ResolveSelectExpr flags select = resolveSelectExpr failCte flags select
+    member this.ResolveSelectExpr flags select = resolveSelectExpr emptyContext flags select
     member this.ResolveMainEntity fields select main = resolveMainEntity fields select main
     member this.UsedArguments = usedArguments
 

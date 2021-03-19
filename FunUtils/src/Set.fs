@@ -7,3 +7,6 @@ let getSingle (s : Set<'k>) : 'k = s |> Set.toSeq |> Seq.exactlyOne
 
 let ofSeqUnique (items : seq<'a>) : Set<'a> =
     Seq.fold (fun s x -> if Set.contains x s then failwith (sprintf "Item '%O' already exists" x) else Set.add x s) Set.empty items
+
+let unionUnique (a : Set<'k>) (b : Set<'k>) : Set<'k> =
+    ofSeqUnique (Seq.append (Set.toSeq a) (Set.toSeq b))
