@@ -812,7 +812,6 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
 
                           member this.Dispose () =
                               if not isDisposed then
-                                  isDisposed <- true
                                   match maybeJSAPI with
                                   | Some jsApi -> jsApi.API.ResetAPI ()
                                   | None -> ()
@@ -821,10 +820,10 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                   | None -> ()
                                   (transaction :> IDisposable).Dispose ()
                                   (transaction.Connection :> IDisposable).Dispose ()
+                                  isDisposed <- true
                           member this.DisposeAsync () =
                               unitVtask {
                                   if not isDisposed then
-                                      isDisposed <- true
                                       match maybeJSAPI with
                                       | Some jsApi -> jsApi.API.ResetAPI ()
                                       | None -> ()
@@ -833,6 +832,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                       | None -> ()
                                       do! (transaction :> IAsyncDisposable).DisposeAsync ()
                                       do! (transaction.Connection :> IAsyncDisposable).DisposeAsync ()
+                                      isDisposed <- true
                               }
                     }
             with

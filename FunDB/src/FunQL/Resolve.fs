@@ -17,7 +17,9 @@ type ViewResolveException (message : string) =
 [<NoEquality; NoComparison>]
 type private BoundFieldInfo =
     { Ref : ResolvedFieldRef
-      // Same as in `FieldInfo`
+      // If set, replaces all occurences of this field with given name, and also forces user to explicitly name it.
+      // Used for `__main`: all `__main` occurences are renamed to main column name, and user cannot use `__main`
+      // without renaming in SELECT.
       ForceRename : bool
       Entity : IEntityFields
       Field : ResolvedField
@@ -354,10 +356,6 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 match Map.tryFind ref.name fields with
                 | Some r -> r
                 | None -> raisef ViewResolveException "Unknown field %O in %O" ref.name f
-            let newName =
-                match outerBoundField with
-                | Some f -> f.Ref.name
-                | None -> ref.name
 
             let (innerBoundField, outerRef) =
                 match outerBoundField with
@@ -370,7 +368,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 | _ ->
                     raisef ViewResolveException "Dereference on an unbound field in %O" f
 
-            let newRef = { entity = Option.map (fun ename -> { schema = None; name = ename }) entityName; name = newName } : FieldRef
+            let newRef = { entity = Option.map (fun ename -> { schema = None; name = ename }) entityName; name = ref.name } : FieldRef
             { InnerField = innerBoundField
               OuterField = outerBoundField
               Ref = { Ref = VRColumn { Ref = newRef; Bound = outerRef }; Path = f.Path }
@@ -457,11 +455,13 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         | QRExpr (name, FERef f) ->
             Option.iter checkName name
             let ref = resolveReference true mapping f
-            match ref.InnerField with
-            | Some field when field.ForceRename && Option.isNone name -> raisef ViewResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
-            | _ -> ()
+            let innerField =
+                match ref.InnerField with
+                | Some field when field.ForceRename && Option.isNone name -> raisef ViewResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
+                | Some field -> Some { field with ForceRename = false }
+                | None -> None
             let info =
-                { InnerField = ref.InnerField
+                { InnerField = innerField
                   HasAggregates = false
                 }
             (info, QRExpr (name, FERef ref.Ref))

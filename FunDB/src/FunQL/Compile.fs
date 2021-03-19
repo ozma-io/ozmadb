@@ -42,9 +42,11 @@ type GenericDomains<'e> when 'e : comparison =
 type Domain = GenericDomain<FieldName>
 type Domains = GenericDomains<FieldName>
 
-let rec private mapDomainsFields (f : 'e1 -> 'e2) : GenericDomains<'e1> -> GenericDomains<'e2> = function
-    | DSingle (id, dom) -> DSingle (id, Map.mapKeys f dom)
-    | DMulti (ns, doms) -> DMulti (ns, Map.map (fun name -> mapDomainsFields f) doms)
+let rec private mapDomain (f : GenericDomain<'a> -> GenericDomain<'b>) : GenericDomains<'a> -> GenericDomains<'b> = function
+    | DSingle (id, dom) -> DSingle (id, f dom)
+    | DMulti (ns, doms) -> DMulti (ns, Map.map (fun name -> mapDomain f) doms)
+
+let private mapDomainsFields (f : 'e1 -> 'e2) = mapDomain (Map.mapKeys f)
 
 let private renameDomainFields (names : Map<'e1, 'e2>) = mapDomainsFields (fun k -> Map.find k names)
 
@@ -1441,6 +1443,11 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   IdColumn = idDefault
                 }
             let domain = mapAllFields makeDomainEntry entity |> Map.mapKeys TName
+            let mainEntry =
+                { Ref = { entity = entityRef; name = entity.mainField }
+                  IdColumn = idDefault
+                }
+            let domain = Map.add (TName funMain) mainEntry domain
 
             let compiledPun = Option.map compileAliasFromName pun
             let newName = Option.defaultValue name pun
