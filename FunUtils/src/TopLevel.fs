@@ -26,6 +26,7 @@ module POSIXPath = POSIXPath
 
 type Void = private Void of unit
 type Exception = System.Exception
+type StringComparable<'a> = String.StringComparable<'a>
 
 let inline isRefNull (x : 'a) = obj.ReferenceEquals(x, null)
 

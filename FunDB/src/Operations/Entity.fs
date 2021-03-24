@@ -52,13 +52,8 @@ let private runIntQuery (connection : QueryConnection) globalArgs query placehol
     task {
         match! runQuery connection.ExecuteValueQuery globalArgs query placeholders cancellationToken with
         | SQL.VInt i -> return i
-        | _ -> return raisef EntityExecutionException "Non-integer result"
+        | ret -> return failwithf "Non-integer result: %O" ret
     }
-
-let private clearFieldType : ResolvedFieldType -> ArgumentFieldType = function
-    | FTReference (r, _) -> FTReference (r, None)
-    | FTEnum vals -> FTEnum vals
-    | FTType t -> FTType t
 
 let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
     match role with
@@ -94,12 +89,12 @@ let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRe
 
 type private ValueColumn =
     { Placeholder : Placeholder
-      Argument : Argument<ResolvedEntityRef, FunQLVoid>
+      Argument : ResolvedArgument
       Column : SQL.ColumnName
       Extra : obj
     }
 
-let private fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.defaultValue || field.isNullable
+let private fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.DefaultValue || field.IsNullable
 
 let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) (cancellationToken : CancellationToken) : Task<int> =
     task {
@@ -111,16 +106,16 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             | Some arg ->
                 Some
                     { Placeholder = PLocal fieldName
-                      Argument = { ArgType = clearFieldType field.fieldType; Optional = isOptional }
-                      Column = field.columnName
+                      Argument = { ArgType = field.FieldType; Optional = isOptional }
+                      Column = field.ColumnName
                       Extra = ({ name = fieldName } : RestrictedColumnInfo)
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
 
-        if entity.isAbstract then
+        if entity.IsAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
-        if entity.isHidden then
+        if entity.IsHidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
         let (subEntityValue, rawArgs) =
             if hasSubType entity then
@@ -130,12 +125,12 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
                       Column = sqlFunSubEntity
                       Extra = null
                     }
-                let newArgs = Map.add funSubEntity (FString entity.typeName) rawArgs
+                let newArgs = Map.add funSubEntity (FString entity.TypeName) rawArgs
                 (Seq.singleton value, newArgs)
             else
                 (Seq.empty, rawArgs)
 
-        let argumentTypes = Seq.append subEntityValue (entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue) |> Seq.cache
+        let argumentTypes = Seq.append subEntityValue (entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue) |> Seq.cache
         let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
         // Id is needed so that we always have at least one column inserted.
         let insertColumns = argumentTypes |> Seq.map (fun value -> (value.Extra, value.Column))
@@ -144,7 +139,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
         let expr =
-            { Name = compileResolvedEntityRef entity.root
+            { Name = compileResolvedEntityRef entity.Root
               Columns = columns
               Values = SQL.IValues [| valuesWithSys |]
               Returning = [| SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunId }) |]
@@ -174,29 +169,29 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
             | None -> None
-            | Some arg when field.isImmutable -> raisef EntityDeniedException "Field %O is immutable" { entity = entityRef; name = fieldName }
+            | Some arg when field.IsImmutable -> raisef EntityDeniedException "Field %O is immutable" { entity = entityRef; name = fieldName }
             | Some arg ->
                 Some
                     { Placeholder = PLocal fieldName
-                      Argument = { ArgType = clearFieldType field.fieldType; Optional = fieldIsOptional field }
-                      Column = field.columnName
+                      Argument = { ArgType = field.FieldType; Optional = fieldIsOptional field }
+                      Column = field.ColumnName
                       Extra = ({ name = fieldName } : RestrictedColumnInfo)
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
-        if entity.isHidden then
+        if entity.IsHidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
-        let argumentTypes = entity.columnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
+        let argumentTypes = entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
         let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
         let columns = argumentTypes |> Seq.map (fun value -> (value.Column, (value.Extra, SQL.VEPlaceholder arguments.Types.[value.Placeholder].PlaceholderId))) |> Map.ofSeq
 
         let (idPlaceholder, arguments) = addArgument (PLocal funId) funIdArg arguments
 
-        let tableRef = compileResolvedEntityRef entity.root
+        let tableRef = compileResolvedEntityRef entity.Root
         let whereId = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idPlaceholder)
         let whereExpr =
-            match entity.inheritance with
-            | Some inheritance -> SQL.VEAnd (inheritance.checkExpr, whereId)
+            match entity.Inheritance with
+            | Some inheritance -> SQL.VEAnd (inheritance.CheckExpr, whereId)
             | None -> whereId
 
         let expr =
@@ -228,20 +223,20 @@ let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
     unitTask {
         let entity = layout.FindEntity entityRef |> Option.get
 
-        if entity.isHidden then
+        if entity.IsHidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
-        if entity.isAbstract then
+        if entity.IsAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
 
         let (idPlaceholder, arguments) = addArgument (PLocal funId) funIdArg emptyArguments
         let whereExpr = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idPlaceholder)
         let whereExpr =
             if hasSubType entity then
-                let subEntityCheck = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.typeName))
+                let subEntityCheck = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
                 SQL.VEAnd (subEntityCheck, whereExpr)
             else
                 whereExpr
-        let tableRef = compileResolvedEntityRef entity.root
+        let tableRef = compileResolvedEntityRef entity.Root
 
         let expr =
             { Name = tableRef

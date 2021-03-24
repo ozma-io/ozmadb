@@ -19,6 +19,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public DbSet<Constraint> Constraints { get; set; } = null!;
         public DbSet<Trigger> Triggers { get; set; } = null!;
         public DbSet<Depend> Depends { get; set; } = null!;
+        public DbSet<Index> Index { get; set; } = null!;
 
         public PgCatalogContext()
             : base()
@@ -41,7 +42,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
             modelBuilder.Entity<Attribute>()
                 .HasOne(attr => attr.AttrDef)
-                .WithOne(def => def!.Attribute)
+                .WithOne(def => def!.Attribute!)
                 .HasForeignKey<AttrDef>(def => new { def.AdRelId, def.AdNum });
             // Not really a string, just a dummy type
             modelBuilder.Entity<AttrDef>()
@@ -52,6 +53,9 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
             modelBuilder.Entity<Depend>()
                 .HasNoKey();
+
+            modelBuilder.Entity<Index>()
+                .Property<string[]>("IndExprs");
 
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {
@@ -73,28 +77,25 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
         public async Task<IEnumerable<Namespace>> GetObjects(CancellationToken cancellationToken)
         {
-            /* var classOid = await this.Classes
-                .AsNoTracking()
-                .Where(cl => cl.Namespace.NspName == "pg_catalog" && cl.RelName == "pg_class")
-                .Select(cl => cl.Oid)
-                .SingleAsync(cancellationToken); */
-
             // All this circus because just running:
             //
             // Include(x => x.foos).Select(x => new { X = x; Foos = x.foos.Select(..).ToList(); })
             //
             // Makes EFCore get Foos two times! This leads to a cartesian explosion quickly.
             // Instead we avoid `Include` and manually merge related entries.
-            var ret = await this.Namespaces
+            var retQuery = this.Namespaces
+                .AsQueryable()
+                .Where(ns => !ns.NspName.StartsWith("pg_") && ns.NspName != "information_schema");
+
+            var ret = await retQuery
                 .AsNoTracking()
                 .AsSplitQuery()
+                .Include(ns => ns.Classes)
                 .Include(ns => ns.Procs).ThenInclude(proc => proc.RetType)
                 .Include(ns => ns.Procs).ThenInclude(proc => proc.Language)
-                .Include(ns => ns.Classes).ThenInclude(cl => cl.Indexes).ThenInclude(cl => cl.Class)
-                .Where(ns => !ns.NspName.StartsWith("pg_") && ns.NspName != "information_schema")
                 .ToListAsync();
 
-            IList<int> classesIds = ret.SelectMany(ns => ns.Classes).Select(cl => cl.Oid).ToList();
+            var classesIds = retQuery.SelectMany(ns => ns.Classes).Select(cl => cl.Oid);
 
             var attrsList = await this.Attributes
                 .AsNoTracking()
@@ -120,8 +121,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
             var constrsList = await this.Constraints
                 .AsNoTracking()
-                .AsSplitQuery()
-                .Include(constr => constr.FRelClass).ThenInclude(rcl => rcl.Namespace)
+                .Include(constr => constr.FRelClass).ThenInclude(rcl => rcl!.Namespace)
                 .Where(constr => classesIds.Contains(constr.ConRelId))
                 .Select(constr => new
                     {
@@ -140,8 +140,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
             var triggersList = await this.Triggers
                 .AsNoTracking()
+                .Include(trig => trig.Function).ThenInclude(func => func!.Namespace)
                 .Where(trig => classesIds.Contains(trig.TgRelId) && !trig.TgIsInternal)
-                .Include(trig => trig.Function).ThenInclude(func => func.Namespace)
                 .Select(trig => new
                     {
                         Trigger = trig,
@@ -157,24 +157,35 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 .GroupBy(trig => trig.TgRelId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
+            var indexesList = await this.Index
+                .AsNoTracking()
+                .Include(index => index.Class)
+                .Where(index =>
+                    classesIds.Contains(index.IndRelId) &&
+                    !this.Constraints.AsQueryable().Where(constr => constr.ConIndId == index.IndexRelId).Any())
+                .Select(index => new
+                    {
+                        Index = index,
+                        Source = PgGetExpr(EF.Property<string>(index, "IndExprs"), index.IndexRelId),
+                    })
+                .ToListAsync();
+            var indexes = indexesList
+                .Select(index =>
+                {
+                    index.Index.Source = index.Source;
+                    return index.Index;
+                })
+                .GroupBy(index => index.IndRelId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
             foreach (var ns in ret)
             {
-                foreach (var cl in ns.Classes)
+                foreach (var cl in ns.Classes!)
                 {
-                    var myAttrs = attrs.GetValueOrDefault(cl.Oid);
-                    if (myAttrs == null)
-                        myAttrs = new List<Attribute>();
-                    cl.Attributes = myAttrs;
-
-                    var myConstrs = constrs.GetValueOrDefault(cl.Oid);
-                    if (myConstrs == null)
-                        myConstrs = new List<Constraint>();
-                    cl.Constraints = myConstrs;
-
-                    var myTriggers = triggers.GetValueOrDefault(cl.Oid);
-                    if (myTriggers == null)
-                        myTriggers = new List<Trigger>();
-                    cl.Triggers = myTriggers;
+                    cl.Attributes = attrs.GetValueOrDefault(cl.Oid);
+                    cl.Constraints = constrs.GetValueOrDefault(cl.Oid);
+                    cl.Triggers = triggers.GetValueOrDefault(cl.Oid);
+                    cl.Indexes = indexes.GetValueOrDefault(cl.Oid);
                 }
             }
             return ret;
@@ -189,8 +200,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Required]
         public string NspName { get; set; } = null!;
 
-        public List<Class> Classes { get; set; } = null!;
-        public List<Proc> Procs { get; set; } = null!;
+        public List<Class>? Classes { get; set; }
+        public List<Proc>? Procs { get; set; }
     }
 
     public class Class
@@ -205,15 +216,15 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public char RelKind { get; set; }
 
         [ForeignKey("RelNamespace")]
-        public Namespace Namespace { get; set; } = null!;
+        public Namespace? Namespace { get; set; }
 
-        public List<Attribute> Attributes { get; set; } = null!;
+        public List<Attribute>? Attributes { get; set; }
         [InverseProperty("RelClass")]
-        public List<Constraint> Constraints { get; set; } = null!;
+        public List<Constraint>? Constraints { get; set; }
         [InverseProperty("RelClass")]
-        public List<Index> Indexes { get; set; } = null!;
+        public List<Index>? Indexes { get; set; }
         [InverseProperty("RelClass")]
-        public List<Trigger> Triggers { get; set; } = null!;
+        public List<Trigger>? Triggers { get; set; }
     }
 
     public class Attribute
@@ -229,9 +240,9 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public bool AttIsDropped { get; set; }
 
         [ForeignKey("AttRelId")]
-        public Class RelClass { get; set; } = null!;
+        public Class? RelClass { get; set; }
         [ForeignKey("AttTypId")]
-        public Type Type { get; set; } = null!;
+        public Type? Type { get; set; }
 
         public AttrDef? AttrDef { get; set; }
     }
@@ -265,11 +276,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Int16 AdNum { get; set; }
 
         [NotMapped]
-        public string Source { get; set; } = null!;
+        public string? Source { get; set; }
 
         [ForeignKey("AdRelId")]
-        public Class RelClass { get; set; } = null!;
-        public Attribute Attribute { get; set; } = null!;
+        public Class? RelClass { get; set; }
+        public Attribute? Attribute { get; set; }
     }
 
     public class Constraint
@@ -283,6 +294,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Column(TypeName="oid")]
         public int ConRelId { get; set; }
         [Column(TypeName="oid")]
+        public int? ConIndId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
+        [Column(TypeName="oid")]
         public int? ConFRelId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
         public Int16[]? ConKey { get; set; }
         public Int16[]? ConFKey { get; set; }
@@ -290,12 +303,12 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public bool ConDeferred { get; set; }
 
         [NotMapped]
-        public string Source { get; set; } = null!;
+        public string? Source { get; set; }
 
         [ForeignKey("ConRelId")]
-        public Class RelClass { get; set; } = null!;
+        public Class? RelClass { get; set; }
         [ForeignKey("ConFRelId")]
-        public Class FRelClass { get; set; } = null!;
+        public Class? FRelClass { get; set; }
     }
 
     public class Trigger
@@ -313,19 +326,20 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Int16 TgType { get; set; }
         [Column(TypeName="oid")]
         public int? TgConstraint { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN
+        [Required]
         public Int16[] TgAttr { get; set; } = null!;
         [Required]
         public byte[] TgArgs { get; set; } = null!;
 
         [NotMapped]
-        public string Source { get; set; } = null!;
+        public string? Source { get; set; }
 
         [ForeignKey("TgRelId")]
-        public Class RelClass { get; set; } = null!;
+        public Class? RelClass { get; set; }
         [ForeignKey("TgConstraint")]
-        public Constraint Constraint { get; set; } = null!;
+        public Constraint? Constraint { get; set; }
         [ForeignKey("TgFOid")]
-        public Proc Function { get; set; } = null!;
+        public Proc? Function { get; set; }
     }
 
     public class Proc
@@ -348,11 +362,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public string ProSrc { get; set; } = null!;
 
         [ForeignKey("ProNamespace")]
-        public Namespace Namespace { get; set; } = null!;
+        public Namespace? Namespace { get; set; }
         [ForeignKey("ProLang")]
-        public Language Language { get; set; } = null!;
+        public Language? Language { get; set; }
         [ForeignKey("ProRetType")]
-        public Type RetType { get; set; } = null!;
+        public Type? RetType { get; set; }
     }
 
     public class Index
@@ -363,13 +377,16 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         [Column(TypeName="oid")]
         public int IndRelId { get; set; }
         public bool IndIsUnique { get; set; }
-        public bool IndIsPrimary { get; set; }
+        [Required]
         public Int16[] IndKey { get; set; } = null!;
 
         [ForeignKey("IndexRelId")]
-        public Class Class { get; set; } = null!;
+        public Class? Class { get; set; }
         [ForeignKey("IndRelId")]
-        public Class RelClass { get; set; } = null!;
+        public Class? RelClass { get; set; }
+
+        [NotMapped]
+        public string? Source { get; set; }
     }
 
     public class Depend

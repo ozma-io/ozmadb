@@ -94,7 +94,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let resolveUserViews (uvs : SourceUserViews) : HalfResolvedViews =
         let mapSchema name schema =
             try
-                if not <| Map.containsKey name layout.schemas then
+                if not <| Map.containsKey name layout.Schemas then
                     raisef UserViewResolveException "Unknown schema name"
                 resolveUserViewsSchema schema
             with

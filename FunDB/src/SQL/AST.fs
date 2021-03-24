@@ -11,7 +11,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.SQL.Utils
 
-type SQLName = SQLName of string
+type [<Struct>] SQLName = SQLName of string
     with
         override this.ToString () =
             match this with
@@ -24,7 +24,7 @@ type SQLName = SQLName of string
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
 
-type SQLRawString = SQLRawString of string
+type [<Struct>] SQLRawString = SQLRawString of string
     with
         override this.ToString () =
             match this with
@@ -448,7 +448,7 @@ type [<NoEquality; NoComparison>] SpecialFunction =
             member this.ToSQLString () = this.ToSQLString ()
 
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
-type [<CustomEquality; NoComparison>] ValueExpr =
+type [<NoEquality; NoComparison>] ValueExpr =
     | VEValue of Value
     | VEColumn of ColumnRef
     | VEPlaceholder of int
@@ -519,14 +519,6 @@ type [<CustomEquality; NoComparison>] ValueExpr =
                 String.concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
             | VEArray vals -> sprintf "ARRAY[%s]" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
             | VESubquery query -> sprintf "(%s)" (query.ToSQLString())
-
-        // VERY SLOW!!! Use equality only when you know what are you doing.
-        override x.Equals yobj =
-            match yobj with
-            | :? ValueExpr as y -> (x.ToSQLString()) = (y.ToSQLString())
-            | _ -> false
-
-        override this.GetHashCode () = hash (this.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -723,6 +715,7 @@ and [<NoEquality; NoComparison>] CommonTableExprs =
 and [<NoEquality; NoComparison>] SelectExpr =
     { CTEs : CommonTableExprs option
       Tree : SelectTreeExpr
+      Extra : obj
     } with
         override this.ToString () = this.ToSQLString()
 

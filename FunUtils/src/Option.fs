@@ -18,15 +18,10 @@ let mapTask (f : 'a -> Task<'b>) (opt : 'a option) : Task<'b option> =
         | Some a -> return! Task.map Some (f a)
     }
 
-let ofNull (obj : 'a) : 'a option =
-    if isNull obj then
-        None
-    else
-        Some obj
-
-let toNull : 'a option -> 'a = function
-    | None -> null
-    | Some x -> x
+let addWith (f : 'a -> 'a -> 'a) (a : 'a) (b : 'a option) : 'a =
+    match b with
+    | Some bv -> f a bv
+    | None -> a
 
 let unionWith (f : 'a -> 'a -> 'a) (a : 'a option) (b : 'a option) : 'a option =
     match (a, b) with

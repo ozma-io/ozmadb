@@ -43,7 +43,7 @@ type private Phase1Resolver (layout : Layout) =
     member this.ResolveModules (source : SourceModules) : ResolvedModules =
         let mapSchema name schema =
             try
-                if not <| Map.containsKey name layout.schemas then
+                if not <| Map.containsKey name layout.Schemas then
                     raisef ResolveModulesException "Unknown schema name"
                 resolveModulesSchema schema
             with

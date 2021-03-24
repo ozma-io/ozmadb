@@ -133,7 +133,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
         { Schemas = filterPreloadedSchemas preload views.Schemas }
 
     let filterUserLayout (layout : Layout) : Layout =
-        { schemas = filterUserSchemas preload layout.schemas }
+        { Schemas = filterUserSchemas preload layout.Schemas }
 
     // If `None` cold rebuild is needed.
     let openAndGetCurrentVersion (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
@@ -627,12 +627,17 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             // Actually migrate.
                             let (newAssertions, wantedUserMeta) = buildFullLayoutMeta layout (filterUserLayout layout)
                             let migration = planDatabaseMigration oldState.Context.UserMeta wantedUserMeta
-                            let! migrated = task {
-                                try
-                                    return! migrateDatabase transaction.Connection.Query migration cancellationToken
-                                with
-                                | :? QueryException as err -> return raisefWithInner ContextException err "Migration error"
-                            }
+                            try
+                                do! migrateDatabase transaction.Connection.Query migration cancellationToken
+                            with
+                            | :? QueryException as err -> return raisefWithInner ContextException err "Migration error"
+
+                            let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
+                            let addedAssertions = differenceLayoutAssertions newAssertions oldAssertions
+                            try
+                                do! checkAssertions transaction.Connection.Query layout addedAssertions cancellationToken
+                            with
+                            | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity checks"
 
                             logger.LogInformation("Updating generated user views")
                             let (_, generatedUserViews) = runWithRuntime jsRuntime <| fun api ->
@@ -655,14 +660,6 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 with
                                 | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                             }
-
-                            let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
-                            for check in Set.difference newAssertions oldAssertions do
-                                logger.LogInformation("Running integrity check {check}", check)
-                                try
-                                    do! checkAssertion transaction.Connection.Query layout check cancellationToken
-                                with
-                                | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity check"
 
                             // We update state now and check user views _after_ that.
                             // At this point we are sure there is a valid versionEntry because GetCache should have been called.
@@ -693,7 +690,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 }
 
                             anonymousViewsCache.Clear()
-                            if migrated then
+                            if not <| Array.isEmpty migration then
                                 // There is no way to force-clear prepared statements for all connections in the pool, so we clear the pool itself instead.
                                 NpgsqlConnection.ClearPool(transaction.Connection.Connection)
                             cachedState <- Some { Version = newVersion; Context = newState }

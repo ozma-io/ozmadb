@@ -35,7 +35,7 @@ type private Phase1Resolver (layout : Layout) =
     member this.ResolveActions (source : SourceActions) : ResolvedActions =
         let mapSchema name schema =
             try
-                if not <| Map.containsKey name layout.schemas then
+                if not <| Map.containsKey name layout.Schemas then
                     raisef ResolveActionsException "Unknown schema name"
                 resolveActionsSchema schema
             with

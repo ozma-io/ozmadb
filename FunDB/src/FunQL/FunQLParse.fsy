@@ -354,8 +354,8 @@ ArgumentEntry:
     | ARGUMENT_ID Argument { (FunQLName $1, $2) }
 
 Argument:
-    | ArgumentFieldType      { { ArgType = $1; Optional = false } }
-    | ArgumentFieldType NULL { { ArgType = $1; Optional = true } }
+    | FieldType      { { ArgType = $1; Optional = false } }
+    | FieldType NULL { { ArgType = $1; Optional = true } }
 
 SelectVal:
     | SingleUnlimitedSelectExpr { { CTEs = None; Tree = SSelect $1; Extra = null } }
@@ -792,14 +792,8 @@ FieldExprType:
     | ARRAY LEFT_PAREN ScalarType RIGHT_PAREN  { FETArray $3 }
 
 FieldType:
-    | FieldExprType                                                   { FTType $1 }
-    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN                 { FTReference ($3, None) }
-    | REFERENCE_TYPE LEFT_PAREN EntityRef COMMA FieldExpr RIGHT_PAREN { FTReference ($3, Some $5) }
-    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
-
-ArgumentFieldType:
     | FieldExprType                                   { FTType $1 }
-    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { FTReference ($3, None) }
+    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { FTReference $3 }
     | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 EnumList:

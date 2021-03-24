@@ -17,7 +17,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDBSchema.System
 
 let private makeEntity schemaName (entity : Entity) = ({ schema = schemaName; name = FunQLName entity.Name }, entity)
-let private makeSchema (schema : Schema) = schema.Entities |> Seq.ofNull |> Seq.map (makeEntity (FunQLName schema.Name))
+let private makeSchema (schema : Schema) = schema.Entities |> Seq.ofObj |> Seq.map (makeEntity (FunQLName schema.Name))
 
 let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, Entity> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
 
@@ -74,16 +74,29 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) as this
             )
         this.UpdateDifference updateCheckFunc createCheckFunc
 
+    let updateIndexes (entity : Entity) : Map<FieldName, SourceIndex> -> Map<FieldName, Index> -> Map<FieldName, Index> =
+        let updateIndexFunc _ (newIndex : SourceIndex) (oldIndex : Index) =
+            oldIndex.Expressions <- newIndex.Expressions
+            oldIndex.IsUnique <- newIndex.IsUnique
+        let createIndexFunc (FunQLName name) =
+            Index (
+                Name = name,
+                Entity = entity
+            )
+        this.UpdateDifference updateIndexFunc createIndexFunc
+
     let updateEntity (entity : SourceEntity) (existingEntity : Entity) : unit =
-        let columnFieldsMap = existingEntity.ColumnFields |> Seq.ofNull |> Seq.map (fun col -> (FunQLName col.Name, col)) |> Map.ofSeq
-        let computedFieldsMap = existingEntity.ComputedFields |> Seq.ofNull |> Seq.map (fun comp -> (FunQLName comp.Name, comp)) |> Map.ofSeq
-        let uniqueConstraintsMap = existingEntity.UniqueConstraints |> Seq.ofNull |> Seq.map (fun unique -> (FunQLName unique.Name, unique)) |> Map.ofSeq
-        let checkConstraintsMap = existingEntity.CheckConstraints |> Seq.ofNull |> Seq.map (fun check -> (FunQLName check.Name, check)) |> Map.ofSeq
+        let columnFieldsMap = existingEntity.ColumnFields |> Seq.ofObj |> Seq.map (fun col -> (FunQLName col.Name, col)) |> Map.ofSeq
+        let computedFieldsMap = existingEntity.ComputedFields |> Seq.ofObj |> Seq.map (fun comp -> (FunQLName comp.Name, comp)) |> Map.ofSeq
+        let uniqueConstraintsMap = existingEntity.UniqueConstraints |> Seq.ofObj |> Seq.map (fun unique -> (FunQLName unique.Name, unique)) |> Map.ofSeq
+        let checkConstraintsMap = existingEntity.CheckConstraints |> Seq.ofObj |> Seq.map (fun check -> (FunQLName check.Name, check)) |> Map.ofSeq
+        let indexesMap = existingEntity.Indexes |> Seq.ofObj |> Seq.map (fun index -> (FunQLName index.Name, index)) |> Map.ofSeq
 
         ignore <| updateColumnFields existingEntity entity.ColumnFields columnFieldsMap
         ignore <| updateComputedFields existingEntity entity.ComputedFields computedFieldsMap
         ignore <| updateUniqueConstraints existingEntity entity.UniqueConstraints uniqueConstraintsMap
         ignore <| updateCheckConstraints existingEntity entity.CheckConstraints checkConstraintsMap
+        ignore <| updateIndexes existingEntity entity.Indexes indexesMap
 
         if entity.MainField = funId then
             existingEntity.MainField <- null
@@ -94,7 +107,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) as this
         existingEntity.IsFrozen <- entity.IsFrozen
 
     let updateSchema (schema : SourceSchema) (existingSchema : Schema) =
-        let entitiesMap = existingSchema.Entities |> Seq.ofNull |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
+        let entitiesMap = existingSchema.Entities |> Seq.ofObj |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
 
         let updateFunc _ = updateEntity
         let createFunc (FunQLName name) =

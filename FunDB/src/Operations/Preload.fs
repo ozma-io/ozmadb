@@ -100,7 +100,10 @@ let readSourcePreload (path : string) : SourcePreloadFile =
       DirName = Path.GetDirectoryName path
     }
 
-let preloadHasher = CityHashFactory.Instance.Create()
+let private preloadHasher =
+    let config = CityHashConfig()
+    config.HashSizeInBits <- 128
+    CityHashFactory.Instance.Create(config)
 
 type HashedPreload (preload : Preload) =
     let preloadStr = JsonConvert.SerializeObject preload
@@ -241,7 +244,7 @@ let filterUserMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
     { Schemas = Map.filter (fun name _ -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta.Schemas
     } : SQL.DatabaseMeta
 
-let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : Set<LayoutAssertion> * SQL.DatabaseMeta =
+let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : LayoutAssertions * SQL.DatabaseMeta =
     let meta1 = buildLayoutMeta layout subLayout
     let assertions = buildAssertions layout subLayout
     let meta2 = buildAssertionsMeta layout assertions
@@ -406,15 +409,16 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
         let! _ = migrateDatabase conn.Connection.Query systemMigration cancellationToken
 
         // Second migration shouldn't produce any changes.
-        let sanityCheck () = task {
-            let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
-            let currentSystemMeta = filterPreloadedMeta preload currentMeta
-            let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
-            if Array.isEmpty systemMigration then
-                return true
-            else
-                return failwithf "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
-        }
+        let sanityCheck () =
+            task {
+                let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken
+                let currentSystemMeta = filterPreloadedMeta preload currentMeta
+                let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
+                if Array.isEmpty systemMigration then
+                    return true
+                else
+                    return failwithf "Non-indempotent migration detected: %s" (systemMigration |> Array.map string |> String.concat ", ")
+            }
         assert (Task.awaitSync <| sanityCheck ())
 
         // We migrate layout first so that permissions and attributes have schemas in the table.
@@ -489,7 +493,7 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
         do! checkBrokenLayout logger preload conn brokenLayout cancellationToken
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
-        let userLayout = filterLayout (fun name -> not <| Map.containsKey name preloadLayout.schemas) layout
+        let userLayout = filterLayout (fun name -> not <| Map.containsKey name preloadLayout.Schemas) layout
         let (_, newUserMeta) = buildFullLayoutMeta layout userLayout
         let currentUserMeta = filterUserMeta preload currentMeta
 

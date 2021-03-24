@@ -23,10 +23,10 @@ let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEn
         match Map.tryFind (fieldName.ToString()) rawArgs with
         | None -> Ok None
         | Some value ->
-            match parseValueFromJson field.fieldType field.isNullable value with
-            | None -> Error <| sprintf "Cannot convert field to expected type %O: %O" field.fieldType fieldName
+            match parseValueFromJson field.FieldType field.IsNullable value with
+            | None -> Error <| sprintf "Cannot convert field to expected type %O: %O" field.FieldType fieldName
             | Some arg -> Ok (Some (fieldName, arg))
-    match entity.columnFields |> Map.toSeq |> Seq.traverseResult getValue with
+    match entity.ColumnFields |> Map.toSeq |> Seq.traverseResult getValue with
     | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
     | Error err -> Error err
 
@@ -175,7 +175,7 @@ type EntitiesAPI (rctx : IRequestContext) =
         task {
             match ctx.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
-            | Some entity when entity.isFrozen -> return Error EEFrozen
+            | Some entity when entity.IsFrozen -> return Error EEFrozen
             | Some entity ->
                 match convertEntityArguments rawArgs entity with
                 | Error str -> return Error <| EEArguments str
@@ -194,7 +194,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                                 event.EntityId <- Nullable newId
                                 event.Details <- JsonConvert.SerializeObject args
                             )
-                            if entity.triggersMigration then
+                            if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
                             let afterTriggers = findMergedTriggersInsert entityRef TTAfter ctx.Triggers
                             match! Seq.foldResultTask (applyInsertTriggerAfter entityRef newId args) () afterTriggers with
@@ -228,7 +228,7 @@ type EntitiesAPI (rctx : IRequestContext) =
         task {
             match ctx.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
-            | Some entity when entity.isFrozen -> return Error EEFrozen
+            | Some entity when entity.IsFrozen -> return Error EEFrozen
             | Some entity ->
                 match convertEntityArguments rawArgs entity with
                 | Error str -> return Error <| EEArguments str
@@ -248,7 +248,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                                 event.EntityId <- Nullable id
                                 event.Details <- JsonConvert.SerializeObject args
                             )
-                            if entity.triggersMigration then
+                            if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
                             let afterTriggers = findMergedTriggersUpdate entityRef TTAfter (Map.keys args) ctx.Triggers
                             return! Seq.foldResultTask (applyUpdateTriggerAfter entityRef id args) () afterTriggers
@@ -293,7 +293,7 @@ type EntitiesAPI (rctx : IRequestContext) =
         task {
             match ctx.Layout.FindEntity(entityRef) with
             | None -> return Error EENotFound
-            | Some entity when entity.isFrozen -> return Error EEFrozen
+            | Some entity when entity.IsFrozen -> return Error EEFrozen
             | Some entity ->
                 let beforeTriggers = findMergedTriggersDelete entityRef TTBefore ctx.Triggers
                 match! Seq.foldResultTask (applyDeleteTriggerBefore entityRef id) () beforeTriggers with
@@ -308,7 +308,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                             event.EntityName <- entityRef.name.ToString()
                             event.EntityId <- Nullable id
                         )
-                        if entity.triggersMigration then
+                        if entity.TriggersMigration then
                             ctx.ScheduleMigration ()
                         let afterTriggers = findMergedTriggersDelete entityRef TTAfter ctx.Triggers
                         match! Seq.foldResultTask (applyDeleteTriggerAfter entityRef) () afterTriggers with

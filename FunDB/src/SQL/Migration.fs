@@ -146,7 +146,7 @@ let private migrateBuildTable (fromMeta : TableMeta) (toMeta : TableMeta) : Tabl
                     yield TOAlterColumnType (columnMeta.Name, columnMeta.ColumnType)
                 if oldColumnMeta.IsNullable <> columnMeta.IsNullable then
                     yield TOAlterColumnNull (columnMeta.Name, columnMeta.IsNullable)
-                if Option.map normalizeLocalExpr oldColumnMeta.DefaultExpr <> Option.map normalizeLocalExpr columnMeta.DefaultExpr then
+                if Option.map (normalizeLocalExpr >> String.comparable) oldColumnMeta.DefaultExpr <> Option.map (normalizeLocalExpr >> String.comparable) columnMeta.DefaultExpr then
                     yield TOAlterColumnDefault (columnMeta.Name, columnMeta.DefaultExpr)
 
         for KeyValue (columnKey, columnMeta) in fromMeta.Columns do
@@ -170,7 +170,7 @@ let private migrateOverloads (objRef : SchemaObject) (oldOverloads : Map<Functio
     seq {
         for KeyValue (signature, newDefinition) in newOverloads do
             match Map.tryFind signature oldOverloads with
-            | Some oldDefinition when oldDefinition = newDefinition -> ()
+            | Some oldDefinition when string oldDefinition = string newDefinition -> ()
             | _ -> yield (SOCreateOrReplaceFunction (objRef, signature, newDefinition), 0)
         for KeyValue (signature, definition) in oldOverloads do
             match Map.tryFind signature newOverloads with
@@ -221,7 +221,7 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
                     let mutable oldIsGood = false
                     match (oldConstraintType, constraintType) with
                     | (CMCheck expr1, CMCheck expr2) ->
-                        oldIsGood <- normalizeLocalExpr expr1 = normalizeLocalExpr expr2
+                        oldIsGood <- string (normalizeLocalExpr expr1) = string (normalizeLocalExpr expr2)
                     | (CMForeignKey (ref1, f1, oldDefer), CMForeignKey (ref2, f2, newDefer)) ->
                         if ref1 = ref2 && f1 = f2 then
                             yield! migrateDeferrableConstraint objRef tableName oldDefer newDefer
@@ -334,15 +334,12 @@ let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMet
 let planDatabaseMigration (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =
     migrateBuildDatabase fromMeta toMeta |> Seq.sortBy (fun (op, order) -> (schemaOperationOrder op, order)) |> Seq.map fst |> Seq.toArray
 
-let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) (cancellationToken : CancellationToken) : Task<bool> =
-    task {
-        let mutable touched = false
-        for action in plan do
-            let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty cancellationToken
-            touched <- true
-            ()
-        if touched then
+let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) (cancellationToken : CancellationToken) : Task=
+    unitTask {
+        if not <| Array.isEmpty plan then
+            for action in plan do
+                let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty cancellationToken
+                ()
             // Clear prepared statements so that things don't break if e.g. database types have changed.
             query.Connection.UnprepareAll ()
-        return touched
     }

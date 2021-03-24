@@ -37,6 +37,7 @@ type SerializedEntity =
       ComputedFields : Map<FieldName, SerializedComputedField>
       UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
+      Indexes : Map<IndexName, SourceIndex>
       MainField : FieldName
       ForbidExternalReferences : bool
       Parents : ResolvedEntityRef array
@@ -58,59 +59,66 @@ type SerializedLayout =
     }
 
 let serializeComputedField (comp : ResolvedComputedField) : SerializedComputedField =
-    { Expression = comp.expression.ToFunQLString()
-      InheritedFrom = comp.inheritedFrom
-      AllowBroken = comp.allowBroken
+    { Expression = comp.Expression.ToFunQLString()
+      InheritedFrom = comp.InheritedFrom
+      AllowBroken = comp.AllowBroken
       IsBroken = false
-      IsVirtual = Option.isSome comp.virtualCases
+      IsVirtual = Option.isSome comp.VirtualCases
     }
 
 let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField =
-    { FieldType = column.fieldType
-      ValueType = column.valueType
-      IsNullable = column.isNullable
-      IsImmutable = column.isImmutable
-      DefaultValue = column.defaultValue
-      InheritedFrom = column.inheritedFrom
-    }
-
-let serializeCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckConstraint =
-    { Expression = constr.expression.ToFunQLString()
+    { FieldType = column.FieldType
+      ValueType = column.ValueType
+      IsNullable = column.IsNullable
+      IsImmutable = column.IsImmutable
+      DefaultValue = column.DefaultValue
+      InheritedFrom = column.InheritedFrom
     }
 
 let serializeUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUniqueConstraint =
-    { Columns = constr.columns
+    { Columns = constr.Columns
+    }
+
+
+let serializeCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckConstraint =
+    { Expression = constr.Expression.ToFunQLString()
+    }
+
+let serializeIndex (index : ResolvedIndex) : SourceIndex =
+    { Expressions = index.Expressions |> Array.map (fun x -> x.ToFunQLString())
+      IsUnique = index.IsUnique
     }
 
 let rec private inheritanceChain (layout : Layout) (entity : ResolvedEntity) : ResolvedEntityRef seq =
     seq {
-        match entity.inheritance with
+        match entity.Inheritance with
         | None -> ()
         | Some parent ->
-            yield parent.parent
-            let parentEntity = layout.FindEntity parent.parent |> Option.get
+            yield parent.Parent
+            let parentEntity = layout.FindEntity parent.Parent |> Option.get
             yield! inheritanceChain layout parentEntity
     }
 
 let serializeEntity (layout : Layout) (entity : ResolvedEntity) : SerializedEntity =
-    { ColumnFields = Map.map (fun name col -> serializeColumnField col) entity.columnFields
-      ComputedFields =  Map.mapMaybe (fun name col -> col |> Result.getOption |> Option.map serializeComputedField) entity.computedFields
-      UniqueConstraints = Map.map (fun name constr -> serializeUniqueConstraint constr) entity.uniqueConstraints
-      CheckConstraints = Map.map (fun name constr -> serializeCheckConstraint constr) entity.checkConstraints
-      MainField = entity.mainField
-      ForbidExternalReferences = entity.forbidExternalReferences
+    { ColumnFields = Map.map (fun name col -> serializeColumnField col) entity.ColumnFields
+      ComputedFields =  Map.mapMaybe (fun name col -> col |> Result.getOption |> Option.map serializeComputedField) entity.ComputedFields
+      UniqueConstraints = Map.map (fun name constr -> serializeUniqueConstraint constr) entity.UniqueConstraints
+      CheckConstraints = Map.map (fun name constr -> serializeCheckConstraint constr) entity.CheckConstraints
+      Indexes = Map.map (fun name index -> serializeIndex index) entity.Indexes
+      MainField = entity.MainField
+      ForbidExternalReferences = entity.ForbidExternalReferences
       Parents = inheritanceChain layout entity |> Seq.toArray
-      IsAbstract = entity.isAbstract
-      IsFrozen = entity.isFrozen
-      Children = entity.children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.direct })
-      Root = entity.root
+      IsAbstract = entity.IsAbstract
+      IsFrozen = entity.IsFrozen
+      Children = entity.Children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.Direct })
+      Root = entity.Root
     }
 
 let serializeSchema (layout : Layout) (schema : ResolvedSchema) : SerializedSchema =
-    { Entities = Map.mapMaybe (fun name entity -> if entity.isHidden then None else Some <| serializeEntity layout entity) schema.entities
-      Roots = schema.roots
+    { Entities = Map.mapMaybe (fun name entity -> if entity.IsHidden then None else Some <| serializeEntity layout entity) schema.Entities
+      Roots = schema.Roots
     }
 
 let serializeLayout (layout : Layout) : SerializedLayout =
-    { Schemas = Map.map (fun name schema -> serializeSchema layout schema) layout.schemas
+    { Schemas = Map.map (fun name schema -> serializeSchema layout schema) layout.Schemas
     }

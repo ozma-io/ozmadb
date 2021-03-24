@@ -87,6 +87,8 @@ open FunWithFlags.FunDB.SQL.AST
 
 %start valueExpr
 %type <ValueExpr> valueExpr
+%start valueExprList
+%type <ValueExpr[]> valueExprList
 %start valueType
 %type <DBValueType> valueType
 %start schemaObject
@@ -96,6 +98,7 @@ open FunWithFlags.FunDB.SQL.AST
 
 // Entry points
 valueExpr : ValueExpr EOF { $1 }
+valueExprList : NonEmptyExprList EOF { $1 }
 valueType : ValueType EOF { $1 }
 schemaObject : SchemaObject EOF { $1 }
 

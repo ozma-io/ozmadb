@@ -16,7 +16,7 @@ type PlaceholderId = int
 [<NoEquality; NoComparison>]
 type CompiledArgument =
     { PlaceholderId : PlaceholderId
-      FieldType : ArgumentFieldType
+      FieldType : ResolvedFieldType
       DbType : SQL.DBValueType
       Optional : bool
     }
@@ -53,9 +53,9 @@ let compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
     | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
     | FETArray stype -> SQL.VTArray <| compileScalarType stype
 
-let compileFieldType : FieldType<_, _> -> SQL.SimpleValueType = function
+let compileFieldType : FieldType<_> -> SQL.SimpleValueType = function
     | FTType fetype -> compileFieldExprType fetype
-    | FTReference (ent, restriction) -> SQL.VTScalar SQL.STInt
+    | FTReference ent -> SQL.VTScalar SQL.STInt
     | FTEnum vals -> SQL.VTScalar SQL.STString
 
 let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgument) : CompiledArgument =
@@ -114,7 +114,7 @@ let compileArguments (args : ResolvedArgumentsMap) : QueryArguments =
       NextAnonymousId = 0
     }
 
-let private typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue) : unit =
+let private typecheckArgument (fieldType : FieldType<_>) (value : FieldValue) : unit =
     match fieldType with
     | FTEnum vals ->
         match value with
@@ -126,7 +126,7 @@ let private typecheckArgument (fieldType : FieldType<_, _>) (value : FieldValue)
 
 let compileArray (vals : 'a array) : SQL.ValueArray<'a> = Array.map SQL.AVValue vals
 
-let compileFieldValueSingle : FieldValue -> SQL.Value = function
+let compileFieldValue : FieldValue -> SQL.Value = function
     | FInt i -> SQL.VInt i
     | FDecimal d -> SQL.VDecimal d
     | FString s -> SQL.VString s
@@ -159,5 +159,5 @@ let prepareArguments (args : QueryArguments) (values : ArgumentValues) : ExprPar
             | Some value -> (false, value)
         if not (mapping.Optional && notFound) then
             typecheckArgument mapping.FieldType value
-        (mapping.PlaceholderId, compileFieldValueSingle value)
+        (mapping.PlaceholderId, compileFieldValue value)
     args.Types |> Map.mapWithKeys makeParameter

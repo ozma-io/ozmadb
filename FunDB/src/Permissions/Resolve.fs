@@ -97,14 +97,14 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             | Some { Field = RSubEntity }
             | Some { Field = RColumnField _ } -> ()
             | Some { Field = RComputedField comp } ->
-                if allowIds || not comp.hasId then
+                if allowIds || not comp.HasId then
                     ()
                 else
                     raisef ResolvePermissionsException "Ids aren't allowed: %O" name
         | (ref :: refs) ->
-            match Map.tryFind name entity.columnFields with
-            | Some { fieldType = FTReference (refEntity, _) } ->
-                let newEntity = Map.find refEntity.name (Map.find refEntity.schema layout.schemas).entities
+            match Map.tryFind name entity.ColumnFields with
+            | Some { FieldType = FTReference refEntity } ->
+                let newEntity = Map.find refEntity.name (Map.find refEntity.schema layout.Schemas).Entities
                 checkPath allowIds newEntity ref refs
             | _ -> raisef ResolvePermissionsException "Invalid dereference in path: %O" ref
 
@@ -132,7 +132,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     | Some argInfo -> argInfo
                 if not <| Array.isEmpty path then
                     match argInfo.ArgType with
-                    | FTReference (entityRef, where) ->
+                    | FTReference entityRef ->
                         let (name, remainingPath) =
                             match Array.toList path with
                             | head :: tail -> (head, tail)
@@ -166,10 +166,10 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
 
     let resolveAllowedField (fieldRef : ResolvedFieldRef) (entity : ResolvedEntity) (allowedField : SourceAllowedField) : AllowedField =
         let field =
-            match Map.tryFind fieldRef.name entity.columnFields with
+            match Map.tryFind fieldRef.name entity.ColumnFields with
             | None -> raisef ResolvePermissionsException "Unknown field"
             | Some f -> f
-        if Option.isSome field.inheritedFrom then
+        if Option.isSome field.InheritedFrom then
             raisef ResolvePermissionsException "Cannot define restrictions on parent entity fields in children"
         let resolveOne = Option.map (resolveRestriction fieldRef.entity entity true) >> Option.defaultValue emptyRestriction
         { Change = allowedField.Change
@@ -229,14 +229,14 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let myPerms =
             if myPerms.Insert then
                 try
-                    if entity.isAbstract then
+                    if entity.IsAbstract then
                         raisef ResolvePermissionsException "Cannot allow insertion of abstract entities"
                     // Check that we can change all required fields.
                     if optimizedIsFalse myPerms.Check.Expression then
                         raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
-                    for KeyValue(fieldName, field) in entity.columnFields do
-                        if Option.isNone field.defaultValue && not field.isNullable then
-                            let parentEntity = Option.defaultValue entityRef field.inheritedFrom
+                    for KeyValue(fieldName, field) in entity.ColumnFields do
+                        if Option.isNone field.DefaultValue && not field.IsNullable then
+                            let parentEntity = Option.defaultValue entityRef field.InheritedFrom
                             match Map.tryFind { entity = parentEntity; name = fieldName } flat.Fields with
                             | Some { Change = true } -> ()
                             | _ -> raisef ResolvePermissionsException "Required field %O is not allowed for inserting" fieldName
@@ -259,12 +259,12 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             if not (optimizedIsFalse myPerms.Delete.Expression) then
                 try
                     // Check that we can can view all column fields.
-                    if entity.isAbstract then
+                    if entity.IsAbstract then
                         raisef ResolvePermissionsException "Cannot allow deletion of abstract entities"
                     if optimizedIsFalse myPerms.Select.Expression then
                         raisef ResolvePermissionsException "Cannot allow to delete without allowing to select"
-                    for KeyValue(fieldName, field) in entity.columnFields do
-                        let parentEntity = Option.defaultValue entityRef field.inheritedFrom
+                    for KeyValue(fieldName, field) in entity.ColumnFields do
+                        let parentEntity = Option.defaultValue entityRef field.InheritedFrom
                         match Map.tryFind { entity = parentEntity; name = fieldName } flat.Fields with
                         | Some f when not (optimizedIsFalse f.Select.Expression) -> ()
                         | _ -> raisef ResolvePermissionsException "Field %O is not allowed for selection, which is required for deletion" fieldName
@@ -292,23 +292,23 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                 | Error err -> raisefWithInner ResolvePermissionsParentException err.Error "In parent %O" parentRef
             | None ->
                 let parentEntity = layout.FindEntity parentRef |> Option.get
-                match parentEntity.inheritance with
+                match parentEntity.Inheritance with
                 | None -> Seq.empty
-                | Some inheritance -> resolveParent inheritance.parent
+                | Some inheritance -> resolveParent inheritance.Parent
 
         let entity =
             match layout.FindEntity entityRef with
             | None -> raisef ResolvePermissionsException "Undefined entity"
             | Some s -> s
         let parentFlat =
-            match entity.inheritance with
+            match entity.Inheritance with
             | None -> Seq.empty
-            | Some inheritance -> resolveParent inheritance.parent
+            | Some inheritance -> resolveParent inheritance.Parent
 
         let (error1, resolved) = resolveSelfAllowedEntity entityRef entity source
         let myFlat = flattenAllowedEntity entityRef resolved
         let inheritedFlat =
-            match Map.tryFind entity.root flattened with
+            match Map.tryFind entity.Root flattened with
             | Some f -> Seq.singleton f
             | None -> Seq.empty
         let resultFlat = Seq.concat [Seq.singleton myFlat; parentFlat; inheritedFlat] |> Seq.fold1 mergeFlatEntity
@@ -320,7 +320,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
               Flat = newResultFlat
               Error = error
             } : HalfResolvedEntity
-        flattened <- Map.add entity.root newResultFlat flattened
+        flattened <- Map.add entity.Root newResultFlat flattened
         ret
 
     and resolveAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : Result<HalfResolvedEntity, AllowedEntityError> =
@@ -372,7 +372,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let mapSchema name allowedSchema =
             try
                 let schema =
-                    match Map.tryFind name layout.schemas with
+                    match Map.tryFind name layout.Schemas with
                     | None -> raisef ResolvePermissionsException "Undefined schema"
                     | Some s -> s
                 let (schemaErrors, newAllowed) = resolveAllowedSchema name schema allowedSchema
@@ -466,7 +466,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
 
         let mapSchema name schema =
             try
-                if not <| Map.containsKey name layout.schemas then
+                if not <| Map.containsKey name layout.Schemas then
                     raisef ResolvePermissionsException "Unknown schema name"
                 let (schemaErrors, newSchema) = resolvePermissionsSchema name schema
                 if not <| Map.isEmpty schemaErrors then

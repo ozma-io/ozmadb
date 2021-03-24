@@ -144,7 +144,7 @@ let private makeColumnMeta (attr : Attribute) : ColumnMeta =
             if attr.Type.TypType <> 'b' then
                 raisef SQLMetaException "Unsupported non-base type: %s" attr.Type.TypName
             parseUdtName attr.Type.TypName
-        let defaultExpr = attr.AttrDef |> Option.ofNull |> Option.map (fun def -> parseLocalExpr def.Source)
+        let defaultExpr = attr.AttrDef |> Option.ofObj |> Option.map (fun def -> parseLocalExpr def.Source)
         { Name = SQLName attr.AttName
           ColumnType = columnType
           IsNullable = not attr.AttNotNull
@@ -213,7 +213,7 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
             // FIXME: Any better way???
             // See https://postgrespro.com/list/thread-id/1558141
             match trigger.Source with
-            | Regex @"WHEN \((.*)\) EXECUTE (?:PROCEDURE|FUNCTION)" [cond] -> Some <| parseLocalExpr cond
+            | Regex @"WHEN \((.*)\) EXECUTE (?:PROCEDURE|FUNCTION)" [cond] -> parseLocalExpr cond |> String.comparable |> Some
             | _ -> None
         let functionName =
             { schema = Some <| SQLName trigger.Function.Namespace.NspName
@@ -234,18 +234,18 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
 
 let private makeUnconstrainedTableMeta (cl : Class) : TableName * (Map<SQLName, ObjectMeta> * TableMeta * PgTableMeta) =
     try
-        let columnIds = cl.Attributes |> Seq.map (fun attr -> (attr.AttNum, SQLName attr.AttName)) |> Map.ofSeqUnique
-        let columns = cl.Attributes |> Seq.map (makeColumnMeta >> (fun col -> (col.Name.ToString(), col))) |> Map.ofSeqUnique
+        let columnIds = cl.Attributes |> Seq.ofObj |> Seq.map (fun attr -> (attr.AttNum, SQLName attr.AttName)) |> Map.ofSeqUnique
+        let columns = cl.Attributes |> Seq.ofObj |> Seq.map (makeColumnMeta >> (fun col -> (col.Name.ToString(), col))) |> Map.ofSeqUnique
         let tableName = SQLName cl.RelName
         let makeTrigger trig =
             let (name, def) =  makeTriggerMeta columnIds trig
             (name, OMTrigger (tableName, def))
-        let triggers = cl.Triggers |> Seq.map makeTrigger |> Map.ofSeqUnique
+        let triggers = cl.Triggers |> Seq.ofObj |> Seq.map makeTrigger |> Map.ofSeqUnique
         let res = { Columns = columns }
         let meta =
             { Columns = columnIds
-              Constraints = cl.Constraints
-              Indexes = cl.Indexes
+              Constraints = cl.Constraints |> Seq.ofObj
+              Indexes = cl.Indexes |> Seq.ofObj
             }
         (tableName, (triggers, res, meta))
     with
@@ -330,16 +330,30 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 
         Option.map (fun r -> (SQLName constr.ConName, r)) ret
 
-    let makeIndexMeta (tableName : TableName) (columnIds : TableColumnIds) (index : Index) : (IndexName * IndexMeta) option =
-        let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
-        if index.IndIsUnique || index.IndIsPrimary then
-            None
-        else
-            let cols = Array.map makeLocalColumn index.IndKey
-            let ret =
-                { Columns = cols
-                } : IndexMeta
-            Some (SQLName index.Class.RelName, ret)
+    let makeIndexMeta (columnIds : TableColumnIds) (index : Index) : (IndexName * IndexMeta) =
+        let expressions =
+            if isNull index.Source then
+                [||]
+            else
+                match parse tokenizeSQL valueExprList index.Source with
+                | Error msg -> raisef SQLMetaException "Cannot parse index expressions: %s" msg
+                | Ok exprs -> exprs
+
+        let mutable exprI = 0
+        let makeKey (num : ColumnNum) =
+            if num <> 0s then
+                IKColumn <| Map.find num columnIds
+            else
+                let ret = expressions.[exprI]
+                exprI <- exprI + 1
+                IKExpression <| String.comparable ret
+
+        let keys = Array.map makeKey index.IndKey
+        let ret =
+            { Keys = keys
+              IsUnique = index.IndIsUnique
+            } : IndexMeta
+        (SQLName index.Class.RelName, ret)
 
     let finishSchemaMeta (schemaName : SchemaName) (schema : PgSchemaMeta) : SchemaMeta =
         let makeConstraints (tableName : TableName, table : PgTableMeta) =
@@ -349,7 +363,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                 |> Seq.map ((fun (constrName, constr) -> (constrName, OMConstraint (tableName, constr))) >> uncurry tagName)
             let indexes =
                 table.Indexes
-                |> Seq.mapMaybe (makeIndexMeta tableName table.Columns)
+                |> Seq.map (makeIndexMeta table.Columns)
                 |> Seq.map ((fun (indexName, index) -> (indexName, OMIndex (tableName, index))) >> uncurry tagName)
             Seq.append constraints indexes
         let newObjects = schema.Tables |> Map.toSeq |> Seq.collect makeConstraints |> Map.ofSeqUnique

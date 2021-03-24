@@ -45,6 +45,13 @@ let private makeSourceCheckConstraint (constr : CheckConstraintAttribute) : FunQ
     let res = { Expression = constr.Expression } : SourceCheckConstraint
     (FunQLName constr.Name, res)
 
+let private makeSourceIndex (index : IndexAttribute) : FunQLName * SourceIndex =
+    let res =
+        { Expressions = index.Expressions
+          IsUnique = index.IsUnique
+        }
+    (FunQLName index.Name, res)
+
 let private getAttribute<'t when 't :> Attribute> (prop : PropertyInfo) =
     Attribute.GetCustomAttributes(prop, typeof<'t>) |> Array.map (fun x -> x :?> 't)
 
@@ -59,12 +66,14 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
         let computedFields = getAttribute<ComputedFieldAttribute> prop
         let uniqueConstraints = getAttribute<UniqueConstraintAttribute> prop
         let checkConstraints = getAttribute<CheckConstraintAttribute> prop
+        let indexes = getAttribute<IndexAttribute> prop
 
         let res =
             { ColumnFields = columnFields
               ComputedFields = computedFields |> Seq.map makeSourceComputedField |> Map.ofSeq
               UniqueConstraints = uniqueConstraints |> Seq.map makeSourceUniqueConstraint |> Map.ofSeq
               CheckConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
+              Indexes = indexes |> Seq.map makeSourceIndex |> Map.ofSeq
               MainField = FunQLName entityAttr.MainField
               ForbidExternalReferences = entityAttr.ForbidExternalReferences
               ForbidTriggers = entityAttr.ForbidTriggers

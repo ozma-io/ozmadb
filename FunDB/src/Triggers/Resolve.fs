@@ -21,7 +21,7 @@ let private checkName (FunQLName name) : unit =
 
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let resolveTrigger (entity : ResolvedEntity) (trigger : SourceTrigger) : ResolvedTrigger =
-        if entity.forbidTriggers then
+        if entity.ForbidTriggers then
             raisef ResolveTriggersException "Triggers are disabled for this entity"
 
         let updateFields =
@@ -29,7 +29,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             | [|f|] when f = updateFieldsAll -> TUFAll
             | fields ->
                 for field in fields do
-                    if not (Map.containsKey field entity.columnFields) then
+                    if not (Map.containsKey field entity.ColumnFields) then
                         raisef ResolveTriggersException "Unknown update field name: %O" field
                 try
                     TUFSet (Set.ofSeqUnique fields)
@@ -72,7 +72,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
         let mapEntity name entityTriggers =
             try
                 let entity =
-                    match Map.tryFind name schema.entities with
+                    match Map.tryFind name schema.Entities with
                     | None -> raisef ResolveTriggersException "Unknown entity name"
                     | Some entity -> entity
                 let (entityErrors, newEntity) = resolveTriggersEntity entity entityTriggers
@@ -93,7 +93,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
         let mapSchema name schemaTriggers =
             try
                 let schema =
-                    match Map.tryFind name layout.schemas with
+                    match Map.tryFind name layout.Schemas with
                     | None -> raisef ResolveTriggersException "Unknown schema name"
                     | Some schema -> schema
                 let (schemaErrors, newSchema) = resolveTriggersSchema schema schemaTriggers
@@ -113,7 +113,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
 
         let mapDatabase name db =
             try
-                if not <| Map.containsKey name layout.schemas then
+                if not <| Map.containsKey name layout.Schemas then
                     raisef ResolveTriggersException "Unknown schema name"
                 let (dbErrors, newDb) = resolveTriggersDatabase db
                 if not <| Map.isEmpty dbErrors then

@@ -144,16 +144,15 @@ let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
     | Some ref -> ref
     | None -> raisef ViewResolveException "Unspecified schema in name: %O" name
 
-let private resolveArgumentFieldType (layout : Layout) : ParsedFieldType -> ArgumentFieldType = function
+let private resolveArgumentFieldType (layout : Layout) : ParsedFieldType -> ResolvedFieldType = function
     | FTType ft -> FTType ft
-    | FTReference (entityRef, Some where) -> raisef ViewResolveException "Restrictions in reference arguments aren't allowed"
-    | FTReference (entityRef, None) ->
+    | FTReference entityRef ->
         let resolvedRef = resolveEntityRef entityRef
         let refEntity =
             match layout.FindEntity(resolvedRef) with
             | None -> raisef ViewResolveException "Cannot find entity %O from reference type" resolvedRef
             | Some refEntity -> refEntity
-        FTReference (resolvedRef, None)
+        FTReference resolvedRef
     | FTEnum vals ->
         if Set.isEmpty vals then
             raisef ViewResolveException "Enums must not be empty"
@@ -276,7 +275,7 @@ let rec followPath (layout : ILayoutFields) (fieldRef : ResolvedFieldRef) : Fiel
         let entity = layout.FindEntity fieldRef.entity |> Option.get
         let fieldInfo = entity.FindField fieldRef.name |> Option.get
         match fieldInfo.Field with
-        | RColumnField { fieldType = FTReference (entityRef, _) } ->
+        | RColumnField { FieldType = FTReference entityRef } ->
             let newFieldRef = { entity = entityRef; name = ref }
             followPath layout newFieldRef refs
         | _ -> failwith <| sprintf "Invalid dereference in path: %O" ref
@@ -318,6 +317,20 @@ let resolveSubEntity (layout : ILayoutFields) (ctx : SubEntityContext) (field : 
 
     { Ref = relaxEntityRef subEntityRef; Extra = info }
 
+let setRelatedExprEntity (onGlobalArg : ArgumentName -> unit) (localRef : EntityRef) : ResolvedFieldExpr -> ResolvedFieldExpr =
+    let resolveReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
+        let newRef =
+            match ref.Ref with
+            | VRColumn col ->
+                VRColumn { col with Ref = { col.Ref with entity = Some localRef } }
+            | VRPlaceholder (PLocal name) -> failwith <| sprintf "Unexpected local argument: %O" name
+            | VRPlaceholder ((PGlobal name) as arg) ->
+                onGlobalArg name
+                VRPlaceholder arg
+        { Ref = newRef; Path = ref.Path }
+    let mapper = idFieldExprMapper resolveReference id
+    mapFieldExpr mapper
+
 type private SelectFlags =
     { OneColumn : bool
       RequireNames : bool
@@ -352,7 +365,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         | [] -> boundField
         | (ref :: refs) ->
             match boundField.Field with
-            | RColumnField { fieldType = FTReference (entityRef, _) } ->
+            | RColumnField { FieldType = FTReference entityRef } ->
                 let newEntity = layout.FindEntity entityRef |> Option.get
                 match newEntity.FindField ref with
                 | Some fieldInfo ->
@@ -408,7 +421,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                     None
                 else
                     match argInfo.ArgType with
-                    | FTReference (entityRef, where) ->
+                    | FTReference entityRef ->
                         let (name, remainingPath) =
                             match Array.toList f.Path with
                             | head :: tail -> (head, tail)
@@ -520,7 +533,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             if not <| Array.isEmpty col.Path then
                 isLocal <- false
             match ref.OuterField with
-            | Some { Field = RComputedField { isLocal = false } } ->
+            | Some { Field = RComputedField { IsLocal = false } } ->
                 isLocal <- false
             | _ -> ()
 
@@ -832,7 +845,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             match layout.FindEntity ref with
             | None -> raisef ViewResolveException "Entity not found: %O" main.Entity
             | Some e -> e :?> ResolvedEntity
-        if entity.isAbstract then
+        if entity.IsAbstract then
             raisef ViewResolveException "Entity is abstract: %O" main.Entity
         let (foundRef, columns) = findMainEntity query
         if foundRef <> ref then
@@ -846,10 +859,10 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         let mappedResults = columns |> Seq.mapMaybe getField |> Map.ofSeqUnique
 
         let checkField fieldName (field : ResolvedColumnField) =
-            if Option.isNone field.defaultValue && not field.isNullable then
+            if Option.isNone field.DefaultValue && not field.IsNullable then
                 if not (Map.containsKey fieldName mappedResults) then
                     raisef ViewResolveException "Required inserted entity field is not in the view expression: %O" fieldName
-        entity.columnFields |> Map.iter checkField
+        entity.ColumnFields |> Map.iter checkField
 
         { Entity = ref
           FieldsToColumns = Map.reverse mappedResults

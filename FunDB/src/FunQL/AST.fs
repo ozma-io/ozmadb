@@ -23,7 +23,7 @@ type IFunQLName =
         abstract member ToName : unit -> FunQLName
     end
 
-and [<TypeConverter(typeof<NewtypeConverter<FunQLName>>)>] FunQLName = FunQLName of string
+and [<TypeConverter(typeof<NewtypeConverter<FunQLName>>)>] [<Struct>] FunQLName = FunQLName of string
     with
         override this.ToString () =
             match this with
@@ -45,6 +45,7 @@ type SchemaName = FunQLName
 type EntityName = FunQLName
 type FieldName = FunQLName
 type ConstraintName = FunQLName
+type IndexName = FunQLName
 type AttributeName = FunQLName
 type ArgumentName = FunQLName
 type UserViewName = FunQLName
@@ -447,9 +448,9 @@ type [<NoEquality; NoComparison>] BinaryOperator =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-type [<NoEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+type [<NoEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e> when 'e :> IFunQLName =
     | [<CaseName(null, InnerObject=true)>] FTType of FieldExprType
-    | [<CaseName("reference")>] FTReference of reference : 'e * where : FieldExpr<'e, 'f> option
+    | [<CaseName("reference")>] FTReference of reference : 'e
     | [<CaseName("enum")>] FTEnum of values : Set<string>
     with
         override this.ToString () = this.ToFunQLString()
@@ -457,8 +458,7 @@ type [<NoEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e, 'f> w
         member this.ToFunQLString () =
             match this with
             | FTType t -> t.ToFunQLString()
-            | FTReference (e, None) -> sprintf "reference(%s)" (e.ToFunQLString())
-            | FTReference (e, Some check) -> sprintf "reference(%s, %s)" (e.ToFunQLString()) (check.ToFunQLString())
+            | FTReference e -> sprintf "reference(%s)" (e.ToFunQLString())
             | FTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map renderFunQLString |> String.concat ", ")
 
         interface IFunQLString with
@@ -466,7 +466,7 @@ type [<NoEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e, 'f> w
 
 and AttributeMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, FieldExpr<'e, 'f>>
 
-and [<NoEquality; NoComparison>] FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FEValue of FieldValue
     | FERef of 'f
     | FENot of FieldExpr<'e, 'f>
@@ -790,7 +790,7 @@ type FieldTypePrettyConverter () =
     inherit JsonConverter ()
 
     override this.CanConvert (objectType : Type) =
-        isUnionCase<FieldType<_, _>> objectType
+        isUnionCase<FieldType<_>> objectType
 
     override this.CanRead = false
 
@@ -799,14 +799,10 @@ type FieldTypePrettyConverter () =
 
     override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
-        match castUnion<FieldType<IFunQLName, IFunQLName>> value with
+        match castUnion<FieldType<IFunQLName>> value with
         | Some (FTType st) -> serialize st
-        | Some (FTReference (ref, where)) ->
-            let cond =
-                match where with
-                | None -> null
-                | Some cond -> cond.ToString()
-            [("type", "reference":> obj); ("entity", ref :> obj); ("where", cond :> obj)] |> Map.ofList |> serialize
+        | Some (FTReference ref) ->
+            [("type", "reference":> obj); ("entity", ref :> obj)] |> Map.ofList |> serialize
         | Some (FTEnum vals) ->
             [("type", "enum" :> obj); ("values", vals :> obj)] |> Map.ofList |> serialize
         | None -> failwith "impossible"
@@ -1012,7 +1008,8 @@ type FunQLVoid = private FunQLVoid of unit with
 type LinkedFieldRef = LinkedRef<ValueRef<FieldRef>>
 type LinkedFieldName = LinkedRef<ValueRef<FieldName>>
 
-type ParsedFieldType = FieldType<EntityRef, LinkedFieldRef>
+type ParsedFieldType = FieldType<EntityRef>
+type ResolvedFieldType = FieldType<ResolvedEntityRef>
 
 type LocalFieldExpr = FieldExpr<FunQLVoid, FieldName>
 
@@ -1054,8 +1051,8 @@ type ResolvedAttributeMap = AttributeMap<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>
 
 [<NoEquality; NoComparison>]
-type Argument<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    { ArgType: FieldType<'e, 'f>
+type Argument<'e> when 'e :> IFunQLName =
+    { ArgType: FieldType<'e>
       Optional: bool
     } with
         override this.ToString () = this.ToFunQLString()
@@ -1070,10 +1067,8 @@ type Argument<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-type ArgumentFieldType = FieldType<ResolvedEntityRef, FunQLVoid>
-
-type ParsedArgument = Argument<EntityRef, LinkedFieldRef>
-type ResolvedArgument = Argument<ResolvedEntityRef, FunQLVoid>
+type ParsedArgument = Argument<EntityRef>
+type ResolvedArgument = Argument<ResolvedEntityRef>
 
 let funId = FunQLName "id"
 let funSubEntity = FunQLName "sub_entity"
@@ -1117,7 +1112,7 @@ let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
                                Optional = false })
           (FunQLName "user", { ArgType = FTType <| FETScalar SFTString
                                Optional = false })
-          (FunQLName "user_id", { ArgType = FTReference ({ schema = funSchema; name = funUsers }, None)
+          (FunQLName "user_id", { ArgType = FTReference ({ schema = funSchema; name = funUsers })
                                   Optional = true })
           (FunQLName "transaction_time", { ArgType = FTType <| FETScalar SFTDateTime
                                            Optional = false })
@@ -1202,10 +1197,10 @@ let private parseValueFromJson' (fieldExprType : FieldExprType) : bool -> JToken
     | FETScalar SFTJson -> parseSingleValueStrict FJson
     | FETScalar SFTUserViewRef -> parseSingleValueStrict FUserViewRef
 
-let parseValueFromJson (fieldType : FieldType<_, _>) (isNullable : bool) (tok : JToken) : FieldValue option =
+let parseValueFromJson (fieldType : FieldType<_>) (isNullable : bool) (tok : JToken) : FieldValue option =
     match fieldType with
     | FTType feType -> parseValueFromJson' feType isNullable tok
-    | FTReference (ref, where) -> parseSingleValue (FInt >> Some) isNullable tok
+    | FTReference ref -> parseSingleValue (FInt >> Some) isNullable tok
     | FTEnum values ->
         let checkAndEncode v =
             if Set.contains v values then

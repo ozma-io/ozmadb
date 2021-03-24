@@ -154,9 +154,9 @@ type private TriggersMerger (layout : Layout) =
             | None -> ()
             | Some merged ->
                 yield (triggerEntityRef, merged)
-                if not (Map.isEmpty triggerEntity.children) then
+                if not (Map.isEmpty triggerEntity.Children) then
                     let inheritedMerged = markEntityInherited triggerEntityRef merged
-                    for KeyValue (childRef, childInfo) in triggerEntity.children do
+                    for KeyValue (childRef, childInfo) in triggerEntity.Children do
                         yield (childRef, inheritedMerged)
         }
 

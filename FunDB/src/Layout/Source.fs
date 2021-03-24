@@ -15,6 +15,11 @@ type SourceCheckConstraint =
     { Expression : string
     }
 
+type SourceIndex =
+    { Expressions : string[]
+      IsUnique : bool
+    }
+
 type SourceColumnField =
     { Type : string
       DefaultValue : string option
@@ -38,6 +43,7 @@ type SourceEntity =
       ComputedFields : Map<FieldName, SourceComputedField>
       UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
+      Indexes : Map<IndexName, SourceIndex>
       MainField : FieldName
       ForbidExternalReferences : bool
       [<JsonIgnore>]

@@ -137,13 +137,44 @@ and [<NoEquality; NoComparison>] RaiseStatement =
 and Statements = Statement[]
 
 [<NoEquality; NoComparison>]
-type Program =
-    { Body : Statements
+type Declaration =
+    { Name : SQLName
+      Type : DBValueType
+      IsConstant : bool
+      IsNullable : bool
+      Default : ValueExpr option
     } with
         override this.ToString () = this.ToPLPgSQLString()
 
         member this.ToPLPgSQLString () =
-            sprintf "BEGIN %s END" (Statement.StatementsToString this.Body)
+            let nameStr = this.Name.ToSQLString()
+            let constantStr = if this.IsConstant then "CONSTANT" else ""
+            let typeStr = this.Type.ToSQLString()
+            let nullableStr = if this.IsNullable then "NULLABLE" else ""
+            let defaultStr =
+                match this.Default with
+                | None -> ""
+                | Some expr -> sprintf ":= %s" (expr.ToSQLString())
+            String.concatWithWhitespaces [nameStr; constantStr; typeStr; nullableStr; defaultStr]
+
+        interface IPLPgSQLString with
+            member this.ToPLPgSQLString () = this.ToPLPgSQLString()
+
+[<NoEquality; NoComparison>]
+type Program =
+    { Declarations : Declaration[]
+      Body : Statements
+    } with
+        override this.ToString () = this.ToPLPgSQLString()
+
+        member this.ToPLPgSQLString () =
+            let declarations =
+                if Array.isEmpty this.Declarations then
+                    ""
+                else
+                    sprintf "DECLARE %s" (this.Declarations |> Seq.map (fun x -> x.ToPLPgSQLString()) |> String.concat "; ")
+            let body = sprintf "BEGIN %s END" (Statement.StatementsToString this.Body)
+            String.concatWithWhitespaces [declarations; body]
 
         interface IPLPgSQLString with
             member this.ToPLPgSQLString () = this.ToPLPgSQLString()

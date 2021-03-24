@@ -5,6 +5,7 @@
       "userViewGenerator": "./funapp_migration.mjs",
 
       "entities": {
+
         "settings": {
           "columnFields": {
             "name": { "type": "string" },
@@ -17,7 +18,41 @@
             "non_empty_name": { "expression": "name <> ''" }
           },
           "mainField": "name"
+        },
+
+        "color_themes": {
+          "columnFields": {
+            "name": { "type": "string" }
+          },
+          "uniqueConstraints": {
+            "unique_name": { "columns": [ "name" ] }
+          },
+          "checkConstraints": {
+            "non_empty_name": { "expression": "name <> ''" }
+          },
+          "mainField": "name"
+        },
+
+        "color_variants": {
+          "columnFields": {
+            "name": { "type": "string" },
+            "theme_id": { "type": "reference(\"funapp\".\"color_themes\")" },
+            "foreground": { "type": "string", "isNullable": true },
+            "background": { "type": "string", "isNullable": true },
+            "border": { "type": "string", "isNullable": true }
+          },
+          "computedFields": {
+            "full_name": { "expression": "theme_id=>name || name" }
+          },
+          "uniqueConstraints": {
+            "unique_name": { "columns": [ "name" ] }
+          },
+          "checkConstraints": {
+            "non_empty_name": { "expression": "name <> ''" }
+          },
+          "mainField": "full_name"
         }
+
       },
 
       "roles": {
@@ -62,6 +97,36 @@
                         "select": "true"
                       },
                       "value": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
+                  "color_themes": {
+                    "select": "true",
+                    "fields": {
+                      "name": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
+                  "color_variants": {
+                    "select": "true",
+                    "fields": {
+                      "name": {
+                        "select": "true"
+                      },
+                      "theme_id": {
+                        "select": "true"
+                      },
+                      "foreground": {
+                        "select": "true"
+                      },
+                      "background": {
+                        "select": "true"
+                      },
+                      "border": {
                         "select": "true"
                       }
                     }

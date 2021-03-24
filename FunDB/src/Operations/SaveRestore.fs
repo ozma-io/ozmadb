@@ -79,6 +79,7 @@ type PrettyEntity =
       ComputedFields : Map<FieldName, PrettyComputedField>
       UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
+      Indexes : Map<IndexName, SourceIndex>
       MainField : FieldName
       ForbidExternalReferences : bool
       IsAbstract : bool
@@ -302,6 +303,7 @@ let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : Sou
       ComputedFields = Map.map (applyAttrs prettifyComputedField) entity.ComputedFields
       UniqueConstraints = entity.UniqueConstraints
       CheckConstraints = entity.CheckConstraints
+      Indexes = entity.Indexes
       MainField = entity.MainField
       ForbidExternalReferences = entity.ForbidExternalReferences
       IsAbstract = entity.IsAbstract
@@ -326,6 +328,7 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
           ComputedFields = Map.map (fun name -> deprettifyComputedField >> extractAttrs name) entity.ComputedFields
           UniqueConstraints = entity.UniqueConstraints
           CheckConstraints = entity.CheckConstraints
+          Indexes = entity.Indexes
           MainField = entity.MainField
           ForbidExternalReferences = entity.ForbidExternalReferences
           ForbidTriggers = false

@@ -22,18 +22,20 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
 
     let updateAllowedField (field : SourceAllowedField) (existingField : RoleColumnField) : unit =
         existingField.Change <- field.Change
-        existingField.Select <- Option.toNull field.Select
+        existingField.Select <- Option.toObj field.Select
 
     let updateAllowedFields (entityRef : ResolvedEntityRef) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) =
         let oldFieldsMap =
             existingEntity.ColumnFields
+            |> Seq.ofObj
             |> Seq.map (fun roleField -> (FunQLName roleField.ColumnName, roleField))
             |> Map.ofSeq
 
         let updateFunc _ = updateAllowedField
         let createFunc (FunQLName fieldName) =
             RoleColumnField (
-                ColumnName = fieldName
+                ColumnName = fieldName,
+                RoleEntity = existingEntity
             )
         ignore <| this.UpdateDifference updateFunc createFunc entity.Fields oldFieldsMap
 
@@ -42,19 +44,21 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
 
         existingEntity.AllowBroken <- entity.AllowBroken
         existingEntity.Insert <- entity.Insert
-        existingEntity.Check <- Option.toNull entity.Check
-        existingEntity.Select <- Option.toNull entity.Select
-        existingEntity.Update <- Option.toNull entity.Update
-        existingEntity.Delete <- Option.toNull entity.Delete
+        existingEntity.Check <- Option.toObj entity.Check
+        existingEntity.Select <- Option.toObj entity.Select
+        existingEntity.Update <- Option.toObj entity.Update
+        existingEntity.Delete <- Option.toObj entity.Delete
 
     let updateAllowedDatabase (role : SourceRole) (existingRole : Role) : unit =
         let oldEntitiesMap =
             existingRole.Entities
+            |> Seq.ofObj
             |> Seq.map (fun roleEntity -> ({ schema = FunQLName roleEntity.Entity.Schema.Name; name = FunQLName roleEntity.Entity.Name }, roleEntity))
             |> Map.ofSeq
 
         let entitiesMap =
-            role.Permissions.Schemas |> Map.toSeq
+            role.Permissions.Schemas
+            |> Map.toSeq
             |> Seq.collect (fun (schemaName, entities) -> entities.Entities |> Map.toSeq |> Seq.map (fun (entityName, entity) -> ({ schema = schemaName; name = entityName }, entity)))
             |> Map.ofSeq
 
@@ -67,7 +71,8 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
                 | Some id -> id
                 | None -> raisef SystemUpdaterException "Unknown entity %O" entityRef
             RoleEntity (
-                Entity = entity
+                Entity = entity,
+                Role = existingRole
             )
         ignore <| this.UpdateDifference updateFunc createFunc entitiesMap oldEntitiesMap
 
@@ -81,13 +86,10 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
             with
             | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In allowed schema %O: %s" name e.Message
         let createFunc (FunQLName name) =
-            let newRole =
-                Role (
-                    Name = name,
-                    Entities = List()
-                )
-            existingSchema.Roles.Add(newRole)
-            newRole
+            Role (
+                Name = name,
+                Schema = existingSchema
+            )
         ignore <| this.UpdateDifference updateFunc createFunc schema.Roles oldRolesMap
 
     let updateSchemas (schemas : Map<SchemaName, SourcePermissionsSchema>) (existingSchemas : Map<SchemaName, Schema>) =

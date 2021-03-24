@@ -54,6 +54,13 @@ namespace FunWithFlags.FunDBSchema.System
         public DbSet<CheckConstraint> CheckConstraints { get; set; } = null!;
 
         [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
+        [ComputedField("full_name", "entity_id=>__main || '.' || name")]
+        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
+        [CheckConstraint("not_empty", "expressions <> (array[] :: array(string))")]
+        public DbSet<Index> Indexes { get; set; } = null!;
+
+        [Entity("full_name", ForbidExternalReferences=true, ForbidTriggers=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"schema_id", "name"})]
         [CheckConstraint("not_reserved", "name <> ''")]
@@ -148,6 +155,7 @@ namespace FunWithFlags.FunDBSchema.System
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.ComputedFields)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.UniqueConstraints)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.CheckConstraints)
+                .Include(sch => sch.Entities).ThenInclude(ent => ent.Indexes)
                 .Include(sch => sch.Entities).ThenInclude(ent => ent.Parent).ThenInclude(ent => ent!.Schema);
         }
 
@@ -253,6 +261,7 @@ namespace FunWithFlags.FunDBSchema.System
         public List<ComputedField> ComputedFields { get; set; } = null!;
         public List<UniqueConstraint> UniqueConstraints { get; set; } = null!;
         public List<CheckConstraint> CheckConstraints { get; set; } = null!;
+        public List<Index> Indexes { get; set; } = null!;
     }
 
     public class ColumnField
@@ -304,8 +313,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("reference(public.entities)")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
-        // Order is important here
-        // Change this if/when we implement "ordered 1-N references".
+        // Order is important here.
         [ColumnField("array(string)")]
         [Required]
         public string[] Columns { get; set; } = null!;
@@ -323,6 +331,23 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Expression { get; set; } = null!;
+    }
+
+    public class Index
+    {
+        public int Id { get; set; }
+        [ColumnField("string")]
+        [Required]
+        public string Name { get; set; } = null!;
+        [ColumnField("reference(public.entities)")]
+        public int EntityId { get; set; }
+        public Entity? Entity { get; set; }
+        // Order is important here.
+        [ColumnField("array(string)")]
+        [Required]
+        public string[] Expressions { get; set; } = null!;
+        [ColumnField("bool", Default="false")]
+        public bool IsUnique { get; set; }
     }
 
     public class UserView

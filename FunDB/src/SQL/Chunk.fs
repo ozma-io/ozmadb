@@ -63,6 +63,7 @@ type private ChunkApplier (chunk : QueryChunk) =
     and applySelectExpr (select : SelectExpr) : SelectExpr =
         { CTEs = Option.map applyCommonTableExprs select.CTEs
           Tree = applySelectTreeExpr select.Tree
+          Extra = select.Extra
         }
 
     member this.ApplySelectExpr select = applySelectExpr select

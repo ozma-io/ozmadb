@@ -33,9 +33,9 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
                 let currExpr = renameRestriction entityRef entityRef currRestr.Expression
                 orRestriction oldRestrs { currRestr with Expression = currExpr }
         let entity = layout.FindEntity currRef |> Option.get
-        match entity.inheritance with
+        match entity.Inheritance with
         | None -> newRestrs
-        | Some inheritance -> buildParentRestrictions newRestrs inheritance.parent
+        | Some inheritance -> buildParentRestrictions newRestrs inheritance.Parent
 
     // We allow any child too.
     let buildChildRestrictions (currRestrs : Restriction) (currRef : ResolvedEntityRef) =
@@ -64,4 +64,4 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restricti
 
     let parentRestrs = buildParentRestrictions emptyRestriction entityRef
     let selfEntity = layout.FindEntity entityRef |> Option.get
-    selfEntity.children |> Map.keys |> Seq.fold buildChildRestrictions parentRestrs
+    selfEntity.Children |> Map.keys |> Seq.fold buildChildRestrictions parentRestrs

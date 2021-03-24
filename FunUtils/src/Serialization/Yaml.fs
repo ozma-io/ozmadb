@@ -131,7 +131,7 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                     let read =
                         fun (reader : IParser) ->
                             let name = converter.Deserialize<string>(reader)
-                            match Map.tryFind (Option.ofNull name) options with
+                            match Map.tryFind (Option.ofObj name) options with
                             | Some (_, v) -> v
                             | None -> raisef YamlException "Unknown enum case %s" name
                     let reverseOptions = options |> Map.mapWithKeys (fun name (case, v) -> (case.Name, name))

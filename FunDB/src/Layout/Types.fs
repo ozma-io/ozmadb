@@ -3,8 +3,9 @@ module FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.Layout.Source
 module SQL = FunWithFlags.FunDB.SQL.AST
+
+type ResolvedConstraintRef = ResolvedFieldRef
 
 type ReferenceRef =
     | RThis of FieldName
@@ -28,66 +29,72 @@ type ReferenceRef =
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
-// Used instead of names in system generated identifiers to ensure that they do not exceed PostgreSQL identifier length restrictions.
+// Used instead of names in system generated identifiers to ensure that they do not exceed PostgreSQL identifier length restrictions (63 bytes).
 type HashName = string
 
 let hashNameLength = 20
-
-type ResolvedFieldType = FieldType<ResolvedEntityRef, ReferenceRef>
 
 type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>
 
 [<NoEquality; NoComparison>]
 type ResolvedUniqueConstraint =
-    { columns : FunQLName array
-      hashName : HashName // Guaranteed to be unique in an entity
+    { Columns : FieldName[]
+      HashName : HashName // Guaranteed to be unique in an entity
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedCheckConstraint =
-    { expression : LocalFieldExpr
-      hashName : HashName // Guaranteed to be unique in an entity
+    { Expression : ResolvedFieldExpr
+      IsLocal : bool
+      HashName : HashName // Guaranteed to be unique in an entity
+    }
+
+[<NoEquality; NoComparison>]
+type ResolvedIndex =
+    { Expressions : LocalFieldExpr[]
+      HashName : HashName // Guaranteed to be unique in an entity
+      IsUnique : bool
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedColumnField =
-    { fieldType : ResolvedFieldType
-      valueType : SQL.SimpleValueType
-      defaultValue : FieldValue option
-      isNullable : bool
-      isImmutable : bool
-      inheritedFrom : ResolvedEntityRef option
-      columnName : SQL.ColumnName
-      hashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
+    { FieldType : ResolvedFieldType
+      ValueType : SQL.SimpleValueType
+      DefaultValue : FieldValue option
+      IsNullable : bool
+      IsImmutable : bool
+      InheritedFrom : ResolvedEntityRef option
+      ColumnName : SQL.ColumnName
+      HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
     }
 
 [<NoEquality; NoComparison>]
 type VirtualFieldCase =
-    { check : SQL.ValueExpr
-      expression : ResolvedFieldExpr
-      ref : ResolvedFieldRef
+    { Check : SQL.ValueExpr
+      Expression : ResolvedFieldExpr
+      Ref : ResolvedFieldRef
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedComputedField =
-    { expression : ResolvedFieldExpr
+    { Expression : ResolvedFieldExpr
       // Set when there's no dereferences in the expression
-      isLocal : bool
+      IsLocal : bool
       // Set when computed field uses Id
-      hasId : bool
-      usedSchemas : UsedSchemas
-      inheritedFrom : ResolvedEntityRef option
-      allowBroken : bool
-      hashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
-      virtualCases : (VirtualFieldCase array) option
+      HasId : bool
+      UsedSchemas : UsedSchemas
+      InheritedFrom : ResolvedEntityRef option
+      AllowBroken : bool
+      HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
+      VirtualCases : (VirtualFieldCase array) option
     }
 
 [<NoEquality; NoComparison>]
 type EntityInheritance =
-    { parent : ResolvedEntityRef
+    { Parent : ResolvedEntityRef
       // Expression that verifies that given entry's sub_entity is valid for this type.
       // Column is used unqualified.
-      checkExpr : SQL.ValueExpr
+      CheckExpr : SQL.ValueExpr
     }
 
 [<NoEquality; NoComparison>]
@@ -110,7 +117,7 @@ type ResolvedFieldInfo = FieldInfo<ResolvedColumnField, ResolvedComputedField>
 
 [<NoEquality; NoComparison>]
 type ChildEntity =
-    { direct : bool
+    { Direct : bool
     }
 
 type IEntityFields =
@@ -144,27 +151,28 @@ let inline genericFindField (getColumnField : FieldName -> 'col option) (getComp
 
 [<NoEquality; NoComparison>]
 type ResolvedEntity =
-    { columnFields : Map<FieldName, ResolvedColumnField>
-      computedFields : Map<FieldName, Result<ResolvedComputedField, exn>>
-      uniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
-      checkConstraints : Map<ConstraintName, ResolvedCheckConstraint>
-      mainField : FieldName
-      forbidExternalReferences : bool
-      forbidTriggers : bool
-      triggersMigration : bool
-      isHidden : bool
-      inheritance : EntityInheritance option
-      subEntityParseExpr : SQL.ValueExpr // Parses SubEntity field into JSON
-      children : Map<ResolvedEntityRef, ChildEntity>
-      typeName : string // SubEntity value for this entity
-      hashName : HashName // Guaranteed to be unique for any entity in a schema
-      isAbstract : bool
-      isFrozen : bool
+    { ColumnFields : Map<FieldName, ResolvedColumnField>
+      ComputedFields : Map<FieldName, Result<ResolvedComputedField, exn>>
+      UniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
+      CheckConstraints : Map<ConstraintName, ResolvedCheckConstraint>
+      Indexes : Map<IndexName, ResolvedIndex>
+      MainField : FieldName
+      ForbidExternalReferences : bool
+      ForbidTriggers : bool
+      TriggersMigration : bool
+      IsHidden : bool
+      Inheritance : EntityInheritance option
+      SubEntityParseExpr : SQL.ValueExpr // Parses SubEntity field into JSON
+      Children : Map<ResolvedEntityRef, ChildEntity>
+      TypeName : string // SubEntity value for this entity
+      HashName : HashName // Guaranteed to be unique for any entity in a schema
+      IsAbstract : bool
+      IsFrozen : bool
       // Hierarchy root
-      root : ResolvedEntityRef
+      Root : ResolvedEntityRef
     } with
         member this.FindField (name : FieldName) =
-            genericFindField (fun name -> Map.tryFind name this.columnFields) (fun name -> Map.tryFind name this.computedFields |> Option.bind Result.getOption) this name
+            genericFindField (fun name -> Map.tryFind name this.ColumnFields) (fun name -> Map.tryFind name this.ComputedFields |> Option.bind Result.getOption) this name
 
         interface IEntityFields with
             member this.FindField name = this.FindField name
@@ -175,16 +183,16 @@ type ResolvedEntity =
                         Seq.singleton (funSubEntity, RSubEntity)
                     else
                         Seq.empty
-                let columns = this.columnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
+                let columns = this.ColumnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
                 let getComputed = function
                 | (name, Error e) -> None
                 | (name, Ok comp) -> Some (name, RComputedField comp)
-                let computed = this.computedFields |> Map.toSeq |> Seq.mapMaybe getComputed
+                let computed = this.ComputedFields |> Map.toSeq |> Seq.mapMaybe getComputed
                 Seq.concat [id; subentity; columns; computed]
-            member this.MainField = this.mainField
-            member this.Parent = this.inheritance |> Option.map (fun i -> i.parent)
-            member this.IsAbstract = this.isAbstract
-            member this.Children = Map.toSeq this.children
+            member this.MainField = this.MainField
+            member this.Parent = this.Inheritance |> Option.map (fun i -> i.Parent)
+            member this.IsAbstract = this.IsAbstract
+            member this.Children = Map.toSeq this.Children
 
 // Should be in sync with type names generation in Resolve
 let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntityRef =
@@ -195,8 +203,8 @@ let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntit
 
 [<NoEquality; NoComparison>]
 type ResolvedSchema =
-    { entities : Map<EntityName, ResolvedEntity>
-      roots : Set<EntityName>
+    { Entities : Map<EntityName, ResolvedEntity>
+      Roots : Set<EntityName>
     }
 
 type ILayoutFields =
@@ -204,14 +212,14 @@ type ILayoutFields =
 
 [<NoEquality; NoComparison>]
 type Layout =
-    { schemas : Map<SchemaName, ResolvedSchema>
+    { Schemas : Map<SchemaName, ResolvedSchema>
     } with
         member this.FindEntity (ref : ResolvedEntityRef) =
-            match Map.tryFind ref.schema this.schemas with
+            match Map.tryFind ref.schema this.Schemas with
             | None -> None
             | Some schema ->
-                match Map.tryFind ref.name schema.entities with
-                | Some entity when not entity.isHidden -> Some entity
+                match Map.tryFind ref.name schema.Entities with
+                | Some entity when not entity.IsHidden -> Some entity
                 | _ -> None
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
@@ -233,7 +241,7 @@ let rec checkInheritance (layout : ILayoutFields) (parentRef : ResolvedEntityRef
         | Some childParentRef -> checkInheritance layout parentRef childParentRef
 
 let filterLayout (f : SchemaName -> bool) (layout : Layout) : Layout =
-    { schemas = Map.filter (fun name schema -> f name) layout.schemas
+    { Schemas = Map.filter (fun name schema -> f name) layout.Schemas
     }
 
 type ErroredEntity =

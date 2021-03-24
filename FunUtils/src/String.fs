@@ -1,5 +1,6 @@
 module FunWithFlags.FunUtils.String
 
+open System
 open System.Text.RegularExpressions
 
 let truncate (len : int) (s : string) =
@@ -15,3 +16,29 @@ let private normalizeNewlinesRegex = Regex("\r\n|\n|\r", RegexOptions.Compiled)
 
 let normalizeNewlines (str : string) : string =
     normalizeNewlinesRegex.Replace(str, "\n")
+
+type StringComparable<'a> (inner : 'a) =
+    let innerString = string inner
+
+    member this.String = innerString
+    member this.Value = inner
+
+    override this.ToString () = innerString
+
+    override x.Equals yobj =
+        match yobj with
+        | :? StringComparable<'a> as y -> x.String = y.String
+        | _ -> false
+
+    override this.GetHashCode () = hash this.String
+
+    interface IComparable with
+       member x.CompareTo yobj =
+          match yobj with
+          | :? StringComparable<'a> as y -> compare x.String y.String
+          | _ -> invalidArg "yobj" "cannot compare value of different types"
+
+    interface IComparable<StringComparable<'a>> with
+       member x.CompareTo y = compare x.String y.String
+
+let comparable a = StringComparable a

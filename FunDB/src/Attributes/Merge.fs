@@ -97,9 +97,9 @@ type private AttributesMerger (layout : Layout) =
             let retEntity = makeOneMergedAttributesEntity schemaName entityAttrs
             if not (Map.isEmpty retEntity.Fields) then
                 yield (attrEntityRef, retEntity)
-                if not (Map.isEmpty entity.children) then
+                if not (Map.isEmpty entity.Children) then
                     let inheritedEntity = markEntityInherited retEntity
-                    for KeyValue (childRef, childInfo) in entity.children do
+                    for KeyValue (childRef, childInfo) in entity.Children do
                         yield (childRef, inheritedEntity)
         }
 

@@ -22,9 +22,9 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             if Option.isNone <| entity.FindField name then
                 raisef ResolveAttributesException "Column not found in default attribute: %O" name
         | (ref :: refs) ->
-            match Map.tryFind name entity.columnFields with
-            | Some { fieldType = FTReference (refEntity, _) } ->
-                let newEntity = Map.find refEntity.name (Map.find refEntity.schema layout.schemas).entities
+            match Map.tryFind name entity.ColumnFields with
+            | Some { FieldType = FTReference refEntity } ->
+                let newEntity = Map.find refEntity.name (Map.find refEntity.schema layout.Schemas).Entities
                 checkPath newEntity ref refs
             | _ -> raisef ResolveAttributesException "Invalid dereference in path: %O" ref
 
@@ -53,7 +53,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     | Some argInfo -> argInfo
                 if not <| Array.isEmpty path then
                     match argInfo.ArgType with
-                    | FTReference (entityRef, where) ->
+                    | FTReference entityRef ->
                         let (name, remainingPath) =
                             match Array.toList path with
                             | head :: tail -> (head, tail)
@@ -118,7 +118,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
         let mapEntity name entityAttrs =
             try
                 let entity =
-                    match Map.tryFind name schema.entities with
+                    match Map.tryFind name schema.Entities with
                     | None -> raisef ResolveAttributesException "Unknown entity name"
                     | Some entity -> entity
                 let ref = { schema = schemaName; name = name }
@@ -140,7 +140,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
         let mapSchema name schemaAttrs =
             try
                 let schema =
-                    match Map.tryFind name layout.schemas with
+                    match Map.tryFind name layout.Schemas with
                     | None -> raisef ResolveAttributesException "Unknown schema name"
                     | Some schema -> schema
                 let (schemaErrors, newSchema) = resolveAttributesSchema name schema schemaAttrs
@@ -160,7 +160,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
 
         let mapDatabase name db =
             try
-                if not <| Map.containsKey name layout.schemas then
+                if not <| Map.containsKey name layout.Schemas then
                     raisef ResolveAttributesException "Unknown schema name"
                 let (dbErrors, newDb) = resolveAttributesDatabase db
                 if not <| Map.isEmpty dbErrors then

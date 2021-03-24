@@ -40,11 +40,17 @@ let private makeSourceCheckConstraint (constr : CheckConstraint) : SourceCheckCo
     { Expression = constr.Expression
     }
 
+let private makeSourceIndex (index : Index) : SourceIndex =
+    { Expressions = index.Expressions
+      IsUnique = index.IsUnique
+    }
+
 let private makeSourceEntity (entity : Entity) : SourceEntity =
     { ColumnFields = entity.ColumnFields |> Seq.map (fun col -> (FunQLName col.Name, makeSourceColumnField col)) |> Map.ofSeqUnique
       ComputedFields = entity.ComputedFields |> Seq.map (fun comp -> (FunQLName comp.Name, makeSourceComputedField comp)) |> Map.ofSeqUnique
       UniqueConstraints = entity.UniqueConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceUniqueConstraint constr)) |> Map.ofSeqUnique
       CheckConstraints = entity.CheckConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceCheckConstraint constr)) |> Map.ofSeqUnique
+      Indexes = entity.Indexes |> Seq.map (fun index -> (FunQLName index.Name, makeSourceIndex index)) |> Map.ofSeqUnique
       MainField =
         if isNull entity.MainField
         then funId

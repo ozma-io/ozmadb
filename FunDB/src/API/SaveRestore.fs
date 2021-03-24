@@ -4,8 +4,6 @@ open System.IO
 open System.Linq
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
-open Microsoft.EntityFrameworkCore
-open Z.EntityFramework
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 
@@ -21,10 +19,10 @@ let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEn
         match Map.tryFind (fieldName.ToString()) rawArgs with
         | None -> Ok None
         | Some value ->
-            match parseValueFromJson field.fieldType field.isNullable value with
-            | None -> Error <| sprintf "Cannot convert field to expected type %O: %O" field.fieldType fieldName
+            match parseValueFromJson field.FieldType field.IsNullable value with
+            | None -> Error <| sprintf "Cannot convert field to expected type %O: %O" field.FieldType fieldName
             | Some arg -> Ok (Some (fieldName, arg))
-    match entity.columnFields |> Map.toSeq |> Seq.traverseResult getValue with
+    match entity.ColumnFields |> Map.toSeq |> Seq.traverseResult getValue with
     | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
     | Error err -> Error err
 
@@ -45,10 +43,10 @@ type SaveRestoreAPI (rctx : IRequestContext) =
             let names =
                 match schemas with
                 | SSNames names -> Array.toSeq names
-                | SSAll -> Map.keys ctx.Layout.schemas
+                | SSAll -> Map.keys ctx.Layout.Schemas
                 | SSNonPreloaded ->
                     let preloadSchemas = Map.keysSet ctx.Preload.Schemas
-                    let allSchemas = Map.keysSet ctx.Layout.schemas
+                    let allSchemas = Map.keysSet ctx.Layout.Schemas
                     Set.toSeq (Set.difference allSchemas preloadSchemas)
             if not (canSave rctx.User.Type) then
                 logger.LogError("Dump access denied")
@@ -103,7 +101,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                             if not dropOthers then
                                 Set.empty
                             else
-                                let emptySchemas = Set.difference (Map.keysSet ctx.Layout.schemas) preloadSchemas
+                                let emptySchemas = Set.difference (Map.keysSet ctx.Layout.Schemas) preloadSchemas
                                 Set.difference emptySchemas restoredSchemas
                         let dumps =
                             let emptyDumps = droppedSchemas |> Seq.map (fun name -> (name, emptySchemaDump)) |> Map.ofSeq

@@ -158,7 +158,7 @@ type UnionConverter (objectType : Type) =
                         let read =
                             fun (reader : JsonReader) (serializer : JsonSerializer) ->
                                 let name = serializer.Deserialize<string>(reader)
-                                match Map.tryFind (Option.ofNull name) options with
+                                match Map.tryFind (Option.ofObj name) options with
                                 | Some (_, v) -> v
                                 | None -> raisef JsonException "Unknown enum case %s" name
                         let reverseOptions = options |> Map.mapWithKeys (fun name (case, v) -> (case.Name, name))
@@ -284,3 +284,21 @@ let jsonArray (vals : JToken seq) : JArray =
     for v in vals do
         arr.Add(v)
     arr
+
+let jtokenComparer = new JTokenEqualityComparer()
+
+[<Struct; CustomEquality; NoComparison>]
+type ComparableJToken = ComparableJToken of JToken
+    with
+        member this.Json =
+            let (ComparableJToken tok) = this
+            tok
+
+        override x.Equals yobj =
+            match yobj with
+            | :? ComparableJToken as y ->
+                jtokenComparer.Equals(x.Json, y.Json)
+            | _ -> false
+
+        override this.GetHashCode () =
+            jtokenComparer.GetHashCode(this.Json)

@@ -45,6 +45,20 @@ namespace FunWithFlags.FunDBSchema.Attributes
     }
 
     [AttributeUsage(AttributeTargets.Property, AllowMultiple=true)]
+    public class IndexAttribute : Attribute
+    {
+        public string Name { get; }
+        public string[] Expressions { get; }
+        public bool IsUnique { get; set; }
+
+        public IndexAttribute(string name, string[] expressions)
+        {
+            this.Name = name;
+            this.Expressions = expressions;
+        }
+    }
+
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple=true)]
     public class ComputedFieldAttribute : Attribute
     {
         public string Name { get; }

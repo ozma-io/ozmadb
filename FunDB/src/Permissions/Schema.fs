@@ -15,7 +15,7 @@ type SchemaRolesException (message : string) =
 
 let private makeSourceAllowedField (field : RoleColumnField) : SourceAllowedField =
     { Change = field.Change
-      Select = Option.ofNull field.Select
+      Select = Option.ofObj field.Select
     }
 
 let private makeSourceAllowedEntity (entity : RoleEntity) : SourceAllowedEntity =
@@ -23,11 +23,11 @@ let private makeSourceAllowedEntity (entity : RoleEntity) : SourceAllowedEntity 
 
     { Fields = fields
       AllowBroken = entity.AllowBroken
-      Check = Option.ofNull entity.Check
+      Check = Option.ofObj entity.Check
       Insert = entity.Insert
-      Select = Option.ofNull entity.Select
-      Update = Option.ofNull entity.Update
-      Delete = Option.ofNull entity.Delete
+      Select = Option.ofObj entity.Select
+      Update = Option.ofObj entity.Update
+      Delete = Option.ofObj entity.Delete
     }
 
 let private makeSourceAllowedEntities (entity : RoleEntity) : Map<EntityName, SourceAllowedEntity> =

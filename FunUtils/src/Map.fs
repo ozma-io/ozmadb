@@ -2,14 +2,15 @@ module FunWithFlags.FunUtils.Map
 
 open System.Threading.Tasks
 
+let addWith (resolve : 'v -> 'v -> 'v) (k : 'k) (v : 'v) (m : Map<'k, 'v>) : Map<'k, 'v> =
+    let newValue =
+        match Map.tryFind k m with
+        | Some v' -> resolve v' v
+        | None -> v
+    Map.add k newValue m
+
 let ofSeqWith (resolve : 'k -> 'v -> 'v -> 'v) (items : seq<'k * 'v>) : Map<'k, 'v> =
-    let addOrResolve m (k, v) =
-        let newValue =
-            match Map.tryFind k m with
-            | Some v' -> resolve k v' v
-            | None -> v
-        Map.add k newValue m
-    Seq.fold addOrResolve Map.empty items
+    Seq.fold (fun m (k, v) -> addWith (resolve k) k v m) Map.empty items
 
 let ofSeqUnique (items : seq<'k * 'v>) : Map<'k, 'v> =
     ofSeqWith (fun k v1 v2 -> failwith (sprintf "Key '%O' already exists" k)) items

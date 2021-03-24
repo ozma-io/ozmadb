@@ -46,7 +46,7 @@ let defaultDeferrableConstraint =
       InitiallyDeferred = false
     }
 
-[<StructuralEquality; NoComparison>]
+[<NoEquality; NoComparison>]
 type ConstraintMeta =
     | CMUnique of ColumnName[] * DeferrableConstraint
     | CMCheck of ValueExpr
@@ -54,8 +54,24 @@ type ConstraintMeta =
     | CMForeignKey of TableRef * (ColumnName * ColumnName)[] * DeferrableConstraint
 
 [<StructuralEquality; NoComparison>]
+type IndexKey =
+    | IKColumn of ColumnName
+    | IKExpression of StringComparable<ValueExpr>
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | IKColumn col -> col.ToSQLString()
+            | IKExpression expr -> sprintf "(%s)" (expr.Value.ToSQLString())
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
 type IndexMeta =
-    { Columns : ColumnName[]
+    { Keys : IndexKey[]
+      IsUnique : bool
     }
 
 [<NoEquality; NoComparison>]
@@ -92,7 +108,7 @@ type FunctionMode =
 [<StructuralEquality; NoComparison>]
 type FunctionArgument =
     { Name : SQLName option
-      DefaultValue : ValueExpr option // Do not set to NULL
+      DefaultValue : StringComparable<ValueExpr> option // Do not set to NULL
     }
 
 type FunctionArgumentSignature =
@@ -111,10 +127,9 @@ let private functionArgumentToString (signature : FunctionArgumentSignature) (ar
     let defaultStr =
         match arg.DefaultValue with
         | None -> ""
-        | Some d -> sprintf "= %s" (d.ToSQLString())
+        | Some d -> sprintf "= %s" (d.Value.ToSQLString())
     String.concatWithWhitespaces [signature.Mode.ToSQLString(); nameStr; signature.TypeName.ToSQLString(); defaultStr]
 
-[<StructuralEquality; NoComparison>]
 type FunctionReturn =
     | FRTable of (TypeName * ColumnName)[]
     | FRValue of TypeName
@@ -133,7 +148,6 @@ type FunctionReturn =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-[<StructuralEquality; NoComparison>]
 type FunctionBehaviour =
     | FBImmutable
     | FBStable
@@ -174,7 +188,6 @@ type TriggerOrder =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-[<StructuralEquality; NoComparison>]
 type TriggerEvent =
     | TEInsert
     | TEUpdate of ColumnName[] option
@@ -215,7 +228,7 @@ type TriggerDefinition =
       Order : TriggerOrder
       Events : TriggerEvent[]
       Mode : TriggerMode
-      Condition : ValueExpr option
+      Condition : StringComparable<ValueExpr> option
       FunctionName : SchemaObject
       FunctionArgs : string[]
     }
@@ -383,10 +396,12 @@ type SchemaOperation =
                 String.concatWithWhitespaces [initStr; alterStr]
             | SODropConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
             | SOCreateIndex (index, table, pars) ->
-                let cols =
-                    assert (not <| Array.isEmpty pars.Columns)
-                    pars.Columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
-                sprintf "CREATE INDEX %s ON %s (%s)" (index.name.ToSQLString()) ({ index with name = table }.ToSQLString()) cols
+                let keysStr =
+                    assert (not <| Array.isEmpty pars.Keys)
+                    pars.Keys |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                let uniqueStr = if pars.IsUnique then "UNIQUE" else ""
+                let suffixStr = sprintf "INDEX %s ON %s (%s)" (index.name.ToSQLString()) ({ index with name = table }.ToSQLString()) keysStr
+                String.concatWithWhitespaces ["CREATE"; uniqueStr; suffixStr]
             | SORenameIndex (index, toName) -> sprintf "ALTER INDEX %s RENAME TO %s" (index.ToSQLString()) (toName.ToSQLString())
             | SODropIndex index -> sprintf "DROP INDEX %s" (index.ToSQLString())
             | SOCreateOrReplaceFunction (func, args, def) ->
@@ -419,7 +434,7 @@ type SchemaOperation =
                 let whenStr =
                     match def.Condition with
                     | None -> ""
-                    | Some cond -> sprintf "WHEN (%s)" (cond.ToSQLString())
+                    | Some cond -> sprintf "WHEN (%s)" (cond.Value.ToSQLString())
                 let argsStr = def.FunctionArgs |> Seq.map renderSqlString |> String.concat ", "
                 let tailStr = sprintf "EXECUTE FUNCTION %s (%s)" (def.FunctionName.ToSQLString()) argsStr
                 String.concatWithWhitespaces ["CREATE"; constraintStr; triggerStr; whenStr; tailStr]
