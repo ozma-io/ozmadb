@@ -265,6 +265,7 @@ export type TransactionOp = IInsertEntityOp | IUpdateEntityOp | IDeleteEntityOp;
 
 export interface ITransaction {
   operations: TransactionOp[];
+  deferConstraints?: boolean;
 }
 
 /*

@@ -10,6 +10,7 @@ export interface IFunDBAPI {
   insertEntity: (ref: Api.IEntityRef, args: Record<string, unknown>) => Promise<number | undefined>;
   updateEntity: (ref: Api.IEntityRef, id: number, args: Record<string, unknown>) => Promise<void>;
   deleteEntity: (ref: Api.IEntityRef, id: number) => Promise<void>;
+  deferConstraints: <T>(inner: () => T) => Promise<T>;
   writeEvent: (message: string) => void;
   writeEventSync: (message: string) => void;
 }
