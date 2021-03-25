@@ -6,6 +6,16 @@ SELECT
   value
 FROM
   funapp.settings`,
+    "color_themes": `
+SELECT
+  id, name
+FROM
+  funapp.color_themes`,
+  "color_variants": `
+  SELECT
+    theme_id, name, foreground, border, background
+  FROM
+    funapp.color_variants`,
     // Public APIs
     "system_menu": `
 SELECT
