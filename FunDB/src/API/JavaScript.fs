@@ -181,6 +181,22 @@ type APITemplate (isolate : Isolate) =
             runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
         ))
 
+        fundbTemplate.Set("deferConstraints", FunctionTemplate.New(isolate, fun args ->
+            let context = isolate.CurrentContext
+            if args.Length <> 1 then
+                throwCallError context "Number of arguments must be 1"
+            let func = args.[0].GetFunction()
+            let handle = Option.get currentHandle
+            let run () =
+                task {
+                    let! res = handle.API.Entities.DeferConstraints <| fun () -> Task.result <| func.Call(null)
+                    match res with
+                    | Ok r -> return r
+                    | Error e -> return throwError context e
+                }
+            runtime.EventLoop.NewPromise(context, Func<_>(run), isolate.CurrentCancellationToken).Value
+        ))
+
         fundbTemplate.Set("writeEvent", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then

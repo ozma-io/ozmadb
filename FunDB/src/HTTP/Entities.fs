@@ -17,6 +17,12 @@ let private errorHandler = function
     | EEException _ -> ServerErrors.internalError
     | EETrigger _ -> ServerErrors.internalError
 
+[<NoEquality; NoComparison>]
+type TopLevelTransaction =
+    { Operations : TransactionOp[]
+      DeferConstraints : bool
+    }
+
 let entitiesApi : HttpHandler =
     let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
@@ -38,11 +44,20 @@ let entitiesApi : HttpHandler =
     let runTransaction (api : IFunDBAPI) =
         safeBindJson <| fun transaction (next : HttpFunc) (ctx : HttpContext) ->
             task {
-                match! api.Entities.RunTransaction transaction with
-                | Ok ret ->
-                    return! commitAndReturn (json ret) api next ctx
-                | Error err ->
-                    return! RequestErrors.badRequest (json err) next ctx
+                if not transaction.DeferConstraints then
+                    match! api.Entities.RunTransaction { Operations = transaction.Operations } with
+                    | Ok ret ->
+                        return! commitAndReturn (json ret) api next ctx
+                    | Error err ->
+                        return! RequestErrors.badRequest (json err) next ctx
+                else
+                    match! api.Entities.DeferConstraints (fun () -> api.Entities.RunTransaction { Operations = transaction.Operations }) with
+                    | Ok (Ok ret) ->
+                        return! commitAndReturn (json ret) api next ctx
+                    | Ok (Error err) ->
+                        return! RequestErrors.badRequest (json err) next ctx
+                    | Error err ->
+                        return! RequestErrors.badRequest (json err) next ctx
             }
 
     let transactionApi =

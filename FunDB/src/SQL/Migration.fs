@@ -178,19 +178,10 @@ let private migrateOverloads (objRef : SchemaObject) (oldOverloads : Map<Functio
             | None -> yield (SODropFunction (objRef, signature), 0)
     }
 
-let private migrateBool (oldVal : bool) (newVal : bool) =
-    if oldVal = newVal then None else Some newVal
-
 let private migrateDeferrableConstraint (objRef : SchemaObject) (tableName : TableName) (oldDefer : DeferrableConstraint) (newDefer : DeferrableConstraint) : OrderedSchemaOperation seq =
     seq {
-        let deferrable = migrateBool oldDefer.Deferrable newDefer.Deferrable
-        let initiallyDeferred = migrateBool oldDefer.InitiallyDeferred newDefer.InitiallyDeferred
-        if Option.isSome deferrable || Option.isSome initiallyDeferred then
-            let alter =
-                { Deferrable = deferrable
-                  InitiallyDeferred = initiallyDeferred
-                }
-            yield (SOAlterConstraint (objRef, tableName, alter), 0)
+        if oldDefer <> newDefer then
+            yield (SOAlterConstraint (objRef, tableName, newDefer), 0)
     }
 
 let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMeta) : OrderedSchemaOperation seq =

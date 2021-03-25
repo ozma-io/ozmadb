@@ -26,25 +26,21 @@ type ConstraintType =
 
 [<StructuralEquality; NoComparison>]
 type DeferrableConstraint =
-    { Deferrable : bool
-      InitiallyDeferred : bool
-    } with
+    | DCNotDeferrable
+    | DCDeferrable of InitiallyDeferred : bool
+    with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            let deferrableStr =
-                if this.Deferrable then "DEFERRABLE" else "NOT DEFERRABLE"
-            let initiallyDeferredStr =
-                if this.InitiallyDeferred then "INITIALLY DEFERRED" else "INITIALLY IMMEDIATE"
-            sprintf "%s %s" deferrableStr initiallyDeferredStr
+            match this with
+            | DCNotDeferrable -> "NOT DEFERRABLE"
+            | DCDeferrable initiallyDef ->
+                let initiallyDeferredStr =
+                    if initiallyDef then "INITIALLY DEFERRED" else "INITIALLY IMMEDIATE"
+                sprintf "DEFERRABLE %s" initiallyDeferredStr
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
-
-let defaultDeferrableConstraint =
-    { Deferrable = false
-      InitiallyDeferred = false
-    }
 
 [<NoEquality; NoComparison>]
 type ConstraintMeta =
@@ -224,7 +220,7 @@ type TriggerMode =
 
 [<StructuralEquality; NoComparison>]
 type TriggerDefinition =
-    { IsConstraint : bool
+    { IsConstraint : DeferrableConstraint option
       Order : TriggerOrder
       Events : TriggerEvent[]
       Mode : TriggerMode
@@ -303,34 +299,6 @@ type TableOperation =
             member this.ToSQLString () = this.ToSQLString()
 
 [<NoEquality; NoComparison>]
-type AlterConstraint =
-    { Deferrable : bool option
-      InitiallyDeferred : bool option
-    } with
-        override this.ToString () = this.ToSQLString()
-
-        member this.ToSQLString () =
-            let deferrableStr =
-                match this.Deferrable with
-                | None -> ""
-                | Some false -> "NOT DEFERRABLE"
-                | Some true -> "DEFERRABLE"
-            let initiallyDeferredStr =
-                match this.InitiallyDeferred with
-                | None -> ""
-                | Some false -> "INITIALLY IMMEDIATE"
-                | Some true -> "INITIALLY DEFERRED"
-            String.concatWithWhitespaces [deferrableStr; initiallyDeferredStr]
-
-        interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString()
-
-let emptyAlterConstraint =
-    { Deferrable = None
-      InitiallyDeferred = None
-    }
-
-[<NoEquality; NoComparison>]
 type SchemaOperation =
     | SOCreateSchema of SchemaName
     | SORenameSchema of SchemaName * SchemaName
@@ -345,7 +313,7 @@ type SchemaOperation =
     | SODropSequence of SchemaObject
     | SOCreateConstraint of SchemaObject * TableName * ConstraintMeta
     | SORenameConstraint of SchemaObject * TableName * ConstraintName
-    | SOAlterConstraint of SchemaObject * TableName * AlterConstraint
+    | SOAlterConstraint of SchemaObject * TableName * DeferrableConstraint
     | SODropConstraint of SchemaObject * TableName
     | SOCreateIndex of SchemaObject * TableName * IndexMeta
     | SORenameIndex of SchemaObject * IndexName
@@ -422,22 +390,26 @@ type SchemaOperation =
                 sprintf "DROP FUNCTION %s (%s)" (func.ToSQLString()) argsStr
             | SOCreateTrigger (trigger, table, def) ->
                 assert (not <| Array.isEmpty def.Events)
-                let constraintStr = if def.IsConstraint then "CONSTRAINT" else ""
+                let constraintStr = if Option.isSome def.IsConstraint then "CONSTRAINT" else ""
                 let eventsStr = def.Events |> Seq.map (fun e -> e.ToSQLString()) |> String.concat " OR "
                 let triggerStr =
-                    sprintf "TRIGGER %s %s %s ON %s %s"
+                    sprintf "TRIGGER %s %s %s ON %s"
                         (trigger.name.ToSQLString())
                         (def.Order.ToSQLString())
                         eventsStr
                         ({ schema = trigger.schema; name = table }.ToSQLString())
-                        (def.Mode.ToSQLString())
+                let deferStr =
+                    match def.IsConstraint with
+                    | None -> ""
+                    | Some d -> d.ToSQLString()
+                let modeStr = def.Mode.ToSQLString()
                 let whenStr =
                     match def.Condition with
                     | None -> ""
                     | Some cond -> sprintf "WHEN (%s)" (cond.Value.ToSQLString())
                 let argsStr = def.FunctionArgs |> Seq.map renderSqlString |> String.concat ", "
                 let tailStr = sprintf "EXECUTE FUNCTION %s (%s)" (def.FunctionName.ToSQLString()) argsStr
-                String.concatWithWhitespaces ["CREATE"; constraintStr; triggerStr; whenStr; tailStr]
+                String.concatWithWhitespaces ["CREATE"; constraintStr; triggerStr; deferStr; modeStr; whenStr; tailStr]
             | SORenameTrigger (trigger, table, toName) ->
                 sprintf "ALTER TRIGGER %s ON %s RENAME TO %s" (trigger.name.ToSQLString()) ({ schema = trigger.schema; name = table }.ToSQLString()) (toName.ToSQLString())
             | SODropTrigger (trigger, table) ->

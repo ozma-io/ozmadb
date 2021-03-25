@@ -238,6 +238,8 @@ type TransactionResult =
     abstract member UpdateEntity : ResolvedEntityRef -> int -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member DeleteEntity : ResolvedEntityRef -> int -> Task<Result<unit, EntityErrorInfo>>
     abstract member RunTransaction : Transaction -> Task<Result<TransactionResult, TransactionError>>
+    abstract member ConstraintsDeferred : bool
+    abstract member DeferConstraints : (unit -> Task<'a>) -> Task<Result<'a, EntityErrorInfo>>
 
 [<SerializeAsObject("error")>]
 type SaveErrorInfo =

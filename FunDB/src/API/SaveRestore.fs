@@ -76,6 +76,8 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                 return Ok (stream :> Stream)
         }
 
+    // Be careful when introducing this API to JavaScript! `RestoreSchemas` uses `DEFER CONSTRAINTS`,
+    // but Entities API has its own `DEFER CONSTRAINTS` management.
     member this.RestoreSchemas (dumps : Map<SchemaName, SchemaDump>) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
         task {
             if not (canRestore rctx.User.Type) then

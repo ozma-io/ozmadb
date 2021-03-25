@@ -178,6 +178,12 @@ let private triggerTypeUpdate = 1s <<< 4
 let private triggerTypeTruncate = 1s <<< 5
 let private triggerTypeInstead = 1s <<< 6
 
+let private makeDeferrableConstraint (constr : Constraint) : DeferrableConstraint =
+    if constr.ConDeferrable then
+        DCDeferrable constr.ConDeferred
+    else
+        DCNotDeferrable
+
 let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : TriggerName * TriggerDefinition =
     try
         if not (Array.isEmpty trigger.TgArgs) then
@@ -219,8 +225,13 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
             { schema = Some <| SQLName trigger.Function.Namespace.NspName
               name = SQLName trigger.Function.ProName
             }
+        let isConstraint =
+            if not trigger.TgConstraint.HasValue then
+                None
+            else
+                Some <| makeDeferrableConstraint trigger.Constraint
         let def =
-            { IsConstraint = trigger.TgConstraint.HasValue
+            { IsConstraint = isConstraint
               Order = order
               Events = events |> Array.ofSeq
               Mode = mode
@@ -296,11 +307,6 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
         (SQLName ns.NspName, res)
     with
     | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in schema %s: %s" ns.NspName e.Message
-
-let private makeDeferrableConstraint (constr : Constraint) : DeferrableConstraint =
-    { Deferrable = constr.ConDeferrable
-      InitiallyDeferred = constr.ConDeferred
-    }
 
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =

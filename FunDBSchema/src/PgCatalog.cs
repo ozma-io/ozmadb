@@ -141,6 +141,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
             var triggersList = await this.Triggers
                 .AsNoTracking()
                 .Include(trig => trig.Function).ThenInclude(func => func!.Namespace)
+                // Could in principle build constraints map instead and get constraints by ids. Too lazy for now.
+                .Include(trig => trig.Constraint)
                 .Where(trig => classesIds.Contains(trig.TgRelId) && !trig.TgIsInternal)
                 .Select(trig => new
                     {

@@ -180,7 +180,7 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
         else
             SQL.VEBinaryOp (checkOldColumn, SQL.BONotEq, checkNewColumn)
     let checkUpdateTriggerDefinition =
-        { IsConstraint = true
+        { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEUpdate (Some [| field.ColumnName |]) |]
           Mode = SQL.TMEachRow
@@ -193,7 +193,7 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
     let checkUpdateTriggerObject = SQL.OMTrigger (fromTable, checkUpdateTriggerDefinition)
 
     let checkInsertTriggerDefinition =
-        { IsConstraint = true
+        { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEInsert |]
           Mode = SQL.TMEachRow
@@ -554,7 +554,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let tableName = compileName constrRef.entity.name
 
     let checkUpdateTriggerDefinition =
-        { IsConstraint = true
+        { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEUpdate (Some affectedColumns) |]
           Mode = SQL.TMEachRow
@@ -567,7 +567,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let checkUpdateTriggerObject = SQL.OMTrigger (tableName, checkUpdateTriggerDefinition)
 
     let checkInsertTriggerDefinition =
-        { IsConstraint = true
+        { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEInsert |]
           Mode = SQL.TMEachRow
@@ -653,7 +653,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
     let triggerTableName = compileName trigger.Entity.name
 
     let checkUpdateTriggerDefinition =
-        { IsConstraint = true
+        { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEUpdate (Some affectedColumns) |]
           Mode = SQL.TMEachRow
