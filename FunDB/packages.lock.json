@@ -68,8 +68,8 @@
       "Npgsql": {
         "type": "Direct",
         "requested": "[5.0.*, )",
-        "resolved": "5.0.3",
-        "contentHash": "IDx2tijhyXGz7tVXQH0iGnCnW0ReSUy3UC99ytSklJKscob5WV8eLZWuT/jqYBq0l07RmZOSrdjUEDEetsgDIA==",
+        "resolved": "5.0.4",
+        "contentHash": "wuJUsrhOKaR41ZB9Ecw9ZEpQzMQ5bRahl7w+pt4noVMDkDPbw4cMHV8UfNKeZSPLXaN4yWXPR2QgJ+2vG/85VQ==",
         "dependencies": {
           "System.Runtime.CompilerServices.Unsafe": "4.6.0"
         }
@@ -89,11 +89,11 @@
       "Npgsql.Json.NET": {
         "type": "Direct",
         "requested": "[5.0.*, )",
-        "resolved": "5.0.3",
-        "contentHash": "2CTzejVyn8MptyOHC5Sr4LhdyhZR4XyzWeCa/XgrcZp/nLO6ZgGFGUSBAGQfULq5CREZPtBNx5PxKYWJwqBPpw==",
+        "resolved": "5.0.4",
+        "contentHash": "/om2QrxLYP6XrAPcs567igsInwCIXwSvyS47h5kJ4738zmPNgRgJjXbjGlH0vfAXLRX28AoU1vgLbTHc8NSNiA==",
         "dependencies": {
           "Newtonsoft.Json": "12.0.2",
-          "Npgsql": "5.0.3"
+          "Npgsql": "5.0.4"
         }
       },
       "System.Data.HashFunction.CityHash": {
@@ -109,14 +109,14 @@
       "Z.EntityFramework.Plus.EFCore": {
         "type": "Direct",
         "requested": "[5.1.*, )",
-        "resolved": "5.1.26",
-        "contentHash": "3VBTe6/FrPbws47OM/M8YtghNJeycRBP0qCdMRnnMYMY2feV0pt4qG1wk+5Ypg5zF+5iJzXjdPnpOxa1ig0iKw==",
+        "resolved": "5.1.29",
+        "contentHash": "FzdLLKXUhqrEZt1YWo994sm/KpPgWu1HG7DhciTLhZUByn2VSFXsaoVYaxgNvMHoz/FK58HsBf2pMB9qkVSDZg==",
         "dependencies": {
           "Microsoft.CSharp": "4.7.0",
           "Microsoft.EntityFrameworkCore.Relational": "[5.0.0, 6.0.0)",
           "System.Reflection.Emit": "4.7.0",
           "System.Reflection.TypeExtensions": "4.7.0",
-          "Z.EntityFramework.Extensions.EFCore": "[5.1.26]",
+          "Z.EntityFramework.Extensions.EFCore": "[5.1.29]",
           "Z.Expressions.Eval": "[4.0.37]"
         }
       },
@@ -911,8 +911,8 @@
       },
       "Z.EntityFramework.Extensions.EFCore": {
         "type": "Transitive",
-        "resolved": "5.1.26",
-        "contentHash": "hVXaxdb3eFiEeNpMrqQnOAgfMpOq6alL3xatdobNmg1wlL1hmv4lYjpNja+MoG3vmwa2oYCJmPKV3BSjSzqC/A==",
+        "resolved": "5.1.29",
+        "contentHash": "KdQMhJR6dZqAsVF1zJeVsYD6fM0FFRXWyhtZZCO5vHc+E+OyMpoGSosAR9ToaLFZ/Bo8vOQrhMZmwVKHZea7bA==",
         "dependencies": {
           "Microsoft.CSharp": "4.7.0",
           "Microsoft.EntityFrameworkCore.Relational": "5.0.0",

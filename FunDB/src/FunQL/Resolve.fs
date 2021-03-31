@@ -955,8 +955,8 @@ let resolveViewExpr (layout : Layout) (viewExpr : ParsedViewExpr) : ResolvedView
     let allArguments = Map.union localArguments globalArgumentsMap
     let qualifier = QueryResolver (layout, allArguments)
     let (results, qQuery) = qualifier.ResolveSelectExpr viewExprSelectFlags viewExpr.Select
-    let qQuery = relabelSelectExpr qQuery
     let mainEntity = Option.map (qualifier.ResolveMainEntity (getFieldsMap results) qQuery) viewExpr.MainEntity
+    let qQuery = relabelSelectExpr qQuery
 
     { Arguments = Map.union localArguments (Map.filter (fun name _ -> Set.contains name qualifier.UsedArguments) globalArgumentsMap)
       Select = qQuery
