@@ -164,3 +164,8 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
         member this.Isolate = isolate
         member this.EventLoop = this.EventLoop
         member this.EventLoopScope f = this.EventLoopScope f
+
+let stackTraceString (e : JSException) =
+    match JSException.GetStackTrace e.Value with
+    | null -> "(no stack trace)"
+    | trace -> trace.ToPrettyString()

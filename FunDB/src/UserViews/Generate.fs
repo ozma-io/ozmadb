@@ -39,7 +39,7 @@ type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scri
             newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
         with
         | :? JSException as e ->
-            raisefWithInner UserViewGenerateException e "Unhandled exception in user view generator: %s" (e.JSStackTrace.ToPrettyString())
+            raisefWithInner UserViewGenerateException e "Unhandled exception in user view generator %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
         | :? NetJsException as e ->
             raisefWithInner UserViewGenerateException e "Couldn't generate user views"
 

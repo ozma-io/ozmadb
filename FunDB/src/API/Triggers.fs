@@ -71,7 +71,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                     }
             with
             | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
+                return raisefWithInner TriggerRunException e "Unhandled exception in trigger %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
             | :? NetJsException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
@@ -99,7 +99,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                     }
             with
             | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
+                return raisefWithInner TriggerRunException e "Unhandled exception in trigger %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
             | :? NetJsException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
@@ -128,7 +128,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                     }
             with
             | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger:\n%s" (e.JSStackTrace.ToPrettyString())
+                return raisefWithInner TriggerRunException e "Unhandled exception in trigger %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
             | :? NetJsException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }

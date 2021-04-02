@@ -48,7 +48,7 @@ type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
                     }
             with
             | :? JSException as e ->
-                return raisefWithInner ActionRunException e "Unhandled exception:\n%s" (e.JSStackTrace.ToPrettyString())
+                return raisefWithInner ActionRunException e "Unhandled exception %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
             | :? NetJsException as e ->
                 return raisefWithInner ActionRunException e "Failed to run"
         }
