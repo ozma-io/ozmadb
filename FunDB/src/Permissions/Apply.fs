@@ -11,12 +11,13 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 // Rename top-level entities in a restriction expression
 let private renameRestriction (boundRef : ResolvedEntityRef) (entityRef : ResolvedEntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
+    let relaxedRef = relaxEntityRef entityRef
     let renameBound (bound : BoundField) : BoundField =
         { bound with Ref = { entity = boundRef; name = bound.Ref.name } }
     let resetReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
         let link =
             match ref.Ref with
-            | VRColumn c -> VRColumn { Bound = Option.map renameBound c.Bound; Ref = ({ entity = Some { schema = None; name = entityRef.name }; name = c.Ref.name } : FieldRef) }
+            | VRColumn c -> VRColumn { Bound = Option.map renameBound c.Bound; Ref = ({ entity = Some relaxedRef; name = c.Ref.name } : FieldRef) }
             | VRPlaceholder p -> VRPlaceholder p
         { Ref = link; Path = ref.Path }
     let mapper = idFieldExprMapper resetReference id

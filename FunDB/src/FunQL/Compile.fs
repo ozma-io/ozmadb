@@ -1527,14 +1527,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             (Map.singleton (compileName alias.Name) fromInfo, ret)
 
     member this.CompileSingleFromClause (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) =
-        let (fromMap, from) = compileFromExpr Map.empty None from
+        let (fromMap, compiledFrom) = compileFromExpr Map.empty None from
         let (newPaths, where) =
             match where with
             | None -> (Map.empty, None)
             | Some where ->
                 let (newPaths, ret) = compileLinkedFieldExpr Map.empty Map.empty where
                 (newPaths, Some ret)
-        let builtFrom = buildJoins from newPaths
+        let builtFrom = buildJoins compiledFrom newPaths
         (builtFrom, where)
 
     member this.CompileSelectExpr (mainEntity : ResolvedEntityRef option) (metaColumns : bool) (select : ResolvedSelectExpr) =

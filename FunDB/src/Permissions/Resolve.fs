@@ -153,13 +153,14 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                 | PLocal name ->
                     raisef ResolvePermissionsException "Local argument %O is not allowed" name
             newQuery
-        let voidAggr aggr = raisef ViewResolveException "Forbidden aggregate function in a restriction"
+        let voidAggr aggr = raisef ResolvePermissionsException "Forbidden aggregate function in a restriction"
 
         let mapper =
             { idFieldExprMapper resolveReference resolveQuery with
                   Aggregate = voidAggr
             }
         let expr = mapFieldExpr mapper whereExpr |> optimizeFieldExpr
+
         { Expression = expr
           GlobalArguments = globalArguments
         }
