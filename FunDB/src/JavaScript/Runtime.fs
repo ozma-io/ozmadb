@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.JavaScript.Runtime
 
 open System
+open System.Threading
 open System.Threading.Tasks
 open System.Runtime.CompilerServices
 open FSharp.Control.Tasks.Affine
@@ -169,3 +170,19 @@ let stackTraceString (e : JSException) =
     match JSException.GetStackTrace e.Value with
     | null -> "(no stack trace)"
     | trace -> trace.ToPrettyString()
+
+let inline runFunctionInRuntime (runtime : IJSRuntime) (func : Function) (cancellationToken : CancellationToken) (args : Value.Value[]) =
+    task {
+        try
+            return! runtime.EventLoopScope <| fun eventLoop ->
+                task {
+                    let maybeResult = func.Call(cancellationToken, null, args)
+                    eventLoop.Run(cancellationToken)
+                    return maybeResult.GetValueOrPromiseResult ()
+                }
+        with
+        | :? JSException as e ->
+            return raisefWithInner JavaScriptRuntimeException e "Unhandled exception %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
+        | :? NetJsException as e ->
+            return raisefWithInner JavaScriptRuntimeException e "Failed to run"
+    }

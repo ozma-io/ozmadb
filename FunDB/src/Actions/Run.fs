@@ -33,24 +33,16 @@ type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
                 args.WriteTo(writer)
                 writer.Result
             try
-                return! runtime.EventLoopScope <| fun eventLoop ->
-                    task {
-                        let maybeResult = func.Call(cancellationToken, null, [|argsValue|])
-                        do! eventLoop.Run ()
-                        let maybeResult = maybeResult.GetValueOrPromiseResult ()
-                        match maybeResult.Data with
-                        | :? Undefined -> return None
-                        | :? Object ->
-                            use reader = new V8JsonReader(maybeResult)
-                            let result = JToken.ReadFrom(reader) :?> JObject
-                            return Some result
-                        | _ -> return raisef ActionRunException "Invalid return value"
-                    }
+                let! result =  runFunctionInRuntime runtime func cancellationToken [|argsValue|]
+                match result.Data with
+                | :? Undefined -> return None
+                | :? Object ->
+                    use reader = new V8JsonReader(result)
+                    let result = JToken.ReadFrom(reader) :?> JObject
+                    return Some result
+                | _ -> return raisef ActionRunException "Invalid return value"
             with
-            | :? JSException as e ->
-                return raisefWithInner ActionRunException e "Unhandled exception %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
-            | :? NetJsException as e ->
-                return raisefWithInner ActionRunException e "Failed to run"
+            | :? JavaScriptRuntimeException as e -> return raisefWithInner ActionRunException e "Failed to run action"
         }
 
     member this.Runtime = runtime

@@ -51,28 +51,20 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             let oldArgs = V8JsonWriter.Serialize(runtime.Context, args)
             try
-                return! runtime.EventLoopScope <| fun eventLoop ->
-                    task {
-                        let newArgs = func.Call(cancellationToken, null, [|eventValue; oldArgs|])
-                        do! eventLoop.Run ()
-                        let newArgs = newArgs.GetValueOrPromiseResult ()
-                        return
-                            match newArgs.Data with
-                            | :? bool as ret -> if ret then ATUntouched else ATCancelled
-                            | _ ->
-                                let ret =
-                                    try
-                                        V8JsonReader.Deserialize(newArgs)
-                                    with
-                                    | :? JsonReaderException as e -> raisefWithInner TriggerRunException e "Failed to parse value"
-                                if isRefNull ret then
-                                    raisef TriggerRunException "Value must not be null"
-                                ATTouched ret
-                    }
+                let! newArgs = runFunctionInRuntime runtime func cancellationToken [|eventValue; oldArgs|]
+                match newArgs.Data with
+                | :? bool as ret -> return (if ret then ATUntouched else ATCancelled)
+                | _ ->
+                    let ret =
+                        try
+                            V8JsonReader.Deserialize(newArgs)
+                        with
+                        | :? JsonReaderException as e -> raisefWithInner TriggerRunException e "Failed to parse value"
+                    if isRefNull ret then
+                        raisef TriggerRunException "Value must not be null"
+                    return ATTouched ret
             with
-            | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
-            | :? NetJsException as e ->
+            | :? JavaScriptRuntimeException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
@@ -84,23 +76,17 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                   Source = source
                 }
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
+            let functionArgs =
+                match args with
+                | Some oldArgsObj ->
+                    let oldArgs = V8JsonWriter.Serialize(runtime.Context, oldArgsObj)
+                    [|eventValue; oldArgs|]
+                | None -> [|eventValue|]
             try
-                let functionArgs =
-                    match args with
-                    | Some oldArgsObj ->
-                        let oldArgs = V8JsonWriter.Serialize(runtime.Context, oldArgsObj)
-                        [|eventValue; oldArgs|]
-                    | None -> [|eventValue|]
-                return! runtime.EventLoopScope <| fun eventLoop ->
-                    task {
-                        let maybePromise = func.Call(cancellationToken, null, functionArgs)
-                        do! eventLoop.Run ()
-                        ignore <| maybePromise.GetValueOrPromiseResult ()
-                    }
+                let! _ = runFunctionInRuntime runtime func cancellationToken functionArgs
+                return ()
             with
-            | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
-            | :? NetJsException as e ->
+            | :? JavaScriptRuntimeException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
@@ -119,19 +105,13 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                 }
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             try
-                return! runtime.EventLoopScope <| fun eventLoop ->
-                    task {
-                        let maybeContinue = func.Call(cancellationToken, null, [|eventValue|])
-                        do! eventLoop.Run ()
-                        let maybeContinue = maybeContinue.GetValueOrPromiseResult ()
-                        return maybeContinue.GetBoolean ()
-                    }
+                let! maybeContinue = runFunctionInRuntime runtime func cancellationToken [|eventValue|]
+                return maybeContinue.GetBoolean ()
             with
-            | :? JSException as e ->
-                return raisefWithInner TriggerRunException e "Unhandled exception in trigger %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
-            | :? NetJsException as e ->
+            | :? JavaScriptRuntimeException as e ->
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
+
     member this.RunInsertTriggerAfter (entity : ResolvedEntityRef) (newId : int) (args : EntityArguments) (cancellationToken : CancellationToken) : Task =
         runAfterTrigger entity (TSInsert (Some newId)) (Some args) cancellationToken
 

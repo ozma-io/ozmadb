@@ -391,9 +391,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                         logger.LogError(ex, "Error while having constraints deferred")
                         deferConstraintsDepth <- deferConstraintsDepth - 1
                         try
-                            eprintfn "lolol"
                             let! _ = query.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty ctx.CancellationToken
-                            eprintfn "lalal"
                             ()
                         with
                         | ex  -> logger.LogError(ex, "Error while setting constraints immediate when throwing")
@@ -402,9 +400,7 @@ type EntitiesAPI (rctx : IRequestContext) =
             deferConstraintsDepth <- deferConstraintsDepth - 1
             if deferConstraintsDepth = 0 then
                 try
-                    eprintfn "hohoho"
                     let! _ = query.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty ctx.CancellationToken
-                    eprintfn "hahaha"
                     return Ok ret
                 with
                 | :? QueryException as ex ->

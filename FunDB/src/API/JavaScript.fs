@@ -79,7 +79,7 @@ type APITemplate (isolate : Isolate) =
                 let! res = f ()
                 match res with
                 | Ok r -> return V8JsonWriter.Serialize(context, r)
-                | Error e -> return throwError context e
+                | Error e -> return raisef JavaScriptRuntimeException "%O" e
             }
         Func<_>(run)
 
@@ -128,7 +128,7 @@ type APITemplate (isolate : Isolate) =
                     emptyViewChunk
             let handle = Option.get currentHandle
             let run = runApiCall context <| fun () -> handle.API.UserViews.GetUserView source uvArgs chunk emptyUserViewFlags
-            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
+            runtime.EventLoop.NewPromise(context, run).Value
         ))
         fundbTemplate.Set("getUserViewInfo", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -137,7 +137,7 @@ type APITemplate (isolate : Isolate) =
             let source = jsDeserialize context args.[0] : UserViewSource
             let handle = Option.get currentHandle
             let run = runApiCall context <| fun () -> handle.API.UserViews.GetUserViewInfo source emptyUserViewFlags
-            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
+            runtime.EventLoop.NewPromise(context, run).Value
         ))
 
         fundbTemplate.Set("getEntityInfo", FunctionTemplate.New(isolate, fun args ->
@@ -147,7 +147,7 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
             let handle = Option.get currentHandle
             let run = runApiCall context <| fun () -> handle.API.Entities.GetEntityInfo ref
-            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
+            runtime.EventLoop.NewPromise(context, run).Value
         ))
         fundbTemplate.Set("insertEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -157,7 +157,7 @@ type APITemplate (isolate : Isolate) =
             let rawArgs = jsDeserialize context args.[1] : RawArguments
             let handle = Option.get currentHandle
             let run = runApiCall context <| fun () -> handle.API.Entities.InsertEntity ref rawArgs
-            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
+            runtime.EventLoop.NewPromise(context, run).Value
         ))
         fundbTemplate.Set("updateEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -168,7 +168,7 @@ type APITemplate (isolate : Isolate) =
             let rawArgs = jsDeserialize context args.[2] : RawArguments
             let handle = Option.get currentHandle
             let run = runApiCall context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
-            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
+            runtime.EventLoop.NewPromise(context, run).Value
         ))
         fundbTemplate.Set("deleteEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -178,7 +178,7 @@ type APITemplate (isolate : Isolate) =
             let id = jsInt context args.[1]
             let handle = Option.get currentHandle
             let run = runApiCall context <| fun () -> handle.API.Entities.DeleteEntity ref id
-            runtime.EventLoop.NewPromise(context, run, isolate.CurrentCancellationToken).Value
+            runtime.EventLoop.NewPromise(context, run).Value
         ))
 
         fundbTemplate.Set("deferConstraints", FunctionTemplate.New(isolate, fun args ->
@@ -192,9 +192,9 @@ type APITemplate (isolate : Isolate) =
                     let! res = handle.API.Entities.DeferConstraints <| fun () -> func.CallAsync(null)
                     match res with
                     | Ok r -> return r
-                    | Error e -> return throwError context e
+                    | Error e -> return raisef JavaScriptRuntimeException "%O" e
                 }
-            runtime.EventLoop.NewPromise(context, Func<_>(run), isolate.CurrentCancellationToken).Value
+            runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
 
         fundbTemplate.Set("writeEvent", FunctionTemplate.New(isolate, fun args ->
