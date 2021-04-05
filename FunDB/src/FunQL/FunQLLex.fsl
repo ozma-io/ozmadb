@@ -175,6 +175,7 @@ and tokenizeFunQL = parse
     | e n u m           { Parse.ENUM_TYPE }
     | j s o n           { Parse.JSON_TYPE }
     | u v r e f         { Parse.UVREF_TYPE }
+    | u u i d           { Parse.UUID_TYPE }
 
     // Unescaped ids
     | unescapedId { Parse.ID ((String lexbuf.Lexeme).ToLower()) }

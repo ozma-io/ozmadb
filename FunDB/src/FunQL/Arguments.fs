@@ -48,6 +48,7 @@ let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
     | SFTInterval -> SQL.STInterval
     | SFTJson -> SQL.STJson
     | SFTUserViewRef -> SQL.STJson
+    | SFTUuid -> SQL.STUuid
 
 let compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
     | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
@@ -135,6 +136,7 @@ let compileFieldValue : FieldValue -> SQL.Value = function
     | FDate d -> SQL.VDate d
     | FInterval int -> SQL.VInterval int
     | FJson j -> SQL.VJson j
+    | FUuid u -> SQL.VUuid u
     | FUserViewRef r -> SQL.VJson <| JToken.FromObject(r)
     | FIntArray vals -> SQL.VIntArray (compileArray vals)
     | FDecimalArray vals -> SQL.VDecimalArray (compileArray vals)
@@ -145,6 +147,7 @@ let compileFieldValue : FieldValue -> SQL.Value = function
     | FIntervalArray vals -> SQL.VIntervalArray (compileArray vals)
     | FJsonArray vals -> SQL.VJsonArray (compileArray vals)
     | FUserViewRefArray vals -> SQL.VJsonArray (vals |> Array.map (fun x -> JToken.FromObject(x)) |> compileArray)
+    | FUuidArray vals -> SQL.VUuidArray (compileArray vals)
     | FNull -> SQL.VNull
 
 let prepareArguments (args : QueryArguments) (values : ArgumentValues) : ExprParameters =

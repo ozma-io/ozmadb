@@ -25,6 +25,7 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FInterval int -> failwith "Not implemented"
     | FJson j -> failwith "Not implemented"
     | FUserViewRef r -> failwith "Not implemented"
+    | FUuid u -> failwith "Not implemented"
     | FIntArray ints -> JSArray <| Array.map (double >> JSNumber >> JSValue) ints
     | FDecimalArray decs -> JSArray <| Array.map (double >> JSNumber >> JSValue) decs
     | FStringArray strings -> JSArray <| Array.map (JSString >> JSValue) strings
@@ -34,6 +35,7 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FIntervalArray ints -> failwith "Not implemented"
     | FJsonArray jss -> failwith "Not implemented"
     | FUserViewRefArray refs -> failwith "Not implemented"
+    | FUuidArray uuids -> failwith "Not implemented"
     | FNull -> JSValue JSNull
 
 // Expects local variable `context`.

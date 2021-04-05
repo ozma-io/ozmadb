@@ -74,6 +74,11 @@ let tryBool (str : string) : bool option =
     | "n" -> Some false
     | _ -> None
 
+let tryUuid (str : string) : Guid option =
+    match Guid.TryParse(str) with
+    | (true, uuid) -> Some uuid
+    | (false, _) -> None
+
 let regexMatch (regex : string) (flags : RegexOptions) (str : string) : (string list) option =
     let m = Regex.Match(str, regex, flags)
     if m.Success

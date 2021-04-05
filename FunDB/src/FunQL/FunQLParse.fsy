@@ -85,7 +85,8 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
         | FUserViewRefArray _
         | FDateArray _
         | FDateTimeArray _
-        | FIntervalArray _ ->
+        | FIntervalArray _
+        | FUuidArray _ ->
             match exprType with
             | FETArray _ -> ()
             | FETScalar _ -> failwith "Casting cannot be performed between arrays and scalars"
@@ -97,7 +98,8 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
         | FUserViewRef _
         | FDate _
         | FDateTime _
-        | FInterval _ ->
+        | FInterval _
+        | FUuid _ ->
             match exprType with
             | FETScalar _ -> ()
             | FETArray _ -> failwith "Casting cannot be performed between arrays and scalars"
@@ -109,60 +111,25 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin { Type = joinType; A = fromExpr1; B = fromExpr2; Condition = whereExpr }
 
-let private valueToJson : FieldValue -> JToken = function
-    | FInt i -> JToken.op_Implicit i
-    | FDecimal d -> JToken.op_Implicit d
-    | FString s -> JToken.op_Implicit s
-    | FBool b -> JToken.op_Implicit b
-    | FJson j -> j
-    | FStringArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
-    | FIntArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
-    | FBoolArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
-    | FDecimalArray ss -> ss |> Seq.map JToken.op_Implicit |> jsonArray :> JToken
-    | FJsonArray ss -> jsonArray ss :> JToken
-    | FNull -> JValue.CreateNull() :> JToken
-    // Keep in sync with coalesceJsonObject!
-    | (FUserViewRef _ as v)
-    | (FUserViewRefArray _ as v)
-    | (FDate _ as v)
-    | (FDateTime _ as v)
-    | (FInterval _ as v)
-    | (FDateArray _ as v)
-    | (FDateTimeArray _ as v)
-    | (FIntervalArray _ as v) ->
-      failwith <| sprintf "Encountered impossible value %O while converting to JSON in parser" v
-
-let private validJsonValue = function
-    // Keep in sync with valueToJson!
-    | FUserViewRef _
-    | FUserViewRefArray _
-    | FDate _
-    | FDateTime _
-    | FInterval _
-    | FDateArray _
-    | FDateTimeArray _
-    | FIntervalArray _ -> false
-    | _ -> true
-
 let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : ParsedFieldExpr =
     let rec tryExtract = function
         | [] -> Some []
-        | ((name, FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
+        | ((name, FEValue v) :: t) -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
         | _ -> None
 
     match tryExtract exprs with
     | None -> FEJsonObject (exprs |> Seq.map (fun (name, e) -> (FunQLName name, e)) |> Map.ofSeq)
-    | Some vals -> FEValue (FJson (vals |> Seq.map (fun (name, v) -> (name, valueToJson v)) |> jsonObject))
+    | Some vals -> FEValue (FJson (vals |> Seq.map (fun (name, v) -> (name, JToken.FromObject v)) |> jsonObject))
 
 let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
     let rec tryExtract = function
         | [] -> Some []
-        | ((FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> v :: nt) (tryExtract t)
+        | ((FEValue v) :: t) -> Option.map (fun nt -> v :: nt) (tryExtract t)
         | _ -> None
 
     match tryExtract exprs with
     | None -> FEJsonArray (List.toArray exprs)
-    | Some vals -> FEValue (FJson (vals |> Seq.map valueToJson |> jsonArray))
+    | Some vals -> FEValue (FJson (vals |> Seq.map JToken.FromObject |> jsonArray))
 
 let private makeFunc (name : FunQLName) (exprs : ParsedFieldExpr array) : ParsedFieldExpr =
     if Map.containsKey name allowedFunctions then
@@ -293,6 +260,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token ENUM_TYPE
 %token JSON_TYPE
 %token UVREF_TYPE
+%token UUID_TYPE
 
 // Misc
 %token EOF
@@ -786,6 +754,7 @@ ScalarType:
     | INTERVAL_TYPE { SFTInterval }
     | JSON_TYPE     { SFTJson }
     | UVREF_TYPE    { SFTUserViewRef }
+    | UUID_TYPE     { SFTUuid }
 
 FieldExprType:
     | ScalarType                               { FETScalar $1 }

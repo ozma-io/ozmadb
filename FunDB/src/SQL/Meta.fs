@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.SQL.Meta
 
+open System
 open Npgsql
 open System.Threading
 open System.Threading.Tasks
@@ -67,6 +68,7 @@ let private parseToSimpleType : SimpleType -> (string -> Value) = function
     | STInterval -> runCast trySqlInterval >> VInterval
     | STRegclass -> runCast tryRegclass >> VRegclass
     | STJson -> runCast tryJson >> VJson
+    | STUuid -> runCast tryUuid >> VUuid
 
 // Convert string-cast patterns into actual values so that we reverse lost type information.
 // Don't reduce the expressions beyond that!

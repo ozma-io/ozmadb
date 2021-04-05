@@ -93,7 +93,7 @@ type ArrayValue<'t> =
     | AVArray of ArrayValue<'t>[]
     | AVNull
 
-and ValueArray<'t> = ArrayValue<'t> array
+and ValueArray<'t> = ArrayValue<'t>[]
 
 let rec mapArrayValue (func : 'a -> 'b) : ArrayValue<'a> -> ArrayValue<'b> = function
     | AVValue a -> AVValue (func a)
@@ -114,6 +114,7 @@ type [<NoEquality; NoComparison>] Value =
     | VDate of NpgsqlDate
     | VInterval of NpgsqlTimeSpan
     | VJson of JToken
+    | VUuid of Guid
     | VIntArray of ValueArray<int>
     | VBigIntArray of ValueArray<int64>
     | VDecimalArray of ValueArray<decimal>
@@ -124,6 +125,7 @@ type [<NoEquality; NoComparison>] Value =
     | VIntervalArray of ValueArray<NpgsqlTimeSpan>
     | VRegclassArray of ValueArray<SchemaObject>
     | VJsonArray of ValueArray<JToken>
+    | VUuidArray of ValueArray<Guid>
     | VNull
     with
         override this.ToString () = this.ToSQLString()
@@ -149,6 +151,7 @@ type [<NoEquality; NoComparison>] Value =
             | VDate d -> sprintf "%s :: date" (d |> string |> renderSqlString)
             | VInterval d -> sprintf "%s :: interval" (d |> string |> renderSqlString)
             | VJson j -> sprintf "%s :: jsonb" (j |> renderSqlJson |> renderSqlString)
+            | VUuid u -> sprintf "%s :: uuid" (u |> string |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
             | VBigIntArray vals -> renderArray renderSqlBigInt "int8" vals
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
@@ -159,6 +162,7 @@ type [<NoEquality; NoComparison>] Value =
             | VIntervalArray vals -> renderArray string "interval" vals
             | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
             | VJsonArray vals -> renderArray renderSqlJson "jsonb" vals
+            | VUuidArray vals -> renderArray string "uuid" vals
             | VNull -> "NULL"
 
         interface ISQLString with
@@ -195,6 +199,7 @@ type ValuePrettyConverter () =
         | VInterval int -> writer.WriteValue(int.ToString())
         | VJson j -> j.WriteTo(writer)
         | VRegclass rc -> writer.WriteValue(string rc)
+        | VUuid u -> writer.WriteValue(u)
         | VIntArray vals -> serializeArray id vals
         | VBigIntArray vals -> serializeArray id vals
         | VDecimalArray vals -> serializeArray id vals
@@ -205,6 +210,7 @@ type ValuePrettyConverter () =
         | VIntervalArray vals -> serializeArray string vals
         | VRegclassArray vals -> serializeArray string vals
         | VJsonArray vals -> serializeArray id vals
+        | VUuidArray vals -> serializeArray id vals
         | VNull -> writer.WriteNull()
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
@@ -220,6 +226,7 @@ type SimpleType =
     | [<CaseName("interval")>] STInterval
     | [<CaseName("regclass")>] STRegclass
     | [<CaseName("json")>] STJson
+    | [<CaseName("uuid")>] STUuid
     with
         override this.ToString () = this.ToSQLString()
 
@@ -235,6 +242,7 @@ type SimpleType =
             | STInterval -> "interval"
             | STRegclass -> "regclass"
             | STJson -> "jsonb"
+            | STUuid -> "uuid"
 
         member this.ToSQLRawString () = SQLRawString (this.ToSQLString())
 
@@ -264,6 +272,7 @@ let findSimpleType (str : TypeName) : SimpleType option =
     | "regclass" -> Some STRegclass
     | "jsonb" -> Some STJson
     | "json" -> Some STJson
+    | "uuid" -> Some STUuid
     | _ -> None
 
 [<SerializeAsObject("type")>]
@@ -299,6 +308,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VInterval int -> Some <| VTScalar STInterval
     | VRegclass rc -> Some <| VTScalar STRegclass
     | VJson j -> Some <| VTScalar STJson
+    | VUuid u -> Some <| VTScalar STUuid
     | VIntArray vals -> Some <| VTArray STInt
     | VBigIntArray vals -> Some <| VTArray STBigInt
     | VDecimalArray vals -> Some <| VTArray STDecimal
@@ -309,6 +319,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VIntervalArray vals -> Some <| VTArray STInterval
     | VRegclassArray vals -> Some <| VTArray STRegclass
     | VJsonArray vals -> Some <| VTArray STJson
+    | VUuidArray vals -> Some <| VTArray STUuid
     | VNull -> None
 
 let findSimpleValueType : DBValueType -> SimpleValueType option = function

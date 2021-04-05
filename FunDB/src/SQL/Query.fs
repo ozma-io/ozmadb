@@ -78,6 +78,7 @@ let private convertValue valType (rawValue : obj) =
         match tryJson value with
         | Some j -> VJson j
         | None -> raisef QueryException "Invalid JSON value: %s" value
+    | (VTScalar STUuid, (:? Guid as value)) -> VUuid value
     | (VTArray scalarType, (:? Array as rootVals)) ->
         let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
             let convertOne : obj -> ArrayValue<'a> = function
@@ -100,6 +101,7 @@ let private convertValue valType (rawValue : obj) =
         | STInterval -> VIntervalArray (convertArray tryCast<NpgsqlTimeSpan> rootVals)
         | STRegclass -> raisef QueryException "Regclass arrays are not supported: %O" rootVals
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
+        | STUuid -> VUuidArray (convertArray tryCast<Guid> rootVals)
     | (typ, value) -> raisef QueryException "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName)
 
 let rec private npgsqlArrayValue (vals : ArrayValue<'a> array) : obj =
@@ -123,6 +125,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VDate dt -> (Some NpgsqlDbType.Date, upcast dt)
     | VInterval int -> (Some NpgsqlDbType.Interval, upcast int)
     | VJson j -> (Some NpgsqlDbType.Jsonb, upcast j)
+    | VUuid u -> (Some NpgsqlDbType.Uuid, upcast u)
     | VIntArray vals -> npgsqlArray NpgsqlDbType.Integer vals
     | VBigIntArray vals -> npgsqlArray NpgsqlDbType.Bigint vals
     | VDecimalArray vals -> npgsqlArray NpgsqlDbType.Numeric vals
@@ -133,6 +136,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VIntervalArray vals -> npgsqlArray NpgsqlDbType.Interval vals
     | VRegclassArray vals -> raisef QueryException "Regclass arguments are not supported: %O" vals
     | VJsonArray vals -> npgsqlArray NpgsqlDbType.Jsonb vals
+    | VUuidArray vals -> npgsqlArray NpgsqlDbType.Uuid vals
     | VNull -> (None, upcast DBNull.Value)
 
 type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnection) =

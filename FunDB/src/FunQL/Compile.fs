@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.FunQL.Compile
 
+open System
 open NpgsqlTypes
 open Newtonsoft.Json.Linq
 
@@ -228,6 +229,7 @@ let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETArray SFTInterval -> FIntervalArray [||]
     | FETArray SFTJson -> FJsonArray [||]
     | FETArray SFTUserViewRef -> FUserViewRefArray [||]
+    | FETArray SFTUuid -> FUuidArray [||]
     | FETScalar SFTString -> FString ""
     | FETScalar SFTInt -> FInt 0
     | FETScalar SFTDecimal -> FDecimal 0m
@@ -237,6 +239,7 @@ let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
     | FETScalar SFTInterval -> FInterval NpgsqlTimeSpan.Zero
     | FETScalar SFTJson -> FJson (JObject ())
     | FETScalar SFTUserViewRef -> FUserViewRef { schema = None; name = FunQLName "" }
+    | FETScalar SFTUuid -> FUuid Guid.Empty
 
 let defaultCompiledArgument : ResolvedFieldType -> FieldValue = function
     | FTType feType -> defaultCompiledExprArgument feType
@@ -349,49 +352,6 @@ let composeExhaustingIf (compileTag : 'tag -> SQL.ValueExpr) (options : ('tag * 
         let (lastTag, lastExpr) = options.[last]
         SQL.VECase (cases, Some lastExpr)
 
-let private valueToJson : SQL.Value -> JToken = function
-    | SQL.VInt i -> JToken.op_Implicit i
-    | SQL.VBigInt i -> JToken.op_Implicit i
-    | SQL.VDecimal d -> JToken.op_Implicit d
-    | SQL.VString s -> JToken.op_Implicit s
-    | SQL.VBool b -> JToken.op_Implicit b
-    | SQL.VJson j -> j
-    | SQL.VStringArray ss -> sqlJsonArray ss
-    | SQL.VIntArray ss -> sqlJsonArray ss
-    | SQL.VBigIntArray ss -> sqlJsonArray ss
-    | SQL.VBoolArray ss -> sqlJsonArray ss
-    | SQL.VDecimalArray ss -> sqlJsonArray ss
-    | SQL.VJsonArray initialVals ->
-        let rec traverse vals =
-            let arr = JArray()
-            for v in vals do
-                let newV =
-                    match v with
-                    | SQL.AVArray ss -> traverse ss
-                    | SQL.AVValue v -> v
-                    | SQL.AVNull -> JValue.CreateNull() :> JToken
-                arr.Add(newV)
-            arr :> JToken
-        traverse initialVals
-    | SQL.VNull -> JValue.CreateNull() :> JToken
-    | (SQL.VDate _ as v)
-    | (SQL.VDateTime _ as v)
-    | (SQL.VInterval _ as v)
-    | (SQL.VDateArray _ as v)
-    | (SQL.VDateTimeArray _ as v)
-    | (SQL.VIntervalArray _ as v)
-    | (SQL.VRegclass _ as v)
-    | (SQL.VRegclassArray _ as v) ->
-        failwith <| sprintf "Encountered impossible value %O while converting to JSON in parser" v
-
-let private validJsonValue = function
-    // Keep in sync with valueToJson!
-    | SQL.VDate _
-    | SQL.VDateTime _
-    | SQL.VDateArray _
-    | SQL.VDateTimeArray _ -> true
-    | _ -> false
-
 let private rewriteSubEntityCheck (subEntity : SQL.ValueExpr) : SQL.ValueExpr -> SQL.ValueExpr =
     SQL.genericMapValueExpr
         { SQL.idValueExprGenericMapper with
@@ -451,25 +411,25 @@ let rec genericCompileFieldExpr (layout : Layout) (refFunc : ReferenceContext ->
             let compiled = Array.map traverse vals
 
             let tryExtract = function
-                | SQL.VEValue v when validJsonValue v -> Some v
+                | SQL.VEValue v -> Some v
                 | _ -> None
 
             // Recheck if all values can be represented as JSON value; e.g. user view references are now valid values.
             let optimized = Seq.traverseOption tryExtract compiled
             match optimized with
-            | Some optimizedVals -> optimizedVals |> Seq.map valueToJson |> jsonArray :> JToken |> SQL.VJson |> SQL.VEValue
+            | Some optimizedVals -> optimizedVals |> Seq.map JToken.FromObject |> jsonArray :> JToken |> SQL.VJson |> SQL.VEValue
             | None -> SQL.VEFunc (SQL.SQLName "jsonb_build_array", Array.map traverse vals)
         | FEJsonObject obj ->
             let compiled = Map.map (fun name -> traverse) obj
 
             let tryExtract = function
-                | (FunQLName name, SQL.VEValue v) when validJsonValue v -> Some (name, v)
+                | (FunQLName name, SQL.VEValue v) -> Some (name, v)
                 | _ -> None
 
             // Recheck if all values can be represented as JSON value; e.g. user view references are now valid values.
             let optimized = Seq.traverseOption tryExtract (Map.toSeq compiled)
             match optimized with
-            | Some optimizedVals -> optimizedVals |> Seq.map (fun (name, v) -> (name, valueToJson v)) |> jsonObject :> JToken |> SQL.VJson |> SQL.VEValue
+            | Some optimizedVals -> optimizedVals |> Seq.map (fun (name, v) -> (name, JToken.FromObject v)) |> jsonObject :> JToken |> SQL.VJson |> SQL.VEValue
             | None ->
                 let args = obj |> Map.toSeq |> Seq.collect (fun (FunQLName name, v) -> [SQL.VEValue <| SQL.VString name; traverse v]) |> Seq.toArray
                 SQL.VEFunc (SQL.SQLName "jsonb_build_object", args)

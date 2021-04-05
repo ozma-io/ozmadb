@@ -170,6 +170,7 @@ type [<NoEquality; NoComparison>] FieldValue =
     | FDate of NpgsqlDate
     | FInterval of NpgsqlTimeSpan
     | FJson of JToken
+    | FUuid of Guid
     | FUserViewRef of UserViewRef
     | FIntArray of int[]
     | FDecimalArray of decimal[]
@@ -180,6 +181,7 @@ type [<NoEquality; NoComparison>] FieldValue =
     | FIntervalArray of NpgsqlTimeSpan[]
     | FJsonArray of JToken[]
     | FUserViewRefArray of UserViewRef[]
+    | FUuidArray of Guid[]
     | FNull
     with
         override this.ToString () = this.ToFunQLString()
@@ -201,6 +203,7 @@ type [<NoEquality; NoComparison>] FieldValue =
             | FInterval int -> renderFunQLInterval int
             | FJson j -> renderFunQLJson j
             | FUserViewRef r -> sprintf "&%s" (r.ToFunQLString())
+            | FUuid j -> renderFunQLUUID j
             | FIntArray vals -> renderArray renderFunQLInt "int" vals
             | FDecimalArray vals -> renderArray renderFunQLDecimal "decimal" vals
             | FStringArray vals -> renderArray renderFunQLString "string" vals
@@ -210,6 +213,7 @@ type [<NoEquality; NoComparison>] FieldValue =
             | FIntervalArray vals -> renderArray (string >> renderFunQLString) "interval" vals
             | FJsonArray vals -> renderArray renderFunQLJson "json" vals
             | FUserViewRefArray vals -> renderArray (fun (r : EntityRef) -> sprintf "&%s" (r.ToFunQLString())) "uvref" vals
+            | FUuidArray vals -> renderArray renderFunQLUUID "uuid" vals
             | FNull -> "NULL"
 
         interface IFunQLString with
@@ -236,6 +240,7 @@ type FieldValuePrettyConverter () =
         | FInterval int -> writer.WriteValue(int.ToString())
         | FJson j -> j.WriteTo(writer)
         | FUserViewRef r -> serialize r
+        | FUuid uuid -> writer.WriteValue(uuid)
         | FIntArray vals -> serialize vals
         | FDecimalArray vals -> serialize vals
         | FStringArray vals -> serialize vals
@@ -245,6 +250,7 @@ type FieldValuePrettyConverter () =
         | FIntervalArray vals -> serialize vals
         | FJsonArray vals -> serialize vals
         | FUserViewRefArray vals -> serialize vals
+        | FUuidArray vals -> serialize vals
         | FNull -> writer.WriteNull()
 
 type ScalarFieldType =
@@ -257,6 +263,7 @@ type ScalarFieldType =
     | [<CaseName("interval")>] SFTInterval
     | [<CaseName("json")>] SFTJson
     | [<CaseName("uvref")>] SFTUserViewRef
+    | [<CaseName("uuid")>] SFTUuid
     with
         static member private Fields = unionNames (unionCases typeof<ScalarFieldType>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
 
@@ -1187,6 +1194,7 @@ let private parseValueFromJson' (fieldExprType : FieldExprType) : bool -> JToken
     | FETArray SFTInterval -> parseSingleValue (Seq.traverseOption trySqlInterval >> Option.map (Array.ofSeq >> FIntervalArray))
     | FETArray SFTJson -> parseSingleValueStrict FJsonArray
     | FETArray SFTUserViewRef -> parseSingleValueStrict FUserViewRefArray
+    | FETArray SFTUuid -> parseSingleValueStrict FUuidArray
     | FETScalar SFTString -> parseSingleValueStrict FString
     | FETScalar SFTInt -> parseSingleValueStrict FInt
     | FETScalar SFTDecimal -> parseSingleValueStrict FDecimal
@@ -1196,6 +1204,7 @@ let private parseValueFromJson' (fieldExprType : FieldExprType) : bool -> JToken
     | FETScalar SFTInterval -> parseSingleValue (trySqlInterval >> Option.map FInterval)
     | FETScalar SFTJson -> parseSingleValueStrict FJson
     | FETScalar SFTUserViewRef -> parseSingleValueStrict FUserViewRef
+    | FETScalar SFTUuid -> parseSingleValueStrict FUuid
 
 let parseValueFromJson (fieldType : FieldType<_>) (isNullable : bool) (tok : JToken) : FieldValue option =
     match fieldType with
