@@ -37,6 +37,16 @@ type private APIHandle =
       Logger : ILogger
     }
 
+let private runApiCall<'a, 'e when 'e :> IAPIError> (context : Context) (f : unit -> Task<Result<'a, 'e>>) : Func<Task<Value.Value>> =
+    let run () =
+        task {
+            let! res = f ()
+            match res with
+            | Ok r -> return V8JsonWriter.Serialize(context, r)
+            | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
+        }
+    Func<_>(run)
+
 type APITemplate (isolate : Isolate) =
     let mutable currentHandle = None : APIHandle option
     let mutable errorConstructor = None : Value.Function option
@@ -72,16 +82,6 @@ type APITemplate (isolate : Isolate) =
         match v.Data with
         | :? Value.String as s -> s.Get()
         | _ -> throwCallError context "Unexpected value type: %O, expected string" v.ValueType
-
-    let runApiCall (context : Context) (f : unit -> Task<Result<'a, 'e>>) : Func<Task<Value.Value>> =
-        let run () =
-            task {
-                let! res = f ()
-                match res with
-                | Ok r -> return V8JsonWriter.Serialize(context, r)
-                | Error e -> return raisef JavaScriptRuntimeException "%O" e
-            }
-        Func<_>(run)
 
     let template =
         let template = ObjectTemplate.New(isolate)
@@ -192,7 +192,7 @@ type APITemplate (isolate : Isolate) =
                     let! res = handle.API.Entities.DeferConstraints <| fun () -> func.CallAsync(null)
                     match res with
                     | Ok r -> return r
-                    | Error e -> return raisef JavaScriptRuntimeException "%O" e
+                    | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
                 }
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
