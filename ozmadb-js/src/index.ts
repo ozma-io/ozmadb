@@ -53,7 +53,7 @@ export type UserViewSource = IAnonymousUserView | INamedUserView;
  * Database result types.
  */
 
-export type SimpleType = "int" | "decimal" | "string" | "bool" | "datetime" | "date" | "interval" | "json";
+export type SimpleType = "int" | "decimal" | "string" | "bool" | "datetime" | "date" | "interval" | "json" | "uuid";
 
 export interface IScalarSimpleType {
   type: SimpleType;
@@ -70,7 +70,7 @@ export type ValueType = IScalarSimpleType | IArraySimpleType;
  * Column field types. More high-level, include references and enumerations.
  */
 
-export type FieldValueType = "int" | "decimal" | "string" | "bool" | "datetime" | "date" | "interval" | "json";
+export type FieldValueType = "int" | "decimal" | "string" | "bool" | "datetime" | "date" | "interval" | "json" | "uuid";
 
 export interface IScalarFieldType {
   type: FieldValueType;
