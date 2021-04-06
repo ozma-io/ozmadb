@@ -22,7 +22,7 @@ let renderFunQLDecimal = renderSqlDecimal
 let renderFunQLDateTime (j : NpgsqlDateTime) : string = sprintf "%s :: datetime" (j |> string |> renderFunQLString)
 let renderFunQLDate (j : NpgsqlDate) : string = sprintf "%s :: date" (j |> string |> renderFunQLString)
 let renderFunQLInterval (ts : NpgsqlTimeSpan) : string = sprintf "%s :: interval" (ts |> string |> renderFunQLString)
-let renderFunQLUUID (uuid : Guid) : string = sprintf "%s :: uuid" (uuid |> string |> renderFunQLString)
+let renderFunQLUuid (uuid : Guid) : string = sprintf "%s :: uuid" (uuid |> string |> renderFunQLString)
 
 let rec renderFunQLJson (j : JToken) : string =
     match j.Type with

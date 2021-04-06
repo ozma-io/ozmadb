@@ -203,7 +203,7 @@ type [<NoEquality; NoComparison>] FieldValue =
             | FInterval int -> renderFunQLInterval int
             | FJson j -> renderFunQLJson j
             | FUserViewRef r -> sprintf "&%s" (r.ToFunQLString())
-            | FUuid j -> renderFunQLUUID j
+            | FUuid j -> renderFunQLUuid j
             | FIntArray vals -> renderArray renderFunQLInt "int" vals
             | FDecimalArray vals -> renderArray renderFunQLDecimal "decimal" vals
             | FStringArray vals -> renderArray renderFunQLString "string" vals
@@ -213,7 +213,7 @@ type [<NoEquality; NoComparison>] FieldValue =
             | FIntervalArray vals -> renderArray (string >> renderFunQLString) "interval" vals
             | FJsonArray vals -> renderArray renderFunQLJson "json" vals
             | FUserViewRefArray vals -> renderArray (fun (r : EntityRef) -> sprintf "&%s" (r.ToFunQLString())) "uvref" vals
-            | FUuidArray vals -> renderArray renderFunQLUUID "uuid" vals
+            | FUuidArray vals -> renderArray renderFunQLUuid "uuid" vals
             | FNull -> "NULL"
 
         interface IFunQLString with

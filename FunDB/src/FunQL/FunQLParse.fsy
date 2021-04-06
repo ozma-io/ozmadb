@@ -111,10 +111,15 @@ let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : u
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin { Type = joinType; A = fromExpr1; B = fromExpr2; Condition = whereExpr }
 
+let private validJsonValue = function
+    | FUserViewRef _
+    | FUserViewRefArray _ -> false // We need to first dereference them.
+    | _ -> true
+
 let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : ParsedFieldExpr =
     let rec tryExtract = function
         | [] -> Some []
-        | ((name, FEValue v) :: t) -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
+        | ((name, FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
         | _ -> None
 
     match tryExtract exprs with
@@ -124,7 +129,7 @@ let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : Parse
 let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
     let rec tryExtract = function
         | [] -> Some []
-        | ((FEValue v) :: t) -> Option.map (fun nt -> v :: nt) (tryExtract t)
+        | ((FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> v :: nt) (tryExtract t)
         | _ -> None
 
     match tryExtract exprs with

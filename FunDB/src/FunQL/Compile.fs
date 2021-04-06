@@ -330,15 +330,6 @@ let compileAlias (alias : EntityAlias) : SQL.TableAlias =
       Columns = Option.map (Array.map compileName) alias.Fields
     }
 
-let inline sqlJsonArray< ^a, ^b when ^b :> JToken and ^b : (static member op_Implicit : ^a -> ^b) > (initialVals : SQL.ValueArray< ^a >) : JToken =
-    let rec traverseOne = function
-        | SQL.AVArray ss -> traverse ss
-        | SQL.AVValue v -> (^b : (static member op_Implicit : ^a -> ^b) v) :> JToken
-        | SQL.AVNull -> JValue.CreateNull() :> JToken
-    and traverse vals =
-        vals |> Seq.map traverseOne |> jsonArray :> JToken
-    traverse initialVals
-
 let composeExhaustingIf (compileTag : 'tag -> SQL.ValueExpr) (options : ('tag * SQL.ValueExpr) array) : SQL.ValueExpr =
     if Array.isEmpty options then
         SQL.VEValue SQL.VNull
