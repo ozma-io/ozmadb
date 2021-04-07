@@ -45,7 +45,7 @@
             "full_name": { "expression": "theme_id=>name || name" }
           },
           "uniqueConstraints": {
-            "unique_name": { "columns": [ "name" ] }
+            "unique_full_name": { "columns": [ "name", "theme_id" ] }
           },
           "checkConstraints": {
             "non_empty_name": { "expression": "name <> ''" }
