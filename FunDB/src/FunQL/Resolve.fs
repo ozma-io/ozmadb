@@ -495,7 +495,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
             let ref = resolveReference true ctx.FieldMaps f
             let innerField =
                 match ref.InnerField with
-                | Some field when field.ForceRename && Option.isNone name -> raisef ViewResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
+                | Some field when field.ForceRename && Option.isNone name && flags.RequireNames -> raisef ViewResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
                 | Some field -> Some { field with ForceRename = false }
                 | None -> None
             let info =
