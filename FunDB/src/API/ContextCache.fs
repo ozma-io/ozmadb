@@ -147,7 +147,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                         with
                         | :? PostgresException when transaction.Connection.Connection.State = ConnectionState.Open ->
                             // Most likely we couldn't execute the statement itself because there is no "state" table yet.
-                            do! transaction.Rollback ()
+                            do! (transaction :> IAsyncDisposable).DisposeAsync ()
                             let transaction = new DatabaseTransaction (transaction.Connection)
                             return (transaction, null)
                     }
@@ -367,110 +367,116 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
         }
 
     // Called when state update by another instance is detected. More lightweight than full `coldRebuildFromDatabase`.
-    let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let! (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews) = task {
-            try
-                let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
-                let (_, layout) = resolveLayout sourceLayout false
+    let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState> =
+        task {
+            let! (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews) =
+                task {
+                    try
+                        let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
+                        let (_, layout) = resolveLayout sourceLayout false
 
-                let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
-                let (_, defaultAttrs) = resolveAttributes layout false sourceAttrs
-                let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+                        let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
+                        let (_, defaultAttrs) = resolveAttributes layout false sourceAttrs
+                        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
-                let! sourceUvs = buildSchemaUserViews transaction.System cancellationToken
-                let (_, userViews) = resolveUserViews layout mergedAttrs false sourceUvs
+                        let! sourceUvs = buildSchemaUserViews transaction.System cancellationToken
+                        let (_, userViews) = resolveUserViews layout mergedAttrs false sourceUvs
 
-                // To dry-run user views we need to stop the transaction.
-                let! _ = transaction.Rollback ()
-                // We dry-run those views that _can_ be failed here, outside of a transaction.
-                let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews cancellationToken
-                let transaction = new DatabaseTransaction(transaction.Connection)
-                return (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews)
-            with
-            | ex ->
-                do! transaction.Rollback ()
-                return reraise' ex
-        }
-        let! currentVersion2 =
-            task {
+                        // To dry-run user views we need to stop the transaction.
+                        let! _ = transaction.Rollback ()
+                        // We dry-run those views that _can_ be failed here, outside of a transaction.
+                        let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews cancellationToken
+                        let transaction = new DatabaseTransaction(transaction.Connection)
+                        return (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews)
+                    with
+                    | ex ->
+                        do! transaction.Rollback ()
+                        return reraise' ex
+                }
+            let! currentVersion2 =
+                task {
+                    try
+                        return! ensureCurrentVersion transaction false cancellationToken
+                    with
+                    | ex ->
+                        do! transaction.Rollback ()
+                        return reraise' ex
+                }
+            if currentVersion2 <> currentVersion then
+                return! rebuildFromDatabase transaction currentVersion2 cancellationToken
+            else
                 try
-                    return! ensureCurrentVersion transaction false cancellationToken
+                    // Now dry-run those views that _cannot_ fail - we can get an exception here and stop, which is the point -
+                    // views with `allowBroken = true` fail on first error and so can be dry-run inside a transaction.
+                    let! (_, prefetchedGoodViews) = dryRunUserViews transaction.Connection.Query layout false (Some false) sourceUvs userViews cancellationToken
+                    let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
+
+                    let! sourceModules = buildSchemaModules transaction.System cancellationToken
+                    let modules = resolveModules layout sourceModules
+
+                    let jsRuntime = makeRuntime (moduleFiles modules)
+
+                    let! sourceActions = buildSchemaActions transaction.System cancellationToken
+                    let (_, actions) = resolveActions layout false sourceActions
+                    let (_, actions) = runWithRuntime jsRuntime <| fun api -> testEvalActions api false actions
+
+                    let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
+                    let (_, triggers) = resolveTriggers layout false sourceTriggers
+                    let (_, triggers) = runWithRuntime jsRuntime <| fun api -> testEvalTriggers api false triggers
+                    let mergedTriggers = mergeTriggers layout triggers
+
+                    // Another instance has already rebuilt them, so just load them from the database.
+                    let systemViews = filterSystemViews sourceUvs
+
+                    let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
+                    let (_, permissions) = resolvePermissions layout false sourcePermissions
+
+                    let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
+
+                    do! transaction.Rollback ()
+
+                    let newState =
+                        { Layout = layout
+                          Permissions = permissions
+                          DefaultAttrs = mergedAttrs
+                          JSRuntime = jsRuntime
+                          ActionScripts = IsolateLocal(fun isolate -> prepareActionScripts (jsRuntime.GetValue isolate) actions)
+                          Triggers = mergedTriggers
+                          TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
+                          UserViews = prefetchedViews
+                          SystemViews = systemViews
+                          UserMeta = userMeta
+                        }
+
+                    return { Version = currentVersion; Context = newState }
                 with
                 | ex ->
                     do! transaction.Rollback ()
                     return reraise' ex
-            }
-        if currentVersion2 <> currentVersion then
-            return! rebuildFromDatabase transaction currentVersion2 cancellationToken
-        else
-            try
-                // Now dry-run those views that _cannot_ fail - we can get an exception here and stop, which is the point -
-                // views with `allowBroken = true` fail on first error and so can be dry-run inside a transaction.
-                let! (_, prefetchedGoodViews) = dryRunUserViews transaction.Connection.Query layout false (Some false) sourceUvs userViews cancellationToken
-                let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
-
-                let! sourceModules = buildSchemaModules transaction.System cancellationToken
-                let modules = resolveModules layout sourceModules
-
-                let jsRuntime = makeRuntime (moduleFiles modules)
-
-                let! sourceActions = buildSchemaActions transaction.System cancellationToken
-                let (_, actions) = resolveActions layout false sourceActions
-                let (_, actions) = runWithRuntime jsRuntime <| fun api -> testEvalActions api false actions
-
-                let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
-                let (_, triggers) = resolveTriggers layout false sourceTriggers
-                let (_, triggers) = runWithRuntime jsRuntime <| fun api -> testEvalTriggers api false triggers
-                let mergedTriggers = mergeTriggers layout triggers
-
-                // Another instance has already rebuilt them, so just load them from the database.
-                let systemViews = filterSystemViews sourceUvs
-
-                let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
-                let (_, permissions) = resolvePermissions layout false sourcePermissions
-
-                let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
-
-                do! transaction.Rollback ()
-
-                let newState =
-                    { Layout = layout
-                      Permissions = permissions
-                      DefaultAttrs = mergedAttrs
-                      JSRuntime = jsRuntime
-                      ActionScripts = IsolateLocal(fun isolate -> prepareActionScripts (jsRuntime.GetValue isolate) actions)
-                      Triggers = mergedTriggers
-                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
-                      UserViews = prefetchedViews
-                      SystemViews = systemViews
-                      UserMeta = userMeta
-                    }
-
-                return { Version = currentVersion; Context = newState }
-            with
-            | ex ->
-                do! transaction.Rollback ()
-                return reraise' ex
-    }
+        }
 
     let mutable cachedState : CachedState option = None
     // Used to detect simultaneous migrations.
     let cachedStateLock = new SemaphoreSlim 1
 
-    let tryWithStateLock (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) (next : unit -> Task) : Task<bool> =
+    // Run a function that atomically updates database state and release a connection.
+    let updateStateAndRelease (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) (next : unit -> Task) : Task<bool> =
         task {
             let! success = cachedStateLock.WaitAsync(0)
             if not success then
-                do! transaction.Rollback ()
-                do! cachedStateLock.WaitAsync (cancellationToken)
-                ignore <| cachedStateLock.Release ()
+                do! (transaction :> IAsyncDisposable).DisposeAsync()
+                do! (transaction.Connection :> IAsyncDisposable).DisposeAsync()
+                do! cachedStateLock.WaitAsync(cancellationToken)
+                ignore <| cachedStateLock.Release()
                 return false
             else
                 try
                     do! next ()
                     return true
                 finally
-                    ignore <| cachedStateLock.Release ()
+                    ignore <| cachedStateLock.Release()
+                    (transaction :> IDisposable).Dispose()
+                    (transaction.Connection :> IDisposable).Dispose()
         }
 
     let rec getCachedState (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> =
@@ -478,7 +484,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
             let! (transaction, ret) = openAndGetCurrentVersion cancellationToken
             match (cachedState, ret) with
             | (None, Some ver) ->
-                let! _ = tryWithStateLock transaction cancellationToken <| fun () ->
+                let! _ = updateStateAndRelease transaction cancellationToken <| fun () ->
                     unitTask {
                         let! databaseVersion = getDatabaseVersion transaction cancellationToken
                         if databaseVersion = Some currentDatabaseVersion then
@@ -493,7 +499,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 return! getCachedState cancellationToken
             | (Some oldState, Some ver) ->
                 if oldState.Version <> ver then
-                    let! _ = tryWithStateLock transaction cancellationToken <| fun () ->
+                    let! _ = updateStateAndRelease transaction cancellationToken <| fun () ->
                         unitTask {
                             transaction.Connection.Connection.UnprepareAll()
                             let! newState = rebuildFromDatabase transaction ver cancellationToken
@@ -505,7 +511,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                     return (transaction, oldState)
             | (_, None)
             | (None, _) ->
-                let! _ = tryWithStateLock transaction cancellationToken <| fun () ->
+                let! _ = updateStateAndRelease transaction cancellationToken <| fun () ->
                     unitTask {
                         transaction.Connection.Connection.UnprepareAll()
                         match! coldRebuildFromDatabase transaction cancellationToken with

@@ -258,7 +258,6 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
         task {
             let logger = ctx.GetLogger("withContext")
             use _ = logger.BeginScope("Creating context for instance {}, user {} (is root: {})", inst.Instance.Name, inst.UserName, inst.IsRoot)
-            let connectionExtra = ctx.GetService<IInstancesSource>()
             let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
             let instancesCache = ctx.GetService<InstancesCacheStore>()
             let! cacheStore = instancesCache.GetContextCache(connectionString)

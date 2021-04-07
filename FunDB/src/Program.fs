@@ -65,7 +65,9 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
                     new InstancesContext(systemOptions.Options)
                 try
                     match! instances.Instances.FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken) with
-                    | null -> return None
+                    | null ->
+                        do! instances.DisposeAsync ()
+                        return None
                     | instance ->
                         let obj =
                             { new IInstance with

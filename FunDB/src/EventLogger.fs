@@ -39,6 +39,8 @@ type EventLogger (loggerFactory : ILoggerFactory) =
                                             let! transaction = openAndCheckTransaction loggerFactory connectionString IsolationLevel.ReadCommitted cancellationToken <| fun transaction ->
                                                 task {
                                                     let! _ = transaction.System.Events.AddAsync(entry)
+                                                    // Check that connection works the first time.
+                                                    let! _ = transaction.System.SaveChangesAsync(cancellationToken)
                                                     return transaction
                                                 }
                                             databaseConnections.Add(connectionString, transaction)
