@@ -69,6 +69,11 @@ let private convertPath (p : Path) =
             failwithf "Absolute path is not expected: %s" p
         normalized
 
+let stackTraceString (e : JSException) =
+    match JSException.GetStackTrace e.Value with
+    | null -> "(no stack trace)"
+    | trace -> trace.ToPrettyString()
+
 type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateConstructor : Isolate -> 'a, env : JSEnvironment) as this =
     let mutable currentEventLoop = None : EventLoop option
     let template = templateConstructor isolate
@@ -80,7 +85,11 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
 
     let makeModule (file : ModuleFile) =
         let normalized = convertPath file.Path
-        let modul = Module.Compile(String.New(context.Isolate, file.Source), ScriptOrigin(normalized, IsModule = true))
+        let modul =
+            try
+                Module.Compile(String.New(context.Isolate, file.Source), ScriptOrigin(normalized, IsModule = true))
+            with
+            | :? JSException as e -> raisefWithInner JavaScriptRuntimeException e "Uncaught error during compilation:\n%s" (stackTraceString e)
         { Path = normalized
           Module = modul
           DirPath = POSIXPath.dirName normalized
@@ -128,13 +137,25 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
                 else
                     Map.find id moduleIdsMap
             resolveModule currentModule path
-        jsModule.Module.Instantiate(context, Func<_, _, _> resolveOne)
+        try
+            jsModule.Module.Instantiate(context, Func<_, _, _> resolveOne)
+        with
+        | :? JSException as e -> raisefWithInner JavaScriptRuntimeException e "Uncaught error during instantiation:\n%s" (stackTraceString e)
         jsModule.Module
 
     member this.CreateDefaultFunction (file : ModuleFile) =
-        let jsModule = this.CreateModule file
-        ignore <| jsModule.Evaluate()
-        jsModule.Namespace.Get("default").GetFunction()
+        let jsModule =
+            try
+                let jsModule = this.CreateModule file
+                ignore <| jsModule.Evaluate()
+                jsModule
+            with
+            | :? JSException as e -> raisefWithInner JavaScriptRuntimeException e "Uncaught error during evaluation:\n%s" (stackTraceString e)
+        try
+            jsModule.Namespace.Get("default").GetFunction()
+        with
+        | :? JSException as e -> raisefWithInner JavaScriptRuntimeException e "Couldn't get default module:\n%s" (stackTraceString e)
+        | :? NetJsException as e -> raisefWithInner JavaScriptRuntimeException e "Couldn't get default module"
 
     member this.Context = context
     member this.Isolate = isolate
@@ -165,11 +186,6 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
         member this.Isolate = isolate
         member this.EventLoop = this.EventLoop
         member this.EventLoopScope f = this.EventLoopScope f
-
-let stackTraceString (e : JSException) =
-    match JSException.GetStackTrace e.Value with
-    | null -> "(no stack trace)"
-    | trace -> trace.ToPrettyString()
 
 let inline runFunctionInRuntime (runtime : IJSRuntime) (func : Function) (cancellationToken : CancellationToken) (args : Value.Value[]) =
     task {
