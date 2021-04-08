@@ -38,7 +38,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
         try
             runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
         with
-        | :? NetJsException as e ->
+        | :? JavaScriptRuntimeException as e ->
             raisefWithInner TriggerRunException e "Couldn't initialize trigger"
 
     let runArgsTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
