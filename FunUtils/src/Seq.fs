@@ -322,3 +322,13 @@ let ofObj (a : 'a seq) =
     match a with
     | null -> Seq.empty
     | ra -> ra
+
+let partition (f : 'a -> bool) (vals : seq<'a>) : seq<'a> * seq<'a> =
+    let trues = List()
+    let falses = List()
+    for v in vals do
+        if f v then
+            trues.Add(v)
+        else
+            falses.Add(v)
+    (trues :> seq<'a>, falses :> seq<'a>)

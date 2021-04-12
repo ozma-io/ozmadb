@@ -16,7 +16,9 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 
 type DomainIdColumn = int
 
-// Domains is a way to distinguish rows after set operations so that row types and IDs can be traced back.
+// These are not the same domains as in Layout!
+//
+// Domains are a way to distinguish rows after set operations so that row types and IDs can be traced back.
 // Domain is a map of assigned references to fields to each column.
 // Domain key is cross product of all local domain ids i.e. map from domain namespace ids to local domain ids.
 // Local domain ids get assigned to all sets in a set operation.
@@ -258,7 +260,7 @@ type CompiledAttributesExpr =
 type CompiledViewExpr =
     { AttributesQuery : CompiledAttributesExpr option
       Query : Query<SQL.SelectExpr>
-      Columns : ColumnType[]
+      Columns : (ColumnType * SQL.ColumnName)[]
       Domains : Domains
       MainEntity : ResolvedEntityRef option
       FlattenedDomains : FlattenedDomains
@@ -323,11 +325,6 @@ let compileAliasFromEntity (entityRef : ResolvedEntityRef) (pun : EntityName opt
     
     { Name = newName
       Columns = None
-    }
-
-let compileAlias (alias : EntityAlias) : SQL.TableAlias =
-    { Name = compileName alias.Name
-      Columns = Option.map (Array.map compileName) alias.Fields
     }
 
 let composeExhaustingIf (compileTag : 'tag -> SQL.ValueExpr) (options : ('tag * SQL.ValueExpr) array) : SQL.ValueExpr =
@@ -528,24 +525,6 @@ let private infoFromSignature (flags : SelectFlags) (domains : TempDomains) (sig
       Domains = domains
     }
 
-let private renameSelectInfo (columns : FieldName[]) (info : SelectInfo) : SelectInfo =
-    let mutable columnI = 0
-    let mutable namesMap = Map.empty
-    let renameOne = function
-        | CTColumn name ->
-            let newName = TName columns.[columnI]
-            columnI <- columnI + 1
-            namesMap <- Map.add name newName namesMap
-            CTColumn newName
-        | a -> a
-
-    let columns = Array.map renameOne info.Columns
-    let domains = renameDomainFields namesMap info.Domains
-
-    { Columns = columns
-      Domains = domains
-    }
-
 type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttributes, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
     let mutable usedSchemas : UsedSchemas = Map.empty
@@ -562,6 +541,30 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | CTMeta CMMainId -> SQL.SQLName "__main_id"
         | CTMeta CMMainSubEntity -> SQL.SQLName "__main_sub_entity"
         | CTColumn (FunQLName column) -> SQL.SQLName column
+
+    let renameSelectInfo (columns : FieldName[]) (info : SelectInfo) : SelectInfo =
+        let mutable columnI = 0
+        let mutable namesMap = Map.empty
+
+        for column in info.Columns do
+            match column with
+            | CTColumn name ->
+                let newName = TName columns.[columnI]
+                columnI <- columnI + 1
+                namesMap <- Map.add name newName namesMap
+            | _ -> ()
+        
+        let renameColumns = function
+            | CTColumn name -> CTColumn namesMap.[name]
+            | CTColumnMeta (name, meta) -> CTColumnMeta (namesMap.[name], meta)
+            | a -> a
+
+        let columns = Array.map renameColumns info.Columns
+        let domains = renameDomainFields namesMap info.Domains
+
+        { Columns = columns
+          Domains = domains
+        }
 
     let signatureColumns (skipNames : bool) (sign : SelectSignature) (half : HalfCompiledSelect) : SQL.SelectedColumn seq =
         seq {
@@ -821,11 +824,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
                     let result =
                         { Attributes = Map.empty
-                          Result = QRExpr (None, FERef <| makeColumn firstName remainingPath)
+                          Result = FERef <| makeColumn firstName remainingPath
+                          Alias = None
                         }
                     let selectClause =
                         { Attributes = Map.empty
-                          Results = [| result |]
+                          Results = [| QRExpr result |]
                           From = Some <| FEntity (None, argEntityRef')
                           Where = Some <| FEBinaryOp (FERef idColumn, BOEq, FERef arg)
                           GroupBy = [||]
@@ -1066,13 +1070,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let mutable idCols = Map.empty : Map<string, DomainIdColumn>
         let mutable lastIdCol = 1
 
-        let getResultEntry (i : int) (result : ResolvedQueryResult) : ResultColumn =
+        let getResultColumnEntry (i : int) (result : ResolvedQueryColumnResult) : ResultColumn =
             let currentAttrs = Map.keysSet result.Attributes
 
-            let (newPaths, resultColumn) = compileResult cteBindings paths result
+            let (newPaths, resultColumn) = compileColumnResult cteBindings paths result
             paths <- newPaths
 
-            match resultFieldRef result.Result with
+            match resultFieldRef result with
             | Some ({ Ref = { Ref = { entity = Some ({ name = entityName } as entityRef); name = fieldName } } } as resultRef) when addMetaColumns ->
                 // Add columns for tracking (id, sub_entity etc.)
                 let tableRef = compileRenamedEntityRef entityRef
@@ -1273,6 +1277,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   Column = resultColumn
                 }
 
+        let getResultEntry (i : int) : ResolvedQueryResult -> ResultColumn = function
+            | QRAll alias -> failwith "Impossible QRAll"
+            | QRExpr result -> getResultColumnEntry i result
+
         let resultEntries = Array.mapi getResultEntry select.Results
         let resultColumns = resultEntries |> Array.map (fun x -> x.Column)
         let emptyDomains = DSingle (newGlobalDomainId (), Map.empty)
@@ -1341,15 +1349,11 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         (info, query)
 
-    and compileResult (cteBindings : CTEBindings) (paths0 : JoinPaths) (result : ResolvedQueryResult) : JoinPaths * SelectColumn =
+    and compileColumnResult (cteBindings : CTEBindings) (paths0 : JoinPaths) (result : ResolvedQueryColumnResult) : JoinPaths * SelectColumn =
         let mutable paths = paths0
 
-        let newExpr =
-            match result.Result with
-            | QRExpr (name, expr) ->
-                let (newPaths, ret) = compileLinkedFieldExpr cteBindings paths expr
-                paths <- newPaths
-                ret
+        let (newPaths, newExpr) = compileLinkedFieldExpr cteBindings paths result.Result
+        paths <- newPaths
 
         let compileAttr (attrName, expr) =
             let attrCol = CCCellAttribute attrName
@@ -1359,7 +1363,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let attrs = result.Attributes |> Map.toSeq |> Seq.map compileAttr |> Map.ofSeq
         let name =
-             match result.Result.TryToName () with
+             match result.TryToName () with
              | None -> newTempFieldName ()
              | Some name -> TName name
         let ret =
@@ -1469,13 +1473,20 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   MetaColumns = true
                 }
             let (info, expr) = compileSelectExpr flags cteBindings None q
-            let ret = SQL.FSubExpr (compileAlias alias, expr)
-            let info =
+            let (info, fields) =
                 match alias.Fields with
-                | None -> info
-                | Some fields -> renameSelectInfo fields info
+                | None -> (info, None)
+                | Some fields ->
+                    let info = renameSelectInfo fields info
+                    let fields = info.Columns |> Array.map (mapColumnType getFinalName >> columnName)
+                    (info, Some fields)
+            let compiledAlias =
+                { Name = compileName alias.Name
+                  Columns = fields
+                } : SQL.TableAlias
+            let ret = SQL.FSubExpr (compiledAlias, expr)
             let fromInfo = subentityFromInfo mainEntity info
-            (Map.singleton (compileName alias.Name) fromInfo, ret)
+            (Map.singleton compiledAlias.Name fromInfo, ret)
 
     member this.CompileSingleFromClause (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) =
         let (fromMap, compiledFrom) = compileFromExpr Map.empty None from
@@ -1498,6 +1509,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     member this.Arguments = arguments
     member this.UsedSchemas = usedSchemas
+    member this.ColumnName name = columnName name
 
 type private PurityStatus = Pure | RowPure
 
@@ -1597,10 +1609,12 @@ let compileSingleFromClause (layout : Layout) (argumentsMap : CompiledArgumentsM
     let compiler = QueryCompiler (layout, emptyMergedDefaultAttributes, bogusArguments)
     compiler.CompileSingleFromClause from where
 
-let compileSelectExpr (layout : Layout) (viewExpr : ResolvedSelectExpr) : SQL.SelectExpr =
-    let compiler = QueryCompiler (layout, emptyMergedDefaultAttributes, emptyArguments)
+let compileSelectExpr (layout : Layout) (argumentsMap : CompiledArgumentsMap) (viewExpr : ResolvedSelectExpr) : UsedSchemas * SQL.SelectExpr =
+    let bogusArguments =
+        { emptyArguments with Types = argumentsMap }
+    let compiler = QueryCompiler (layout, emptyMergedDefaultAttributes, bogusArguments)
     let (info, select) = compiler.CompileSelectExpr None false viewExpr
-    select
+    (compiler.UsedSchemas, select)
 
 let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
     let mainEntityRef = viewExpr.MainEntity |> Option.map (fun main -> main.Entity)
@@ -1647,9 +1661,11 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let domains = mapDomainsFields getFinalName info.Domains
     let flattenedDomains = flattenDomains domains
 
+    let columnsWithNames = Array.map (fun name -> (name, compiler.ColumnName name)) newColumns
+
     { AttributesQuery = attrQuery
       Query = { Expression = newExpr; Arguments = compiler.Arguments }
-      Columns = newColumns
+      Columns = columnsWithNames
       Domains = domains
       FlattenedDomains = flattenedDomains
       UsedSchemas = compiler.UsedSchemas

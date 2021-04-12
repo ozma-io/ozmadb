@@ -39,20 +39,21 @@ type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>
 [<NoEquality; NoComparison>]
 type ResolvedUniqueConstraint =
     { Columns : FieldName[]
-      HashName : HashName // Guaranteed to be unique in an entity
+      HashName : HashName // Guaranteed to be unique in an entity.
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedCheckConstraint =
     { Expression : ResolvedFieldExpr
+      UsedSchemas : UsedSchemas
       IsLocal : bool
-      HashName : HashName // Guaranteed to be unique in an entity
+      HashName : HashName // Guaranteed to be unique in an entity.
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedIndex =
     { Expressions : LocalFieldExpr[]
-      HashName : HashName // Guaranteed to be unique in an entity
+      HashName : HashName // Guaranteed to be unique in an entity.
       IsUnique : bool
     }
 
@@ -65,7 +66,7 @@ type ResolvedColumnField =
       IsImmutable : bool
       InheritedFrom : ResolvedEntityRef option
       ColumnName : SQL.ColumnName
-      HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
+      HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity.
     }
 
 [<NoEquality; NoComparison>]
@@ -78,14 +79,14 @@ type VirtualFieldCase =
 [<NoEquality; NoComparison>]
 type ResolvedComputedField =
     { Expression : ResolvedFieldExpr
-      // Set when there's no dereferences in the expression
+      // Set when there's no dereferences in the expression.
       IsLocal : bool
-      // Set when computed field uses Id
+      // Set when computed field uses Id.
       HasId : bool
       UsedSchemas : UsedSchemas
       InheritedFrom : ResolvedEntityRef option
       AllowBroken : bool
-      HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity
+      HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity.
       VirtualCases : (VirtualFieldCase array) option
     }
 

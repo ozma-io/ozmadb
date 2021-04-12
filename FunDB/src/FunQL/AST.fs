@@ -326,8 +326,8 @@ type SetOperation =
             member this.ToFunQLString () = this.ToFunQLString()
 
 type SortOrder =
-    | Asc
-    | Desc
+    | [<CaseName("asc")>] Asc
+    | [<CaseName("desc")>] Desc
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -566,10 +566,25 @@ and [<NoEquality; NoComparison>] AggExpr<'e, 'f> when 'e :> IFunQLName and 'f :>
             member this.ToFunQLString () = this.ToFunQLString()
 
 and [<NoEquality; NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    { Attributes : AttributeMap<'e, 'f>
-      Result : QueryResultExpr<'e, 'f>
-    }
+    | QRAll of EntityRef option
+    | QRExpr of QueryColumnResult<'e, 'f>
     with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | QRAll None -> "*"
+            | QRAll (Some ref) -> sprintf "%s.*" (ref.ToFunQLString())
+            | QRExpr expr -> expr.ToFunQLString()
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] QueryColumnResult<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { Alias : EntityName option
+      Attributes : AttributeMap<'e, 'f>
+      Result : FieldExpr<'e, 'f>
+    } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
@@ -577,29 +592,23 @@ and [<NoEquality; NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLName and '
                 if Map.isEmpty this.Attributes
                 then ""
                 else renderAttributesMap this.Attributes
+            
+            let aliasStr =
+                match this.Alias with
+                | None -> ""
+                | Some name -> sprintf "AS %s" (name.ToFunQLString())
+            
+            let resultStr = this.Result.ToFunQLString()
 
-            String.concatWithWhitespaces [this.Result.ToFunQLString(); attrsStr]
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-and [<NoEquality; NoComparison>] QueryResultExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    | QRExpr of FunQLName option * FieldExpr<'e, 'f>
-    with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            match this with
-            | QRExpr (None, expr) -> expr.ToFunQLString()
-            | QRExpr (Some name, expr) -> sprintf "%s AS %s" (expr.ToFunQLString()) (name.ToFunQLString())
+            String.concatWithWhitespaces [resultStr; aliasStr; attrsStr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
         member this.TryToName () =
             match this with
-            | QRExpr (None, FERef c) -> Some <| c.ToName ()
-            | QRExpr (Some name, expr) -> Some name
+            | { Alias = Some name } -> Some name
+            | { Alias = None; Result = FERef c } -> Some <| c.ToName ()
             | _ -> None
 
         interface IFunQLName with
@@ -1050,7 +1059,7 @@ type ResolvedSelectExpr = SelectExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedSelectTreeExpr = SelectTreeExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedSingleSelectExpr = SingleSelectExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedQueryResult = QueryResult<EntityRef, LinkedBoundFieldRef>
-type ResolvedQueryResultExpr = QueryResultExpr<EntityRef, LinkedBoundFieldRef>
+type ResolvedQueryColumnResult = QueryColumnResult<EntityRef, LinkedBoundFieldRef>
 type ResolvedCommonTableExpr = CommonTableExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedCommonTableExprs = CommonTableExprs<EntityRef, LinkedBoundFieldRef>
 type ResolvedFromExpr = FromExpr<EntityRef, LinkedBoundFieldRef>
@@ -1091,6 +1100,16 @@ type UsedFields = Set<FieldName>
 type UsedEntities = Map<EntityName, UsedFields>
 type UsedSchemas = Map<SchemaName, UsedEntities>
 
+let usedEntityFields (ref : ResolvedEntityRef) (usedSchemas : UsedSchemas) : UsedFields option =
+    match Map.tryFind ref.schema usedSchemas with
+    | None -> None
+    | Some usedEntities -> Map.tryFind ref.name usedEntities
+
+let isFieldUsed (ref : ResolvedFieldRef) (usedSchemas : UsedSchemas) : bool =
+    match usedEntityFields ref.entity usedSchemas with
+    | None -> false
+    | Some usedFields -> Set.contains ref.name usedFields
+
 let addUsedEntity (schemaName : SchemaName) (entityName : EntityName) (usedSchemas : UsedSchemas) : UsedSchemas =
     let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
     let oldEntity = Map.findWithDefault entityName (fun () -> Set.empty) oldSchema
@@ -1111,6 +1130,8 @@ let addUsedFieldRef (ref : ResolvedFieldRef) =
 
 let mergeUsedSchemas : UsedSchemas -> UsedSchemas -> UsedSchemas =
     Map.unionWith (fun _ -> Map.unionWith (fun _ -> Set.union))
+
+type LocalArgumentsMap = Map<ArgumentName, FieldValue>
 
 // Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
 let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =

@@ -17,6 +17,9 @@ let private normalizeNewlinesRegex = Regex("\r\n|\n|\r", RegexOptions.Compiled)
 let normalizeNewlines (str : string) : string =
     normalizeNewlinesRegex.Replace(str, "\n")
 
+let hexBytes (bytes : byte seq) : string =
+    bytes |> Seq.map (fun b -> b.ToString("x2")) |> String.concat ""
+
 type StringComparable<'a> (inner : 'a) =
     let innerString = string inner
 

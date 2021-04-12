@@ -164,20 +164,21 @@ type private PermissionsApplier (access : SchemaAccess) =
 
     member this.ApplyToSelectExpr = applyToSelectExpr
 
+let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (query : Query<SelectExpr>) : Query<SelectExpr> =
+    let accessCompiler = AccessCompiler (layout, role, query.Arguments)
+    let access = accessCompiler.FilterUsedSchemas layout usedSchemas
+    let applier = PermissionsApplier access
+    let expression = applier.ApplyToSelectExpr query.Expression
+    { Expression = expression
+      Arguments = accessCompiler.Arguments
+    }
+
 let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (expr : CompiledViewExpr) : unit =
     let accessCompiler = AccessCompiler (layout, role, expr.Query.Arguments)
     let access = accessCompiler.FilterUsedSchemas layout expr.UsedSchemas
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (view : CompiledViewExpr) : CompiledViewExpr =
-    let accessCompiler = AccessCompiler (layout, role, view.Query.Arguments)
-    let access = accessCompiler.FilterUsedSchemas layout view.UsedSchemas
-    let applier = PermissionsApplier access
-    let expression = applier.ApplyToSelectExpr view.Query.Expression
     { view with
-          Query =
-              { view.Query with
-                    Expression = expression
-                    Arguments = accessCompiler.Arguments
-              }
+          Query = applyRoleQueryExpr layout role view.UsedSchemas view.Query
     }

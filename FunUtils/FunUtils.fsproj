@@ -22,6 +22,7 @@
     <Compile Include="src/IO.fs" />
     <Compile Include="src/Expr.fs" />
     <Compile Include="src/POSIXPath.fs" />
+    <Compile Include="src/Hash.fs" />
     <Compile Include="src/TopLevel.fs" />
 
     <Compile Include="src/Serialization/Utils.fs" />

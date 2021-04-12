@@ -23,6 +23,7 @@ module Collections = Collections
 module IO = IO
 module Expr = Expr
 module POSIXPath = POSIXPath
+module Hash = Hash
 
 type Void = private Void of unit
 type Exception = System.Exception

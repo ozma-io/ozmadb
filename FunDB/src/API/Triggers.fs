@@ -41,7 +41,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
         | :? JavaScriptRuntimeException as e ->
             raisefWithInner TriggerRunException e "Couldn't initialize trigger"
 
-    let runArgsTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
+    let runArgsTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
         task {
             let event =
                 { Entity = entity
@@ -68,7 +68,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
-    let runAfterTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : EntityArguments option) (cancellationToken : CancellationToken) : Task =
+    let runAfterTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : LocalArgumentsMap option) (cancellationToken : CancellationToken) : Task =
         unitTask {
             let event =
                 { Entity = entity
@@ -90,10 +90,10 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
-    member this.RunInsertTriggerBefore (entity : ResolvedEntityRef) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
+    member this.RunInsertTriggerBefore (entity : ResolvedEntityRef) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
         runArgsTrigger entity (TSInsert None) args cancellationToken
 
-    member this.RunUpdateTriggerBefore (entity : ResolvedEntityRef) (id : int) (args : EntityArguments) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
+    member this.RunUpdateTriggerBefore (entity : ResolvedEntityRef) (id : int) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
         runArgsTrigger entity (TSUpdate id) args cancellationToken
 
     member this.RunDeleteTriggerBefore (entity : ResolvedEntityRef) (id : int) (cancellationToken : CancellationToken) : Task<bool> =
@@ -112,10 +112,10 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                 return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
-    member this.RunInsertTriggerAfter (entity : ResolvedEntityRef) (newId : int) (args : EntityArguments) (cancellationToken : CancellationToken) : Task =
+    member this.RunInsertTriggerAfter (entity : ResolvedEntityRef) (newId : int) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
         runAfterTrigger entity (TSInsert (Some newId)) (Some args) cancellationToken
 
-    member this.RunUpdateTriggerAfter (entity : ResolvedEntityRef) (id : int) (args : EntityArguments) (cancellationToken : CancellationToken) : Task=
+    member this.RunUpdateTriggerAfter (entity : ResolvedEntityRef) (id : int) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task=
         runAfterTrigger entity (TSUpdate id) (Some args) cancellationToken
 
     member this.RunDeleteTriggerAfter (entity : ResolvedEntityRef) (cancellationToken : CancellationToken) : Task =

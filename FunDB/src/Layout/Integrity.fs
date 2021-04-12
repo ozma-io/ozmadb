@@ -220,7 +220,7 @@ let private convertRelatedExpr (localRef : EntityRef) : ResolvedFieldExpr -> Res
 // Need to be public for JsonConvert
 type PathTriggerKey =
     { Ref : ResolvedFieldRef
-      // This is path without the last dereference; for example, triggers for foo=>bar and foo=>baz will be merged into trigger for entity E, which contains bar and baz.
+      // This is path without the last dereference; for example, triggers for foo=>bar and foo=>baz will be merged into trigger for entity E, which handles bar and baz.
       EntityPath : FieldName list
     }
 
@@ -372,11 +372,12 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
 
     let result = 
         { Attributes = Map.empty
-          Result = QRExpr (None, aggExpr)
+          Result = aggExpr
+          Alias = None
         }
     let singleSelect =
         { Attributes = Map.empty
-          Results = [| result |]
+          Results = [| QRExpr result |]
           From = Some (FEntity (None, relaxEntityRef entity.Root))
           Where = None
           GroupBy = [||]
@@ -384,7 +385,8 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
           Extra = null
         } : ResolvedSingleSelectExpr
     let select = { CTEs = None; Tree = SSelect singleSelect; Extra = null }
-    compileSelectExpr layout select
+    let (usedSchemas, expr) = compileSelectExpr layout Map.empty select
+    expr
 
 // Replaces entity references with `new` in simple cases.
 type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
@@ -492,11 +494,12 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
 
     let result = 
         { Attributes = Map.empty
-          Result = QRExpr (None, fixedCheck)
+          Result = fixedCheck
+          Alias = None
         }
     let singleSelect =
         { Attributes = Map.empty
-          Results = [| result |]
+          Results = [|  QRExpr result |]
           From = Some (FEntity (None, relaxEntityRef entity.Root))
           Where = None
           GroupBy = [||]
@@ -504,7 +507,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           Extra = null
         } : ResolvedSingleSelectExpr
     let select = { CTEs = None; Tree = SSelect singleSelect; Extra = null }
-    let compiled = compileSelectExpr layout select
+    let (usedSchemas, compiled) = compileSelectExpr layout Map.empty select
 
     let replacer = ConstraintUseNewConverter(entity.Root)
     let compiled = replacer.UseNewInSelectExpr compiled

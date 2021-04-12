@@ -552,6 +552,8 @@ namespace FunWithFlags.FunDBSchema.System
         public string? SchemaName { get; set; }
         [ColumnField("string", IsImmutable=true)]
         public string? EntityName { get; set; }
+        [ColumnField("string", IsImmutable=true)]
+        public string? FieldName { get; set; }
         [ColumnField("int", IsImmutable=true)]
         public int? EntityId { get; set; }
         [ColumnField("string", IsImmutable=true)]
