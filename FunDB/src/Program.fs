@@ -100,7 +100,6 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
             }
 
         member this.SetExtraConnectionOptions (builder : NpgsqlConnectionStringBuilder) =
-            builder.MaxPoolSize <- 20
             builder.ConnectionIdleLifetime <- 30
             builder.MaxAutoPrepare <- 50
 
