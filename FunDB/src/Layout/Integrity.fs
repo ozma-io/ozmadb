@@ -366,7 +366,8 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
     member this.FindCheckConstraintAffected expr = findCheckConstraintAffected expr
 
 let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.SelectExpr =
-    let fixedCheck = convertRelatedExpr (relaxEntityRef constrRef.entity) check
+    let entity = layout.FindEntity constrRef.entity |> Option.get
+    let fixedCheck = convertRelatedExpr (relaxEntityRef entity.Root) check
     let aggExpr = FEAggFunc (FunQLName "bool_and", AEAll [| fixedCheck |])
 
     let result = 
@@ -376,7 +377,7 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
     let singleSelect =
         { Attributes = Map.empty
           Results = [| result |]
-          From = Some (FEntity (None, relaxEntityRef constrRef.entity))
+          From = Some (FEntity (None, relaxEntityRef entity.Root))
           Where = None
           GroupBy = [||]
           OrderLimit = emptyOrderLimitClause
@@ -487,7 +488,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let entity = layout.FindEntity constrRef.entity |> Option.get
     let constr = Map.find constrRef.name entity.CheckConstraints
 
-    let fixedCheck = convertRelatedExpr (relaxEntityRef constrRef.entity) check
+    let fixedCheck = convertRelatedExpr (relaxEntityRef entity.Root) check
 
     let result = 
         { Attributes = Map.empty
@@ -496,7 +497,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let singleSelect =
         { Attributes = Map.empty
           Results = [| result |]
-          From = Some (FEntity (None, relaxEntityRef constrRef.entity))
+          From = Some (FEntity (None, relaxEntityRef entity.Root))
           Where = None
           GroupBy = [||]
           OrderLimit = emptyOrderLimitClause
@@ -505,7 +506,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let select = { CTEs = None; Tree = SSelect singleSelect; Extra = null }
     let compiled = compileSelectExpr layout select
 
-    let replacer = ConstraintUseNewConverter(constrRef.entity)
+    let replacer = ConstraintUseNewConverter(entity.Root)
     let compiled = replacer.UseNewInSelectExpr compiled
 
     let raiseCall =
@@ -550,8 +551,8 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let getColumnName name = (Map.find name entity.ColumnFields).ColumnName
     let affectedColumns = outerFields |> Seq.map getColumnName |> Seq.toArray
 
-    let schemaName = compileName constrRef.entity.schema
-    let tableName = compileName constrRef.entity.name
+    let schemaName = compileName entity.Root.schema
+    let tableName = compileName entity.Root.name
 
     let checkUpdateTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
@@ -648,9 +649,9 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
     let getColumnName name = (Map.find name triggerEntity.ColumnFields).ColumnName
     let affectedColumns = trigger.Fields |> Seq.map getColumnName |> Seq.toArray
 
-    let schemaName = compileName constrRef.entity.schema
-    let triggerSchemaName = compileName trigger.Entity.schema
-    let triggerTableName = compileName trigger.Entity.name
+    let schemaName = compileName entity.Root.schema
+    let triggerSchemaName = compileName triggerEntity.Root.schema
+    let triggerTableName = compileName triggerEntity.Root.name
 
     let checkUpdateTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
