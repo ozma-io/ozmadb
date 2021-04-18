@@ -322,7 +322,7 @@ let compileAliasFromEntity (entityRef : ResolvedEntityRef) (pun : EntityName opt
         match pun with
         | Some punName -> compileName punName
         | None -> renameResolvedEntityRef entityRef
-    
+
     { Name = newName
       Columns = None
     }
@@ -553,7 +553,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 columnI <- columnI + 1
                 namesMap <- Map.add name newName namesMap
             | _ -> ()
-        
+
         let renameColumns = function
             | CTColumn name -> CTColumn namesMap.[name]
             | CTColumnMeta (name, meta) -> CTColumnMeta (namesMap.[name], meta)
@@ -1406,7 +1406,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             let domain = Map.add (TName funMain) mainEntry domain
             let newAlias = compileAliasFromEntity entityRef pun
-        
+
             let subquery =
                 match entity.Inheritance with
                 | None ->

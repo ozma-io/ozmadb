@@ -29,6 +29,7 @@ open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.Operations.Domain
 open FunWithFlags.FunDB.FunQL.Chunk
+module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 
 type RawArguments = Map<string, JToken>
@@ -318,6 +319,7 @@ type IPermissionsAPI =
 [<NoEquality; NoComparison>]
 type DomainValuesResult =
     { Values : DomainValue[]
+      PunType : SQL.SimpleValueType
       Hash : string
     }
 

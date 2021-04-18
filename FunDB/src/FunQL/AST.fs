@@ -592,12 +592,12 @@ and [<NoEquality; NoComparison>] QueryColumnResult<'e, 'f> when 'e :> IFunQLName
                 if Map.isEmpty this.Attributes
                 then ""
                 else renderAttributesMap this.Attributes
-            
+
             let aliasStr =
                 match this.Alias with
                 | None -> ""
                 | Some name -> sprintf "AS %s" (name.ToFunQLString())
-            
+
             let resultStr = this.Result.ToFunQLString()
 
             String.concatWithWhitespaces [resultStr; aliasStr; attrsStr]

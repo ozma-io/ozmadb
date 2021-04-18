@@ -38,13 +38,19 @@ type DomainValue =
       Pun : SQL.Value option
     }
 
+[<NoEquality; NoComparison>]
+type DomainValues =
+    { Values : DomainValue[]
+      PunType : SQL.SimpleValueType
+    }
+
 let private convertDomainValue (values : SQL.Value[]) =
     assert (Array.length values = 2)
     { Value = values.[0]
       Pun = Some values.[1]
     }
 
-let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (role : ResolvedRole option) (arguments : ArgumentValuesMap) (chunk : SourceQueryChunk) (cancellationToken : CancellationToken) : Task<DomainValue[]> =
+let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (role : ResolvedRole option) (arguments : ArgumentValuesMap) (chunk : SourceQueryChunk) (cancellationToken : CancellationToken) : Task<DomainValues> =
     task {
         let query =
             match role with
@@ -60,7 +66,13 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
         try
             let arguments = Map.union arguments (Map.mapKeys PLocal argValues)
             return! connection.ExecuteQuery (query.Expression.ToSQLString()) (prepareArguments query.Arguments arguments) cancellationToken <| fun result ->
-                result.Rows |> Seq.map convertDomainValue |> Seq.toArray |> Task.result
+                let values = result.Rows |> Seq.map convertDomainValue |> Seq.toArray
+                let (_, punType) = result.Columns.[1]
+                let ret =
+                    { Values = values
+                      PunType = punType
+                    }
+                Task.result ret
         with
             | :? QueryException as ex ->
                 return raisefWithInner DomainExecutionException ex.InnerException "%s" ex.Message

@@ -166,7 +166,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
               PunType = column.PunType
               MainField = mainField
             }
-        
+
         let attributesStr =
             match compiled.AttributesQuery with
             | None -> ""

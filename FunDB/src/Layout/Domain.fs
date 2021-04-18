@@ -51,13 +51,24 @@ let private hasLocalDependencies (ref : ResolvedFieldRef) (usedSchemas : UsedSch
     // We always have at least one field in used local fields: the reference itself. Hence we just check that size is larger than 1.
     Set.count localEntity > 1
 
-let private makeResultExpr (ref : FieldRef) : ResolvedFieldExpr =
-    let resultColumn =
+let private makeResultExpr (entityRef : ResolvedEntityRef) (exprEntityRef : EntityRef option) (name : FieldName) : ResolvedFieldExpr =
+    let fieldRef =
+        { entity = exprEntityRef
+          name = name
+        } : FieldRef
+    let bound =
         { Ref =
-            VRColumn
-                { Ref = ref
-                  Bound = None
-                }
+            { entity = entityRef
+              name = name
+            }
+          Immediate = true
+        }
+    let column =
+        { Ref = fieldRef
+          Bound = Some bound
+        }
+    let resultColumn =
+        { Ref = VRColumn column
           Path = [||]
         }
     FERef resultColumn
@@ -111,9 +122,9 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
     let convertQuery query = failwithf "Impossible query: %O" query
     mapFieldExpr (idFieldExprMapper convertRef convertQuery) expr
 
-let private compileReferenceOptionsSelectFrom (layout : Layout) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : DomainExpr =
-    let idExpr = makeResultExpr { entity = Some referencedEntityRef; name = funId }
-    let mainExpr = makeResultExpr { entity = Some referencedEntityRef; name = funMain }
+let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : DomainExpr =
+    let idExpr = makeResultExpr refEntityRef (Some referencedEntityRef) funId
+    let mainExpr = makeResultExpr refEntityRef (Some referencedEntityRef) funMain
     let orderByMain =
         { emptyOrderLimitClause with
               OrderBy = [| (Asc, mainExpr) |]
@@ -145,7 +156,7 @@ let private compileReferenceOptionsSelectFrom (layout : Layout) (arguments : Que
 
 let private compileGenericReferenceOptionsSelect (layout : Layout) (refEntityRef : ResolvedEntityRef) (where : ResolvedFieldExpr option) : DomainExpr =
     let from = FEntity (Some referencedName, relaxEntityRef refEntityRef)
-    compileReferenceOptionsSelectFrom layout emptyArguments from where
+    compileReferenceOptionsSelectFrom layout refEntityRef emptyArguments from where
 
 let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRef : ResolvedEntityRef) (refEntityRef : ResolvedEntityRef) (extraWhere : ResolvedFieldExpr option) : DomainExpr =
     let rowFrom = FEntity (None, relaxEntityRef entityRef)
@@ -171,7 +182,7 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
         | None -> idCheck
         | Some where -> FEAnd (idCheck, where)
 
-    compileReferenceOptionsSelectFrom layout arguments (FJoin join) (Some where)
+    compileReferenceOptionsSelectFrom layout refEntityRef arguments (FJoin join) (Some where)
 
 // For now, we only build domains based on immediate check constraints.
 // For example, for check constraint `user_id=>account_id=>balance > 0` we restrict `user_id` based on that.

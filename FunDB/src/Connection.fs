@@ -82,7 +82,7 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
             do! transaction.DisposeAsync ()
             do! system.DisposeAsync ()
         }
-    
+
     // Consumers should use this method instead of `System.SaveChangesAsync` to properly handle serialization errors.
     member this.SystemSaveChangesAsync (cancellationToken : CancellationToken) =
         serializedSaveChangesAsync system cancellationToken

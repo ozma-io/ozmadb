@@ -187,7 +187,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let func = args.[0].GetFunction()
             let handle = Option.get currentHandle
-            let run () = 
+            let run () =
                 task {
                     let! res = handle.API.Entities.DeferConstraints <| fun () -> func.CallAsync(null)
                     match res with

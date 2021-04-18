@@ -365,7 +365,7 @@ type EntitiesAPI (rctx : IRequestContext) =
             | Error e ->
                 return Error e
         }
-    
+
     member this.DeferConstraints (func : unit -> Task<'a>) : Task<Result<'a, EntityErrorInfo>> =
         task {
             if deferConstraintsDepth = 0 then

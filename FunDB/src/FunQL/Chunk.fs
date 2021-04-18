@@ -133,7 +133,7 @@ let private genericResolveWhere (findColumn : FieldName -> SQL.ColumnName option
     let mapper =
         { idFieldExprMapper resolveExprReference resolveQuery with
               Aggregate = resolveAggr
-              SubEntity = resolveSubEntity 
+              SubEntity = resolveSubEntity
         }
     let resolvedExpr = mapFieldExpr mapper parsedExpr
 

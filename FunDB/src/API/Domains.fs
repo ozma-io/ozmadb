@@ -25,7 +25,11 @@ type DomainsAPI (rctx : IRequestContext) =
                         | (Some id, Some rowSpecific) -> (rowSpecific, Map.add (PLocal funId) (FInt id) argValues)
                         | _ -> (domain.Generic, argValues)
                     let! ret = getDomainValues ctx.Transaction.Connection.Query ctx.Layout expr (getReadRole rctx.User.Type) argValues chunk ctx.CancellationToken
-                    return Ok { Values = ret; Hash = expr.Hash }
+                    return Ok
+                        { Values = ret.Values
+                          PunType = ret.PunType
+                          Hash = expr.Hash
+                        }
                 with
                 | :? ChunkException as ex -> return Error <| DEArguments (exceptionString ex)
                 | :? DomainExecutionException as ex ->
