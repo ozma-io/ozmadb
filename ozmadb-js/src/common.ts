@@ -82,13 +82,9 @@ export interface IArrayFieldType {
   subtype: FieldValueType;
 }
 
-export interface IReferenceEntity {
-  entity: IEntityRef;
-  where?: string;
-}
-
-export interface IReferenceFieldType extends IReferenceEntity {
+export interface IReferenceFieldType {
   type: "reference";
+  entity: IEntityRef;
 }
 
 export interface IEnumFieldType {
@@ -312,6 +308,7 @@ export interface IDomainValue {
 
 export interface IDomainValuesResult {
   values: IDomainValue[];
+  punType: ValueType;
   hash: string;
 }
 
