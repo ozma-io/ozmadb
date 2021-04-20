@@ -13,7 +13,7 @@ type ParsedSelectTreeExpr = SelectTreeExpr<EntityRef, LinkedFieldRef>
 type ParsedSetOperationExpr = SetOperationExpr<EntityRef, LinkedFieldRef>
 type ParsedSingleSelectExpr = SingleSelectExpr<EntityRef, LinkedFieldRef>
 type ParsedQueryResult = QueryResult<EntityRef, LinkedFieldRef>
-type ParsedQueryResultExpr = QueryResultExpr<EntityRef, LinkedFieldRef>
+type ParsedQueryColumnResult = QueryColumnResult<EntityRef, LinkedFieldRef>
 type ParsedAttributeMap = AttributeMap<EntityRef, LinkedFieldRef>
 type ParsedCommonTableExpr = CommonTableExpr<EntityRef, LinkedFieldRef>
 type ParsedCommonTableExprs = CommonTableExprs<EntityRef, LinkedFieldRef>
@@ -440,12 +440,15 @@ NonEmptyQueryResults:
     | QueryResult COMMA NonEmptyQueryResults { $1 :: $3 }
 
 QueryResult:
-    | AT Name EQ FieldExpr                { AAttribute ($2, $4) }
-    | QueryResultExpr MaybeAttributeMap   { AResult { Attributes = $2; Result = $1 } }
+    | AT Name EQ FieldExpr       { AAttribute ($2, $4) }
+    | Name DOT Name DOT MULTIPLY { AResult (QRAll (Some { schema = Some $1; name = $3; })) }
+    | Name DOT MULTIPLY          { AResult (QRAll (Some { schema = None; name = $1; })) }
+    | MULTIPLY                   { AResult (QRAll None) }
+    | QueryColumnResult          { AResult (QRExpr $1) }
 
-QueryResultExpr:
-    | FieldExpr         { QRExpr (None, $1) }
-    | FieldExpr AS Name { QRExpr (Some $3, $1) }
+QueryColumnResult:
+    | FieldExpr MaybeAttributeMap         { { Alias = None; Attributes = $2; Result = $1 } }
+    | FieldExpr AS Name MaybeAttributeMap { { Alias = Some $3; Attributes = $4; Result = $1 } }
 
 MaybeAttributeMap:
     |                                                   { Map.empty }

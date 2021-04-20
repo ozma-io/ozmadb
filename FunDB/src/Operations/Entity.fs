@@ -33,12 +33,9 @@ type EntityDeniedException (message : string, innerException : Exception) =
 
 type EntityId = int
 
-type EntityArguments = Map<FieldName, FieldValue>
-
-let private runQuery (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>) (globalArgs : EntityArguments) (query : Query<'q>) (placeholders : EntityArguments) (cancellationToken : CancellationToken) : Task<'a> =
+let private runQuery (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>) (globalArgs : LocalArgumentsMap) (query : Query<'q>) (placeholders : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<'a> =
     task {
         try
-            // FIXME: Slow
             let args = Map.union (Map.mapKeys PGlobal globalArgs) (Map.mapKeys PLocal placeholders)
             return! runFunc (query.Expression.ToSQLString()) (prepareArguments query.Arguments args) cancellationToken
         with
@@ -96,7 +93,7 @@ type private ValueColumn =
 
 let private fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.DefaultValue || field.IsNullable
 
-let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : EntityArguments) (cancellationToken : CancellationToken) : Task<int> =
+let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<int> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             let isOptional = fieldIsOptional field
@@ -115,8 +112,6 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
         if entity.IsAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
-        if entity.IsHidden then
-            raisef EntityExecutionException "Entity %O is hidden" entityRef
         let (subEntityValue, rawArgs) =
             if hasSubType entity then
                 let value =
@@ -164,7 +159,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
 
 let private funIdArg = { ArgType = FTType (FETScalar SFTInt); Optional = false }
 
-let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : EntityArguments) (cancellationToken : CancellationToken) : Task =
+let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
@@ -219,7 +214,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : EntityArguments) (
             do! countAndThrow connection tableRef whereExpr cancellationToken
     }
 
-let deleteEntity (connection : QueryConnection) (globalArgs : EntityArguments) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (cancellationToken : CancellationToken) : Task =
+let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let entity = layout.FindEntity entityRef |> Option.get
 

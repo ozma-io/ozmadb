@@ -23,7 +23,7 @@ type CompiledArgument =
 
 type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
 type CompiledArgumentsMap = Map<Placeholder, CompiledArgument>
-type ArgumentValues = Map<Placeholder, FieldValue>
+type ArgumentValuesMap = Map<Placeholder, FieldValue>
 
 [<NoEquality; NoComparison>]
 type QueryArguments =
@@ -84,16 +84,16 @@ let addArgument (name : Placeholder) (arg : ResolvedArgument) (args : QueryArgum
             }
         (argId, ret)
 
-let addAnonymousArgument (arg : ResolvedArgument) (args : QueryArguments) : PlaceholderId * Placeholder * QueryArguments =
+let addAnonymousArgument (arg : ResolvedArgument) (args : QueryArguments) : PlaceholderId * ArgumentName * QueryArguments =
     let argId = args.NextPlaceholderId
-    let name = sprintf "__%i" args.NextAnonymousId |> FunQLName |> PLocal
-    let ret =
+    let name = sprintf "__%i" args.NextAnonymousId |> FunQLName
+    let args =
         { args with
-              Types = Map.add name (compileArgument argId arg) args.Types
+              Types = Map.add (PLocal name) (compileArgument argId arg) args.Types
               NextPlaceholderId = argId + 1
               NextAnonymousId = args.NextAnonymousId + 1
         }
-    (argId, name, ret)
+    (argId, name, args)
 
 let mergeArguments (a : QueryArguments) (b : QueryArguments) : QueryArguments =
     { Types = Map.unionUnique a.Types b.Types
@@ -150,7 +150,7 @@ let compileFieldValue : FieldValue -> SQL.Value = function
     | FUuidArray vals -> SQL.VUuidArray (compileArray vals)
     | FNull -> SQL.VNull
 
-let prepareArguments (args : QueryArguments) (values : ArgumentValues) : ExprParameters =
+let prepareArguments (args : QueryArguments) (values : ArgumentValuesMap) : ExprParameters =
     let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
         let (notFound, value) =
             match Map.tryFind name values with

@@ -50,6 +50,7 @@ type UserViewInfo =
       Domains : UVDomains
       MainEntity : ResolvedEntityRef option
       Columns : UserViewColumn[]
+      Hash : string
     }
 
 [<NoEquality; NoComparison>]
@@ -94,8 +95,8 @@ type UserViewDryRunException (message : string, innerException : Exception) =
 
     new (message : string) = UserViewDryRunException (message, null)
 
-let private getColumn : ColumnType -> FunQLName option = function
-    | CTColumn c -> Some c
+let private getColumn : (ColumnType * SQL.ColumnName) -> FunQLName option = function
+    | (CTColumn c, _) -> Some c
     | _ -> None
 
 let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (res : ExecutedViewExpr) : PureAttributes =
@@ -116,6 +117,7 @@ let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : Compiled
 let private emptyLimit =
     { Offset = None
       Limit = Some (SQL.VEValue (SQL.VInt 0))
+      Where = None
     }
 
 type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
@@ -165,11 +167,19 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
               MainField = mainField
             }
 
+        let attributesStr =
+            match compiled.AttributesQuery with
+            | None -> ""
+            | Some q -> q.Query
+        let queryStr = compiled.Query.Expression.ToString()
+        let hash = String.concatWithWhitespaces [attributesStr; queryStr] |> Hash.sha1OfString |> String.hexBytes
+
         { AttributeTypes = viewInfo.AttributeTypes
           RowAttributeTypes = viewInfo.RowAttributeTypes
           Domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.FlattenedDomains
           Columns = Seq.map2 getResultColumn (Seq.mapMaybe getColumn compiled.Columns) viewInfo.Columns |> Seq.toArray
           MainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.Entity) viewExpr.MainEntity
+          Hash = hash
         }
 
     let rec dryRunUserView (uv : ResolvedUserView) : Task<PrefetchedUserView> =

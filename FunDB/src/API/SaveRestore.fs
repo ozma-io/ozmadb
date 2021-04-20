@@ -14,7 +14,7 @@ open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.API.Types
 
-let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<EntityArguments, string> =
+let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<LocalArgumentsMap, string> =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind (fieldName.ToString()) rawArgs with
         | None -> Ok None

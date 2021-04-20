@@ -11,7 +11,6 @@ open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
-open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Merge
@@ -19,7 +18,7 @@ open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.Triggers
 
-let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<EntityArguments, string> =
+let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEntity) : Result<LocalArgumentsMap, string> =
     let getValue (fieldName : FieldName, field : ResolvedColumnField) =
         match Map.tryFind (fieldName.ToString()) rawArgs with
         | None -> Ok None
@@ -30,15 +29,6 @@ let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEn
     match entity.ColumnFields |> Map.toSeq |> Seq.traverseResult getValue with
     | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
     | Error err -> Error err
-
-let private getReadRole = function
-    | RTRoot -> None
-    | RTRole role when role.CanRead -> None
-    | RTRole role -> role.Role
-
-let private getWriteRole = function
-    | RTRoot -> None
-    | RTRole role -> Some (Option.defaultValue emptyResolvedRole role.Role)
 
 type private BeforeTriggerError =
     | BEError of EntityErrorInfo
@@ -52,7 +42,7 @@ type EntitiesAPI (rctx : IRequestContext) =
     // Increased with nested requests for deferring.
     let mutable deferConstraintsDepth = 0
 
-    let runArgsTrigger (run : ITriggerScript -> Task<ArgsTriggerResult>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, BeforeTriggerError>> =
+    let runArgsTrigger (run : ITriggerScript -> Task<ArgsTriggerResult>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : LocalArgumentsMap) (trigger : MergedTrigger) : Task<Result<LocalArgumentsMap, BeforeTriggerError>> =
         let ref =
             { Schema = trigger.Schema
               Entity = Option.defaultValue entityRef trigger.Inherited
@@ -112,10 +102,10 @@ type EntitiesAPI (rctx : IRequestContext) =
                         return Error <| EETrigger (ref.Schema, ref.Name, EEException str)
             }
 
-    let applyInsertTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, BeforeTriggerError>> =
+    let applyInsertTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : LocalArgumentsMap) (trigger : MergedTrigger) : Task<Result<LocalArgumentsMap, BeforeTriggerError>> =
         runArgsTrigger (fun script -> script.RunInsertTriggerBefore entityRef args ctx.CancellationToken) entityRef entity args trigger
 
-    let applyUpdateTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : int) (args : EntityArguments) (trigger : MergedTrigger) : Task<Result<EntityArguments, BeforeTriggerError>> =
+    let applyUpdateTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (id : int) (args : LocalArgumentsMap) (trigger : MergedTrigger) : Task<Result<LocalArgumentsMap, BeforeTriggerError>> =
         runArgsTrigger (fun script -> script.RunUpdateTriggerBefore entityRef id args ctx.CancellationToken) entityRef entity args trigger
 
     let applyDeleteTriggerBefore (entityRef : ResolvedEntityRef) (id : int) () (trigger : MergedTrigger) : Task<Result<unit, BeforeTriggerError>> =
@@ -145,10 +135,10 @@ type EntitiesAPI (rctx : IRequestContext) =
                         return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException str))
             }
 
-    let applyInsertTriggerAfter (entityRef : ResolvedEntityRef) (id : int) (args : EntityArguments) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
+    let applyInsertTriggerAfter (entityRef : ResolvedEntityRef) (id : int) (args : LocalArgumentsMap) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
         runAfterTrigger (fun script -> script.RunInsertTriggerAfter entityRef id args ctx.CancellationToken) entityRef trigger
 
-    let applyUpdateTriggerAfter (entityRef : ResolvedEntityRef) (id : int) (args : EntityArguments) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
+    let applyUpdateTriggerAfter (entityRef : ResolvedEntityRef) (id : int) (args : LocalArgumentsMap) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
         runAfterTrigger (fun script -> script.RunUpdateTriggerAfter entityRef id args ctx.CancellationToken) entityRef trigger
 
     let applyDeleteTriggerAfter (entityRef : ResolvedEntityRef) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
@@ -375,7 +365,7 @@ type EntitiesAPI (rctx : IRequestContext) =
             | Error e ->
                 return Error e
         }
-    
+
     member this.DeferConstraints (func : unit -> Task<'a>) : Task<Result<'a, EntityErrorInfo>> =
         task {
             if deferConstraintsDepth = 0 then

@@ -37,7 +37,7 @@ type RequestErrorInfo =
         [<DataMember>]
         member this.Message =
             match this with
-            | REInternal msg -> msg 
+            | REInternal msg -> msg
             | RERequest msg -> msg
             | RENoEndpoint -> "API endpoint doesn't exist"
             | RENoInstance -> "Instance not found"
@@ -87,14 +87,24 @@ let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyV
     | Error name -> sprintf "Invalid JSON value in argument %s" name |> RERequest |> requestError
     | Ok args2 -> f <| Map.ofSeq args2
 
-let queryArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+let queryArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     processArgs f ctx.Request.Query next ctx
 
-let formArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+let formArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {
         let! form = ctx.Request.ReadFormAsync ()
         return! processArgs f form next ctx
     }
+
+let bindJsonToken (token : JToken) (f : 'a -> HttpHandler) : HttpHandler =
+    let mobj =
+        try
+            Ok <| token.ToObject()
+        with
+        | :? JsonException as e -> Error <| exceptionString e
+    match mobj with
+    | Ok o -> f o
+    | Error e -> RequestErrors.BAD_REQUEST e
 
 let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {

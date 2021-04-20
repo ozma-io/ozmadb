@@ -59,17 +59,20 @@ type UserViewsAPI (rctx : IRequestContext) =
                     | Some (Ok cached) -> return Ok cached
         }
 
-    let convertViewArguments (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValues, string> =
+    let convertViewArguments (extraArguments : ArgumentValuesMap) (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValuesMap, string> =
         let findArgument (name, arg : CompiledArgument) =
-            match name with
-            | PLocal (FunQLName lname) ->
-                match Map.tryFind lname rawArgs with
-                | Some argStr ->
-                    match parseValueFromJson arg.FieldType false argStr with
-                    | None -> Error <| sprintf "Cannot convert argument %O to type %O" name arg.FieldType
-                    | Some arg -> Ok (Some (name, arg))
-                | _ -> Ok None
-            | PGlobal gname -> Ok (Some (name, Map.find gname rctx.GlobalArguments))
+            match Map.tryFind name extraArguments with
+            | Some arg -> Ok (Some (name, arg))
+            | None ->
+                match name with
+                | PLocal (FunQLName lname) ->
+                    match Map.tryFind lname rawArgs with
+                    | Some argStr ->
+                        match parseValueFromJson arg.FieldType false argStr with
+                        | None -> Error <| sprintf "Cannot convert argument %O to type %O" name arg.FieldType
+                        | Some arg -> Ok (Some (name, arg))
+                    | _ -> Ok None
+                | PGlobal gname -> Ok (Some (name, Map.find gname rctx.GlobalArguments))
         compiled.Query.Arguments.Types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
 
     member this.GetUserViewInfo (source : UserViewSource) (flags : UserViewFlags) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
@@ -97,7 +100,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (chunk : ViewChunk) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
+    member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
         task {
             match! resolveSource source flags with
             | Error e -> return Error e
@@ -113,21 +116,32 @@ type UserViewsAPI (rctx : IRequestContext) =
                         task {
                             return (uv, { res with Rows = Array.ofSeq res.Rows })
                         }
-                    match convertViewArguments rawArgs compiled with
-                    | Error msg ->
-                        rctx.WriteEvent (fun event ->
-                            event.Type <- "getUserView"
-                            event.Error <- "arguments"
-                            event.Details <- msg
-                        )
-                        return Error <| UVEArguments msg
-                    | Ok arguments ->
-                        let (extraArguments, compiled) = viewExprChunk chunk compiled
-                        let arguments = Map.union arguments extraArguments
-                        let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled arguments ctx.CancellationToken getResult
-                        return Ok { Info = puv.Info
-                                    Result = res
-                                  }
+
+                    let maybeResolvedChunk =
+                        try
+                            Ok <| resolveViewExprChunk compiled chunk
+                        with
+                        | :? ChunkException as e -> Error <| UVEArguments (exceptionString e)
+                    match maybeResolvedChunk with
+                    | Error e -> return Error e
+                    | Ok resolvedChunk ->
+                        let (extraLocalArgs, query) = queryExprChunk resolvedChunk compiled.Query
+                        let extraArgValues = Map.mapKeys PLocal extraLocalArgs
+                        let compiled = { compiled with Query = query }
+
+                        match convertViewArguments extraArgValues rawArgs compiled with
+                        | Error msg ->
+                            rctx.WriteEvent (fun event ->
+                                event.Type <- "getUserView"
+                                event.Error <- "arguments"
+                                event.Details <- msg
+                            )
+                            return Error <| UVEArguments msg
+                        | Ok arguments ->
+                            let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled arguments ctx.CancellationToken getResult
+                            return Ok { Info = puv.Info
+                                        Result = res
+                                      }
                 with
                 | :? PermissionsViewException as err ->
                     logger.LogError(err, "Access denied to user view")
@@ -141,4 +155,4 @@ type UserViewsAPI (rctx : IRequestContext) =
 
     interface IUserViewsAPI with
         member this.GetUserViewInfo source flags = this.GetUserViewInfo source flags
-        member this.GetUserView source rawArguments page flags = this.GetUserView source rawArguments page flags
+        member this.GetUserView source rawArguments chunk flags = this.GetUserView source rawArguments chunk flags

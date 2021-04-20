@@ -20,6 +20,7 @@ type [<NoEquality; NoComparison>] ExecutedValue =
     { Value : SQL.Value
       [<DataMember(EmitDefaultValue = false, Order = 42)>]
       Attributes : ExecutedAttributeMap
+      [<DataMember(EmitDefaultValue = false)>]
       Pun : SQL.Value option
     }
 
@@ -36,7 +37,9 @@ type [<NoEquality; NoComparison>] ExecutedRow =
       Attributes : ExecutedAttributeMap
       [<DataMember(EmitDefaultValue = false)>]
       EntityIds : Map<DomainIdColumn, ExecutedEntityId>
+      [<DataMember(EmitDefaultValue = false)>]
       MainId : int option
+      [<DataMember(EmitDefaultValue = false)>]
       MainSubEntity : ResolvedEntityRef option
     }
 
@@ -99,14 +102,14 @@ let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult
       ColumnAttributes = colAttributes
     }
 
-let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domains) (columns : ColumnType[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
-    let takeRowAttribute i colType (_, valType) =
+let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domains) (columns : (ColumnType * SQL.ColumnName)[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
+    let takeRowAttribute i (colType, _) (_, valType) =
         match colType with
         | CTMeta (CMRowAttribute name) -> Some (name, (valType, i))
         | _ -> None
     let rowAttributes = Seq.mapi2Maybe takeRowAttribute columns result.Columns |> Map.ofSeq
 
-    let takeCellAttribute i colType (_, valType) =
+    let takeCellAttribute i (colType, _) (_, valType) =
         match colType with
             | CTColumnMeta (fieldName, CCCellAttribute name) -> Some (fieldName, (name, (valType, i)))
             | _ -> None
@@ -116,43 +119,43 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         |> Seq.map (fun (fieldName, attrs) -> (fieldName, attrs |> Seq.map snd |> Map.ofSeq))
         |> Map.ofSeq
 
-    let takePunAttribute i colType (_, valType) =
+    let takePunAttribute i (colType, _) (_, valType) =
         match colType with
         | CTColumnMeta (name, CCPun) -> Some (name, (valType, i))
         | _ -> None
     let punAttributes = Seq.mapi2Maybe takePunAttribute columns result.Columns |> Map.ofSeq
 
-    let takeDomainColumn i colType =
+    let takeDomainColumn i (colType, _) =
         match colType with
         | CTMeta (CMDomain ns) -> Some (ns, i)
         | _ -> None
     let domainColumns = Seq.mapiMaybe takeDomainColumn columns |> Map.ofSeq
 
-    let takeIdColumn i colType =
+    let takeIdColumn i (colType, _) =
         match colType with
         | CTMeta (CMId name) -> Some (name, i)
         | _ -> None
     let idColumns = Seq.mapiMaybe takeIdColumn columns |> Map.ofSeq
 
-    let takeSubEntityColumn i colType =
+    let takeSubEntityColumn i (colType, _) =
         match colType with
         | CTMeta (CMSubEntity name) -> Some (name, i)
         | _ -> None
     let subEntityColumns = Seq.mapiMaybe takeSubEntityColumn columns |> Map.ofSeq
 
-    let takeMainIdColumn i colType =
+    let takeMainIdColumn i (colType, _) =
         match colType with
         | CTMeta CMMainId -> Some i
         | _ -> None
     let mainIdColumn = Seq.mapiMaybe takeMainIdColumn columns |> Seq.first
 
-    let takeMainSubEntityColumn i colType =
+    let takeMainSubEntityColumn i (colType, _) =
         match colType with
         | CTMeta CMMainSubEntity -> Some i
         | _ -> None
     let mainSubEntityColumn = Seq.mapiMaybe takeMainSubEntityColumn columns |> Seq.first
 
-    let takeColumn i colType (_, valType) =
+    let takeColumn i (colType, _) (_, valType) =
         match colType with
             | CTColumn name ->
                 let cellAttributes =
@@ -265,7 +268,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         }
     (viewInfo, rows)
 
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValues) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
+let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
         let parameters = prepareArguments viewExpr.Query.Arguments arguments
 

@@ -543,6 +543,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         if opts.HasId then
             raisef ResolveLayoutException "Cannot use id in check constraints"
         { Expression = expr
+          UsedSchemas = opts.UsedSchemas
           IsLocal = opts.IsLocal
           HashName = makeHashName constrName
         }

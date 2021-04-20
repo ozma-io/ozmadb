@@ -5,66 +5,103 @@ open FunWithFlags.FunDB.SQL.AST
 type QueryChunk =
     { Offset : ValueExpr option
       Limit : ValueExpr option
+      Where : ValueExpr option
     }
 
 let emptyQueryChunk =
     { Offset = None
       Limit = None
+      Where = None
     } : QueryChunk
 
 let private applyToOrderLimit (chunk : QueryChunk) (orderLimit : OrderLimitClause) =
     let offsetExpr =
         match chunk.Offset with
         | None -> orderLimit.Offset
-        | Some (VEValue (VInt n)) when n <= 0 -> orderLimit.Offset
         | Some offset ->
             Some <|
                 match orderLimit.Offset with
-                | Some oldOffset -> VEBinaryOp (oldOffset, BOPlus, offset)
                 | None -> offset
+                | Some oldOffset ->
+                    let safeOffset = VESpecialFunc (SFGreatest, [|VEValue (VInt 0); offset|])
+                    VEBinaryOp (oldOffset, BOPlus, safeOffset)
     let limitExpr =
         match chunk.Limit with
         | None -> orderLimit.Limit
-        | Some (VEValue (VInt n)) when n <= 0 -> Some (VEValue (VInt 0))
         | Some limit ->
             Some <|
                 match orderLimit.Limit with
-                | Some oldLimit -> VESpecialFunc (SFLeast, [|oldLimit; limit|])
                 | None -> limit
+                | Some oldLimit ->
+                    // If offset is used, we need to consider of it in limit too to prevent leaks.
+                    let oldLimit =
+                        match chunk.Offset with
+                        | None -> oldLimit
+                        | Some offset ->
+                            let safeOffset = VESpecialFunc (SFGreatest, [|VEValue (VInt 0); offset|])
+                            let newLimit = VEBinaryOp (oldLimit, BOMinus, safeOffset)
+                            VESpecialFunc (SFGreatest, [|VEValue (VInt 0); newLimit|])
+                    VESpecialFunc (SFLeast, [|oldLimit; limit|])
     { orderLimit with
           Offset = offsetExpr
           Limit = limitExpr
     }
 
 type private ChunkApplier (chunk : QueryChunk) =
-    let rec applySelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
+    let rec applyLimitSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
         | SSelect sel -> SSelect { sel with OrderLimit = applyToOrderLimit chunk sel.OrderLimit }
-        | SValues values -> SValues values
+        | SValues _ as values ->
+            // Outer select is the way.
+            let fromAlias =
+                { Name = SQLName "inner"
+                  Columns = None
+                }
+            let innerSelect =
+                { CTEs = None
+                  Tree = values
+                  Extra = null
+                }
+            let outerSelect =
+                { Columns = [| SCAll None |]
+                  From = Some <| FSubExpr (fromAlias, innerSelect)
+                  Where = None
+                  GroupBy = [||]
+                  OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
+                  Extra = null
+                }
+            SSelect outerSelect
         | SSetOp setOp ->
             SSetOp
-                { Operation = setOp.Operation
-                  AllowDuplicates = setOp.AllowDuplicates
-                  A = applySelectExpr setOp.A
-                  B = applySelectExpr setOp.B
-                  OrderLimit = setOp.OrderLimit
+                { setOp with
+                      OrderLimit = applyToOrderLimit chunk setOp.OrderLimit
                 }
 
-    and applyCommonTableExpr (cte : CommonTableExpr) : CommonTableExpr =
-        { Fields = cte.Fields
-          Materialized = cte.Materialized
-          Expr = applySelectExpr cte.Expr
-        }
-
-    and applyCommonTableExprs (ctes : CommonTableExprs) : CommonTableExprs =
-        { Recursive = ctes.Recursive
-          Exprs = Array.map (fun (name, expr) -> (name, applyCommonTableExpr expr)) ctes.Exprs
-        }
-
     and applySelectExpr (select : SelectExpr) : SelectExpr =
-        { CTEs = Option.map applyCommonTableExprs select.CTEs
-          Tree = applySelectTreeExpr select.Tree
-          Extra = select.Extra
-        }
+        match chunk.Where with
+        | None ->
+            { select with
+                  Tree = applyLimitSelectTreeExpr select.Tree
+            }
+        | Some where ->
+            // We need to create an outer SELECT with restrictions and its own limits.
+            let fromAlias =
+                { Name = SQLName "inner"
+                  Columns = None
+                }
+            let outerSelect =
+                { Columns = [| SCAll None |]
+                  From = Some <| FSubExpr (fromAlias, select)
+                  Where = Some where
+                  GroupBy = [||]
+                  OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
+                  Extra = null
+                }
+            let ret =
+                { CTEs = None
+                  Tree = SSelect outerSelect
+                  Extra = null
+                }
+            ret
 
     member this.ApplySelectExpr select = applySelectExpr select
 

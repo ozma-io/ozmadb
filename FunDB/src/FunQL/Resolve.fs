@@ -134,9 +134,10 @@ let refField : LinkedRef<ValueRef<'f>> -> LinkedRef<'f> option = function
     | { Ref = VRColumn field; Path = path } -> Some { Ref = field; Path = path }
     | _ -> None
 
-let resultFieldRef : QueryResultExpr<'e, LinkedRef<ValueRef<'f>>> -> LinkedRef<'f> option = function
-    | QRExpr (name, FERef ref) -> refField ref
-    | QRExpr (name, _) -> None
+let resultFieldRef (result : QueryColumnResult<'e, LinkedRef<ValueRef<'f>>>) : LinkedRef<'f> option =
+    match result.Result with
+    | FERef ref -> refField ref
+    | _ -> None
 
 // Copy of that in Layout.Resolve but with a different exception.
 let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
@@ -478,19 +479,27 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 | Failure msg -> raisef ViewResolveException "Clashing names: %s" msg
             renameFields fieldNames results
 
-    let rec resolveResult (flags : SelectFlags) (ctx : Context) (result : ParsedQueryResult) : ResolvedResultInfo * ResolvedQueryResult =
+    let rec resolveResult (flags : SelectFlags) (ctx : Context) : ParsedQueryResult -> ResolvedResultInfo * ResolvedQueryResult = function
+        | QRAll alias -> raisef ViewResolveException "Wildcard SELECTs are not yet supported"
+        | QRExpr result ->
+            let (exprInfo, newResult) = resolveResultColumn flags ctx result
+            (exprInfo, QRExpr newResult)
+
+
+    and resolveResultColumn (flags : SelectFlags) (ctx : Context) (result : ParsedQueryColumnResult) : ResolvedResultInfo * ResolvedQueryColumnResult =
         if not (Map.isEmpty result.Attributes) && flags.NoAttributes then
             raisef ViewResolveException "Attributes are not allowed in query expressions"
-        let (exprInfo, expr) = resolveResultExpr flags ctx result.Result
-        let ret = {
-            Attributes = resolveAttributes ctx result.Attributes
-            Result = expr
-        }
+        let (exprInfo, expr) = resolveResultExpr flags ctx result.Alias result.Result
+        let ret =
+            { Alias = result.Alias
+              Attributes = resolveAttributes ctx result.Attributes
+              Result = expr
+            } : ResolvedQueryColumnResult
         (exprInfo, ret)
 
     // Should be in sync with resultField
-    and resolveResultExpr (flags : SelectFlags) (ctx : Context) : ParsedQueryResultExpr -> ResolvedResultInfo * ResolvedQueryResultExpr = function
-        | QRExpr (name, FERef f) ->
+    and resolveResultExpr (flags : SelectFlags) (ctx : Context) (name : FieldName option) : ParsedFieldExpr -> ResolvedResultInfo * ResolvedFieldExpr = function
+        | FERef f ->
             Option.iter checkName name
             let ref = resolveReference true ctx.FieldMaps f
             let innerField =
@@ -502,8 +511,8 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 { InnerField = innerField
                   HasAggregates = false
                 }
-            (info, QRExpr (name, FERef ref.Ref))
-        | QRExpr (name, e) ->
+            (info, FERef ref.Ref)
+        | e ->
             match name with
             | Some n -> checkName n
             | None when flags.RequireNames -> raisef ViewResolveException "Unnamed results are allowed only inside expression queries"
@@ -513,7 +522,7 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
                 { InnerField = None
                   HasAggregates = exprInfo.HasAggregates
                 }
-            (info, QRExpr (name, expr))
+            (info, expr)
 
     and resolveAttributes (ctx : Context) (attributes : ParsedAttributeMap) : ResolvedAttributeMap =
         Map.map (fun name expr -> resolveNonaggrFieldExpr ctx expr) attributes
@@ -760,7 +769,10 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         let rawResults = Array.map (resolveResult flags ctx) query.Results
         let hasAggregates = Array.exists (fun (info : ResolvedResultInfo, expr) -> info.HasAggregates) rawResults || not (Array.isEmpty qGroupBy)
         let results = Array.map snd rawResults
-        let newFields = rawResults |> Array.map (fun (info, res) -> (res.Result.TryToName (), if hasAggregates then None else info.InnerField))
+        let getFields : ResolvedResultInfo * ResolvedQueryResult -> FieldName option * BoundFieldInfo option = function
+            | (_, QRAll alias) -> failwith "Impossible QRAll"
+            | (info, QRExpr result) -> (result.TryToName (), if hasAggregates then None else info.InnerField)
+        let newFields = rawResults |> Array.map getFields
         try
             newFields |> Seq.mapMaybe fst |> Set.ofSeqUnique |> ignore
         with
@@ -851,11 +863,13 @@ type private QueryResolver (layout : ILayoutFields, arguments : ResolvedArgument
         if foundRef <> ref then
             raisef ViewResolveException "Cannot map main entity to the expression: %O, possible value: %O" ref foundRef
 
-        let getField (result : ResolvedQueryResult) : (FieldName * FieldName) option =
-            let name = result.Result.TryToName () |> Option.get
-            match Map.tryFind name fields with
-            | Some (Some { Ref = boundRef; Field = RColumnField _ }) when boundRef.entity = ref -> Some (name, boundRef.name)
-            | _ -> None
+        let getField : ResolvedQueryResult -> (FieldName * FieldName) option = function
+            | QRAll _ -> failwith "Impossible QRAll"
+            | QRExpr result ->
+                let name = result.TryToName () |> Option.get
+                match Map.tryFind name fields with
+                | Some (Some { Ref = boundRef; Field = RColumnField _ }) when boundRef.entity = ref -> Some (name, boundRef.name)
+                | _ -> None
         let mappedResults = columns |> Seq.mapMaybe getField |> Map.ofSeqUnique
 
         let checkField fieldName (field : ResolvedColumnField) =
@@ -936,13 +950,15 @@ and private relabelOrderLimitClause (clause : ResolvedOrderLimitClause) : Resolv
       OrderBy = Array.map (fun (order, expr) -> (order, relabelFieldExpr expr)) clause.OrderBy
     }
 
-and private relabelQueryResult (result : ResolvedQueryResult) : ResolvedQueryResult =
-    { Attributes = Map.map (fun name -> relabelFieldExpr) result.Attributes
-      Result = relabelQueryResultExpr result.Result
-    }
+and private relabelQueryResult : ResolvedQueryResult -> ResolvedQueryResult = function
+    | QRAll alias -> QRAll alias
+    | QRExpr result -> QRExpr <| relabelQueryColumnResult result
 
-and private relabelQueryResultExpr : ResolvedQueryResultExpr -> ResolvedQueryResultExpr = function
-    | QRExpr (name, e) -> QRExpr (name, relabelFieldExpr e)
+and private relabelQueryColumnResult (result : ResolvedQueryColumnResult) : ResolvedQueryColumnResult =
+    { Attributes = Map.map (fun name -> relabelFieldExpr) result.Attributes
+      Result = relabelFieldExpr result.Result
+      Alias = result.Alias
+    }
 
 let resolveSelectExpr (layout : ILayoutFields) (select : ParsedSelectExpr) : Set<Placeholder> * ResolvedSelectExpr =
     let qualifier = QueryResolver (layout, globalArgumentsMap)

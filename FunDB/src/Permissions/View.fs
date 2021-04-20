@@ -144,14 +144,17 @@ type private PermissionsApplier (access : SchemaAccess) =
 
     and applyToFromExpr : FromExpr -> FromExpr = function
         | FTable (extra, pun, entity) ->
-            let entityRef = (extra :?> RealEntityAnnotation).RealEntity
-            let accessSchema = Map.find entityRef.schema access
-            let accessEntity = Map.find entityRef.name accessSchema
-            match accessEntity with
-            | None -> FTable (null, pun, entity)
-            | Some restr ->
-                // `pun` is guaranteed to be there for all table queries.
-                FSubExpr (Option.get pun, restr)
+            match extra with
+            | :? RealEntityAnnotation as ann ->
+                let accessSchema = Map.find ann.RealEntity.schema access
+                let accessEntity = Map.find ann.RealEntity.name accessSchema
+                match accessEntity with
+                | None -> FTable (null, pun, entity)
+                | Some restr ->
+                    // `pun` is guaranteed to be there for all table queries.
+                    FSubExpr (Option.get pun, restr)
+            // From CTE.
+            | _ -> FTable (extra, pun, entity)
         | FJoin join ->
             FJoin
                 { Type = join.Type
@@ -164,20 +167,21 @@ type private PermissionsApplier (access : SchemaAccess) =
 
     member this.ApplyToSelectExpr = applyToSelectExpr
 
+let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (query : Query<SelectExpr>) : Query<SelectExpr> =
+    let accessCompiler = AccessCompiler (layout, role, query.Arguments)
+    let access = accessCompiler.FilterUsedSchemas layout usedSchemas
+    let applier = PermissionsApplier access
+    let expression = applier.ApplyToSelectExpr query.Expression
+    { Expression = expression
+      Arguments = accessCompiler.Arguments
+    }
+
 let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (expr : CompiledViewExpr) : unit =
     let accessCompiler = AccessCompiler (layout, role, expr.Query.Arguments)
     let access = accessCompiler.FilterUsedSchemas layout expr.UsedSchemas
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (view : CompiledViewExpr) : CompiledViewExpr =
-    let accessCompiler = AccessCompiler (layout, role, view.Query.Arguments)
-    let access = accessCompiler.FilterUsedSchemas layout view.UsedSchemas
-    let applier = PermissionsApplier access
-    let expression = applier.ApplyToSelectExpr view.Query.Expression
     { view with
-          Query =
-              { view.Query with
-                    Expression = expression
-                    Arguments = accessCompiler.Arguments
-              }
+          Query = applyRoleQueryExpr layout role view.UsedSchemas view.Query
     }

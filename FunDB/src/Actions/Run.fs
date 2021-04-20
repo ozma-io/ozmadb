@@ -23,7 +23,7 @@ type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
         try
             runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
         with
-        | :? NetJsException as e ->
+        | :? JavaScriptRuntimeException as e ->
             raisefWithInner ActionRunException e "Couldn't initialize"
 
     member this.Run (args : JObject, cancellationToken : CancellationToken) : Task<JObject option> =

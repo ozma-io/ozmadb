@@ -29,15 +29,17 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
             FUserViewRefArray arr
         | v -> v
 
-    let rec resolveResult (result : ResolvedQueryResult) : ResolvedQueryResult =
-        let attributes = resolveAttributes result.Attributes
-        let result = resolveResultExpr result.Result
-        { Attributes = attributes
-          Result = result
-        }
+    let rec resolveResult : ResolvedQueryResult -> ResolvedQueryResult = function
+        | QRAll alias -> QRAll alias
+        | QRExpr result -> QRExpr <| resolveColumnResult result
 
-    and resolveResultExpr : ResolvedQueryResultExpr -> ResolvedQueryResultExpr = function
-        | QRExpr (name, e) -> QRExpr (name, resolveFieldExpr e)
+    and resolveColumnResult (result : ResolvedQueryColumnResult) : ResolvedQueryColumnResult =
+        let attributes = resolveAttributes result.Attributes
+        let expr = resolveFieldExpr result.Result
+        { Alias = result.Alias
+          Attributes = attributes
+          Result = expr
+        }
 
     and resolveAttributes (attributes : ResolvedAttributeMap) : ResolvedAttributeMap =
         Map.map (fun name expr -> resolveFieldExpr expr) attributes

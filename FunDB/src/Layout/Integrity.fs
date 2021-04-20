@@ -54,7 +54,7 @@ type private AssertionsBuilder (layout : Layout) =
             | FTReference toRef ->
                 let refEntity = layout.FindEntity toRef |> Option.get
                 if Option.isSome refEntity.Inheritance then
-                    let assertion = 
+                    let assertion =
                         { FromField = fieldRef
                           ToEntity = toRef
                         }
@@ -220,7 +220,7 @@ let private convertRelatedExpr (localRef : EntityRef) : ResolvedFieldExpr -> Res
 // Need to be public for JsonConvert
 type PathTriggerKey =
     { Ref : ResolvedFieldRef
-      // This is path without the last dereference; for example, triggers for foo=>bar and foo=>baz will be merged into trigger for entity E, which contains bar and baz.
+      // This is path without the last dereference; for example, triggers for foo=>bar and foo=>baz will be merged into trigger for entity E, which handles bar and baz.
       EntityPath : FieldName list
     }
 
@@ -353,14 +353,14 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
                     let mapper = { SQL.idValueExprMapper with ColumnReference = mapRef }
                     let newExpr = SQL.mapValueExpr mapper trig.Expression
                     { trig with Expression = newExpr }
-                
+
                 triggers <- List.fold (fun trigs (key, trig) -> Map.addWith unionPathTrigger key (postprocessTrigger trig) trigs) triggers newTriggers
         let mapper =
             { idFieldExprIter with
                 FieldReference = iterReference
             }
         iterFieldExpr mapper expr
-        
+
         (outerFields, triggers)
 
     member this.FindCheckConstraintAffected expr = findCheckConstraintAffected expr
@@ -370,13 +370,14 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
     let fixedCheck = convertRelatedExpr (relaxEntityRef entity.Root) check
     let aggExpr = FEAggFunc (FunQLName "bool_and", AEAll [| fixedCheck |])
 
-    let result = 
+    let result =
         { Attributes = Map.empty
-          Result = QRExpr (None, aggExpr)
+          Result = aggExpr
+          Alias = None
         }
     let singleSelect =
         { Attributes = Map.empty
-          Results = [| result |]
+          Results = [| QRExpr result |]
           From = Some (FEntity (None, relaxEntityRef entity.Root))
           Where = None
           GroupBy = [||]
@@ -384,7 +385,8 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
           Extra = null
         } : ResolvedSingleSelectExpr
     let select = { CTEs = None; Tree = SSelect singleSelect; Extra = null }
-    compileSelectExpr layout select
+    let (usedSchemas, expr) = compileSelectExpr layout Map.empty select
+    expr
 
 // Replaces entity references with `new` in simple cases.
 type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
@@ -490,13 +492,14 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
 
     let fixedCheck = convertRelatedExpr (relaxEntityRef entity.Root) check
 
-    let result = 
+    let result =
         { Attributes = Map.empty
-          Result = QRExpr (None, fixedCheck)
+          Result = fixedCheck
+          Alias = None
         }
     let singleSelect =
         { Attributes = Map.empty
-          Results = [| result |]
+          Results = [|  QRExpr result |]
           From = Some (FEntity (None, relaxEntityRef entity.Root))
           Where = None
           GroupBy = [||]
@@ -504,7 +507,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           Extra = null
         } : ResolvedSingleSelectExpr
     let select = { CTEs = None; Tree = SSelect singleSelect; Extra = null }
-    let compiled = compileSelectExpr layout select
+    let (usedSchemas, compiled) = compileSelectExpr layout Map.empty select
 
     let replacer = ConstraintUseNewConverter(entity.Root)
     let compiled = replacer.UseNewInSelectExpr compiled
@@ -547,7 +550,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
         match entity.Inheritance with
         | None -> updateCheck
         | Some inher -> SQL.VEAnd (inher.CheckExpr, updateCheck)
-    
+
     let getColumnName name = (Map.find name entity.ColumnFields).ColumnName
     let affectedColumns = outerFields |> Seq.map getColumnName |> Seq.toArray
 
@@ -645,7 +648,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
         match entity.Inheritance with
         | None -> updateCheck
         | Some inher -> SQL.VEAnd (inher.CheckExpr, updateCheck)
-    
+
     let getColumnName name = (Map.find name triggerEntity.ColumnFields).ColumnName
     let affectedColumns = trigger.Fields |> Seq.map getColumnName |> Seq.toArray
 

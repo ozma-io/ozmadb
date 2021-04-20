@@ -1,13 +1,13 @@
 ﻿module FunWithFlags.FunDB.API.ContextCache
 
 open System
+open System.Security.Cryptography
 open System.Reflection
 open System.Data
 open System.IO
 open System.Linq
 open Z.EntityFramework.Plus
 open Microsoft.EntityFrameworkCore
-open System.Security.Cryptography
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
@@ -50,6 +50,7 @@ open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.UserViews.Schema
 open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.UserViews.Generate
+open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.Layout.Integrity
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Meta
@@ -78,10 +79,12 @@ let private versionField = "StateVersion"
 let private fallbackVersion = 0
 let private migrationLockNumber = 0
 let private migrationLockParams = Map.singleton 0 (SQL.VInt migrationLockNumber)
+
 let private assemblyHash =
-    use hasher = SHA256.Create()
-    use assembly = File.OpenRead(Assembly.GetCallingAssembly().Location)
-    hasher.ComputeHash(assembly) |> Array.map (fun x -> x.ToString("x2")) |> String.concat ""
+    lazy
+        use hasher = SHA1.Create()
+        use assembly = File.OpenRead(Assembly.GetCallingAssembly().Location)
+        hasher.ComputeHash(assembly) |> Hash.sha1OfBytes |> String.hexBytes
 
 [<NoEquality; NoComparison>]
 type private CachedContext =
@@ -89,6 +92,7 @@ type private CachedContext =
       UserViews : PrefetchedUserViews
       Permissions : Permissions
       DefaultAttrs : MergedDefaultAttributes
+      Domains : LayoutDomains
       JSRuntime : IsolateLocal<JSRuntime<APITemplate>>
       ActionScripts : IsolateLocal<ActionScripts>
       Triggers : MergedTriggers
@@ -117,7 +121,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
     let anonymousViewsCache = FluidCache<AnonymousUserView>(64, TimeSpan.FromSeconds(0.0), TimeSpan.FromSeconds(600.0), fun () -> DateTime.Now)
     let anonymousViewsIndex = anonymousViewsCache.AddIndex("byQuery", fun uv -> uv.Query)
 
-    let currentDatabaseVersion = sprintf "%s %s" assemblyHash hashedPreload.Hash
+    let currentDatabaseVersion = sprintf "%s %s" (assemblyHash.Force()) hashedPreload.Hash
 
     let jsIsolates =
         DefaultObjectPool
@@ -300,6 +304,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 let! _ = transaction.Commit (cancellationToken)
 
                 let systemViews = filterSystemViews sourceViews
+                let domains = buildLayoutDomains layout
 
                 let state =
                     { Layout = layout
@@ -310,6 +315,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                       Triggers = mergedTriggers
                       TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
                       UserViews = prefetchedViews
+                      Domains = domains
                       SystemViews = systemViews
                       UserMeta = userMeta
                     }
@@ -409,31 +415,32 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                     // Now dry-run those views that _cannot_ fail - we can get an exception here and stop, which is the point -
                     // views with `allowBroken = true` fail on first error and so can be dry-run inside a transaction.
                     let! (_, prefetchedGoodViews) = dryRunUserViews transaction.Connection.Query layout false (Some false) sourceUvs userViews cancellationToken
-                    let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
 
                     let! sourceModules = buildSchemaModules transaction.System cancellationToken
+                    let! sourceActions = buildSchemaActions transaction.System cancellationToken
+                    let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
+                    let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
+                    let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
+
+                    do! transaction.Rollback ()
+
                     let modules = resolveModules layout sourceModules
 
                     let jsRuntime = makeRuntime (moduleFiles modules)
 
-                    let! sourceActions = buildSchemaActions transaction.System cancellationToken
                     let (_, actions) = resolveActions layout false sourceActions
                     let (_, actions) = runWithRuntime jsRuntime <| fun api -> testEvalActions api false actions
 
-                    let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                     let (_, triggers) = resolveTriggers layout false sourceTriggers
                     let (_, triggers) = runWithRuntime jsRuntime <| fun api -> testEvalTriggers api false triggers
-                    let mergedTriggers = mergeTriggers layout triggers
 
-                    // Another instance has already rebuilt them, so just load them from the database.
-                    let systemViews = filterSystemViews sourceUvs
-
-                    let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
                     let (_, permissions) = resolvePermissions layout false sourcePermissions
 
-                    let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
-
-                    do! transaction.Rollback ()
+                    let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
+                    // Another instance has already rebuilt them, so just load them from the database.
+                    let systemViews = filterSystemViews sourceUvs
+                    let mergedTriggers = mergeTriggers layout triggers
+                    let domains = buildLayoutDomains layout
 
                     let newState =
                         { Layout = layout
@@ -444,6 +451,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           Triggers = mergedTriggers
                           TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
                           UserViews = prefetchedViews
+                          Domains = domains
                           SystemViews = systemViews
                           UserMeta = userMeta
                         }
@@ -682,6 +690,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
 
                             let! (_, goodUserViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUserViews userViews cancellationToken
 
+                            let domains = buildLayoutDomains layout
+
                             let newState =
                                 { Layout = layout
                                   Permissions = permissions
@@ -691,6 +701,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                   Triggers = mergedTriggers
                                   TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
                                   UserViews = mergePrefetchedUserViews badUserViews goodUserViews
+                                  Domains = domains
                                   SystemViews = filterSystemViews sourceUserViews
                                   UserMeta = wantedUserMeta
                                 }
@@ -802,6 +813,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           member this.Permissions = oldState.Context.Permissions
                           member this.DefaultAttrs = oldState.Context.DefaultAttrs
                           member this.Triggers = oldState.Context.Triggers
+                          member this.Domains = oldState.Context.Domains
 
                           member this.Commit () = commit ()
                           member this.ScheduleMigration () =

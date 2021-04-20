@@ -105,21 +105,23 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
     let searchPath = env.SearchPath |> Seq.map convertPath |> Seq.distinct |> Seq.toArray
 
     let resolveModule currentModule path =
+        let inline moduleNotFound () = raise <| JSException.NewFromString(context, sprintf "Module not found: %s" path)
+
         if POSIXPath.isAbsolute path then
-            raise <| JSException.NewFromString(context, "Module not found")
+            moduleNotFound ()
         let fullPath = POSIXPath.normalize (POSIXPath.combine currentModule.DirPath path)
         match Map.tryFind fullPath modulePathsMap with
         | Some modul -> modul.Module
         | None ->
             let firstComponent = (POSIXPath.splitComponents path).[0]
             if firstComponent = "." || firstComponent = ".." then
-                raise <| JSException.NewFromString(context, "Module not found")
+                moduleNotFound ()
             let trySearch (search : Path) =
                 let fullPath = POSIXPath.normalize (POSIXPath.combine search path)
                 Map.tryFind fullPath modulePathsMap
             match Seq.tryPick trySearch searchPath with
             | Some modul -> modul.Module
-            | None -> raise <| JSException.NewFromString(context, "Module not found")
+            | None -> moduleNotFound ()
 
     do
         let resolveOne path id =

@@ -8,7 +8,7 @@ open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 open FSharp.Control.Tasks.Affine
 open Npgsql
-open System.Data.HashFunction.CityHash
+open System.Security.Cryptography
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Meta
@@ -100,15 +100,12 @@ let readSourcePreload (path : string) : SourcePreloadFile =
       DirName = Path.GetDirectoryName path
     }
 
-let private preloadHasher =
-    let config = CityHashConfig()
-    config.HashSizeInBits <- 128
-    CityHashFactory.Instance.Create(config)
-
 type HashedPreload (preload : Preload) =
     let preloadStr = JsonConvert.SerializeObject preload
     let preloadBytes = Encoding.UTF8.GetBytes preloadStr
-    let preloadHash = preloadHasher.ComputeHash(preloadBytes).AsHexString()
+    let preloadHash =
+        use hasher = SHA1.Create()
+        hasher.ComputeHash(preloadBytes) |> String.hexBytes
 
     member this.Preload = preload
     member this.Hash = preloadHash

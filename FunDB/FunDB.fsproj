@@ -70,6 +70,7 @@
     <Compile Include="src/Layout/System.fs" />
     <Compile Include="src/Layout/Meta.fs" />
     <Compile Include="src/Layout/Integrity.fs" />
+    <Compile Include="src/Layout/Domain.fs" />
 
     <Compile Include="src/Attributes/Resolve.fs" />
     <Compile Include="src/Attributes/Schema.fs" />
@@ -120,6 +121,7 @@
 
     <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/Entity.fs" />
+    <Compile Include="src/Operations/Domain.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
 
     <Compile Include="src/API/Types.fs" />
@@ -133,6 +135,7 @@
     <Compile Include="src/API/SaveRestore.fs" />
     <Compile Include="src/API/Actions.fs" />
     <Compile Include="src/API/Permissions.fs" />
+    <Compile Include="src/API/Domains.fs" />
     <Compile Include="src/API/API.fs" />
 
     <Compile Include="src/HTTP/Utils.fs" />
@@ -142,6 +145,7 @@
     <Compile Include="src/HTTP/Actions.fs" />
     <Compile Include="src/HTTP/SaveRestore.fs" />
     <Compile Include="src/HTTP/Permissions.fs" />
+    <Compile Include="src/HTTP/Domains.fs" />
 
     <Compile Include="src/Program.fs" />
   </ItemGroup>

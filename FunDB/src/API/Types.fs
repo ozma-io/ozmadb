@@ -7,7 +7,6 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json.Linq
-open NetJs
 open NpgsqlTypes
 
 open FunWithFlags.FunUtils.Serialization.Utils
@@ -25,10 +24,12 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Attributes.Merge
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.SaveRestore
-open FunWithFlags.FunDB.Operations.Entity
+open FunWithFlags.FunDB.Operations.Domain
 open FunWithFlags.FunDB.FunQL.Chunk
+module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 
 type RawArguments = Map<string, JToken>
@@ -39,12 +40,12 @@ type ArgsTriggerResult =
     | ATCancelled
 
 type ITriggerScript =
-    abstract member RunInsertTriggerBefore : ResolvedEntityRef -> EntityArguments -> CancellationToken -> Task<ArgsTriggerResult>
-    abstract member RunUpdateTriggerBefore : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task<ArgsTriggerResult>
+    abstract member RunInsertTriggerBefore : ResolvedEntityRef -> LocalArgumentsMap -> CancellationToken -> Task<ArgsTriggerResult>
+    abstract member RunUpdateTriggerBefore : ResolvedEntityRef -> int -> LocalArgumentsMap -> CancellationToken -> Task<ArgsTriggerResult>
     abstract member RunDeleteTriggerBefore : ResolvedEntityRef -> int -> CancellationToken -> Task<bool>
 
-    abstract member RunInsertTriggerAfter : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task
-    abstract member RunUpdateTriggerAfter : ResolvedEntityRef -> int -> EntityArguments -> CancellationToken -> Task
+    abstract member RunInsertTriggerAfter : ResolvedEntityRef -> int -> LocalArgumentsMap -> CancellationToken -> Task
+    abstract member RunUpdateTriggerAfter : ResolvedEntityRef -> int -> LocalArgumentsMap -> CancellationToken -> Task
     abstract member RunDeleteTriggerAfter : ResolvedEntityRef -> CancellationToken -> Task
 
 type IContext =
@@ -64,6 +65,7 @@ type IContext =
     abstract member Permissions : Permissions
     abstract member DefaultAttrs : MergedDefaultAttributes
     abstract member Triggers : MergedTriggers
+    abstract member Domains : LayoutDomains
 
     abstract member ScheduleMigration : unit -> unit
     abstract member Commit : unit -> Task
@@ -112,7 +114,7 @@ type EventSource =
 type IRequestContext =
     abstract Context : IContext with get
     abstract User : RequestUser with get
-    abstract GlobalArguments : Map<ArgumentName, FieldValue> with get
+    abstract GlobalArguments : LocalArgumentsMap with get
     abstract Source : EventSource with get
 
     abstract member WriteEvent : (EventEntry -> unit) -> unit
@@ -170,7 +172,7 @@ let emptyUserViewFlags =
 
 type IUserViewsAPI =
     abstract member GetUserViewInfo : UserViewSource -> UserViewFlags -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
-    abstract member GetUserView : UserViewSource -> RawArguments -> ViewChunk -> UserViewFlags -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
+    abstract member GetUserView : UserViewSource -> RawArguments -> SourceQueryChunk -> UserViewFlags -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
 
 [<SerializeAsObject("error")>]
 type EntityErrorInfo =
@@ -314,6 +316,34 @@ type UserPermissions =
 type IPermissionsAPI =
     abstract member UserPermissions : UserPermissions
 
+[<NoEquality; NoComparison>]
+type DomainValuesResult =
+    { Values : DomainValue[]
+      PunType : SQL.SimpleValueType
+      Hash : string
+    }
+
+[<SerializeAsObject("error")>]
+type DomainErrorInfo =
+    | [<CaseName("not_found")>] DENotFound
+    | [<CaseName("access_denied")>] DEAccessDenied
+    | [<CaseName("arguments")>] DEArguments of Details : string
+    | [<CaseName("execution")>] DEExecution of Details : string
+    with
+        [<DataMember>]
+        member this.Message =
+            match this with
+            | DENotFound -> "Entity not found"
+            | DEAccessDenied -> "Entity access denied"
+            | DEArguments msg -> sprintf "Invalid operation arguments: %s" msg
+            | DEExecution msg -> sprintf "Operation execution failed: %s" msg
+
+        interface IAPIError with
+            member this.Message = this.Message
+
+type IDomainsAPI =
+    abstract member GetDomainValues : ResolvedFieldRef -> int option -> SourceQueryChunk -> Task<Result<DomainValuesResult, DomainErrorInfo>>
+
 type IFunDBAPI =
     abstract member Request : IRequestContext
     abstract member UserViews : IUserViewsAPI
@@ -321,6 +351,7 @@ type IFunDBAPI =
     abstract member SaveRestore : ISaveRestoreAPI
     abstract member Actions : IActionsAPI
     abstract member Permissions : IPermissionsAPI
+    abstract member Domains : IDomainsAPI
 
 let dummyFunDBAPI =
     { new IFunDBAPI with
@@ -330,4 +361,14 @@ let dummyFunDBAPI =
           member this.SaveRestore = failwith "Attempted to access dummy API"
           member this.Actions = failwith "Attempted to access dummy API"
           member this.Permissions = failwith "Attempted to access dummy API"
+          member this.Domains = failwith "Attempted to access dummy API"
     }
+
+let getReadRole = function
+    | RTRoot -> None
+    | RTRole role when role.CanRead -> None
+    | RTRole role -> role.Role
+
+let getWriteRole = function
+    | RTRoot -> None
+    | RTRole role -> Some (Option.defaultValue emptyResolvedRole role.Role)

@@ -123,9 +123,9 @@ type APITemplate (isolate : Isolate) =
                     Map.empty
             let chunk =
                 if args.Length >= 3 && args.[2].ValueType <> Value.ValueType.Undefined then
-                    jsDeserialize context args.[2] : ViewChunk
+                    jsDeserialize context args.[2] : SourceQueryChunk
                 else
-                    emptyViewChunk
+                    emptyQueryChunk
             let handle = Option.get currentHandle
             let run = runApiCall context <| fun () -> handle.API.UserViews.GetUserView source uvArgs chunk emptyUserViewFlags
             runtime.EventLoop.NewPromise(context, run).Value
@@ -187,7 +187,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let func = args.[0].GetFunction()
             let handle = Option.get currentHandle
-            let run () = 
+            let run () =
                 task {
                     let! res = handle.API.Entities.DeferConstraints <| fun () -> func.CallAsync(null)
                     match res with
@@ -195,6 +195,26 @@ type APITemplate (isolate : Isolate) =
                     | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
                 }
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
+        ))
+
+        fundbTemplate.Set("getDomainValues", FunctionTemplate.New(isolate, fun args ->
+            let context = isolate.CurrentContext
+            if args.Length < 1 || args.Length > 3 then
+                throwCallError context "Number of arguments must be between 1 and 3"
+            let ref = jsDeserialize context args.[0] : ResolvedFieldRef
+            let rowId =
+                if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
+                    Some <| int (args.[1].GetNumber())
+                else
+                    None
+            let chunk =
+                if args.Length >= 3 && args.[2].ValueType <> Value.ValueType.Undefined then
+                    jsDeserialize context args.[2] : SourceQueryChunk
+                else
+                    emptyQueryChunk
+            let handle = Option.get currentHandle
+            let run = runApiCall context <| fun () -> handle.API.Domains.GetDomainValues ref rowId chunk
+            runtime.EventLoop.NewPromise(context, run).Value
         ))
 
         fundbTemplate.Set("writeEvent", FunctionTemplate.New(isolate, fun args ->
