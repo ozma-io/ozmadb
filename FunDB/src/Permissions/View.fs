@@ -144,14 +144,17 @@ type private PermissionsApplier (access : SchemaAccess) =
 
     and applyToFromExpr : FromExpr -> FromExpr = function
         | FTable (extra, pun, entity) ->
-            let entityRef = (extra :?> RealEntityAnnotation).RealEntity
-            let accessSchema = Map.find entityRef.schema access
-            let accessEntity = Map.find entityRef.name accessSchema
-            match accessEntity with
-            | None -> FTable (null, pun, entity)
-            | Some restr ->
-                // `pun` is guaranteed to be there for all table queries.
-                FSubExpr (Option.get pun, restr)
+            match extra with
+            | :? RealEntityAnnotation as ann ->
+                let accessSchema = Map.find ann.RealEntity.schema access
+                let accessEntity = Map.find ann.RealEntity.name accessSchema
+                match accessEntity with
+                | None -> FTable (null, pun, entity)
+                | Some restr ->
+                    // `pun` is guaranteed to be there for all table queries.
+                    FSubExpr (Option.get pun, restr)
+            // From CTE.
+            | _ -> FTable (extra, pun, entity)
         | FJoin join ->
             FJoin
                 { Type = join.Type
