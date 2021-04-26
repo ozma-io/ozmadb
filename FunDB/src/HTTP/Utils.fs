@@ -122,9 +122,6 @@ let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) :
         | Ok ret -> return! f ret next ctx
     }
 
-let authorize =
-    requiresAuthentication (challenge JwtBearerDefaults.AuthenticationScheme)
-
 let commitAndReturn (handler : HttpHandler) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {
         try
@@ -228,18 +225,15 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
         | None ->
             return! requestError RENoInstance next ctx
         | Some instance ->
+            let anonymousCtx =
+                { Source = instancesSource
+                  Instance = instance
+                  UserName = anonymousUsername
+                  IsRoot = instance.DisableSecurity
+                  CanRead = instance.IsTemplate
+                }
             try
-                if instance.DisableSecurity then
-                    let ictx =
-                        { Source = instancesSource
-                          Instance = instance
-                          UserName = anonymousUsername
-                          IsRoot = true
-                          CanRead = true
-                        }
-                    return! f ictx next ctx
-                else
-                    let f' info =
+                    let getCtx info =
                         let userName =
                             match info.Email with
                             | Some e -> e
@@ -252,7 +246,12 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                               CanRead = instance.IsTemplate
                             }
                         f ictx
-                    return! (authorize >=> resolveUser f') next ctx
+                    let failHandler =
+                        if instance.IsTemplate then
+                            f anonymousCtx
+                        else
+                            challenge JwtBearerDefaults.AuthenticationScheme
+                    return! (requiresAuthentication failHandler >=> resolveUser getCtx) next ctx
             finally
                 instance.Dispose ()
     }
