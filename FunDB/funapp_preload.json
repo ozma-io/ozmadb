@@ -22,7 +22,8 @@
 
         "color_themes": {
           "columnFields": {
-            "name": { "type": "string" }
+            "name": { "type": "string" },
+            "localized_name": { "type": "json", "isNullable": true }
           },
           "uniqueConstraints": {
             "unique_name": { "columns": [ "name" ] }
