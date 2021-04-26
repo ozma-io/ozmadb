@@ -631,7 +631,7 @@ and [<NoEquality; NoComparison>] SingleSelectExpr =
                 else
                     sprintf "GROUP BY %s" (this.GroupBy |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", ")
 
-            sprintf "SELECT %s" (String.concatWithWhitespaces [resultsStr; fromStr; whereStr; groupByStr; this.OrderLimit.ToSQLString()])
+            String.concatWithWhitespaces ["SELECT"; resultsStr; fromStr; whereStr; groupByStr; this.OrderLimit.ToSQLString()]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

@@ -275,7 +275,17 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
         let! attrsResult = task {
             match viewExpr.AttributesQuery with
             | Some attributesExpr ->
-                return! connection.ExecuteQuery attributesExpr.Query parameters cancellationToken (parseAttributesResult attributesExpr.Columns >> Task.FromResult)
+                let allColumns =  Seq.append attributesExpr.PureColumns attributesExpr.AttributeColumns
+                let colTypes = allColumns |> Seq.map (fun (typ, name, col) -> typ) |> Seq.toArray
+                let singleQuery =
+                    { Columns = allColumns |> Seq.map (fun (typ, name, col) -> SQL.SCExpr (Some name, col)) |> Seq.toArray
+                      From = None
+                      Where = None
+                      GroupBy = [||]
+                      OrderLimit = SQL.emptyOrderLimitClause
+                      Extra = null
+                    } : SQL.SingleSelectExpr
+                return! connection.ExecuteQuery (string singleQuery) parameters cancellationToken (parseAttributesResult colTypes >> Task.FromResult)
             | None ->
                 return
                     { Attributes = Map.empty

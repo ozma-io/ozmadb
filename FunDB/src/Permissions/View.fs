@@ -166,6 +166,7 @@ type private PermissionsApplier (access : SchemaAccess) =
             FSubExpr (alias, applyToSelectExpr q)
 
     member this.ApplyToSelectExpr = applyToSelectExpr
+    member this.ApplyToValueExpr = applyToValueExpr
 
 let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (query : Query<SelectExpr>) : Query<SelectExpr> =
     let accessCompiler = AccessCompiler (layout, role, query.Arguments)
@@ -182,6 +183,18 @@ let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (expr : CompiledVi
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (view : CompiledViewExpr) : CompiledViewExpr =
+    let accessCompiler = AccessCompiler (layout, role, view.Query.Arguments)
+    let access = accessCompiler.FilterUsedSchemas layout view.UsedSchemas
+    let applier = PermissionsApplier access
+    let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
+    let newQuery =
+        { Expression = queryExpression
+          Arguments = accessCompiler.Arguments
+        }
+    let mapAttributeColumn (typ, name, expr) =
+        let expr = applier.ApplyToValueExpr expr
+        (typ, name, expr)
     { view with
-          Query = applyRoleQueryExpr layout role view.UsedSchemas view.Query
+          AttributesQuery = Option.map (fun info -> { info with AttributeColumns = Array.map mapAttributeColumn info.AttributeColumns }) view.AttributesQuery
+          Query = newQuery
     }

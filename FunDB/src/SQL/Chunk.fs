@@ -48,7 +48,7 @@ let private applyToOrderLimit (chunk : QueryChunk) (orderLimit : OrderLimitClaus
     }
 
 type private ChunkApplier (chunk : QueryChunk) =
-    let rec applyLimitSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
+    let applyLimitSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
         | SSelect sel -> SSelect { sel with OrderLimit = applyToOrderLimit chunk sel.OrderLimit }
         | SValues _ as values ->
             // Outer select is the way.
@@ -76,7 +76,7 @@ type private ChunkApplier (chunk : QueryChunk) =
                       OrderLimit = applyToOrderLimit chunk setOp.OrderLimit
                 }
 
-    and applySelectExpr (select : SelectExpr) : SelectExpr =
+    let applySelectExpr (select : SelectExpr) : SelectExpr =
         match chunk.Where with
         | None ->
             { select with

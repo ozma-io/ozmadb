@@ -106,11 +106,16 @@ let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : Compiled
           ColumnAttributes = Array.map (fun _ -> Map.empty) res.ColumnAttributes
         }
     | Some attrInfo ->
-        let filterPure name attrs =
-            match Map.tryFind name attrInfo.PureColumnAttributes with
-            | None -> Map.empty
-            | Some pureAttrs -> attrs |> Map.filter (fun name _ -> Set.contains name pureAttrs)
-        { Attributes = res.Attributes |> Map.filter (fun name _ -> Set.contains name attrInfo.PureAttributes)
+        let getPureAttr = function
+        | (CTMeta (CMRowAttribute attrName), name, attr) -> Some attrName
+        | _ -> None
+        let pureAttrs = attrInfo.PureColumns |> Seq.mapMaybe getPureAttr |> Set.ofSeq
+        let getPureColumnAttr = function
+        | (CTColumnMeta (colName, CCCellAttribute attrName), name, attr) -> Some (colName, attrName)
+        | _ -> None
+        let pureColumnAttrs = attrInfo.PureColumns |> Seq.mapMaybe getPureColumnAttr |> Set.ofSeq
+        let filterPure colName attrs = attrs |> Map.filter (fun name _ -> Set.contains (colName, name) pureColumnAttrs)
+        { Attributes = res.Attributes |> Map.filter (fun name _ -> Set.contains name pureAttrs)
           ColumnAttributes = Seq.map2 filterPure (Seq.mapMaybe getColumn compiled.Columns) res.ColumnAttributes |> Seq.toArray
         }
 
@@ -119,6 +124,14 @@ let private emptyLimit =
       Limit = Some (SQL.VEValue (SQL.VInt 0))
       Where = None
     }
+
+let private limitAttributeColumn (typ : ColumnType, name : SQL.ColumnName, expr : SQL.ValueExpr) =
+    let mapper =
+        { SQL.idValueExprMapper with
+              Query = selectExprChunk emptyLimit
+        }
+    let expr = SQL.mapValueExpr mapper expr
+    (typ, name, expr)
 
 type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
     let mutable serializedFields : Map<ResolvedFieldRef, SerializedColumnField> = Map.empty
@@ -170,7 +183,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         let attributesStr =
             match compiled.AttributesQuery with
             | None -> ""
-            | Some q -> q.Query
+            | Some q -> Seq.append q.PureColumns q.AttributeColumns |> Seq.map (fun (typ, name, expr) -> SQL.SCExpr (Some name, expr) |> string) |> String.concat ", "
         let queryStr = compiled.Query.Expression.ToString()
         let hash = String.concatWithWhitespaces [attributesStr; queryStr] |> Hash.sha1OfString |> String.hexBytes
 
@@ -190,6 +203,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                           { uv.Compiled.Query with
                                 Expression = selectExprChunk emptyLimit uv.Compiled.Query.Expression
                           }
+                      AttributesQuery = Option.map (fun attrs -> { attrs with AttributeColumns = Array.map limitAttributeColumn attrs.AttributeColumns }) uv.Compiled.AttributesQuery
                 }
             let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
 

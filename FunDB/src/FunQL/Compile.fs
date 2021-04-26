@@ -250,10 +250,8 @@ let defaultCompiledArgument : ResolvedFieldType -> FieldValue = function
 
 // Evaluation of column-wise or global attributes
 type CompiledAttributesExpr =
-    { Query : string
-      Columns : ColumnType[]
-      PureAttributes : Set<AttributeName>
-      PureColumnAttributes : Map<FieldName, Set<AttributeName>>
+    { PureColumns : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[]
+      AttributeColumns : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[]
     }
 
 [<NoEquality; NoComparison>]
@@ -1543,37 +1541,38 @@ let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
     else
         Some Pure
 
-let private checkPureColumn : SQL.SelectedColumn -> PurityStatus option = function
-    | SQL.SCAll _ -> None
-    | SQL.SCExpr (name, expr) -> checkPureExpr expr
-
 [<NoEquality; NoComparison>]
 type private PureColumn =
     { ColumnType : ColumnType
       Purity : PurityStatus
-      Result : SQL.SelectedColumn
+      Name : SQL.ColumnName
+      Expression : SQL.ValueExpr
     }
 
 let rec private findPureTreeExprAttributes (columnTypes : ColumnType[]) : SQL.SelectTreeExpr -> (PureColumn option)[] = function
     | SQL.SSelect query ->
         let assignPure colType res =
-            match checkPureColumn res with
-            | Some purity ->
-                let isGood =
-                    match colType with
-                    | CTMeta (CMRowAttribute attrName) -> true
-                    | CTColumnMeta (colName, CCCellAttribute attrName) -> true
-                    | _ -> false
-                if isGood then
-                    let info =
-                        { ColumnType = colType
-                          Purity = purity
-                          Result = res
-                        }
-                    Some info
-                else
-                    None
-            | _ -> None
+            match res with
+            | SQL.SCAll _ -> None
+            | SQL.SCExpr (name, expr) ->
+                match checkPureExpr expr with
+                | Some purity ->
+                    let isGood =
+                        match colType with
+                        | CTMeta (CMRowAttribute attrName) -> true
+                        | CTColumnMeta (colName, CCCellAttribute attrName) -> true
+                        | _ -> false
+                    if isGood then
+                        let info =
+                            { ColumnType = colType
+                              Purity = purity
+                              Name = Option.get name
+                              Expression = expr
+                            }
+                        Some info
+                    else
+                        None
+                | _ -> None
         Array.map2 assignPure columnTypes query.Columns
     | SQL.SValues vals -> Array.create (Array.length vals.[0]) None
     | SQL.SSetOp setOp -> Array.create (findPureExprAttributes columnTypes setOp.A |> Array.length) None
@@ -1616,6 +1615,8 @@ let compileSelectExpr (layout : Layout) (argumentsMap : CompiledArgumentsMap) (v
     let (info, select) = compiler.CompileSelectExpr None false viewExpr
     (compiler.UsedSchemas, select)
 
+let private convertPureColumns (infos : PureColumn seq) = infos |> Seq.map (fun info -> (info.ColumnType, info.Name, info.Expression)) |> Seq.toArray
+
 let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
     let mainEntityRef = viewExpr.MainEntity |> Option.map (fun main -> main.Entity)
     let compiler = QueryCompiler (layout, defaultAttrs, compileArguments viewExpr.Arguments)
@@ -1633,30 +1634,16 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
         if Array.isEmpty onlyPureAttrs then
             None
         else
-            let query = SQL.SSelect {
-                    Columns = Array.map (fun info -> info.Result) onlyPureAttrs
-                    From = None
-                    Where = None
-                    GroupBy = [||]
-                    OrderLimit = SQL.emptyOrderLimitClause
-                    Extra = null
+            let filterPureColumn (info : PureColumn) =
+                match info.ColumnType with
+                | CTMeta (CMRowAttribute name) when info.Purity = Pure -> true
+                | CTColumnMeta (colName, CCCellAttribute name) when info.Purity = Pure -> true
+                | _ -> false
+            let (pureColumns, attributeColumns) = onlyPureAttrs |> Seq.partition filterPureColumn
+            Some
+                { PureColumns = convertPureColumns pureColumns
+                  AttributeColumns = convertPureColumns attributeColumns
                 }
-
-            let getPureAttribute (info : PureColumn) =
-                match info.ColumnType with
-                | CTMeta (CMRowAttribute name) when info.Purity = Pure -> Some name
-                | _ -> None
-            let pureAttrs = onlyPureAttrs |> Seq.mapMaybe getPureAttribute |> Set.ofSeq
-            let getPureColumnAttribute (info : PureColumn) =
-                match info.ColumnType with
-                | CTColumnMeta (colName, CCCellAttribute name) when info.Purity = Pure -> Some (colName, Set.singleton name)
-                | _ -> None
-            let pureColAttrs = onlyPureAttrs |> Seq.mapMaybe getPureColumnAttribute |> Map.ofSeqWith (fun name -> Set.union)
-            Some { Query = query.ToString()
-                   Columns = Array.map (fun info -> info.ColumnType) onlyPureAttrs
-                   PureAttributes = pureAttrs
-                   PureColumnAttributes = pureColAttrs
-                 }
 
     let domains = mapDomainsFields getFinalName info.Domains
     let flattenedDomains = flattenDomains domains
