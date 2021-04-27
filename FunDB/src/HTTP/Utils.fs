@@ -233,6 +233,9 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                   CanRead = instance.IsTemplate
                 }
             try
+                if instance.DisableSecurity then
+                    return! f anonymousCtx next ctx
+                else
                     let getCtx info =
                         let userName =
                             match info.Email with
