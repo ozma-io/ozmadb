@@ -323,7 +323,7 @@ export interface IApiError {
   message: string;
 }
 
-export type UserViewErrorType = RequestErrorType | "not_found" | "resolution" | "execution" | "arguments";
+export type UserViewErrorType = RequestErrorType | "not_found" | "compilation" | "execution" | "arguments";
 
 /*
  * Extra types.
