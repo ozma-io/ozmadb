@@ -221,6 +221,11 @@ export interface IExecutedViewExpr {
   rows: IExecutedRow[];
 }
 
+export interface IExplainedQuery {
+  query: string;
+  explanation: string;
+}
+
 /*
  * User view API responses.
  */
@@ -234,6 +239,11 @@ export interface IViewInfoResult {
   info: IResultViewInfo;
   pureAttributes: AttributesMap;
   pureColumnAttributes: AttributesMap[];
+}
+
+export interface IViewExplainResult {
+  rows: IExplainedQuery;
+  attributes?: IExplainedQuery;
 }
 
 /*
@@ -267,7 +277,7 @@ export interface ITransaction {
 }
 
 /*
- * Transaction results.
+ * Transaction API responses.
  */
 
 export interface IInsertEntityResult {
@@ -290,7 +300,7 @@ export interface ITransactionResult {
 }
 
 /*
- * Action results.
+ * Action API responses.
  */
 
 export interface IActionResult {
@@ -298,7 +308,7 @@ export interface IActionResult {
 }
 
 /*
- * Domain results.
+ * Domain API responses.
  */
 
 export interface IDomainValue {
