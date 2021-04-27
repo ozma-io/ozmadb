@@ -18,6 +18,10 @@ open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.UserViews.Resolve
 open FunWithFlags.FunDB.API.Types
 
+let private canExplain : RoleType -> bool = function
+    | RTRoot -> true
+    | RTRole role -> role.CanRead
+
 type UserViewsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<UserViewsAPI>()
@@ -100,6 +104,41 @@ type UserViewsAPI (rctx : IRequestContext) =
                     return Error UVEAccessDenied
         }
 
+    member this.GetUserViewExplain (source : UserViewSource) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
+        task {
+            match! resolveSource source flags with
+            | Error e -> return Error e
+            | Ok uv ->
+                if not (canExplain rctx.User.Type) then
+                    logger.LogError("Explain access denied")
+                    rctx.WriteEvent (fun event ->
+                        event.Type <- "getUserViewExplain"
+                        event.Error <- "access_denied"
+                    )
+                    return Error UVEAccessDenied
+                else
+                    let compiled = uv.UserView.Compiled
+                    let maybeResolvedChunk =
+                        try
+                            Ok <| resolveViewExprChunk compiled chunk
+                        with
+                        | :? ChunkException as e ->
+                            rctx.WriteEvent (fun event ->
+                                event.Type <- "getUserViewExplain"
+                                event.Error <- "arguments"
+                                event.Details <- exceptionString e
+                            )
+                            Error <| UVEArguments (exceptionString e)
+
+                    match maybeResolvedChunk with
+                    | Error e -> return Error e
+                    | Ok resolvedChunk ->
+                        let (extraLocalArgs, query) = queryExprChunk resolvedChunk compiled.Query
+                        let compiled = { compiled with Query = query }
+                        let! res = explainViewExpr ctx.Transaction.Connection.Query compiled ctx.CancellationToken
+                        return Ok res
+        }
+
     member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
         task {
             match! resolveSource source flags with
@@ -112,16 +151,19 @@ type UserViewsAPI (rctx : IRequestContext) =
                         | RTRole role when role.CanRead -> uv.UserView.Compiled
                         | RTRole role ->
                             applyRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled
-                    let getResult info (res : ExecutedViewExpr) =
-                        task {
-                            return (uv, { res with Rows = Array.ofSeq res.Rows })
-                        }
 
                     let maybeResolvedChunk =
                         try
                             Ok <| resolveViewExprChunk compiled chunk
                         with
-                        | :? ChunkException as e -> Error <| UVEArguments (exceptionString e)
+                        | :? ChunkException as e ->
+                            rctx.WriteEvent (fun event ->
+                                event.Type <- "getUserView"
+                                event.Error <- "arguments"
+                                event.Details <- exceptionString e
+                            )
+                            Error <| UVEArguments (exceptionString e)
+
                     match maybeResolvedChunk with
                     | Error e -> return Error e
                     | Ok resolvedChunk ->
@@ -138,6 +180,8 @@ type UserViewsAPI (rctx : IRequestContext) =
                             )
                             return Error <| UVEArguments msg
                         | Ok arguments ->
+                            let getResult info (res : ExecutedViewExpr) = Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
+
                             let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled arguments ctx.CancellationToken getResult
                             return Ok { Info = puv.Info
                                         Result = res
@@ -155,4 +199,5 @@ type UserViewsAPI (rctx : IRequestContext) =
 
     interface IUserViewsAPI with
         member this.GetUserViewInfo source flags = this.GetUserViewInfo source flags
+        member this.GetUserViewExplain source chunk flags = this.GetUserViewExplain source chunk flags
         member this.GetUserView source rawArguments chunk flags = this.GetUserView source rawArguments chunk flags

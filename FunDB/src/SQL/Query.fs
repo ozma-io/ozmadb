@@ -32,6 +32,7 @@ type ExprParameters = Map<int, Value>
 [<NoEquality; NoComparison>]
 type QueryResult =
     { Columns : (SQLName * SimpleValueType)[]
+      // FIXME: Convert to IAsyncEnumerable
       Rows : seq<Value[]>
     }
 
@@ -179,7 +180,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             let result = reader.[0] |> convertValue typ
             let! hasRow1 = reader.ReadAsync(cancellationToken)
             if hasRow1 then
-                raisef QueryException "Has a second row"
+                raisef QueryException "Has a second row: %O" (reader.[0] |> convertValue typ)
             return result
         }
 
@@ -196,7 +197,8 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             let result = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
             let! hasRow1 = reader.ReadAsync(cancellationToken)
             if hasRow1 then
-                raisef QueryException "Has a second row"
+                let secondResult = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toList
+                raisef QueryException "Has a second row: %O" secondResult
             return result
         }
 

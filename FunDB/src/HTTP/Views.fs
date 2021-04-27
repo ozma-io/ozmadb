@@ -37,6 +37,13 @@ type UserViewRequest =
       Where : SourceChunkWhere option
     }
 
+type UserViewExplainRequest =
+    { ForceRecompile : bool
+      Offset : int option
+      Limit : int option
+      Where : SourceChunkWhere option
+    }
+
 type AnonymousUserViewRequest =
     { Query : string
     }
@@ -107,12 +114,49 @@ let viewsApi : HttpHandler =
         | None -> safeBindJson (doPostInfoView viewRef api)
         | Some req -> bindJsonToken req (doPostSelectFromView viewRef api)
 
+    let getExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) =
+        task {
+            let flags =
+                { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+                } : UserViewFlags
+            let chunk =
+                { Offset = intRequestArg "__offset" ctx
+                  Limit = intRequestArg "__limit" ctx
+                  Where = None
+                } : SourceQueryChunk
+            match! api.UserViews.GetUserViewExplain viewRef chunk flags with
+            | Ok res -> return! Successful.ok (json res) next ctx
+            | Error err -> return! uvError err next ctx
+        }
+
+    let doPostExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewExplainRequest) (next : HttpFunc) (ctx : HttpContext) =
+        task {
+            let flags =
+                { ForceRecompile = flagIfDebug req.ForceRecompile
+                } : UserViewFlags
+            let chunk =
+                { Offset = req.Offset
+                  Limit = req.Limit
+                  Where = req.Where
+                } : SourceQueryChunk
+            match! api.UserViews.GetUserViewExplain viewRef chunk flags with
+            | Ok res -> return! Successful.ok (json res) next ctx
+            | Error err -> return! uvError err next ctx
+        }
+
+    let postExplainView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
+        match maybeReq with
+        | None -> safeBindJson (doPostExplainView viewRef api)
+        | Some req -> bindJsonToken req (doPostExplainView viewRef api)
+
     let viewApi (viewRef : UserViewSource) (maybeReq : JToken option) =
         choose
             [ route "/entries" >=> GET >=> withContext (getSelectFromView viewRef)
               route "/entries" >=> POST >=> withContext (postSelectFromView viewRef maybeReq)
               route "/info" >=> GET >=> withContext (getInfoView viewRef)
               route "/info" >=> POST >=> withContext (postInfoView viewRef maybeReq)
+              route "/explain" >=> GET >=> withContext (getExplainView viewRef)
+              route "/explain" >=> POST >=> withContext (postExplainView viewRef maybeReq)
             ]
 
     let postAnonymousView (rawData : JToken) =

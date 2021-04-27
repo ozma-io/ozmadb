@@ -172,6 +172,7 @@ let emptyUserViewFlags =
 
 type IUserViewsAPI =
     abstract member GetUserViewInfo : UserViewSource -> UserViewFlags -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
+    abstract member GetUserViewExplain :  UserViewSource -> SourceQueryChunk -> UserViewFlags -> Task<Result<ExplainedViewExpr, UserViewErrorInfo>>
     abstract member GetUserView : UserViewSource -> RawArguments -> SourceQueryChunk -> UserViewFlags -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
 
 [<SerializeAsObject("error")>]

@@ -31,7 +31,16 @@ type DomainsAPI (rctx : IRequestContext) =
                           Hash = expr.Hash
                         }
                 with
-                | :? ChunkException as ex -> return Error <| DEArguments (exceptionString ex)
+                | :? ChunkException as ex ->
+                    rctx.WriteEvent (fun event ->
+                        event.Type <- "getDomainValues"
+                        event.SchemaName <- fieldRef.entity.schema.ToString()
+                        event.EntityName <- fieldRef.entity.name.ToString()
+                        event.FieldName <- fieldRef.name.ToString()
+                        event.Error <- "arguments"
+                        event.Details <- exceptionString ex
+                    )
+                    return Error <| DEArguments (exceptionString ex)
                 | :? DomainExecutionException as ex ->
                     logger.LogError(ex, "Failed to get domain values")
                     let str = exceptionString ex

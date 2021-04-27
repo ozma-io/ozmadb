@@ -10,6 +10,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -268,31 +269,38 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         }
     (viewInfo, rows)
 
+let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SingleSelectExpr) option =
+    match viewExpr.AttributesQuery with
+    | None -> None
+    | Some attributesExpr ->
+        let allColumns =  Seq.append attributesExpr.PureColumns attributesExpr.AttributeColumns
+        let colTypes = allColumns |> Seq.map (fun (typ, name, col) -> typ) |> Seq.toArray
+        let query =
+            { Columns = allColumns |> Seq.map (fun (typ, name, col) -> SQL.SCExpr (Some name, col)) |> Seq.toArray
+              From = None
+              Where = None
+              GroupBy = [||]
+              OrderLimit = SQL.emptyOrderLimitClause
+              Extra = null
+            } : SQL.SingleSelectExpr
+        Some (colTypes, query)
+
 let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
         let parameters = prepareArguments viewExpr.Query.Arguments arguments
 
-        let! attrsResult = task {
-            match viewExpr.AttributesQuery with
-            | Some attributesExpr ->
-                let allColumns =  Seq.append attributesExpr.PureColumns attributesExpr.AttributeColumns
-                let colTypes = allColumns |> Seq.map (fun (typ, name, col) -> typ) |> Seq.toArray
-                let singleQuery =
-                    { Columns = allColumns |> Seq.map (fun (typ, name, col) -> SQL.SCExpr (Some name, col)) |> Seq.toArray
-                      From = None
-                      Where = None
-                      GroupBy = [||]
-                      OrderLimit = SQL.emptyOrderLimitClause
-                      Extra = null
-                    } : SQL.SingleSelectExpr
-                return! connection.ExecuteQuery (string singleQuery) parameters cancellationToken (parseAttributesResult colTypes >> Task.FromResult)
-            | None ->
-                return
-                    { Attributes = Map.empty
-                      AttributeTypes = Map.empty
-                      ColumnAttributes = Map.empty
-                    }
-        }
+        let! attrsResult =
+            task {
+                match getAttributesQuery viewExpr with
+                | None ->
+                    return
+                        { Attributes = Map.empty
+                          AttributeTypes = Map.empty
+                          ColumnAttributes = Map.empty
+                        }
+                | Some (colTypes, query) ->
+                    return! connection.ExecuteQuery (string query) parameters cancellationToken (parseAttributesResult colTypes >> Task.FromResult)
+            }
 
         let getColumnInfo (col : ExecutedColumnInfo) =
             let attributeTypes =
@@ -320,4 +328,53 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
                   Rows = rows
                 }
             resultFunc mergedInfo result
+    }
+
+type ExplainedQuery =
+    { Query : string
+      Explanation : string
+    }
+
+type ExplainedViewExpr =
+    { Rows : ExplainedQuery
+      Attributes : ExplainedQuery option
+    }
+
+let private runExplainQuery (connection : QueryConnection) (query : ISQLString) (parameters : ExprParameters) (cancellationToken : CancellationToken) : Task<ExplainedQuery> =
+    task {
+        let queryStr = query.ToSQLString()
+        return! connection.ExecuteQuery (sprintf "EXPLAIN %s" queryStr) parameters cancellationToken <| fun result ->
+            if result.Columns.Length <> 1 then
+                failwithf "Unexpected number of columns from EXPLAIN: %i" result.Columns.Length
+            let getString (row : SQL.Value[]) =
+                match row.[0] with
+                | SQL.VString str -> str
+                | ret -> failwithf "Unexpected EXPLAIN return value: %O" ret
+            let explanation = result.Rows |> Seq.map getString |> String.concat "\n"
+            Task.result
+                { Query = queryStr
+                  Explanation = explanation
+                }
+    }
+
+let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (cancellationToken : CancellationToken) : Task<ExplainedViewExpr> =
+    task {
+        let arguments = viewExpr.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
+        let parameters = prepareArguments viewExpr.Query.Arguments arguments
+
+        let! attrsResult =
+            task {
+                match getAttributesQuery viewExpr with
+                | None -> return None
+                | Some (colTypes, query) ->
+                    let! ret = runExplainQuery connection query parameters cancellationToken
+                    return Some ret
+            }
+    
+        let! result = runExplainQuery connection viewExpr.Query.Expression parameters cancellationToken
+
+        return
+            { Rows = result
+              Attributes = attrsResult
+            }
     }
