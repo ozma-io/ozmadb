@@ -18,7 +18,7 @@ let private uvError e =
         | UVEArguments _ -> RequestErrors.badRequest
         | UVEAccessDenied -> RequestErrors.forbidden
         | UVENotFound -> RequestErrors.notFound
-        | UVEResolution _ -> RequestErrors.badRequest
+        | UVECompilation _ -> RequestErrors.badRequest
         | UVEExecution _ -> RequestErrors.unprocessableEntity
     handler (json e)
 

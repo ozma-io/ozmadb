@@ -17,7 +17,7 @@ type ActionsAPI (rctx : IRequestContext) =
     member this.RunAction (ref : ActionRef) (args : JObject) : Task<Result<ActionResult, ActionErrorInfo>> =
         task {
             match ctx.FindAction(ref) with
-            | Some action ->
+            | Some (Ok action) ->
                 try
                     return! rctx.RunWithSource (ESAction ref) <| fun () ->
                         task {
@@ -34,7 +34,10 @@ type ActionsAPI (rctx : IRequestContext) =
                             event.Details <- str
                         )
                         return Error (AEException str)
-            | _ -> return Error AENotFound
+            | Some (Error e) ->
+                logger.LogError(e, "Requested action {action} is broken", ref.ToString())
+                return Error <| AECompilation (exceptionString e)
+            | None -> return Error AENotFound
         }
 
     interface IActionsAPI with

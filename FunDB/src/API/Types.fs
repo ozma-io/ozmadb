@@ -73,7 +73,7 @@ type IContext =
     abstract member ResolveAnonymousView : SchemaName option -> string -> Task<PrefetchedUserView>
     abstract member WriteEvent : EventEntry -> unit
     abstract member SetAPI : IFunDBAPI -> unit
-    abstract member FindAction : ActionRef -> ActionScript option
+    abstract member FindAction : ActionRef -> Result<ActionScript, exn> option
     abstract member FindTrigger : TriggerRef -> ITriggerScript option
 
 [<NoEquality; NoComparison>]
@@ -128,7 +128,7 @@ type IAPIError =
 type UserViewErrorInfo =
     | [<CaseName("not_found")>] UVENotFound
     | [<CaseName("access_denied")>] UVEAccessDenied
-    | [<CaseName("resolution")>] UVEResolution of Details : string
+    | [<CaseName("compilation")>] UVECompilation of Details : string
     | [<CaseName("execution")>] UVEExecution of Details : string
     | [<CaseName("arguments")>] UVEArguments of Details : string
     with
@@ -137,7 +137,7 @@ type UserViewErrorInfo =
             match this with
             | UVENotFound -> "User view not found"
             | UVEAccessDenied -> "User view access denied"
-            | UVEResolution msg -> sprintf  "User view compilation failed: %s" msg
+            | UVECompilation msg -> sprintf  "User view compilation failed: %s" msg
             | UVEExecution msg -> sprintf "User view execution failed: %s" msg
             | UVEArguments msg -> sprintf "Invalid user view arguments: %s" msg
 
@@ -294,12 +294,14 @@ type ActionResult =
 [<SerializeAsObject("error")>]
 type ActionErrorInfo =
     | [<CaseName("not_found")>] AENotFound
+    | [<CaseName("compilation")>] AECompilation of Details : string
     | [<CaseName("exception")>] AEException of Details : string
     with
         [<DataMember>]
         member this.Message =
             match this with
-            | AENotFound -> "Entity not found"
+            | AENotFound -> "Action not found"
+            | AECompilation msg -> sprintf "Action compilation failed: %s" msg
             | AEException msg -> msg
 
         interface IAPIError with
@@ -333,8 +335,8 @@ type DomainErrorInfo =
         [<DataMember>]
         member this.Message =
             match this with
-            | DENotFound -> "Entity not found"
-            | DEAccessDenied -> "Entity access denied"
+            | DENotFound -> "Field not found"
+            | DEAccessDenied -> "Field access denied"
             | DEArguments msg -> sprintf "Invalid operation arguments: %s" msg
             | DEExecution msg -> sprintf "Operation execution failed: %s" msg
 

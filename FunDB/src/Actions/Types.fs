@@ -20,7 +20,10 @@ type ActionsSchema =
 [<NoEquality; NoComparison>]
 type ResolvedActions =
     { Schemas : Map<SchemaName, ActionsSchema>
-    }
+    } with
+        member this.FindAction (ref : ActionRef) : Result<ResolvedAction, exn> option =
+             Map.tryFind ref.schema this.Schemas
+                |> Option.bind (fun schema -> Map.tryFind ref.name schema.Actions)
 
 type ErroredActionsSchema = Map<ActionName, exn>
 type ErroredActions = Map<SchemaName, ErroredActionsSchema>

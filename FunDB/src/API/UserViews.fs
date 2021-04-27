@@ -36,7 +36,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                 with
                 | :? UserViewResolveException as err ->
                     logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
-                    return Error <| UVEResolution (exceptionString err)
+                    return Error <| UVECompilation (exceptionString err)
             | UVNamed ref ->
                 if flags.ForceRecompile then
                     let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.schema && uv.Name = string ref.name).FirstOrDefaultAsync(ctx.CancellationToken)
@@ -49,13 +49,13 @@ type UserViewsAPI (rctx : IRequestContext) =
                         with
                         | :? UserViewResolveException as err ->
                             logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
-                            return Error <| UVEResolution (exceptionString err)
+                            return Error <| UVECompilation (exceptionString err)
                 else
                     match ctx.UserViews.Find ref with
                     | None -> return Error UVENotFound
                     | Some (Error e) ->
                         logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
-                        return Error <| UVEResolution (exceptionString e)
+                        return Error <| UVECompilation (exceptionString e)
                     | Some (Ok cached) -> return Ok cached
         }
 

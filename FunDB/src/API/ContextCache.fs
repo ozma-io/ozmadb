@@ -93,6 +93,7 @@ type private CachedContext =
       Permissions : Permissions
       DefaultAttrs : MergedDefaultAttributes
       Domains : LayoutDomains
+      Actions : ResolvedActions
       JSRuntime : IsolateLocal<JSRuntime<APITemplate>>
       ActionScripts : IsolateLocal<ActionScripts>
       Triggers : MergedTriggers
@@ -311,6 +312,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                       Permissions = permissions
                       DefaultAttrs = mergedAttrs
                       JSRuntime = jsRuntime
+                      Actions = actions
                       ActionScripts = IsolateLocal(fun isolate -> prepareActionScripts (jsRuntime.GetValue isolate) actions)
                       Triggers = mergedTriggers
                       TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
@@ -447,6 +449,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           Permissions = permissions
                           DefaultAttrs = mergedAttrs
                           JSRuntime = jsRuntime
+                          Actions = actions
                           ActionScripts = IsolateLocal(fun isolate -> prepareActionScripts (jsRuntime.GetValue isolate) actions)
                           Triggers = mergedTriggers
                           TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
@@ -697,6 +700,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                   Permissions = permissions
                                   DefaultAttrs = mergedAttrs
                                   JSRuntime = jsRuntime
+                                  Actions = actions
                                   ActionScripts = IsolateLocal(fun isolate -> prepareActionScripts (jsRuntime.GetValue isolate) actions)
                                   Triggers = mergedTriggers
                                   TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
@@ -822,7 +826,14 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           member this.ResolveAnonymousView homeSchema query = resolveAnonymousView homeSchema query
                           member this.WriteEvent event = eventLogger.WriteEvent(connectionString, event)
                           member this.SetAPI api = setAPI api
-                          member this.FindAction ref = (getActionScripts ()).FindAction ref
+                          member this.FindAction ref =
+                            match (getActionScripts ()).FindAction ref with
+                            | Some script -> Some (Ok script)
+                            | None ->
+                                match oldState.Context.Actions.FindAction ref with
+                                | Some (Ok script) -> failwith "Impossible"
+                                | Some (Error e) -> Some (Error e)
+                                | None -> None
                           member this.FindTrigger ref = (getTriggerScripts ()).FindTrigger ref
 
                           member this.Dispose () =

@@ -14,6 +14,7 @@ let private actionError e =
     let handler =
         match e with
         | AENotFound -> RequestErrors.notFound
+        | AECompilation _ -> ServerErrors.internalError
         | AEException _ -> ServerErrors.internalError
     handler (json e)
 
