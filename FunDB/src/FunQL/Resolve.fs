@@ -504,7 +504,7 @@ let private resolvePath (layout : ILayoutBits) (typeCtxs : TypeContextsMap) (fir
             let (entityRef, entity, field) =
                 match findFieldWithContext layout typeCtxs header.Key header.Ref with
                 | Some ret -> ret
-                | None -> raisef ViewResolveException "Field not found: %O" ref
+                | None -> raisef ViewResolveException "Field not found: %O" header.Ref
             { Header = { header with Ref = { header.Ref with Entity = entityRef } }
               Field = resolvedFieldToBits field.Field
               Entity = entity
