@@ -63,7 +63,7 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
       Parent =
         if entity.Parent = null
         then None
-        else Some { schema = FunQLName entity.Parent.Schema.Name; name = FunQLName entity.Parent.Name }
+        else Some { Schema = FunQLName entity.Parent.Schema.Name; Name = FunQLName entity.Parent.Name }
       IsAbstract = entity.IsAbstract
     }
 

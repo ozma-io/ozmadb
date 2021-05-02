@@ -91,11 +91,11 @@ let serializeIndex (index : ResolvedIndex) : SourceIndex =
 
 let rec private inheritanceChain (layout : Layout) (entity : ResolvedEntity) : ResolvedEntityRef seq =
     seq {
-        match entity.Inheritance with
+        match entity.Parent with
         | None -> ()
         | Some parent ->
-            yield parent.Parent
-            let parentEntity = layout.FindEntity parent.Parent |> Option.get
+            yield parent
+            let parentEntity = layout.FindEntity parent |> Option.get
             yield! inheritanceChain layout parentEntity
     }
 

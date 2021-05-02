@@ -72,28 +72,30 @@ let emptyArguments =
       NextAnonymousId = 0
     }
 
-let addArgument (name : Placeholder) (arg : ResolvedArgument) (args : QueryArguments) : PlaceholderId * QueryArguments =
+let addArgument (name : Placeholder) (arg : ResolvedArgument) (args : QueryArguments) : CompiledArgument * QueryArguments =
     match Map.tryFind name args.Types with
-    | Some oldArg -> (oldArg.PlaceholderId, args)
+    | Some oldArg -> (oldArg, args)
     | None ->
         let argId = args.NextPlaceholderId
+        let newArg = compileArgument argId arg
         let ret =
             { args with
-                  Types = Map.add name (compileArgument argId arg) args.Types
+                  Types = Map.add name newArg args.Types
                   NextPlaceholderId = argId + 1
             }
-        (argId, ret)
+        (newArg, ret)
 
-let addAnonymousArgument (arg : ResolvedArgument) (args : QueryArguments) : PlaceholderId * ArgumentName * QueryArguments =
+let addAnonymousArgument (arg : ResolvedArgument) (args : QueryArguments) : CompiledArgument * ArgumentName * QueryArguments =
     let argId = args.NextPlaceholderId
     let name = sprintf "__%i" args.NextAnonymousId |> FunQLName
+    let newArg = compileArgument argId arg
     let args =
         { args with
-              Types = Map.add (PLocal name) (compileArgument argId arg) args.Types
+              Types = Map.add (PLocal name) newArg args.Types
               NextPlaceholderId = argId + 1
               NextAnonymousId = args.NextAnonymousId + 1
         }
-    (argId, name, args)
+    (newArg, name, args)
 
 let mergeArguments (a : QueryArguments) (b : QueryArguments) : QueryArguments =
     { Types = Map.unionUnique a.Types b.Types
@@ -164,3 +166,25 @@ let prepareArguments (args : QueryArguments) (values : ArgumentValuesMap) : Expr
             typecheckArgument mapping.FieldType value
         (mapping.PlaceholderId, compileFieldValue value)
     args.Types |> Map.mapWithKeys makeParameter
+
+// Used to compile expressions with some arguments hidden or renamed, and insert changed arguments back.
+let modifyArgumentsInNamespace (changeNames : Placeholder -> Placeholder option) (modify : QueryArguments -> QueryArguments * 'a) (arguments : QueryArguments) : QueryArguments * 'a =
+    let convertArgument (name : Placeholder) (arg : CompiledArgument) =
+        match changeNames name with
+        | Some newName -> Some (newName, arg)
+        | None -> None
+    let nsArgumentsMap = Map.mapWithKeysMaybe convertArgument arguments.Types
+
+    let nsArguments = { arguments with Types = nsArgumentsMap }
+    let (newNsArguments, ret) = modify nsArguments
+
+    let maybeInsertArgument (currMap : CompiledArgumentsMap) (name : Placeholder, arg : CompiledArgument) =
+        if arg.PlaceholderId >= arguments.NextPlaceholderId then
+            assert (not <| Map.containsKey name currMap)
+            Map.add name arg currMap
+        else
+            currMap
+    let newArgumentTypes = Seq.fold maybeInsertArgument arguments.Types (Map.toSeq newNsArguments.Types)
+
+    let newArguments = { newNsArguments with Types = newArgumentTypes }
+    (newArguments, ret)

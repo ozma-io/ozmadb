@@ -33,6 +33,8 @@ type EntityDeniedException (message : string, innerException : Exception) =
 
 type EntityId = int
 
+let private subEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
+
 let private runQuery (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>) (globalArgs : LocalArgumentsMap) (query : Query<'q>) (placeholders : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<'a> =
     task {
         try
@@ -40,7 +42,7 @@ let private runQuery (runFunc : string -> ExprParameters -> CancellationToken ->
             return! runFunc (query.Expression.ToSQLString()) (prepareArguments query.Arguments args) cancellationToken
         with
             | :? QueryException as ex ->
-                return raisefWithInner EntityExecutionException ex.InnerException "%s" ex.Message
+                return raisefWithInner EntityExecutionException ex ""
     }
 
 let private runNonQuery (connection : QueryConnection) = runQuery connection.ExecuteNonQuery
@@ -60,7 +62,7 @@ let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : Re
             serializeEntityRestricted layout role entityRef
         with
         | :? PermissionsEntityException as e ->
-            raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
+            raisefWithInner EntityDeniedException e ""
 
 let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (whereExpr : SQL.ValueExpr) (cancellationToken : CancellationToken) =
     unitTask {
@@ -105,7 +107,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                     { Placeholder = PLocal fieldName
                       Argument = { ArgType = field.FieldType; Optional = isOptional }
                       Column = field.ColumnName
-                      Extra = ({ name = fieldName } : RestrictedColumnInfo)
+                      Extra = ({ Name = fieldName } : RestrictedColumnInfo)
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
@@ -137,8 +139,8 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             { Name = compileResolvedEntityRef entity.Root
               Columns = columns
               Values = SQL.IValues [| valuesWithSys |]
-              Returning = [| SQL.SCExpr (None, SQL.VEColumn { table = None; name = sqlFunId }) |]
-              Extra = ({ ref = entityRef } : RestrictedTableInfo)
+              Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
+              Extra = ({ Ref = entityRef } : RestrictedTableInfo)
             } : SQL.InsertExpr
         let query =
             { Expression = expr
@@ -152,7 +154,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                     applyRoleInsert layout role query
                 with
                 | :? PermissionsEntityException as e ->
-                    raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
+                    raisefWithInner EntityDeniedException e ""
 
         return! runIntQuery connection globalArgs query rawArgs cancellationToken
     }
@@ -164,13 +166,13 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
             | None -> None
-            | Some arg when field.IsImmutable -> raisef EntityDeniedException "Field %O is immutable" { entity = entityRef; name = fieldName }
+            | Some arg when field.IsImmutable -> raisef EntityDeniedException "Field %O is immutable" { Entity = entityRef; Name = fieldName }
             | Some arg ->
                 Some
                     { Placeholder = PLocal fieldName
                       Argument = { ArgType = field.FieldType; Optional = fieldIsOptional field }
                       Column = field.ColumnName
-                      Extra = ({ name = fieldName } : RestrictedColumnInfo)
+                      Extra = ({ Name = fieldName } : RestrictedColumnInfo)
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
@@ -180,20 +182,22 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
         let columns = argumentTypes |> Seq.map (fun value -> (value.Column, (value.Extra, SQL.VEPlaceholder arguments.Types.[value.Placeholder].PlaceholderId))) |> Map.ofSeq
 
-        let (idPlaceholder, arguments) = addArgument (PLocal funId) funIdArg arguments
+        let (idArg, arguments) = addArgument (PLocal funId) funIdArg arguments
 
         let tableRef = compileResolvedEntityRef entity.Root
-        let whereId = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idPlaceholder)
+        let whereId = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
         let whereExpr =
-            match entity.Inheritance with
-            | Some inheritance -> SQL.VEAnd (inheritance.CheckExpr, whereId)
-            | None -> whereId
+            if Option.isSome entity.Parent then
+                let checkExpr = makeCheckExpr subEntityColumn layout entityRef
+                SQL.VEAnd (checkExpr, whereId)
+            else
+                whereId
 
         let expr =
             { Name = tableRef
               Columns = columns
               Where = Some whereExpr
-              Extra = ({ ref = entityRef } : RestrictedTableInfo)
+              Extra = ({ Ref = entityRef } : RestrictedTableInfo)
             } : SQL.UpdateExpr
         let query =
             { Expression = expr
@@ -207,7 +211,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                     applyRoleUpdate layout role query
                 with
                 | :? PermissionsEntityException as e ->
-                    raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
+                    raisefWithInner EntityDeniedException e ""
 
         let! affected = runNonQuery connection globalArgs restricted (Map.add funId (FInt id) rawArgs) cancellationToken
         if affected = 0 then
@@ -223,11 +227,11 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         if entity.IsAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
 
-        let (idPlaceholder, arguments) = addArgument (PLocal funId) funIdArg emptyArguments
-        let whereExpr = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idPlaceholder)
+        let (idArg, arguments) = addArgument (PLocal funId) funIdArg emptyArguments
+        let whereExpr = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
         let whereExpr =
             if hasSubType entity then
-                let subEntityCheck = SQL.VEBinaryOp (SQL.VEColumn { table = None; name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
+                let subEntityCheck = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
                 SQL.VEAnd (subEntityCheck, whereExpr)
             else
                 whereExpr
@@ -236,7 +240,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let expr =
             { Name = tableRef
               Where = Some whereExpr
-              Extra = ({ ref = entityRef } : RestrictedTableInfo)
+              Extra = ({ Ref = entityRef } : RestrictedTableInfo)
             } : SQL.DeleteExpr
         let query =
             { Expression = expr
@@ -250,7 +254,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                     applyRoleDelete layout role query
                 with
                 | :? PermissionsEntityException as e ->
-                    raisefWithInner EntityDeniedException e.InnerException "%s" e.Message
+                    raisefWithInner EntityDeniedException e ""
 
         let! affected = runNonQuery connection globalArgs restricted (Map.singleton funId (FInt id)) cancellationToken
         if affected = 0 then

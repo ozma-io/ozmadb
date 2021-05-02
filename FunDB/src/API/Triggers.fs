@@ -150,12 +150,12 @@ type TriggerScripts =
     } with
         member this.FindTrigger (ref : TriggerRef) : ITriggerScript option =
              Map.tryFind ref.Schema this.Schemas
-                |> Option.bind (fun db -> Map.tryFind ref.Entity.schema db.Schemas)
-                |> Option.bind (fun schema -> Map.tryFind ref.Entity.name schema.Entities)
+                |> Option.bind (fun db -> Map.tryFind ref.Entity.Schema db.Schemas)
+                |> Option.bind (fun schema -> Map.tryFind ref.Entity.Name schema.Entities)
                 |> Option.bind (fun entity -> Map.tryFind ref.Name entity.Triggers)
 
 let private triggerName (triggerRef : TriggerRef) =
-    sprintf "triggers/%O/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.schema triggerRef.Entity.name triggerRef.Name
+    sprintf "triggers/%O/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.Schema triggerRef.Entity.Name triggerRef.Name
 
 let private prepareTriggerScriptsEntity (runtime : IJSRuntime) (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : TriggerScriptsEntity =
     let getOne name = function
@@ -166,7 +166,7 @@ let private prepareTriggerScriptsEntity (runtime : IJSRuntime) (schemaName : Sch
     }
 
 let private prepareTriggerScriptsSchema (runtime : IJSRuntime) (schemaName : SchemaName) (triggerSchema : SchemaName) (triggers : TriggersSchema) : TriggerScriptsSchema =
-    let getOne name = prepareTriggerScriptsEntity runtime schemaName { schema = triggerSchema; name = name }
+    let getOne name = prepareTriggerScriptsEntity runtime schemaName { Schema = triggerSchema; Name = name }
     { Entities = Map.map getOne triggers.Entities
     }
 
@@ -197,7 +197,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                         errors <- Map.add name (e :> exn) errors
                     Error (e :> exn)
             with
-            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In trigger %O: %s" name e.Message
+            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e "In trigger %O" name
 
         let ret =
             { Triggers = entityTriggers.Triggers |> Map.map (fun name -> Result.bind (mapTrigger name))
@@ -209,13 +209,13 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
 
         let mapEntity name entityTriggers =
             try
-                let ref = { schema = triggerSchema; name = name }
+                let ref = { Schema = triggerSchema; Name = name }
                 let (entityErrors, newEntity) = testTriggersEntity schemaName ref entityTriggers
                 if not <| Map.isEmpty entityErrors then
                     errors <- Map.add name entityErrors errors
                 newEntity
             with
-            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In triggers entity %O: %s" name e.Message
+            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e "In triggers entity %O" name
 
         let ret =
             { Entities = schemaTriggers.Entities |> Map.map mapEntity
@@ -232,7 +232,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                     errors <- Map.add name schemaErrors errors
                 newSchema
             with
-            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In triggers schema %O: %s" name e.Message
+            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e "In triggers schema %O" name
 
         let ret =
             { Schemas = db.Schemas |> Map.map mapSchema
@@ -249,7 +249,7 @@ type private TestTriggerEvaluator (runtime : IJSRuntime, forceAllowBroken : bool
                     errors <- Map.add name dbErrors errors
                 newDb
             with
-            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e.InnerException "In schema %O: %s" name e.Message
+            | :? TriggerRunException as e -> raisefWithInner TriggerRunException e "In schema %O" name
 
         let ret =
             { Schemas = triggers.Schemas |> Map.map mapDatabase

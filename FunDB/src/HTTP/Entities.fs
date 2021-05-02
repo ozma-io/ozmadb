@@ -34,8 +34,8 @@ let entitiesApi : HttpHandler =
 
     let entityApi (schema : string, name : string) =
         let entityRef =
-            { schema = FunQLName schema
-              name = FunQLName name
+            { Schema = FunQLName schema
+              Name = FunQLName name
             }
         choose
             [ GET >=> withContext (getEntityInfo entityRef)

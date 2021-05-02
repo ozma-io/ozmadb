@@ -1,3 +1,4 @@
+[<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.Hash
 
 open System.Text

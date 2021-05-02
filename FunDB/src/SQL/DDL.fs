@@ -356,19 +356,19 @@ type SchemaOperation =
                         let refCols = cols |> Seq.map (fun (name, refName) -> refName.ToSQLString()) |> String.concat ", "
                         sprintf "FOREIGN KEY (%s) REFERENCES %s (%s) %s" myCols (ref.ToSQLString()) refCols (defer.ToSQLString())
                     | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
-                sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) constraintStr
-            | SORenameConstraint (constr, table, toName) -> sprintf "ALTER TABLE %s RENAME CONSTRAINT %s TO %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString()) (toName.ToSQLString())
+                sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with Name = table }.ToSQLString()) (constr.Name.ToSQLString()) constraintStr
+            | SORenameConstraint (constr, table, toName) -> sprintf "ALTER TABLE %s RENAME CONSTRAINT %s TO %s" ({ constr with Name = table }.ToSQLString()) (constr.Name.ToSQLString()) (toName.ToSQLString())
             | SOAlterConstraint (constr, table, alter) ->
-                let initStr = sprintf "ALTER TABLE %s ALTER CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
+                let initStr = sprintf "ALTER TABLE %s ALTER CONSTRAINT %s" ({ constr with Name = table }.ToSQLString()) (constr.Name.ToSQLString())
                 let alterStr = alter.ToSQLString()
                 String.concatWithWhitespaces [initStr; alterStr]
-            | SODropConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with name = table }.ToSQLString()) (constr.name.ToSQLString())
+            | SODropConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with Name = table }.ToSQLString()) (constr.Name.ToSQLString())
             | SOCreateIndex (index, table, pars) ->
                 let keysStr =
                     assert (not <| Array.isEmpty pars.Keys)
                     pars.Keys |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
                 let uniqueStr = if pars.IsUnique then "UNIQUE" else ""
-                let suffixStr = sprintf "INDEX %s ON %s (%s)" (index.name.ToSQLString()) ({ index with name = table }.ToSQLString()) keysStr
+                let suffixStr = sprintf "INDEX %s ON %s (%s)" (index.Name.ToSQLString()) ({ index with Name = table }.ToSQLString()) keysStr
                 String.concatWithWhitespaces ["CREATE"; uniqueStr; suffixStr]
             | SORenameIndex (index, toName) -> sprintf "ALTER INDEX %s RENAME TO %s" (index.ToSQLString()) (toName.ToSQLString())
             | SODropIndex index -> sprintf "DROP INDEX %s" (index.ToSQLString())
@@ -394,10 +394,10 @@ type SchemaOperation =
                 let eventsStr = def.Events |> Seq.map (fun e -> e.ToSQLString()) |> String.concat " OR "
                 let triggerStr =
                     sprintf "TRIGGER %s %s %s ON %s"
-                        (trigger.name.ToSQLString())
+                        (trigger.Name.ToSQLString())
                         (def.Order.ToSQLString())
                         eventsStr
-                        ({ schema = trigger.schema; name = table }.ToSQLString())
+                        ({ Schema = trigger.Schema; Name = table }.ToSQLString())
                 let deferStr =
                     match def.IsConstraint with
                     | None -> ""
@@ -411,9 +411,9 @@ type SchemaOperation =
                 let tailStr = sprintf "EXECUTE FUNCTION %s (%s)" (def.FunctionName.ToSQLString()) argsStr
                 String.concatWithWhitespaces ["CREATE"; constraintStr; triggerStr; deferStr; modeStr; whenStr; tailStr]
             | SORenameTrigger (trigger, table, toName) ->
-                sprintf "ALTER TRIGGER %s ON %s RENAME TO %s" (trigger.name.ToSQLString()) ({ schema = trigger.schema; name = table }.ToSQLString()) (toName.ToSQLString())
+                sprintf "ALTER TRIGGER %s ON %s RENAME TO %s" (trigger.Name.ToSQLString()) ({ Schema = trigger.Schema; Name = table }.ToSQLString()) (toName.ToSQLString())
             | SODropTrigger (trigger, table) ->
-                sprintf "DROP TRIGGER %s ON %s" (trigger.name.ToSQLString()) ({ schema = trigger.schema; name = table }.ToSQLString())
+                sprintf "DROP TRIGGER %s ON %s" (trigger.Name.ToSQLString()) ({ Schema = trigger.Schema; Name = table }.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

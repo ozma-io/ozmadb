@@ -55,16 +55,16 @@ type ActionScripts =
     { Schemas : Map<ActionName, ActionScriptsSchema>
     } with
         member this.FindAction (ref : ActionRef) : ActionScript option =
-             Map.tryFind ref.schema this.Schemas
-                |> Option.bind (fun schema -> Map.tryFind ref.name schema.Actions)
+             Map.tryFind ref.Schema this.Schemas
+                |> Option.bind (fun schema -> Map.tryFind ref.Name schema.Actions)
 
 let private actionName (actionRef : ActionRef) =
-    sprintf "actions/%O/%O.mjs" actionRef.schema actionRef.name
+    sprintf "actions/%O/%O.mjs" actionRef.Schema actionRef.Name
 
 let private prepareActionScriptsSchema (runtime : IJSRuntime) (schemaName : SchemaName) (actions : ActionsSchema) : ActionScriptsSchema =
     let getOne name = function
     | Error e -> None
-    | Ok action -> Some (ActionScript(runtime, actionName { schema = schemaName; name = name }, action.Function))
+    | Ok action -> Some (ActionScript(runtime, actionName { Schema = schemaName; Name = name }, action.Function))
 
     { Actions = Map.mapMaybe getOne actions.Actions
     }
@@ -83,7 +83,7 @@ type private TestActionEvaluator (runtime : IJSRuntime, forceAllowBroken : bool)
         let mapAction name (action : ResolvedAction) =
             try
                 try
-                    let ref = { schema = schemaName; name = name }
+                    let ref = { Schema = schemaName; Name = name }
                     testAction ref action
                     Ok action
                 with
@@ -92,7 +92,7 @@ type private TestActionEvaluator (runtime : IJSRuntime, forceAllowBroken : bool)
                         errors <- Map.add name (e :> exn) errors
                     Error (e :> exn)
             with
-            | :? ActionRunException as e -> raisefWithInner ActionRunException e.InnerException "Error in action %O: %s" name e.Message
+            | :? ActionRunException as e -> raisefWithInner ActionRunException e "In action %O" name
 
         let ret =
             { Actions = entityActions.Actions |> Map.map (fun name -> Result.bind (mapAction name))
@@ -109,7 +109,7 @@ type private TestActionEvaluator (runtime : IJSRuntime, forceAllowBroken : bool)
                     errors <- Map.add name dbErrors errors
                 newSchema
             with
-            | :? ActionRunException as e -> raisefWithInner ActionRunException e.InnerException "Error in schema %O: %s" name e.Message
+            | :? ActionRunException as e -> raisefWithInner ActionRunException e "In schema %O" name
 
         let ret =
             { Schemas = actions.Schemas |> Map.map mapDatabase

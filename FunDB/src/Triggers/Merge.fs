@@ -42,8 +42,8 @@ type MergedTriggers =
     }
 
 let private findTriggersTime (entity : ResolvedEntityRef) (time : TriggerTime) (triggers : MergedTriggers) : MergedTriggersTime option =
-    Map.tryFind entity.schema triggers.Schemas
-        |> Option.bind (fun schema -> Map.tryFind entity.name schema.Entities)
+    Map.tryFind entity.Schema triggers.Schemas
+        |> Option.bind (fun schema -> Map.tryFind entity.Name schema.Entities)
         |> Option.map (fun entity -> match time with | TTBefore -> entity.Before | TTAfter -> entity.After)
 
 let findMergedTriggersInsert (entity : ResolvedEntityRef) (time : TriggerTime) (triggers : MergedTriggers) : MergedTrigger seq =
@@ -165,7 +165,7 @@ type private TriggersMerger (layout : Layout) =
             for KeyValue(schemaName, triggersDb) in triggers.Schemas do
                 for KeyValue(triggerSchemaName, schema) in triggersDb.Schemas do
                     for KeyValue(triggerEntityName, entity) in schema.Entities do
-                        let triggerRef = { schema = triggerSchemaName; name = triggerEntityName }
+                        let triggerRef = { Schema = triggerSchemaName; Name = triggerEntityName }
                         let triggerEntity = layout.FindEntity triggerRef |> Option.get
                         for KeyValue(triggerName, trigger) in entity.Triggers do
                             yield! emitMergedTriggersEntity schemaName triggerName triggerRef triggerEntity trigger
@@ -176,7 +176,7 @@ type private TriggersMerger (layout : Layout) =
             emitTriggers triggers
             |> Map.ofSeqWith (fun ref attrs1 attrs2 -> mergeTriggersEntity attrs1 attrs2)
             |> Map.toSeq
-            |> Seq.map (fun (ref, attrs) -> (ref.schema, { Entities = Map.singleton ref.name attrs }))
+            |> Seq.map (fun (ref, attrs) -> (ref.Schema, { Entities = Map.singleton ref.Name attrs }))
             |> Map.ofSeqWith (fun name -> mergeTriggersSchema)
         { Schemas = schemas }
 

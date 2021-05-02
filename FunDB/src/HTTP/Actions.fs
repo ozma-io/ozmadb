@@ -30,7 +30,7 @@ let actionsApi : HttpHandler =
             }
 
     let actionApi (schema, name) =
-        let ref = { schema = FunQLName schema; name = FunQLName name }
+        let ref = { Schema = FunQLName schema; Name = FunQLName name }
         POST >=> withContext (runAction ref)
 
     choose

@@ -229,9 +229,9 @@ CaseElse:
     | ELSE ValueExpr { Some $2 }
 
 ColumnRef:
-    | Name DOT Name DOT Name { { table = Some { schema = Some $1; name = $3 }; name = $5 } }
-    | Name DOT Name          { { table = Some { schema = None; name = $1 }; name = $3 } }
-    | Name                   { { table = None; name = $1 } }
+    | Name DOT Name DOT Name { { Table = Some { Schema = Some $1; Name = $3 }; Name = $5 } }
+    | Name DOT Name          { { Table = Some { Schema = None; Name = $1 }; Name = $3 } }
+    | Name                   { { Table = None; Name = $1 } }
 
 Name:
     | ID        { SQLName $1 }
@@ -269,5 +269,5 @@ Value:
     | NULL          { VNull }
 
 SchemaObject:
-    | Name DOT Name { { schema = Some $1; name = $3 } }
-    | Name          { { schema = None; name = $1 } }
+    | Name DOT Name { { Schema = Some $1; Name = $3 } }
+    | Name          { { Schema = None; Name = $1 } }

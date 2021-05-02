@@ -83,7 +83,7 @@ let private migrationLockParams = Map.singleton 0 (SQL.VInt migrationLockNumber)
 let private assemblyHash =
     lazy
         use hasher = SHA1.Create()
-        use assembly = File.OpenRead(Assembly.GetCallingAssembly().Location)
+        use assembly = File.OpenRead(Assembly.GetExecutingAssembly().Location)
         hasher.ComputeHash(assembly) |> Hash.sha1OfBytes |> String.hexBytes
 
 [<NoEquality; NoComparison>]
@@ -360,16 +360,17 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
             match! getMigrationLock transaction cancellationToken with
             | false -> return None
             | true ->
-                let! (userMeta, layout, isChanged) = task {
-                    try
-                        let! (isChanged, layout, userMeta) = initialMigratePreload logger preload transaction cancellationToken
-                        do! ensureDatabaseVersion transaction cancellationToken
-                        return (userMeta, layout, isChanged)
-                    with
-                    | ex ->
-                        do! transaction.Rollback ()
-                        return reraise' ex
-                }
+                let! (userMeta, layout, isChanged) =
+                    task {
+                        try
+                            let! (isChanged, layout, userMeta) = initialMigratePreload logger preload transaction cancellationToken
+                            do! ensureDatabaseVersion transaction cancellationToken
+                            return (userMeta, layout, isChanged)
+                        with
+                        | ex ->
+                            do! transaction.Rollback ()
+                            return reraise' ex
+                    }
                 let! ret = finishColdRebuild transaction layout userMeta isChanged cancellationToken
                 return Some ret
         }

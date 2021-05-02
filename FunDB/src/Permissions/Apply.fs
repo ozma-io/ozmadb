@@ -5,64 +5,61 @@ open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Types
-open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 // Rename top-level entities in a restriction expression
-let private renameRestriction (boundRef : ResolvedEntityRef) (entityRef : ResolvedEntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
-    let relaxedRef = relaxEntityRef entityRef
-    let renameBound (bound : BoundField) : BoundField =
-        { bound with Ref = { entity = boundRef; name = bound.Ref.name } }
-    let resetReference (ref : LinkedBoundFieldRef) : LinkedBoundFieldRef =
-        let link =
-            match ref.Ref with
-            | VRColumn c -> VRColumn { Bound = Option.map renameBound c.Bound; Ref = ({ entity = Some relaxedRef; name = c.Ref.name } : FieldRef) }
-            | VRPlaceholder p -> VRPlaceholder p
-        { Ref = link; Path = ref.Path }
-    let mapper = idFieldExprMapper resetReference id
-    mapOptimizedFieldExpr mapper restr
+let private renameRestriction (entityRef : EntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
+    mapOptimizedFieldExpr (replaceEntityRefInExpr (Some entityRef)) restr
 
-let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> Restriction) (layout : Layout) (allowedEntity : FlatAllowedEntity) (entityRef : ResolvedEntityRef) : Restriction =
+let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedOptimizedFieldExpr) (layout : Layout) (allowedEntity : FlatAllowedEntity) (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr =
+    let relaxedRef = relaxEntityRef entityRef
     // We add restrictions from all parents, including the entity itself.
-    let rec buildParentRestrictions (oldRestrs : Restriction) (currRef : ResolvedEntityRef) =
+    let rec buildParentRestrictions (oldRestrs : ResolvedOptimizedFieldExpr) (currRef : ResolvedEntityRef) =
         let newRestrs =
             match Map.tryFind currRef allowedEntity.Children with
             | None -> oldRestrs
             | Some child ->
                 let currRestr = accessor child
-                let currExpr = renameRestriction entityRef entityRef currRestr.Expression
-                orRestriction oldRestrs { currRestr with Expression = currExpr }
+                let currExpr = renameRestriction relaxedRef currRestr
+                orFieldExpr oldRestrs currExpr
         let entity = layout.FindEntity currRef |> Option.get
-        match entity.Inheritance with
+        match entity.Parent with
         | None -> newRestrs
-        | Some inheritance -> buildParentRestrictions newRestrs inheritance.Parent
+        | Some parent -> buildParentRestrictions newRestrs parent
 
     // We allow any child too.
-    let buildChildRestrictions (currRestrs : Restriction) (currRef : ResolvedEntityRef) =
+    let buildChildRestrictions (currRestrs : ResolvedOptimizedFieldExpr) (currRef : ResolvedEntityRef) =
         let entity = layout.FindEntity currRef |> Option.get
         match Map.tryFind currRef allowedEntity.Children with
         | None -> currRestrs
         | Some child ->
             let restrs = accessor child
-            if optimizedIsFalse restrs.Expression then
+            if optimizedIsFalse restrs then
                 currRestrs
             else
-                let expr = renameRestriction currRef entityRef restrs.Expression
-                let fieldRef = { entity = entityRef; name = funSubEntity }
-                let bound = { Ref = fieldRef; Immediate = true }
-                let boundFieldRef = { Ref = VRColumn { Ref = relaxFieldRef fieldRef; Bound = Some bound }; Path = [||] }
+                let expr = renameRestriction relaxedRef restrs
+                let fieldRef = { Entity = entityRef; Name = funSubEntity }
+                let boundInfo =
+                    { Ref = fieldRef
+                      Immediate = true
+                      Path = [||]
+                    } : BoundFieldMeta
+                let fieldInfo =
+                    { Bound = Some boundInfo
+                      FromEntityId = localExprFromEntityId
+                      ForceSQLName = None
+                    } : FieldMeta
+                let boundFieldRef = { Ref = { Ref = VRColumn { Entity = Some relaxedRef; Name = funSubEntity }; Path = [||] }; Extra = ObjectMap.singleton fieldInfo } : LinkedBoundFieldRef
                 let subEntityRef =
                     { Ref = relaxEntityRef currRef
-                      Extra =
-                        { AlwaysTrue = false
-                        }
-                    }
+                      Extra = ObjectMap.empty
+                    } : SubEntityRef
 
                 let typeCheck = FEInheritedFrom (boundFieldRef, subEntityRef) |> optimizeFieldExpr
                 let currCheck = andFieldExpr typeCheck expr
-                orRestriction currRestrs { restrs with Expression = currCheck }
+                orFieldExpr currRestrs currCheck
 
-    let parentRestrs = buildParentRestrictions emptyRestriction entityRef
+    let parentRestrs = buildParentRestrictions OFEFalse entityRef
     let selfEntity = layout.FindEntity entityRef |> Option.get
     selfEntity.Children |> Map.keys |> Seq.fold buildChildRestrictions parentRestrs

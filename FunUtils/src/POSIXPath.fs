@@ -1,4 +1,4 @@
-
+[<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.POSIXPath
 
 open System.Text.RegularExpressions

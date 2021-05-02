@@ -112,7 +112,7 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
                             logger.LogError("User {} has no role set", opts.UserName)
                             raise <| RequestException RENoRole
                     | Some user ->
-                        match ctx.Permissions.Find { schema = FunQLName user.Role.Schema.Name; name = FunQLName user.Role.Name } |> Option.get with
+                        match ctx.Permissions.Find { Schema = FunQLName user.Role.Schema.Name; Name = FunQLName user.Role.Name } |> Option.get with
                         | Ok role -> RTRole { Role = Some role; CanRead = opts.CanRead }
                         | Error _ when opts.CanRead -> RTRole { Role = None; CanRead = true }
                         | Error e ->

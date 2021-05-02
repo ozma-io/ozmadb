@@ -8,7 +8,6 @@ open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Apply
-open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.Permissions.Compile
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 
@@ -34,21 +33,22 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
         let selectRestr = applyRestrictionExpression accessor layout flattened ref
 
         let addRestriction restriction name =
-            let field = Map.find name entity.ColumnFields
-            let parentEntity = Option.defaultValue ref field.InheritedFrom
-            match Map.tryFind ({ entity = parentEntity; name = name } : FunQL.ResolvedFieldRef) flattened.Fields with
-            | Some r -> andRestriction restriction r.Select
-            | _ -> raisef PermissionsViewException "Access denied to select field %O" name
+            if name = FunQL.funId || name = FunQL.funSubEntity then
+                restriction
+            else
+                let field = Map.find name entity.ColumnFields
+                let parentEntity = Option.defaultValue ref field.InheritedFrom
+                match Map.tryFind ({ Entity = parentEntity; Name = name } : FunQL.ResolvedFieldRef) flattened.Fields with
+                | Some r -> andFieldExpr restriction r.Select
+                | _ -> raisef PermissionsViewException "Access denied to select field %O" name
         let fieldsRestriction = usedFields |> Set.toSeq |> Seq.fold addRestriction selectRestr
 
-        match fieldsRestriction.Expression with
+        match fieldsRestriction with
         | OFEFalse -> raisef PermissionsViewException "Access denied to select"
         | OFETrue -> None
         | _ ->
-            for arg in fieldsRestriction.GlobalArguments do
-                let (argPlaceholder, newArguments) = addArgument (FunQL.PGlobal arg) FunQL.globalArgumentTypes.[arg] arguments
-                arguments <- newArguments
-            let singleSelect = compileRestriction layout ref arguments.Types fieldsRestriction
+            let (newArguments, singleSelect) = compileRestriction layout ref arguments fieldsRestriction
+            arguments <- newArguments
             let select =
                 { CTEs = None
                   Tree = SSelect singleSelect
@@ -59,7 +59,7 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
     let filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =
         let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
             let entity = Map.find name schema.Entities
-            let ref = { schema = schemaName; name = name } : FunQL.ResolvedEntityRef
+            let ref = { Schema = schemaName; Name = name } : FunQL.ResolvedEntityRef
             try
                 filterUsedFields ref entity usedFields
             with
@@ -108,8 +108,8 @@ type private PermissionsApplier (access : SchemaAccess) =
         match select.Extra with
         // Special case -- subentity select which gets generated when someone uses subentity in FROM.
         | :? RealEntityAnnotation as ann ->
-            let accessSchema = Map.find ann.RealEntity.schema access
-            let accessEntity = Map.find ann.RealEntity.name accessSchema
+            let accessSchema = Map.find ann.RealEntity.Schema access
+            let accessEntity = Map.find ann.RealEntity.Name accessSchema
             match accessEntity with
             | None -> select
             | Some restr -> restr
@@ -146,8 +146,8 @@ type private PermissionsApplier (access : SchemaAccess) =
         | FTable (extra, pun, entity) ->
             match extra with
             | :? RealEntityAnnotation as ann ->
-                let accessSchema = Map.find ann.RealEntity.schema access
-                let accessEntity = Map.find ann.RealEntity.name accessSchema
+                let accessSchema = Map.find ann.RealEntity.Schema access
+                let accessEntity = Map.find ann.RealEntity.Name accessSchema
                 match accessEntity with
                 | None -> FTable (null, pun, entity)
                 | Some restr ->
@@ -177,14 +177,14 @@ let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : Fu
       Arguments = accessCompiler.Arguments
     }
 
-let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (expr : CompiledViewExpr) : unit =
+let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (expr : CompiledViewExpr) : unit =
     let accessCompiler = AccessCompiler (layout, role, expr.Query.Arguments)
-    let access = accessCompiler.FilterUsedSchemas layout expr.UsedSchemas
+    let access = accessCompiler.FilterUsedSchemas layout usedSchemas
     ()
 
-let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (view : CompiledViewExpr) : CompiledViewExpr =
+let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (view : CompiledViewExpr) : CompiledViewExpr =
     let accessCompiler = AccessCompiler (layout, role, view.Query.Arguments)
-    let access = accessCompiler.FilterUsedSchemas layout view.UsedSchemas
+    let access = accessCompiler.FilterUsedSchemas layout usedSchemas
     let applier = PermissionsApplier access
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
     let newQuery =

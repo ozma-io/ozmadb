@@ -1,40 +1,47 @@
 [<AutoOpen>]
-module FunWithFlags.FunUtils.TopLevel
+module FunWithFlags.FunUtils.Utils
 
 open Printf
 open System
 open System.Collections.Generic
+open System.Collections.ObjectModel
 open System.Runtime.ExceptionServices
 open Microsoft.FSharp.Reflection
 
-open FunWithFlags.FunUtils
-
-module Task = Task
-module Null = Null
-module Option = Option
-module Result = Result
-module Seq = Seq
-module Set = Set
-module Map = Map
-module Array = Array
-module String = String
-module Parsing = Parsing
-module Collections = Collections
-module IO = IO
-module Expr = Expr
-module POSIXPath = POSIXPath
-module Hash = Hash
-
 type Void = private Void of unit
 type Exception = System.Exception
-type StringComparable<'a> = String.StringComparable<'a>
 
 let inline isRefNull (x : 'a) = obj.ReferenceEquals(x, null)
 
 let inline curry f a b = f (a, b)
 let inline uncurry f (a, b) = f a b
+let inline flip f a b = f b a
 
-let dictUnique (items : IEnumerable<'k * 'v>) : IDictionary<'k, 'v> = items |> Map.ofSeqUnique |> Map.toSeq |> dict
+let inline raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
+    kprintf <| fun str ->
+        raise  <| constr (str, inner)
+
+let inline raisef (constr : string -> 'e) : StringFormat<'a, 'b> -> 'a =
+    let thenRaise str =
+        raise  <| constr str
+    kprintf thenRaise
+
+let inline reraise' (e : exn) =
+    (ExceptionDispatchInfo.Capture e).Throw ()
+    failwith "Unreachable"
+
+let private genericDictUnique (items : ('k * 'v) seq) =
+    let d = Dictionary<'k, 'v>()
+    for (k, v) in items do
+        if not <| d.TryAdd(k, v) then
+            failwithf "Key '%O' already exists" k
+    ReadOnlyDictionary d
+
+let readOnlyDictUnique (items : ('k * 'v) seq) : IReadOnlyDictionary<'k, 'v> =
+    genericDictUnique items :> IReadOnlyDictionary<'k, 'v>
+
+let dictUnique (items : ('k * 'v) seq) : IDictionary<'k, 'v> =
+    genericDictUnique items :> IDictionary<'k, 'v>
 
 let tryCast<'b> (value : obj) : 'b option =
     match value with
@@ -54,19 +61,6 @@ let castUnion<'a> (value : obj) : 'a option =
     else
         None
 
-let inline raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
-    kprintf <| fun str ->
-        raise  <| constr (str, inner)
-
-let inline raisef (constr : string -> 'e) : StringFormat<'a, 'b> -> 'a =
-    let thenRaise str =
-        raise  <| constr str
-    kprintf thenRaise
-
-let inline reraise' (e : exn) =
-    (ExceptionDispatchInfo.Capture e).Throw ()
-    failwith "Unreachable"
-
 let tryGetValue (dict: IReadOnlyDictionary<'K, 'V>) (key: 'K) : 'V option =
     let (success, v) = dict.TryGetValue(key)
     if success then Some v else None
@@ -84,4 +78,10 @@ let rec exceptionString (e : exn) : string =
     if isNull e.InnerException then
         e.Message
     else
-        sprintf "%s: %s" e.Message (exceptionString e.InnerException)
+        let inner = exceptionString e.InnerException
+        if e.Message = "" then
+            inner
+        else if inner = "" then
+            e.Message
+        else
+            sprintf "%s: %s" e.Message inner

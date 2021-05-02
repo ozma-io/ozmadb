@@ -36,8 +36,8 @@ type UserViews =
     { Schemas : Map<SchemaName, Result<UserViewsSchema, UserViewsSchemaError>>
     } with
         member this.Find (ref : ResolvedUserViewRef) =
-            match Map.tryFind ref.schema this.Schemas with
-            | Some (Ok schema) -> Map.tryFind ref.name schema.UserViews
+            match Map.tryFind ref.Schema this.Schemas with
+            | Some (Ok schema) -> Map.tryFind ref.Name schema.UserViews
             | _ -> None
 
 type ErroredUserViewsSchema =

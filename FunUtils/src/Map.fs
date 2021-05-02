@@ -1,3 +1,4 @@
+[<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.Map
 
 open System.Threading.Tasks
@@ -13,7 +14,7 @@ let ofSeqWith (resolve : 'k -> 'v -> 'v -> 'v) (items : seq<'k * 'v>) : Map<'k, 
     Seq.fold (fun m (k, v) -> addWith (resolve k) k v m) Map.empty items
 
 let ofSeqUnique (items : seq<'k * 'v>) : Map<'k, 'v> =
-    ofSeqWith (fun k v1 v2 -> failwith (sprintf "Key '%O' already exists" k)) items
+    ofSeqWith (fun k v1 v2 -> failwithf "Key '%O' already exists" k) items
 
 let getWithDefault (k : 'k) (def : 'v) (m : Map<'k, 'v>) : 'v =
     match Map.tryFind k m with

@@ -47,15 +47,15 @@ type FunctionName = SQLName
 // Values
 
 type SchemaObject =
-    { schema : SchemaName option
-      name : SQLName
+    { Schema : SchemaName option
+      Name : SQLName
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            match this.schema with
-            | None -> this.name.ToSQLString()
-            | Some schema -> sprintf "%s.%s" (schema.ToSQLString()) (this.name.ToSQLString())
+            match this.Schema with
+            | None -> this.Name.ToSQLString()
+            | Some schema -> sprintf "%s.%s" (schema.ToSQLString()) (this.Name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -63,27 +63,27 @@ type SchemaObject =
 type TableRef = SchemaObject
 
 type ResolvedColumnRef =
-    { table : TableRef
-      name : ColumnName
+    { Table : TableRef
+      Name : ColumnName
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            sprintf "%s.%s" (this.table.ToSQLString()) (this.name.ToSQLString())
+            sprintf "%s.%s" (this.Table.ToSQLString()) (this.Name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
 
 type ColumnRef =
-    { table : TableRef option
-      name : ColumnName
+    { Table : TableRef option
+      Name : ColumnName
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            match this.table with
-            | None -> this.name.ToSQLString()
-            | Some entity -> sprintf "%s.%s" (entity.ToSQLString()) (this.name.ToSQLString())
+            match this.Table with
+            | None -> this.Name.ToSQLString()
+            | Some entity -> sprintf "%s.%s" (entity.ToSQLString()) (this.Name.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()

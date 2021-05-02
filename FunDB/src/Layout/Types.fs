@@ -45,14 +45,14 @@ type ResolvedUniqueConstraint =
 [<NoEquality; NoComparison>]
 type ResolvedCheckConstraint =
     { Expression : ResolvedFieldExpr
-      UsedSchemas : UsedSchemas
       IsLocal : bool
+      UsedSchemas : UsedSchemas // Needed for domains.
       HashName : HashName // Guaranteed to be unique in an entity.
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedIndex =
-    { Expressions : LocalFieldExpr[]
+    { Expressions : ResolvedFieldExpr[]
       HashName : HashName // Guaranteed to be unique in an entity.
       IsUnique : bool
     }
@@ -71,32 +71,29 @@ type ResolvedColumnField =
 
 [<NoEquality; NoComparison>]
 type VirtualFieldCase =
-    { Check : SQL.ValueExpr
-      Expression : ResolvedFieldExpr
-      Ref : ResolvedFieldRef
+    { Ref : ResolvedEntityRef
+      PossibleEntities : Set<ResolvedEntityRef>
     }
+
+// These fields are available without fully resolving a computed field.
+type IComputedFieldBits =
+    abstract member InheritedFrom : ResolvedEntityRef option
+    abstract member AllowBroken : bool
+    abstract member IsVirtual : bool
 
 [<NoEquality; NoComparison>]
 type ResolvedComputedField =
     { Expression : ResolvedFieldExpr
-      // Set when there's no dereferences in the expression.
-      IsLocal : bool
-      // Set when computed field uses Id.
-      HasId : bool
-      UsedSchemas : UsedSchemas
       InheritedFrom : ResolvedEntityRef option
       AllowBroken : bool
+      IsLocal : bool
       HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity.
       VirtualCases : (VirtualFieldCase array) option
-    }
-
-[<NoEquality; NoComparison>]
-type EntityInheritance =
-    { Parent : ResolvedEntityRef
-      // Expression that verifies that given entry's sub_entity is valid for this type.
-      // Column is used unqualified.
-      CheckExpr : SQL.ValueExpr
-    }
+    } with
+        interface IComputedFieldBits with
+            member this.InheritedFrom = this.InheritedFrom
+            member this.AllowBroken = this.AllowBroken
+            member this.IsVirtual = Option.isSome this.VirtualCases
 
 [<NoEquality; NoComparison>]
 type GenericResolvedField<'col, 'comp> =
@@ -105,7 +102,17 @@ type GenericResolvedField<'col, 'comp> =
     | RId
     | RSubEntity
 
+let mapResolvedField (colFunc : 'col1 -> 'col2) (compFunc : 'comp1 -> 'comp2) : GenericResolvedField<'col1, 'comp1> -> GenericResolvedField<'col2, 'comp2> = function
+    | RColumnField col -> RColumnField (colFunc col)
+    | RComputedField comp -> RComputedField (compFunc comp)
+    | RId -> RId
+    | RSubEntity -> RSubEntity
+
 type ResolvedField = GenericResolvedField<ResolvedColumnField, ResolvedComputedField>
+
+type ResolvedFieldBits = GenericResolvedField<ResolvedColumnField, IComputedFieldBits>
+
+let resolvedFieldToBits : ResolvedField -> ResolvedFieldBits = mapResolvedField id (fun x -> x :> IComputedFieldBits)
 
 type FieldInfo<'col, 'comp> =
     { Name : FieldName
@@ -116,23 +123,34 @@ type FieldInfo<'col, 'comp> =
 
 type ResolvedFieldInfo = FieldInfo<ResolvedColumnField, ResolvedComputedField>
 
+type ResolvedFieldBitsInfo = FieldInfo<ResolvedColumnField, IComputedFieldBits>
+
+let resolvedFieldInfoToBits (info : ResolvedFieldInfo) : ResolvedFieldBitsInfo =
+    { Name = info.Name
+      ForceRename = info.ForceRename
+      Field =  mapResolvedField id (fun x -> x :> IComputedFieldBits) info.Field
+    }
+
 [<NoEquality; NoComparison>]
 type ChildEntity =
     { Direct : bool
     }
 
-type IEntityFields =
+type IEntityBits =
     abstract member FindField : FieldName ->  ResolvedFieldInfo option
-    abstract member Fields : (FieldName * ResolvedField) seq
+    abstract member FindFieldBits : FieldName ->  ResolvedFieldBitsInfo option
+    abstract member Fields : (FieldName * ResolvedFieldBits) seq
     abstract member MainField : FieldName
+    abstract member TypeName : string
     abstract member Parent : ResolvedEntityRef option
     abstract member IsAbstract : bool
-    abstract member Children : (ResolvedEntityRef * ChildEntity) seq
+    abstract member IsHidden : bool
+    abstract member Children : Map<ResolvedEntityRef, ChildEntity>
 
-let hasSubType (entity : IEntityFields) =
+let hasSubType (entity : IEntityBits) =
         Option.isSome entity.Parent || entity.IsAbstract || not (Seq.isEmpty entity.Children)
 
-let inline genericFindField (getColumnField : FieldName -> 'col option) (getComputedField : FieldName -> 'comp option) (fields : IEntityFields) : FieldName -> FieldInfo<'col, 'comp> option =
+let inline genericFindField (getColumnField : FieldName -> 'col option) (getComputedField : FieldName -> 'comp option) (fields : IEntityBits) : FieldName -> FieldInfo<'col, 'comp> option =
     let rec traverse (name : FieldName) =
         if name = funId then
             Some { Name = funId; ForceRename = false; Field = RId }
@@ -162,8 +180,7 @@ type ResolvedEntity =
       ForbidTriggers : bool
       TriggersMigration : bool
       IsHidden : bool
-      Inheritance : EntityInheritance option
-      SubEntityParseExpr : SQL.ValueExpr // Parses SubEntity field into JSON
+      Parent : ResolvedEntityRef option
       Children : Map<ResolvedEntityRef, ChildEntity>
       TypeName : string // SubEntity value for this entity
       HashName : HashName // Guaranteed to be unique for any entity in a schema
@@ -175,8 +192,9 @@ type ResolvedEntity =
         member this.FindField (name : FieldName) =
             genericFindField (fun name -> Map.tryFind name this.ColumnFields) (fun name -> Map.tryFind name this.ComputedFields |> Option.bind Result.getOption) this name
 
-        interface IEntityFields with
+        interface IEntityBits with
             member this.FindField name = this.FindField name
+            member this.FindFieldBits name = Option.map resolvedFieldInfoToBits <| this.FindField name
             member this.Fields =
                 let id = Seq.singleton (funId, RId)
                 let subentity =
@@ -187,19 +205,21 @@ type ResolvedEntity =
                 let columns = this.ColumnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
                 let getComputed = function
                 | (name, Error e) -> None
-                | (name, Ok comp) -> Some (name, RComputedField comp)
+                | (name, Ok comp) -> Some (name, RComputedField (comp :> IComputedFieldBits))
                 let computed = this.ComputedFields |> Map.toSeq |> Seq.mapMaybe getComputed
                 Seq.concat [id; subentity; columns; computed]
             member this.MainField = this.MainField
-            member this.Parent = this.Inheritance |> Option.map (fun i -> i.Parent)
+            member this.TypeName = this.TypeName
+            member this.Parent = this.Parent
             member this.IsAbstract = this.IsAbstract
-            member this.Children = Map.toSeq this.Children
+            member this.IsHidden = this.IsHidden
+            member this.Children = this.Children
 
 // Should be in sync with type names generation in Resolve
 let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntityRef =
     match typeName.Split("__") with
-    | [| entityName |] -> { root with name = FunQLName entityName }
-    | [| schemaName; entityName |] -> { schema = FunQLName schemaName; name = FunQLName entityName }
+    | [| entityName |] -> { root with Name = FunQLName entityName }
+    | [| schemaName; entityName |] -> { Schema = FunQLName schemaName; Name = FunQLName entityName }
     | _ -> failwith "Invalid type name"
 
 [<NoEquality; NoComparison>]
@@ -208,31 +228,28 @@ type ResolvedSchema =
       Roots : Set<EntityName>
     }
 
-type ILayoutFields =
-    abstract member FindEntity : ResolvedEntityRef -> IEntityFields option
+type ILayoutBits =
+    abstract member FindEntity : ResolvedEntityRef -> IEntityBits option
 
 [<NoEquality; NoComparison>]
 type Layout =
     { Schemas : Map<SchemaName, ResolvedSchema>
     } with
         member this.FindEntity (ref : ResolvedEntityRef) =
-            match Map.tryFind ref.schema this.Schemas with
+            match Map.tryFind ref.Schema this.Schemas with
             | None -> None
-            | Some schema ->
-                match Map.tryFind ref.name schema.Entities with
-                | Some entity when not entity.IsHidden -> Some entity
-                | _ -> None
+            | Some schema -> Map.tryFind ref.Name schema.Entities
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
-        interface ILayoutFields with
-            member this.FindEntity ref = Option.map (fun e -> e :> IEntityFields) (this.FindEntity ref)
+        interface ILayoutBits with
+            member this.FindEntity ref = Option.map (fun e -> e :> IEntityBits) (this.FindEntity ref)
 
-let mapAllFields (f : FieldName -> ResolvedField -> 'a) (entity : IEntityFields) : Map<FieldName, 'a> =
+let mapAllFields (f : FieldName -> ResolvedFieldBits -> 'a) (entity : IEntityBits) : Map<FieldName, 'a> =
     entity.Fields |> Seq.map (fun (name, field) -> (name, f name field)) |> Map.ofSeq
 
-let rec checkInheritance (layout : ILayoutFields) (parentRef : ResolvedEntityRef) (childRef : ResolvedEntityRef) =
+let rec checkInheritance (layout : ILayoutBits) (parentRef : ResolvedEntityRef) (childRef : ResolvedEntityRef) =
     if parentRef = childRef then
         true
     else
@@ -250,3 +267,22 @@ type ErroredEntity =
     }
 type ErroredSchema = Map<EntityName, ErroredEntity>
 type ErroredLayout = Map<SchemaName, ErroredSchema>
+
+let allPossibleEntities (layout : ILayoutBits) (parentRef : ResolvedEntityRef) : (ResolvedEntityRef * IEntityBits) seq =
+    let getEntity ref =
+        let entity = layout.FindEntity ref |> Option.get
+        if entity.IsAbstract then
+            None
+        else
+            Some (ref, entity)
+
+    let parentEntity = layout.FindEntity parentRef |> Option.get
+    let childrenEntities = parentEntity.Children |> Map.keys |> Seq.mapMaybe getEntity
+    let realEntity =
+        if parentEntity.IsAbstract then
+            Seq.empty
+        else
+            Seq.singleton (parentRef, parentEntity)
+    Seq.append realEntity childrenEntities
+
+let localExprFromEntityId = 0

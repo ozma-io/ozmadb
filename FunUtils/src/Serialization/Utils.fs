@@ -1,3 +1,4 @@
+[<AutoOpen>]
 module FunWithFlags.FunUtils.Serialization.Utils
 
 open System

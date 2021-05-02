@@ -33,7 +33,7 @@ type private Phase1Resolver (layout : Layout) =
                 { Source = modul.Source
                 }
             with
-            | :? ResolveModulesException as e -> raisefWithInner ResolveModulesException e.InnerException "Error in module %O: %s" path e.Message
+            | :? ResolveModulesException as e -> raisefWithInner ResolveModulesException e "In module %O" path
 
         let modules = Map.map mapModule schema.Modules
 
@@ -47,7 +47,7 @@ type private Phase1Resolver (layout : Layout) =
                     raisef ResolveModulesException "Unknown schema name"
                 resolveModulesSchema schema
             with
-            | :? ResolveModulesException as e -> raisefWithInner ResolveModulesException e.InnerException "Error in modules schema %O: %s" name e.Message
+            | :? ResolveModulesException as e -> raisefWithInner ResolveModulesException e "In modules schema %O" name
 
         { Schemas = Map.map (fun name -> resolveModulesSchema) source.Schemas
         }

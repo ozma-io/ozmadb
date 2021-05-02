@@ -37,9 +37,9 @@ type SourceAttributesDatabase =
     { Schemas : Map<SchemaName, SourceAttributesSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.Schemas with
+            match Map.tryFind entity.Schema this.Schemas with
                 | None -> None
-                | Some schema -> Map.tryFind entity.name schema.Entities
+                | Some schema -> Map.tryFind entity.Name schema.Entities
 
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =

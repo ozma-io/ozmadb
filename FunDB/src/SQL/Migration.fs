@@ -66,7 +66,7 @@ let private deleteBuildTable (table : TableRef) (tableMeta : TableMeta) : Ordere
 let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta) : OrderedSchemaOperation seq =
     seq {
         for KeyValue (_, (objectName, obj)) in schemaMeta.Objects do
-            let objRef = { schema = Some schemaName; name = objectName }
+            let objRef = { Schema = Some schemaName; Name = objectName }
             match obj with
             | OMTable tableMeta ->
                 yield! deleteBuildTable objRef tableMeta
@@ -187,13 +187,13 @@ let private migrateDeferrableConstraint (objRef : SchemaObject) (tableName : Tab
 let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMeta) : OrderedSchemaOperation seq =
     seq {
         for KeyValue (objectKey, (objectName, obj)) in toMeta.Objects do
-            let objRef = { schema = Some toMeta.Name; name = objectName }
+            let objRef = { Schema = Some toMeta.Name; Name = objectName }
             match obj with
             | OMTable tableMeta ->
                 match Map.tryFind objectKey fromObjects with
                 | Some (oldObjectName, OMTable oldTableMeta) ->
                     if oldObjectName <> objectName then
-                        let oldObjRef = { schema = Some toMeta.Name; name = oldObjectName }
+                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
                         yield (SORenameTable (oldObjRef, objectName), 0)
                     yield! migrateAlterTable objRef oldTableMeta tableMeta
                 | _ ->
@@ -203,7 +203,7 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
                 match Map.tryFind objectKey fromObjects with
                 | Some (oldObjectName, OMSequence) ->
                     if oldObjectName <> objectName then
-                        let oldObjRef = { schema = Some toMeta.Name; name = oldObjectName }
+                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
                         yield (SORenameSequence (oldObjRef, objectName), 0)
                 | _ -> yield (SOCreateSequence objRef, 0)
             | OMConstraint (tableName, constraintType) ->
@@ -229,7 +229,7 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
 
                     if oldIsGood then
                         if oldObjectName <> objectName then
-                            let oldObjRef = { schema = Some toMeta.Name; name = oldObjectName }
+                            let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
                             yield (SORenameConstraint (oldObjRef, tableName, objectName), 0)
                     else
                         let isPrimaryKey =
@@ -246,14 +246,14 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
                         yield (SODropIndex objRef, 0)
                         yield (SOCreateIndex (objRef, tableName, index), 0)
                     else if oldObjectName <> objectName then
-                        let oldObjRef = { schema = Some toMeta.Name; name = oldObjectName }
+                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
                         yield (SORenameIndex (oldObjRef, objectName), 0)
                 | _ -> yield (SOCreateIndex (objRef, tableName, index), 0)
             | OMFunction newOverloads ->
                 match Map.tryFind objectKey fromObjects with
                 | Some (oldObjectName, OMFunction oldOverloads) ->
                     if oldObjectName <> objectName then
-                        let oldObjRef = { schema = Some toMeta.Name; name = oldObjectName }
+                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
                         for KeyValue (signature, _) in oldOverloads do
                             yield (SORenameFunction (oldObjRef, signature, objectName), 0)
                     yield! migrateOverloads objRef oldOverloads newOverloads
@@ -265,12 +265,12 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
                         yield (SODropTrigger (objRef, oldTableName), 0)
                         yield (SOCreateTrigger (objRef, tableName, trigger), 0)
                     else if oldObjectName <> objectName then
-                        let oldObjRef = { schema = Some toMeta.Name; name = oldObjectName }
+                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
                         yield (SORenameTrigger (oldObjRef, tableName, objectName), 0)
                 | _ -> yield (SOCreateTrigger (objRef, tableName, trigger), 0)
 
         for KeyValue (objectKey, (objectName, obj)) in fromObjects do
-            let objRef = { schema = Some toMeta.Name; name = objectName }
+            let objRef = { Schema = Some toMeta.Name; Name = objectName }
             match obj with
             | OMTable tableMeta ->
                 match Map.tryFind objectKey toMeta.Objects with

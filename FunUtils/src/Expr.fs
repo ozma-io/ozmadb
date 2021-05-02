@@ -1,3 +1,4 @@
+[<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.Expr
 
 open System

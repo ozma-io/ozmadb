@@ -156,8 +156,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                         logger.LogError(ex, "Access denied")
                         rctx.WriteEvent (fun event ->
                             event.Type <- "getEntityInfo"
-                            event.SchemaName <- entityRef.schema.ToString()
-                            event.EntityName <- entityRef.name.ToString()
+                            event.SchemaName <- entityRef.Schema.ToString()
+                            event.EntityName <- entityRef.Name.ToString()
                             event.Error <- "access_denied"
                             event.Details <- exceptionString ex
                         )
@@ -183,8 +183,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Type) entityRef args ctx.CancellationToken
                             rctx.WriteEventSync (fun event ->
                                 event.Type <- "insertEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.EntityId <- Nullable newId
                                 event.Details <- JsonConvert.SerializeObject args
                             )
@@ -200,8 +200,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             let str = exceptionString ex
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "insertEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.Error <- "execution"
                                 event.Details <- str
                             )
@@ -210,8 +210,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             logger.LogError(ex, "Access denied")
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "insertEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.Error <- "access_denied"
                                 event.Details <- exceptionString ex
                             )
@@ -237,8 +237,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             do! updateEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Type) entityRef id args ctx.CancellationToken
                             rctx.WriteEventSync (fun event ->
                                 event.Type <- "updateEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Details <- JsonConvert.SerializeObject args
                             )
@@ -252,8 +252,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             let str = exceptionString ex
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "updateEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Error <- "execution"
                                 event.Details <- str
@@ -263,8 +263,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             logger.LogError(ex, "Not found")
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "updateEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Error <- "not_found"
                                 event.Details <- exceptionString ex
@@ -274,8 +274,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             logger.LogError(ex, "Access denied")
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "updateEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Error <- "access_denied"
                                 event.Details <- exceptionString ex
@@ -298,8 +298,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                         do! deleteEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Type) entityRef id ctx.CancellationToken
                         rctx.WriteEventSync (fun event ->
                             event.Type <- "deleteEntity"
-                            event.SchemaName <- entityRef.schema.ToString()
-                            event.EntityName <- entityRef.name.ToString()
+                            event.SchemaName <- entityRef.Schema.ToString()
+                            event.EntityName <- entityRef.Name.ToString()
                             event.EntityId <- Nullable id
                         )
                         if entity.TriggersMigration then
@@ -314,8 +314,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             let str = exceptionString ex
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "deleteEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Error <- "execution"
                                 event.Details <- str
@@ -325,8 +325,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             logger.LogError(ex, "Not found")
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "deleteEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Error <- "not_found"
                                 event.Details <- exceptionString ex
@@ -336,8 +336,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                             logger.LogError(ex, "Access denied")
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "deleteEntity"
-                                event.SchemaName <- entityRef.schema.ToString()
-                                event.EntityName <- entityRef.name.ToString()
+                                event.SchemaName <- entityRef.Schema.ToString()
+                                event.EntityName <- entityRef.Name.ToString()
                                 event.EntityId <- Nullable id
                                 event.Error <- "access_denied"
                                 event.Details <- exceptionString ex

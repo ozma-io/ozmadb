@@ -39,7 +39,7 @@ type private ActionsUpdater (db : SystemContext) as this =
             try
                 updateActionsDatabase schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
@@ -65,7 +65,7 @@ let updateActions (db : SystemContext) (actions : SourceActions) (cancellationTo
 let private findBrokenActionsSchema (schemaName : SchemaName) (schema : ErroredActionsSchema) : ActionRef seq =
     seq {
         for KeyValue(actionName, action) in schema do
-            yield { schema = schemaName; name = actionName }
+            yield { Schema = schemaName; Name = actionName }
     }
 
 let private findBrokenActions (actions : ErroredActions) : ActionRef seq =
@@ -75,8 +75,8 @@ let private findBrokenActions (actions : ErroredActions) : ActionRef seq =
     }
 
 let private checkActionName (ref : ActionRef) : Expr<Action -> bool> =
-    let checkSchema = checkSchemaName ref.schema
-    let uvName = string ref.name
+    let checkSchema = checkSchemaName ref.Schema
+    let uvName = string ref.Name
     <@ fun action -> (%checkSchema) action.Schema && action.Name = uvName @>
 
 let markBrokenActions (db : SystemContext) (actions : ErroredActions) (cancellationToken : CancellationToken) : Task =

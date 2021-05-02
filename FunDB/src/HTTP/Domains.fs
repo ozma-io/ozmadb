@@ -53,7 +53,7 @@ let domainsApi : HttpHandler =
             }
 
     let domainApi (schema, entity, name) =
-        let ref = { entity = { schema = FunQLName schema; name = FunQLName entity }; name = FunQLName name }
+        let ref = { Entity = { Schema = FunQLName schema; Name = FunQLName entity }; Name = FunQLName name }
         choose
             [ GET >=> withContext (getDomainValues ref)
               POST >=> withContext (postGetDomainValues ref)

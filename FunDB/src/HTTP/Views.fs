@@ -171,7 +171,7 @@ let viewsApi : HttpHandler =
         | "POST" -> safeBindJson postAnonymousView next ctx
         | _ -> RequestErrors.METHOD_NOT_ALLOWED "Method not allowed" next ctx
 
-    let namedView (schemaName, uvName) = viewApi (UVNamed { schema = FunQLName schemaName; name = FunQLName uvName }) None
+    let namedView (schemaName, uvName) = viewApi (UVNamed { Schema = FunQLName schemaName; Name = FunQLName uvName }) None
 
     choose
         [ subRoute "/views/anonymous" anonymousView

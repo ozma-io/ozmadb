@@ -76,8 +76,8 @@ type PrefetchedUserViews =
     { Schemas : Map<SchemaName, Result<PrefetchedViewsSchema, UserViewsSchemaError>>
     } with
         member this.Find (ref : ResolvedUserViewRef) =
-            match Map.tryFind ref.schema this.Schemas with
-            | Some (Ok schema) -> Map.tryFind ref.name schema.UserViews
+            match Map.tryFind ref.Schema this.Schemas with
+            | Some (Ok schema) -> Map.tryFind ref.Name schema.UserViews
             | _ -> None
 
 let private mergePrefetchedViewsSchema (a : PrefetchedViewsSchema) (b : PrefetchedViewsSchema) =
@@ -140,7 +140,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         match Map.tryFind ref serializedFields with
         | Some f -> Some f
         | None ->
-            match layout.FindField ref.entity ref.name with
+            match layout.FindField ref.Entity ref.Name with
             | Some { Field = RColumnField src } ->
                 let res = serializeColumnField src
                 serializedFields <- Map.add ref res serializedFields
@@ -169,7 +169,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                     | None -> None
                     | Some fieldName ->
                         Some { Name = fieldName
-                               Field = getSerializedField { entity = insertInfo.Entity; name = fieldName } |> Option.get
+                               Field = getSerializedField { Entity = insertInfo.Entity; Name = fieldName } |> Option.get
                              }
 
             { Name = column.Name
@@ -225,7 +225,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         let mapUserView (name, maybeUv : Result<ResolvedUserView, exn>) =
             task {
                 try
-                    let ref = { schema = schemaName; name = name }
+                    let ref = { Schema = schemaName; Name = name }
                     match maybeUv with
                     | Error e -> return None
                     | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
@@ -240,7 +240,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                             return Some (name, Error (e :> exn))
                 with
                 | :? UserViewDryRunException as e ->
-                    return raisefWithInner UserViewDryRunException e "Error in user view %O" ref
+                    return raisefWithInner UserViewDryRunException e "In user view %O" name
             }
 
         let! userViews = schema.UserViews |> Map.toSeq |> Seq.mapTask mapUserView |> Task.map (Seq.catMaybes >> Map.ofSeq)
@@ -261,7 +261,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                         return Ok newSchema
                     with
                     | :? UserViewDryRunException as e ->
-                        return raisefWithInner UserViewDryRunException e.InnerException "Error in schema %O: %s" name e.Message
+                        return raisefWithInner UserViewDryRunException e "In schema %O" name
                 }
             | Error e -> Task.result (Error e)
 

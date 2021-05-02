@@ -1,3 +1,4 @@
+[<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.Task
 
 open System.Threading.Tasks

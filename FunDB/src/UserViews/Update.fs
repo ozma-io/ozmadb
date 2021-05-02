@@ -75,7 +75,7 @@ let private findBrokenUserViewsSchema (schemaName : SchemaName) (schema : Errore
         | UEGenerator e -> yield ERGenerator schemaName
         | UEUserViews schema ->
             for KeyValue(uvName, uv) in schema do
-                yield ERUserView { schema = schemaName; name = uvName }
+                yield ERUserView { Schema = schemaName; Name = uvName }
     }
 
 let private findBrokenUserViews (uvs : ErroredUserViews) : UserViewErrorRef seq =
@@ -85,8 +85,8 @@ let private findBrokenUserViews (uvs : ErroredUserViews) : UserViewErrorRef seq 
     }
 
 let private checkUserViewName (ref : ResolvedUserViewRef) : Expr<UserView -> bool> =
-    let checkSchema = checkSchemaName ref.schema
-    let uvName = string ref.name
+    let checkSchema = checkSchemaName ref.Schema
+    let uvName = string ref.Name
     <@ fun uv -> (%checkSchema) uv.Schema && uv.Name = uvName @>
 
 let markBrokenUserViews (db : SystemContext) (uvs : ErroredUserViews) (cancellationToken : CancellationToken) : Task =

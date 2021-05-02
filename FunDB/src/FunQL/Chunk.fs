@@ -8,6 +8,8 @@ open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
+open FunWithFlags.FunDB.FunQL.Resolve
+open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.FunQL.Compile
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Chunk
@@ -33,12 +35,13 @@ type SourceQueryChunk =
       Where : SourceChunkWhere option
     }
 
-type ResolvedChunkExpr = FieldExpr<EntityRef, ValueRef<FieldName>>
+type ColumnNamesMap = Map<FieldName, SQL.ColumnName>
 
 type ResolvedChunkWhere =
-    { Arguments : Map<ArgumentName, ResolvedFieldType * FieldValue>
-      ColumnNames : Map<FieldName, SQL.ColumnName>
-      Expression : ResolvedChunkExpr
+    { Arguments : ResolvedArgumentsMap
+      ArgumentValues : Map<ArgumentName, FieldValue>
+      ColumnNames : ColumnNamesMap
+      Expression : ResolvedFieldExpr
     }
 
 type ResolvedQueryChunk =
@@ -58,123 +61,108 @@ let private limitOffsetArgument =
       Optional = false
     } : ResolvedArgument
 
-let private addAnonymousInt (int : int option) (argValues : LocalArgumentsMap) (arguments : QueryArguments) : LocalArgumentsMap * QueryArguments * SQL.ValueExpr option =
+let private maybeAddAnonymousInt (int : int option) (argValues : LocalArgumentsMap) (arguments : QueryArguments) : LocalArgumentsMap * QueryArguments * SQL.ValueExpr option =
     match int with
     | None -> (argValues, arguments, None)
     | Some offset ->
-        let (argId, arg, arguments) = addAnonymousArgument limitOffsetArgument arguments
+        let (argInfo, arg, arguments) = addAnonymousArgument limitOffsetArgument arguments
         let argValues = Map.add arg (FInt offset) argValues
-        let sqlPlaceholder = Some <| SQL.VEPlaceholder argId
+        let sqlPlaceholder = Some <| SQL.VEPlaceholder argInfo.PlaceholderId
         (argValues, arguments, sqlPlaceholder)
 
-let private compileWhereExpr (initialArguments : QueryArguments) (localArguments : Map<ArgumentName, PlaceholderId>) (columns : Map<FieldName, SQL.ColumnName>) (expr : ResolvedChunkExpr) =
-    let mutable arguments = initialArguments
+// `chunkArguments` is a map from anonymous argument name to a real argument name.
+let private compileWhereExpr (layout : Layout) (initialArguments : QueryArguments) (chunkArguments : Map<ArgumentName, ArgumentName>) (expr : ResolvedFieldExpr) =
+    // A small hack: remake compiled arguments map so that it only contains chunk arguments.
+    let convertArgument (name : Placeholder) =
+        match name with
+        | PGlobal glob -> Some name
+        | PLocal loc ->
+            match Map.tryFind loc chunkArguments with
+            | None -> None
+            | Some realName -> Some (PLocal realName)
+    let compileExpr (args : QueryArguments) =
+        let (info, expr) = compileSingleFieldExpr layout emptyExprCompilationFlags args expr
+        (info.Arguments, expr)
+    modifyArgumentsInNamespace convertArgument compileExpr initialArguments
 
-    let compileLinkedRef ctx (ref : ValueRef<FieldName>) : SQL.ValueExpr =
-        match ref with
-        | VRColumn name -> SQL.VEColumn { table = None; name = Map.find name columns }
-        | VRPlaceholder (PGlobal name as arg) ->
-            let (argId, newArguments) = addArgument arg globalArgumentTypes.[name] arguments
-            arguments <- newArguments
-            SQL.VEPlaceholder argId
-        | VRPlaceholder (PLocal name) ->
-            SQL.VEPlaceholder (localArguments.[name])
-    let compileSubSelectExpr select = failwith "Impossible SELECT sub-expression"
+let private chunkFromEntityId = -1
 
-    let ret = genericCompileFieldExpr { Schemas = Map.empty } compileLinkedRef compileSubSelectExpr expr
-    (arguments, ret)
-
-let private genericResolveWhere (findColumn : FieldName -> SQL.ColumnName option) (chunk : SourceChunkWhere) : ResolvedChunkWhere =
+let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (chunk : SourceChunkWhere) : ResolvedChunkWhere =
     let parsedExpr =
         match parse tokenizeFunQL fieldExpr chunk.Expression with
         | Ok r -> r
         | Error msg -> raisef ChunkException "Error parsing chunk restriction: %s" msg
 
-    let resolveArgument (arg : SourceChunkArgument) : ResolvedFieldType * FieldValue =
-        let parsedType =
-            match parse tokenizeFunQL fieldType arg.Type with
-            | Ok r -> r
-            | Error msg -> raisef ChunkException "Error parsing argument type: %s" msg
-        let resolvedType =
-            match parsedType with
-            | FTReference ref -> raisef ChunkException "References in chunk restrictions are not supported: %O" ref
-            | FTEnum vals -> FTEnum vals
-            | FTType t -> FTType t
-        let resolvedValue =
-            match parseValueFromJson resolvedType true arg.Value with
-            | Some v -> v
-            | None -> raisef ChunkException "Couldn't parse value %O to type %O" arg.Value resolvedType
-        (resolvedType, resolvedValue)
+    let parseChunkArgument (arg : SourceChunkArgument) : ParsedArgument =
+        match parse tokenizeFunQL fieldType arg.Type with
+        | Ok r -> { ArgType = r; Optional = false }
+        | Error msg -> raisef ChunkException "Error parsing argument type: %s" msg
+    let parsedArguments = Map.map (fun name -> parseChunkArgument) chunk.Arguments
 
-    let resolvedArguments = Map.map (fun name -> resolveArgument) chunk.Arguments
+    let makeCustomMapping (name : FieldName) (colName : SQL.ColumnName) =
+        let info =
+            { Bound = None
+              ForceSQLName = Some colName
+            } : CustomFromField
+        let ref = { Entity = None; Name = name } : FieldRef
+        (ref, info)
+    let customMapping = Map.mapWithKeys makeCustomMapping namesMap : CustomFromMapping
 
-    let mutable columnNames = Map.empty
+    let (localArguments, resolvedExpr) =
+        try
+            resolveSingleFieldExpr layout parsedArguments chunkFromEntityId (SFCustom customMapping) parsedExpr
+        with
+        | :? ViewResolveException as e -> raisefWithInner ChunkException e ""
+    let (info, usedArguments) = fieldExprUsedReferences layout resolvedExpr
+    if not info.IsLocal then
+        raisef ChunkException "Expression is required to be local"
+    if info.HasAggregates then
+        raisef ChunkException "Aggregate functions are not supported here"
 
-    let resolveExprReference : LinkedFieldRef -> ValueRef<FieldName> = function
-        | { Ref = VRColumn { entity = None; name = name }; Path = [||] } ->
-            match findColumn name with
-            | None -> raisef ChunkException "Field not found in chunk restriction: %O" name
-            | Some columnName ->
-                columnNames <- Map.add name columnName columnNames
-                VRColumn name
-        | { Ref = VRPlaceholder (PGlobal name as arg); Path = [||] } ->
-            if not <| Map.containsKey name globalArgumentTypes then
-                raisef ChunkException "Unknown global argument in chunk restriction: %O" ref
-            VRPlaceholder arg
-        | { Ref = VRPlaceholder (PLocal name as arg); Path = [||] } ->
-            if not <| Map.containsKey name resolvedArguments then
-                raisef ChunkException "Unknown local argument in chunk restriction: %O" ref
-            VRPlaceholder arg
-        | ref -> raisef ChunkException "Invalid reference in chunk restriction: %O" ref
+    let resolveChunkValue (name : ArgumentName) (arg : SourceChunkArgument) : FieldValue =
+        let argument = Map.find (PLocal name)  localArguments
+        match parseValueFromJson argument.ArgType true arg.Value with
+        | Some v -> v
+        | None -> raisef ChunkException "Couldn't parse value %O to type %O" arg.Value argument.ArgType
 
-    let resolveQuery query = raisef ChunkException "Unexpected sub-expression in chunk restriction"
-    let resolveAggr aggr = raisef ChunkException "Unexpected aggregate expression in chunk restriction"
-    let resolveSubEntity ctx fieldRef subEntity = raisef ChunkException "Unexpected aggregate expression in chunk restriction"
-    let mapper =
-        { idFieldExprMapper resolveExprReference resolveQuery with
-              Aggregate = resolveAggr
-              SubEntity = resolveSubEntity
-        }
-    let resolvedExpr = mapFieldExpr mapper parsedExpr
+    let argValues = Map.map resolveChunkValue chunk.Arguments
 
-    { Arguments = resolvedArguments
-      ColumnNames = columnNames
+    { Arguments = localArguments
+      ArgumentValues = argValues
+      ColumnNames = namesMap
       Expression = resolvedExpr
     }
 
-let genericResolveChunk (findColumn : FieldName -> SQL.ColumnName option) (chunk : SourceQueryChunk) : ResolvedQueryChunk =
+let genericResolveChunk (layout : Layout) (namesMap : ColumnNamesMap) (chunk : SourceQueryChunk) : ResolvedQueryChunk =
     { Offset = chunk.Offset
       Limit = chunk.Limit
-      Where = Option.map (genericResolveWhere findColumn) chunk.Where
+      Where = Option.map (genericResolveWhere layout namesMap) chunk.Where
     }
 
-let resolveViewExprChunk (viewExpr : CompiledViewExpr) (chunk : SourceQueryChunk) : ResolvedQueryChunk =
+let resolveViewExprChunk (layout : Layout) (viewExpr : CompiledViewExpr) (chunk : SourceQueryChunk) : ResolvedQueryChunk =
     let getOneColumn = function
         | (CTColumn name, columnName) -> Some (name, columnName)
         | _ -> None
     let columnsMap = viewExpr.Columns |> Seq.mapMaybe getOneColumn |> Map.ofSeq
-    genericResolveChunk (fun name -> Map.tryFind name columnsMap) chunk
+    genericResolveChunk layout columnsMap chunk
 
-let queryExprChunk (chunk : ResolvedQueryChunk) (query : Query<SQL.SelectExpr>) : LocalArgumentsMap * Query<SQL.SelectExpr> =
+let queryExprChunk (layout : Layout) (chunk : ResolvedQueryChunk) (query : Query<SQL.SelectExpr>) : LocalArgumentsMap * Query<SQL.SelectExpr> =
     let argValues = Map.empty : LocalArgumentsMap
     let arguments = query.Arguments
-    let (argValues, arguments, sqlOffset) = addAnonymousInt chunk.Offset argValues arguments
-    let (argValues, arguments, sqlLimit) = addAnonymousInt chunk.Limit argValues arguments
+    let (argValues, arguments, sqlOffset) = maybeAddAnonymousInt chunk.Offset argValues arguments
+    let (argValues, arguments, sqlLimit) = maybeAddAnonymousInt chunk.Limit argValues arguments
     let (argValues, arguments, sqlWhere) =
         match chunk.Where with
         | None -> (argValues, arguments, None)
         | Some where ->
-            let foldArgs (argValues, arguments, localArguments) (name, (argType, argValue)) =
-                let argumentInfo =
-                    { ArgType = argType
-                      Optional = false
-                    } : ResolvedArgument
-                let (argId, arg, arguments) = addAnonymousArgument argumentInfo arguments
-                let localArguments = Map.add name argId localArguments
-                let argValues = Map.add arg argValue argValues
-                (argValues, arguments, localArguments)
-            let (argValues, arguments, localArguments) = Seq.fold foldArgs (argValues, arguments, Map.empty) (Map.toSeq where.Arguments)
-            let (arguments, compiled) = compileWhereExpr arguments localArguments where.ColumnNames where.Expression
+            let foldArgs (argValues, arguments, chunkArguments) (name, argValue) =
+                let argumentInfo = Map.find (PLocal name) where.Arguments
+                let (argId, anonName, arguments) = addAnonymousArgument argumentInfo arguments
+                let chunkArguments = Map.add anonName name chunkArguments
+                let argValues = Map.add anonName argValue argValues
+                (argValues, arguments, chunkArguments)
+            let (argValues, arguments, chunkArguments) = Seq.fold foldArgs (argValues, arguments, Map.empty) (Map.toSeq where.ArgumentValues)
+            let (arguments, compiled) = compileWhereExpr layout arguments chunkArguments where.Expression
             (argValues, arguments, Some compiled)
 
     let sqlChunk =

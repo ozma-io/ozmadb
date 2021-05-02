@@ -27,10 +27,11 @@ type DomainDeniedException (message : string, innerException : Exception) =
 
     new (message : string) = DomainDeniedException (message, null)
 
-let private findDomainColumn = function
-    | col when col = domainValueName -> Some sqlDomainValueName
-    | col when col = domainPunName -> Some sqlDomainPunName
-    | _ -> None
+let private domainColumns =
+    Map.ofList
+        [ (domainValueName, sqlDomainValueName)
+          (domainPunName, sqlDomainPunName)
+        ]
 
 type DomainValue =
     { Value : SQL.Value
@@ -59,9 +60,9 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
                 try
                     applyRoleQueryExpr layout r domain.UsedSchemas domain.Query
                 with
-                | :? PermissionsViewException as e -> raisefWithInner DomainDeniedException e.InnerException "%s" e.Message
-        let resolvedChunk = genericResolveChunk findDomainColumn chunk
-        let (argValues, query) = queryExprChunk resolvedChunk query
+                | :? PermissionsViewException as e -> raisefWithInner DomainDeniedException e ""
+        let resolvedChunk = genericResolveChunk layout domainColumns chunk
+        let (argValues, query) = queryExprChunk layout resolvedChunk query
 
         try
             let arguments = Map.union arguments (Map.mapKeys PLocal argValues)

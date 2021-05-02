@@ -26,12 +26,12 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) as 
 
     let updateAttributesDatabase (schema : SourceAttributesDatabase) (existingSchema : Schema) : unit =
         let addOldAttrsKey (attrs : FieldAttributes) =
-            ({ entity = { schema = FunQLName attrs.FieldEntity.Schema.Name; name = FunQLName attrs.FieldEntity.Name }; name = FunQLName attrs.FieldName }, attrs)
+            ({ Entity = { Schema = FunQLName attrs.FieldEntity.Schema.Name; Name = FunQLName attrs.FieldEntity.Name }; Name = FunQLName attrs.FieldName }, attrs)
         let oldAttrsMap =
             existingSchema.FieldsAttributes |> Seq.map addOldAttrsKey |> Map.ofSeq
 
         let addNewAttrsFieldKey schemaName entityName (fieldName, attrs : SourceAttributesField) =
-            ({ entity = { schema = schemaName; name = entityName }; name = fieldName }, attrs)
+            ({ Entity = { Schema = schemaName; Name = entityName }; Name = fieldName }, attrs)
         let addNewAttrsEntityKey schemaName (entityName, entity : SourceAttributesEntity) =
             entity.Fields |> Map.toSeq |> Seq.map (addNewAttrsFieldKey schemaName entityName)
         let addNewAttrsSchemaKey (schemaName, schema : SourceAttributesSchema) =
@@ -41,12 +41,12 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) as 
         let updateFunc _ = updateAttributesField
         let createFunc fieldRef =
             let entity =
-                match Map.tryFind fieldRef.entity allEntitiesMap with
+                match Map.tryFind fieldRef.Entity allEntitiesMap with
                 | Some id -> id
-                | None -> raisef SystemUpdaterException "Unknown entity %O" fieldRef.entity
+                | None -> raisef SystemUpdaterException "Unknown entity %O" fieldRef.Entity
             FieldAttributes (
                 FieldEntity = entity,
-                FieldName = string fieldRef.name,
+                FieldName = string fieldRef.Name,
                 Schema = existingSchema
             )
         ignore <| this.UpdateDifference updateFunc createFunc newAttrsMap oldAttrsMap
@@ -56,7 +56,7 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) as 
             try
                 updateAttributesDatabase schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
@@ -82,13 +82,13 @@ let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (can
 let private findBrokenAttributesEntity (schemaName : SchemaName) (attrEntityRef : ResolvedEntityRef) (entity : ErroredAttributesEntity) : DefaultAttributeRef seq =
     seq {
         for KeyValue(attrFieldName, field) in entity do
-            yield { Schema = schemaName; Field = { entity = attrEntityRef; name = attrFieldName } }
+            yield { Schema = schemaName; Field = { Entity = attrEntityRef; Name = attrFieldName } }
     }
 
 let private findBrokenAttributesSchema (schemaName : SchemaName) (attrSchemaName : SchemaName) (schema : ErroredAttributesSchema) : DefaultAttributeRef seq =
     seq {
         for KeyValue(attrEntityName, entity) in schema do
-            yield! findBrokenAttributesEntity schemaName { schema = attrSchemaName; name = attrEntityName } entity
+            yield! findBrokenAttributesEntity schemaName { Schema = attrSchemaName; Name = attrEntityName } entity
     }
 
 let private findBrokenAttributesDatabase (schemaName : SchemaName) (db : ErroredAttributesDatabase) : DefaultAttributeRef seq =
@@ -104,9 +104,9 @@ let private findBrokenAttributes (attrs : ErroredDefaultAttributes) : DefaultAtt
     }
 
 let private checkAttributeName (ref : DefaultAttributeRef) : Expr<FieldAttributes -> bool> =
-    let checkEntity = checkEntityName ref.Field.entity
+    let checkEntity = checkEntityName ref.Field.Entity
     let checkSchema = checkSchemaName ref.Schema
-    let fieldName = string ref.Field.name
+    let fieldName = string ref.Field.Name
     <@ fun attrs -> (%checkSchema) attrs.Schema && (%checkEntity) attrs.FieldEntity && attrs.FieldName = fieldName @>
 
 let markBrokenAttributes (db : SystemContext) (attrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) : Task =

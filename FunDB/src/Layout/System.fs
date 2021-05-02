@@ -95,7 +95,7 @@ let buildSystemSchema (contextClass : Type) : SourceSchema =
         match propType.BaseType with
         | null as baseType | baseType when baseType = typeof<obj> -> entity
         | baseType ->
-            { entity with Parent = Some { schema = funSchema; name = Map.find baseType.FullName types }}
+            { entity with Parent = Some { Schema = funSchema; Name = Map.find baseType.FullName types }}
 
     let entities = entitiesInfo |> Seq.map (fun (name, propType, entity) -> (name, applyParent entity propType)) |> Map.ofSeq
     { Entities = entities

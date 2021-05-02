@@ -35,7 +35,7 @@ type private ModulesUpdater (db : SystemContext) as this =
             try
                 updateModulesDatabase schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas

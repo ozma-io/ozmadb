@@ -35,21 +35,21 @@ let private tryRegclass (str : string) : SchemaObject option =
     | Ok obj ->
         // "public" schema gets special handling because its mentions are omitted in PostgreSQL.
         let normalizedObj =
-            if Option.isNone obj.schema then
-                { schema = Some publicSchema; name = obj.name }
+            if Option.isNone obj.Schema then
+                { Schema = Some publicSchema; Name = obj.Name }
             else
                 obj
         Some normalizedObj
     | Error msg -> None
 
 let private makeTableFromName (schema : string) (table : string) : TableRef =
-    { schema = Some (SQLName schema)
-      name = SQLName table
+    { Schema = Some (SQLName schema)
+      Name = SQLName table
     }
 
 let private makeColumnFromName (schema : string) (table : string) (column : string) : ResolvedColumnRef =
-    { table = makeTableFromName schema table
-      name = SQLName column
+    { Table = makeTableFromName schema table
+      Name = SQLName column
     }
 
 let private runCast castFunc str =
@@ -153,7 +153,7 @@ let private makeColumnMeta (attr : Attribute) : ColumnMeta =
           DefaultExpr = defaultExpr
         }
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in column %s: %s" attr.AttName e.Message
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In column %s" attr.AttName
 
 type private TableColumnIds = Map<ColumnNum, ColumnName>
 
@@ -224,8 +224,8 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
             | Regex @"WHEN \((.*)\) EXECUTE (?:PROCEDURE|FUNCTION)" [cond] -> parseLocalExpr cond |> String.comparable |> Some
             | _ -> None
         let functionName =
-            { schema = Some <| SQLName trigger.Function.Namespace.NspName
-              name = SQLName trigger.Function.ProName
+            { Schema = Some <| SQLName trigger.Function.Namespace.NspName
+              Name = SQLName trigger.Function.ProName
             }
         let isConstraint =
             if not trigger.TgConstraint.HasValue then
@@ -243,7 +243,7 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
             }
         (SQLName trigger.TgName, def)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in trigger %s: %s" trigger.TgName e.Message
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In trigger %s" trigger.TgName
 
 let private makeUnconstrainedTableMeta (cl : Class) : TableName * (Map<SQLName, ObjectMeta> * TableMeta * PgTableMeta) =
     try
@@ -262,7 +262,7 @@ let private makeUnconstrainedTableMeta (cl : Class) : TableName * (Map<SQLName, 
             }
         (tableName, (triggers, res, meta))
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in table %s: %s" cl.RelName e.Message
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In table %s" cl.RelName
 
 let private makeSequenceMeta (cl : Class) : SequenceName * ObjectMeta =
     (SQLName cl.RelName, OMSequence)
@@ -290,7 +290,7 @@ let private makeFunctionMeta (proc : Proc) : FunctionName * Map<FunctionSignatur
             }
         (SQLName proc.ProName, Map.singleton signature def)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in function %s: %s" proc.ProName e.Message
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In function %s" proc.ProName
 
 let private tagName (name : SQLName) a = (name.ToString(), (name, a))
 
@@ -308,7 +308,7 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
             }
         (SQLName ns.NspName, res)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e.InnerException "Error in schema %s: %s" ns.NspName e.Message
+    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In schema %s" ns.NspName
 
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =
@@ -327,7 +327,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                     let toName = Map.find toNum refTable.Columns
                     (fromName, toName)
 
-                let tableRef = { schema = Some refSchema; name = refName }
+                let tableRef = { Schema = Some refSchema; Name = refName }
                 let cols = Seq.map2 makeRefColumn constr.ConKey constr.ConFKey |> Seq.toArray
                 Some <| CMForeignKey (tableRef, cols, makeDeferrableConstraint constr)
             | 'p' ->

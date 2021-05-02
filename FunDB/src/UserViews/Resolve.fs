@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Resolve
+open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.FunQL.Dereference
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Attributes.Merge
@@ -76,14 +77,14 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                 try
                     Ok <| resolveUserView uv
                 with
-                | :? UserViewResolveException as e when (forceAllowBroken || uv.AllowBroken) ->
+                | :? UserViewResolveException as e when forceAllowBroken || uv.AllowBroken ->
                     let ret =
                         { AllowBroken = uv.AllowBroken
                           Error = e :> exn
                         }
                     Error ret
             with
-            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "In user view %O: %s" name e.Message
+            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "In user view %O" name
 
         let uvs = schema.UserViews |> Map.map mapUserView
 
@@ -98,7 +99,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     raisef UserViewResolveException "Unknown schema name"
                 resolveUserViewsSchema schema
             with
-            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e.InnerException "In schema %O: %s" name e.Message
+            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "In schema %O" name
         uvs.Schemas |> Map.map mapSchema
 
     member this.ResolveUserView = resolveUserView
@@ -120,12 +121,12 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
             | Some _ -> ()
             | None ->
                 let mschema =
-                    match Map.tryFind ref.schema halfResolved with
+                    match Map.tryFind ref.Schema halfResolved with
                     | None -> raisef UserViewResolveException "Referenced view not found: %O" ref
                     | Some r -> r
                 match mschema with
                 | Ok schema ->
-                    if not <| Map.containsKey ref.name schema.UserViews then
+                    if not <| Map.containsKey ref.Name schema.UserViews then
                         raisef UserViewResolveException "Referenced view not found: %O" ref
                 | Error e ->
                     raisef UserViewResolveException "User view's schema is broken: %O" ref
@@ -146,7 +147,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
         let mutable errors = Map.empty
 
         let mapUserView name maybeUv =
-            let ref = { schema = schemaName; name = name }
+            let ref = { Schema = schemaName; Name = name }
             match maybeUv with
             | Error e ->
                 cachedViews <- Map.add ref (Error e.Error) cachedViews
@@ -193,7 +194,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
                     Ok newSchema
                 with
                 | :? UserViewResolveException as e ->
-                    raisefWithInner UserViewResolveException e.InnerException "In schema %O: %s" name e.Message
+                    raisefWithInner UserViewResolveException e "In schema %O" name
             | Error err ->
                 errors <- Map.add name (UEGenerator err.Error) errors
                 Error err

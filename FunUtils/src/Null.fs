@@ -1,3 +1,4 @@
+[<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.Null
 
 let defaultValue (defaultValue : 'a) : 'a -> 'a = function

@@ -10,14 +10,14 @@ type ViewDereferenceException (message : string) =
 type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, homeSchema : SchemaName option) =
     let resolveRef (ref : UserViewRef) : UserViewRef =
         let schemaName =
-            match ref.schema with
+            match ref.Schema with
             | None ->
                 match homeSchema with
                 | None -> raisef ViewDereferenceException "No default schema for user view reference %O" ref
                 | Some r -> r
             | Some schemaName -> schemaName
-        checkViewExists { schema = schemaName; name = ref.name }
-        { schema = Some schemaName; name = ref.name }
+        checkViewExists { Schema = schemaName; Name = ref.Name }
+        { Schema = Some schemaName; Name = ref.Name }
 
     let resolveValue (value : FieldValue) : FieldValue =
         match value with
@@ -44,12 +44,12 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
     and resolveAttributes (attributes : ResolvedAttributeMap) : ResolvedAttributeMap =
         Map.map (fun name expr -> resolveFieldExpr expr) attributes
 
-    and resolveFieldExpr : ResolvedFieldExpr -> ResolvedFieldExpr =
+    and resolveFieldExpr (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
         let mapper =
-            { idFieldExprMapper id id with
+            { idFieldExprMapper id resolveSelectExpr with
                 Value = resolveValue
             }
-        mapFieldExpr mapper
+        mapFieldExpr mapper expr
 
     and resolveOrderLimitClause (limits : ResolvedOrderLimitClause) : ResolvedOrderLimitClause =
         let resolveOrderBy (ord, expr) = (ord, resolveFieldExpr expr)
@@ -98,20 +98,20 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         }
 
     and resolveSingleSelectExpr (query : ResolvedSingleSelectExpr) : ResolvedSingleSelectExpr =
-            let attributes = resolveAttributes query.Attributes
-            let from = Option.map resolveFromExpr query.From
-            let where = Option.map resolveFieldExpr query.Where
-            let groupBy = Array.map resolveFieldExpr query.GroupBy
-            let results = Array.map resolveResult query.Results
-            let orderLimit = resolveOrderLimitClause query.OrderLimit
-            { Attributes = attributes
-              From = from
-              Where = where
-              GroupBy = groupBy
-              Results = results
-              OrderLimit = orderLimit
-              Extra = query.Extra
-            }
+        let attributes = resolveAttributes query.Attributes
+        let from = Option.map resolveFromExpr query.From
+        let where = Option.map resolveFieldExpr query.Where
+        let groupBy = Array.map resolveFieldExpr query.GroupBy
+        let results = Array.map resolveResult query.Results
+        let orderLimit = resolveOrderLimitClause query.OrderLimit
+        { Attributes = attributes
+          From = from
+          Where = where
+          GroupBy = groupBy
+          Results = results
+          OrderLimit = orderLimit
+          Extra = query.Extra
+        }
 
     and resolveFromExpr : ResolvedFromExpr -> ResolvedFromExpr = function
         | FEntity (pun, name) -> FEntity (pun, name)

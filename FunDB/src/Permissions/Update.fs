@@ -1,6 +1,5 @@
 module FunWithFlags.FunDB.Permissions.Update
 
-open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.FSharp.Quotations
@@ -53,13 +52,13 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
         let oldEntitiesMap =
             existingRole.Entities
             |> Seq.ofObj
-            |> Seq.map (fun roleEntity -> ({ schema = FunQLName roleEntity.Entity.Schema.Name; name = FunQLName roleEntity.Entity.Name }, roleEntity))
+            |> Seq.map (fun roleEntity -> ({ Schema = FunQLName roleEntity.Entity.Schema.Name; Name = FunQLName roleEntity.Entity.Name }, roleEntity))
             |> Map.ofSeq
 
         let entitiesMap =
             role.Permissions.Schemas
             |> Map.toSeq
-            |> Seq.collect (fun (schemaName, entities) -> entities.Entities |> Map.toSeq |> Seq.map (fun (entityName, entity) -> ({ schema = schemaName; name = entityName }, entity)))
+            |> Seq.collect (fun (schemaName, entities) -> entities.Entities |> Map.toSeq |> Seq.map (fun (entityName, entity) -> ({ Schema = schemaName; Name = entityName }, entity)))
             |> Map.ofSeq
 
         existingRole.AllowBroken <- role.AllowBroken
@@ -84,7 +83,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
             try
                 updateAllowedDatabase schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In allowed schema %O: %s" name e.Message
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In allowed schema %O" name
         let createFunc (FunQLName name) =
             Role (
                 Name = name,
@@ -97,7 +96,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
             try
                 updatePermissionsSchema schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
@@ -126,7 +125,7 @@ type private RoleErrorRef = ERRole of RoleRef
 let private findBrokenAllowedSchema (roleRef : RoleRef) (allowedSchemaName : SchemaName) (schema : ErroredAllowedSchema) : RoleErrorRef seq =
     seq {
         for KeyValue(allowedEntityName, entity) in schema do
-            yield EREntity { Role = roleRef; Entity = { schema = allowedSchemaName; name = allowedEntityName } }
+            yield EREntity { Role = roleRef; Entity = { Schema = allowedSchemaName; Name = allowedEntityName } }
     }
 
 let private findBrokenRole (roleRef : RoleRef) (role : ErroredRole) : RoleErrorRef seq =
@@ -141,7 +140,7 @@ let private findBrokenRole (roleRef : RoleRef) (role : ErroredRole) : RoleErrorR
 let private findBrokenRolesSchema (schemaName : SchemaName) (roles : ErroredRoles) : RoleErrorRef seq =
     seq {
         for KeyValue(roleName, role) in roles do
-            yield! findBrokenRole { schema = schemaName; name = roleName } role
+            yield! findBrokenRole { Schema = schemaName; Name = roleName } role
     }
 
 let private findBrokenPermissions (roles : ErroredPermissions) : RoleErrorRef seq =
@@ -151,8 +150,8 @@ let private findBrokenPermissions (roles : ErroredPermissions) : RoleErrorRef se
     }
 
 let private checkRoleName (ref : RoleRef) : Expr<Role -> bool> =
-    let checkSchema = checkSchemaName ref.schema
-    let roleName = string ref.name
+    let checkSchema = checkSchemaName ref.Schema
+    let roleName = string ref.Name
     <@ fun role -> (%checkSchema) role.Schema && role.Name = roleName @>
 
 let private checkAllowedEntityName (ref : AllowedEntityRef) : Expr<RoleEntity -> bool> =

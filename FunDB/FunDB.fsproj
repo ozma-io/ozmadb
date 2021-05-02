@@ -56,6 +56,7 @@
     <Compile Include="src/Attributes/Merge.fs" />
 
     <Compile Include="src/FunQL/Resolve.fs" />
+    <Compile Include="src/FunQL/UsedReferences.fs" />
     <Compile Include="src/FunQL/Dereference.fs" />
     <Compile Include="src/FunQL/Optimize.fs" />
     <Compile Include="src/FunQL/Arguments.fs" />

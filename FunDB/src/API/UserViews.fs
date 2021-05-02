@@ -43,12 +43,12 @@ type UserViewsAPI (rctx : IRequestContext) =
                     return Error <| UVECompilation (exceptionString err)
             | UVNamed ref ->
                 if flags.ForceRecompile then
-                    let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.schema && uv.Name = string ref.name).FirstOrDefaultAsync(ctx.CancellationToken)
+                    let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.Schema && uv.Name = string ref.Name).FirstOrDefaultAsync(ctx.CancellationToken)
                     if isNull uv then
                         return Error UVENotFound
                     else
                         try
-                            let! anon = ctx.ResolveAnonymousView (Some ref.schema) uv.Query
+                            let! anon = ctx.ResolveAnonymousView (Some ref.Schema) uv.Query
                             return Ok anon
                         with
                         | :? UserViewResolveException as err ->
@@ -88,7 +88,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     match rctx.User.Type with
                     | RTRoot -> ()
                     | RTRole role when role.CanRead -> ()
-                    | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled
+                    | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
                     return Ok { Info = uv.Info
                                 PureAttributes = uv.PureAttributes.Attributes
                                 PureColumnAttributes = uv.PureAttributes.ColumnAttributes
@@ -120,7 +120,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     let compiled = uv.UserView.Compiled
                     let maybeResolvedChunk =
                         try
-                            Ok <| resolveViewExprChunk compiled chunk
+                            Ok <| resolveViewExprChunk ctx.Layout compiled chunk
                         with
                         | :? ChunkException as e ->
                             rctx.WriteEvent (fun event ->
@@ -133,7 +133,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     match maybeResolvedChunk with
                     | Error e -> return Error e
                     | Ok resolvedChunk ->
-                        let (extraLocalArgs, query) = queryExprChunk resolvedChunk compiled.Query
+                        let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
                         let compiled = { compiled with Query = query }
                         let! res = explainViewExpr ctx.Transaction.Connection.Query compiled ctx.CancellationToken
                         return Ok res
@@ -150,11 +150,11 @@ type UserViewsAPI (rctx : IRequestContext) =
                         | RTRoot -> uv.UserView.Compiled
                         | RTRole role when role.CanRead -> uv.UserView.Compiled
                         | RTRole role ->
-                            applyRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled
+                            applyRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
 
                     let maybeResolvedChunk =
                         try
-                            Ok <| resolveViewExprChunk compiled chunk
+                            Ok <| resolveViewExprChunk ctx.Layout compiled chunk
                         with
                         | :? ChunkException as e ->
                             rctx.WriteEvent (fun event ->
@@ -167,7 +167,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     match maybeResolvedChunk with
                     | Error e -> return Error e
                     | Ok resolvedChunk ->
-                        let (extraLocalArgs, query) = queryExprChunk resolvedChunk compiled.Query
+                        let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
                         let extraArgValues = Map.mapKeys PLocal extraLocalArgs
                         let compiled = { compiled with Query = query }
 

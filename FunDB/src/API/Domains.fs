@@ -7,6 +7,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.Operations.Domain
+open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.API.Types
 
 type DomainsAPI (rctx : IRequestContext) =
@@ -15,7 +16,7 @@ type DomainsAPI (rctx : IRequestContext) =
 
     member this.GetDomainValues (fieldRef : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) =
         task {
-            match ctx.Domains.FindField fieldRef with
+            match findDomainForField ctx.Layout fieldRef ctx.Domains with
             | None -> return Error DENotFound
             | Some domain ->
                 try
@@ -34,9 +35,9 @@ type DomainsAPI (rctx : IRequestContext) =
                 | :? ChunkException as ex ->
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getDomainValues"
-                        event.SchemaName <- fieldRef.entity.schema.ToString()
-                        event.EntityName <- fieldRef.entity.name.ToString()
-                        event.FieldName <- fieldRef.name.ToString()
+                        event.SchemaName <- fieldRef.Entity.Schema.ToString()
+                        event.EntityName <- fieldRef.Entity.Name.ToString()
+                        event.FieldName <- fieldRef.Name.ToString()
                         event.Error <- "arguments"
                         event.Details <- exceptionString ex
                     )
@@ -46,9 +47,9 @@ type DomainsAPI (rctx : IRequestContext) =
                     let str = exceptionString ex
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getDomainValues"
-                        event.SchemaName <- fieldRef.entity.schema.ToString()
-                        event.EntityName <- fieldRef.entity.name.ToString()
-                        event.FieldName <- fieldRef.name.ToString()
+                        event.SchemaName <- fieldRef.Entity.Schema.ToString()
+                        event.EntityName <- fieldRef.Entity.Name.ToString()
+                        event.FieldName <- fieldRef.Name.ToString()
                         event.Error <- "execution"
                         event.Details <- str
                     )
@@ -57,9 +58,9 @@ type DomainsAPI (rctx : IRequestContext) =
                     logger.LogError(ex, "Access denied")
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getDomainValues"
-                        event.SchemaName <- fieldRef.entity.schema.ToString()
-                        event.EntityName <- fieldRef.entity.name.ToString()
-                        event.FieldName <- fieldRef.name.ToString()
+                        event.SchemaName <- fieldRef.Entity.Schema.ToString()
+                        event.EntityName <- fieldRef.Entity.Name.ToString()
+                        event.FieldName <- fieldRef.Name.ToString()
                         event.Error <- "access_denied"
                         event.Details <- exceptionString ex
                     )

@@ -30,12 +30,12 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) as th
 
     let updateTriggersDatabase (schema : SourceTriggersDatabase) (existingSchema : Schema) : unit =
         let addOldTriggerKey (trigger: Trigger) =
-            (({ schema = FunQLName trigger.TriggerEntity.Schema.Name; name = FunQLName trigger.TriggerEntity.Name }, FunQLName trigger.Name), trigger)
+            (({ Schema = FunQLName trigger.TriggerEntity.Schema.Name; Name = FunQLName trigger.TriggerEntity.Name }, FunQLName trigger.Name), trigger)
         let oldTriggersMap =
             existingSchema.Triggers |> Seq.map addOldTriggerKey |> Map.ofSeq
 
         let addNewTriggerKey schemaName entityName (triggerName, trig : SourceTrigger) =
-            (({ schema = schemaName; name = entityName }, triggerName), trig)
+            (({ Schema = schemaName; Name = entityName }, triggerName), trig)
         let addNewTriggersEntityKey schemaName (entityName, entity : SourceTriggersEntity) =
             entity.Triggers |> Map.toSeq |> Seq.map (addNewTriggerKey schemaName entityName)
         let addNewTriggersSchemaKey (schemaName, schema : SourceTriggersSchema) =
@@ -60,7 +60,7 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) as th
             try
                 updateTriggersDatabase schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
@@ -92,7 +92,7 @@ let private findBrokenTriggersEntity (schemaName : SchemaName) (trigEntityRef : 
 let private findBrokenTriggersSchema (schemaName : SchemaName) (trigSchemaName : SchemaName) (schema : ErroredTriggersSchema) : TriggerRef seq =
     seq {
         for KeyValue(trigEntityName, entity) in schema do
-            yield! findBrokenTriggersEntity schemaName { schema = trigSchemaName; name = trigEntityName } entity
+            yield! findBrokenTriggersEntity schemaName { Schema = trigSchemaName; Name = trigEntityName } entity
     }
 
 let private findBrokenTriggersDatabase (schemaName : SchemaName) (db : ErroredTriggersDatabase) : TriggerRef seq =

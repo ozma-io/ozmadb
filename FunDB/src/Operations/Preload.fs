@@ -268,9 +268,9 @@ let private checkBrokenLayout (logger :ILogger) (preload : Preload) (conn : Data
                 let isSystem = Map.containsKey schemaName preload.Schemas
                 for KeyValue(compName, err) in entity.ComputedFields do
                         if isSystem then
-                            logger.LogWarning(err, "System computed field {ref} as broken", { entity = { schema = schemaName; name = entityName }; name = compName })
+                            logger.LogWarning(err, "System computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
                         else
-                            logger.LogWarning(err, "Marking computed field {ref} as broken", { entity = { schema = schemaName; name = entityName }; name = compName })
+                            logger.LogWarning(err, "Marking computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
 
             if critical then
                 failwith "Broken system layout"
@@ -289,7 +289,7 @@ let checkBrokenAttributes (logger :ILogger) (preload : Preload) (conn : Database
                 for KeyValue(attrsEntityName, attrsEntity) in attrsSchema do
                     for KeyValue(attrsFieldName, err) in attrsEntity do
                         let schemaStr = schemaName.ToString()
-                        let defFieldName = ({ entity = { schema = attrsSchemaName; name = attrsEntityName }; name = attrsFieldName } : ResolvedFieldRef).ToString()
+                        let defFieldName = ({ Entity = { Schema = attrsSchemaName; Name = attrsEntityName }; Name = attrsFieldName } : ResolvedFieldRef).ToString()
                         if isSystem then
                             logger.LogError(err, "System default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
                         else
@@ -308,7 +308,7 @@ let checkBrokenActions (logger :ILogger) (preload : Preload) (conn : DatabaseTra
                 critical <- true
             for KeyValue(actionName, err) in schema do
                 let schemaStr = schemaName.ToString()
-                let actionNameStr = ({ schema = schemaName; name = actionName } : ActionRef).ToString()
+                let actionNameStr = ({ Schema = schemaName; Name = actionName } : ActionRef).ToString()
                 if isSystem then
                     logger.LogError(err, "System action {name} from {schema} is broken", actionNameStr, schemaStr)
                 else
@@ -329,7 +329,7 @@ let checkBrokenTriggers (logger :ILogger) (preload : Preload) (conn : DatabaseTr
                 for KeyValue(triggerEntityName, triggersEntity) in triggersSchema do
                     for KeyValue(triggerName, err) in triggersEntity do
                         let schemaStr = schemaName.ToString()
-                        let triggerNameStr = ({ Schema = schemaName; Entity = { schema = triggerSchemaName; name = triggerEntityName }; Name = triggerName } : TriggerRef).ToString()
+                        let triggerNameStr = ({ Schema = schemaName; Entity = { Schema = triggerSchemaName; Name = triggerEntityName }; Name = triggerName } : TriggerRef).ToString()
                         if isSystem then
                             logger.LogError(err, "System trigger {name} from {schema} is broken", triggerNameStr, schemaStr)
                         else
@@ -349,7 +349,7 @@ let checkBrokenUserViews (logger :ILogger) (preload : Preload) (conn : DatabaseT
             match mschema with
             | UEUserViews schema ->
                 for KeyValue(uvName, err) in schema do
-                    let uvName = ({ schema = schemaName; name = uvName } : ResolvedUserViewRef).ToString()
+                    let uvName = ({ Schema = schemaName; Name = uvName } : ResolvedUserViewRef).ToString()
                     if isSystem then
                         logger.LogError(err, "System view {uv} is broken", uvName)
                     else
@@ -381,8 +381,8 @@ let checkBrokenPermissions (logger :ILogger) (preload : Preload) (conn : Databas
                 | ERDatabase errs ->
                     for KeyValue(allowedSchemaName, allowedSchema) in errs do
                         for KeyValue(allowedEntityName, err) in allowedSchema do
-                            let roleName = ({ schema = schemaName; name = roleName } : ResolvedRoleRef).ToString()
-                            let allowedName = ({ schema = allowedSchemaName; name = allowedEntityName } : ResolvedEntityRef).ToString()
+                            let roleName = ({ Schema = schemaName; Name = roleName } : ResolvedRoleRef).ToString()
+                            let allowedName = ({ Schema = allowedSchemaName; Name = allowedEntityName } : ResolvedEntityRef).ToString()
                             if isSystem then
                                 logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
                             else

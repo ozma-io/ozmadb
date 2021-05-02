@@ -234,7 +234,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
             // ID can be NULL, for example, in case of JOINs.
             | None -> None
             | Some id ->
-                let subEntity = Option.bind (getSubEntity info.Ref.entity) (Map.tryFind info.IdColumn subEntityColumns)
+                let subEntity = Option.bind (getSubEntity info.Ref.Entity) (Map.tryFind info.IdColumn subEntityColumns)
                 let ret =
                     { Id = id
                       SubEntity = subEntity

@@ -27,7 +27,7 @@ type private Phase1Resolver (layout : Layout) =
                     }
                 Ok ret
             with
-            | :? ResolveActionsException as e -> raisefWithInner ResolveActionsException e.InnerException "Error in action %O: %s" name e.Message
+            | :? ResolveActionsException as e -> raisefWithInner ResolveActionsException e "In action %O" name
 
         { Actions = Map.map mapAction schema.Actions
         }
@@ -39,7 +39,7 @@ type private Phase1Resolver (layout : Layout) =
                     raisef ResolveActionsException "Unknown schema name"
                 resolveActionsSchema schema
             with
-            | :? ResolveActionsException as e -> raisefWithInner ResolveActionsException e.InnerException "Error in actions schema %O: %s" name e.Message
+            | :? ResolveActionsException as e -> raisefWithInner ResolveActionsException e "In actions schema %O" name
 
         { Schemas = Map.map (fun name -> resolveActionsSchema) source.Schemas
         }

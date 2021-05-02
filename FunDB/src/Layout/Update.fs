@@ -16,12 +16,12 @@ open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDBSchema.System
 
-let private makeEntity schemaName (entity : Entity) = ({ schema = schemaName; name = FunQLName entity.Name }, entity)
+let private makeEntity schemaName (entity : Entity) = ({ Schema = schemaName; Name = FunQLName entity.Name }, entity)
 let private makeSchema (schema : Schema) = schema.Entities |> Seq.ofObj |> Seq.map (makeEntity (FunQLName schema.Name))
 
 let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, Entity> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
 
-type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) as this =
+type private LayoutUpdater (db : SystemContext) as this =
     inherit SystemUpdater(db)
 
     let updateColumnFields (entity : Entity) : Map<FieldName, SourceColumnField> -> Map<FieldName, ColumnField> -> Map<FieldName, ColumnField> =
@@ -125,7 +125,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) as this
                 match entity.Parent with
                 | None -> ()
                 | Some parent ->
-                    let existingEntity = parents.[{ schema = schemaName; name = entityName }]
+                    let existingEntity = parents.[{ Schema = schemaName; Name = entityName }]
                     let parentEntity = parents.[parent]
                     existingEntity.Parent <- parentEntity
 
@@ -134,7 +134,7 @@ type private LayoutUpdater (db : SystemContext, allSchemas : Schema seq) as this
             try
                 updateSchema schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e.InnerException "In schema %O: %s" name e.Message
+            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         let createFunc (FunQLName name) =
             Schema (
                 Name = name
@@ -158,7 +158,7 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken
                 |> Seq.map (fun schema -> (FunQLName schema.Name, schema))
                 |> Map.ofSeq
 
-            let updater = LayoutUpdater (db, schemas)
+            let updater = LayoutUpdater(db)
             ignore <| updater.UpdateSchemas layout.Schemas schemasMap
             return updater
         }
@@ -166,13 +166,13 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken
 let private findBrokenComputedFieldsEntity (entityRef : ResolvedEntityRef) (entity : ErroredEntity) : ResolvedFieldRef seq =
     seq {
         for KeyValue(fieldName, field) in entity.ComputedFields do
-            yield { entity = entityRef; name = fieldName }
+            yield { Entity = entityRef; Name = fieldName }
     }
 
 let private findBrokenComputedFieldsSchema (schemaName : SchemaName) (schema : ErroredSchema) : ResolvedFieldRef seq =
     seq {
         for KeyValue(entityName, entity) in schema do
-            yield! findBrokenComputedFieldsEntity { schema = schemaName; name = entityName } entity
+            yield! findBrokenComputedFieldsEntity { Schema = schemaName; Name = entityName } entity
     }
 
 let private findBrokenComputedFields (layout : ErroredLayout) : ResolvedFieldRef seq =
@@ -186,18 +186,18 @@ let checkSchemaName (name : SchemaName) : Expr<Schema -> bool> =
     <@ fun schema -> schema.Name = schemaName @>
 
 let checkEntityName (ref : ResolvedEntityRef) : Expr<Entity -> bool> =
-    let checkSchema = checkSchemaName ref.schema
-    let entityName = string ref.name
+    let checkSchema = checkSchemaName ref.Schema
+    let entityName = string ref.Name
     <@ fun entity -> entity.Name = entityName && (%checkSchema) entity.Schema @>
 
 let checkColumnFieldName (ref : ResolvedFieldRef) : Expr<ColumnField -> bool> =
-    let checkEntity = checkEntityName ref.entity
-    let compName = string ref.name
+    let checkEntity = checkEntityName ref.Entity
+    let compName = string ref.Name
     <@ fun field -> field.Name = compName && (%checkEntity) field.Entity @>
 
 let checkComputedFieldName (ref : ResolvedFieldRef) : Expr<ComputedField -> bool> =
-    let checkEntity = checkEntityName ref.entity
-    let compName = string ref.name
+    let checkEntity = checkEntityName ref.Entity
+    let compName = string ref.Name
     <@ fun field -> field.Name = compName && (%checkEntity) field.Entity @>
 
 let genericMarkBroken (queryable : IQueryable<'a>) (checks : Expr<'a -> bool> seq) (setBroken : Expr<'a -> 'a>) (cancellationToken : CancellationToken) : Task =

@@ -469,26 +469,26 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                               | None -> Map.empty
                     }
                 | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.yaml$" [rawSchemaName; rawEntityName; rawTriggerName] ->
-                    let ref = { Schema = schemaName; Entity = { schema = FunQLName rawSchemaName; name = FunQLName rawEntityName }; Name = FunQLName rawTriggerName }
+                    let ref = { Schema = schemaName; Entity = { Schema = FunQLName rawSchemaName; Name = FunQLName rawEntityName }; Name = FunQLName rawTriggerName }
                     let prettyTriggerMeta : PrettyTriggerMeta = deserializeEntry entry
                     let (prevMeta, prevProc) = Map.findWithDefault ref (fun () -> (None, "")) encounteredTriggers
                     assert (Option.isNone prevMeta)
                     encounteredTriggers <- Map.add ref (Some prettyTriggerMeta, prevProc) encounteredTriggers
                     emptySchemaDump
                 | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.mjs$" [rawSchemaName; rawEntityName; rawTriggerName] ->
-                    let ref = { Schema = schemaName; Entity = { schema = FunQLName rawSchemaName; name = FunQLName rawEntityName }; Name = FunQLName rawTriggerName }
+                    let ref = { Schema = schemaName; Entity = { Schema = FunQLName rawSchemaName; Name = FunQLName rawEntityName }; Name = FunQLName rawTriggerName }
                     let rawProcedure = readEntry entry <| fun reader -> reader.ReadToEnd()
                     let (prevMeta, prevProc) = Map.findWithDefault ref (fun () -> (None, "")) encounteredTriggers
                     encounteredTriggers <- Map.add ref (prevMeta, rawProcedure) encounteredTriggers
                     emptySchemaDump
                 | CIRegex @"^actions/([^/]+)\.yaml$" [rawActionName] ->
-                    let ref = { schema = schemaName; name = FunQLName rawActionName }
+                    let ref = { Schema = schemaName; Name = FunQLName rawActionName }
                     let prettyActionMeta : PrettyActionMeta = deserializeEntry entry
                     let (prevMeta, prevFunc) = Map.findWithDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
                     encounteredActions <- Map.add ref (prettyActionMeta, prevFunc) encounteredActions
                     emptySchemaDump
                 | CIRegex @"^actions/([^/]+)\.mjs$" [rawActionName] ->
-                    let ref = { schema = schemaName; name = FunQLName rawActionName }
+                    let ref = { Schema = schemaName; Name = FunQLName rawActionName }
                     let rawFunc = readEntry entry <| fun reader -> reader.ReadToEnd()
                     let (prevMeta, prevFunc) = Map.findWithDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
                     encounteredActions <- Map.add ref (prevMeta, rawFunc) encounteredActions
@@ -506,13 +506,13 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                           Roles = Map.singleton name role
                     }
                 | CIRegex @"^user_views/([^/]+)\.yaml$" [rawName] ->
-                    let ref = { schema = schemaName; name = FunQLName rawName }
+                    let ref = { Schema = schemaName; Name = FunQLName rawName }
                     let prettyUvMeta : PrettyUserViewMeta = deserializeEntry entry
                     let (prevMeta, prevUv) = Map.findWithDefault ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
                     encounteredUserViews <- Map.add ref (prettyUvMeta, prevUv) encounteredUserViews
                     emptySchemaDump
                 | CIRegex @"^user_views/([^/]+)\.funql$" [rawName] ->
-                    let ref = { schema = schemaName; name = FunQLName rawName }
+                    let ref = { Schema = schemaName; Name = FunQLName rawName }
                     let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
                     let (prevMeta, prevUv) = Map.findWithDefault ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
                     encounteredUserViews <- Map.add ref (prevMeta, rawUv) encounteredUserViews
@@ -541,8 +541,8 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
             |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) Map.empty
 
     let convertAction (KeyValue(ref : ActionRef, (meta : PrettyActionMeta, source))) =
-        let ret = { emptySchemaDump with Actions = Map.singleton ref.name { Function = source; AllowBroken = meta.AllowBroken } }
-        (ref.schema, ret)
+        let ret = { emptySchemaDump with Actions = Map.singleton ref.Name { Function = source; AllowBroken = meta.AllowBroken } }
+        (ref.Schema, ret)
     let dump =
         encounteredActions
             |> Seq.map (convertAction >> uncurry Map.singleton)
@@ -554,10 +554,10 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
             let entityTriggers =
                 { Triggers = Map.singleton ref.Name (deprettifyTrigger meta proc) }
             let schemaTriggers =
-                { Entities = Map.singleton ref.Entity.name entityTriggers }
+                { Entities = Map.singleton ref.Entity.Name entityTriggers }
             let ret =
                 { emptySchemaDump with
-                      Triggers = Map.singleton ref.Entity.schema schemaTriggers
+                      Triggers = Map.singleton ref.Entity.Schema schemaTriggers
                 }
             (ref.Schema, ret)
         | (None, _) -> raisef RestoreSchemaException "No meta description for trigger %O" ref
@@ -567,8 +567,8 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
             |> Seq.fold (Map.unionWith (fun name -> mergeSchemaDump)) dump
 
     let convertUserView (KeyValue(ref : ResolvedUserViewRef, (meta : PrettyUserViewMeta, uv))) =
-        let ret = { emptySchemaDump with UserViews = Map.singleton ref.name { Query = uv; AllowBroken = meta.AllowBroken } }
-        (ref.schema, ret)
+        let ret = { emptySchemaDump with UserViews = Map.singleton ref.Name { Query = uv; AllowBroken = meta.AllowBroken } }
+        (ref.Schema, ret)
     let dump =
         encounteredUserViews
             |> Seq.map (convertUserView >> uncurry Map.singleton)

@@ -18,23 +18,11 @@ type AllowedEntityRef =
   }
 
 [<NoEquality; NoComparison>]
-type Restriction =
-    { Expression : ResolvedOptimizedFieldExpr
-      GlobalArguments : Set<ArgumentName>
-    } with
-    override this.ToString () = this.ToFunQLString ()
-
-    member this.ToFunQLString () = this.Expression.ToFunQLString ()
-
-    interface IFunQLString with
-        member this.ToFunQLString () = this.ToFunQLString()
-
-[<NoEquality; NoComparison>]
 type AllowedField =
     { // Are you allowed to change (UPDATE/INSERT) this field?
       Change : bool
       // Are you allowed to select this entry? If yes, what _additional_ restrictions are in place if this field is used, on top of entity-wide?
-      Select : Restriction
+      Select : ResolvedOptimizedFieldExpr
     }
 
 [<NoEquality; NoComparison>]
@@ -47,15 +35,15 @@ type AllowedOperationError =
 type AllowedEntity =
     { AllowBroken : bool
       // Post-UPDATE/INSERT check expression.
-      Check : Restriction
+      Check : ResolvedOptimizedFieldExpr
       // Are you allowed to INSERT?
       Insert : bool
       // Which entries are you allowed to SELECT?
-      Select : Restriction
+      Select : ResolvedOptimizedFieldExpr
       // Which entries are you allowed to UPDATE (on top of SELECT)?
-      Update : Restriction
+      Update : ResolvedOptimizedFieldExpr
       // Which entries are you allowed to DELETE (on top of SELECT)?
-      Delete : Restriction
+      Delete : ResolvedOptimizedFieldExpr
       Fields : Map<FieldName, AllowedField>
     }
 
@@ -75,9 +63,9 @@ type AllowedDatabase =
     { Schemas : Map<SchemaName, AllowedSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.Schemas with
+            match Map.tryFind entity.Schema this.Schemas with
                 | None -> None
-                | Some schema -> Map.tryFind entity.name schema.Entities
+                | Some schema -> Map.tryFind entity.Name schema.Entities
 
 let emptyAllowedDatabase : AllowedDatabase =
     { Schemas = Map.empty
@@ -86,10 +74,10 @@ let emptyAllowedDatabase : AllowedDatabase =
 [<NoEquality; NoComparison>]
 type FlatAllowedDerivedEntity =
     { Insert : bool
-      Check : Restriction
-      Select : Restriction
-      Update : Restriction
-      Delete : Restriction
+      Check : ResolvedOptimizedFieldExpr
+      Select : ResolvedOptimizedFieldExpr
+      Update : ResolvedOptimizedFieldExpr
+      Delete : ResolvedOptimizedFieldExpr
     }
 
 [<NoEquality; NoComparison>]
@@ -125,9 +113,9 @@ type Permissions =
     { Schemas : Map<SchemaName, PermissionsSchema>
     } with
         member this.Find (ref : ResolvedRoleRef) =
-            match Map.tryFind ref.schema this.Schemas with
+            match Map.tryFind ref.Schema this.Schemas with
             | None -> None
-            | Some schema -> Map.tryFind ref.name schema.Roles
+            | Some schema -> Map.tryFind ref.Name schema.Roles
 
 type ErroredAllowedSchema = Map<EntityName, exn>
 type ErroredAllowedDatabase = Map<SchemaName, ErroredAllowedSchema>

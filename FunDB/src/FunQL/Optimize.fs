@@ -85,10 +85,10 @@ let rec optimizeFieldExpr : FieldExpr<'e, 'f> -> OptimizedFieldExpr<'e, 'f> = fu
     | FEValue v -> optimizeFieldValue v
     | expr -> OFEExpr expr
 
-let rec mapOptimizedFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) (e : OptimizedFieldExpr<'e1, 'f1>) : OptimizedFieldExpr<'e2, 'f2> =
+let rec mapOptimizedFieldExpr (f : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) (e : OptimizedFieldExpr<'e1, 'f1>) : OptimizedFieldExpr<'e2, 'f2> =
     match e with
-    | OFEOr ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr mapper) |> Seq.fold1 orFieldExpr
-    | OFEAnd ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr mapper) |> Seq.fold1 andFieldExpr
-    | OFETrue -> optimizeFieldValue (mapper.Value (FBool true))
-    | OFEFalse -> optimizeFieldValue (mapper.Value (FBool false))
-    | OFEExpr expr -> optimizeFieldExpr (mapFieldExpr mapper expr)
+    | OFEOr ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 orFieldExpr
+    | OFEAnd ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 andFieldExpr
+    | OFETrue -> optimizeFieldExpr (f (FEValue (FBool true)))
+    | OFEFalse -> optimizeFieldExpr (f (FEValue (FBool false)))
+    | OFEExpr expr -> optimizeFieldExpr (f expr)

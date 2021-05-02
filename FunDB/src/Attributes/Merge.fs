@@ -32,9 +32,9 @@ type MergedDefaultAttributes =
     { Schemas : Map<SchemaName, MergedAttributesSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.Schemas with
+            match Map.tryFind entity.Schema this.Schemas with
             | None -> None
-            | Some schema -> Map.tryFind entity.name schema.Entities
+            | Some schema -> Map.tryFind entity.Name schema.Entities
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
@@ -70,9 +70,16 @@ let private mergeAttributesPair (a : MergedDefaultAttributes) (b : MergedDefault
     { Schemas = Map.unionWith (fun name -> mergeAttributesSchema) a.Schemas b.Schemas
     }
 
+let private makeMergedAttribute (schemaName : SchemaName) (priority : int) (attr : ResolvedFieldExpr) =
+    { SchemaName = schemaName
+      Priority = priority
+      Expression = attr
+      Inherited = false
+    }
+
 let private makeMergedAttributesField (schemaName : SchemaName) = function
     | Ok field ->
-        field.Attributes |> Map.map (fun name expr -> { SchemaName = schemaName; Priority = field.Priority; Expression = expr; Inherited = false })
+        field.Attributes |> Map.map (fun name attr -> makeMergedAttribute schemaName field.Priority attr)
     | Error _ -> Map.empty
 
 let private makeOneMergedAttributesEntity (schemaName : SchemaName) (entityAttrs : AttributesEntity) : MergedAttributesEntity =
@@ -108,7 +115,7 @@ type private AttributesMerger (layout : Layout) =
             for KeyValue(schemaName, attrsDb) in attrs.Schemas do
                 for KeyValue(attrSchemaName, schema) in attrsDb.Schemas do
                     for KeyValue(attrEntityName, entity) in schema.Entities do
-                        yield! emitMergedAttributesEntity schemaName { schema = attrSchemaName; name = attrEntityName } entity
+                        yield! emitMergedAttributesEntity schemaName { Schema = attrSchemaName; Name = attrEntityName } entity
         }
 
     let mergeDefaultAttributes (attrs : DefaultAttributes) : MergedDefaultAttributes =
@@ -116,7 +123,7 @@ type private AttributesMerger (layout : Layout) =
             emitDefaultAttributes attrs
             |> Map.ofSeqWith (fun ref attrs1 attrs2 -> mergeAttributesEntity attrs1 attrs2)
             |> Map.toSeq
-            |> Seq.map (fun (ref, attrs) -> (ref.schema, { Entities = Map.singleton ref.name attrs }))
+            |> Seq.map (fun (ref, attrs) -> (ref.Schema, { Entities = Map.singleton ref.Name attrs }))
             |> Map.ofSeqWith (fun name -> mergeAttributesSchema)
         { Schemas = schemas }
 

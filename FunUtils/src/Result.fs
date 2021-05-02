@@ -1,3 +1,4 @@
+[<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.Result
 
 let isOk : Result<'a, 'e> -> bool = function

@@ -15,7 +15,6 @@ type AttributesField =
     { AllowBroken : bool
       Priority : int
       Attributes : ResolvedAttributeMap
-      GlobalArguments : Set<ArgumentName>
     }
 
 [<NoEquality; NoComparison>]
@@ -35,9 +34,9 @@ type AttributesDatabase =
     { Schemas : Map<SchemaName, AttributesSchema>
     } with
         member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.schema this.Schemas with
+            match Map.tryFind entity.Schema this.Schemas with
             | None -> None
-            | Some schema -> Map.tryFind entity.name schema.Entities
+            | Some schema -> Map.tryFind entity.Name schema.Entities
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))

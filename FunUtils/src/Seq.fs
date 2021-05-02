@@ -1,72 +1,82 @@
+[<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.Seq
 
 open System
+open System.Linq
 open System.Collections.Generic
 open System.Threading.Tasks
 open FSharp.Control.Tasks.NonAffine
 
 let mapMaybe (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
-    seq { for i in s do
-              match f i with
-              | Some r -> yield r
-              | None -> ()
-        }
+    seq {
+        for i in s do
+            match f i with
+            | Some r -> yield r
+            | None -> ()
+    }
 
 let map2Maybe (f : 'a -> 'b -> 'c option) (s1 : seq<'a>) (s2 : seq<'b>) : seq<'c> =
-    seq { for (i1, i2) in Seq.zip s1 s2 do
-              match f i1 i2 with
-              | Some r -> yield r
-              | None -> ()
-        }
+    seq {
+        for (i1, i2) in Seq.zip s1 s2 do
+            match f i1 i2 with
+            | Some r -> yield r
+            | None -> ()
+    }
 
 let map3Maybe (f : 'a -> 'b -> 'c -> 'd option) (s1 : seq<'a>) (s2 : seq<'b>) (s3 : seq<'c>) : seq<'d> =
-    seq { for (i1, i2, i3) in Seq.zip3 s1 s2 s3 do
-              match f i1 i2 i3 with
-              | Some r -> yield r
-              | None -> ()
-        }
+    seq {
+        for (i1, i2, i3) in Seq.zip3 s1 s2 s3 do
+            match f i1 i2 i3 with
+            | Some r -> yield r
+            | None -> ()
+    }
 
 let catMaybes (s : seq<'a option>) : seq<'a> =
-    seq { for i in s do
-              match i with
-              | Some r -> yield r
-              | None -> ()
-        }
+    seq {
+        for i in s do
+            match i with
+            | Some r -> yield r
+            | None -> ()
+    }
 
 let mapiMaybe (f : int -> 'a -> 'b option) (s : seq<'a>) : seq<'b> =
-    seq { let mutable n = 0
-          for i in s do
-              match f n i with
-              | Some r -> yield r
-              | None -> ()
-              n <- n + 1
-        }
+    seq {
+        let mutable n = 0
+        for i in s do
+            match f n i with
+            | Some r -> yield r
+            | None -> ()
+            n <- n + 1
+    }
 
 let mapi2Maybe (f : int -> 'a -> 'b -> 'c option) (s1 : seq<'a>) (s2 : seq<'b>) : seq<'c> =
-    seq { let mutable n = 0
-          for (i1, i2) in Seq.zip s1 s2 do
-              match f n i1 i2 with
-              | Some r -> yield r
-              | None -> ()
-              n <- n + 1
-        }
+    seq {
+        let mutable n = 0
+        for (i1, i2) in Seq.zip s1 s2 do
+            match f n i1 i2 with
+            | Some r -> yield r
+            | None -> ()
+            n <- n + 1
+    }
 
 let mapi3Maybe (f : int -> 'a -> 'b -> 'c -> 'd option) (s1 : seq<'a>) (s2 : seq<'b>) (s3 : seq<'c>) : seq<'d> =
-    seq { let mutable n = 0
-          for (i1, i2, i3) in Seq.zip3 s1 s2 s3 do
-              match f n i1 i2 i3 with
-              | Some r -> yield r
-              | None -> ()
-              n <- n + 1
-        }
+    seq {
+        let mutable n = 0
+        for (i1, i2, i3) in Seq.zip3 s1 s2 s3 do
+            match f n i1 i2 i3 with
+            | Some r -> yield r
+            | None -> ()
+            n <- n + 1
+    }
 
 let filteri (f : int -> 'a -> bool) (s : seq<'a>) : seq<'a> =
-    seq { let mutable n = 0
-          for i in s do
-              if f n i then
-                  yield i
-              n <- n + 1
-        }
+    seq {
+        let mutable n = 0
+        for i in s do
+            if f n i then
+                yield i
+            n <- n + 1
+    }
 
 let first (s : seq<'a>) : 'a option = Seq.tryFind (fun x -> true) s
 
@@ -151,7 +161,6 @@ let foldResult (func : 'acc -> 'a -> Result<'acc, 'e>) (init : 'acc) (vals : seq
     match error with
     | None -> Ok acc
     | Some e -> Error e
-
 
 let foldTask (func : 'acc -> 'a -> Task<'acc>) (init : 'acc) (vals : seq<'a>) : Task<'acc> =
     task {
@@ -332,3 +341,19 @@ let partition (f : 'a -> bool) (vals : seq<'a>) : seq<'a> * seq<'a> =
         else
             falses.Add(v)
     (trues :> seq<'a>, falses :> seq<'a>)
+
+let skipLast (n : int) (a : 'a seq) = a.SkipLast(n)
+
+let snoc (s : 'a seq) : 'a * 'a seq =
+    let i = s.GetEnumerator()
+    if i.MoveNext() then
+        (i.Current, ofEnumerator i)
+    else
+        failwith "snoc: empty sequence"
+
+let trySnoc (s : 'a seq) : ('a * 'a seq) option =
+    let i = s.GetEnumerator()
+    if i.MoveNext() then
+        Some (i.Current, ofEnumerator i)
+    else
+        None

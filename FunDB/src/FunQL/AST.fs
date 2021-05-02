@@ -55,20 +55,20 @@ type TriggerName = FunQLName
 type ActionName = FunQLName
 
 type EntityRef =
-    { schema : SchemaName option
-      name : EntityName
+    { Schema : SchemaName option
+      Name : EntityName
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            match this.schema with
-            | None -> this.name.ToFunQLString()
-            | Some x -> sprintf "%s.%s" (x.ToFunQLString()) (this.name.ToFunQLString())
+            match this.Schema with
+            | None -> this.Name.ToFunQLString()
+            | Some x -> sprintf "%s.%s" (x.ToFunQLString()) (this.Name.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-        member this.ToName () = this.name
+        member this.ToName () = this.Name
 
         interface IFunQLName with
             member this.ToName () = this.ToName ()
@@ -76,69 +76,69 @@ type EntityRef =
 type UserViewRef = EntityRef
 
 type ResolvedEntityRef =
-    { schema : SchemaName
-      name : EntityName
+    { Schema : SchemaName
+      Name : EntityName
     } with
         override this.ToString () = this.ToFunQLString()
 
-        member this.ToFunQLString () = sprintf "%s.%s" (this.schema.ToFunQLString()) (this.name.ToFunQLString())
+        member this.ToFunQLString () = sprintf "%s.%s" (this.Schema.ToFunQLString()) (this.Name.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-        member this.ToName () = this.name
+        member this.ToName () = this.Name
 
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
 let relaxEntityRef (ref : ResolvedEntityRef) : EntityRef =
-    { schema = Some ref.schema; name = ref.name }
+    { Schema = Some ref.Schema; Name = ref.Name }
 
 let tryResolveEntityRef (ref : EntityRef) : ResolvedEntityRef option =
-    Option.map (fun schema -> { schema = schema; name = ref.name }) ref.schema
+    Option.map (fun schema -> { Schema = schema; Name = ref.Name }) ref.Schema
 
 type ResolvedUserViewRef = ResolvedEntityRef
 
 type FieldRef =
-    { entity : EntityRef option
-      name : FieldName
+    { Entity : EntityRef option
+      Name : FieldName
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            match this.entity with
-            | None -> this.name.ToFunQLString()
-            | Some entity -> sprintf "%s.%s" (entity.ToFunQLString()) (this.name.ToFunQLString())
+            match this.Entity with
+            | None -> this.Name.ToFunQLString()
+            | Some entity -> sprintf "%s.%s" (entity.ToFunQLString()) (this.Name.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-        member this.ToName () = this.name
+        member this.ToName () = this.Name
 
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
 type ResolvedFieldRef =
-    { entity : ResolvedEntityRef
-      name : FieldName
+    { Entity : ResolvedEntityRef
+      Name : FieldName
     } with
         override this.ToString () = this.ToFunQLString()
 
-        member this.ToFunQLString () = sprintf "%s.%s" (this.entity.ToFunQLString()) (this.name.ToFunQLString())
+        member this.ToFunQLString () = sprintf "%s.%s" (this.Entity.ToFunQLString()) (this.Name.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-        member this.ToName () = this.name
+        member this.ToName () = this.Name
 
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
 let relaxFieldRef (ref : ResolvedFieldRef) : FieldRef =
-    { entity = Some <| relaxEntityRef ref.entity; name = ref.name }
+    { Entity = Some <| relaxEntityRef ref.Entity; Name = ref.Name }
 
 let tryResolveFieldRef (ref : FieldRef) : ResolvedFieldRef option =
-    ref.entity |> Option.bind (tryResolveEntityRef >> Option.map (fun entity -> { entity = entity; name = ref.name }))
+    ref.Entity |> Option.bind (tryResolveEntityRef >> Option.map (fun entity -> { Entity = entity; Name = ref.Name }))
 
 type Placeholder =
     | PLocal of ArgumentName
@@ -384,7 +384,7 @@ type ValueRef<'f> when 'f :> IFunQLName =
 
 type SubEntityRef =
     { Ref : EntityRef
-      Extra : obj
+      Extra : ObjectMap
     }
 
 type EntityAlias =
@@ -646,7 +646,7 @@ and [<NoEquality; NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName 
       Where : FieldExpr<'e, 'f> option
       GroupBy : FieldExpr<'e, 'f>[]
       OrderLimit : OrderLimitClause<'e, 'f>
-      Extra : obj
+      Extra : ObjectMap
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -698,7 +698,7 @@ and [<NoEquality; NoComparison>] SelectTreeExpr<'e, 'f> when 'e :> IFunQLName an
 and [<NoEquality; NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { CTEs : CommonTableExprs<'e, 'f> option
       Tree : SelectTreeExpr<'e, 'f>
-      Extra : obj
+      Extra : ObjectMap
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -771,13 +771,13 @@ and [<NoEquality; NoComparison>] JoinExpr<'e, 'f> when 'e :> IFunQLName and 'f :
 and CommonTableExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Fields : FieldName[] option
       Expr : SelectExpr<'e, 'f>
-      Extra : obj
+      Extra : ObjectMap
     }
 
 and [<NoEquality; NoComparison>] CommonTableExprs<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Recursive : bool
       Exprs : (EntityName * CommonTableExpr<'e, 'f>)[]
-      Extra : obj
+      Extra : ObjectMap
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -1030,15 +1030,9 @@ type ResolvedFieldType = FieldType<ResolvedEntityRef>
 type LocalFieldExpr = FieldExpr<FunQLVoid, FieldName>
 
 [<NoEquality; NoComparison>]
-type BoundField =
-    { Ref : ResolvedFieldRef
-      Immediate : bool // Set if field references value from a table directly, not via a subexpression.
-    }
-
-[<NoEquality; NoComparison>]
 type BoundRef<'f> when 'f :> IFunQLName =
     { Ref : 'f
-      Bound : BoundField option
+      Extra : ObjectMap
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -1052,7 +1046,7 @@ type BoundRef<'f> when 'f :> IFunQLName =
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
-type LinkedBoundFieldRef = LinkedRef<ValueRef<BoundRef<FieldRef>>>
+type LinkedBoundFieldRef = BoundRef<LinkedRef<ValueRef<FieldRef>>>
 
 type ResolvedFieldExpr = FieldExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedSelectExpr = SelectExpr<EntityRef, LinkedBoundFieldRef>
@@ -1065,6 +1059,7 @@ type ResolvedCommonTableExprs = CommonTableExprs<EntityRef, LinkedBoundFieldRef>
 type ResolvedFromExpr = FromExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedAttributeMap = AttributeMap<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>
+type ResolvedAggExpr = AggExpr<EntityRef, LinkedBoundFieldRef>
 
 [<NoEquality; NoComparison>]
 type Argument<'e> when 'e :> IFunQLName =
@@ -1101,14 +1096,14 @@ type UsedEntities = Map<EntityName, UsedFields>
 type UsedSchemas = Map<SchemaName, UsedEntities>
 
 let usedEntityFields (ref : ResolvedEntityRef) (usedSchemas : UsedSchemas) : UsedFields option =
-    match Map.tryFind ref.schema usedSchemas with
+    match Map.tryFind ref.Schema usedSchemas with
     | None -> None
-    | Some usedEntities -> Map.tryFind ref.name usedEntities
+    | Some usedEntities -> Map.tryFind ref.Name usedEntities
 
 let isFieldUsed (ref : ResolvedFieldRef) (usedSchemas : UsedSchemas) : bool =
-    match usedEntityFields ref.entity usedSchemas with
+    match usedEntityFields ref.Entity usedSchemas with
     | None -> false
-    | Some usedFields -> Set.contains ref.name usedFields
+    | Some usedFields -> Set.contains ref.Name usedFields
 
 let addUsedEntity (schemaName : SchemaName) (entityName : EntityName) (usedSchemas : UsedSchemas) : UsedSchemas =
     let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
@@ -1116,20 +1111,21 @@ let addUsedEntity (schemaName : SchemaName) (entityName : EntityName) (usedSchem
     Map.add schemaName (Map.add entityName oldEntity oldSchema) usedSchemas
 
 let addUsedEntityRef (ref : ResolvedEntityRef) =
-    addUsedEntity ref.schema ref.name
+    addUsedEntity ref.Schema ref.Name
 
 let addUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldName : FieldName) (usedSchemas : UsedSchemas) : UsedSchemas =
-    assert (fieldName <> funId && fieldName <> funSubEntity)
     let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
     let oldEntity = Map.findWithDefault entityName (fun () -> Set.empty) oldSchema
     let newEntity = Set.add fieldName oldEntity
     Map.add schemaName (Map.add entityName newEntity oldSchema) usedSchemas
 
 let addUsedFieldRef (ref : ResolvedFieldRef) =
-    addUsedField ref.entity.schema ref.entity.name ref.name
+    addUsedField ref.Entity.Schema ref.Entity.Name ref.Name
 
 let mergeUsedSchemas : UsedSchemas -> UsedSchemas -> UsedSchemas =
     Map.unionWith (fun _ -> Map.unionWith (fun _ -> Set.union))
+
+type UsedArguments = Set<Placeholder>
 
 type LocalArgumentsMap = Map<ArgumentName, FieldValue>
 
@@ -1140,7 +1136,7 @@ let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
                                Optional = false })
           (FunQLName "user", { ArgType = FTType <| FETScalar SFTString
                                Optional = false })
-          (FunQLName "user_id", { ArgType = FTReference ({ schema = funSchema; name = funUsers })
+          (FunQLName "user_id", { ArgType = FTReference ({ Schema = funSchema; Name = funUsers })
                                   Optional = true })
           (FunQLName "transaction_time", { ArgType = FTType <| FETScalar SFTDateTime
                                            Optional = false })
