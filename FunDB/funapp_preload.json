@@ -20,6 +20,20 @@
           "mainField": "name"
         },
 
+        "iframe_markups": {
+          "columnFields": {
+            "name": { "type": "string" },
+            "markup": { "type": "string" }
+          },
+          "uniqueConstraints": {
+            "unique_name": { "columns": [ "name" ] }
+          },
+          "checkConstraints": {
+            "non_empty_name": { "expression": "name <> ''" }
+          },
+          "mainField": "name"
+        },
+
         "color_themes": {
           "columnFields": {
             "name": { "type": "string" },
