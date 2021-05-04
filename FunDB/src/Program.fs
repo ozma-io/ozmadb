@@ -101,6 +101,7 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
             }
 
         member this.SetExtraConnectionOptions (builder : NpgsqlConnectionStringBuilder) =
+            builder.CommandTimeout <- 0
             builder.ConnectionIdleLifetime <- 30
             builder.MaxAutoPrepare <- 50
 
@@ -128,6 +129,7 @@ type StaticInstance (instance : Instance) =
             Task.result (Some obj)
 
         member this.SetExtraConnectionOptions (builder : NpgsqlConnectionStringBuilder) =
+            builder.CommandTimeout <- 0
             ()
 
 type Startup (config : IConfiguration) =
