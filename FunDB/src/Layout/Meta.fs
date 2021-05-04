@@ -88,13 +88,16 @@ type private MetaBuilder (layout : Layout) =
     let rec getPathReferences (fieldRef : ResolvedFieldRef) (relatedFields : PathReferencesMap) (fields : (ResolvedEntityRef * FieldName) list) : PathReferencesMap =
         match fields with
         | [] -> relatedFields
-        | ((entityRef, name) :: refs) ->
+        | ((refEntityRef, refName) :: refs) ->
             let entity = layout.FindEntity fieldRef.Entity |> Option.get
-            let field = Map.find fieldRef.Name entity.ColumnFields
-            let relatedFields = Map.add fieldRef (entity, field) relatedFields
-            getPathReferences { Entity = entityRef; Name = name } relatedFields refs
+            let (fieldName, field) =
+                match entity.FindField fieldRef.Name with
+                | Some { Field = RColumnField col; Name = fieldName } -> (fieldName, col)
+                | _ -> failwith "Unexpected non-column field"
+            let relatedFields = Map.add { fieldRef with Name = fieldName } (entity, field) relatedFields
+            getPathReferences { Entity = refEntityRef; Name = refName } relatedFields refs
 
-    let makeCheckConstraintMeta (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (modifyExpr : SQL.ValueExpr -> SQL.ValueExpr) (constr : ResolvedCheckConstraint) : (SQL.MigrationKey * (SQL.SQLName * SQL.ObjectMeta)) seq =
+    let makeCheckConstraintMeta (entity : ResolvedEntity) (modifyExpr : SQL.ValueExpr -> SQL.ValueExpr) (constr : ResolvedCheckConstraint) : (SQL.MigrationKey * (SQL.SQLName * SQL.ObjectMeta)) seq =
         let tableName = compileResolvedEntityRef entity.Root
         if not constr.IsLocal then
             Seq.empty
@@ -108,7 +111,7 @@ type private MetaBuilder (layout : Layout) =
     let makeEntityMeta (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SQL.TableMeta * (SQL.MigrationKey * (SQL.SQLName * SQL.ObjectMeta)) seq =
         let tableName = compileResolvedEntityRef entity.Root
 
-        let makeEntityCheckConstraint modifyExpr (name, constr) = makeCheckConstraintMeta entityRef entity modifyExpr constr
+        let makeEntityCheckConstraint modifyExpr (name, constr) = makeCheckConstraintMeta entity modifyExpr constr
 
         let (table, extraObjects) =
             match entity.Parent with
