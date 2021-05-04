@@ -8,7 +8,7 @@ FROM
   funapp.settings`,
     "color_themes": `
 SELECT
-  id, name
+  id, name, localized_name
 FROM
   funapp.color_themes`,
   "color_variants": `
