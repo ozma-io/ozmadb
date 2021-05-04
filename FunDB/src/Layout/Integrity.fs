@@ -241,15 +241,14 @@ let private pathTriggerName (key : PathTriggerFullKey) =
     String.truncate 40 str
 
 type private PathTrigger =
-    { Fields : Set<FieldName>
-      // These should be same for any two equal keys; Fields are merged.
-      Entity : ResolvedEntityRef
+    { // Map from field names to field root entities.
+      Fields : Map<FieldName, ResolvedEntityRef>
       Expression : SQL.ValueExpr
     }
 
 let private unionPathTrigger (a : PathTrigger) (b : PathTrigger) : PathTrigger =
-    { Fields = Set.union a.Fields b.Fields
-      Entity = b.Entity
+    { // Values should be the same.
+      Fields = Map.union a.Fields b.Fields
       Expression = b.Expression
     }
 
@@ -262,8 +261,7 @@ let private buildSinglePathTrigger (outerRef : ResolvedFieldRef) (refEntityRef :
               EntityPath = []
             }
         let trigger =
-            { Fields = Set.singleton fieldName
-              Entity = refEntityRef
+            { Fields = Map.singleton fieldName refEntityRef
               Expression = expr
             }
         (key, trigger)
@@ -290,11 +288,11 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
         | [] -> []
         | [(entityRef, fieldName)] -> [buildSinglePathTrigger outerRef entityRef fieldName]
         | (entityRef, fieldName) :: refs ->
-            let (outerKey, outerTrigger) as outerPair = buildSinglePathTrigger outerRef entityRef fieldName
-            let ref1Entity = layout.FindEntity outerTrigger.Entity |> Option.get
+            let ref1Entity = layout.FindEntity entityRef |> Option.get
             let ref1Field = Map.find fieldName ref1Entity.ColumnFields
+            let outerPair = buildSinglePathTrigger outerRef entityRef fieldName
 
-            let innerFieldRef = { Entity = outerTrigger.Entity; Name = fieldName }
+            let innerFieldRef = { Entity = entityRef; Name = fieldName }
             let innerTriggers = buildPathTriggers innerFieldRef refs
 
             let expandPathTrigger (key, trigger : PathTrigger) =
@@ -304,7 +302,7 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
                     }
                 let newTrigger =
                     { trigger with
-                          Expression = expandPathTriggerExpr outerRef.Name outerTrigger.Entity trigger.Expression
+                          Expression = expandPathTriggerExpr outerRef.Name entityRef trigger.Expression
                     }
                 (newKey, newTrigger)
             let wrappedTriggers = List.map expandPathTrigger innerTriggers
@@ -612,7 +610,6 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
 let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (aggCheck : SQL.SingleSelectExpr) (key : PathTriggerKey) (trigger : PathTrigger) : SQL.DatabaseMeta =
     let entity = layout.FindEntity constrRef.Entity |> Option.get
     let triggerName = pathTriggerName { ConstraintRef = constrRef; Key = key }
-    let triggerEntity = layout.FindEntity trigger.Entity |> Option.get
 
     let aggCheck =
         { aggCheck with
@@ -653,11 +650,15 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
     let checkFunctionName = SQL.SQLName checkFunctionKey
     let checkFunctionObject = SQL.OMFunction <| Map.singleton [||] checkFunctionDefinition
 
-    let fieldDistinctCheck name =
-        let field = Map.find name triggerEntity.ColumnFields
+    let getFieldInfo (fieldName, fieldEntityRef) =
+        let fieldEntity = layout.FindEntity fieldEntityRef |> Option.get
+        let field = Map.find fieldName fieldEntity.ColumnFields
         let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = field.ColumnName }
         let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
-        SQL.VEDistinct (checkOldColumn, checkNewColumn)
+        let expr = SQL.VEDistinct (checkOldColumn, checkNewColumn)
+        (field.ColumnName, expr)
+
+    let fieldsInfo = trigger.Fields |> Map.toSeq |> Seq.map getFieldInfo |> Seq.cache
 
     let checkExpr =
         if Option.isNone entity.Parent then
@@ -665,18 +666,21 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
         else
             Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
-    let updateCheck = trigger.Fields |> Seq.map fieldDistinctCheck |> Seq.fold1 (curry SQL.VEAnd)
+    let updateCheck = fieldsInfo |> Seq.map snd |> Seq.fold1 (curry SQL.VEAnd)
     let updateCheck =
         match checkExpr with
         | None -> updateCheck
         | Some check -> SQL.VEAnd (check, updateCheck)
 
-    let getColumnName name = (Map.find name triggerEntity.ColumnFields).ColumnName
-    let affectedColumns = trigger.Fields |> Seq.map getColumnName |> Seq.toArray
+    let affectedColumns = fieldsInfo |> Seq.map fst |> Seq.toArray
 
     let schemaName = compileName entity.Root.Schema
-    let triggerSchemaName = compileName triggerEntity.Root.Schema
-    let triggerTableName = compileName triggerEntity.Root.Name
+
+    // We guarantee that `Fields` is non-empty.
+    let triggerSomeEntityRef = trigger.Fields |> Map.values |> Seq.first |> Option.get
+    let triggerSomeEntity = layout.FindEntity triggerSomeEntityRef |> Option.get
+    let triggerSchemaName = compileName triggerSomeEntity.Root.Schema
+    let triggerTableName = compileName triggerSomeEntity.Root.Name
 
     let checkUpdateTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
