@@ -952,7 +952,14 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                     match field.Field with
                     // We erase field information for computed fields from results, as they would be expanded at this point.
                     | RComputedField comp -> None
-                    | _ -> Some { field with ForceRename = false }
+                    | _ ->
+                        let header = { field.Header with Immediate = false }
+                        let ret =
+                            { field with
+                                Header = header
+                                ForceRename = false
+                            }
+                        Some ret
                 | None -> None
             let info =
                 { InnerField = innerField
