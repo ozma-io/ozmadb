@@ -9,7 +9,7 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/bin/Debug/netcoreapp3.0/FunDB.dll",
+            "program": "${workspaceFolder}/bin/Debug/netcoreapp5.0/FunDB.dll",
             "args": ["config.local.json"],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",

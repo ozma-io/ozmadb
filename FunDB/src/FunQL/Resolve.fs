@@ -948,7 +948,11 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             let innerField =
                 match ref.InnerField with
                 | Some field when field.ForceRename && Option.isNone name && flags.RequireNames -> raisef ViewResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
-                | Some field -> Some { field with ForceRename = false }
+                | Some field ->
+                    match field.Field with
+                    // We erase field information for computed fields from results, as they would be expanded at this point.
+                    | RComputedField comp -> None
+                    | _ -> Some { field with ForceRename = false }
                 | None -> None
             let info =
                 { InnerField = innerField
