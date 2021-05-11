@@ -85,7 +85,7 @@ type UserViewsAPI (rctx : IRequestContext) =
             | Error e -> return Error e
             | Ok uv ->
                 try
-                    match rctx.User.Type with
+                    match rctx.User.EffectiveType with
                     | RTRoot -> ()
                     | RTRole role when role.CanRead -> ()
                     | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
@@ -106,18 +106,23 @@ type UserViewsAPI (rctx : IRequestContext) =
 
     member this.GetUserViewExplain (source : UserViewSource) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
         task {
-            match! resolveSource source flags with
-            | Error e -> return Error e
-            | Ok uv ->
-                if not (canExplain rctx.User.Type) then
-                    logger.LogError("Explain access denied")
-                    rctx.WriteEvent (fun event ->
-                        event.Type <- "getUserViewExplain"
-                        event.Error <- "access_denied"
-                    )
-                    return Error UVEAccessDenied
-                else
-                    let compiled = uv.UserView.Compiled
+            if not (canExplain rctx.User.Type) then
+                logger.LogError("Explain access denied")
+                rctx.WriteEvent (fun event ->
+                    event.Type <- "getUserViewExplain"
+                    event.Error <- "access_denied"
+                )
+                return Error UVEAccessDenied
+            else
+                match! resolveSource source flags with
+                | Error e -> return Error e
+                | Ok uv ->
+                    let compiled =
+                        match rctx.User.EffectiveType with
+                        | RTRoot -> uv.UserView.Compiled
+                        | RTRole role when role.CanRead -> uv.UserView.Compiled
+                        | RTRole role ->
+                            applyRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
                     let maybeResolvedChunk =
                         try
                             Ok <| resolveViewExprChunk ctx.Layout compiled chunk
@@ -146,7 +151,7 @@ type UserViewsAPI (rctx : IRequestContext) =
             | Ok uv ->
                 try
                     let compiled =
-                        match rctx.User.Type with
+                        match rctx.User.EffectiveType with
                         | RTRoot -> uv.UserView.Compiled
                         | RTRole role when role.CanRead -> uv.UserView.Compiled
                         | RTRole role ->

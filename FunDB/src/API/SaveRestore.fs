@@ -80,7 +80,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
     // but Entities API has its own `DEFER CONSTRAINTS` management.
     member this.RestoreSchemas (dumps : Map<SchemaName, SchemaDump>) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
         task {
-            if not (canRestore rctx.User.Type) then
+            if not (canRestore rctx.User.EffectiveType) then
                 logger.LogError("Restore access denied")
                 rctx.WriteEvent (fun event ->
                     event.Type <- "restoreSchema"

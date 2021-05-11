@@ -22,10 +22,18 @@ type DomainRequest =
     { Limit : int option
       Offset : int option
       Where : SourceChunkWhere option
+      PretendRole : ResolvedEntityRef option
       RowId : int option
     }
 
 let domainsApi : HttpHandler =
+    let returnValues (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) next ctx =
+        task {
+            match! api.Domains.GetDomainValues ref rowId chunk with
+            | Ok res -> return! Successful.ok (json res) next ctx
+            | Error err -> return! domainError err next ctx
+        }
+
     let getDomainValues (ref : ResolvedFieldRef) (api : IFunDBAPI) next ctx =
         task {
             let rowId = intRequestArg "id" ctx
@@ -34,9 +42,7 @@ let domainsApi : HttpHandler =
                   Limit = intRequestArg "__limit" ctx
                   Where = None
                 } : SourceQueryChunk
-            match! api.Domains.GetDomainValues ref rowId chunk with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! domainError err next ctx
+            return! returnValues api ref rowId chunk next ctx
         }
 
     let postGetDomainValues (ref : ResolvedFieldRef) (api : IFunDBAPI) =
@@ -47,9 +53,9 @@ let domainsApi : HttpHandler =
                       Offset = req.Offset
                       Where = req.Where
                     } : SourceQueryChunk
-                match! api.Domains.GetDomainValues ref req.RowId chunk with
-                | Ok res -> return! Successful.ok (json res) next ctx
-                | Error err -> return! domainError err next ctx
+                match req.PretendRole with
+                | None -> return! returnValues api ref req.RowId chunk next ctx
+                | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnValues api ref req.RowId chunk next ctx)
             }
 
     let domainApi (schema, entity, name) =

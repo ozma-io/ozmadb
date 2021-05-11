@@ -1,13 +1,10 @@
 module FunWithFlags.FunDB.API.Request
 
 open System
-open System.Threading
 open System.Threading.Tasks
-open NpgsqlTypes
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
-open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunDBSchema.System
@@ -42,7 +39,7 @@ type RequestParams =
 
 let private maxSourceDepth = 16
 
-type RequestContext private (opts : RequestParams, userId : int option, roleType : RoleType) =
+type RequestContext private (opts : RequestParams, userId : int option, roleType : RoleType, logger : ILogger) =
     let ctx = opts.Context
     let userIdValue =
         match userId with
@@ -59,8 +56,9 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
     do
         assert (Map.keysSet globalArgumentTypes = Map.keysSet globalArguments)
 
-    let user =
+    let mutable currentUser =
         { Type = roleType
+          EffectiveType = roleType
           Name = opts.UserName
           Language = opts.Language
         }
@@ -118,10 +116,10 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
                         | Error e ->
                             logger.LogError(e, "Role for user {} is broken", opts.UserName)
                             raise <| RequestException RENoRole
-            return RequestContext(opts, userId, roleType)
+            return RequestContext(opts, userId, roleType, logger)
         }
 
-    member this.User = user
+    member this.User = currentUser
     member this.Context = ctx
     member this.GlobalArguments = globalArguments
 
@@ -145,8 +143,31 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
                 source <- oldSource
         }
 
+    member this.PretendRole (newRole : ResolvedEntityRef) (func : unit -> Task<'a>) : Task<'a> =
+        task {
+            let effectiveRole =
+                match roleType with
+                | RTRoot ->
+                    match ctx.Permissions.Find newRole with
+                    | Some (Ok role) -> RTRole { Role = Some role; CanRead = opts.CanRead }
+                    | Some (Error e) ->
+                        logger.LogError(e, "Role {} is broken", newRole)
+                        raise <| RequestException RENoRole
+                    | None ->
+                        raise <| RequestException RENoRole
+                | _ ->
+                    logger.LogError("Role pretending is only available for root users, not for {}", opts.UserName)
+                    raise <| RequestException RENoRole
+            let oldUser = currentUser
+            currentUser <- { currentUser with EffectiveType = effectiveRole }
+            try
+                return! func ()
+            finally
+                currentUser <- oldUser
+        }
+
     interface IRequestContext with
-        member this.User = user
+        member this.User = currentUser
         member this.Context = ctx
         member this.GlobalArguments = globalArguments
         member this.Source = source
@@ -154,3 +175,4 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
         member this.WriteEvent addDetails = this.WriteEvent addDetails
         member this.WriteEventSync addDetails = this.WriteEventSync addDetails
         member this.RunWithSource newSource func = this.RunWithSource newSource func
+        member this.PretendRole newRole func = this.PretendRole newRole func

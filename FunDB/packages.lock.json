@@ -77,8 +77,8 @@
       "Npgsql.EntityFrameworkCore.PostgreSQL": {
         "type": "Direct",
         "requested": "[5.0.*, )",
-        "resolved": "5.0.5",
-        "contentHash": "sxmLlqjeNgpMAHIyQj62fXtaP/jfJMUrHzXfrXsk1N9NvIbfqTbX/GMkscq/Cqi4JCH+zc1vxnS02KT0Zn5dFg==",
+        "resolved": "5.0.5.1",
+        "contentHash": "yTFRZ5jMOu+Ez94YJzYKlxnbSO7h0BDSCM38xVN8ynZrS01xfP4/g8o/+InOarCkT6stZPMPD910STIsXYNQ5w==",
         "dependencies": {
           "Microsoft.EntityFrameworkCore": "5.0.5",
           "Microsoft.EntityFrameworkCore.Abstractions": "5.0.5",
@@ -109,15 +109,15 @@
       "Z.EntityFramework.Plus.EFCore": {
         "type": "Direct",
         "requested": "[5.1.*, )",
-        "resolved": "5.1.30",
-        "contentHash": "F6LOkXdpZgavMVjTUiPjyoVGref296Qmpsvqg1gneUgxnFjyTFPxydsUoK3MkkUomgAoQRfto6EimnZ0C4yBFQ==",
+        "resolved": "5.1.35",
+        "contentHash": "O0RMCPXGHbcIZNoAgURYf226gKT4/GChA81906wX6wSNFlrgmvXKyCidlopHE+xuPEIqZ+PJ05s+O2qKFAw1mQ==",
         "dependencies": {
           "Microsoft.CSharp": "4.7.0",
           "Microsoft.EntityFrameworkCore.Relational": "[5.0.0, 6.0.0)",
           "System.Reflection.Emit": "4.7.0",
           "System.Reflection.TypeExtensions": "4.7.0",
-          "Z.EntityFramework.Extensions.EFCore": "[5.1.30]",
-          "Z.Expressions.Eval": "[4.0.38]"
+          "Z.EntityFramework.Extensions.EFCore": "[5.1.35]",
+          "Z.Expressions.Eval": "[4.0.42]"
         }
       },
       "FsLexYacc.Runtime": {
@@ -911,8 +911,8 @@
       },
       "Z.EntityFramework.Extensions.EFCore": {
         "type": "Transitive",
-        "resolved": "5.1.30",
-        "contentHash": "3vB9CkPb0Cxy/GGzm6IcR/xX3mi5gNtDWSYdq4L4A7zIMxWh03w7VteY0lQKY+VY0sENqSuzO9idgYB4cSb/Kw==",
+        "resolved": "5.1.35",
+        "contentHash": "+rRToEvigSqKsrdmodiAJMV2qobdoe4wcGgDyOp6yPSVOWNeGkpMnmBnZHdmEKAiD12OLHITdANEmIGguMh6hA==",
         "dependencies": {
           "Microsoft.CSharp": "4.7.0",
           "Microsoft.EntityFrameworkCore.Relational": "5.0.0",
@@ -924,8 +924,8 @@
       },
       "Z.Expressions.Eval": {
         "type": "Transitive",
-        "resolved": "4.0.38",
-        "contentHash": "pvmopTDMIQxx0ndXei5CGL2ZhSsxWQYcLDeHzNxNOD/JXlaN6v8RgNINDsnwxYExS3RS0GTob3QwNHmtF4fcnA==",
+        "resolved": "4.0.42",
+        "contentHash": "7eFfqB7QHUzxfVyjKn71p3w9qYMHqDZXtt4h7w7W7g4k2ngDtgMPHy1GigiF10oA5o1zcGahVI9kwp+Lzy4E1w==",
         "dependencies": {
           "Microsoft.CSharp": "4.5.0",
           "Microsoft.Extensions.Caching.Memory": "2.0.0",

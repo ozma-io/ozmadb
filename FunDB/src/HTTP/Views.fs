@@ -35,6 +35,7 @@ type UserViewRequest =
       Offset : int option
       Limit : int option
       Where : SourceChunkWhere option
+      PretendRole : ResolvedEntityRef option
     }
 
 type UserViewExplainRequest =
@@ -42,6 +43,7 @@ type UserViewExplainRequest =
       Offset : int option
       Limit : int option
       Where : SourceChunkWhere option
+      PretendRole : ResolvedEntityRef option
     }
 
 type AnonymousUserViewRequest =
@@ -53,6 +55,13 @@ type UserViewInfoRequest =
     }
 
 let viewsApi : HttpHandler =
+    let returnView (viewRef : UserViewSource) (api : IFunDBAPI) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) next ctx =
+        task {
+            match! api.UserViews.GetUserView viewRef rawArgs chunk flags with
+            | Ok res -> return! Successful.ok (json res) next ctx
+            | Error err -> return! uvError err next ctx
+        }
+
     let getSelectFromView (viewRef : UserViewSource) (api : IFunDBAPI) =
         queryArgs <| fun rawArgs next ctx ->
             task {
@@ -64,9 +73,7 @@ let viewsApi : HttpHandler =
                       Limit = intRequestArg "__limit" ctx
                       Where = None
                     } : SourceQueryChunk
-                match! api.UserViews.GetUserView viewRef rawArgs chunk flags with
-                | Ok res -> return! Successful.ok (json res) next ctx
-                | Error err -> return! uvError err next ctx
+                return! returnView viewRef api rawArgs chunk flags next ctx
             }
 
     let doPostSelectFromView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewRequest) (next : HttpFunc) (ctx : HttpContext) =
@@ -79,9 +86,9 @@ let viewsApi : HttpHandler =
                   Limit = req.Limit
                   Where = req.Where
                 } : SourceQueryChunk
-            match! api.UserViews.GetUserView viewRef req.Args chunk flags with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! uvError err next ctx
+            match req.PretendRole with
+            | None -> return! returnView viewRef api req.Args chunk flags next ctx
+            | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnView viewRef api req.Args chunk flags next ctx)
         }
 
     let postSelectFromView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
@@ -114,6 +121,13 @@ let viewsApi : HttpHandler =
         | None -> safeBindJson (doPostInfoView viewRef api)
         | Some req -> bindJsonToken req (doPostSelectFromView viewRef api)
 
+    let returnExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (chunk : SourceQueryChunk) (flags : UserViewFlags) next ctx =
+        task {
+            match! api.UserViews.GetUserViewExplain viewRef chunk flags with
+            | Ok res -> return! Successful.ok (json res) next ctx
+            | Error err -> return! uvError err next ctx
+        }
+
     let getExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) =
         task {
             let flags =
@@ -124,9 +138,7 @@ let viewsApi : HttpHandler =
                   Limit = intRequestArg "__limit" ctx
                   Where = None
                 } : SourceQueryChunk
-            match! api.UserViews.GetUserViewExplain viewRef chunk flags with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! uvError err next ctx
+            return! returnExplainView viewRef api chunk flags next ctx
         }
 
     let doPostExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewExplainRequest) (next : HttpFunc) (ctx : HttpContext) =
@@ -139,9 +151,9 @@ let viewsApi : HttpHandler =
                   Limit = req.Limit
                   Where = req.Where
                 } : SourceQueryChunk
-            match! api.UserViews.GetUserViewExplain viewRef chunk flags with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! uvError err next ctx
+            match req.PretendRole with
+            | None -> return! returnExplainView viewRef api chunk flags next ctx
+            | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnExplainView viewRef api chunk flags next ctx)
         }
 
     let postExplainView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =

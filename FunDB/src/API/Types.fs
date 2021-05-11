@@ -95,6 +95,7 @@ type RoleType =
 [<NoEquality; NoComparison>]
 type RequestUser =
     { Type : RoleType
+      EffectiveType : RoleType
       Name : UserName
       Language : string
     }
@@ -120,6 +121,7 @@ type IRequestContext =
     abstract member WriteEvent : (EventEntry -> unit) -> unit
     abstract member WriteEventSync : (EventEntry -> unit) -> unit
     abstract member RunWithSource : EventSource -> (unit -> Task<'a>) -> Task<'a>
+    abstract member PretendRole : ResolvedEntityRef -> (unit -> Task<'a>) -> Task<'a>
 
 type IAPIError =
     abstract member Message : string

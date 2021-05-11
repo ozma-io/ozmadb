@@ -425,6 +425,21 @@ type private TypeContext =
 
 type private TypeContextsMap = Map<FromFieldKey, TypeContext>
 
+type private TypeContexts =
+    { Map : TypeContextsMap
+      ExtraConditionals : bool
+    }
+
+let private emptyTypeContexts =
+    { Map = Map.empty
+      ExtraConditionals = false
+    }
+
+let private emptyCondTypeContexts =
+    { Map = Map.empty
+      ExtraConditionals = true
+    }
+
 let rec private foldCommonAncestor (layout : ILayoutBits) (baseRef : ResolvedEntityRef) (refA : ResolvedEntityRef) (entityA : IEntityBits) (refB : ResolvedEntityRef) (entityB : IEntityBits) : ResolvedEntityRef * IEntityBits =
     if Map.containsKey refB entityA.Children then
         (refA, entityA)
@@ -703,7 +718,13 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                   Type = ctx.Type
                 }
     
-    let notTypeContexts = Map.mapMaybe (fun name -> notTypeContext)
+    let notTypeContexts ctx =
+        if ctx.ExtraConditionals then
+            emptyTypeContexts
+        else
+            { Map = Map.mapMaybe (fun name -> notTypeContext) ctx.Map
+              ExtraConditionals = false
+            }
 
     let orTypeContext (ctxA : TypeContext) (ctxB : TypeContext) : TypeContext option =
         assert (ctxA.Type = ctxB.Type)
@@ -717,7 +738,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                   Type = ctxA.Type
                 }
 
-    let orTypeContexts = Map.intersectWithMaybe (fun name -> orTypeContext)
+    let orTypeContexts (ctxA : TypeContexts) (ctxB : TypeContexts) =
+        { Map = Map.intersectWithMaybe (fun name -> orTypeContext) ctxA.Map ctxB.Map
+          ExtraConditionals = ctxA.ExtraConditionals || ctxB.ExtraConditionals
+        }
 
     let andTypeContext (ctxA : TypeContext) (ctxB : TypeContext) : TypeContext =
         assert (ctxA.Type = ctxB.Type)
@@ -725,7 +749,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
           Type = ctxA.Type
         }
 
-    let andTypeContexts = Map.unionWith (fun name -> andTypeContext)
+    let andTypeContexts (ctxA : TypeContexts) (ctxB : TypeContexts) =
+        { Map = Map.unionWith (fun name -> andTypeContext) ctxA.Map ctxB.Map
+          ExtraConditionals = ctxA.ExtraConditionals || ctxB.ExtraConditionals
+        }
 
     let createFromMapping (fromEntityId : FromEntityId) (ref : ResolvedEntityRef) (pun : (EntityRef option) option) (allowHidden : bool) : FieldMapping =
         let entity =
@@ -1015,9 +1042,9 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             isLocal <- false
             res
 
-        let rec traverse outerTypeCtxs = function
-            | FEValue value -> (Map.empty, FEValue value)
-            | FERef r -> (Map.empty, FERef (resolveExprReference outerTypeCtxs r))
+        let rec traverse (outerTypeCtxs : TypeContexts) = function
+            | FEValue value -> (emptyCondTypeContexts, FEValue value)
+            | FERef r -> (emptyCondTypeContexts, FERef (resolveExprReference outerTypeCtxs.Map r))
             | FENot e ->
                 let (innerTypeCtxs, e) = traverse outerTypeCtxs e
                 (notTypeContexts innerTypeCtxs, FENot e)
@@ -1030,7 +1057,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 let (typeCtxsB, newB) = traverse outerTypeCtxs b
                 (orTypeContexts typeCtxsA typeCtxsB, FEOr (newA, newB))
             | FECase (es, els) ->
-                let mutable curTypeCtxs = Map.empty
+                let mutable curTypeCtxs = emptyTypeContexts
                 let applyOne (cond, e) =
                     let mergedTypeCtxs = andTypeContexts outerTypeCtxs curTypeCtxs
                     let (condTypeCtxs, newCond) = traverse mergedTypeCtxs cond
@@ -1043,86 +1070,94 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                     let (typeCtxs_, newE) = traverse mergedTypeCtxs e
                     newE
                 let newEls = Option.map applyElse els
-                (Map.empty, FECase (newEs, newEls))
+                (emptyCondTypeContexts, FECase (newEs, newEls))
             | FEInheritedFrom (f, nam) ->
-                let newF = resolveExprReference outerTypeCtxs f
-                let (inerTypeCtxs, newNam) = resolveSubEntity layout outerTypeCtxs SECInheritedFrom (resolveExprReference outerTypeCtxs f) nam
-                (inerTypeCtxs, FEInheritedFrom (newF, newNam))
+                let newF = resolveExprReference outerTypeCtxs.Map f
+                let (innerTypeCtxs, newNam) = resolveSubEntity layout outerTypeCtxs.Map SECInheritedFrom (resolveExprReference outerTypeCtxs.Map f) nam
+                let ctx =
+                    { Map = innerTypeCtxs
+                      ExtraConditionals = false
+                    }
+                (ctx, FEInheritedFrom (newF, newNam))
             | FEOfType (f, nam) ->
-                let newF = resolveExprReference outerTypeCtxs f
-                let (inerTypeCtxs, newNam) = resolveSubEntity layout outerTypeCtxs SECOfType (resolveExprReference outerTypeCtxs f) nam
-                (inerTypeCtxs, FEOfType (newF, newNam))
+                let newF = resolveExprReference outerTypeCtxs.Map f
+                let (innerTypeCtxs, newNam) = resolveSubEntity layout outerTypeCtxs.Map SECOfType (resolveExprReference outerTypeCtxs.Map f) nam
+                let ctx =
+                    { Map = innerTypeCtxs
+                      ExtraConditionals = false
+                    }
+                (ctx, FEOfType (newF, newNam))
             | FEDistinct (a, b) ->
                 let (typeCtxs_, newA) = traverse outerTypeCtxs a
                 let (typeCtxs_, newB) = traverse outerTypeCtxs b
-                (Map.empty, FEDistinct (newA, newB))
+                (emptyCondTypeContexts, FEDistinct (newA, newB))
             | FENotDistinct (a, b) ->
                 let (typeCtxs_, newA) = traverse outerTypeCtxs a
                 let (typeCtxs_, newB) = traverse outerTypeCtxs b
-                (Map.empty, FENotDistinct (newA, newB))
+                (emptyCondTypeContexts, FENotDistinct (newA, newB))
             | FEBinaryOp (a, op, b) ->
                 let (typeCtxs_, newA) = traverse outerTypeCtxs a
                 let (typeCtxs_, newB) = traverse outerTypeCtxs b
-                (Map.empty, FEBinaryOp (newA, op, newB))
+                (emptyCondTypeContexts, FEBinaryOp (newA, op, newB))
             | FESimilarTo (e, pat) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
                 let (typeCtxs_, newPat) = traverse outerTypeCtxs pat
-                (Map.empty, FESimilarTo (newE, newPat))
+                (emptyCondTypeContexts, FESimilarTo (newE, newPat))
             | FENotSimilarTo (e, pat) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
                 let (typeCtxs_, newPat) = traverse outerTypeCtxs pat
-                (Map.empty, FENotSimilarTo (newE, newPat))
+                (emptyCondTypeContexts, FENotSimilarTo (newE, newPat))
             | FEIn (e, vals) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
                 let newVals = Array.map (traverse outerTypeCtxs >> snd) vals
-                (Map.empty, FEIn (newE, newVals))
+                (emptyCondTypeContexts, FEIn (newE, newVals))
             | FENotIn (e, vals) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
                 let newVals = Array.map (traverse outerTypeCtxs >> snd) vals
-                (Map.empty, FENotIn (newE, newVals))
+                (emptyCondTypeContexts, FENotIn (newE, newVals))
             | FEInQuery (e, query) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
                 let newQuery = resolveQuery query
-                (Map.empty, FEInQuery (newE, newQuery))
+                (emptyCondTypeContexts, FEInQuery (newE, newQuery))
             | FENotInQuery (e, query) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
                 let newQuery = resolveQuery query
-                (Map.empty, FENotInQuery (newE, newQuery))
+                (emptyCondTypeContexts, FENotInQuery (newE, newQuery))
             | FEAny (e, op, arr) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
                 let (typeCtxs_, newArr) = traverse outerTypeCtxs arr
-                (Map.empty, FEAny (newE, op, newArr))
+                (emptyCondTypeContexts, FEAny (newE, op, newArr))
             | FEAll (e, op, arr) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
                 let (typeCtxs_, newArr) = traverse outerTypeCtxs arr
-                (Map.empty, FEAll (newE, op, newArr))
+                (emptyCondTypeContexts, FEAll (newE, op, newArr))
             | FECast (e, typ) ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
-                (Map.empty, FECast (newE, typ))
+                (emptyCondTypeContexts, FECast (newE, typ))
             | FEIsNull e ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
-                (Map.empty, FEIsNull newE)
+                (emptyCondTypeContexts, FEIsNull newE)
             | FEIsNotNull e ->
                 let (typeCtxs_, newE) = traverse outerTypeCtxs e
-                (Map.empty, FEIsNotNull newE)
+                (emptyCondTypeContexts, FEIsNotNull newE)
             | FEJsonArray vals ->
                 let newVals = Array.map (traverse outerTypeCtxs >> snd) vals
-                (Map.empty, FEJsonArray newVals)
+                (emptyCondTypeContexts, FEJsonArray newVals)
             | FEJsonObject obj ->
                 let newObj = Map.map (fun name -> traverse outerTypeCtxs >> snd) obj
-                (Map.empty, FEJsonObject newObj)
+                (emptyCondTypeContexts, FEJsonObject newObj)
             | FEFunc (name, args) ->
                 let newArgs = Array.map (traverse outerTypeCtxs >> snd) args
-                (Map.empty, FEFunc (name, newArgs))
+                (emptyCondTypeContexts, FEFunc (name, newArgs))
             | FEAggFunc (name, args) ->
                 hasAggregates <- true
                 let newArgs = mapAggExpr (traverse outerTypeCtxs >> snd) args
-                (Map.empty, FEAggFunc (name, newArgs))
+                (emptyCondTypeContexts, FEAggFunc (name, newArgs))
             | FESubquery query ->
                 let newQuery = resolveQuery query
-                (Map.empty, FESubquery newQuery)
+                (emptyCondTypeContexts, FESubquery newQuery)
 
-        let (_, ret) = traverse Map.empty expr
+        let (_, ret) = traverse emptyTypeContexts expr
         let info =
             { IsLocal = isLocal
               HasAggregates = hasAggregates
