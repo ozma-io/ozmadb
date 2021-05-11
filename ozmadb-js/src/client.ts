@@ -45,16 +45,25 @@ interface IAnonymousUserViewRequest {
 
 interface IUserViewEntriesRequest extends IQueryChunk {
   args?: Record<ArgumentName, any>;
+  pretendRole?: IEntityRef;
 }
 
 interface IAnonymousUserViewEntriesRequest extends IUserViewEntriesRequest, IAnonymousUserViewRequest { }
 
-interface IUserViewExplainRequest extends IQueryChunk { }
+interface IUserViewExplainRequest extends IQueryChunk {
+  pretendRole?: IEntityRef;
+}
 
 interface IAnonymousUserViewExplainRequest extends IUserViewExplainRequest, IAnonymousUserViewRequest { }
 
 interface IDomainsRequest extends IQueryChunk {
   rowId?: number;
+  pretendRole?: IEntityRef;
+}
+
+export interface IUserViewOpts {
+  chunk?: IQueryChunk;
+  pretendRole?: IEntityRef;
 }
 
 export default class FunDBAPI {
@@ -118,19 +127,21 @@ export default class FunDBAPI {
     return this.fetchJsonApi(`views/${path}/explain`, token, "POST", body) as Promise<IViewExplainResult>;
   };
 
-  getAnonymousUserView = async (token: string | null, query: string, args?: Record<string, unknown>, chunk?: IQueryChunk): Promise<IViewExprResult> => {
+  getAnonymousUserView = async (token: string | null, query: string, args?: Record<string, unknown>, opts?: IUserViewOpts): Promise<IViewExprResult> => {
     const req: IAnonymousUserViewEntriesRequest = {
         query,
         args,
-        ...chunk,
+        ...opts?.chunk,
+        pretendRole: opts?.pretendRole,
     };
     return this.getUserView("anonymous", token, req);
   };
 
-  getNamedUserView = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, chunk?: IQueryChunk): Promise<IViewExprResult> => {
+  getNamedUserView = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, opts?: IUserViewOpts): Promise<IViewExprResult> => {
     const req: IUserViewEntriesRequest = {
         args,
-        ...chunk,
+        ...opts?.chunk,
+        pretendRole: opts?.pretendRole,
     };
     return this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, req);
   };
@@ -139,17 +150,19 @@ export default class FunDBAPI {
     return this.getUserViewInfo(`by_name/${ref.schema}/${ref.name}`, token, {});
   };
 
-  getAnonymousUserViewExplain = async (token: string | null, query: string, chunk?: IQueryChunk): Promise<IViewExplainResult> => {
+  getAnonymousUserViewExplain = async (token: string | null, query: string, opts?: IUserViewOpts): Promise<IViewExplainResult> => {
     const req: IAnonymousUserViewExplainRequest = {
       query,
-      ...chunk,
+      ...opts?.chunk,
+      pretendRole: opts?.pretendRole,
     };
     return this.getUserViewExplain("anonymous", token, req);
   };
 
-  getNamedUserViewExplain = async (token: string | null, ref: IUserViewRef, chunk?: IQueryChunk): Promise<IViewExplainResult> => {
+  getNamedUserViewExplain = async (token: string | null, ref: IUserViewRef, opts?: IUserViewOpts): Promise<IViewExplainResult> => {
     const req: IUserViewExplainRequest = {
-      ...chunk,
+      ...opts?.chunk,
+      pretendRole: opts?.pretendRole,
     };
     return this.getUserViewExplain(`by_name/${ref.schema}/${ref.name}`, token, req);
   };
@@ -166,10 +179,11 @@ export default class FunDBAPI {
     return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args ?? {}) as Promise<IActionResult>;
   };
 
-  getDomainValues = async (token: string | null, ref: IFieldRef, rowId?: number, chunk?: IQueryChunk): Promise<IDomainValuesResult> => {
+  getDomainValues = async (token: string | null, ref: IFieldRef, rowId?: number, opts?: IUserViewOpts): Promise<IDomainValuesResult> => {
     const req: IDomainsRequest = {
       rowId,
-        ...chunk,
+      ...opts?.chunk,
+      pretendRole: opts?.pretendRole,
     };
     return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}`, token, "POST", req) as Promise<IDomainValuesResult>;
   };
