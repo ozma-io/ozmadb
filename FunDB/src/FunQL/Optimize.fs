@@ -35,8 +35,8 @@ type ResolvedOptimizedFieldExpr = OptimizedFieldExpr<EntityRef, LinkedBoundField
 let orFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f>) : OptimizedFieldExpr<'e, 'f> =
     match (a, b) with
     | (OFEOr ors1, OFEOr ors2) -> OFEOr (Map.union ors1 ors2)
-    | (OFEOr ors, OFETrue)
-    | (OFETrue, OFEOr ors) -> OFETrue
+    | (expr, OFETrue)
+    | (OFETrue, expr) -> OFETrue
     | (expr, OFEFalse)
     | (OFEFalse, expr) -> expr
     | (OFEOr ors, expr)
@@ -54,8 +54,8 @@ let andFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f
     | (OFEAnd ands1, OFEAnd ands2) -> OFEAnd (Map.union ands1 ands2)
     | (expr, OFETrue)
     | (OFETrue, expr) -> expr
-    | (OFEAnd ands, OFEFalse)
-    | (OFEFalse, OFEAnd ands) -> OFEFalse
+    | (expr, OFEFalse)
+    | (OFEFalse, expr) -> OFEFalse
     | (OFEAnd ands, expr)
     | (expr, OFEAnd ands) -> OFEAnd (Map.add (expr.ToString()) expr ands)
     | (expr1, expr2) ->
