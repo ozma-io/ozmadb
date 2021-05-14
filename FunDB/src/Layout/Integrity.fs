@@ -446,8 +446,13 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
         }
 
     and useNewInSingleSelectExpr (query : SQL.SingleSelectExpr) : SQL.SingleSelectExpr =
-        let (extraWhere, from) = Option.map useNewInFromExpr query.From |> Option.defaultValue (None, None)
-        let currWhere = Option.map useNewInValueExpr query.Where
+        let from = Option.get query.From
+        let info = query.Extra :?> SelectFromInfo
+        let (extraWhere, maybeName, from) = useNewInFromExpr from
+        let droppedName = Option.get maybeName
+        let currWhere = Option.map useNewInValueExpr info.WhereWithoutSubentities
+        let entitiesMap = Map.remove droppedName info.Entities
+        let currWhere = addEntityChecks entitiesMap currWhere
         { Columns = Array.map useNewInSelectedColumn query.Columns
           From = from
           Where = Option.unionWith (curry SQL.VEAnd) currWhere extraWhere
@@ -483,22 +488,23 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
         SQL.mapValueExpr mapper
 
     // ValueExpr returned is a piece that goes into WHERE clause.
-    and useNewInFromExpr : SQL.FromExpr -> (SQL.ValueExpr option * SQL.FromExpr option) = function
+    and useNewInFromExpr : SQL.FromExpr -> (SQL.ValueExpr option * SQL.TableName option * SQL.FromExpr option) = function
         | SQL.FTable (extra, pun, entity) as from ->
             let ann = extra :?> RealEntityAnnotation
             if not ann.FromPath && ann.RealEntity = constrEntityRef then
-                (None, None)
+                (None, pun |> Option.map (fun x -> x.Name), None)
             else
-                (None, Some from)
+                (None, None, Some from)
         | SQL.FJoin join as expr ->
-            let (valExprA, ma) = useNewInFromExpr join.A
-            let (valExprB, mb) = useNewInFromExpr join.B
+            let (valExprA, nameA, ma) = useNewInFromExpr join.A
+            let (valExprB, nameB, mb) = useNewInFromExpr join.B
+            let name = Option.unionUnique nameA nameB
             let valExpr = Option.unionWith (curry SQL.VEAnd) valExprA valExprB
             match (ma, mb) with
             | (None, None) -> failwithf "Impossible JOIN of two constrained entities: %O" expr
             | (Some other, None)
             | (None, Some other) ->
-                (Some <| useNewInValueExpr join.Condition, Some other)
+                (Some <| useNewInValueExpr join.Condition, name, Some other)
             | (Some a, Some b) ->
                 let ret =
                     SQL.FJoin
@@ -507,15 +513,8 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
                           B = b
                           Condition = useNewInValueExpr join.Condition
                         }
-                (valExpr, Some ret)
-        | SQL.FSubExpr (alias, q) as subexpr ->
-            match q.Extra with
-            | :? RealEntityAnnotation as ann ->
-                if ann.RealEntity = constrEntityRef then
-                    (None, None)
-                else
-                    (None, Some subexpr)
-            | _ -> failwith "Unexpected subexpression"
+                (valExpr, name, Some ret)
+        | SQL.FSubExpr (alias, q) -> failwith "Unexpected subexpression"
 
     member this.UseNewInSelectExpr expr = useNewInSelectExpr expr
 

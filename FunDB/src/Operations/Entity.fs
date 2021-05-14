@@ -51,6 +51,8 @@ let private runIntQuery (connection : QueryConnection) globalArgs query placehol
     task {
         match! runQuery connection.ExecuteValueQuery globalArgs query placeholders cancellationToken with
         | SQL.VInt i -> return i
+        // FIXME FIXME: should use int64 everywhere instead!
+        | SQL.VBigInt i -> return (int i)
         | ret -> return failwithf "Non-integer result: %O" ret
     }
 
