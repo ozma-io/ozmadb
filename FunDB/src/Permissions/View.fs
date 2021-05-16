@@ -119,10 +119,19 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
                     match accessEntity with
                     | None -> (from, where, joins)
                     | Some restr ->
-                        let (renamesMap, addedJoins, joins) = augmentJoinPaths joins restr.Joins
+                        // Rename old table reference in restriction joins and expression.
+                        let oldTableName = renameResolvedEntityRef entityInfo.Ref
+                        let renameJoinKey (key : JoinKey) =
+                            if key.Table = oldTableName then
+                                { key with Table = tableName }
+                            else
+                                key
+                        let restrJoinsMap = Map.mapKeys renameJoinKey restr.Joins.Map
+                        let (renamesMap, addedJoins, joins) = augmentJoinPaths joins { restr.Joins with Map = restrJoinsMap }
                         let (entitiesMap, from) = buildJoins layout info.Entities from addedJoins
-                        let renamesMap = Map.add (compileRenamedResolvedEntityRef entityInfo.Ref).Name tableName renamesMap
-                        let check = renameValueExprTables renamesMap restr.Where
+                        let renamesMap = Map.add oldTableName tableName renamesMap
+                        let check = renameAllValueExprTables renamesMap restr.Where
+
                         let newWhere =
                             match where with
                             | None -> check

@@ -177,12 +177,12 @@ and JoinPathsMap = Map<JoinKey, JoinPath>
 type JoinPathsSeq = (JoinKey * SQL.TableName) seq
 
 type JoinPaths =
-    { LastJoinId : int
+    { NextJoinId : int
       Map : JoinPathsMap
     }
 
 let emptyJoinPaths =
-    { LastJoinId = 0
+    { NextJoinId = 0
       Map = Map.empty
     }
 
@@ -532,11 +532,17 @@ type RenamesMap = Map<SQL.TableName, SQL.TableName>
 // Returned join paths sequence are only those paths that need to be added to an existing FROM expression
 // with `oldPaths` added.
 let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : RenamesMap * JoinPathsSeq * JoinPaths =
-    let mutable lastId = oldPaths.LastJoinId
+    let mutable lastId = oldPaths.NextJoinId
     let mutable addedPaths = []
     let mutable renamesMap = Map.empty
 
-    let rec renameNewPath (oldMap : JoinPathsMap) (joinKey : JoinKey) (path : JoinPath) =
+    let rec renameNewPath (newKeyName : SQL.TableName option) (oldMap : JoinPathsMap) (joinKey : JoinKey) (path : JoinPath) =
+        // In nested join maps, join key table is always the same and is equal to table name of the previous level join.
+        // We need to rename it to the new name.
+        let joinKey =
+            match newKeyName with
+            | None -> joinKey
+            | Some name -> { joinKey with Table = name }
         let (oldNested, newName) =
             match Map.tryFind joinKey oldMap with
             | Some existing -> (existing.Nested, existing.Name)
@@ -546,27 +552,32 @@ let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : RenamesMap 
                 addedPaths <- (joinKey, newName) :: addedPaths
                 (Map.empty, newName)
         renamesMap <- Map.add path.Name newName renamesMap
-        let nestedMap = renameNewPaths oldNested path.Nested
+        let nestedMap = renameNewPaths (Some newName) oldNested path.Nested
         { Name = newName
           Nested = nestedMap
         }
-    and renameNewPaths (oldMap : JoinPathsMap) (newMap : JoinPathsMap) = Map.map (renameNewPath oldMap) newMap
+    and renameNewPaths (newKeyName : SQL.TableName option) (oldMap : JoinPathsMap) (newMap : JoinPathsMap) = Map.map (renameNewPath newKeyName oldMap) newMap
 
-    let renamedNewPaths = renameNewPaths oldPaths.Map newPaths.Map
+    let renamedNewPaths = renameNewPaths None oldPaths.Map newPaths.Map
     let ret =
         { Map = Map.union oldPaths.Map renamedNewPaths
-          LastJoinId = lastId
+          NextJoinId = lastId
         }
-    (renamesMap, List.toSeq addedPaths, ret)
 
-let renameValueExprTables (renamesMap : RenamesMap) : SQL.ValueExpr -> SQL.ValueExpr =
+    (renamesMap, Seq.rev (List.toSeq addedPaths), ret)
+
+let private genericRenameValueExprTables (failOnNoFind : bool) (renamesMap : RenamesMap) : SQL.ValueExpr -> SQL.ValueExpr =
     let mapColumn : SQL.ColumnRef -> SQL.ColumnRef = function
-        | { Table = Some { Schema = None; Name = tableName }; Name = colName } ->
+        | { Table = Some { Schema = None; Name = tableName }; Name = colName } as ref ->
             match Map.tryFind tableName renamesMap with
-            | None -> failwithf "Unknown table name during rename: %O" tableName
+            | None when failOnNoFind -> failwithf "Unknown table name during rename: %O" tableName
+            | None -> ref
             | Some newName -> { Table = Some { Schema = None; Name = newName }; Name = colName }
         | ref -> failwithf "Unexpected column ref during rename: %O" ref
     SQL.mapValueExpr { SQL.idValueExprMapper with ColumnReference = mapColumn }
+
+let renameAllValueExprTables = genericRenameValueExprTables true
+let renameValueExprTables = genericRenameValueExprTables false
 
 let addEntityChecks (entitiesMap : FromEntitiesMap) (where : SQL.ValueExpr option) : SQL.ValueExpr option =
     let addWhere where check =
@@ -741,12 +752,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         lastGlobalDomainId <- lastGlobalDomainId + 1
         id
 
-    let mutable lastJoinId = 0
-    let newJoinId () =
-        let id = lastJoinId
-        lastJoinId <- lastJoinId + 1
-        compileJoinId id
-
     let mutable lastTempFieldId = 0
     let newTempFieldName () =
         let id = lastTempFieldId
@@ -854,33 +859,33 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
 
             let newFieldRef = { Entity = newEntityRef; Name = fieldName }
-            let (newPath, lastJoinId, res) =
+            let (newPath, nextJoinId, res) =
                 match Map.tryFind pathKey paths.Map with
                 | None ->
-                    let newRealName = newJoinId ()
+                    let newRealName = compileJoinId paths.NextJoinId
                     let newTableRef = { Schema = None; Name = newRealName } : SQL.TableRef
                     let bogusPaths =
                         { Map = Map.empty
-                          LastJoinId = paths.LastJoinId
+                          NextJoinId = paths.NextJoinId + 1
                         }
                     let (nestedPaths, res) = compilePath emptyExprCompilationFlags ctx extra bogusPaths (Some newTableRef) newFieldRef None refs
                     let path =
                         { Name = newRealName
                           Nested = nestedPaths.Map
                         }
-                    (path, nestedPaths.LastJoinId, res)
+                    (path, nestedPaths.NextJoinId, res)
                 | Some path ->
                     let newTableRef = { Schema = None; Name = path.Name } : SQL.TableRef
                     let bogusPaths =
                         { Map = path.Nested
-                          LastJoinId = paths.LastJoinId
+                          NextJoinId = paths.NextJoinId
                         }
                     let (nestedPaths, res) = compilePath emptyExprCompilationFlags ctx extra bogusPaths (Some newTableRef) newFieldRef None refs
                     let newPath = { path with Nested = nestedPaths.Map }
-                    (newPath, nestedPaths.LastJoinId, res)
+                    (newPath, nestedPaths.NextJoinId, res)
             let newPaths =
                 { Map = Map.add pathKey newPath paths.Map
-                  LastJoinId = lastJoinId
+                  NextJoinId = nextJoinId
                 }
             (newPaths, res)
     

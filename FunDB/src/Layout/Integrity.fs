@@ -423,7 +423,7 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
 
 // Replaces entity references with `new` in simple cases.
 type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
-    let compiledConstrTableRef = compileRenamedResolvedEntityRef constrEntityRef
+    let compiledConstrTableName = renameResolvedEntityRef constrEntityRef
 
     let rec useNewInSelectTreeExpr : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
         | SQL.SSelect query -> SQL.SSelect <| useNewInSingleSelectExpr query
@@ -472,20 +472,8 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
         | SQL.SCExpr (name, expr) -> SQL.SCExpr (name, useNewInValueExpr expr)
 
     and useNewInValueExpr =
-        let mapColumnReference (columnRef : SQL.ColumnRef) =
-            match columnRef.Table with
-            | Some tref when tref = compiledConstrTableRef ->
-                // We guarantee that NEW and OLD are unused, because all entities are renamed to `schema__name` form and there should be no aliases in
-                // this expression.
-                { columnRef with Table = Some sqlNewRow }
-            | _ -> columnRef
-
-        let mapper =
-            { SQL.idValueExprMapper with
-                  ColumnReference = mapColumnReference
-                  Query = fun _ -> failwith "Unexpected query expression in constraint"
-            }
-        SQL.mapValueExpr mapper
+        let renamesMap = Map.singleton compiledConstrTableName sqlNewName
+        renameValueExprTables renamesMap
 
     // ValueExpr returned is a piece that goes into WHERE clause.
     and useNewInFromExpr : SQL.FromExpr -> (SQL.ValueExpr option * SQL.TableName option * SQL.FromExpr option) = function
