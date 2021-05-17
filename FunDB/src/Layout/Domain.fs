@@ -233,7 +233,7 @@ type private DomainsBuilder (layout : Layout) =
             |> Seq.filter (fun constr -> isFieldUsed fieldRef constr.UsedSchemas)
             |> Seq.partition (fun constr -> hasLocalDependencies fieldRef constr.UsedSchemas)
 
-        let mergeChecks (usedSchemas1, check1) (usedSchemas2, check2) = (mergeUsedSchemas usedSchemas1 usedSchemas2, FEAnd (check1, check2))
+        let mergeChecks (usedSchemas1 : UsedSchemas, check1 : ResolvedFieldExpr) (usedSchemas2 : UsedSchemas, check2 : ResolvedFieldExpr) = (mergeUsedSchemas usedSchemas1 usedSchemas2, FEAnd (check1, check2))
         let buildCheck (checks : ResolvedCheckConstraint seq) : UsedSchemas * ResolvedFieldExpr =
             checks |> Seq.map (fun constr -> (constr.UsedSchemas, renameDomainCheck refEntityRef fieldRef.Name constr.Expression)) |> Seq.fold1 mergeChecks
 
