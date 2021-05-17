@@ -165,16 +165,22 @@ type FromEntitiesMap = Map<SQL.TableName, FromEntityInfo>
 type JoinKey =
     { Table : SQL.TableName
       Column : SQL.ColumnName
-      ToEntity : ResolvedEntityRef // Real entity
+      ToRootEntity : ResolvedEntityRef
     }
 
 type JoinPath =
-    { Name : SQL.TableName
+    { RealEntity : ResolvedEntityRef // Real entity, may differ from `ToRootEntity`.
+      Name : SQL.TableName
+    }
+
+type JoinTree =
+    { Path : JoinPath
       Nested : JoinPathsMap
     }
-and JoinPathsMap = Map<JoinKey, JoinPath>
 
-type JoinPathsSeq = (JoinKey * SQL.TableName) seq
+and JoinPathsMap = Map<JoinKey, JoinTree>
+
+type JoinPathsSeq = (JoinKey * JoinPath) seq
 
 type JoinPaths =
     { NextJoinId : int
@@ -493,17 +499,17 @@ let private infoFromSignature (domains : TempDomains) (signature : SelectSignatu
       Domains = domains
     }
 
-let joinPath (layout : Layout) (from : SQL.FromExpr) (joinKey : JoinKey) (name : SQL.TableName) : SQL.FromExpr =
+let joinPath (layout : Layout) (from : SQL.FromExpr) (joinKey : JoinKey) (join : JoinPath) : SQL.FromExpr =
     let tableRef = { Schema = None; Name = joinKey.Table } : SQL.TableRef
-    let toTableRef = { Schema = None; Name = name } : SQL.TableRef
-    let entity = layout.FindEntity joinKey.ToEntity |> Option.get
+    let toTableRef = { Schema = None; Name = join.Name } : SQL.TableRef
+    let entity = layout.FindEntity joinKey.ToRootEntity |> Option.get
 
     let fromColumn = SQL.VEColumn { Table = Some tableRef; Name = joinKey.Column }
     let toColumn = SQL.VEColumn { Table = Some toTableRef; Name = sqlFunId }
     let joinExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
-    let alias = { Name = name; Columns = None } : SQL.TableAlias
+    let alias = { Name = join.Name; Columns = None } : SQL.TableAlias
     let ann =
-        { RealEntity = joinKey.ToEntity
+        { RealEntity = join.RealEntity
           FromPath = true
         } : RealEntityAnnotation
     let subquery = SQL.FTable (ann, Some alias, compileResolvedEntityRef entity.Root)
@@ -512,18 +518,18 @@ let joinPath (layout : Layout) (from : SQL.FromExpr) (joinKey : JoinKey) (name :
 let rec joinsToSeq (paths : JoinPathsMap) : JoinPathsSeq =
     paths |> Map.toSeq |> Seq.collect joinToSeq
 
-and private joinToSeq (joinKey : JoinKey, path : JoinPath) : (JoinKey * SQL.TableName) seq =
-    let me = Seq.singleton (joinKey, path.Name)
-    Seq.append me (joinsToSeq path.Nested)
+and private joinToSeq (joinKey : JoinKey, tree : JoinTree) : (JoinKey * JoinPath) seq =
+    let me = Seq.singleton (joinKey, tree.Path)
+    Seq.append me (joinsToSeq tree.Nested)
 
 let buildJoins (layout : Layout) (initialEntitiesMap : FromEntitiesMap) (initialFrom : SQL.FromExpr) (paths : JoinPathsSeq) : FromEntitiesMap * SQL.FromExpr =
-    let foldOne (entitiesMap, from) (joinKey : JoinKey, name : SQL.TableName) =
-        let from = joinPath layout from joinKey name
+    let foldOne (entitiesMap, from) (joinKey : JoinKey, join : JoinPath) =
+        let from = joinPath layout from joinKey join
         let entity =
-            { Ref = joinKey.ToEntity
+            { Ref = join.RealEntity
               Check = None
             }
-        let entitiesMap = Map.add name entity entitiesMap
+        let entitiesMap = Map.add join.Name entity entitiesMap
         (entitiesMap, from)
     Seq.fold foldOne (initialEntitiesMap, initialFrom) paths
 
@@ -536,24 +542,27 @@ let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : RenamesMap 
     let mutable addedPaths = []
     let mutable renamesMap = Map.empty
 
-    let rec renameNewPath (newKeyName : SQL.TableName option) (oldMap : JoinPathsMap) (joinKey : JoinKey) (path : JoinPath) =
+    let rec renameNewPath (newKeyName : SQL.TableName option) (oldMap : JoinPathsMap) (joinKey : JoinKey) (tree : JoinTree) =
         // In nested join maps, join key table is always the same and is equal to table name of the previous level join.
         // We need to rename it to the new name.
         let joinKey =
             match newKeyName with
             | None -> joinKey
             | Some name -> { joinKey with Table = name }
-        let (oldNested, newName) =
+        let (oldNested, newPath) =
             match Map.tryFind joinKey oldMap with
-            | Some existing -> (existing.Nested, existing.Name)
+            | Some existing -> (existing.Nested, existing.Path)
             | None ->
-                let newName = compileJoinId lastId
+                let newPath =
+                    { Name = compileJoinId lastId
+                      RealEntity = tree.Path.RealEntity
+                    }
                 lastId <- lastId + 1
-                addedPaths <- (joinKey, newName) :: addedPaths
-                (Map.empty, newName)
-        renamesMap <- Map.add path.Name newName renamesMap
-        let nestedMap = renameNewPaths (Some newName) oldNested path.Nested
-        { Name = newName
+                addedPaths <- (joinKey, newPath) :: addedPaths
+                (Map.empty, newPath)
+        renamesMap <- Map.add tree.Path.Name newPath.Name renamesMap
+        let nestedMap = renameNewPaths (Some newPath.Name) oldNested tree.Nested
+        { Path = newPath
           Nested = nestedMap
         }
     and renameNewPaths (newKeyName : SQL.TableName option) (oldMap : JoinPathsMap) (newMap : JoinPathsMap) = Map.map (renameNewPath newKeyName oldMap) newMap
@@ -855,7 +864,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let pathKey =
                 { Table = (Option.get tableRef).Name
                   Column = column
-                  ToEntity = newEntity.Root
+                  ToRootEntity = newEntity.Root
                 }
 
             let newFieldRef = { Entity = newEntityRef; Name = fieldName }
@@ -871,18 +880,22 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     let (nestedPaths, res) = compilePath emptyExprCompilationFlags ctx extra bogusPaths (Some newTableRef) newFieldRef None refs
                     let path =
                         { Name = newRealName
+                          RealEntity = newEntityRef
+                        }
+                    let tree =
+                        { Path = path
                           Nested = nestedPaths.Map
                         }
-                    (path, nestedPaths.NextJoinId, res)
-                | Some path ->
-                    let newTableRef = { Schema = None; Name = path.Name } : SQL.TableRef
+                    (tree, nestedPaths.NextJoinId, res)
+                | Some tree ->
+                    let newTableRef = { Schema = None; Name = tree.Path.Name } : SQL.TableRef
                     let bogusPaths =
-                        { Map = path.Nested
+                        { Map = tree.Nested
                           NextJoinId = paths.NextJoinId
                         }
                     let (nestedPaths, res) = compilePath emptyExprCompilationFlags ctx extra bogusPaths (Some newTableRef) newFieldRef None refs
-                    let newPath = { path with Nested = nestedPaths.Map }
-                    (newPath, nestedPaths.NextJoinId, res)
+                    let newTree = { tree with Nested = nestedPaths.Map }
+                    (newTree, nestedPaths.NextJoinId, res)
             let newPaths =
                 { Map = Map.add pathKey newPath paths.Map
                   NextJoinId = nextJoinId

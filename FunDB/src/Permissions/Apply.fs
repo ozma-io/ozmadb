@@ -12,6 +12,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 let private renameRestriction (entityRef : EntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
     mapOptimizedFieldExpr (replaceEntityRefInExpr (Some entityRef)) restr
 
+// Filter entities, allowing only those that satisfy access conditions, taking into account parent and children permissions.
 let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedOptimizedFieldExpr) (layout : Layout) (allowedEntity : FlatAllowedEntity) (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr =
     let relaxedRef = relaxEntityRef entityRef
     // We add restrictions from all parents, including the entity itself.

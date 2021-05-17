@@ -46,6 +46,7 @@ let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (ent : AllowedE
     { Children = Map.singleton entityRef derived
       Fields = fields
     }
+
 let private mergeField (a : AllowedField) (b : AllowedField) : AllowedField =
     { Change = a.Change || b.Change
       Select = orFieldExpr a.Select b.Select

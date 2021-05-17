@@ -20,10 +20,15 @@ type private FieldAccess = CompiledRestriction option
 type private EntityAccess = Map<FunQL.EntityName, FieldAccess>
 type private SchemaAccess = Map<FunQL.SchemaName, EntityAccess>
 
-type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArguments : QueryArguments) =
-    let mutable arguments = initialArguments
+type private FieldTempAccess = Map<FunQL.ResolvedEntityRef, ResolvedOptimizedFieldExpr>
 
-    let filterUsedFields (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) (usedFields : FunQL.UsedFields) : FieldAccess =
+type private EntityTempAccess = Map<FunQL.EntityName, ResolvedOptimizedFieldExpr>
+type private SchemaTempAccess = Map<FunQL.SchemaName, EntityTempAccess>
+
+type private AccessAggregator (layout : Layout, role : ResolvedRole) =
+    let mutable fieldAccesses = Map.empty : FieldTempAccess
+
+    let filterUsedFields (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) (usedFields : FunQL.UsedFields) : ResolvedOptimizedFieldExpr =
         let flattened =
             match Map.tryFind entity.Root role.Flattened with
             | Some f -> f
@@ -31,6 +36,7 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
         let accessor (derived : FlatAllowedDerivedEntity) = derived.Select
         let selectRestr = applyRestrictionExpression accessor layout flattened ref
 
+        let fieldsRestriction = Map.tryFind entity.Root fieldAccesses |> Option.defaultValue OFETrue
         let addRestriction restriction name =
             if name = FunQL.funId || name = FunQL.funSubEntity then
                 restriction
@@ -40,17 +46,15 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
                 match Map.tryFind ({ Entity = parentEntity; Name = name } : FunQL.ResolvedFieldRef) flattened.Fields with
                 | Some r -> andFieldExpr restriction r.Select
                 | _ -> raisef PermissionsViewException "Access denied to select field %O" name
-        let fieldsRestriction = usedFields |> Set.toSeq |> Seq.fold addRestriction selectRestr
+        let fieldsRestriction = usedFields |> Set.toSeq |> Seq.fold addRestriction fieldsRestriction
 
         match fieldsRestriction with
         | OFEFalse -> raisef PermissionsViewException "Access denied to select"
-        | OFETrue -> None
         | _ ->
-            let (newArguments, restriction) = compileRestriction layout ref arguments fieldsRestriction
-            arguments <- newArguments
-            Some restriction
+            fieldAccesses <- Map.add entity.Root fieldsRestriction fieldAccesses
+            selectRestr
 
-    let filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =
+    let filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedEntities : FunQL.UsedEntities) : EntityTempAccess =
         let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
             let entity = Map.find name schema.Entities
             let ref = { Schema = schemaName; Name = name } : FunQL.ResolvedEntityRef
@@ -61,7 +65,7 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
 
         Map.map mapEntity usedEntities
 
-    let filterUsedSchemas (layout : Layout) (usedSchemas : FunQL.UsedSchemas) : SchemaAccess =
+    let filterUsedSchemas (usedSchemas : FunQL.UsedSchemas) : SchemaTempAccess =
         let mapSchema (name : FunQL.SchemaName) (usedEntities : FunQL.UsedEntities) =
             let schema = Map.find name layout.Schemas
             try
@@ -70,9 +74,47 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, initialArgume
             | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied for schema %O: %s" name e.Message
 
         Map.map mapSchema usedSchemas
+    
+    member this.FieldAccesses = fieldAccesses
+    member this.FilterUsedSchemas usedSchemas = filterUsedSchemas usedSchemas
 
+type private AccessCompiler (layout : Layout, fieldAccesses : FieldTempAccess, initialArguments : QueryArguments) =
+    let mutable arguments = initialArguments
+
+    let compileRestriction (entity : ResolvedEntity) (ref : FunQL.ResolvedEntityRef) (restr : ResolvedOptimizedFieldExpr) : FieldAccess =
+        let fieldAccess = Map.find entity.Root fieldAccesses
+        match andFieldExpr restr fieldAccess with
+        | OFETrue -> None
+        | finalRestr ->
+            let (newArguments, restriction) = compileRestriction layout ref arguments finalRestr
+            arguments <- newArguments
+            Some restriction
+
+    let compileEntityAccess (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (entityAccess : EntityTempAccess) : EntityAccess =
+        let mapEntity (name : FunQL.EntityName) (restr : ResolvedOptimizedFieldExpr) =
+            let entity = Map.find name schema.Entities
+            let ref = { Schema = schemaName; Name = name } : FunQL.ResolvedEntityRef
+            compileRestriction entity ref restr
+
+        Map.map mapEntity entityAccess
+
+    let compileSchemaAccess (schemaAccess : SchemaTempAccess) : SchemaAccess =
+        let mapSchema (name : FunQL.SchemaName) (entityAccess : EntityTempAccess) =
+            let schema = Map.find name layout.Schemas
+            compileEntityAccess name schema entityAccess
+
+        Map.map mapSchema schemaAccess
+    
     member this.Arguments = arguments
-    member this.FilterUsedSchemas = filterUsedSchemas
+    member this.CompileSchemaAccess schemaAccess = compileSchemaAccess schemaAccess
+
+let private compileRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (arguments : QueryArguments) : QueryArguments * SchemaAccess =
+    let accessAgg = AccessAggregator (layout, role)
+    let halfAccess = accessAgg.FilterUsedSchemas usedSchemas
+
+    let accessCompiler = AccessCompiler (layout, accessAgg.FieldAccesses, arguments)
+    let access = accessCompiler.CompileSchemaAccess halfAccess
+    (accessCompiler.Arguments, access)
 
 type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
     let rec applyToSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
@@ -114,6 +156,7 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
                 let fromVal = Option.get from
 
                 let restrictOne (from, where, joins) (tableName : TableName, entityInfo : FromEntityInfo) =
+                    eprintfn "Trying to find access entity %O" entityInfo.Ref
                     let accessSchema = Map.find entityInfo.Ref.Schema access
                     let accessEntity = Map.find entityInfo.Ref.Name accessSchema
                     match accessEntity with
@@ -180,27 +223,27 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
     member this.ApplyToValueExpr = applyToValueExpr
 
 let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (query : Query<SelectExpr>) : Query<SelectExpr> =
-    let accessCompiler = AccessCompiler (layout, role, query.Arguments)
-    let access = accessCompiler.FilterUsedSchemas layout usedSchemas
+    let (arguments, access) = compileRoleViewExpr layout role usedSchemas query.Arguments
     let applier = PermissionsApplier (layout, access)
     let expression = applier.ApplyToSelectExpr query.Expression
     { Expression = expression
-      Arguments = accessCompiler.Arguments
+      Arguments = arguments
     }
 
 let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (expr : CompiledViewExpr) : unit =
-    let accessCompiler = AccessCompiler (layout, role, expr.Query.Arguments)
-    let access = accessCompiler.FilterUsedSchemas layout usedSchemas
+    let accessAgg = AccessAggregator (layout, role)
+    let halfAccess = accessAgg.FilterUsedSchemas usedSchemas
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (view : CompiledViewExpr) : CompiledViewExpr =
-    let accessCompiler = AccessCompiler (layout, role, view.Query.Arguments)
-    let access = accessCompiler.FilterUsedSchemas layout usedSchemas
+    eprintfn "Used schemas: %O" usedSchemas
+    eprintfn "Query: %O" view.Query.Expression
+    let (arguments, access) = compileRoleViewExpr layout role usedSchemas view.Query.Arguments
     let applier = PermissionsApplier (layout, access)
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
     let newQuery =
         { Expression = queryExpression
-          Arguments = accessCompiler.Arguments
+          Arguments = arguments
         }
     let mapAttributeColumn (typ, name, expr) =
         let expr = applier.ApplyToValueExpr expr
