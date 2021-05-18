@@ -475,7 +475,9 @@ let addCTEs (extraCTEs : (SQL.TableName * SQL.CommonTableExpr) seq) (expr : SQL.
                   Recursive = false
                 } : SQL.CommonTableExprs
             Some exprs
-    | Some ctes -> Some { ctes with Exprs = Seq.toArray (Seq.append extraCTEs ctes.Exprs) }
+    | Some ctes ->
+        let exprs = Seq.toArray (Seq.append extraCTEs ctes.Exprs)
+        Some { ctes with Exprs = exprs }
 
 let addTopLevelCTEs (extraCTEs : (SQL.TableName * SQL.CommonTableExpr) seq) (expr : SQL.SelectExpr) =
     let newCTEs = addCTEs extraCTEs expr.CTEs
@@ -533,7 +535,7 @@ let renameValueExprTables = genericRenameValueExprTables false
 
 type SubEntityCTEs = Map<SQL.TableName, SQL.CommonTableExpr>
 
-let private subEntityCTE (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (check : SQL.ValueExpr option) : SQL.CommonTableExpr =
+let private subEntitySelectExpr (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (check : SQL.ValueExpr option) : SQL.SelectExpr =
     let tableRef = compileResolvedEntityRef entity.Root
     let ann =
         { RealEntity = entityRef
@@ -547,11 +549,7 @@ let private subEntityCTE (entityRef : ResolvedEntityRef) (entity : ResolvedEntit
           OrderLimit = SQL.emptyOrderLimitClause
           Extra = null
         } : SQL.SingleSelectExpr
-    let expr = { Extra = ann; CTEs = None; Tree = SQL.SSelect select } : SQL.SelectExpr
-    { Fields = None
-      Materialized = Some false
-      Expr = expr
-    } : SQL.CommonTableExpr
+    { Extra = ann; CTEs = None; Tree = SQL.SSelect select }
 
 type ExprCompilationFlags =
     { ForceNoImmediate : bool
@@ -584,7 +582,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         if not <| Map.containsKey newName subEntityCTEs then
             let subEntityCol = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
             let checkExpr = makeCheckExpr subEntityCol layout entityRef
-            let cte = subEntityCTE entityRef entity (Some checkExpr)
+            let selectExpr = subEntitySelectExpr entityRef entity (Some checkExpr)
+            let cte =
+                { Fields = None
+                  Materialized = Some false
+                  Expr = selectExpr
+                } : SQL.CommonTableExpr
             subEntityCTEs <- Map.add newName cte subEntityCTEs
 
         { Schema = None; Name = newName }
