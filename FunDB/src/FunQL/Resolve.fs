@@ -1231,6 +1231,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         let newCte =
             { Fields = cte.Fields
               Expr = newSelect
+              Materialized = cte.Materialized
               Extra = ObjectMap.singleton info
             }
         (getFieldsMap results, newCte)
@@ -1519,6 +1520,7 @@ and private relabelCommonTableExpr (cte : ResolvedCommonTableExpr) : ResolvedCom
     let extra = ObjectMap.findType<ResolvedCommonTableExprTempMeta> cte.Extra
     { Fields = cte.Fields
       Expr = relabelSelectExpr cte.Expr
+      Materialized = cte.Materialized
       Extra = ObjectMap.singleton ({ MainEntity = extra.MainEntity } : ResolvedCommonTableExprInfo)
     }
 

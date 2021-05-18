@@ -269,7 +269,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         }
     (viewInfo, rows)
 
-let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SingleSelectExpr) option =
+let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SelectExpr) option =
     match viewExpr.AttributesQuery with
     | None -> None
     | Some attributesExpr ->
@@ -283,7 +283,12 @@ let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * S
               OrderLimit = SQL.emptyOrderLimitClause
               Extra = null
             } : SQL.SingleSelectExpr
-        Some (colTypes, query)
+        let select =
+            { CTEs = attributesExpr.CTEs
+              Tree = SQL.SSelect query
+              Extra = null
+            } : SQL.SelectExpr
+        Some (colTypes, select)
 
 let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {

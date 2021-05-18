@@ -111,57 +111,58 @@ and tokenizeFunQL = parse
     | "->>"  { Parse.DOUBLE_ARROW }
 
     // Keywords
-    | t r u e           { Parse.BOOL true }
-    | f a l s e         { Parse.BOOL false }
-    | n u l l           { Parse.NULL }
-    | s e l e c t       { Parse.SELECT }
-    | f r o m           { Parse.FROM }
-    | w h e r e         { Parse.WHERE }
-    | l e f t           { Parse.LEFT }
-    | r i g h t         { Parse.RIGHT }
-    | i n n e r         { Parse.INNER }
-    | o u t e r         { Parse.OUTER }
-    | j o i n           { Parse.JOIN }
-    | o n               { Parse.ON }
-    | o r d e r         { Parse.ORDER }
-    | b y               { Parse.BY }
-    | a s               { Parse.AS }
-    | a s c             { Parse.ASC }
-    | d e s c           { Parse.DESC }
-    | a n d             { Parse.AND }
-    | o r               { Parse.OR }
-    | l i k e           { Parse.LIKE }
-    | i l i k e         { Parse.ILIKE }
-    | s i m i l a r     { Parse.SIMILAR }
-    | i n               { Parse.IN }
-    | i s               { Parse.IS }
-    | t o               { Parse.TO }
-    | n o t             { Parse.NOT }
-    | f o r             { Parse.FOR }
-    | i n s e r t       { Parse.INSERT }
-    | i n t o           { Parse.INTO }
-    | c a s e           { Parse.CASE }
-    | w h e n           { Parse.WHEN }
-    | t h e n           { Parse.THEN }
-    | e l s e           { Parse.ELSE }
-    | e n d             { Parse.END }
-    | l i m i t         { Parse.LIMIT }
-    | o f f s e t       { Parse.OFFSET }
-    | u n i o n         { Parse.UNION }
-    | i n t e r s e c t { Parse.INTERSECT }
-    | u p d a t e       { Parse.UPDATE }
-    | o f               { Parse.OF }
-    | v a l u e s       { Parse.VALUES }
-    | a l l             { Parse.ALL }
-    | d i s t i n c t   { Parse.DISTINCT }
-    | g r o u p         { Parse.GROUP }
-    | a r r a y         { Parse.ARRAY }
-    | i n h e r i t e d { Parse.INHERITED }
-    | o f t y p e       { Parse.OFTYPE }
-    | w i t h           { Parse.WITH }
-    | r e c u r s i v e { Parse.RECURSIVE }
-    | a n y             { Parse.ANY }
-    | s o m e           { Parse.SOME }
+    | t r u e                 { Parse.BOOL true }
+    | f a l s e               { Parse.BOOL false }
+    | n u l l                 { Parse.NULL }
+    | s e l e c t             { Parse.SELECT }
+    | f r o m                 { Parse.FROM }
+    | w h e r e               { Parse.WHERE }
+    | l e f t                 { Parse.LEFT }
+    | r i g h t               { Parse.RIGHT }
+    | i n n e r               { Parse.INNER }
+    | o u t e r               { Parse.OUTER }
+    | j o i n                 { Parse.JOIN }
+    | o n                     { Parse.ON }
+    | o r d e r               { Parse.ORDER }
+    | b y                     { Parse.BY }
+    | a s                     { Parse.AS }
+    | a s c                   { Parse.ASC }
+    | d e s c                 { Parse.DESC }
+    | a n d                   { Parse.AND }
+    | o r                     { Parse.OR }
+    | l i k e                 { Parse.LIKE }
+    | i l i k e               { Parse.ILIKE }
+    | s i m i l a r           { Parse.SIMILAR }
+    | i n                     { Parse.IN }
+    | i s                     { Parse.IS }
+    | t o                     { Parse.TO }
+    | n o t                   { Parse.NOT }
+    | f o r                   { Parse.FOR }
+    | i n s e r t             { Parse.INSERT }
+    | i n t o                 { Parse.INTO }
+    | c a s e                 { Parse.CASE }
+    | w h e n                 { Parse.WHEN }
+    | t h e n                 { Parse.THEN }
+    | e l s e                 { Parse.ELSE }
+    | e n d                   { Parse.END }
+    | l i m i t               { Parse.LIMIT }
+    | o f f s e t             { Parse.OFFSET }
+    | u n i o n               { Parse.UNION }
+    | i n t e r s e c t       { Parse.INTERSECT }
+    | u p d a t e             { Parse.UPDATE }
+    | o f                     { Parse.OF }
+    | v a l u e s             { Parse.VALUES }
+    | a l l                   { Parse.ALL }
+    | d i s t i n c t         { Parse.DISTINCT }
+    | g r o u p               { Parse.GROUP }
+    | a r r a y               { Parse.ARRAY }
+    | i n h e r i t e d       { Parse.INHERITED }
+    | o f t y p e             { Parse.OFTYPE }
+    | w i t h                 { Parse.WITH }
+    | r e c u r s i v e       { Parse.RECURSIVE }
+    | a n y                   { Parse.ANY }
+    | s o m e                 { Parse.SOME }
+    | m a t e r i a l i z e d { Parse.MATERIALIZED }
 
     // Types
     | i n t             { Parse.INT_TYPE }

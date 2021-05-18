@@ -122,6 +122,20 @@ let private compileRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSch
     (accessCompiler.Arguments, access)
 
 type private PermissionsApplier (access : SchemaAccess) =
+    let mutable subEntityCTEs = Map.empty : Map<TableName, CommonTableExpr>
+    let newSubEntityFrom (entityRef : FunQL.ResolvedEntityRef) (restr : SelectExpr) : TableRef =
+        let newName = renameResolvedEntityRef entityRef
+        if not <| Map.containsKey newName subEntityCTEs then
+            let cte =
+                { Fields = None
+                  Materialized = Some false
+                  Expr = restr
+                } : CommonTableExpr
+            eprintfn "New CTE: %O" cte
+            subEntityCTEs <- Map.add newName cte subEntityCTEs
+
+        { Schema = None; Name = newName }
+
     let rec applyToSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
         | SSelect query -> SSelect <| applyToSingleSelectExpr query
         | SSetOp setOp ->
@@ -192,8 +206,9 @@ type private PermissionsApplier (access : SchemaAccess) =
                 match accessEntity with
                 | None -> FTable (null, pun, entity)
                 | Some restr ->
-                    // `pun` is guaranteed to be there for all table queries.
-                    FSubExpr (Option.get pun, restr)
+                    let subRef = newSubEntityFrom ann.RealEntity restr
+                    eprintfn "Restricting %O" ann.RealEntity
+                    FTable (null, pun, subRef)
             // From CTE.
             | _ -> FTable (extra, pun, entity)
         | FJoin join ->
@@ -206,14 +221,15 @@ type private PermissionsApplier (access : SchemaAccess) =
         | FSubExpr (alias, q) ->
             FSubExpr (alias, applyToSelectExpr q)
 
-    member this.ApplyToSelectExpr = applyToSelectExpr
-    member this.ApplyToValueExpr = applyToValueExpr
+    member this.ApplyToSelectExpr expr = applyToSelectExpr expr
+    member this.ApplyToValueExpr expr = applyToValueExpr expr
+    member this.SubEntityCTEs = subEntityCTEs
 
 let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (query : Query<SelectExpr>) : Query<SelectExpr> =
     let (arguments, access) = compileRoleViewExpr layout role usedSchemas query.Arguments
     let applier = PermissionsApplier access
     let expression = applier.ApplyToSelectExpr query.Expression
-    { Expression = expression
+    { Expression = addTopLevelCTEs (Map.toSeq applier.SubEntityCTEs) expression
       Arguments = arguments
     }
 
@@ -223,19 +239,23 @@ let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : Fun
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (view : CompiledViewExpr) : CompiledViewExpr =
-    eprintfn "Used schemas: %O" usedSchemas
-    eprintfn "Query: %O" view.Query.Expression
     let (arguments, access) = compileRoleViewExpr layout role usedSchemas view.Query.Arguments
     let applier = PermissionsApplier access
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
-    let newQuery =
-        { Expression = queryExpression
-          Arguments = arguments
-        }
     let mapAttributeColumn (typ, name, expr) =
         let expr = applier.ApplyToValueExpr expr
         (typ, name, expr)
+    let mapAttributesQuery query =
+        { query with
+              AttributeColumns = Array.map mapAttributeColumn query.AttributeColumns
+              CTEs = addCTEs (Map.toSeq applier.SubEntityCTEs) query.CTEs
+        }
+    let attributesQuery = Option.map mapAttributesQuery view.AttributesQuery
+    let newQuery =
+        { Expression = addTopLevelCTEs (Map.toSeq applier.SubEntityCTEs) queryExpression
+          Arguments = arguments
+        }
     { view with
-          AttributesQuery = Option.map (fun info -> { info with AttributeColumns = Array.map mapAttributeColumn info.AttributeColumns }) view.AttributesQuery
+          AttributesQuery = attributesQuery
           Query = newQuery
     }

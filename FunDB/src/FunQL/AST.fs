@@ -770,6 +770,7 @@ and [<NoEquality; NoComparison>] JoinExpr<'e, 'f> when 'e :> IFunQLName and 'f :
 
 and CommonTableExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Fields : FieldName[] option
+      Materialized : bool option
       Expr : SelectExpr<'e, 'f>
       Extra : ObjectMap
     }
@@ -791,7 +792,12 @@ and [<NoEquality; NoComparison>] CommonTableExprs<'e, 'f> when 'e :> IFunQLName 
                         assert (not (Array.isEmpty args))
                         let argsStr = args |> Array.map (fun x -> x.ToFunQLString()) |> String.concat ", "
                         sprintf "%s(%s)" (name.ToFunQLString()) argsStr
-                sprintf "%s AS (%s)" nameStr (cte.Expr.ToFunQLString())
+                let materializedStr =
+                    match cte.Materialized with
+                    | None -> ""
+                    | Some true -> "MATERIALIZED"
+                    | Some false -> "NOT MATERIALIZED"
+                String.concatWithWhitespaces [nameStr; "AS"; materializedStr; cte.Expr.ToFunQLString()]
             let exprs =
                 this.Exprs
                 |> Seq.map convertOne

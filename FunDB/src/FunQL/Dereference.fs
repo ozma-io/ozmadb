@@ -79,6 +79,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         let expr = resolveSelectExpr cte.Expr
         { Expr = expr
           Fields = cte.Fields
+          Materialized = cte.Materialized
           Extra = cte.Extra
         }
 
