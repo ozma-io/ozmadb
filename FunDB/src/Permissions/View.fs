@@ -87,8 +87,13 @@ type private AccessCompiler (layout : Layout, fieldAccesses : FieldTempAccess, i
         | OFETrue -> None
         | finalRestr ->
             let (newArguments, restriction) = compileRestriction layout ref arguments finalRestr
+            let select =
+                { CTEs = None
+                  Tree = SSelect restriction
+                  Extra = null
+                }
             arguments <- newArguments
-            Some restriction
+            Some select
 
     let compileEntityAccess (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (entityAccess : EntityTempAccess) : EntityAccess =
         let mapEntity (name : FunQL.EntityName) (restr : ResolvedOptimizedFieldExpr) =

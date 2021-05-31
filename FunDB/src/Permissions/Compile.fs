@@ -8,7 +8,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedOptimizedFieldExpr) : QueryArguments * SQL.SelectExpr =
+let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedOptimizedFieldExpr) : QueryArguments * SQL.SingleSelectExpr =
     let (info, from) = compileSingleFromExpr layout arguments (FEntity (None, relaxEntityRef ref)) (Some <| restr.ToFieldExpr())
     let select =
         { Columns = [| compileRenamedResolvedEntityRef ref |> Some |> SQL.SCAll |]
@@ -18,12 +18,7 @@ let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : 
           OrderLimit = SQL.emptyOrderLimitClause
           Extra = null
         } : SQL.SingleSelectExpr
-    let query =
-        { CTEs = addCTEs from.CTEs None
-          Tree = SQL.SSelect select
-          Extra = null
-        } : SQL.SelectExpr
-    (info.Arguments, query)
+    (info.Arguments, select)
 
 let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedOptimizedFieldExpr) : QueryArguments * SQL.ValueExpr =
     let (info, from) = compileSingleFromExpr layout arguments (FEntity (None, relaxEntityRef ref)) (Some <| restr.ToFieldExpr())
