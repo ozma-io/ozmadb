@@ -53,6 +53,7 @@ type RoleName = FunQLName
 type FunctionName = FunQLName
 type TriggerName = FunQLName
 type ActionName = FunQLName
+type PragmaName = FunQLName
 
 type EntityRef =
     { Schema : SchemaName option
@@ -1067,6 +1068,8 @@ type ResolvedAttributeMap = AttributeMap<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>
 type ResolvedAggExpr = AggExpr<EntityRef, LinkedBoundFieldRef>
 
+type PragmasMap = Map<PragmaName, FieldValue>
+
 [<NoEquality; NoComparison>]
 type Argument<'e> when 'e :> IFunQLName =
     { ArgType: FieldType<'e>
@@ -1191,6 +1194,27 @@ let allowedFunctions : Map<FunctionName, FunctionRepr> =
           (FunQLName "coalesce", FRSpecial SQL.SFCoalesce)
           (FunQLName "least", FRSpecial SQL.SFLeast)
           (FunQLName "greatest", FRSpecial SQL.SFGreatest)
+        ]
+
+let allowedPragmas : Set<PragmaName> =
+    Set.ofList
+        [ FunQLName "enable_bitmapscan"
+          FunQLName "enable_gathermerge"
+          FunQLName "enable_hashagg"
+          FunQLName "enable_hashjoin"
+          FunQLName "enable_indexscan"
+          FunQLName "enable_indexonlyscan"
+          FunQLName "enable_material"
+          FunQLName "enable_mergejoin"
+          FunQLName "enable_nestloop"
+          FunQLName "enable_parallel_append"
+          FunQLName "enable_parallel_hash"
+          FunQLName "enable_partition_pruning"
+          FunQLName "enable_partitionwise_join"
+          FunQLName "enable_partitionwise_aggregate"
+          FunQLName "enable_seqscan"
+          FunQLName "enable_sort"
+          FunQLName "enable_tidscan"
         ]
 
 let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =

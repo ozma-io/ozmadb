@@ -228,7 +228,8 @@ type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
 
 [<NoEquality; NoComparison>]
 type ResolvedViewExpr =
-    { Arguments : ResolvedArgumentsMap
+    { Pragmas : PragmasMap
+      Arguments : ResolvedArgumentsMap
       Select : ResolvedSelectExpr
       MainEntity : ResolvedMainEntity option
     } with
@@ -1600,7 +1601,8 @@ let resolveViewExpr (layout : ILayoutBits) (viewExpr : ParsedViewExpr) : Resolve
     let qualifier = QueryResolver (layout, allArguments)
     let (results, qQuery) = qualifier.ResolveSelectExpr viewExprSelectFlags viewExpr.Select
     let mainEntity = Option.map (qualifier.ResolveMainEntity (getFieldsMap results) qQuery) viewExpr.MainEntity
-    { Arguments = localArguments
+    { Pragmas = Map.filter (fun name v -> Set.contains name allowedPragmas) viewExpr.Pragmas
+      Arguments = localArguments
       Select = relabelSelectExpr qQuery
       MainEntity = mainEntity
     }

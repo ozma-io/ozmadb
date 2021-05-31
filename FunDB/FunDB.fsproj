@@ -22,6 +22,7 @@
     <Compile Include="src/SQL/AST.fs" />
     <Compile Include="src/SQL/DML.fs" />
     <Compile Include="src/SQL/DDL.fs" />
+    <Compile Include="src/SQL/Misc.fs" />
     <Compile Include="src/SQL/PLPgSQL.fs" />
     <FsYacc Include="src/SQL/SQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParse.fs" />

@@ -104,7 +104,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserViewExplain (source : UserViewSource) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
+    member this.GetUserViewExplain (source : UserViewSource) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
         task {
             if not (canExplain rctx.User.Type) then
                 logger.LogError("Explain access denied")
@@ -140,7 +140,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     | Ok resolvedChunk ->
                         let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
                         let compiled = { compiled with Query = query }
-                        let! res = explainViewExpr ctx.Transaction.Connection.Query compiled ctx.CancellationToken
+                        let! res = explainViewExpr ctx.Transaction.Connection.Query compiled explainOpts ctx.CancellationToken
                         return Ok res
         }
 
@@ -204,5 +204,5 @@ type UserViewsAPI (rctx : IRequestContext) =
 
     interface IUserViewsAPI with
         member this.GetUserViewInfo source flags = this.GetUserViewInfo source flags
-        member this.GetUserViewExplain source chunk flags = this.GetUserViewExplain source chunk flags
+        member this.GetUserViewExplain source chunk flags explainOpts = this.GetUserViewExplain source chunk flags explainOpts
         member this.GetUserView source rawArguments chunk flags = this.GetUserView source rawArguments chunk flags

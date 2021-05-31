@@ -141,10 +141,19 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
         }
 
     and applyToSelectExpr (select : SelectExpr) : SelectExpr =
-        { CTEs = Option.map applyToCommonTableExprs select.CTEs
-          Tree = applyToSelectTreeExpr select.Tree
-          Extra = select.Extra
-        }
+        match select.Extra with
+        // Special case -- subentity select which gets generated when someone uses subentity in FROM.
+        | :? RealEntityAnnotation as ann ->
+            let accessSchema = Map.find ann.RealEntity.Schema access
+            let accessEntity = Map.find ann.RealEntity.Name accessSchema
+            match accessEntity with
+            | None -> select
+            | Some restr -> restrictionToSelect ann.RealEntity restr
+        | _ ->
+            { CTEs = Option.map applyToCommonTableExprs select.CTEs
+              Tree = applyToSelectTreeExpr select.Tree
+              Extra = select.Extra
+            }
 
     and applyToSingleSelectExpr (query : SingleSelectExpr) : SingleSelectExpr =
         let from = Option.map applyToFromExpr query.From
@@ -156,30 +165,33 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
                 let fromVal = Option.get from
 
                 let restrictOne (from, where, joins) (tableName : TableName, entityInfo : FromEntityInfo) =
-                    eprintfn "Trying to find access entity %O" entityInfo.Ref
-                    let accessSchema = Map.find entityInfo.Ref.Schema access
-                    let accessEntity = Map.find entityInfo.Ref.Name accessSchema
-                    match accessEntity with
-                    | None -> (from, where, joins)
-                    | Some restr ->
-                        // Rename old table reference in restriction joins and expression.
-                        let oldTableName = renameResolvedEntityRef entityInfo.Ref
-                        let renameJoinKey (key : JoinKey) =
-                            if key.Table = oldTableName then
-                                { key with Table = tableName }
-                            else
-                                key
-                        let restrJoinsMap = Map.mapKeys renameJoinKey restr.Joins.Map
-                        let (renamesMap, addedJoins, joins) = augmentJoinPaths joins { restr.Joins with Map = restrJoinsMap }
-                        let (entitiesMap, from) = buildJoins layout info.Entities from addedJoins
-                        let renamesMap = Map.add oldTableName tableName renamesMap
-                        let check = renameAllValueExprTables renamesMap restr.Where
+                    if not entityInfo.IsInner then
+                        // We restrict them in FROM expression.
+                        (from, where, joins)
+                    else
+                        let accessSchema = Map.find entityInfo.Ref.Schema access
+                        let accessEntity = Map.find entityInfo.Ref.Name accessSchema
+                        match accessEntity with
+                        | None -> (from, where, joins)
+                        | Some restr ->
+                            // Rename old table reference in restriction joins and expression.
+                            let oldTableName = renameResolvedEntityRef entityInfo.Ref
+                            let renameJoinKey (key : JoinKey) =
+                                if key.Table = oldTableName then
+                                    { key with Table = tableName }
+                                else
+                                    key
+                            let restrJoinsMap = Map.mapKeys renameJoinKey restr.Joins.Map
+                            let (renamesMap, addedJoins, joins) = augmentJoinPaths joins { restr.Joins with Map = restrJoinsMap }
+                            let (entitiesMap, from) = buildJoins layout info.Entities from addedJoins
+                            let renamesMap = Map.add oldTableName tableName renamesMap
+                            let check = renameAllValueExprTables renamesMap restr.Where
 
-                        let newWhere =
-                            match where with
-                            | None -> check
-                            | Some oldWhere -> VEAnd (oldWhere, check)
-                        (from, Some newWhere, joins)
+                            let newWhere =
+                                match where with
+                                | None -> check
+                                | Some oldWhere -> VEAnd (oldWhere, check)
+                            (from, Some newWhere, joins)
 
                 let (fromVal, where, joins) = info.Entities |> Map.toSeq |> Seq.fold restrictOne (fromVal, where, info.Joins)
                 (Some fromVal, where)
@@ -208,6 +220,15 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
         mapValueExpr mapper
 
     and applyToFromExpr : FromExpr -> FromExpr = function
+        | FTable (:? RealEntityAnnotation as ann, pun, entity) when not ann.IsInner ->
+            let accessSchema = Map.find ann.RealEntity.Schema access
+            let accessEntity = Map.find ann.RealEntity.Name accessSchema
+            match accessEntity with
+            | None -> FTable (ann, pun, entity)
+            | Some restr ->
+                // `pun` is guaranteed to be there for all table queries.
+                FSubExpr (Option.get pun, restrictionToSelect ann.RealEntity restr)
+        // From CTE.
         | FTable (extra, pun, entity) -> FTable (extra, pun, entity)
         | FJoin join ->
             FJoin
@@ -236,8 +257,6 @@ let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : Fun
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (view : CompiledViewExpr) : CompiledViewExpr =
-    eprintfn "Used schemas: %O" usedSchemas
-    eprintfn "Query: %O" view.Query.Expression
     let (arguments, access) = compileRoleViewExpr layout role usedSchemas view.Query.Arguments
     let applier = PermissionsApplier (layout, access)
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression

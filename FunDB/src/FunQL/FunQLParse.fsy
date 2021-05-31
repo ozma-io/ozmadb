@@ -27,7 +27,8 @@ type ParsedMainEntity =
 
 [<NoComparison>]
 type ParsedViewExpr =
-    { Arguments : ParsedArgumentsMap
+    { Pragmas : PragmasMap
+      Arguments : ParsedArgumentsMap
       Select : ParsedSelectExpr
       MainEntity : ParsedMainEntity option
     }
@@ -175,6 +176,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token RIGHT_BRACKET
 %token DOUBLE_COLON
 %token COLON
+%token SEMICOLON
 %token COMMA
 %token DOT
 %token EQ
@@ -254,6 +256,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token ANY
 %token SOME
 %token MATERIALIZED
+%token SET
 
 // Types
 %token INT_TYPE
@@ -311,7 +314,18 @@ attributeMap : AttributeMap EOF { $1 }
 // Expressions
 
 ViewExpr:
-    | MaybeArguments UnparenSelectExpr InsertEntityClause { { Arguments = $1; Select = $2; MainEntity = $3 } }
+    | MaybeArguments MaybePragmas UnparenSelectExpr InsertEntityClause { { Pragmas = $2; Arguments = $1; Select = $3; MainEntity = $4 } }
+
+MaybePragmas:
+    | MaybePragmasList { parseMap "Clashing pragma names" $1 }
+
+SetEq:
+    | EQ { () }
+    | TO { () }
+
+MaybePragmasList:
+    |                                                 { [] }
+    | SET Name SetEq Value SEMICOLON MaybePragmasList { ($2, $4) :: $6 }
 
 MaybeArguments:
     |                                            { Map.empty }

@@ -61,11 +61,14 @@ let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -
 
 let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError RENoEndpoint
 
-let boolRequestArg (name : string) (ctx: HttpContext) : bool =
+let tryBoolRequestArg (name : string) (ctx: HttpContext) : bool option =
     match ctx.Request.Query.TryGetValue name with
-    | (true, values) when values.Count = 0 -> true
-    | (true, values) -> Option.defaultValue false (Parsing.tryBool values.[0])
-    | (false, _) -> false
+    | (true, values) when values.Count = 0 -> Some true
+    | (true, values) -> Some <| Option.defaultValue false (Parsing.tryBool values.[0])
+    | (false, _) -> None
+
+let boolRequestArg (name : string) (ctx: HttpContext) : bool =
+    Option.defaultValue false (tryBoolRequestArg name ctx)
 
 let intRequestArg (name : string) (ctx: HttpContext) : int option =
     ctx.TryGetQueryStringValue name |> Option.bind Parsing.tryIntInvariant

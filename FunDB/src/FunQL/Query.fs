@@ -4,6 +4,7 @@ open System.Threading
 open System.Threading.Tasks
 open System.Runtime.Serialization
 open FSharp.Control.Tasks.Affine
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
@@ -13,6 +14,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
+module SQL = FunWithFlags.FunDB.SQL.Misc
 
 type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
 type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
@@ -72,6 +74,31 @@ type private ExecutedAttributes =
     { Attributes : ExecutedAttributeMap
       AttributeTypes : ExecutedAttributeTypes
       ColumnAttributes : Map<FieldName, ExecutedAttributeTypes * ExecutedAttributeMap>
+    }
+
+// TODO: we could improve performance with pipelining (we could also pipeline attributes query).
+let private setPragmas (connection : QueryConnection) (pragmas : CompiledPragmasMap) (cancellationToken : CancellationToken) : Task =
+    unitTask {
+        for KeyValue(name, v) in pragmas do
+            let q =
+                { Parameter = name
+                  Scope = Some SQL.SSLocal
+                  Value = SQL.SVValue [|v|]
+                } : SQL.SetExpr
+            let! _ = connection.ExecuteNonQuery (q.ToSQLString()) Map.empty cancellationToken
+            ()
+    }
+
+let private unsetPragmas (connection : QueryConnection) (pragmas : CompiledPragmasMap) (cancellationToken : CancellationToken) : Task =
+    unitTask {
+        for KeyValue(name, v) in pragmas do
+            let q =
+                { Parameter = name
+                  Scope = Some SQL.SSLocal
+                  Value = SQL.SVDefault
+                } : SQL.SetExpr
+            let! _ = connection.ExecuteNonQuery (q.ToSQLString()) Map.empty cancellationToken
+            ()
     }
 
 let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult) : ExecutedAttributes =
@@ -284,7 +311,7 @@ let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * S
               Extra = null
             } : SQL.SingleSelectExpr
         let select =
-            { CTEs = attributesExpr.CTEs
+            { CTEs = None
               Tree = SQL.SSelect query
               Extra = null
             } : SQL.SelectExpr
@@ -293,6 +320,8 @@ let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * S
 let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
         let parameters = prepareArguments viewExpr.Query.Arguments arguments
+
+        do! setPragmas connection viewExpr.Pragmas cancellationToken
 
         let! attrsResult =
             task {
@@ -319,7 +348,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | None -> Map.empty
             | Some (attrTypes, attrs) -> attrs
 
-        return! connection.ExecuteQuery (viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
+        let! ret = connection.ExecuteQuery (viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
             let (info, rows) = parseResult viewExpr.MainEntity viewExpr.Domains viewExpr.Columns rawResult
 
             let mergedInfo =
@@ -333,11 +362,14 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
                   Rows = rows
                 }
             resultFunc mergedInfo result
+
+        do! unsetPragmas connection viewExpr.Pragmas cancellationToken
+        return ret
     }
 
 type ExplainedQuery =
     { Query : string
-      Explanation : string
+      Explanation : JToken
     }
 
 type ExplainedViewExpr =
@@ -345,38 +377,56 @@ type ExplainedViewExpr =
       Attributes : ExplainedQuery option
     }
 
-let private runExplainQuery (connection : QueryConnection) (query : ISQLString) (parameters : ExprParameters) (cancellationToken : CancellationToken) : Task<ExplainedQuery> =
-    task {
-        let queryStr = query.ToSQLString()
-        return! connection.ExecuteQuery (sprintf "EXPLAIN %s" queryStr) parameters cancellationToken <| fun result ->
-            if result.Columns.Length <> 1 then
-                failwithf "Unexpected number of columns from EXPLAIN: %i" result.Columns.Length
-            let getString (row : SQL.Value[]) =
-                match row.[0] with
-                | SQL.VString str -> str
-                | ret -> failwithf "Unexpected EXPLAIN return value: %O" ret
-            let explanation = result.Rows |> Seq.map getString |> String.concat "\n"
-            Task.result
-                { Query = queryStr
-                  Explanation = explanation
-                }
+type ExplainViewOptions =
+    { Analyze : bool option
+      Costs : bool option
+      Verbose : bool option
     }
 
-let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (cancellationToken : CancellationToken) : Task<ExplainedViewExpr> =
+let defaultExplainViewOptions =
+    { Analyze = None
+      Costs = None
+      Verbose = None
+    }
+
+let private runExplainQuery<'a when 'a :> ISQLString> (connection : QueryConnection) (query : 'a) (parameters : ExprParameters) (explainOpts : ExplainViewOptions) (cancellationToken : CancellationToken) : Task<ExplainedQuery> =
+    task {
+        let explainQuery =
+            { Statement = query
+              Analyze = explainOpts.Analyze
+              Costs = explainOpts.Costs
+              Verbose = explainOpts.Verbose
+              Format = Some SQL.EFJson
+            } : SQL.ExplainExpr<'a>
+        let queryStr = explainQuery.ToSQLString()
+        match! connection.ExecuteValueQuery queryStr parameters cancellationToken with
+        | SQL.VJson j ->
+            return
+                { Query = query.ToSQLString()
+                  Explanation = j
+                }
+        | ret -> return failwithf "Unexpected EXPLAIN return value: %O" ret
+    }
+
+let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (explainOpts : ExplainViewOptions) (cancellationToken : CancellationToken) : Task<ExplainedViewExpr> =
     task {
         let arguments = viewExpr.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
         let parameters = prepareArguments viewExpr.Query.Arguments arguments
+
+        do! setPragmas connection viewExpr.Pragmas cancellationToken
 
         let! attrsResult =
             task {
                 match getAttributesQuery viewExpr with
                 | None -> return None
                 | Some (colTypes, query) ->
-                    let! ret = runExplainQuery connection query parameters cancellationToken
+                    let! ret = runExplainQuery connection query parameters explainOpts cancellationToken
                     return Some ret
             }
     
-        let! result = runExplainQuery connection viewExpr.Query.Expression parameters cancellationToken
+        let! result = runExplainQuery connection viewExpr.Query.Expression parameters explainOpts cancellationToken
+
+        do! unsetPragmas connection viewExpr.Pragmas cancellationToken
 
         return
             { Rows = result

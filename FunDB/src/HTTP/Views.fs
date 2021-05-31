@@ -9,6 +9,7 @@ open FSharp.Control.Tasks.Affine
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
+open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.HTTP.Utils
 
@@ -44,6 +45,9 @@ type UserViewExplainRequest =
       Limit : int option
       Where : SourceChunkWhere option
       PretendRole : ResolvedEntityRef option
+      Analyze : bool option
+      Verbose : bool option
+      Costs : bool option
     }
 
 type AnonymousUserViewRequest =
@@ -121,9 +125,9 @@ let viewsApi : HttpHandler =
         | None -> safeBindJson (doPostInfoView viewRef api)
         | Some req -> bindJsonToken req (doPostSelectFromView viewRef api)
 
-    let returnExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (chunk : SourceQueryChunk) (flags : UserViewFlags) next ctx =
+    let returnExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) next ctx =
         task {
-            match! api.UserViews.GetUserViewExplain viewRef chunk flags with
+            match! api.UserViews.GetUserViewExplain viewRef chunk flags explainOpts with
             | Ok res -> return! Successful.ok (json res) next ctx
             | Error err -> return! uvError err next ctx
         }
@@ -138,7 +142,12 @@ let viewsApi : HttpHandler =
                   Limit = intRequestArg "__limit" ctx
                   Where = None
                 } : SourceQueryChunk
-            return! returnExplainView viewRef api chunk flags next ctx
+            let explainOpts =
+                { Analyze = tryBoolRequestArg "__analyze" ctx
+                  Costs = tryBoolRequestArg "__costs" ctx
+                  Verbose = tryBoolRequestArg "__verbose" ctx
+                } : ExplainViewOptions
+            return! returnExplainView viewRef api chunk flags explainOpts next ctx
         }
 
     let doPostExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewExplainRequest) (next : HttpFunc) (ctx : HttpContext) =
@@ -151,9 +160,14 @@ let viewsApi : HttpHandler =
                   Limit = req.Limit
                   Where = req.Where
                 } : SourceQueryChunk
+            let explainOpts =
+                { Analyze = req.Analyze
+                  Costs = req.Costs
+                  Verbose = req.Verbose
+                } : ExplainViewOptions
             match req.PretendRole with
-            | None -> return! returnExplainView viewRef api chunk flags next ctx
-            | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnExplainView viewRef api chunk flags next ctx)
+            | None -> return! returnExplainView viewRef api chunk flags explainOpts next ctx
+            | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnExplainView viewRef api chunk flags explainOpts next ctx)
         }
 
     let postExplainView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =

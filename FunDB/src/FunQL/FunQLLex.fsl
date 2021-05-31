@@ -46,15 +46,16 @@ let x = ['X' 'x']
 let y = ['Y' 'y']
 let z = ['Z' 'z']
 
-rule commentFunQL level = parse
+rule private commentFunQL level = parse
     | "/*"       { commentFunQL (level + 1) lexbuf }
     | "*/"       { if level = 0 then tokenizeFunQL lexbuf else commentFunQL (level - 1) lexbuf }
     | escapedId  { commentFunQL level lexbuf }
     | string     { commentFunQL level lexbuf }
     | newline    { newline lexbuf; commentFunQL level lexbuf }
     | _          { commentFunQL level lexbuf }
+    | eof        { failwith "Unterminated comment" }
 
-and lineCommentFunQL = parse
+and private lineCommentFunQL = parse
     | newline { newline lexbuf; tokenizeFunQL lexbuf }
     | _       { lineCommentFunQL lexbuf }
     | eof     { Parse.EOF }
@@ -82,6 +83,7 @@ and tokenizeFunQL = parse
     | "]"    { Parse.RIGHT_BRACKET }
     | "::"   { Parse.DOUBLE_COLON }
     | ":"    { Parse.COLON }
+    | ";"    { Parse.SEMICOLON }
     | ","    { Parse.COMMA }
     | "."    { Parse.DOT }
     | "="    { Parse.EQ }
@@ -163,6 +165,7 @@ and tokenizeFunQL = parse
     | a n y                   { Parse.ANY }
     | s o m e                 { Parse.SOME }
     | m a t e r i a l i z e d { Parse.MATERIALIZED }
+    | s e t                   { Parse.SET }
 
     // Types
     | i n t             { Parse.INT_TYPE }
@@ -181,12 +184,14 @@ and tokenizeFunQL = parse
     // Unescaped ids
     | unescapedId { Parse.ID ((String lexbuf.Lexeme).ToLower()) }
 
-    // Whitespace
-    | whitespace { tokenizeFunQL lexbuf }
+    // Comments
     | "--"       { lineCommentFunQL lexbuf }
     | "/*"       { commentFunQL 0 lexbuf }
+
+    // Whitespace
+    | whitespace { tokenizeFunQL lexbuf }
     | newline    { newline lexbuf; tokenizeFunQL lexbuf }
 
-    // Misc
+    // Parsing
     | _   { failwith "Lexical error" }
     | eof { Parse.EOF }

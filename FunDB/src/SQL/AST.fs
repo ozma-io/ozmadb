@@ -43,6 +43,7 @@ type ColumnName = SQLName
 // Because '"character varying(1)"' is not a type but 'character varying(1)' is!
 type TypeName = SQLRawString
 type FunctionName = SQLName
+type ParameterName = SQLName
 
 // Values
 
