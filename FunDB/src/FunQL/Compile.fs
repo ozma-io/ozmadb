@@ -1224,7 +1224,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let ret =
             { Fields = fields
               Expr = expr
-              Materialized = Some false
+              Materialized = Some <| Option.defaultValue false cte.Materialized
             } : SQL.CommonTableExpr
         (info, ret)
 
