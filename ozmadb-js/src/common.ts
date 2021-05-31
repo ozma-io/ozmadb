@@ -223,7 +223,7 @@ export interface IExecutedViewExpr {
 
 export interface IExplainedQuery {
   query: string;
-  explanation: string;
+  explanation: object;
 }
 
 /*

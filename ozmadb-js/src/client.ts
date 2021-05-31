@@ -52,6 +52,9 @@ interface IAnonymousUserViewEntriesRequest extends IUserViewEntriesRequest, IAno
 
 interface IUserViewExplainRequest extends IQueryChunk {
   pretendRole?: IEntityRef;
+  verbose?: boolean;
+  analyze?: boolean;
+  costs?: boolean;
 }
 
 interface IAnonymousUserViewExplainRequest extends IUserViewExplainRequest, IAnonymousUserViewRequest { }
