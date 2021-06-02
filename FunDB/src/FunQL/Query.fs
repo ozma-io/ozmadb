@@ -408,9 +408,9 @@ let private runExplainQuery<'a when 'a :> ISQLString> (connection : QueryConnect
         | ret -> return failwithf "Unexpected EXPLAIN return value: %O" ret
     }
 
-let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (explainOpts : ExplainViewOptions) (cancellationToken : CancellationToken) : Task<ExplainedViewExpr> =
+let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (maybeArguments : ArgumentValuesMap option) (explainOpts : ExplainViewOptions) (cancellationToken : CancellationToken) : Task<ExplainedViewExpr> =
     task {
-        let arguments = viewExpr.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
+        let arguments = Option.defaultWith (fun () -> viewExpr.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)) maybeArguments
         let parameters = prepareArguments viewExpr.Query.Arguments arguments
 
         do! setPragmas connection viewExpr.Pragmas cancellationToken

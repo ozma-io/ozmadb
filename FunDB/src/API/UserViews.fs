@@ -104,7 +104,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserViewExplain (source : UserViewSource) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
+    member this.GetUserViewExplain (source : UserViewSource) (maybeRawArguments : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
         task {
             if not (canExplain rctx.User.Type) then
                 logger.LogError("Explain access denied")
@@ -139,9 +139,20 @@ type UserViewsAPI (rctx : IRequestContext) =
                     | Error e -> return Error e
                     | Ok resolvedChunk ->
                         let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
+                        let extraArgValues = Map.mapKeys PLocal extraLocalArgs
                         let compiled = { compiled with Query = query }
-                        let! res = explainViewExpr ctx.Transaction.Connection.Query compiled explainOpts ctx.CancellationToken
-                        return Ok res
+                        match Option.map (fun args -> convertViewArguments extraArgValues args compiled) maybeRawArguments with
+                        | Some (Error msg) ->
+                            rctx.WriteEvent (fun event ->
+                                event.Type <- "getUserView"
+                                event.Error <- "arguments"
+                                event.Details <- msg
+                            )
+                            return Error <| UVEArguments msg
+                        | maybeRetArgs ->
+                            let maybeArgs = Option.map Result.get maybeRetArgs
+                            let! res = explainViewExpr ctx.Transaction.Connection.Query compiled maybeArgs explainOpts ctx.CancellationToken
+                            return Ok res
         }
 
     member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
@@ -204,5 +215,5 @@ type UserViewsAPI (rctx : IRequestContext) =
 
     interface IUserViewsAPI with
         member this.GetUserViewInfo source flags = this.GetUserViewInfo source flags
-        member this.GetUserViewExplain source chunk flags explainOpts = this.GetUserViewExplain source chunk flags explainOpts
+        member this.GetUserViewExplain source maybeRawArguments chunk flags explainOpts = this.GetUserViewExplain source maybeRawArguments chunk flags explainOpts
         member this.GetUserView source rawArguments chunk flags = this.GetUserView source rawArguments chunk flags

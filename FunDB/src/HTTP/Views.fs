@@ -40,7 +40,8 @@ type UserViewRequest =
     }
 
 type UserViewExplainRequest =
-    { ForceRecompile : bool
+    { Args: RawArguments option
+      ForceRecompile : bool
       Offset : int option
       Limit : int option
       Where : SourceChunkWhere option
@@ -125,30 +126,33 @@ let viewsApi : HttpHandler =
         | None -> safeBindJson (doPostInfoView viewRef api)
         | Some req -> bindJsonToken req (doPostSelectFromView viewRef api)
 
-    let returnExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) next ctx =
+    let returnExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (maybeArgs : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) next ctx =
         task {
-            match! api.UserViews.GetUserViewExplain viewRef chunk flags explainOpts with
+            match! api.UserViews.GetUserViewExplain viewRef maybeArgs chunk flags explainOpts with
             | Ok res -> return! Successful.ok (json res) next ctx
             | Error err -> return! uvError err next ctx
         }
 
-    let getExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) =
-        task {
-            let flags =
-                { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
-                } : UserViewFlags
-            let chunk =
-                { Offset = intRequestArg "__offset" ctx
-                  Limit = intRequestArg "__limit" ctx
-                  Where = None
-                } : SourceQueryChunk
-            let explainOpts =
-                { Analyze = tryBoolRequestArg "__analyze" ctx
-                  Costs = tryBoolRequestArg "__costs" ctx
-                  Verbose = tryBoolRequestArg "__verbose" ctx
-                } : ExplainViewOptions
-            return! returnExplainView viewRef api chunk flags explainOpts next ctx
-        }
+    let getExplainView (viewRef : UserViewSource) (api : IFunDBAPI) =
+        queryArgs <| fun rawArgs next ctx ->
+            task {
+                let flags =
+                    { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+                    } : UserViewFlags
+                let chunk =
+                    { Offset = intRequestArg "__offset" ctx
+                      Limit = intRequestArg "__limit" ctx
+                      Where = None
+                    } : SourceQueryChunk
+                let explainOpts =
+                    { Analyze = tryBoolRequestArg "__analyze" ctx
+                      Costs = tryBoolRequestArg "__costs" ctx
+                      Verbose = tryBoolRequestArg "__verbose" ctx
+                    } : ExplainViewOptions
+                let maybeArgs =
+                    if Map.isEmpty rawArgs then None else Some rawArgs
+                return! returnExplainView viewRef api maybeArgs chunk flags explainOpts next ctx
+            }
 
     let doPostExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewExplainRequest) (next : HttpFunc) (ctx : HttpContext) =
         task {
@@ -166,8 +170,8 @@ let viewsApi : HttpHandler =
                   Verbose = req.Verbose
                 } : ExplainViewOptions
             match req.PretendRole with
-            | None -> return! returnExplainView viewRef api chunk flags explainOpts next ctx
-            | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnExplainView viewRef api chunk flags explainOpts next ctx)
+            | None -> return! returnExplainView viewRef api req.Args chunk flags explainOpts next ctx
+            | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnExplainView viewRef api req.Args chunk flags explainOpts next ctx)
         }
 
     let postExplainView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
