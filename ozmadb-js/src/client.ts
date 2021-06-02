@@ -50,11 +50,15 @@ interface IUserViewEntriesRequest extends IQueryChunk {
 
 interface IAnonymousUserViewEntriesRequest extends IUserViewEntriesRequest, IAnonymousUserViewRequest { }
 
-interface IUserViewExplainRequest extends IQueryChunk {
-  pretendRole?: IEntityRef;
+interface IUserViewExplainFlags {
   verbose?: boolean;
   analyze?: boolean;
   costs?: boolean;
+}
+
+interface IUserViewExplainRequest extends IQueryChunk, IUserViewExplainFlags {
+  args?: Record<ArgumentName, any>;
+  pretendRole?: IEntityRef;
 }
 
 interface IAnonymousUserViewExplainRequest extends IUserViewExplainRequest, IAnonymousUserViewRequest { }
@@ -67,6 +71,9 @@ interface IDomainsRequest extends IQueryChunk {
 export interface IUserViewOpts {
   chunk?: IQueryChunk;
   pretendRole?: IEntityRef;
+}
+
+export interface IUserViewExplainOpts extends IUserViewOpts, IUserViewExplainFlags {
 }
 
 export default class FunDBAPI {
@@ -153,18 +160,26 @@ export default class FunDBAPI {
     return this.getUserViewInfo(`by_name/${ref.schema}/${ref.name}`, token, {});
   };
 
-  getAnonymousUserViewExplain = async (token: string | null, query: string, opts?: IUserViewOpts): Promise<IViewExplainResult> => {
+  getAnonymousUserViewExplain = async (token: string | null, query: string, args?: Record<string, unknown>, opts?: IUserViewExplainOpts): Promise<IViewExplainResult> => {
     const req: IAnonymousUserViewExplainRequest = {
       query,
+      args,
       ...opts?.chunk,
+      verbose: opts?.verbose,
+      analyze: opts?.analyze,
+      costs: opts?.costs,
       pretendRole: opts?.pretendRole,
     };
     return this.getUserViewExplain("anonymous", token, req);
   };
 
-  getNamedUserViewExplain = async (token: string | null, ref: IUserViewRef, opts?: IUserViewOpts): Promise<IViewExplainResult> => {
+  getNamedUserViewExplain = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, opts?: IUserViewExplainOpts): Promise<IViewExplainResult> => {
     const req: IUserViewExplainRequest = {
+      args,
       ...opts?.chunk,
+      verbose: opts?.verbose,
+      analyze: opts?.analyze,
+      costs: opts?.costs,
       pretendRole: opts?.pretendRole,
     };
     return this.getUserViewExplain(`by_name/${ref.schema}/${ref.name}`, token, req);
