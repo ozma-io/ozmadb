@@ -345,7 +345,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
             else
                 match parse tokenizeSQL valueExprList index.ExprsSource with
                 | Error msg -> raisef SQLMetaException "Cannot parse index expressions: %s" msg
-                | Ok exprs -> exprs
+                | Ok exprs -> Array.map castLocalExpr exprs
 
         let mutable exprI = 0
         let makeKey (num : ColumnNum) =
@@ -360,9 +360,8 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
             if isNull index.PredSource then
                 None
             else
-                match parse tokenizeSQL valueExpr index.PredSource with
-                | Error msg -> raisef SQLMetaException "Cannot parse index predicate: %s" msg
-                | Ok pred -> Some <| String.comparable pred
+                let pred = parseLocalExpr index.PredSource
+                Some <| String.comparable pred
 
         let keys = Array.map makeKey index.IndKey
         let ret =
