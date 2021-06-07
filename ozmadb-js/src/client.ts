@@ -45,6 +45,7 @@ interface IAnonymousUserViewRequest {
 
 interface IUserViewEntriesRequest extends IQueryChunk {
   args?: Record<ArgumentName, any>;
+  pretendUser?: string;
   pretendRole?: IEntityRef;
 }
 
@@ -58,6 +59,7 @@ interface IUserViewExplainFlags {
 
 interface IUserViewExplainRequest extends IQueryChunk, IUserViewExplainFlags {
   args?: Record<ArgumentName, any>;
+  pretendUser?: string;
   pretendRole?: IEntityRef;
 }
 
@@ -65,11 +67,13 @@ interface IAnonymousUserViewExplainRequest extends IUserViewExplainRequest, IAno
 
 interface IDomainsRequest extends IQueryChunk {
   rowId?: number;
+  pretendUser?: string;
   pretendRole?: IEntityRef;
 }
 
 export interface IUserViewOpts {
   chunk?: IQueryChunk;
+  pretendUser?: string;
   pretendRole?: IEntityRef;
 }
 
@@ -168,6 +172,7 @@ export default class FunDBAPI {
       verbose: opts?.verbose,
       analyze: opts?.analyze,
       costs: opts?.costs,
+      pretendUser: opts?.pretendUser,
       pretendRole: opts?.pretendRole,
     };
     return this.getUserViewExplain("anonymous", token, req);
@@ -180,6 +185,7 @@ export default class FunDBAPI {
       verbose: opts?.verbose,
       analyze: opts?.analyze,
       costs: opts?.costs,
+      pretendUser: opts?.pretendUser,
       pretendRole: opts?.pretendRole,
     };
     return this.getUserViewExplain(`by_name/${ref.schema}/${ref.name}`, token, req);
