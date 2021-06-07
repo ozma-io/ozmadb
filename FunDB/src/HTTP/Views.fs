@@ -1,6 +1,5 @@
 module FunWithFlags.FunDB.HTTP.Views
 
-open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open Microsoft.AspNetCore.Http
 open Giraffe
@@ -10,6 +9,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.HTTP.Utils
 
@@ -37,6 +37,7 @@ type UserViewRequest =
       Limit : int option
       Where : SourceChunkWhere option
       PretendRole : ResolvedEntityRef option
+      PretendUser : UserName option
     }
 
 type UserViewExplainRequest =
@@ -46,6 +47,7 @@ type UserViewExplainRequest =
       Limit : int option
       Where : SourceChunkWhere option
       PretendRole : ResolvedEntityRef option
+      PretendUser : UserName option
       Analyze : bool option
       Verbose : bool option
       Costs : bool option
@@ -82,19 +84,15 @@ let viewsApi : HttpHandler =
             }
 
     let doPostSelectFromView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewRequest) (next : HttpFunc) (ctx : HttpContext) =
-        task {
-            let flags =
-                { ForceRecompile = flagIfDebug req.ForceRecompile
-                } : UserViewFlags
-            let chunk =
-                { Offset = req.Offset
-                  Limit = req.Limit
-                  Where = req.Where
-                } : SourceQueryChunk
-            match req.PretendRole with
-            | None -> return! returnView viewRef api req.Args chunk flags next ctx
-            | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnView viewRef api req.Args chunk flags next ctx)
-        }
+        let flags =
+            { ForceRecompile = flagIfDebug req.ForceRecompile
+            } : UserViewFlags
+        let chunk =
+            { Offset = req.Offset
+              Limit = req.Limit
+              Where = req.Where
+            } : SourceQueryChunk
+        setPretends api req.PretendUser req.PretendRole (fun () -> returnView viewRef api req.Args chunk flags next ctx)
 
     let postSelectFromView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
         match maybeReq with
@@ -155,24 +153,20 @@ let viewsApi : HttpHandler =
             }
 
     let doPostExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewExplainRequest) (next : HttpFunc) (ctx : HttpContext) =
-        task {
-            let flags =
-                { ForceRecompile = flagIfDebug req.ForceRecompile
-                } : UserViewFlags
-            let chunk =
-                { Offset = req.Offset
-                  Limit = req.Limit
-                  Where = req.Where
-                } : SourceQueryChunk
-            let explainOpts =
-                { Analyze = req.Analyze
-                  Costs = req.Costs
-                  Verbose = req.Verbose
-                } : ExplainViewOptions
-            match req.PretendRole with
-            | None -> return! returnExplainView viewRef api req.Args chunk flags explainOpts next ctx
-            | Some roleType -> return! api.Request.PretendRole roleType (fun () -> returnExplainView viewRef api req.Args chunk flags explainOpts next ctx)
-        }
+        let flags =
+            { ForceRecompile = flagIfDebug req.ForceRecompile
+            } : UserViewFlags
+        let chunk =
+            { Offset = req.Offset
+              Limit = req.Limit
+              Where = req.Where
+            } : SourceQueryChunk
+        let explainOpts =
+            { Analyze = req.Analyze
+              Costs = req.Costs
+              Verbose = req.Verbose
+            } : ExplainViewOptions
+        setPretends api req.PretendUser req.PretendRole (fun () -> returnExplainView viewRef api req.Args chunk flags explainOpts next ctx)
 
     let postExplainView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
         match maybeReq with

@@ -79,7 +79,6 @@ let serializeUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUnique
     { Columns = constr.Columns
     }
 
-
 let serializeCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckConstraint =
     { Expression = constr.Expression.ToFunQLString()
     }
@@ -87,6 +86,7 @@ let serializeCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckCon
 let serializeIndex (index : ResolvedIndex) : SourceIndex =
     { Expressions = index.Expressions |> Array.map (fun x -> x.ToFunQLString())
       IsUnique = index.IsUnique
+      Predicate = index.Predicate |> Option.map (fun x -> x.ToFunQLString())
     }
 
 let rec private inheritanceChain (layout : Layout) (entity : ResolvedEntity) : ResolvedEntityRef seq =

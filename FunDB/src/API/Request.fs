@@ -1,6 +1,8 @@
 module FunWithFlags.FunDB.API.Request
 
 open System
+open System.Linq
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
@@ -34,36 +36,80 @@ type RequestParams =
       IsRoot : bool
       CanRead : bool
       Language : string
-      Source : EventSource
+    }
+
+type private RequestArguments =
+    { CanRead : bool
     }
 
 let private maxSourceDepth = 16
 
-type RequestContext private (opts : RequestParams, userId : int option, roleType : RoleType, logger : ILogger) =
-    let ctx = opts.Context
-    let userIdValue =
-        match userId with
-        | None -> FNull
-        | Some id -> FInt id
-    // Should be in sync with globalArgumentTypes
-    let globalArguments =
-        [ (FunQLName "lang", FString opts.Language)
-          (FunQLName "user", FString opts.UserName)
-          (FunQLName "user_id", userIdValue)
-          (FunQLName "transaction_time", FDateTime ctx.TransactionTime)
-          (FunQLName "transaction_id", FInt ctx.TransactionId)
-        ] |> Map.ofList
-    do
-        assert (Map.keysSet globalArgumentTypes = Map.keysSet globalArguments)
+type private FetchedUser =
+    { Id : int
+      IsRoot : bool
+      Role : ResolvedRoleRef option
+    }
 
-    let mutable currentUser =
-        { Type = roleType
-          EffectiveType = roleType
-          Name = opts.UserName
-          Language = opts.Language
+let private fetchUser (system : SystemContext) (userName : UserName) (cancellationToken : CancellationToken) : Task<FetchedUser option> =
+    task {
+        // FIXME: No index for this.
+        let lowerUserName = userName.ToLower()
+        let! user =
+            system.Users
+                .Include("Role")
+                .Include("Role.Schema")
+                .Where(fun x -> x.Name.ToLower() = lowerUserName)
+                .FirstOrDefaultAsync(cancellationToken)
+        if isNull user then
+            return None
+        else
+            let role =
+                if isNull user.Role then
+                    None
+                else
+                    Some { Schema = FunQLName user.Role.Schema.Name; Name = FunQLName user.Role.Name }
+            let ret =
+                { Id = user.Id
+                  IsRoot = user.IsRoot
+                  Role = role
+                }
+            return Some ret
+    }
+
+type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, opts : RequestArguments, logger : ILogger) =
+    let getGlobalArguments (user : RequestUserInfo) =
+        let userIdValue =
+            match user.Effective.Id with
+            | None -> FNull
+            | Some id -> FInt id
+        // Should be in sync with globalArgumentTypes
+        let globalArguments =
+            [ (FunQLName "lang", FString user.Language)
+              (FunQLName "user", FString user.Effective.Name)
+              (FunQLName "user_id", userIdValue)
+              (FunQLName "transaction_time", FDateTime ctx.TransactionTime)
+              (FunQLName "transaction_id", FInt ctx.TransactionId)
+            ] |> Map.ofList
+        assert (Map.keysSet globalArgumentTypes = Map.keysSet globalArguments)
+        globalArguments
+    
+    let mutable currentUser = initialUserInfo
+    let mutable globalArguments = getGlobalArguments initialUserInfo
+
+    let setCurrentUser (newUser : RequestUser) (f : unit -> Task<'a>) : Task<'a> =
+        task {
+            let oldUser = currentUser
+            let oldArguments = globalArguments
+            currentUser <- { currentUser with Effective = newUser }
+            globalArguments <- getGlobalArguments currentUser
+            try
+                return! f ()
+            finally
+                globalArguments <- oldArguments
+                currentUser <- oldUser
         }
 
-    let mutable source = opts.Source
+    let mutable source = ESAPI
     let mutable sourceDepth = 0
 
     let makeEvent (addDetails : EventEntry -> unit) =
@@ -72,51 +118,64 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
                 TransactionTimestamp = ctx.TransactionTime.ToDateTime(),
                 TransactionId = ctx.TransactionId,
                 Timestamp = DateTime.UtcNow,
-                UserName = opts.UserName,
+                UserName = currentUser.Saved.Name,
                 Source = JsonConvert.SerializeObject(source)
             )
         addDetails event
         event
 
+    let checkRoot () =
+        match currentUser.Saved.Type with
+        | RTRoot -> ()
+        | _ ->
+            logger.LogError("This feature is only available for root users, not for {}", currentUser.Effective.Name)
+            raise <| RequestException RENoRole
+
     static member Create (opts : RequestParams) : Task<RequestContext> =
         task {
             let ctx = opts.Context
             let logger = ctx.LoggerFactory.CreateLogger<RequestContext>()
-
-            let lowerUserName = opts.UserName.ToLowerInvariant()
-            // FIXME: SLOW!
-            let! rawUsers =
-                ctx.Transaction.System.Users
-                    .Include("Role")
-                    .Include("Role.Schema")
-                    .ToListAsync(ctx.CancellationToken)
-            let rawUser = rawUsers |> Seq.filter (fun user -> user.Name.ToLowerInvariant() = lowerUserName) |> Seq.first
-            let userId = rawUser |> Option.map (fun u -> u.Id)
-
+            let! maybeUser = fetchUser ctx.Transaction.System opts.UserName ctx.CancellationToken
             let roleType =
                 if opts.IsRoot then
                     RTRoot
                 else
-                    match rawUser with
+                    match maybeUser with
                     | None when opts.CanRead -> RTRole { Role = None; CanRead = true }
                     | None ->
                         logger.LogError("User {} not found in users table", opts.UserName)
                         raise <| RequestException REUserNotFound
                     | Some user when user.IsRoot -> RTRoot
-                    | Some user when isNull user.Role ->
-                        if opts.CanRead then
-                            RTRole { Role = None; CanRead = true }
-                        else
-                            logger.LogError("User {} has no role set", opts.UserName)
-                            raise <| RequestException RENoRole
                     | Some user ->
-                        match ctx.Permissions.Find { Schema = FunQLName user.Role.Schema.Name; Name = FunQLName user.Role.Name } |> Option.get with
-                        | Ok role -> RTRole { Role = Some role; CanRead = opts.CanRead }
-                        | Error _ when opts.CanRead -> RTRole { Role = None; CanRead = true }
-                        | Error e ->
-                            logger.LogError(e, "Role for user {} is broken", opts.UserName)
-                            raise <| RequestException RENoRole
-            return RequestContext(opts, userId, roleType, logger)
+                        match user.Role with
+                        | None ->
+                            if opts.CanRead then
+                                RTRole { Role = None; CanRead = true }
+                            else
+                                logger.LogError("User {} has no role set", opts.UserName)
+                                raise <| RequestException RENoRole
+                        | Some roleRef ->
+                            match ctx.Permissions.Find roleRef |> Option.get with
+                            | Ok role -> RTRole { Role = Some role; CanRead = opts.CanRead }
+                            | Error _ when opts.CanRead -> RTRole { Role = None; CanRead = true }
+                            | Error e ->
+                                logger.LogError(e, "Role for user {} is broken", opts.UserName)
+                                raise <| RequestException RENoRole
+            let userId = maybeUser |> Option.map (fun u -> u.Id)
+            let initialUser =
+                { Id = userId
+                  Type = roleType
+                  Name = opts.UserName
+                }
+            let userInfo =
+                { Saved = initialUser
+                  Effective = initialUser
+                  Language = opts.Language
+                }
+            let args =
+                { CanRead = opts.CanRead
+                }
+            return RequestContext(ctx, userInfo, args, logger)
         }
 
     member this.User = currentUser
@@ -143,28 +202,50 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
                 source <- oldSource
         }
 
-    member this.PretendRole (newRole : ResolvedEntityRef) (func : unit -> Task<'a>) : Task<'a> =
+    member this.PretendUser (userName : UserName) (func : unit -> Task<'a>) : Task<'a> =
         task {
-            let effectiveRole =
-                match roleType with
-                | RTRoot ->
-                    match ctx.Permissions.Find newRole with
-                    | Some (Ok role) -> RTRole { Role = Some role; CanRead = opts.CanRead }
-                    | Some (Error e) ->
-                        logger.LogError(e, "Role {} is broken", newRole)
-                        raise <| RequestException RENoRole
+            checkRoot ()
+            let! maybeUser = fetchUser ctx.Transaction.System userName ctx.CancellationToken
+            let roleType =
+                match maybeUser with
                     | None ->
-                        raise <| RequestException RENoRole
-                | _ ->
-                    logger.LogError("Role pretending is only available for root users, not for {}", opts.UserName)
-                    raise <| RequestException RENoRole
-            let oldUser = currentUser
-            currentUser <- { currentUser with EffectiveType = effectiveRole }
-            try
-                return! func ()
-            finally
-                currentUser <- oldUser
+                        logger.LogError("User {} not found in users table", userName)
+                        raise <| RequestException REUserNotFound
+                    | Some user when user.IsRoot -> RTRoot
+                        | Some user ->
+                            match user.Role with
+                            | None ->
+                                if opts.CanRead then
+                                    RTRole { Role = None; CanRead = true }
+                                else
+                                    logger.LogError("User {} has no role set", userName)
+                                    raise <| RequestException RENoRole
+                            | Some roleRef ->
+                                match ctx.Permissions.Find roleRef |> Option.get with
+                                | Ok role -> RTRole { Role = Some role; CanRead = opts.CanRead }
+                                | Error e ->
+                                    logger.LogError(e, "Role for user {} is broken", userName)
+                                    raise <| RequestException RENoRole
+            let newUser =
+                { Id = maybeUser |> Option.map (fun u -> u.Id)
+                  Name = userName
+                  Type = roleType
+                }
+            return! setCurrentUser newUser func
         }
+
+    member this.PretendRole (newRole : ResolvedEntityRef) (func : unit -> Task<'a>) : Task<'a> =
+        checkRoot ()
+        let effectiveRole =
+            match ctx.Permissions.Find newRole with
+            | Some (Ok role) -> RTRole { Role = Some role; CanRead = opts.CanRead }
+            | Some (Error e) ->
+                logger.LogError(e, "Role {} is broken", newRole)
+                raise <| RequestException RENoRole
+            | None ->
+                raise <| RequestException RENoRole
+        let newUser = { currentUser.Effective with Type = effectiveRole }
+        setCurrentUser newUser func
 
     interface IRequestContext with
         member this.User = currentUser
@@ -176,3 +257,4 @@ type RequestContext private (opts : RequestParams, userId : int option, roleType
         member this.WriteEventSync addDetails = this.WriteEventSync addDetails
         member this.RunWithSource newSource func = this.RunWithSource newSource func
         member this.PretendRole newRole func = this.PretendRole newRole func
+        member this.PretendUser newUserName func = this.PretendUser newUserName func

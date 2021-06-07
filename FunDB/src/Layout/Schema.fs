@@ -43,6 +43,7 @@ let private makeSourceCheckConstraint (constr : CheckConstraint) : SourceCheckCo
 let private makeSourceIndex (index : Index) : SourceIndex =
     { Expressions = index.Expressions
       IsUnique = index.IsUnique
+      Predicate = Option.ofObj index.Predicate
     }
 
 let private makeSourceEntity (entity : Entity) : SourceEntity =

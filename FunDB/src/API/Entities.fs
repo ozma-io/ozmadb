@@ -149,7 +149,7 @@ type EntitiesAPI (rctx : IRequestContext) =
             match ctx.Layout.FindEntity(entityRef) with
             | Some entity ->
                 try
-                    let res = getEntityInfo ctx.Layout (getReadRole rctx.User.EffectiveType) entityRef entity
+                    let res = getEntityInfo ctx.Layout (getReadRole rctx.User.Effective.Type) entityRef entity
                     return Ok res
                 with
                     | :? EntityDeniedException as ex ->
@@ -180,7 +180,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     | Error BECancelled -> return Ok None
                     | Ok args ->
                         try
-                            let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.EffectiveType) entityRef args ctx.CancellationToken
+                            let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef args ctx.CancellationToken
                             rctx.WriteEventSync (fun event ->
                                 event.Type <- "insertEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
@@ -234,7 +234,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     | Error BECancelled -> return Ok ()
                     | Ok args ->
                         try
-                            do! updateEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.EffectiveType) entityRef id args ctx.CancellationToken
+                            do! updateEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef id args ctx.CancellationToken
                             rctx.WriteEventSync (fun event ->
                                 event.Type <- "updateEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
@@ -295,7 +295,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                 | Error BECancelled -> return Ok ()
                 | Ok () ->
                     try
-                        do! deleteEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.EffectiveType) entityRef id ctx.CancellationToken
+                        do! deleteEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef id ctx.CancellationToken
                         rctx.WriteEventSync (fun event ->
                             event.Type <- "deleteEntity"
                             event.SchemaName <- entityRef.Schema.ToString()

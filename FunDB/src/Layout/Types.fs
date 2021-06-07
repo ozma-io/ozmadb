@@ -55,6 +55,7 @@ type ResolvedIndex =
     { Expressions : ResolvedFieldExpr[]
       HashName : HashName // Guaranteed to be unique in an entity.
       IsUnique : bool
+      Predicate : ResolvedFieldExpr option
     }
 
 [<NoEquality; NoComparison>]

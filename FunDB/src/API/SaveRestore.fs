@@ -48,7 +48,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                     let preloadSchemas = Map.keysSet ctx.Preload.Schemas
                     let allSchemas = Map.keysSet ctx.Layout.Schemas
                     Set.toSeq (Set.difference allSchemas preloadSchemas)
-            if not (canSave rctx.User.Type) then
+            if not (canSave rctx.User.Effective.Type) then
                 logger.LogError("Dump access denied")
                 rctx.WriteEvent (fun event ->
                     event.Type <- "saveSchema"
@@ -80,7 +80,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
     // but Entities API has its own `DEFER CONSTRAINTS` management.
     member this.RestoreSchemas (dumps : Map<SchemaName, SchemaDump>) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
         task {
-            if not (canRestore rctx.User.EffectiveType) then
+            if not (canRestore rctx.User.Effective.Type) then
                 logger.LogError("Restore access denied")
                 rctx.WriteEvent (fun event ->
                     event.Type <- "restoreSchema"

@@ -59,7 +59,7 @@ type IndexKey =
         member this.ToSQLString () =
             match this with
             | IKColumn col -> col.ToSQLString()
-            | IKExpression expr -> sprintf "(%s)" (expr.Value.ToSQLString())
+            | IKExpression expr -> sprintf "(%O)" expr
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -68,6 +68,7 @@ type IndexKey =
 type IndexMeta =
     { Keys : IndexKey[]
       IsUnique : bool
+      Predicate : StringComparable<ValueExpr> option
     }
 
 [<NoEquality; NoComparison>]
@@ -369,7 +370,11 @@ type SchemaOperation =
                     pars.Keys |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
                 let uniqueStr = if pars.IsUnique then "UNIQUE" else ""
                 let suffixStr = sprintf "INDEX %s ON %s (%s)" (index.Name.ToSQLString()) ({ index with Name = table }.ToSQLString()) keysStr
-                String.concatWithWhitespaces ["CREATE"; uniqueStr; suffixStr]
+                let predStr =
+                    match pars.Predicate with
+                    | None -> ""
+                    | Some pred -> sprintf "WHERE %O" pred
+                String.concatWithWhitespaces ["CREATE"; uniqueStr; suffixStr; predStr]
             | SORenameIndex (index, toName) -> sprintf "ALTER INDEX %s RENAME TO %s" (index.ToSQLString()) (toName.ToSQLString())
             | SODropIndex index -> sprintf "DROP INDEX %s" (index.ToSQLString())
             | SOCreateOrReplaceFunction (func, args, def) ->

@@ -50,6 +50,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
         public string Name { get; }
         public string[] Expressions { get; }
         public bool IsUnique { get; set; }
+        public string? Predicate { get; set; }
 
         public IndexAttribute(string name, string[] expressions)
         {

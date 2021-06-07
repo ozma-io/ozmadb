@@ -32,17 +32,26 @@ type private MetaBuilder (layout : Layout) =
             col.ColumnName
         SQL.CMUnique (Array.map compileColumn constr.Columns, SQL.DCNotDeferrable)
 
-    let makeIndexMeta (entity : ResolvedEntity) (index : ResolvedIndex) : SQL.IndexMeta =
-        let compileExpr expr = compileRelatedExpr expr |> String.comparable |> SQL.IKExpression
+    let makeIndexMeta (ref : ResolvedEntityRef) (entity : ResolvedEntity) (index : ResolvedIndex) : SQL.IndexMeta =
+        let compileKeyExpr expr = compileRelatedExpr expr |> String.comparable |> SQL.IKExpression
         let compileKey : ResolvedFieldExpr -> SQL.IndexKey = function
             | FERef { Ref = { Ref = VRColumn col } } as expr ->
                 match Map.tryFind col.Name entity.ColumnFields with
                 | Some col -> SQL.IKColumn col.ColumnName
-                | None -> compileExpr expr
-            | expr -> compileExpr expr
+                | None -> compileKeyExpr expr
+            | expr -> compileKeyExpr expr
+
+        let predicate = Option.map compileRelatedExpr index.Predicate
+        let predicate =
+            match entity.Parent with
+            | None -> predicate
+            | Some parent ->
+                let check = makeCheckExpr subEntityColumn layout ref
+                Option.unionWith (curry SQL.VEAnd) (Some check) predicate
 
         { Keys = Array.map compileKey index.Expressions
           IsUnique = index.IsUnique
+          Predicate = Option.map String.comparable predicate
         } : SQL.IndexMeta
 
     let makeColumnFieldMeta (ref : ResolvedFieldRef) (columnName : SQL.ColumnName) (entity : ResolvedEntity) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.MigrationKey * (SQL.ConstraintName * SQL.ConstraintMeta)) seq =
@@ -153,6 +162,7 @@ type private MetaBuilder (layout : Layout) =
                         let subEntityIndex =
                             { Keys = [| SQL.IKColumn sqlFunSubEntity |]
                               IsUnique = false
+                              Predicate = None
                             } : SQL.IndexMeta
                         let indexes = Seq.singleton (typeIndexKey, (typeIndexName, subEntityIndex))
 
@@ -221,19 +231,20 @@ type private MetaBuilder (layout : Layout) =
         let makeIndex (name, index : ResolvedIndex) =
             let key = sprintf "__index__%s__%s" entity.HashName index.HashName
             let sqlName = SQL.SQLName key
-            (key, (sqlName, makeIndexMeta entity index))
+            (key, (sqlName, makeIndexMeta entityRef entity index))
         let indexes = entity.Indexes |> Map.toSeq |> Seq.map makeIndex
 
         let makeReferenceIndex (name, field : ResolvedColumnField) =
             match field with
             | { InheritedFrom = None; FieldType = FTReference refEntityRef } ->
                 // We build indexes for all references to speed up non-local check constraint integrity lookups,
-                // and DELETE operations on related fields (PostgreSQL will make use of this index internally).
+                // and DELETE operations on related fields (PostgreSQL will make use of this index internally, that's why we don't set a predicate).
                 let key = sprintf "__refindex__%s__%s" entity.HashName field.HashName
                 let sqlName = SQL.SQLName key
                 let refIndex =
                     { Keys = [| SQL.IKColumn field.ColumnName |]
                       IsUnique = false
+                      Predicate = None
                     } : SQL.IndexMeta
                 Some (key, (sqlName, refIndex))
             | _ -> None

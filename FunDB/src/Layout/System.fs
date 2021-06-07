@@ -49,6 +49,7 @@ let private makeSourceIndex (index : IndexAttribute) : FunQLName * SourceIndex =
     let res =
         { Expressions = index.Expressions
           IsUnique = index.IsUnique
+          Predicate = Option.ofObj index.Predicate
         }
     (FunQLName index.Name, res)
 

@@ -18,6 +18,8 @@ open Npgsql
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.ContextCache
@@ -136,6 +138,16 @@ let commitAndReturn (handler : HttpHandler) (api : IFunDBAPI) (next : HttpFunc) 
     }
 
 let commitAndOk : IFunDBAPI -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
+
+let inline private setPretendRole (api : IFunDBAPI) (pretendRole : ResolvedEntityRef option) (func : unit -> Task<'a>) : Task<'a> =
+    match pretendRole with
+    | None -> func ()
+    | Some roleType -> api.Request.PretendRole roleType func
+
+let inline setPretends (api : IFunDBAPI) (pretendUser : UserName option) (pretendRole : ResolvedEntityRef option) (func : unit -> Task<'a>) : Task<'a> =
+    match pretendUser with
+    | None -> setPretendRole api pretendRole func
+    | Some userName -> api.Request.PretendUser userName (fun () -> setPretendRole api pretendRole func)
 
 type RealmAccess =
     { Roles : string[]
@@ -299,7 +311,6 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
                           CanRead = inst.CanRead
                           Language = lang
                           Context = dbCtx
-                          Source = ESAPI
                         }
                 let currTime = DateTime.UtcNow
                 match inst.Instance.AccessedAt with

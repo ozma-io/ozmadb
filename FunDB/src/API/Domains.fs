@@ -25,7 +25,7 @@ type DomainsAPI (rctx : IRequestContext) =
                         match (rowId, domain.RowSpecific) with
                         | (Some id, Some rowSpecific) -> (rowSpecific, Map.add (PLocal funId) (FInt id) argValues)
                         | _ -> (domain.Generic, argValues)
-                    let! ret = getDomainValues ctx.Transaction.Connection.Query ctx.Layout expr (getReadRole rctx.User.Type) argValues chunk ctx.CancellationToken
+                    let! ret = getDomainValues ctx.Transaction.Connection.Query ctx.Layout expr (getReadRole rctx.User.Effective.Type) argValues chunk ctx.CancellationToken
                     return Ok
                         { Values = ret.Values
                           PunType = ret.PunType

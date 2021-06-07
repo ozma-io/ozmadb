@@ -348,6 +348,8 @@ namespace FunWithFlags.FunDBSchema.System
         public string[] Expressions { get; set; } = null!;
         [ColumnField("bool", Default="false")]
         public bool IsUnique { get; set; }
+        [ColumnField("string")]
+        public string? Predicate { get; set; }
     }
 
     public class UserView

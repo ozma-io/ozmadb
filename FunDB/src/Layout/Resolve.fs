@@ -493,10 +493,14 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | FERef { Ref = { Ref = VRColumn { Name = name } } } when name = funId || name = funSubEntity -> raisef ResolveLayoutException "System columns are automatically indexed: %O" expr
             | _ -> ()
             expr.Expr
+        
+        let exprs = Array.map parseExpr index.Expressions
+        let predicate = Option.map (fun x -> (resolveLocalExpr entityRef x).Expr) index.Predicate
 
-        { Expressions = Array.map parseExpr index.Expressions
+        { Expressions = exprs
           HashName = makeHashName indexName
           IsUnique = index.IsUnique
+          Predicate = predicate
         }
 
     let resolveEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) : ErroredEntity * ResolvedEntity =

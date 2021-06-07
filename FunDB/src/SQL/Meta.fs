@@ -340,10 +340,10 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 
     let makeIndexMeta (columnIds : TableColumnIds) (index : Index) : (IndexName * IndexMeta) =
         let expressions =
-            if isNull index.Source then
+            if isNull index.ExprsSource then
                 [||]
             else
-                match parse tokenizeSQL valueExprList index.Source with
+                match parse tokenizeSQL valueExprList index.ExprsSource with
                 | Error msg -> raisef SQLMetaException "Cannot parse index expressions: %s" msg
                 | Ok exprs -> exprs
 
@@ -356,10 +356,19 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                 exprI <- exprI + 1
                 IKExpression <| String.comparable ret
 
+        let pred =
+            if isNull index.PredSource then
+                None
+            else
+                match parse tokenizeSQL valueExpr index.PredSource with
+                | Error msg -> raisef SQLMetaException "Cannot parse index predicate: %s" msg
+                | Ok pred -> Some <| String.comparable pred
+
         let keys = Array.map makeKey index.IndKey
         let ret =
             { Keys = keys
               IsUnique = index.IndIsUnique
+              Predicate = pred
             } : IndexMeta
         (SQLName index.Class.RelName, ret)
 

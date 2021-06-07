@@ -18,6 +18,7 @@ type SourceCheckConstraint =
 type SourceIndex =
     { Expressions : string[]
       IsUnique : bool
+      Predicate : string option
     }
 
 type SourceColumnField =

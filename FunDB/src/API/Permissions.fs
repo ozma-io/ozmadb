@@ -9,7 +9,7 @@ type PermissionsAPI (rctx : IRequestContext) =
     let logger = ctx.LoggerFactory.CreateLogger<PermissionsAPI>()
 
     member this.UserPermissions =
-        { IsRoot = rctx.User.Type.IsRoot
+        { IsRoot = rctx.User.Effective.Type.IsRoot
         }
 
     interface IPermissionsAPI with

@@ -56,6 +56,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
             modelBuilder.Entity<Index>()
                 .Property<string[]>("IndExprs");
+            modelBuilder.Entity<Index>()
+                .Property<string>("IndPred");
 
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {
@@ -168,13 +170,15 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 .Select(index => new
                     {
                         Index = index,
-                        Source = PgGetExpr(EF.Property<string>(index, "IndExprs"), index.IndexRelId),
+                        ExprsSource = PgGetExpr(EF.Property<string>(index, "IndExprs"), index.IndexRelId),
+                        PredSource = PgGetExpr(EF.Property<string>(index, "IndPred"), index.IndexRelId),
                     })
                 .ToListAsync();
             var indexes = indexesList
                 .Select(index =>
                 {
-                    index.Index.Source = index.Source;
+                    index.Index.ExprsSource = index.ExprsSource;
+                    index.Index.PredSource = index.PredSource;
                     return index.Index;
                 })
                 .GroupBy(index => index.IndRelId)
@@ -388,7 +392,9 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Class? RelClass { get; set; }
 
         [NotMapped]
-        public string? Source { get; set; }
+        public string? ExprsSource { get; set; }
+        [NotMapped]
+        public string? PredSource { get; set; }
     }
 
     public class Depend

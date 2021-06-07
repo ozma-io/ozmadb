@@ -85,7 +85,7 @@ type UserViewsAPI (rctx : IRequestContext) =
             | Error e -> return Error e
             | Ok uv ->
                 try
-                    match rctx.User.EffectiveType with
+                    match rctx.User.Effective.Type with
                     | RTRoot -> ()
                     | RTRole role when role.CanRead -> ()
                     | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
@@ -106,7 +106,7 @@ type UserViewsAPI (rctx : IRequestContext) =
 
     member this.GetUserViewExplain (source : UserViewSource) (maybeRawArguments : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
         task {
-            if not (canExplain rctx.User.Type) then
+            if not (canExplain rctx.User.Saved.Type) then
                 logger.LogError("Explain access denied")
                 rctx.WriteEvent (fun event ->
                     event.Type <- "getUserViewExplain"
@@ -118,7 +118,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                 | Error e -> return Error e
                 | Ok uv ->
                     let compiled =
-                        match rctx.User.EffectiveType with
+                        match rctx.User.Effective.Type with
                         | RTRoot -> uv.UserView.Compiled
                         | RTRole role when role.CanRead -> uv.UserView.Compiled
                         | RTRole role ->
@@ -162,7 +162,7 @@ type UserViewsAPI (rctx : IRequestContext) =
             | Ok uv ->
                 try
                     let compiled =
-                        match rctx.User.EffectiveType with
+                        match rctx.User.Effective.Type with
                         | RTRoot -> uv.UserView.Compiled
                         | RTRole role when role.CanRead -> uv.UserView.Compiled
                         | RTRole role ->
