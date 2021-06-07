@@ -170,8 +170,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 .Select(index => new
                     {
                         Index = index,
-                        ExprsSource = PgGetExpr(EF.Property<string>(index, "IndExprs"), index.IndexRelId),
-                        PredSource = PgGetExpr(EF.Property<string>(index, "IndPred"), index.IndexRelId),
+                        ExprsSource = PgGetExpr(EF.Property<string>(index, "IndExprs"), index.IndRelId),
+                        PredSource = PgGetExpr(EF.Property<string>(index, "IndPred"), index.IndRelId),
                     })
                 .ToListAsync();
             var indexes = indexesList
