@@ -406,7 +406,7 @@ let private compileBinaryOp = function
     | BOJsonArrow -> SQL.BOJsonArrow
     | BOJsonTextArrow -> SQL.BOJsonTextArrow
 
-let private makeCheckExprFor (subEntityColumn : SQL.ValueExpr) (entities : IEntityBits seq) : SQL.ValueExpr =
+let makeCheckExprFor (subEntityColumn : SQL.ValueExpr) (entities : IEntityBits seq) : SQL.ValueExpr =
     let options = entities |> Seq.map (fun x -> x.TypeName |> SQL.VString |> SQL.VEValue) |> Seq.toArray
 
     if Array.isEmpty options then
@@ -511,7 +511,7 @@ let private infoFromSignature (domains : TempDomains) (signature : SelectSignatu
 let joinPath (layout : Layout) (from : SQL.FromExpr) (joinKey : JoinKey) (join : JoinPath) : SQL.FromExpr =
     let tableRef = { Schema = None; Name = joinKey.Table } : SQL.TableRef
     let toTableRef = { Schema = None; Name = join.Name } : SQL.TableRef
-    let entity = layout.FindEntity joinKey.ToRootEntity |> Option.get
+    let entity = layout.FindEntity join.RealEntity |> Option.get
 
     let fromColumn = SQL.VEColumn { Table = Some tableRef; Name = joinKey.Column }
     let toColumn = SQL.VEColumn { Table = Some toTableRef; Name = sqlFunId }
@@ -1690,9 +1690,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     let checkExpr = makeCheckExpr subEntityCol layout entityRef
                     (fromExpr, Some checkExpr)
                 | Some parent ->
-                     let subEntityCol = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
-                     let checkExpr = makeCheckExpr subEntityCol layout entityRef
-                     let select =
+                    let subEntityCol = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
+                    let checkExpr = makeCheckExpr subEntityCol layout entityRef
+                    let select =
                         { Columns = [| SQL.SCAll None |]
                           From = Some <| SQL.FTable (null, None, tableRef)
                           Where = Some checkExpr
@@ -1700,9 +1700,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                           OrderLimit = SQL.emptyOrderLimitClause
                           Extra = null
                         } : SQL.SingleSelectExpr
-                     let expr = { Extra = ann; CTEs = None; Tree = SQL.SSelect select } : SQL.SelectExpr
-                     let subExpr = SQL.FSubExpr (newAlias, expr)
-                     (subExpr, None)
+                    let expr = { Extra = ann; CTEs = None; Tree = SQL.SSelect select } : SQL.SelectExpr
+                    let subExpr = SQL.FSubExpr (newAlias, expr)
+                    (subExpr, None)
             let entityInfo =
                 { Ref = entityRef
                   IsInner = isInner

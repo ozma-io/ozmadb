@@ -13,6 +13,7 @@ and [<NoEquality; NoComparison>] OptimizedFieldExpr<'e, 'f> when 'e :> IFunQLNam
     | OFEOr of HashedFieldExprs<'e, 'f>
     | OFEAnd of HashedFieldExprs<'e, 'f>
     | OFEExpr of StringComparable<FieldExpr<'e, 'f>>
+    | OFENot of OptimizedFieldExpr<'e, 'f>
     | OFETrue
     | OFEFalse
     with
@@ -22,6 +23,7 @@ and [<NoEquality; NoComparison>] OptimizedFieldExpr<'e, 'f> when 'e :> IFunQLNam
             match this with
             | OFEOr vals -> vals |> Map.values |> Seq.map (fun v -> v.ToFieldExpr ()) |> Seq.fold1 (curry FEOr)
             | OFEAnd vals -> vals |> Map.values |> Seq.map (fun v -> v.ToFieldExpr ()) |> Seq.fold1 (curry FEAnd)
+            | OFENot expr -> FENot (expr.ToFieldExpr ())
             | OFETrue -> FEValue (FBool true)
             | OFEFalse -> FEValue (FBool false)
             | OFEExpr e -> e.Value
@@ -30,6 +32,7 @@ and [<NoEquality; NoComparison>] OptimizedFieldExpr<'e, 'f> when 'e :> IFunQLNam
             match this with
             | OFEOr vals -> vals |> Map.values |> Seq.map (fun v -> sprintf "(%s)" (v.ToFunQLString())) |> String.concat " OR "
             | OFEAnd vals -> vals |> Map.values |> Seq.map (fun v -> sprintf "(%s)" (v.ToFunQLString())) |> String.concat " AND "
+            | OFENot expr -> sprintf "NOT (%s)" (expr.ToFunQLString())
             | OFETrue -> "TRUE"
             | OFEFalse -> "FALSE"
             | OFEExpr e -> e.String
@@ -49,8 +52,8 @@ let orFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f>
     | (OFEOr ors, expr)
     | (expr, OFEOr ors) -> OFEOr (Map.add (expr.ToString()) expr ors)
     | (expr1, expr2) ->
-        let expr1Str = expr1.ToString()
-        let expr2Str = expr2.ToString()
+        let expr1Str = string expr1
+        let expr2Str = string expr2
         if expr1Str = expr2Str then
             expr1
         else
@@ -66,12 +69,23 @@ let andFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f
     | (OFEAnd ands, expr)
     | (expr, OFEAnd ands) -> OFEAnd (Map.add (expr.ToString()) expr ands)
     | (expr1, expr2) ->
-        let expr1Str = expr1.ToString()
-        let expr2Str = expr2.ToString()
+        let expr1Str = string expr1
+        let expr2Str = string expr2
         if expr1Str = expr2Str then
             expr1
         else
             Map.empty |> Map.add expr1Str expr1 |> Map.add expr2Str expr2 |> OFEAnd
+
+let rec notFieldExpr (a : OptimizedFieldExpr<'e, 'f>) : OptimizedFieldExpr<'e, 'f> =
+    match a with
+    | OFETrue -> OFEFalse
+    | OFEFalse -> OFETrue
+    | OFENot expr -> expr
+    | OFEAnd ands -> OFEOr (invertHashedExprs ands)
+    | OFEOr ors -> OFEAnd (invertHashedExprs ors)
+    | expr -> OFENot expr
+
+and private invertHashedExprs exprs = exprs |> Map.values |> Seq.map (notFieldExpr >> (fun x -> (string x, x))) |> Map.ofSeq
 
 let optimizeFieldValue : FieldValue -> OptimizedFieldExpr<'e, 'f> = function
     | FBool false -> OFEFalse
@@ -89,6 +103,7 @@ let optimizedIsTrue : OptimizedFieldExpr<'e, 'f> -> bool = function
 let rec optimizeFieldExpr : FieldExpr<'e, 'f> -> OptimizedFieldExpr<'e, 'f> = function
     | FEOr (a, b) -> orFieldExpr (optimizeFieldExpr a) (optimizeFieldExpr b)
     | FEAnd (a, b) -> andFieldExpr (optimizeFieldExpr a) (optimizeFieldExpr b)
+    | FENot expr -> notFieldExpr (optimizeFieldExpr expr)
     | FEValue v -> optimizeFieldValue v
     | expr -> OFEExpr (String.comparable expr)
 
@@ -96,6 +111,7 @@ let rec mapOptimizedFieldExpr (f : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) (
     match e with
     | OFEOr ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 orFieldExpr
     | OFEAnd ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 andFieldExpr
+    | OFENot expr -> notFieldExpr (mapOptimizedFieldExpr f expr)
     | OFETrue -> optimizeFieldExpr (f (FEValue (FBool true)))
     | OFEFalse -> optimizeFieldExpr (f (FEValue (FBool false)))
     | OFEExpr expr -> optimizeFieldExpr (f expr.Value)

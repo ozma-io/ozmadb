@@ -42,14 +42,27 @@ type private MetaBuilder (layout : Layout) =
             | expr -> compileKeyExpr expr
 
         let predicate = Option.map compileRelatedExpr index.Predicate
+        let possibleEntities = allPossibleEntities layout ref |> Seq.map snd |> Array.ofSeq
         let predicate =
             match entity.Parent with
             | None -> predicate
             | Some parent ->
-                let check = makeCheckExpr subEntityColumn layout ref
+                let check = makeCheckExprFor subEntityColumn possibleEntities
                 Option.unionWith (curry SQL.VEAnd) (Some check) predicate
 
-        { Keys = Array.map compileKey index.Expressions
+        let userKeys = Array.map compileKey index.Expressions
+
+        let checkSubEntity = function
+            | SQL.IKColumn col when col = sqlFunSubEntity -> true
+            | _ -> false
+        let userKeys =
+            if hasSubType entity && not index.IsUnique && not (Array.exists checkSubEntity userKeys) && Array.length possibleEntities > 1 then
+                // Add `sub_entity` as the last column, because we often will also filter on `sub_entity`.
+                Array.append userKeys [| SQL.IKColumn sqlFunSubEntity |]
+            else
+                userKeys
+
+        { Keys = userKeys
           IsUnique = index.IsUnique
           Predicate = Option.map String.comparable predicate
         } : SQL.IndexMeta

@@ -77,13 +77,26 @@ let private renameRestriction (entityRef : EntityRef) (restr : ResolvedOptimized
 
 type private TypeCheckedExprs = Map<string, ResolvedOptimizedFieldExpr * ResolvedOptimizedFieldExpr>
 
+let private optimizeTypeCheckedExprs merge vals =
+    vals
+    |> Map.values
+    |> Seq.map (fun (check, expr) -> (string check, (check, expr)))
+    |> Map.ofSeqWith (fun name (check1, expr1) (check2, expr2) -> (check1, merge expr1 expr2))
+    |> Map.values
+    |> Seq.map (fun (check, expr) -> (string expr, (check, expr)))
+    |> Map.ofSeq
+
 let private unionTypeCheckedOrExprs = Map.unionWith (fun name (check1, expr1) (check2, expr2) -> (orFieldExpr check1 check2, expr2))
 
 let private buildTypeCheckedOrExprs = Map.values >> Seq.map (fun (check, expr) -> andFieldExpr check expr) >> Seq.fold orFieldExpr OFEFalse
 
+let private optimizeTypeCheckedOrExprs vals = optimizeTypeCheckedExprs orFieldExpr vals
+
 let private unionTypeCheckedAndExprs = Map.unionWith (fun name (check1, expr1) (check2, expr2) -> (andFieldExpr check1 check2, expr2))
 
 let private buildTypeCheckedAndExprs = Map.values >> Seq.map (fun (check, expr) -> orFieldExpr check expr) >> Seq.fold andFieldExpr OFETrue
+
+let private optimizeTypeCheckedAndExprs vals = optimizeTypeCheckedExprs andFieldExpr vals
 
 // Filter entities, allowing only those that satisfy access conditions, taking into account parent and children permissions.
 let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedOptimizedFieldExpr) (layout : Layout) (allowedEntity : FlatAllowedEntity) (allowedFields : FilteredAllowedEntity) (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr =
@@ -110,6 +123,11 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedO
 
         FEInheritedFrom (boundFieldRef, subEntityRef)
 
+    let parentCheck =
+        match selfEntity.Parent with
+        | None -> OFETrue
+        | Some parent -> optimizeFieldExpr (checkEntityForExpr entityRef)
+
     // We add restrictions from all parents, including the entity itself.
     let rec buildParentOrRestrictions (oldRestrs : TypeCheckedExprs) (currRef : ResolvedEntityRef) =
         let newRestrs =
@@ -118,7 +136,7 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedO
             | Some child ->
                 let currRestr = accessor child
                 let currExpr = renameRestriction relaxedRef currRestr
-                Map.add (string currExpr) (OFETrue, currExpr) oldRestrs
+                Map.add (string currExpr) (parentCheck, currExpr) oldRestrs
         let entity = layout.FindEntity currRef |> Option.get
         match entity.Parent with
         | None -> newRestrs
@@ -140,6 +158,7 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedO
         |> Map.keys
         |> Seq.map buildChildOrRestrictions
         |> Seq.fold unionTypeCheckedOrExprs parentOrRestrs
+        |> optimizeTypeCheckedOrExprs
         |> buildTypeCheckedOrExprs
 
     // We restrict access based on parent fields that are accessed.
@@ -149,7 +168,7 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedO
             | None -> oldRestrs
             | Some fieldRestr ->
                 let currExpr = renameRestriction relaxedRef fieldRestr
-                Map.add (string currExpr) (OFEFalse, currExpr) oldRestrs
+                Map.add (string currExpr) (notFieldExpr parentCheck, currExpr) oldRestrs
         let entity = layout.FindEntity currRef |> Option.get
         match entity.Parent with
         | None -> newRestrs
@@ -161,7 +180,7 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedO
         | None -> Map.empty
         | Some fieldRestr ->
             let expr = renameRestriction relaxedRef fieldRestr
-            let typeCheck = checkEntityForExpr currRef |> FENot |> optimizeFieldExpr
+            let typeCheck = checkEntityForExpr currRef |> optimizeFieldExpr |> notFieldExpr
             Map.singleton (string expr) (typeCheck, expr)
 
     let parentAndRestrs = buildParentAndRestrictions Map.empty entityRef
@@ -170,5 +189,6 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedO
         |> Map.keys
         |> Seq.map buildChildAndRestrictions
         |> Seq.fold unionTypeCheckedAndExprs parentAndRestrs
+        |> optimizeTypeCheckedAndExprs
         |> buildTypeCheckedAndExprs
     andFieldExpr orRestrs andRestrs
