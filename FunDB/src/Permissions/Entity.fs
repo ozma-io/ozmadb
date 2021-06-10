@@ -54,21 +54,21 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.U
         match Map.tryFind entity.Root role.Flattened with
         | Some flat -> flat
         | _ -> raisef PermissionsEntityException "Access denied to update"
+    
+    let getUsedField (extra : obj, expr) =
+        let colInfo = extra :?> RestrictedColumnInfo
+        let field = Map.find colInfo.Name entity.ColumnFields
+        let parentEntity = Option.defaultValue tableInfo.Ref field.InheritedFrom
+        addUsedField parentEntity.Schema parentEntity.Name colInfo.Name Map.empty
+    let usedSchemas = query.Expression.Columns |> Map.values |> Seq.map getUsedField |> Seq.fold mergeUsedSchemas Map.empty
 
-    let accessor (derived : FlatAllowedDerivedEntity) =
-        andFieldExpr derived.Select derived.Update
-    let updateRestr = applyRestrictionExpression accessor layout flattened tableInfo.Ref
-
-    let addRestriction restriction (extra : obj, col) =
-        match extra with
-        | :? RestrictedColumnInfo as colInfo ->
-            let field = Map.find colInfo.Name entity.ColumnFields
-            let parentEntity = Option.defaultValue tableInfo.Ref field.InheritedFrom
-            match Map.tryFind { Entity = parentEntity; Name = colInfo.Name } flattened.Fields with
-            | Some { Change = true; Select = select } -> andFieldExpr restriction select
-            | _ -> raisef PermissionsEntityException "Access denied to update field %O" colInfo.Name
-        | _ -> restriction
-    let fieldsRestriction = query.Expression.Columns |> Map.values |> Seq.fold addRestriction updateRestr
+    let fieldsAccess =
+        try
+            let access = filterAccessForUsedSchemas (fun field -> if field.Change then field.Select else OFEFalse) layout role usedSchemas
+            Map.find entity.Root access
+        with
+        | :? PermissionsApplyException as e -> raisefWithInner PermissionsEntityException e ""
+    let fieldsRestriction = applyRestrictionExpression (fun derived -> derived.Update) layout flattened fieldsAccess tableInfo.Ref
 
     match fieldsRestriction with
     | OFEFalse -> raisef PermissionsEntityException "Access denied to update"

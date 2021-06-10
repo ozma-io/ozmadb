@@ -29,23 +29,26 @@ let private checkName (FunQLName name) : unit =
 
 type private HalfResolvedEntity =
     { Allowed : AllowedEntity
-      Flat : FlatAllowedEntity
+      Flattened : FlatAllowedDerivedEntity
       Error : exn option
     }
 
-let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (ent : AllowedEntity) : FlatAllowedEntity =
+let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEnt : FlatAllowedDerivedEntity option) (ent : AllowedEntity) : Map<ResolvedFieldRef,AllowedField> * FlatAllowedDerivedEntity =
     let fields = ent.Fields |> Map.toSeq |> Seq.map (fun (name, field) -> ({ Entity = entityRef; Name = name }, field)) |> Map.ofSeq
 
-    let derived =
+    let select =
+        match ent.Select with
+        | Some sel -> sel
+        | None -> parentEnt |> Option.map (fun pent -> pent.Select) |> Option.defaultValue OFEFalse
+    let ret =
         { Check = ent.Check
           Insert = ent.Insert
-          Select = ent.Select
-          Update = ent.Update
-          Delete = ent.Delete
+          Select = select
+          Update = andFieldExpr select ent.Update
+          Delete = andFieldExpr select ent.Delete
         }
-    { Children = Map.singleton entityRef derived
-      Fields = fields
-    }
+
+    (fields, ret)
 
 let private mergeField (a : AllowedField) (b : AllowedField) : AllowedField =
     { Change = a.Change || b.Change
@@ -65,9 +68,11 @@ let private mergeFlatEntity (a : FlatAllowedEntity) (b : FlatAllowedEntity) : Fl
       Fields = Map.unionWith (fun name -> mergeField) a.Fields b.Fields
     }
 
-type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb : SourceAllowedDatabase, startingFlattened : FlatAllowedDatabase) =
+let private mergeFlatAllowedDatabase = Map.unionWith (fun name -> mergeFlatEntity)
+
+type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb : SourceAllowedDatabase) =
     let mutable resolved : Map<ResolvedEntityRef, Result<HalfResolvedEntity, AllowedEntityError>> = Map.empty
-    let mutable flattened = startingFlattened
+    let mutable flattened = Map.empty
 
     let resolveRestriction (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowIds : bool) (where : string) : ResolvedOptimizedFieldExpr =
         let whereExpr =
@@ -105,10 +110,10 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             with
             | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
 
-        let resolveOne allowIds = Option.map (resolveRestriction entityRef entity allowIds) >> Option.defaultValue OFEFalse
+        let resolveOne allowIds = Option.map (resolveRestriction entityRef entity allowIds)
         let fields = allowedEntity.Fields |> Map.map mapField
 
-        let check = resolveOne false allowedEntity.Check
+        let check = resolveOne false allowedEntity.Check |> Option.defaultValue OFEFalse
 
         let select = resolveOne true allowedEntity.Select
 
@@ -131,76 +136,87 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             }
         (error, ret)
 
-    let checkFlatEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowedEntity : AllowedEntity) (flat : FlatAllowedEntity) : exn option * FlatAllowedDerivedEntity =
+    let rec checkParentRowAccess (entity : ResolvedEntity) (check : AllowedEntity option -> unit) =
+        match entity.Parent with
+        | None -> ()
+        | Some parent ->
+            let parentEntity = layout.FindEntity parent |> Option.get
+            if not parentEntity.IsAbstract then
+                // It's impossible to have broken entity parent access.
+                let parentAllowed = Map.tryFind parent resolved |> Option.map (fun ent -> (Result.get ent).Allowed)
+                check parentAllowed
+            else
+                checkParentRowAccess parentEntity check
+
+    let checkEntity (entity : ResolvedEntity) (allowedEntity : AllowedEntity) : exn option * AllowedEntity =
         let mutable error = None
 
-        let myPerms = Map.find entityRef flat.Children
+        let iterField (name : FieldName) (allowedField : AllowedField) =
+            try
+                if allowedField.Change && optimizedIsFalse allowedEntity.Check then
+                    raisef ResolvePermissionsException "Cannot allow to change without providing check expression"
+            with
+            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
 
-        let iterField (ref : ResolvedFieldRef) (allowedField : AllowedField) =
-            if ref.Entity = entityRef then
-                try
-                    if allowedField.Change && optimizedIsFalse myPerms.Check then
-                        raisef ResolvePermissionsException "Cannot allow to change without providing check expression"
-                with
-                | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" ref
+        Map.iter iterField allowedEntity.Fields
 
-        Map.iter iterField flat.Fields
-
-        let myPerms =
-            if myPerms.Insert then
+        let allowedEntity =
+            if allowedEntity.Insert then
                 try
                     if entity.IsAbstract then
                         raisef ResolvePermissionsException "Cannot allow insertion of abstract entities"
+                    checkParentRowAccess entity <| function
+                        | Some { Insert = true } -> ()
+                        | _ -> raisef ResolvePermissionsException "Cannot insert to child entity when parent entity insert is forbidden"
                     // Check that we can change all required fields.
-                    if optimizedIsFalse myPerms.Check then
+                    if optimizedIsFalse allowedEntity.Check then
                         raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
                     for KeyValue(fieldName, field) in entity.ColumnFields do
                         if Option.isNone field.DefaultValue && not field.IsNullable then
-                            let parentEntity = Option.defaultValue entityRef field.InheritedFrom
-                            match Map.tryFind { Entity = parentEntity; Name = fieldName } flat.Fields with
+                            match Map.tryFind fieldName allowedEntity.Fields with
                             | Some { Change = true } -> ()
                             | _ -> raisef ResolvePermissionsException "Required field %O is not allowed for inserting" fieldName
-                    myPerms
+                    allowedEntity
                 with
                 | :? ResolvePermissionsException as e when allowedEntity.AllowBroken || forceAllowBroken ->
                     error <- Some (e :> exn)
-                    { myPerms with Insert = false }
+                    { allowedEntity with Insert = false }
             else
-                myPerms
+                allowedEntity
 
-        if not (optimizedIsFalse myPerms.Update) then
+        if not (optimizedIsFalse allowedEntity.Update) then
             // Check that we can change all required fields.
-            if optimizedIsFalse myPerms.Check then
+            if optimizedIsFalse allowedEntity.Check then
                 raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
-            if optimizedIsFalse myPerms.Select then
-                raisef ResolvePermissionsException "Cannot allow to update without allowing to select"
 
         let myPerms =
-            if not (optimizedIsFalse myPerms.Delete) then
+            if not (optimizedIsFalse allowedEntity.Delete) then
                 try
+                    checkParentRowAccess entity <| function
+                        | Some access when not (optimizedIsFalse access.Delete) -> ()
+                        | _ -> raisef ResolvePermissionsException "Cannot delete from child entity when parent entity delete is forbidden"
                     // Check that we can can view all column fields.
                     if entity.IsAbstract then
                         raisef ResolvePermissionsException "Cannot allow deletion of abstract entities"
-                    if optimizedIsFalse myPerms.Select then
-                        raisef ResolvePermissionsException "Cannot allow to delete without allowing to select"
                     for KeyValue(fieldName, field) in entity.ColumnFields do
-                        let parentEntity = Option.defaultValue entityRef field.InheritedFrom
-                        match Map.tryFind { Entity = parentEntity; Name = fieldName } flat.Fields with
+                        match Map.tryFind fieldName allowedEntity.Fields with
                         | Some f when not (optimizedIsFalse f.Select) -> ()
-                        | _ -> raisef ResolvePermissionsException "Field %O is not allowed for selection, which is required for deletion" fieldName
-                    myPerms
+                         | _ -> raisef ResolvePermissionsException "Field %O is not allowed for selection, which is required for deletion" fieldName
+                    allowedEntity
                 with
                 | :? ResolvePermissionsException as e when allowedEntity.AllowBroken || forceAllowBroken ->
                     error <- Some (e :> exn)
-                    { myPerms with Delete = OFEFalse }
+                    { allowedEntity with Delete = OFEFalse }
             else
-                myPerms
+                allowedEntity
 
-        (error, myPerms)
+        (error, allowedEntity)
 
-    let rec resolveOneAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : HalfResolvedEntity =
-        // Recursively resolve access rights for entity parents.
-        let rec resolveParent parentRef =
+    // Recursively resolve access rights for entity parents.
+    let rec resolveParentEntity (entity : ResolvedEntity) : FlatAllowedDerivedEntity option =
+        match entity.Parent with
+        | None -> None
+        | Some parentRef ->
             let parentRights =
                 match Map.tryFind parentRef.Schema allowedDb.Schemas with
                 | None -> None
@@ -208,39 +224,44 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             match parentRights with
             | Some right ->
                 match resolveAllowedEntity parentRef right with
-                | Ok ret -> Seq.singleton ret.Flat
+                | Ok ret -> Some ret.Flattened
                 | Error err -> raisefWithInner ResolvePermissionsParentException err.Error "In parent %O" parentRef
             | None ->
                 let parentEntity = layout.FindEntity parentRef |> Option.get
-                match parentEntity.Parent with
-                | None -> Seq.empty
-                | Some parent -> resolveParent parent
+                resolveParentEntity parentEntity
 
+    and resolveOneAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : HalfResolvedEntity =
         let entity =
             match layout.FindEntity entityRef with
             | Some s when not s.IsHidden -> s
             | _ -> raisef ResolvePermissionsException "Undefined entity"
-        let parentFlat =
-            match entity.Parent with
-            | None -> Seq.empty
-            | Some parent -> resolveParent parent
+        let parentEntity = resolveParentEntity entity
 
         let (error1, resolved) = resolveSelfAllowedEntity entityRef entity source
-        let myFlat = flattenAllowedEntity entityRef resolved
-        let inheritedFlat =
+        let (error2, resolved) = checkEntity entity resolved
+        let (fields, myFlat) = flattenAllowedEntity entityRef parentEntity resolved
+
+        let (myFlat, flatEntity) =
             match Map.tryFind entity.Root flattened with
-            | Some f -> Seq.singleton f
-            | None -> Seq.empty
-        let resultFlat = Seq.concat [Seq.singleton myFlat; parentFlat; inheritedFlat] |> Seq.fold1 mergeFlatEntity
-        let (error2, newMyPerms) = checkFlatEntity entityRef entity resolved resultFlat
-        let newResultFlat = { resultFlat with Children = Map.add entityRef newMyPerms resultFlat.Children }
+            | None ->
+                let flatEntity =
+                    { Children = Map.singleton entityRef myFlat
+                      Fields = fields
+                    }
+                (myFlat, flatEntity)
+            | Some oldFlat ->
+                let flatEntity =
+                    { Children = Map.add entityRef myFlat oldFlat.Children
+                      Fields = Map.unionUnique fields oldFlat.Fields
+                    }
+                (myFlat, flatEntity)
         let error = Option.orElseWith (fun _ -> error2) error1
         let ret =
             { Allowed = resolved
-              Flat = newResultFlat
+              Flattened = myFlat
               Error = error
             } : HalfResolvedEntity
-        flattened <- Map.add entity.Root newResultFlat flattened
+        flattened <- Map.add entity.Root flatEntity flattened
         ret
 
     and resolveAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : Result<HalfResolvedEntity, AllowedEntityError> =
@@ -329,14 +350,14 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             match resolveRole newStack parentRef parentRole with
             | Ok (errors, role) -> role.Flattened
             | Error e -> raisefWithInner ResolvePermissionsParentException e "Error in parent %O" parentRef
-        let flattenedParents = role.Parents |> Set.toSeq |> Seq.map resolveParent |> Seq.fold (Map.unionWith (fun name -> mergeFlatEntity)) Map.empty
-        let resolver = RoleResolver (layout, forceAllowBroken, role.Permissions, flattenedParents)
+        let resolver = RoleResolver (layout, forceAllowBroken, role.Permissions)
+        let flattenedParents = role.Parents |> Set.toSeq |> Seq.map resolveParent |> Seq.fold mergeFlatAllowedDatabase Map.empty
         let (errors, resolved) = resolver.ResolveAllowedDatabase ()
 
         let ret =
             { Parents = role.Parents
               Permissions = resolved
-              Flattened = resolver.Flattened
+              Flattened = mergeFlatAllowedDatabase flattenedParents resolver.Flattened
               AllowBroken = role.AllowBroken
             }
         (errors, ret)

@@ -12,6 +12,7 @@ open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.Permissions.Types
+open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -60,7 +61,7 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
                 try
                     applyRoleQueryExpr layout r domain.UsedSchemas domain.Query
                 with
-                | :? PermissionsViewException as e -> raisefWithInner DomainDeniedException e ""
+                | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
         let resolvedChunk = genericResolveChunk layout domainColumns chunk
         let (argValues, query) = queryExprChunk layout resolvedChunk query
 

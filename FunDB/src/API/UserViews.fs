@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.Permissions.Types
+open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.UserViews.Resolve
@@ -88,13 +89,13 @@ type UserViewsAPI (rctx : IRequestContext) =
                     match rctx.User.Effective.Type with
                     | RTRoot -> ()
                     | RTRole role when role.CanRead -> ()
-                    | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
+                    | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas
                     return Ok { Info = uv.Info
                                 PureAttributes = uv.PureAttributes.Attributes
                                 PureColumnAttributes = uv.PureAttributes.ColumnAttributes
                               }
                 with
-                | :? PermissionsViewException as err ->
+                | :? PermissionsApplyException as err ->
                     logger.LogError(err, "Access denied to user view info")
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getUserViewInfo"
@@ -203,7 +204,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                                         Result = res
                                       }
                 with
-                | :? PermissionsViewException as err ->
+                | :? PermissionsApplyException as err ->
                     logger.LogError(err, "Access denied to user view")
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getUserView"

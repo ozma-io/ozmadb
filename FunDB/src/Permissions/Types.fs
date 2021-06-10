@@ -1,6 +1,5 @@
 module FunWithFlags.FunDB.Permissions.Types
 
-open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Permissions.Source
@@ -21,7 +20,7 @@ type AllowedEntityRef =
 type AllowedField =
     { // Are you allowed to change (UPDATE/INSERT) this field?
       Change : bool
-      // Are you allowed to select this entry? If yes, what _additional_ restrictions are in place if this field is used, on top of entity-wide?
+      // Are you allowed to select this field? If yes, what _additional_ restrictions are in place, on top of entity-wide?
       Select : ResolvedOptimizedFieldExpr
     }
 
@@ -38,11 +37,11 @@ type AllowedEntity =
       Check : ResolvedOptimizedFieldExpr
       // Are you allowed to INSERT?
       Insert : bool
-      // Which entries are you allowed to SELECT?
-      Select : ResolvedOptimizedFieldExpr
-      // Which entries are you allowed to UPDATE (on top of SELECT)?
+      // Which entries are you allowed to SELECT, on top of parent entities? 
+      Select : ResolvedOptimizedFieldExpr option
+      // Which entries are you allowed to UPDATE (on top of SELECT, but only for this entity' fields)?
       Update : ResolvedOptimizedFieldExpr
-      // Which entries are you allowed to DELETE (on top of SELECT)?
+      // Which entries are you allowed to DELETE (on top of SELECT, but only for this entity' fields)?
       Delete : ResolvedOptimizedFieldExpr
       Fields : Map<FieldName, AllowedField>
     }

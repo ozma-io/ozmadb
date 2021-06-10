@@ -11,109 +11,47 @@ open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.Compile
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 
-type PermissionsViewException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
-
-    new (message : string) = PermissionsViewException (message, null)
-
 type private FieldAccess = CompiledRestriction option
 type private EntityAccess = Map<FunQL.EntityName, FieldAccess>
 type private SchemaAccess = Map<FunQL.SchemaName, EntityAccess>
 
-type private FieldTempAccess = Map<FunQL.ResolvedEntityRef, ResolvedOptimizedFieldExpr>
-
-type private EntityTempAccess = Map<FunQL.EntityName, ResolvedOptimizedFieldExpr>
-type private SchemaTempAccess = Map<FunQL.SchemaName, EntityTempAccess>
-
-type private AccessAggregator (layout : Layout, role : ResolvedRole) =
-    let mutable fieldAccesses = Map.empty : FieldTempAccess
-
-    let filterUsedFields (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) (usedFields : FunQL.UsedFields) : ResolvedOptimizedFieldExpr =
-        let flattened =
-            match Map.tryFind entity.Root role.Flattened with
-            | Some f -> f
-            | None -> raisef PermissionsViewException "Access denied to entity %O" ref
-        let accessor (derived : FlatAllowedDerivedEntity) = derived.Select
-        let selectRestr = applyRestrictionExpression accessor layout flattened ref
-
-        let fieldsRestriction = Map.tryFind entity.Root fieldAccesses |> Option.defaultValue OFETrue
-        let addRestriction restriction name =
-            if name = FunQL.funId || name = FunQL.funSubEntity then
-                restriction
-            else
-                let field = Map.find name entity.ColumnFields
-                let parentEntity = Option.defaultValue ref field.InheritedFrom
-                match Map.tryFind ({ Entity = parentEntity; Name = name } : FunQL.ResolvedFieldRef) flattened.Fields with
-                | Some r -> andFieldExpr restriction r.Select
-                | _ -> raisef PermissionsViewException "Access denied to select field %O" name
-        let fieldsRestriction = usedFields |> Set.toSeq |> Seq.fold addRestriction fieldsRestriction
-
-        match fieldsRestriction with
-        | OFEFalse -> raisef PermissionsViewException "Access denied to select"
-        | _ ->
-            fieldAccesses <- Map.add entity.Root fieldsRestriction fieldAccesses
-            selectRestr
-
-    let filterUsedEntities (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedEntities : FunQL.UsedEntities) : EntityTempAccess =
-        let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
-            let entity = Map.find name schema.Entities
-            let ref = { Schema = schemaName; Name = name } : FunQL.ResolvedEntityRef
-            try
-                filterUsedFields ref entity usedFields
-            with
-            | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied for entity %O: %s" name e.Message
-
-        Map.map mapEntity usedEntities
-
-    let filterUsedSchemas (usedSchemas : FunQL.UsedSchemas) : SchemaTempAccess =
-        let mapSchema (name : FunQL.SchemaName) (usedEntities : FunQL.UsedEntities) =
-            let schema = Map.find name layout.Schemas
-            try
-                filterUsedEntities name schema usedEntities
-            with
-            | :? PermissionsViewException as e -> raisef PermissionsViewException "Access denied for schema %O: %s" name e.Message
-
-        Map.map mapSchema usedSchemas
-    
-    member this.FieldAccesses = fieldAccesses
-    member this.FilterUsedSchemas usedSchemas = filterUsedSchemas usedSchemas
-
-type private AccessCompiler (layout : Layout, fieldAccesses : FieldTempAccess, initialArguments : QueryArguments) =
+type private AccessCompiler (layout : Layout, role : ResolvedRole, fieldAccesses : FilteredAllowedDatabase, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
 
-    let compileRestriction (entity : ResolvedEntity) (ref : FunQL.ResolvedEntityRef) (restr : ResolvedOptimizedFieldExpr) : FieldAccess =
-        let fieldAccess = Map.find entity.Root fieldAccesses
-        match andFieldExpr restr fieldAccess with
+    let compileRestriction (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) : FieldAccess =
+        let childrenFieldAccesses = Map.find entity.Root fieldAccesses
+        let entityAccesses = Map.find entity.Root role.Flattened
+        let applied = applyRestrictionExpression (fun access -> access.Select) layout entityAccesses childrenFieldAccesses ref
+        match applied with
         | OFETrue -> None
-        | finalRestr ->
-            let (newArguments, restriction) = compileRestriction layout ref arguments finalRestr
+        | _ ->
+            let (newArguments, restriction) = compileRestriction layout ref arguments applied
             arguments <- newArguments
             Some restriction
 
-    let compileEntityAccess (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (entityAccess : EntityTempAccess) : EntityAccess =
-        let mapEntity (name : FunQL.EntityName) (restr : ResolvedOptimizedFieldExpr) =
+    let compileEntityAccess (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =
+        let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
             let entity = Map.find name schema.Entities
             let ref = { Schema = schemaName; Name = name } : FunQL.ResolvedEntityRef
-            compileRestriction entity ref restr
+            compileRestriction ref entity
 
-        Map.map mapEntity entityAccess
+        Map.map mapEntity usedEntities
 
-    let compileSchemaAccess (schemaAccess : SchemaTempAccess) : SchemaAccess =
-        let mapSchema (name : FunQL.SchemaName) (entityAccess : EntityTempAccess) =
+    let compileSchemaAccess (usedSchemas : FunQL.UsedSchemas) : SchemaAccess =
+        let mapSchema (name : FunQL.SchemaName) (usedEntities : FunQL.UsedEntities) =
             let schema = Map.find name layout.Schemas
-            compileEntityAccess name schema entityAccess
+            compileEntityAccess name schema usedEntities
 
-        Map.map mapSchema schemaAccess
+        Map.map mapSchema usedSchemas
     
     member this.Arguments = arguments
-    member this.CompileSchemaAccess schemaAccess = compileSchemaAccess schemaAccess
+    member this.CompileSchemaAccess usedSchemas = compileSchemaAccess usedSchemas
 
+// Can throw PermissionsApplyException.
 let private compileRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (arguments : QueryArguments) : QueryArguments * SchemaAccess =
-    let accessAgg = AccessAggregator (layout, role)
-    let halfAccess = accessAgg.FilterUsedSchemas usedSchemas
-
-    let accessCompiler = AccessCompiler (layout, accessAgg.FieldAccesses, arguments)
-    let access = accessCompiler.CompileSchemaAccess halfAccess
+    let filteredAccess = filterAccessForUsedSchemas (fun field -> field.Select) layout role usedSchemas
+    let accessCompiler = AccessCompiler (layout, role, filteredAccess, arguments)
+    let access = accessCompiler.CompileSchemaAccess usedSchemas
     (accessCompiler.Arguments, access)
 
 type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
@@ -251,9 +189,8 @@ let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : Fu
       Arguments = arguments
     }
 
-let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (expr : CompiledViewExpr) : unit =
-    let accessAgg = AccessAggregator (layout, role)
-    let halfAccess = accessAgg.FilterUsedSchemas usedSchemas
+let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) : unit =
+    let filteredAccess = filterAccessForUsedSchemas (fun field -> field.Select) layout role usedSchemas
     ()
 
 let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (view : CompiledViewExpr) : CompiledViewExpr =
