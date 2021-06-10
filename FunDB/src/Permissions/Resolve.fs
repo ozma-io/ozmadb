@@ -172,7 +172,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     if optimizedIsFalse allowedEntity.Check then
                         raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
                     for KeyValue(fieldName, field) in entity.ColumnFields do
-                        if Option.isNone field.DefaultValue && not field.IsNullable then
+                        if Option.isNone field.InheritedFrom && Option.isNone field.DefaultValue && not field.IsNullable then
                             match Map.tryFind fieldName allowedEntity.Fields with
                             | Some { Change = true } -> ()
                             | _ -> raisef ResolvePermissionsException "Required field %O is not allowed for inserting" fieldName
@@ -189,7 +189,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             if optimizedIsFalse allowedEntity.Check then
                 raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
 
-        let myPerms =
+        let allowedEntity =
             if not (optimizedIsFalse allowedEntity.Delete) then
                 try
                     checkParentRowAccess entity <| function
@@ -199,9 +199,10 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     if entity.IsAbstract then
                         raisef ResolvePermissionsException "Cannot allow deletion of abstract entities"
                     for KeyValue(fieldName, field) in entity.ColumnFields do
-                        match Map.tryFind fieldName allowedEntity.Fields with
-                        | Some f when not (optimizedIsFalse f.Select) -> ()
-                         | _ -> raisef ResolvePermissionsException "Field %O is not allowed for selection, which is required for deletion" fieldName
+                        if Option.isNone field.InheritedFrom then
+                            match Map.tryFind fieldName allowedEntity.Fields with
+                            | Some f when not (optimizedIsFalse f.Select) -> ()
+                            | _ -> raisef ResolvePermissionsException "Field %O is not allowed for selection, which is required for deletion" fieldName
                     allowedEntity
                 with
                 | :? ResolvePermissionsException as e when allowedEntity.AllowBroken || forceAllowBroken ->
