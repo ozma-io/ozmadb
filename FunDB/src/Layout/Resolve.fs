@@ -489,10 +489,6 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | Error msg -> raisef ResolveLayoutException "Error parsing index expression: %s" msg
 
         let expr = resolveLocalExpr entityRef col.Expr
-        // We should automatically de-duplicate indexes instead of this.
-        match expr.Expr with
-        | FERef { Ref = { Ref = VRColumn { Name = name } } } when name = funId || name = funSubEntity -> raisef ResolveLayoutException "System columns are automatically indexed: %O" expr
-        | _ -> ()
         let indexInfo = getIndexTypeInfo indexType
         let (order, nullsOrder) =
             if indexInfo.CanOrder then
