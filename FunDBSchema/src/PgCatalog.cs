@@ -20,6 +20,10 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public DbSet<Trigger> Triggers { get; set; } = null!;
         public DbSet<Depend> Depends { get; set; } = null!;
         public DbSet<Index> Index { get; set; } = null!;
+        public DbSet<Proc> Procs { get; set; } = null!;
+        public DbSet<Extension> Extensions { get; set; } = null!;
+        public DbSet<OpClass> OpClasses { get; set; } = null!;
+        public DbSet<Am> Ams { get; set; } = null!;
 
         public PgCatalogContext()
             : base()
@@ -93,11 +97,23 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 .AsNoTracking()
                 .AsSplitQuery()
                 .Include(ns => ns.Classes)
-                .Include(ns => ns.Procs).ThenInclude(proc => proc.RetType)
-                .Include(ns => ns.Procs).ThenInclude(proc => proc.Language)
+                .Include(ns => ns.Extensions)
                 .ToListAsync();
 
+            var extDependIds = this.Depends.AsQueryable().Where(dep => this.Extensions.AsQueryable().Select(ext => ext.Oid).Contains(dep.RefObjId)).Select(dep => dep.ObjId);
+            var namespaceIds = retQuery.Select(ns => ns.Oid);
             var classesIds = retQuery.SelectMany(ns => ns.Classes).Select(cl => cl.Oid);
+
+            var procsList = await this.Procs
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(proc => proc.RetType)
+                .Include(proc => proc.Language)
+                .Where(proc => namespaceIds.Contains(proc.ProNamespace) && !extDependIds.Contains(proc.Oid))
+                .ToListAsync();
+            var procs = procsList
+                .GroupBy(proc => proc.ProNamespace)
+                .ToDictionary(proc => proc.Key, proc => proc.ToList());
 
             var attrsList = await this.Attributes
                 .AsNoTracking()
@@ -161,9 +177,15 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 .GroupBy(trig => trig.TgRelId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
+            var opClasses = await this.OpClasses
+                .AsNoTracking()
+                .Where(opc => !opc.OpcDefault)
+                .ToDictionaryAsync(opc => opc.Oid, opc => opc.OpcName);
+
             var indexesList = await this.Index
                 .AsNoTracking()
                 .Include(index => index.Class)
+                .ThenInclude(cl => cl!.Am)
                 .Where(index =>
                     classesIds.Contains(index.IndRelId) &&
                     !this.Constraints.AsQueryable().Where(constr => constr.ConIndId == index.IndexRelId).Any())
@@ -172,6 +194,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                         Index = index,
                         ExprsSource = PgGetExpr(EF.Property<string>(index, "IndExprs"), index.IndRelId),
                         PredSource = PgGetExpr(EF.Property<string>(index, "IndPred"), index.IndRelId),
+                        AmCanOrder = PgIndexamHasProperty(index.Class!.Am!.Oid, "can_order"),
                     })
                 .ToListAsync();
             var indexes = indexesList
@@ -179,6 +202,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 {
                     index.Index.ExprsSource = index.ExprsSource;
                     index.Index.PredSource = index.PredSource;
+                    index.Index.Classes = index.Index.IndClass.Select(cl => opClasses.GetValueOrDefault((uint)cl)).ToArray();
+                    index.Index.Class!.Am!.CanOrder = index.AmCanOrder;
                     return index.Index;
                 })
                 .GroupBy(index => index.IndRelId)
@@ -186,6 +211,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
             foreach (var ns in ret)
             {
+                ns.Procs = procs.GetValueOrDefault(ns.Oid);
                 foreach (var cl in ns.Classes!)
                 {
                     cl.Attributes = attrs.GetValueOrDefault(cl.Oid);
@@ -202,27 +228,33 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
     {
         [Column(TypeName="oid")]
         [Key]
-        public int Oid { get; set; }
+        public uint Oid { get; set; }
         [Required]
         public string NspName { get; set; } = null!;
 
         public List<Class>? Classes { get; set; }
         public List<Proc>? Procs { get; set; }
+        public List<Extension>? Extensions { get; set; }
+        public List<OpClass>? OpClasses { get; set; }
     }
 
     public class Class
     {
         [Column(TypeName="oid")]
         [Key]
-        public int Oid { get; set; }
+        public uint Oid { get; set; }
         [Required]
         public string RelName { get; set; } = null!;
         [Column(TypeName="oid")]
-        public int RelNamespace { get; set; }
+        public uint RelNamespace { get; set; }
         public char RelKind { get; set; }
+        [Column(TypeName="oid")]
+        public uint? RelAm { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
 
         [ForeignKey("RelNamespace")]
         public Namespace? Namespace { get; set; }
+        [ForeignKey("RelAm")]
+        public Am? Am { get; set; }
 
         public List<Attribute>? Attributes { get; set; }
         [InverseProperty("RelClass")]
@@ -236,11 +268,11 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
     public class Attribute
     {
         [Column(TypeName="oid")]
-        public int AttRelId { get; set; }
+        public uint AttRelId { get; set; }
         [Required]
         public string AttName { get; set; } = null!;
         [Column(TypeName="oid")]
-        public int AttTypId { get; set; }
+        public uint AttTypId { get; set; }
         public Int16 AttNum { get; set; }
         public bool AttNotNull { get; set; }
         public bool AttIsDropped { get; set; }
@@ -257,7 +289,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
     {
         [Column(TypeName="oid")]
         [Key]
-        public int Oid { get; set; }
+        public uint Oid { get; set; }
         [Required]
         public string TypName { get; set; } = null!;
         public char TypType { get; set; }
@@ -267,7 +299,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
     {
         [Column(TypeName="oid")]
         [Key]
-        public int Oid { get; set; }
+        public uint Oid { get; set; }
         [Required]
         public string LanName { get; set; } = null!;
     }
@@ -276,9 +308,9 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
     {
         [Column(TypeName="oid")]
         [Key]
-        public int Oid { get; set; }
+        public uint Oid { get; set; }
         [Column(TypeName="oid")]
-        public int AdRelId { get; set; }
+        public uint AdRelId { get; set; }
         public Int16 AdNum { get; set; }
 
         [NotMapped]
@@ -293,16 +325,16 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
     {
         [Column(TypeName="oid")]
         [Key]
-        public int Oid { get; set; }
+        public uint Oid { get; set; }
         [Required]
         public string ConName { get; set; } = null!;
         public char ConType { get; set; }
         [Column(TypeName="oid")]
-        public int ConRelId { get; set; }
+        public uint ConRelId { get; set; }
         [Column(TypeName="oid")]
-        public int? ConIndId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
+        public uint? ConIndId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
         [Column(TypeName="oid")]
-        public int? ConFRelId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
+        public uint? ConFRelId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
         public Int16[]? ConKey { get; set; }
         public Int16[]? ConFKey { get; set; }
         public bool ConDeferrable { get; set; }
@@ -321,17 +353,17 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
     {
         [Column(TypeName="oid")]
         [Key]
-        public int Oid { get; set; }
+        public uint Oid { get; set; }
         [Column(TypeName="oid")]
-        public int TgRelId { get; set; }
+        public uint TgRelId { get; set; }
         [Required]
         public string TgName { get; set; } = null!;
         [Column(TypeName="oid")]
-        public int TgFOid { get; set; }
+        public uint TgFOid { get; set; }
         public bool TgIsInternal { get; set; }
         public Int16 TgType { get; set; }
         [Column(TypeName="oid")]
-        public int? TgConstraint { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN
+        public uint? TgConstraint { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN
         [Required]
         public Int16[] TgAttr { get; set; } = null!;
         [Required]
@@ -352,16 +384,16 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
     {
         [Column(TypeName="oid")]
         [Key]
-        public int Oid { get; set; }
+        public uint Oid { get; set; }
         [Required]
         public string ProName { get; set; } = null!;
         [Column(TypeName="oid")]
-        public int ProNamespace { get; set; }
+        public uint ProNamespace { get; set; }
         [Column(TypeName="oid")]
-        public int ProLang { get; set; }
+        public uint ProLang { get; set; }
         public Int16 ProNArgs { get; set; }
         [Column(TypeName="oid")]
-        public int ProRetType { get; set; }
+        public uint ProRetType { get; set; }
         public char ProVolatile { get; set; }
         public bool ProRetSet { get; set; }
         [Required]
@@ -375,16 +407,29 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Type? RetType { get; set; }
     }
 
+    [Flags]
+    public enum IndexOptions : short
+    {
+        Desc = 1 << 0,
+        NullsFirst = 1 << 1,
+    }
+
     public class Index
     {
         [Column(TypeName="oid")]
         [Key]
-        public int IndexRelId { get; set; }
+        public uint IndexRelId { get; set; }
         [Column(TypeName="oid")]
-        public int IndRelId { get; set; }
+        public uint IndRelId { get; set; }
         public bool IndIsUnique { get; set; }
         [Required]
         public Int16[] IndKey { get; set; } = null!;
+        [Required]
+        [Column(TypeName="oid[]")]
+        public uint[] IndClass { get; set; } = null!;
+        [Required]
+        [Column(TypeName="int2[]")]
+        public IndexOptions[] IndOption { get; set; } = null!;
 
         [ForeignKey("IndexRelId")]
         public Class? Class { get; set; }
@@ -395,20 +440,67 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public string? ExprsSource { get; set; }
         [NotMapped]
         public string? PredSource { get; set; }
+        [NotMapped]
+        public string?[]? Classes { get; set; }
     }
 
     public class Depend
     {
         [Column(TypeName="oid")]
-        public int ClassId { get; set; }
+        public uint ClassId { get; set; }
         [Column(TypeName="oid")]
-        public int ObjId { get; set; }
+        public uint ObjId { get; set; }
         public int ObjSubId { get; set; }
         [Column(TypeName="oid")]
-        public int RefClassId { get; set; }
+        public uint RefClassId { get; set; }
         [Column(TypeName="oid")]
-        public int RefObjId { get; set; }
+        public uint RefObjId { get; set; }
         public int RefObjSubId { get; set; }
         public char DepType { get; set; }
+    }
+
+    public class Extension
+    {
+        [Column(TypeName="oid")]
+        [Key]
+        public uint Oid { get; set; }
+
+        [Required]
+        public string ExtName { get; set; } = null!;
+        [Column(TypeName="oid")]
+        public uint ExtNamespace { get; set; }
+        public bool ExtRelocatable { get; set; }
+
+        [ForeignKey("ExtNamespace")]
+        public Namespace? Namespace { get; set; }
+    }
+
+    public class OpClass
+    {
+        [Column(TypeName="oid")]
+        [Key]
+        public uint Oid { get; set; }
+
+        [Required]
+        public string OpcName { get; set; } = null!;
+        [Column(TypeName="oid")]
+        public uint OpcNamespace { get; set; }
+        public bool OpcDefault { get; set; }
+
+        [ForeignKey("OpcNamespace")]
+        public Namespace? Namespace { get; set; }
+    }
+
+    public class Am
+    {
+        [Column(TypeName="oid")]
+        [Key]
+        public uint Oid { get; set; }
+
+        [Required]
+        public string AmName { get; set; } = null!;
+
+        [NotMapped]
+        public bool? CanOrder { get; set; }
     }
 }

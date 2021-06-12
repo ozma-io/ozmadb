@@ -115,9 +115,11 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         iterFieldExpr mapper expr
         exprInfo
 
+    and buildForOrderColumn (ord : ResolvedOrderColumn) =
+        buildForFieldExpr ord.Expr |> ignore
+
     and buildForOrderLimitClause (limits : ResolvedOrderLimitClause) =
-        let buildForOrderBy (ord, expr) = ignore <| buildForFieldExpr expr
-        Array.iter buildForOrderBy limits.OrderBy
+        Array.iter buildForOrderColumn limits.OrderBy
         Option.iter (ignore << buildForFieldExpr) limits.Limit
         Option.iter (ignore << buildForFieldExpr) limits.Offset
 

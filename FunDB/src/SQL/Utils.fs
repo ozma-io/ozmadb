@@ -85,3 +85,7 @@ let convertDateTime (dt : DateTime) = NpgsqlDateTime dt
 
 type ISQLString =
     abstract member ToSQLString : unit -> string
+
+let optionToSQLString<'a when 'a :> ISQLString> : 'a option -> string = function
+    | None -> ""
+    | Some o -> o.ToSQLString()

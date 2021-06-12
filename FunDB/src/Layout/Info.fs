@@ -32,12 +32,28 @@ type SerializedChildEntity =
     }
 
 [<NoEquality; NoComparison>]
+type SerializedIndexColumn =
+    { Expr : string
+      OpClass : FunQLName option
+      Order : SortOrder option
+      Nulls : NullsOrder option
+    }
+
+[<NoEquality; NoComparison>]
+type SerializedIndex =
+    { Expressions : SerializedIndexColumn[]
+      IsUnique : bool
+      Predicate : string option
+      Type : IndexType
+    }
+
+[<NoEquality; NoComparison>]
 type SerializedEntity =
     { ColumnFields : Map<FieldName, SerializedColumnField>
       ComputedFields : Map<FieldName, SerializedComputedField>
       UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
-      Indexes : Map<IndexName, SourceIndex>
+      Indexes : Map<IndexName, SerializedIndex>
       MainField : FieldName
       ForbidExternalReferences : bool
       Parents : ResolvedEntityRef array
@@ -50,7 +66,6 @@ type SerializedEntity =
 [<NoEquality; NoComparison>]
 type SerializedSchema =
     { Entities : Map<EntityName, SerializedEntity>
-      Roots : Set<EntityName>
     }
 
 [<NoEquality; NoComparison>]
@@ -83,10 +98,18 @@ let serializeCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckCon
     { Expression = constr.Expression.ToFunQLString()
     }
 
-let serializeIndex (index : ResolvedIndex) : SourceIndex =
-    { Expressions = index.Expressions |> Array.map (fun x -> x.ToFunQLString())
+let serializeIndexColumn (col : ResolvedIndexColumn) : SerializedIndexColumn =
+    { Expr = col.Expr.ToFunQLString()
+      OpClass = col.OpClass
+      Order = col.Order
+      Nulls = col.Nulls
+    }
+
+let serializeIndex (index : ResolvedIndex) : SerializedIndex =
+    { Expressions = index.Expressions |> Array.map serializeIndexColumn
       IsUnique = index.IsUnique
       Predicate = index.Predicate |> Option.map (fun x -> x.ToFunQLString())
+      Type = index.Type
     }
 
 let rec private inheritanceChain (layout : Layout) (entity : ResolvedEntity) : ResolvedEntityRef seq =
@@ -116,7 +139,6 @@ let serializeEntity (layout : Layout) (entity : ResolvedEntity) : SerializedEnti
 
 let serializeSchema (layout : Layout) (schema : ResolvedSchema) : SerializedSchema =
     { Entities = Map.mapMaybe (fun name entity -> if entity.IsHidden then None else Some <| serializeEntity layout entity) schema.Entities
-      Roots = schema.Roots
     }
 
 let serializeLayout (layout : Layout) : SerializedLayout =

@@ -301,7 +301,7 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
         let tables = tableObjects |> Map.mapWithKeys (fun name (triggers, table, meta) -> (name.ToString(), (name, OMTable table)))
         let triggers = tableObjects |> Map.toSeq |> Seq.map (fun (name, (triggers, table, meta)) -> triggers) |> Seq.fold Map.unionUnique Map.empty |> Map.mapWithKeys tagName
         let sequences = ns.Classes |> Seq.filter (fun cl -> cl.RelKind = 'S') |> Seq.map (makeSequenceMeta >> uncurry tagName) |> Map.ofSeqUnique
-        let functions = ns.Procs |> Seq.map makeFunctionMeta |> Map.ofSeqWith (fun name -> Map.unionUnique) |> Map.mapWithKeys (fun name overloads -> (name.ToString(), (name, OMFunction overloads)))
+        let functions = ns.Procs |> Seq.ofObj |> Seq.map makeFunctionMeta |> Map.ofSeqWith (fun name -> Map.unionUnique) |> Map.mapWithKeys (fun name overloads -> (name.ToString(), (name, OMFunction overloads)))
         let res =
             { Objects = List.fold Map.unionUnique Map.empty [tables; sequences; triggers; functions]
               Tables = tablesMeta
@@ -347,14 +347,40 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                 | Error msg -> raisef SQLMetaException "Cannot parse index expressions: %s" msg
                 | Ok exprs -> Array.map castLocalExpr exprs
 
+        let canOrder = index.Class.Am.CanOrder.Value
+
         let mutable exprI = 0
-        let makeKey (num : ColumnNum) =
-            if num <> 0s then
-                IKColumn <| Map.find num columnIds
-            else
-                let ret = expressions.[exprI]
-                exprI <- exprI + 1
-                IKExpression <| String.comparable ret
+        let makeColumn (i : int) (num : ColumnNum) =
+            let key =
+                if num <> 0s then
+                    IKColumn <| Map.find num columnIds
+                else
+                    let ret = expressions.[exprI]
+                    exprI <- exprI + 1
+                    IKExpression <| String.comparable ret
+            let opClass = index.Classes.[i] |> Option.ofObj |> Option.map SQLName
+            let options = index.IndOption.[i]
+            let order =
+                if not canOrder then
+                    None
+                else
+                    if options.HasFlag IndexOptions.Desc then
+                        Some Desc
+                    else
+                        Some Asc
+            let nullsOrder =
+                if not canOrder then
+                    None
+                else
+                    if options.HasFlag IndexOptions.NullsFirst then
+                        Some NullsFirst
+                    else
+                        Some NullsLast
+            { Key = key
+              OpClass = opClass
+              Order = order
+              Nulls = nullsOrder
+            }
 
         let pred =
             if isNull index.PredSource then
@@ -363,11 +389,12 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                 let pred = parseLocalExpr index.PredSource
                 Some <| String.comparable pred
 
-        let keys = Array.map makeKey index.IndKey
+        let columns = Array.mapi makeColumn index.IndKey
         let ret =
-            { Keys = keys
+            { Columns = columns
               IsUnique = index.IndIsUnique
               Predicate = pred
+              AccessMethod = SQLName index.Class.Am.AmName
             } : IndexMeta
         (SQLName index.Class.RelName, ret)
 
@@ -406,6 +433,13 @@ let createPgCatalogContext (transaction : NpgsqlTransaction) =
             reraise ()
         db
 
+let private getExtensions (ns : Namespace) : ExtensionName seq =
+    let getExt (ext : Extension) =
+        if ns.NspName <> "public" then
+            failwith "Extensions not in 'public' are not supported"
+        SQLName ext.ExtName
+    ns.Extensions |> Seq.map getExt
+
 let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
     task {
         use db = createPgCatalogContext transaction
@@ -414,5 +448,9 @@ let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : Can
         let unconstrainedSchemas = namespaces |> Seq.map makeUnconstrainedSchemaMeta |> Map.ofSeqUnique
         let phase2 = Phase2Resolver(unconstrainedSchemas)
         let schemas = unconstrainedSchemas |> Map.mapWithKeys (fun name meta -> (name.ToString(), phase2.FinishSchemaMeta name meta))
-        return { Schemas = schemas }
+        let extensions = namespaces |> Seq.collect getExtensions |> Set.ofSeq
+        return
+            { Schemas = schemas
+              Extensions = extensions
+            }
     }

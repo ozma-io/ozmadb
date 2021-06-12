@@ -44,6 +44,7 @@ let private makeSourceIndex (index : Index) : SourceIndex =
     { Expressions = index.Expressions
       IsUnique = index.IsUnique
       Predicate = Option.ofObj index.Predicate
+      Type = Map.find index.Type indexTypesMap
     }
 
 let private makeSourceEntity (entity : Entity) : SourceEntity =

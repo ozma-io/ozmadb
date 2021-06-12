@@ -36,7 +36,6 @@ open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Update
 open FunWithFlags.FunDB.Modules.Resolve
-open FunWithFlags.FunDB.Modules.Types
 open FunWithFlags.FunDB.Modules.Source
 open FunWithFlags.FunDB.Modules.Update
 open FunWithFlags.FunDB.Triggers.Resolve
@@ -235,10 +234,12 @@ let filterUserSchemas (preload : Preload) = Map.filter (fun name _ -> not <| Map
 
 let filterPreloadedMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
     { Schemas = Map.filter (fun name _ -> Map.containsKey (FunQLName name) preload.Schemas) meta.Schemas
+      Extensions = meta.Extensions
     } : SQL.DatabaseMeta
 
 let filterUserMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
     { Schemas = Map.filter (fun name _ -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta.Schemas
+      Extensions = meta.Extensions
     } : SQL.DatabaseMeta
 
 let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : LayoutAssertions * SQL.DatabaseMeta =
@@ -492,7 +493,10 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
         logger.LogInformation("Phase 2: Migrating all remaining entities")
         let userLayout = filterLayout (fun name -> not <| Map.containsKey name preloadLayout.Schemas) layout
         let (_, newUserMeta) = buildFullLayoutMeta layout userLayout
-        let currentUserMeta = filterUserMeta preload currentMeta
+        let currentUserMeta =
+            { filterUserMeta preload currentMeta with
+                  Extensions = newSystemMeta.Extensions
+            }
 
         let userMigration = planDatabaseMigration currentUserMeta newUserMeta
         let! _ = migrateDatabase conn.Connection.Query userMigration cancellationToken

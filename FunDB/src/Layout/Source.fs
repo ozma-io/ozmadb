@@ -1,8 +1,11 @@
 module FunWithFlags.FunDB.Layout.Source
 
+open Microsoft.FSharp.Reflection
 open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 // Source Layout; various layout sources, like database or system layout, are converted into this.
@@ -15,9 +18,28 @@ type SourceCheckConstraint =
     { Expression : string
     }
 
+type IndexType =
+    | [<CaseName("btree")>] [<DefaultCase>] ITBTree
+    | [<CaseName("gist")>] ITGIST
+    | [<CaseName("gin")>] ITGIN
+    with
+        static member private Fields = unionNames (unionCases typeof<IndexType>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
+
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let (case, _) = FSharpValue.GetUnionFields(this, typeof<IndexType>)
+            Map.find case.Name IndexType.Fields
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+let indexTypesMap = unionNames (unionCases typeof<IndexType>) |> Map.mapWithKeys (fun name case -> (Option.get name, FSharpValue.MakeUnion(case.Info, [||]) :?> IndexType))
+
 type SourceIndex =
     { Expressions : string[]
       IsUnique : bool
+      Type : IndexType
       Predicate : string option
     }
 
@@ -94,7 +116,8 @@ type SourceLayout =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
 let emptySourceLayout : SourceLayout =
-    { Schemas = Map.empty }
+    { Schemas = Map.empty
+    }
 
 let unionSourceLayout (a : SourceLayout) (b : SourceLayout) : SourceLayout =
     { Schemas = Map.unionWith (fun name -> unionSourceSchema) a.Schemas b.Schemas

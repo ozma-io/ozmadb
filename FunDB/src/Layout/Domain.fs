@@ -151,9 +151,14 @@ let private queryHash (expr : SQL.SelectExpr) : string =
 let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : UsedSchemas * Query<SQL.SelectExpr> =
     let idExpr = makeResultExpr refEntityRef { Entity = Some referencedEntityRef; Name = funId }
     let mainExpr = makeResultExpr refEntityRef { Entity = Some referencedEntityRef; Name = funMain }
+    let mainSortColumn =
+        { Expr = mainExpr
+          Order = None
+          Nulls = None
+        }
     let orderByMain =
         { emptyOrderLimitClause with
-              OrderBy = [| (Asc, mainExpr) |]
+              OrderBy = [| mainSortColumn |]
         }
     let single =
         { Attributes = Map.empty

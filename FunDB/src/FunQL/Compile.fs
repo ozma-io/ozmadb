@@ -304,9 +304,13 @@ type CompiledViewExpr =
       FlattenedDomains : FlattenedDomains
     }
 
-let private compileOrder : SortOrder -> SQL.SortOrder = function
+let compileOrder : SortOrder -> SQL.SortOrder = function
     | Asc -> SQL.Asc
     | Desc -> SQL.Desc
+
+let compileNullsOrder : NullsOrder -> SQL.NullsOrder = function
+    | NullsFirst -> SQL.NullsFirst
+    | NullsLast -> SQL.NullsLast
 
 let private compileJoin : JoinType -> SQL.JoinType = function
     | Left -> SQL.Left
@@ -607,13 +611,11 @@ let addEntityChecks (entitiesMap : FromEntitiesMap) (where : SQL.ValueExpr optio
     entitiesMap |> Map.values |> Seq.mapMaybe (fun info -> info.Check) |> Seq.fold addWhere where
 
 type ExprCompilationFlags =
-    { ForceNoImmediate : bool
-      ForceNoTableRef : bool
+    { ForceNoTableRef : bool
     }
 
 let emptyExprCompilationFlags =
-    { ForceNoImmediate = false
-      ForceNoTableRef = false
+    { ForceNoTableRef = false
     }
 
 type CompiledSingleFrom =
@@ -796,7 +798,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     let rec compileRef (flags : ExprCompilationFlags) (ctx : ReferenceContext) (extra : ObjectMap) (paths0 : JoinPaths) (tableRef : SQL.TableRef option) (fieldRef : ResolvedFieldRef) (forcedName : SQL.ColumnName option) : JoinPaths * SQL.ValueExpr =
         let realColumn name : SQL.ColumnRef =
             let finalName = Option.defaultValue name forcedName
-            { Table = tableRef; Name = finalName }
+            { Table = tableRef; Name = finalName } : SQL.ColumnRef
 
         let entity = layout.FindEntity fieldRef.Entity |> Option.get
         let fieldInfo = entity.FindField fieldRef.Name |> Option.get
@@ -822,8 +824,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 (paths0, SQL.VEColumn <| realColumn sqlFunSubEntity)
         | RColumnField col ->
             usedSchemas <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedSchemas
-
-            (paths0, SQL.VEColumn  <| realColumn col.ColumnName)
+            (paths0, SQL.VEColumn <| realColumn col.ColumnName)
         | RComputedField comp ->
             // Right now don't support renamed fields for computed fields.
             // It's okay because this is impossible: `FROM foo (a, b, c)`, and we don't propagate computed fields.
@@ -962,7 +963,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let newName =
                     match fieldInfo.ForceSQLName with
                     | Some name -> Some name
-                    | None when not boundInfo.Immediate || flags.ForceNoImmediate  -> Some <| compileName ref.Name
+                    | None when not boundInfo.Immediate -> Some <| compileName ref.Name
                     | None -> None
                 let pathWithEntities = Seq.zip boundInfo.Path linked.Ref.Path |> List.ofSeq
                 compilePath flags ctx linked.Extra paths0 tableRef boundInfo.Ref newName pathWithEntities
@@ -1085,14 +1086,27 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let ret = traverse expr
         (paths, ret)
 
+    and compileOrderColumn (cteBindings : CTEBindings) (paths : JoinPaths)  (ord : ResolvedOrderColumn) : JoinPaths * SQL.OrderColumn =
+        let (paths, expr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths ord.Expr
+        let ret =
+            { Expr = expr
+              Order = Option.map compileOrder ord.Order
+              Nulls = Option.map compileNullsOrder ord.Nulls
+            } : SQL.OrderColumn
+        (paths, ret)
+
     and compileOrderLimitClause (cteBindings : CTEBindings) (paths0 : JoinPaths) (clause : ResolvedOrderLimitClause) : JoinPaths * SQL.OrderLimitClause =
         let mutable paths = paths0
+        let compileOrderColumn' ord =
+            let (newPaths, ret) = compileOrderColumn cteBindings paths ord
+            paths <- newPaths
+            ret
         let compileFieldExpr' expr =
             let (newPaths, ret) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
             paths <- newPaths
             ret
         let ret =
-            { OrderBy = Array.map (fun (ord, expr) -> (compileOrder ord, compileFieldExpr' expr)) clause.OrderBy
+            { OrderBy = Array.map compileOrderColumn' clause.OrderBy
               Limit = Option.map compileFieldExpr' clause.Limit
               Offset = Option.map compileFieldExpr' clause.Offset
             } : SQL.OrderLimitClause

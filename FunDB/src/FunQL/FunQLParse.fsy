@@ -20,12 +20,13 @@ type ParsedCommonTableExprs = CommonTableExprs<EntityRef, LinkedFieldRef>
 type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
 type ParsedAggExpr = AggExpr<EntityRef, LinkedFieldRef>
 type ParsedArgumentsMap = Map<ArgumentName, ParsedArgument>
+type ParsedOrderColumn = OrderColumn<EntityRef, LinkedFieldRef>
 
 type ParsedMainEntity =
     { Entity : EntityRef
     }
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type ParsedViewExpr =
     { Pragmas : PragmasMap
       Arguments : ParsedArgumentsMap
@@ -33,12 +34,14 @@ type ParsedViewExpr =
       MainEntity : ParsedMainEntity option
     }
 
-[<NoComparison>]
+type ParsedIndexColumn = IndexColumn<EntityRef, LinkedFieldRef>
+
+[<NoEquality; NoComparison>]
 type private Result =
     | AResult of QueryResult<EntityRef, LinkedFieldRef>
     | AAttribute of FunQLName * ParsedFieldExpr
 
-[<NoComparison>]
+[<NoEquality; NoComparison>]
 type private InSource =
     | ISValues of ParsedFieldExpr[]
     | ISSelect of ParsedSelectExpr
@@ -257,6 +260,9 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token SOME
 %token MATERIALIZED
 %token SET
+%token NULLS
+%token FIRST
+%token LAST
 
 // Types
 %token INT_TYPE
@@ -301,6 +307,9 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %start attributeMap
 %type <ParsedAttributeMap> attributeMap
 
+%start indexColumn
+%type <ParsedIndexColumn> indexColumn
+
 %type <FieldRef> FieldRef
 
 %%
@@ -310,6 +319,7 @@ viewExpr : ViewExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
 attributeMap : AttributeMap EOF { $1 }
+indexColumn : IndexColumn EOF { $1 }
 
 // Expressions
 
@@ -437,12 +447,12 @@ OrderByList:
     | OrderByExpr COMMA OrderByList { $1 :: $3 }
 
 OrderByExpr:
-    | FieldExpr OrderByDirection { ($2, $1) }
+    | FieldExpr SortOrder NullsOrder { { Expr = $1; Order = $2; Nulls = $3 } }
 
-OrderByDirection:
-    |      { Asc }
-    | ASC  { Asc }
-    | DESC { Desc }
+SortOrder:
+    |      { None }
+    | ASC  { Some Asc }
+    | DESC { Some Desc }
 
 LimitClause:
     |                 { None }
@@ -809,3 +819,15 @@ EnumList:
 
 Name:
     | ID { FunQLName $1 }
+
+IndexOpClass:
+    |      { None }
+    | Name { Some $1 } 
+
+NullsOrder:
+    |             { None }
+    | NULLS FIRST { Some NullsFirst }
+    | NULLS LAST  { Some NullsLast }
+
+IndexColumn:
+    | FieldExpr IndexOpClass SortOrder NullsOrder { { Expr = $1; OpClass = $2; Order = $3; Nulls = $4 } }

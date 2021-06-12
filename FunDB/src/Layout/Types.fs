@@ -4,6 +4,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDB.Layout.Source
 
 type ResolvedConstraintRef = ResolvedFieldRef
 
@@ -52,10 +53,11 @@ type ResolvedCheckConstraint =
 
 [<NoEquality; NoComparison>]
 type ResolvedIndex =
-    { Expressions : ResolvedFieldExpr[]
+    { Expressions : ResolvedIndexColumn[]
       HashName : HashName // Guaranteed to be unique in an entity.
       IsUnique : bool
       Predicate : ResolvedFieldExpr option
+      Type : IndexType
     }
 
 [<NoEquality; NoComparison>]
@@ -87,7 +89,7 @@ type ResolvedComputedField =
     { Expression : ResolvedFieldExpr
       InheritedFrom : ResolvedEntityRef option
       AllowBroken : bool
-      IsLocal : bool
+      IsLocal : bool // Doesn't take virtual field cases into account.
       HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity.
       VirtualCases : (VirtualFieldCase array) option
     } with
@@ -226,7 +228,6 @@ let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntit
 [<NoEquality; NoComparison>]
 type ResolvedSchema =
     { Entities : Map<EntityName, ResolvedEntity>
-      Roots : Set<EntityName>
     }
 
 type ILayoutBits =
@@ -287,3 +288,17 @@ let allPossibleEntities (layout : ILayoutBits) (parentRef : ResolvedEntityRef) :
     Seq.append realEntity childrenEntities
 
 let localExprFromEntityId = 0
+
+let allowedOpClasses =
+    Map.ofSeq
+        [ (FunQLName "trgm", Map.ofSeq [(ITGIST, SQL.SQLName "gist_trgm_ops"); (ITGIN, SQL.SQLName "gin_trgm_ops")])
+        ]
+
+type IndexTypeInfo =
+    { CanOrder : bool
+    }
+
+let getIndexTypeInfo = function
+    | ITBTree -> { CanOrder = true }
+    | ITGIST -> { CanOrder = false }
+    | ITGIN -> { CanOrder = false }

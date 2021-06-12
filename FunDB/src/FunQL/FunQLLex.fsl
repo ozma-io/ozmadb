@@ -166,6 +166,9 @@ and tokenizeFunQL = parse
     | s o m e                 { Parse.SOME }
     | m a t e r i a l i z e d { Parse.MATERIALIZED }
     | s e t                   { Parse.SET }
+    | f i r s t               { Parse.FIRST }
+    | l a s t                 { Parse.LAST }
+    | n u l l s               { Parse.NULLS }
 
     // Types
     | i n t             { Parse.INT_TYPE }

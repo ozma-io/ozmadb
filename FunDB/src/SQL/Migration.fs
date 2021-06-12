@@ -28,33 +28,37 @@ let private schemaOperationOrder = function
     | SODropConstraint _ -> 0
     | SODropIndex _ -> 0
     | SODropTrigger _ -> 0
-    // Cool, now create new schemas, sequences and functions.
+    // Cool, now create new schemas.
     | SOCreateSchema _ -> 1
     | SORenameSchema _ -> 1
-    | SOCreateSequence _ -> 2
-    | SORenameSequence _ -> 2
-    | SORenameFunction _ -> 2
-    | SOCreateOrReplaceFunction _ -> 3
+    // Create new extensions.
+    | SOCreateExtension _ -> 2
+    // Create new sequences and functions.
+    | SOCreateSequence _ -> 3
+    | SORenameSequence _ -> 3
+    | SORenameFunction _ -> 3
+    | SOCreateOrReplaceFunction _ -> 4
     // Next, create tables and alter columns.
-    | SOCreateTable _ -> 4
-    | SORenameTable _ -> 4
-    | SORenameTableColumn _ -> 5
-    | SOAlterTable _ -> 6
+    | SOCreateTable _ -> 5
+    | SORenameTable _ -> 5
+    | SORenameTableColumn _ -> 6
+    | SOAlterTable _ -> 7
     // Remove remaining stuff.
-    | SODropTable _ -> 7
-    | SODropFunction _ -> 8
-    | SODropSequence _ -> 8
-    | SODropSchema _ -> 9
+    | SODropTable _ -> 8
+    | SODropSequence _ -> 9
+    | SODropFunction _ -> 10
+    | SODropSchema _ -> 11
+    | SODropExtension _ -> 12
     // Create triggers, indexes and primary key constraints.
-    | SOCreateConstraint (_, _, CMPrimaryKey _) -> 10
-    | SORenameConstraint _ -> 10
-    | SOCreateIndex _ -> 10
-    | SORenameIndex _ -> 10
-    | SOCreateTrigger _ -> 10
-    | SORenameTrigger _ -> 10
+    | SOCreateConstraint (_, _, CMPrimaryKey _) -> 13
+    | SORenameConstraint _ -> 13
+    | SOCreateIndex _ -> 13
+    | SORenameIndex _ -> 13
+    | SOCreateTrigger _ -> 13
+    | SORenameTrigger _ -> 13
     // Finally, create and alter other constraints.
-    | SOAlterConstraint _ -> 11
-    | SOCreateConstraint _ -> 11
+    | SOAlterConstraint _ -> 14
+    | SOCreateConstraint _ -> 14
 
 type private OrderedSchemaOperation = SchemaOperation * int
 
@@ -307,6 +311,9 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
 
 let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : OrderedSchemaOperation seq =
     seq {
+        for extName in toMeta.Extensions do
+            if not <| Set.contains extName fromMeta.Extensions then
+                yield (SOCreateExtension extName, 0)
         for KeyValue (schemaKey, schemaMeta) in toMeta.Schemas do
             match Map.tryFind schemaKey fromMeta.Schemas with
             | None ->
@@ -320,6 +327,9 @@ let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMet
         for KeyValue (schemaKey, schemaMeta) in fromMeta.Schemas do
             if not (Map.containsKey schemaKey toMeta.Schemas) then
                 yield! deleteBuildSchema schemaMeta.Name schemaMeta
+        for extName in fromMeta.Extensions do
+            if not <| Set.contains extName toMeta.Extensions then
+                yield (SODropExtension extName, 0)
     }
 
 let planDatabaseMigration (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =

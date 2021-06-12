@@ -1,11 +1,9 @@
 module FunWithFlags.FunDB.Layout.Meta
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.Layout.Resolve
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
@@ -17,9 +15,26 @@ let private subEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntit
 
 let private relatedCompilationFlags =
     { emptyExprCompilationFlags with
-        ForceNoImmediate = true
         ForceNoTableRef = true
     }
+
+let private funExtensions =
+    Set.ofSeq
+        [ SQL.SQLName "pg_trgm"
+        ]
+
+let private defaultIndexColumn (colName : SQL.SQLName) : SQL.IndexColumn =
+    { Key = SQL.IKColumn colName
+      OpClass = None
+      Order = Some SQL.Asc
+      Nulls = Some SQL.NullsLast
+    }
+
+let private simplifyIndex : SQL.ValueExpr -> SQL.IndexKey = function
+    | SQL.VEColumn col -> SQL.IKColumn col.Name
+    | expr -> SQL.IKExpression (String.comparable expr)
+
+let private defaultIndexType = SQL.SQLName "btree"
 
 type private MetaBuilder (layout : Layout) =
     let compileRelatedExpr (expr : ResolvedFieldExpr) : SQL.ValueExpr =
@@ -32,15 +47,17 @@ type private MetaBuilder (layout : Layout) =
             col.ColumnName
         SQL.CMUnique (Array.map compileColumn constr.Columns, SQL.DCNotDeferrable)
 
-    let makeIndexMeta (ref : ResolvedEntityRef) (entity : ResolvedEntity) (index : ResolvedIndex) : SQL.IndexMeta =
-        let compileKeyExpr expr = compileRelatedExpr expr |> String.comparable |> SQL.IKExpression
-        let compileKey : ResolvedFieldExpr -> SQL.IndexKey = function
-            | FERef { Ref = { Ref = VRColumn col } } as expr ->
-                match Map.tryFind col.Name entity.ColumnFields with
-                | Some col -> SQL.IKColumn col.ColumnName
-                | None -> compileKeyExpr expr
-            | expr -> compileKeyExpr expr
+    let makeIndexColumnMeta (entity : ResolvedEntity) (index : ResolvedIndex) (col : ResolvedIndexColumn) : SQL.IndexColumn =
+        let key = compileRelatedExpr col.Expr |> simplifyIndex
+        let opClass = col.OpClass |> Option.map (fun opClass -> Map.find opClass allowedOpClasses |> Map.find index.Type)
+        
+        { Key = key
+          OpClass = opClass
+          Order = Option.map compileOrder col.Order
+          Nulls = Option.map compileNullsOrder col.Nulls
+        }
 
+    let makeIndexMeta (ref : ResolvedEntityRef) (entity : ResolvedEntity) (index : ResolvedIndex) : SQL.IndexMeta =
         let predicate = Option.map compileRelatedExpr index.Predicate
         let possibleEntities = allPossibleEntities layout ref |> Seq.map snd |> Array.ofSeq
         let predicate =
@@ -50,21 +67,12 @@ type private MetaBuilder (layout : Layout) =
                 let check = makeCheckExprFor subEntityColumn possibleEntities
                 Option.unionWith (curry SQL.VEAnd) (Some check) predicate
 
-        let userKeys = Array.map compileKey index.Expressions
+        let columns = Array.map (makeIndexColumnMeta entity index) index.Expressions
 
-        let checkSubEntity = function
-            | SQL.IKColumn col when col = sqlFunSubEntity -> true
-            | _ -> false
-        let userKeys =
-            if hasSubType entity && not index.IsUnique && not (Array.exists checkSubEntity userKeys) && Array.length possibleEntities > 1 then
-                // Add `sub_entity` as the last column, because we often will also filter on `sub_entity`.
-                Array.append userKeys [| SQL.IKColumn sqlFunSubEntity |]
-            else
-                userKeys
-
-        { Keys = userKeys
+        { Columns = columns
           IsUnique = index.IsUnique
           Predicate = Option.map String.comparable predicate
+          AccessMethod = SQL.SQLName <| index.Type.ToFunQLString()
         } : SQL.IndexMeta
 
     let makeColumnFieldMeta (ref : ResolvedFieldRef) (columnName : SQL.ColumnName) (entity : ResolvedEntity) (field : ResolvedColumnField) : SQL.ColumnMeta * (SQL.MigrationKey * (SQL.ConstraintName * SQL.ConstraintMeta)) seq =
@@ -173,9 +181,10 @@ type private MetaBuilder (layout : Layout) =
                         let typeIndexKey = sprintf "__type_index__%s" entity.HashName
                         let typeIndexName = SQL.SQLName typeIndexKey
                         let subEntityIndex =
-                            { Keys = [| SQL.IKColumn sqlFunSubEntity |]
+                            { Columns = [| defaultIndexColumn sqlFunSubEntity |]
                               IsUnique = false
                               Predicate = None
+                              AccessMethod = defaultIndexType
                             } : SQL.IndexMeta
                         let indexes = Seq.singleton (typeIndexKey, (typeIndexName, subEntityIndex))
 
@@ -255,9 +264,10 @@ type private MetaBuilder (layout : Layout) =
                 let key = sprintf "__refindex__%s__%s" entity.HashName field.HashName
                 let sqlName = SQL.SQLName key
                 let refIndex =
-                    { Keys = [| SQL.IKColumn field.ColumnName |]
+                    { Columns = [| defaultIndexColumn field.ColumnName |]
                       IsUnique = false
                       Predicate = None
+                      AccessMethod = defaultIndexType
                     } : SQL.IndexMeta
                 Some (key, (sqlName, refIndex))
             | _ -> None
@@ -300,7 +310,9 @@ type private MetaBuilder (layout : Layout) =
 
         let schemas = schemas |> Map.filter (fun name schema -> not <| Map.isEmpty schema.Objects)
 
-        { SQL.Schemas = schemas }
+        { Schemas = schemas
+          Extensions = funExtensions
+        }
 
     member this.BuildLayoutMeta = buildLayoutMeta
 

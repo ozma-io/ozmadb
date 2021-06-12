@@ -341,6 +341,11 @@ type private Phase1Resolver (layout : SourceLayout) =
         resolveLayout ()
         cachedEntities
 
+let private parseRelatedExpr (rawExpr : string) =
+    match parse tokenizeFunQL fieldExpr rawExpr with
+    | Ok r -> r
+    | Error msg -> raisef ResolveLayoutException "Error parsing local expression: %s" msg
+
 //
 // PHASE 2: Building computed fields, sub entity parse expressions and other stuff.
 //
@@ -408,12 +413,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
     and initialWrappedLayout = makeWrappedLayout Set.empty
 
-    and resolveRelatedExpr (wrappedLayout : ILayoutBits) (entityRef : ResolvedEntityRef) (rawExpr : string) : RelatedExpr =
-        let expr =
-            match parse tokenizeFunQL fieldExpr rawExpr with
-            | Ok r -> r
-            | Error msg -> raisef ResolveLayoutException "Error parsing local expression: %s" msg
-
+    and resolveRelatedExpr (wrappedLayout : ILayoutBits) (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : RelatedExpr =
         let entityInfo = SFEntity entityRef
         let (localArguments, expr) =
             try
@@ -431,7 +431,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
     and resolveOneComputedExpr (stack : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) (hashName : HashName) (comp : SourceComputedField) : ResolvedComputedField =
         let wrappedLayout = makeWrappedLayout stack
         // Computed fields are always assumed to reference immediate fields. Also read shortcomings of current computed field compilation in Compile.fs.
-        let expr = resolveRelatedExpr wrappedLayout entityRef comp.Expression
+        let expr = resolveRelatedExpr wrappedLayout entityRef (parseRelatedExpr comp.Expression)
         { Expression = expr.Expr
           InheritedFrom = None
           IsLocal = expr.Info.IsLocal
@@ -463,9 +463,9 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 | :? ResolveLayoutException as e when comp.Source.AllowBroken || forceAllowBroken ->
                     Error (e :> exn)
 
-    let resolveLocalExpr (entityRef : ResolvedEntityRef) (rawExpr : string) : RelatedExpr =
+    and resolveLocalExpr (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : RelatedExpr =
         // Local expressions are used as-is in the database, so `Immediate = false`.
-        let expr = resolveRelatedExpr initialWrappedLayout entityRef rawExpr
+        let expr = resolveRelatedExpr initialWrappedLayout entityRef expr
         if not expr.Info.IsLocal then
             raisef ResolveLayoutException "Non-local expressions are not allowed here"
         if not <| Set.isEmpty expr.References.UsedArguments then
@@ -473,7 +473,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         expr
 
     let resolveCheckConstraint (entityRef : ResolvedEntityRef) (constrName : ConstraintName) (constr : SourceCheckConstraint) : ResolvedCheckConstraint =
-        let expr = resolveRelatedExpr initialWrappedLayout entityRef constr.Expression
+        let expr = resolveRelatedExpr initialWrappedLayout entityRef (parseRelatedExpr constr.Expression)
         if not <| Set.isEmpty expr.References.UsedArguments then
             raisef ResolveLayoutException "Arguments are not allowed here"
         { Expression = expr.Expr
@@ -482,25 +482,59 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           HashName = makeHashName constrName
         }
 
+    let resolveIndexColumn (entityRef : ResolvedEntityRef) (indexType : IndexType) (colExpr : string) : ResolvedIndexColumn =
+        let col =
+            match parse tokenizeFunQL indexColumn colExpr with
+            | Ok r -> r
+            | Error msg -> raisef ResolveLayoutException "Error parsing index expression: %s" msg
+
+        let expr = resolveLocalExpr entityRef col.Expr
+        // We should automatically de-duplicate indexes instead of this.
+        match expr.Expr with
+        | FERef { Ref = { Ref = VRColumn { Name = name } } } when name = funId || name = funSubEntity -> raisef ResolveLayoutException "System columns are automatically indexed: %O" expr
+        | _ -> ()
+        let indexInfo = getIndexTypeInfo indexType
+        let (order, nullsOrder) =
+            if indexInfo.CanOrder then
+                let order = Option.defaultValue Asc col.Order
+                let nullsOrder =
+                    match col.Nulls with
+                    | Some n -> n
+                    | None ->
+                        match order with
+                        | Asc -> NullsLast
+                        | Desc -> NullsFirst
+                (Some order, Some nullsOrder)
+            else
+                if Option.isSome col.Order || Option.isSome col.Nulls then
+                    raisef ResolveLayoutException "Cannot specify ordering for unordered index"
+                (None, None)
+        match col.OpClass with
+        | None -> ()
+        | Some cl ->
+            match Map.tryFind cl allowedOpClasses with
+            | None -> raisef ResolveLayoutException "Invalid operation class: %O" cl
+            | Some clOps ->
+                if not <| Map.containsKey indexType clOps then
+                    raisef ResolveLayoutException "Invalid operation class for index type %O: %O" indexType cl
+        { Expr = expr.Expr
+          OpClass = col.OpClass
+          Order = order
+          Nulls = nullsOrder
+        }
+
     let resolveIndex (entityRef : ResolvedEntityRef) (indexName : IndexName) (index : SourceIndex) : ResolvedIndex =
         if Array.isEmpty index.Expressions then
             raise <| ResolveLayoutException "Empty index"
-
-        let parseExpr rawExpr =
-            let expr = resolveLocalExpr entityRef rawExpr
-            // We should automatically de-duplicate indexes instead of this.
-            match expr.Expr with
-            | FERef { Ref = { Ref = VRColumn { Name = name } } } when name = funId || name = funSubEntity -> raisef ResolveLayoutException "System columns are automatically indexed: %O" expr
-            | _ -> ()
-            expr.Expr
         
-        let exprs = Array.map parseExpr index.Expressions
-        let predicate = Option.map (fun x -> (resolveLocalExpr entityRef x).Expr) index.Predicate
+        let exprs = Array.map (resolveIndexColumn entityRef index.Type) index.Expressions
+        let predicate = Option.map (fun x -> (resolveLocalExpr entityRef (parseRelatedExpr x)).Expr) index.Predicate
 
         { Expressions = exprs
           HashName = makeHashName indexName
           IsUnique = index.IsUnique
           Predicate = predicate
+          Type = index.Type
         }
 
     let resolveEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) : ErroredEntity * ResolvedEntity =
@@ -585,7 +619,6 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         (errors, ret)
 
     let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) : ErroredSchema * ResolvedSchema =
-        let mutable roots = Set.empty
         let mutable errors = Map.empty
 
         let mapEntity name entity =
@@ -593,8 +626,6 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             let halfEntity = Map.find ref entities
             try
                 let (entityErrors, entity) = resolveEntity ref halfEntity
-                if Option.isNone entity.Parent then
-                    roots <- Set.add name roots
                 if not (Map.isEmpty entityErrors.ComputedFields) then
                     errors <- Map.add name entityErrors errors
                 entity
@@ -610,8 +641,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
         let ret =
             { Entities = entities
-              Roots = roots
-            }
+            } : ResolvedSchema
         (errors, ret)
 
     let resolveLayout () : ErroredLayout * Layout =
@@ -715,7 +745,6 @@ type private Phase3Resolver (layout : Layout) =
     let resolveSchema (schemaName : SchemaName) (schema : ResolvedSchema) : ResolvedSchema =
         let mapEntity name entity = resolveEntity { Schema = schemaName; Name = name } entity
         { Entities = Map.map mapEntity schema.Entities
-          Roots = schema.Roots
         }
 
     let resolveLayout () : Layout =

@@ -341,6 +341,20 @@ type SortOrder =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+type NullsOrder =
+    | NullsFirst
+    | NullsLast
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | NullsFirst -> "NULLS FIRST"
+            | NullsLast -> "NULLS LAST"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 type JoinType =
     | Inner
     | Left
@@ -563,10 +577,7 @@ and [<NoEquality; NoComparison>] FromExpr =
         member this.ToSQLString () =
             match this with
             | FTable (_, malias, t) ->
-                let aliasStr =
-                    match malias with
-                    | None -> ""
-                    | Some alias -> alias.ToSQLString()
+                let aliasStr = optionToSQLString malias
                 String.concatWithWhitespaces [t.ToSQLString(); aliasStr]
             | FSubExpr (alias, expr) ->
                 sprintf "(%s) %s" (expr.ToSQLString()) (alias.ToSQLString())
@@ -637,8 +648,23 @@ and [<NoEquality; NoComparison>] SingleSelectExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+and [<NoEquality; NoComparison>] OrderColumn =
+    { Expr : ValueExpr
+      Order : SortOrder option
+      Nulls : NullsOrder option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let orderStr = optionToSQLString this.Order
+            let nullsStr = optionToSQLString this.Nulls
+            String.concatWithWhitespaces [this.Expr.ToSQLString(); orderStr; nullsStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 and [<NoEquality; NoComparison>] OrderLimitClause =
-    { OrderBy : (SortOrder * ValueExpr)[]
+    { OrderBy : OrderColumn[]
       Limit : ValueExpr option
       Offset : ValueExpr option
     } with
@@ -648,7 +674,7 @@ and [<NoEquality; NoComparison>] OrderLimitClause =
                 let orderByStr =
                     if Array.isEmpty this.OrderBy
                     then ""
-                    else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToSQLString()) (ord.ToSQLString())) |> String.concat ", ")
+                    else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map (fun ord -> ord.ToSQLString()) |> String.concat ", ")
                 let limitStr =
                     match this.Limit with
                     | Some e -> sprintf "LIMIT %s" (e.ToSQLString())
@@ -732,10 +758,7 @@ and [<NoEquality; NoComparison>] SelectExpr =
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            let ctesStr =
-                match this.CTEs with
-                | None -> ""
-                | Some ctes -> ctes.ToSQLString()
+            let ctesStr = optionToSQLString this.CTEs
             String.concatWithWhitespaces [ctesStr; this.Tree.ToSQLString()]
 
         interface ISQLString with

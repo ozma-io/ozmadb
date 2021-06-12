@@ -67,7 +67,7 @@ namespace FunWithFlags.FunDBSchema.System
         public DbSet<UserView> UserViews { get; set; } = null!;
 
         [Entity("name")]
-        [UniqueConstraint("name", new [] {"name"})]
+        [Attributes.Index("name", new [] {"lower(name)"}, IsUnique=true)]
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<User> Users { get; set; } = null!;
 
@@ -350,6 +350,9 @@ namespace FunWithFlags.FunDBSchema.System
         public bool IsUnique { get; set; }
         [ColumnField("string")]
         public string? Predicate { get; set; }
+       [ColumnField("enum('btree', 'gist', 'gin')", Default="'btree'")]
+       [Required]
+        public string Type { get; set; } = null!;
     }
 
     public class UserView

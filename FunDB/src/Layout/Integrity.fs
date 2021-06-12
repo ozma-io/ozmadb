@@ -214,7 +214,9 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
           (checkInsertTriggerKey, (checkInsertTriggerName, checkInsertTriggerObject))
         ]
         |> Map.ofSeq
-    { Schemas = Map.singleton (fromSchema.ToString()) { Name = fromSchema; Objects = objects } }
+    { Schemas = Map.singleton (fromSchema.ToString()) { Name = fromSchema; Objects = objects }
+      Extensions = Set.empty
+    }
 
 // Need to be public for JsonConvert
 type PathTriggerKey =
@@ -461,10 +463,16 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
           Extra = query.Extra
         }
 
+    and useNewInOrderColumn (col : SQL.OrderColumn) : SQL.OrderColumn =
+        { Expr = useNewInValueExpr col.Expr
+          Order = col.Order
+          Nulls = col.Nulls
+        }
+
     and useNewInOrderLimitClause (clause : SQL.OrderLimitClause) : SQL.OrderLimitClause =
         { Limit = Option.map useNewInValueExpr clause.Limit
           Offset = Option.map useNewInValueExpr clause.Offset
-          OrderBy = Array.map (fun (ord, expr) -> (ord, useNewInValueExpr expr)) clause.OrderBy
+          OrderBy = Array.map useNewInOrderColumn clause.OrderBy
         }
 
     and useNewInSelectedColumn : SQL.SelectedColumn -> SQL.SelectedColumn = function
@@ -616,7 +624,9 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           (checkInsertTriggerKey, (checkInsertTriggerName, checkInsertTriggerObject))
         ]
         |> Map.ofSeq
-    { Schemas = Map.singleton (string schemaName) { Name = schemaName; Objects = objects } }
+    { Schemas = Map.singleton (string schemaName) { Name = schemaName; Objects = objects }
+      Extensions = Set.empty
+    }
 
 // This check is built on assumption that we can collect affected rows after the operation. This is true in all cases except one: DELETE with SET NULL foreign key.
 // We don't support them right now, but beware of this!
@@ -707,9 +717,15 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
     let checkUpdateTriggerObject = SQL.OMTrigger (triggerTableName, checkUpdateTriggerDefinition)
 
     let functionObjects = Map.singleton checkFunctionKey (checkFunctionName, checkFunctionObject)
-    let functionDbMeta : SQL.DatabaseMeta = { Schemas = Map.singleton (string schemaName) { Name = schemaName; Objects = functionObjects } }
+    let functionDbMeta : SQL.DatabaseMeta =
+        { Schemas = Map.singleton (string schemaName) { Name = schemaName; Objects = functionObjects }
+          Extensions = Set.empty
+        }
     let triggerObjects = Map.singleton checkUpdateTriggerKey (checkUpdateTriggerName, checkUpdateTriggerObject)
-    let triggerDbMeta : SQL.DatabaseMeta = { Schemas = Map.singleton (string triggerSchemaName) { Name = triggerSchemaName; Objects = triggerObjects } }
+    let triggerDbMeta : SQL.DatabaseMeta =
+        { Schemas = Map.singleton (string triggerSchemaName) { Name = triggerSchemaName; Objects = triggerObjects }
+          Extensions = Set.empty
+        }
 
     SQL.unionDatabaseMeta functionDbMeta triggerDbMeta
 

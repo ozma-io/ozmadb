@@ -50,10 +50,11 @@ let private makeSourceIndex (index : IndexAttribute) : FunQLName * SourceIndex =
         { Expressions = index.Expressions
           IsUnique = index.IsUnique
           Predicate = Option.ofObj index.Predicate
+          Type = index.Type |> Option.ofObj |> Option.map (fun typ -> Map.find typ indexTypesMap) |> Option.defaultValue ITBTree
         }
     (FunQLName index.Name, res)
 
-let private getAttribute<'t when 't :> Attribute> (prop : PropertyInfo) =
+let private getAttributes<'t when 't :> Attribute> (prop : MemberInfo) =
     Attribute.GetCustomAttributes(prop, typeof<'t>) |> Array.map (fun x -> x :?> 't)
 
 let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceEntity) option =
@@ -64,10 +65,10 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
         // Should be DbSet<Foo>
         let entityClass = prop.PropertyType.GetGenericArguments().[0]
         let columnFields = entityClass.GetProperties() |> Seq.mapMaybe makeSourceColumnField |> Map.ofSeq
-        let computedFields = getAttribute<ComputedFieldAttribute> prop
-        let uniqueConstraints = getAttribute<UniqueConstraintAttribute> prop
-        let checkConstraints = getAttribute<CheckConstraintAttribute> prop
-        let indexes = getAttribute<IndexAttribute> prop
+        let computedFields = getAttributes<ComputedFieldAttribute> prop
+        let uniqueConstraints = getAttributes<UniqueConstraintAttribute> prop
+        let checkConstraints = getAttributes<CheckConstraintAttribute> prop
+        let indexes = getAttributes<IndexAttribute> prop
 
         let res =
             { ColumnFields = columnFields

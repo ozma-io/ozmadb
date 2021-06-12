@@ -340,6 +340,20 @@ type SortOrder =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+type NullsOrder =
+    | [<CaseName("first")>] NullsFirst
+    | [<CaseName("last")>] NullsLast
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | NullsFirst -> "NULLS FIRST"
+            | NullsLast -> "NULLS LAST"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 type LinkedRef<'f> when 'f :> IFunQLName =
     { Ref : 'f
       Path : FieldName[]
@@ -615,27 +629,42 @@ and [<NoEquality; NoComparison>] QueryColumnResult<'e, 'f> when 'e :> IFunQLName
         interface IFunQLName with
             member this.ToName () = this.TryToName () |> Option.get
 
+and [<NoEquality; NoComparison>] OrderColumn<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { Expr : FieldExpr<'e, 'f>
+      Order : SortOrder option
+      Nulls : NullsOrder option
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let orderStr = optionToFunQLString this.Order
+            let nullsStr = optionToFunQLString this.Nulls
+            String.concatWithWhitespaces [this.Expr.ToFunQLString(); orderStr; nullsStr]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 and [<NoEquality; NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    { OrderBy : (SortOrder * FieldExpr<'e, 'f>)[]
+    { OrderBy : OrderColumn<'e, 'f>[]
       Limit : FieldExpr<'e, 'f> option
       Offset : FieldExpr<'e, 'f> option
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-                let orderByStr =
-                    if Array.isEmpty this.OrderBy
-                    then ""
-                    else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map (fun (ord, expr) -> sprintf "%s %s" (expr.ToFunQLString()) (ord.ToFunQLString())) |> String.concat ", ")
-                let limitStr =
-                    match this.Limit with
-                    | Some e -> sprintf "LIMIT %s" (e.ToFunQLString())
-                    | None -> ""
-                let offsetStr =
-                    match this.Offset with
-                    | Some e -> sprintf "OFFSET %s" (e.ToFunQLString())
-                    | None -> ""
-                String.concatWithWhitespaces [orderByStr; limitStr; offsetStr]
+            let orderByStr =
+                if Array.isEmpty this.OrderBy
+                then ""
+                else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map (fun ord -> ord.ToFunQLString()) |> String.concat ", ")
+            let limitStr =
+                match this.Limit with
+                | Some e -> sprintf "LIMIT %s" (e.ToFunQLString())
+                | None -> ""
+            let offsetStr =
+                match this.Offset with
+                | Some e -> sprintf "OFFSET %s" (e.ToFunQLString())
+                | None -> ""
+            String.concatWithWhitespaces [orderByStr; limitStr; offsetStr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -704,10 +733,7 @@ and [<NoEquality; NoComparison>] SelectExpr<'e, 'f> when 'e :> IFunQLName and 'f
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            let ctesStr =
-                match this.CTEs with
-                | None -> ""
-                | Some ctes -> ctes.ToFunQLString()
+            let ctesStr = optionToFunQLString this.CTEs
             String.concatWithWhitespaces [ctesStr; this.Tree.ToFunQLString()]
 
         interface IFunQLString with
@@ -742,10 +768,7 @@ and [<NoEquality; NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :
         member this.ToFunQLString () =
             match this with
             | FEntity (malias, t) ->
-                let aliasStr =
-                    match malias with
-                    | None -> ""
-                    | Some alias -> alias.ToFunQLString()
+                let aliasStr = optionToFunQLString malias
                 String.concatWithWhitespaces [t.ToFunQLString(); aliasStr]
             | FSubExpr (alias, expr) ->
                 sprintf "(%s) %s" (expr.ToFunQLString()) (alias.ToFunQLString())
@@ -805,6 +828,24 @@ and [<NoEquality; NoComparison>] CommonTableExprs<'e, 'f> when 'e :> IFunQLName 
                 |> String.concat ", "
             let recursive = if this.Recursive then "RECURSIVE" else ""
             String.concatWithWhitespaces ["WITH"; recursive; exprs]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+[<NoEquality; NoComparison>]
+type IndexColumn<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { Expr : FieldExpr<'e, 'f>
+      OpClass : FunQLName option
+      Order : SortOrder option
+      Nulls : NullsOrder option
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let opClassStr = optionToFunQLString this.OpClass
+            let orderStr = optionToFunQLString this.Order
+            let nullsStr = optionToFunQLString this.Nulls
+            String.concatWithWhitespaces [this.Expr.ToFunQLString(); opClassStr; orderStr; nullsStr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -1067,6 +1108,9 @@ type ResolvedFromExpr = FromExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedAttributeMap = AttributeMap<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>
 type ResolvedAggExpr = AggExpr<EntityRef, LinkedBoundFieldRef>
+type ResolvedOrderColumn = OrderColumn<EntityRef, LinkedBoundFieldRef>
+
+type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 
 type PragmasMap = Map<PragmaName, FieldValue>
 
@@ -1186,6 +1230,8 @@ let allowedFunctions : Map<FunctionName, FunctionRepr> =
           (FunQLName "round", FRFunction <| SQL.SQLName "round")
           // Strings
           (FunQLName "to_char", FRFunction <| SQL.SQLName "to_char")
+          (FunQLName "upper", FRFunction <| SQL.SQLName "upper")
+          (FunQLName "lower", FRFunction <| SQL.SQLName "lower")
           // Dates
           (FunQLName "age", FRFunction <| SQL.SQLName "age")
           (FunQLName "date_part", FRFunction <| SQL.SQLName "date_part")

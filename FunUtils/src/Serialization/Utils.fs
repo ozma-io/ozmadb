@@ -28,6 +28,11 @@ type CaseNameAttribute (caseName : string) =
     member this.CaseName = caseName
     member val InnerObject = false with get, set
 
+[<AllowNullLiteral>]
+[<AttributeUsage(AttributeTargets.Method)>]
+type DefaultCaseAttribute () =
+    inherit Attribute ()
+
 let memberInnerType (memberInfo : MemberInfo) =
     match memberInfo.MemberType with
     | MemberTypes.Property -> Some (memberInfo :?> PropertyInfo).PropertyType
@@ -69,6 +74,14 @@ let unionName (case : UnionCaseInfo) : string option =
 
 let unionNames (cases : UnionCase seq) : Map<string option, UnionCase> =
     cases |> Seq.map (fun case -> (unionName case.Info, case)) |> Map.ofSeqUnique
+
+let defaultUnionCase (cases : UnionCase seq) : obj option =
+    let getDefaultCase case =
+        match case.Info.GetCustomAttributes typeof<DefaultCaseAttribute> |> Seq.cast |> Seq.first with
+        | None -> None
+        | Some defaultAttr when not (Array.isEmpty case.Fields) -> failwith "Default case must not have any fields"
+        | Some defaultAttr -> Some <| FSharpValue.MakeUnion(case.Info, [||])
+    cases |> Seq.mapMaybe getDefaultCase |> Seq.first
 
 let isUnionEnum (cases : UnionCase seq) : Map<string option, UnionCaseInfo * obj> option =
     let enumCase case =
@@ -142,7 +155,7 @@ let getTypeDefaultValue (objectType : Type) : obj option =
         | None when objectType.IsGenericType && objectType.GetGenericTypeDefinition () = typedefof<_ list> ->
             let emptyCase = FSharpType.GetUnionCases(objectType) |> Array.find (fun case -> case.Name = "Empty")
             Some <| FSharpValue.MakeUnion(emptyCase, [||])
-        | None -> None
+        | None -> defaultUnionCase cases
     else if objectType.IsArray then
         Some (Array.CreateInstance(objectType.GetElementType(), 0) :> obj)
     else if objectType.IsGenericType then

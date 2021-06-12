@@ -5,7 +5,10 @@ open FSharp.Text.Lexing
 let newline (lexbuf: LexBuffer<_>) =
     lexbuf.EndPos <- lexbuf.EndPos.NextLine
 
-let parse (tokenstream : LexBuffer<char> -> 'tok) (parser : (LexBuffer<char> -> 'tok) -> LexBuffer<char> -> 'a) (str : string) : Result<'a, string> =
+type TokenStream<'tok> = LexBuffer<char> -> 'tok
+type Parser<'tok, 'a> = (LexBuffer<char> -> 'tok) -> LexBuffer<char> -> 'a
+
+let parse (tokenstream : TokenStream<'tok>) (parser : Parser<'tok, 'a>) (str : string) : Result<'a, string> =
     let lexbuf = LexBuffer<char>.FromString str
     try
         Ok (parser tokenstream lexbuf)

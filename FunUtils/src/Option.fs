@@ -8,7 +8,8 @@ let getOrFailWith (errorFunc : unit -> string) : 'a option -> 'a = function
     | Some r -> r
     | None -> failwith (errorFunc ())
 
-let toSeq : 'a option -> 'a seq = function
+let toSeq (a : 'a option) :'a seq =
+    match a with
     | Some r -> Seq.singleton r
     | None -> Seq.empty
 

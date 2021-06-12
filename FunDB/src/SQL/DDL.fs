@@ -8,6 +8,9 @@ type ConstraintName = SQLName
 type IndexName = SQLName
 type SequenceName = SQLName
 type TriggerName = SQLName
+type ExtensionName = SQLName
+type OpClassName = SQLName
+type AccessMethodName = SQLName
 type MigrationKey = string
 
 [<NoEquality; NoComparison>]
@@ -65,9 +68,28 @@ type IndexKey =
             member this.ToSQLString () = this.ToSQLString()
 
 [<StructuralEquality; NoComparison>]
+type IndexColumn =
+    { Key : IndexKey
+      OpClass : OpClassName option
+      Order : SortOrder option
+      Nulls : NullsOrder option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let opClassStr = optionToSQLString this.OpClass
+            let orderStr = optionToSQLString this.Order
+            let nullsStr = optionToSQLString this.Nulls
+            String.concatWithWhitespaces [this.Key.ToSQLString(); opClassStr; orderStr; nullsStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
 type IndexMeta =
-    { Keys : IndexKey[]
+    { Columns : IndexColumn[]
       IsUnique : bool
+      AccessMethod : AccessMethodName
       Predicate : StringComparable<ValueExpr> option
     }
 
@@ -117,10 +139,7 @@ let private functionSignatureToString (signature : FunctionArgumentSignature) =
     sprintf "%s %s" (signature.Mode.ToSQLString()) (signature.TypeName.ToSQLString())
 
 let private functionArgumentToString (signature : FunctionArgumentSignature) (arg : FunctionArgument) =
-    let nameStr =
-        match arg.Name with
-        | None -> ""
-        | Some n -> n.ToSQLString()
+    let nameStr = optionToSQLString arg.Name
     let defaultStr =
         match arg.DefaultValue with
         | None -> ""
@@ -257,18 +276,22 @@ let unionSchemaMeta (a : SchemaMeta) (b : SchemaMeta) =
 [<NoEquality; NoComparison>]
 type DatabaseMeta =
     { Schemas : Map<MigrationKey, SchemaMeta>
+      Extensions : Set<ExtensionName>
     }
 
 let emptyDatabaseMeta =
     { Schemas = Map.empty
+      Extensions = Set.empty
     }
 
 let unionDatabaseMeta (a : DatabaseMeta) (b : DatabaseMeta) =
     { Schemas = Map.unionWith (fun key -> unionSchemaMeta) a.Schemas b.Schemas
+      Extensions = Set.union a.Extensions b.Extensions
     }
 
 let filterDatabaseMeta (f : SchemaName -> bool) (meta : DatabaseMeta) =
     { Schemas = Map.filter (fun name schema -> f schema.Name) meta.Schemas
+      Extensions = meta.Extensions
     }
 
 [<NoEquality; NoComparison>]
@@ -301,6 +324,8 @@ type TableOperation =
 
 [<NoEquality; NoComparison>]
 type SchemaOperation =
+    | SOCreateExtension of ExtensionName
+    | SODropExtension of ExtensionName
     | SOCreateSchema of SchemaName
     | SORenameSchema of SchemaName * SchemaName
     | SODropSchema of SchemaName
@@ -330,6 +355,8 @@ type SchemaOperation =
 
         member this.ToSQLString () =
             match this with
+            | SOCreateExtension name -> sprintf "CREATE EXTENSION %s" (name.ToSQLString())
+            | SODropExtension name -> sprintf "DROP EXTENSION %s" (name.ToSQLString())
             | SOCreateSchema schema -> sprintf "CREATE SCHEMA %s" (schema.ToSQLString())
             | SORenameSchema (schema, toName) -> sprintf "ALTER SCHEMA %s RENAME TO %s" (schema.ToSQLString()) (toName.ToSQLString())
             | SODropSchema schema -> sprintf "DROP SCHEMA %s" (schema.ToSQLString())
@@ -365,11 +392,11 @@ type SchemaOperation =
                 String.concatWithWhitespaces [initStr; alterStr]
             | SODropConstraint (constr, table) -> sprintf "ALTER TABLE %s DROP CONSTRAINT %s" ({ constr with Name = table }.ToSQLString()) (constr.Name.ToSQLString())
             | SOCreateIndex (index, table, pars) ->
-                let keysStr =
-                    assert (not <| Array.isEmpty pars.Keys)
-                    pars.Keys |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                let columnsStr =
+                    assert (not <| Array.isEmpty pars.Columns)
+                    pars.Columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
                 let uniqueStr = if pars.IsUnique then "UNIQUE" else ""
-                let suffixStr = sprintf "INDEX %s ON %s (%s)" (index.Name.ToSQLString()) ({ index with Name = table }.ToSQLString()) keysStr
+                let suffixStr = sprintf "INDEX %s ON %s USING %s (%s)" (index.Name.ToSQLString()) ({ index with Name = table }.ToSQLString()) (pars.AccessMethod.ToSQLString()) columnsStr
                 let predStr =
                     match pars.Predicate with
                     | None -> ""
@@ -403,10 +430,7 @@ type SchemaOperation =
                         (def.Order.ToSQLString())
                         eventsStr
                         ({ Schema = trigger.Schema; Name = table }.ToSQLString())
-                let deferStr =
-                    match def.IsConstraint with
-                    | None -> ""
-                    | Some d -> d.ToSQLString()
+                let deferStr = optionToSQLString def.IsConstraint
                 let modeStr = def.Mode.ToSQLString()
                 let whenStr =
                     match def.Condition with

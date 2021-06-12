@@ -1167,13 +1167,16 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
 
     and resolveOrderLimitClause (ctx : Context) (limits : ParsedOrderLimitClause) : bool * ResolvedOrderLimitClause =
         let mutable isLocal = true
-        let resolveOrderBy (ord, expr) =
-            let (info, ret) = resolveFieldExpr ctx expr
+        let resolveOrderBy (ord : ParsedOrderColumn) =
+            let (info, ret) = resolveFieldExpr ctx ord.Expr
             if info.HasAggregates then
                 raisef ViewResolveException "Aggregates are not allowed here"
             if not info.IsLocal then
                 isLocal <- false
-            (ord, ret)
+            { Expr = ret
+              Order = ord.Order
+              Nulls = ord.Nulls
+            }
         let ret =
             { OrderBy = Array.map resolveOrderBy limits.OrderBy
               Limit = Option.map resolveLimitFieldExpr limits.Limit
@@ -1565,7 +1568,13 @@ and private relabelFieldExpr (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
 and private relabelOrderLimitClause (clause : ResolvedOrderLimitClause) : ResolvedOrderLimitClause =
     { Offset = Option.map relabelFieldExpr clause.Offset
       Limit = Option.map relabelFieldExpr clause.Limit
-      OrderBy = Array.map (fun (order, expr) -> (order, relabelFieldExpr expr)) clause.OrderBy
+      OrderBy = Array.map relabelOrderColumn clause.OrderBy
+    }
+
+and private relabelOrderColumn (ord : ResolvedOrderColumn) : ResolvedOrderColumn =
+    { Expr = relabelFieldExpr ord.Expr
+      Order = ord.Order
+      Nulls = ord.Nulls
     }
 
 and private relabelQueryResult : ResolvedQueryResult -> ResolvedQueryResult = function

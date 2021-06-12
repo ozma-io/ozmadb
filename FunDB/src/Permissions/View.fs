@@ -143,10 +143,16 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
           Extra = query.Extra
         }
 
+    and applyToOrderColumn (col : OrderColumn) : OrderColumn =
+        { Expr = applyToValueExpr col.Expr
+          Order = col.Order
+          Nulls = col.Nulls
+        }
+
     and applyToOrderLimitClause (clause : OrderLimitClause) : OrderLimitClause =
         { Limit = Option.map applyToValueExpr clause.Limit
           Offset = Option.map applyToValueExpr clause.Offset
-          OrderBy = Array.map (fun (ord, expr) -> (ord, applyToValueExpr expr)) clause.OrderBy
+          OrderBy = Array.map applyToOrderColumn clause.OrderBy
         }
 
     and applyToSelectedColumn : SelectedColumn -> SelectedColumn = function

@@ -51,9 +51,15 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
             }
         mapFieldExpr mapper expr
 
+    and resolveOrderColumn (ord : ResolvedOrderColumn) : ResolvedOrderColumn =
+        let expr = resolveFieldExpr ord.Expr
+        { Expr = expr
+          Order = ord.Order
+          Nulls = ord.Nulls
+        }
+
     and resolveOrderLimitClause (limits : ResolvedOrderLimitClause) : ResolvedOrderLimitClause =
-        let resolveOrderBy (ord, expr) = (ord, resolveFieldExpr expr)
-        let orderBy = Array.map resolveOrderBy limits.OrderBy
+        let orderBy = Array.map resolveOrderColumn limits.OrderBy
         let limit = Option.map resolveFieldExpr limits.Limit
         let offset = Option.map resolveFieldExpr limits.Offset
         { OrderBy = orderBy

@@ -51,6 +51,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
         public string[] Expressions { get; }
         public bool IsUnique { get; set; }
         public string? Predicate { get; set; }
+        public string? Type { get; set; }
 
         public IndexAttribute(string name, string[] expressions)
         {
@@ -85,4 +86,5 @@ namespace FunWithFlags.FunDBSchema.Attributes
             this.Type = type;
         }
     }
+
 }
