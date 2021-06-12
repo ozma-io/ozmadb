@@ -79,6 +79,7 @@ type private LayoutUpdater (db : SystemContext) as this =
             oldIndex.Expressions <- newIndex.Expressions
             oldIndex.IsUnique <- newIndex.IsUnique
             oldIndex.Predicate <- Option.toObj newIndex.Predicate
+            oldIndex.Type <- string newIndex.Type
         let createIndexFunc (FunQLName name) =
             Index (
                 Name = name,
