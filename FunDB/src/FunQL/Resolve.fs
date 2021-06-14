@@ -478,55 +478,61 @@ let private findCommonAncestor (layout : ILayoutBits) (baseRef : ResolvedEntityR
     | Some None -> None
     | Some (Some ret) -> Some ret
 
-// Find uppest possible entity in the hierarchy given current type context that has a required field, or None if no such entity exists.
-let private findFieldWithContext (layout : ILayoutBits) (typeCtxs : TypeContextsMap) (key : FromFieldKey) (fieldRef : ResolvedFieldRef) : (ResolvedEntityRef * IEntityBits * ResolvedFieldInfo) option =
-    // First try to find within the given entity itself.
+let private findFieldWithoutContext (layout : ILayoutBits) (fieldRef : ResolvedFieldRef) : (ResolvedEntityRef * IEntityBits * ResolvedFieldInfo) option =
     let parentEntity = layout.FindEntity fieldRef.Entity |> Option.get
     match parentEntity.FindField fieldRef.Name with
     | Some field -> Some (fieldRef.Entity, parentEntity, field)
-    | None ->
-        match Map.tryFind key typeCtxs with
-        | None -> None
-        | Some typeCtx ->
-            assert (fieldRef.Entity = typeCtx.Type)
-            match findCommonAncestor layout typeCtx.Type typeCtx.AllowedSubtypes with
-            | Some (newRef, newEntity) when newRef <> fieldRef.Entity ->
-                match newEntity.FindField fieldRef.Name with
-                | None -> None
-                | Some field ->
-                    // Upcast it as much as possible to avoid unnecessary restrictions due to used entities.
-                    let inheritedFrom =
-                        match field.Field with
-                        // These should have been found in parent entity.
-                        | RId | RSubEntity -> failwith "Impossible"
-                        | RColumnField col -> col.InheritedFrom
-                        | RComputedField comp -> comp.InheritedFrom
-                    match inheritedFrom with
-                    | None -> Some (newRef, newEntity, field)
-                    | Some realParentRef ->
-                        let realParent = layout.FindEntity realParentRef |> Option.get
-                        let realField = realParent.FindField fieldRef.Name |> Option.get
-                        Some (realParentRef, realParent, realField)
-            | _ -> None
+    | None -> None
+
+// Find uppest possible entity in the hierarchy given current type context that has a required field, or None if no such entity exists.
+let private findFieldWithContext (layout : ILayoutBits) (typeCtxs : TypeContextsMap) (key : FromFieldKey) (fieldRef : ResolvedFieldRef) : (ResolvedEntityRef * IEntityBits * ResolvedFieldInfo) option =
+    // First try to find within the given entity itself.
+    match Map.tryFind key typeCtxs with
+    | None -> findFieldWithoutContext layout fieldRef
+    | Some typeCtx ->
+        assert (fieldRef.Entity = typeCtx.Type)
+        match findCommonAncestor layout typeCtx.Type typeCtx.AllowedSubtypes with
+        | Some (newRef, newEntity) when newRef <> fieldRef.Entity ->
+            match newEntity.FindField fieldRef.Name with
+            | None -> None
+            | Some field ->
+                // Upcast it as much as possible to avoid unnecessary restrictions due to used entities.
+                let inheritedFrom =
+                    match field.Field with
+                    // These should have been found in parent entity.
+                    | RId | RSubEntity -> failwith "Impossible"
+                    | RColumnField col -> col.InheritedFrom
+                    | RComputedField comp -> comp.InheritedFrom
+                match inheritedFrom with
+                | None -> Some (newRef, newEntity, field)
+                | Some realParentRef ->
+                    let realParent = layout.FindEntity realParentRef |> Option.get
+                    let realField = realParent.FindField fieldRef.Name |> Option.get
+                    Some (realParentRef, realParent, realField)
+        | _ -> findFieldWithoutContext layout fieldRef
 
 type private OldBoundField =
     | OBField of BoundField
     | OBHeader of BoundFieldHeader
 
 let private resolvePath (layout : ILayoutBits) (typeCtxs : TypeContextsMap) (firstOldBoundField : OldBoundField) (fullPath : FieldName list) : BoundField list =
-    let getBoundField : OldBoundField -> BoundField = function
-        | OBField bound -> bound
-        | OBHeader header ->
-            let (entityRef, entity, field) =
-                match findFieldWithContext layout typeCtxs header.Key header.Ref with
-                | Some ret -> ret
-                | None -> raisef ViewResolveException "Field not found: %O" header.Ref
+    let getBoundField (oldBoundField : OldBoundField) : BoundField =
+        let (cachedBound, header) =
+            match oldBoundField with
+            | OBField bound -> (Some bound, bound.Header)
+            | OBHeader header -> (None, header)
+        match findFieldWithContext layout typeCtxs header.Key header.Ref with
+        | None ->
+            assert Option.isNone cachedBound
+            raisef ViewResolveException "Field not found: %O" header.Ref
+        | Some (entityRef, entity, field) when Option.isNone cachedBound || entityRef <> header.Ref.Entity ->
             { Header = { header with Ref = { header.Ref with Entity = entityRef } }
               Field = resolvedFieldToBits field.Field
               Entity = entity
               ForceRename = field.ForceRename
               Name = field.Name
             }
+        | _ -> Option.get cachedBound
 
     let rec traverse (boundField : BoundField) : FieldName list -> BoundField list = function
         | [] -> [boundField]
@@ -535,7 +541,7 @@ let private resolvePath (layout : ILayoutBits) (typeCtxs : TypeContextsMap) (fir
             | RColumnField { FieldType = FTReference entityRef } ->
                 let refKey =
                     { FromId = boundField.Header.Key.FromId
-                      Path = Array.append boundField.Header.Key.Path [|ref|]
+                      Path = Array.append boundField.Header.Key.Path [|boundField.Header.Ref.Name|]
                     }
                 let refHeader =
                     { Key = refKey
@@ -588,7 +594,7 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
         | Some r -> r
     let typeCtxKey =
         { FromId = FIEntity fieldInfo.FromEntityId
-          Path = field.Ref.Path
+          Path = Array.exceptLast (Array.append [| boundInfo.Ref.Name |] field.Ref.Path)
         }
 
     let neededTypes =
