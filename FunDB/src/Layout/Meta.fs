@@ -223,7 +223,7 @@ type private MetaBuilder (layout : Layout) =
                                 Seq.empty
                             else
                                 let checkNull = SQL.VEIsNull (SQL.VEColumn { Table = None; Name = field.ColumnName })
-                                let expr = (SQL.VEOr (checkExpr, checkNull))
+                                let expr = SQL.VENot (SQL.VEAnd (checkExpr, checkNull))
                                 let notnullName = SQL.SQLName <| sprintf "__notnull__%s__%s" entity.HashName field.HashName
                                 let notnullKey = sprintf "__notnull__%s__%s"entity.HashName field.HashName
                                 Seq.singleton (notnullKey, (notnullName, SQL.CMCheck expr))
