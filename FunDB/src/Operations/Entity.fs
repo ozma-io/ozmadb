@@ -95,46 +95,57 @@ type private ValueColumn =
       Extra : obj
     }
 
-let private fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.DefaultValue || field.IsNullable
-
 let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<int> =
     task {
+        let entity = layout.FindEntity entityRef |> Option.get
+
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
-            let isOptional = fieldIsOptional field
             match Map.tryFind fieldName rawArgs with
-            | None when isOptional -> None
-            | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
+            | None ->
+                match field.DefaultValue with
+                | None when field.IsNullable -> None
+                | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
+                | Some def when Option.isNone entity.Parent || field.InheritedFrom = Some entity.Root -> None
+                | Some def ->
+                    let argType =
+                        { Placeholder = PLocal fieldName
+                          Argument = { ArgType = field.FieldType; Optional = false }
+                          Column = field.ColumnName
+                          // We don't set metadata here because it's a default value -- we don't restrict it.
+                          Extra = null
+                        }
+                    Some (argType, (fieldName, def))
             | Some arg ->
-                Some
+                let argType =
                     { Placeholder = PLocal fieldName
-                      Argument = { ArgType = field.FieldType; Optional = isOptional }
+                      Argument = { ArgType = field.FieldType; Optional = false }
                       Column = field.ColumnName
                       Extra = ({ Name = fieldName } : RestrictedColumnInfo)
                     }
-
-        let entity = layout.FindEntity entityRef |> Option.get
+                Some (argType, (fieldName, arg))
 
         if entity.IsAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
-        let (subEntityValue, rawArgs) =
+        let subEntityTypes =
             if hasSubType entity then
-                let value =
+                let argType =
                     { Placeholder = PLocal funSubEntity
                       Argument = { ArgType = FTType (FETScalar SFTString); Optional = false }
                       Column = sqlFunSubEntity
                       Extra = null
                     }
-                let newArgs = Map.add funSubEntity (FString entity.TypeName) rawArgs
-                (Seq.singleton value, newArgs)
+                Seq.singleton (argType, (funSubEntity, FString entity.TypeName))
             else
-                (Seq.empty, rawArgs)
+                Seq.empty
 
-        let argumentTypes = Seq.append subEntityValue (entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue) |> Seq.cache
-        let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
+        let argumentTypes = Seq.append subEntityTypes (entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue) |> Seq.cache
+
+        let arguments = argumentTypes |> Seq.map (fun (valType, (name, value)) -> (valType.Placeholder, valType.Argument)) |> Map.ofSeq |> compileArguments
         // Id is needed so that we always have at least one column inserted.
-        let insertColumns = argumentTypes |> Seq.map (fun value -> (value.Extra, value.Column))
+        let insertColumns = argumentTypes |> Seq.map (fun (valType, (name, value)) -> (valType.Extra, valType.Column))
         let columns = Seq.append (Seq.singleton (null, sqlFunId)) insertColumns |> Array.ofSeq
-        let values = argumentTypes |> Seq.map (fun value -> arguments.Types.[value.Placeholder].PlaceholderId |> SQL.VEPlaceholder |> SQL.IVValue)
+        let values = argumentTypes |> Seq.map (fun (valType, (name, value)) -> arguments.Types.[valType.Placeholder].PlaceholderId |> SQL.VEPlaceholder |> SQL.IVValue)
+
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
         let expr =
@@ -158,7 +169,8 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e ""
 
-        return! runIntQuery connection globalArgs query rawArgs cancellationToken
+        let newRawArgs = argumentTypes |> Seq.map snd |> Map.ofSeq
+        return! runIntQuery connection globalArgs query newRawArgs cancellationToken
     }
 
 let private funIdArg = { ArgType = FTType (FETScalar SFTInt); Optional = false }
@@ -172,7 +184,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             | Some arg ->
                 Some
                     { Placeholder = PLocal fieldName
-                      Argument = { ArgType = field.FieldType; Optional = fieldIsOptional field }
+                      Argument = { ArgType = field.FieldType; Optional = false }
                       Column = field.ColumnName
                       Extra = ({ Name = fieldName } : RestrictedColumnInfo)
                     }

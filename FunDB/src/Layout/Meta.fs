@@ -223,11 +223,11 @@ type private MetaBuilder (layout : Layout) =
                                 Seq.empty
                             else
                                 let checkNull = SQL.VEIsNull (SQL.VEColumn { Table = None; Name = field.ColumnName })
-                                let expr = SQL.VENot (SQL.VEAnd (checkExpr, checkNull))
+                                let expr = (SQL.VEOr (checkExpr, checkNull))
                                 let notnullName = SQL.SQLName <| sprintf "__notnull__%s__%s" entity.HashName field.HashName
                                 let notnullKey = sprintf "__notnull__%s__%s"entity.HashName field.HashName
                                 Seq.singleton (notnullKey, (notnullName, SQL.CMCheck expr))
-                        Some (field.ColumnName, ({ meta with IsNullable = true }, Seq.append constrs extraConstrs))
+                        Some (field.ColumnName, ({ meta with IsNullable = true; DefaultExpr = None }, Seq.append constrs extraConstrs))
 
                 let columnObjects = entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe makeColumn |> Seq.cache
                 let userColumns = columnObjects |> Seq.map (fun (name, (column, constrs)) -> (name.ToString(), column))
