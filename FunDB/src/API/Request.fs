@@ -50,16 +50,21 @@ type private FetchedUser =
       Role : ResolvedRoleRef option
     }
 
-let private fetchUser (system : SystemContext) (userName : UserName) (cancellationToken : CancellationToken) : Task<FetchedUser option> =
+let private fetchUser (system : SystemContext) (userName : UserName) (allowDisabled : bool) (cancellationToken : CancellationToken) : Task<FetchedUser option> =
     task {
         // FIXME: No index for this.
         let lowerUserName = userName.ToLower()
-        let! user =
+        let userQuery =
             system.Users
                 .Include("Role")
                 .Include("Role.Schema")
-                .Where(fun x -> x.Name.ToLower() = lowerUserName && x.IsEnabled)
-                .FirstOrDefaultAsync(cancellationToken)
+                .Where(fun x -> x.Name.ToLower() = lowerUserName)
+        let userQuery =
+            if allowDisabled then
+                userQuery
+            else
+                userQuery.Where(fun x -> x.IsEnabled)
+        let! user = userQuery.FirstOrDefaultAsync(cancellationToken)
         if isNull user then
             return None
         else
@@ -135,7 +140,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         task {
             let ctx = opts.Context
             let logger = ctx.LoggerFactory.CreateLogger<RequestContext>()
-            let! maybeUser = fetchUser ctx.Transaction.System opts.UserName ctx.CancellationToken
+            let! maybeUser = fetchUser ctx.Transaction.System opts.UserName false ctx.CancellationToken
             let roleType =
                 if opts.IsRoot then
                     RTRoot
@@ -205,7 +210,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
     member this.PretendUser (userName : UserName) (func : unit -> Task<'a>) : Task<'a> =
         task {
             checkRoot ()
-            let! maybeUser = fetchUser ctx.Transaction.System userName ctx.CancellationToken
+            let! maybeUser = fetchUser ctx.Transaction.System userName true ctx.CancellationToken
             let roleType =
                 match maybeUser with
                     | None ->
