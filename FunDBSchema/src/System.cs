@@ -382,6 +382,8 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("reference(public.roles)")]
         public int? RoleId { get; set; }
         public Role? Role { get; set; }
+        [ColumnField("bool", Default="true")]
+        public bool IsEnabled { get; set; }
     }
 
     public class Role

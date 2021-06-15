@@ -58,7 +58,7 @@ let private fetchUser (system : SystemContext) (userName : UserName) (cancellati
             system.Users
                 .Include("Role")
                 .Include("Role.Schema")
-                .Where(fun x -> x.Name.ToLower() = lowerUserName)
+                .Where(fun x -> x.Name.ToLower() = lowerUserName && x.IsEnabled)
                 .FirstOrDefaultAsync(cancellationToken)
         if isNull user then
             return None
