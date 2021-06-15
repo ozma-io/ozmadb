@@ -214,14 +214,6 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
         let generator = UserViewsGenerator(runtime, userViews, forceAllowBroken)
         generator.GenerateUserViews layout cancellationToken forceAllowBroken
 
-    let runWithRuntime (jsRuntime : IsolateLocal<JSRuntime<APITemplate>>) (func : JSRuntime<APITemplate> -> 'a) : 'a =
-        let isolate = jsIsolates.Get()
-        try
-            let runtime = jsRuntime.GetValue isolate
-            func runtime
-        finally
-            jsIsolates.Return(isolate)
-
     let makeRuntime files = IsolateLocal(fun isolate ->
         let env =
             { Files = files
@@ -231,102 +223,108 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
     )
 
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let! (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews) = task {
-            try
-                let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
-                let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
-                let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
-
-                let systemViews = preloadUserViews preload
-                let! sourceViews = buildSchemaUserViews transaction.System cancellationToken
-                let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
-
-                let! sourceModules = buildSchemaModules transaction.System cancellationToken
-                let modules = resolveModules layout sourceModules
-
-                let jsRuntime = makeRuntime (moduleFiles modules)
-                let (brokenViews, sourceViews) = runWithRuntime jsRuntime <| fun api -> generateViews api layout sourceViews cancellationToken true
-                let! userViewsUpdater = updateUserViews transaction.System sourceViews cancellationToken
-                let! isChanged2 = userViewsUpdater ()
-
-                let (newBrokenViews, userViews) = resolveUserViews layout mergedAttrs true sourceViews
-                let brokenViews = unionErroredUserViews brokenViews newBrokenViews
-
-                let! currentVersion = ensureCurrentVersion transaction (isChanged || isChanged2) cancellationToken
-
-                // To dry-run user views we need to stop the transaction.
-                let! _ = transaction.Commit (cancellationToken)
-                let! (newBrokenViews, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
-                let brokenViews = unionErroredUserViews brokenViews newBrokenViews
-                let transaction = new DatabaseTransaction (transaction.Connection)
-                return (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews)
-            with
-            | ex ->
-                do! transaction.Rollback ()
-                return reraise' ex
-        }
-        let! currentVersion2 =
-            task {
+        let isolate = jsIsolates.Get()
+        try
+            let! (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews) = task {
                 try
-                    return! ensureCurrentVersion transaction false cancellationToken
+                    let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
+                    let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
+                    let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+
+                    let systemViews = preloadUserViews preload
+                    let! sourceViews = buildSchemaUserViews transaction.System cancellationToken
+                    let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
+
+                    let! sourceModules = buildSchemaModules transaction.System cancellationToken
+                    let modules = resolveModules layout sourceModules
+
+                    let jsRuntime = makeRuntime (moduleFiles modules)
+                    let jsApi = jsRuntime.GetValue isolate
+                    let (brokenViews, sourceViews) = generateViews jsApi layout sourceViews cancellationToken true
+                    let! userViewsUpdater = updateUserViews transaction.System sourceViews cancellationToken
+                    let! isChanged2 = userViewsUpdater ()
+
+                    let (newBrokenViews, userViews) = resolveUserViews layout mergedAttrs true sourceViews
+                    let brokenViews = unionErroredUserViews brokenViews newBrokenViews
+
+                    let! currentVersion = ensureCurrentVersion transaction (isChanged || isChanged2) cancellationToken
+
+                    // To dry-run user views we need to stop the transaction.
+                    let! _ = transaction.Commit (cancellationToken)
+                    let! (newBrokenViews, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
+                    let brokenViews = unionErroredUserViews brokenViews newBrokenViews
+                    let transaction = new DatabaseTransaction (transaction.Connection)
+                    return (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews)
                 with
                 | ex ->
                     do! transaction.Rollback ()
                     return reraise' ex
             }
-        if currentVersion2 <> currentVersion then
-            let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
-            let (_, layout) = resolveLayout sourceLayout false
-            let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
-            return! finishColdRebuild transaction layout userMeta false cancellationToken
-        else
-            try
-                do! checkBrokenAttributes logger preload transaction brokenAttrs cancellationToken
+            let! currentVersion2 =
+                task {
+                    try
+                        return! ensureCurrentVersion transaction false cancellationToken
+                    with
+                    | ex ->
+                        do! transaction.Rollback ()
+                        return reraise' ex
+                }
+            if currentVersion2 <> currentVersion then
+                let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
+                let (_, layout) = resolveLayout sourceLayout false
+                let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
+                return! finishColdRebuild transaction layout userMeta false cancellationToken
+            else
+                try
+                    do! checkBrokenAttributes logger preload transaction brokenAttrs cancellationToken
+                    let jsApi = jsRuntime.GetValue isolate
 
-                let! sourceActions = buildSchemaActions transaction.System cancellationToken
-                let (brokenActions, actions) = resolveActions layout true sourceActions
-                let (newBrokenActions, actions) = runWithRuntime jsRuntime <| fun api -> testEvalActions api true actions
-                let brokenActions = unionErroredActions brokenActions newBrokenActions
-                do! checkBrokenActions logger preload transaction brokenActions cancellationToken
+                    let! sourceActions = buildSchemaActions transaction.System cancellationToken
+                    let (brokenActions, actions) = resolveActions layout true sourceActions
+                    let (newBrokenActions, actions) = testEvalActions jsApi true actions
+                    let brokenActions = unionErroredActions brokenActions newBrokenActions
+                    do! checkBrokenActions logger preload transaction brokenActions cancellationToken
 
-                let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
-                let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
-                let (newBrokenTriggers, triggers) = runWithRuntime jsRuntime <| fun api -> testEvalTriggers api true triggers
-                let brokenTriggers = unionErroredTriggers brokenTriggers newBrokenTriggers
-                let mergedTriggers = mergeTriggers layout triggers
-                do! checkBrokenTriggers logger preload transaction brokenTriggers cancellationToken
+                    let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
+                    let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
+                    let (newBrokenTriggers, triggers) = testEvalTriggers jsApi true triggers
+                    let brokenTriggers = unionErroredTriggers brokenTriggers newBrokenTriggers
+                    let mergedTriggers = mergeTriggers layout triggers
+                    do! checkBrokenTriggers logger preload transaction brokenTriggers cancellationToken
 
-                do! checkBrokenUserViews logger preload transaction brokenViews cancellationToken
+                    do! checkBrokenUserViews logger preload transaction brokenViews cancellationToken
 
-                let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
-                let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
-                do! checkBrokenPermissions logger preload transaction brokenPerms cancellationToken
+                    let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
+                    let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
+                    do! checkBrokenPermissions logger preload transaction brokenPerms cancellationToken
 
-                let! _ = transaction.Commit (cancellationToken)
+                    let! _ = transaction.Commit (cancellationToken)
 
-                let systemViews = filterSystemViews sourceViews
-                let domains = buildLayoutDomains layout
+                    let systemViews = filterSystemViews sourceViews
+                    let domains = buildLayoutDomains layout
 
-                let state =
-                    { Layout = layout
-                      Permissions = permissions
-                      DefaultAttrs = mergedAttrs
-                      JSRuntime = jsRuntime
-                      Actions = actions
-                      ActionScripts = IsolateLocal(fun isolate -> prepareActionScripts (jsRuntime.GetValue isolate) actions)
-                      Triggers = mergedTriggers
-                      TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
-                      UserViews = prefetchedViews
-                      Domains = domains
-                      SystemViews = systemViews
-                      UserMeta = userMeta
-                    }
+                    let state =
+                        { Layout = layout
+                          Permissions = permissions
+                          DefaultAttrs = mergedAttrs
+                          JSRuntime = jsRuntime
+                          Actions = actions
+                          ActionScripts = IsolateLocal(fun isolate -> prepareActionScripts (jsRuntime.GetValue isolate) actions)
+                          Triggers = mergedTriggers
+                          TriggerScripts = IsolateLocal(fun isolate -> prepareTriggerScripts (jsRuntime.GetValue isolate) triggers)
+                          UserViews = prefetchedViews
+                          Domains = domains
+                          SystemViews = systemViews
+                          UserMeta = userMeta
+                        }
 
-                return { Version = currentVersion; Context = state }
-            with
-            | ex ->
-                do! transaction.Rollback ()
-                return reraise' ex
+                    return { Version = currentVersion; Context = state }
+                with
+                | ex ->
+                    do! transaction.Rollback ()
+                    return reraise' ex
+        finally
+            jsIsolates.Return isolate
     }
 
     let rec getMigrationLock (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<bool> =
@@ -427,15 +425,20 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
 
                     do! transaction.Rollback ()
 
-                    let modules = resolveModules layout sourceModules
-
-                    let jsRuntime = makeRuntime (moduleFiles modules)
-
                     let (_, actions) = resolveActions layout false sourceActions
-                    let (_, actions) = runWithRuntime jsRuntime <| fun api -> testEvalActions api false actions
-
                     let (_, triggers) = resolveTriggers layout false sourceTriggers
-                    let (_, triggers) = runWithRuntime jsRuntime <| fun api -> testEvalTriggers api false triggers
+
+                    let modules = resolveModules layout sourceModules
+                    let jsRuntime = makeRuntime (moduleFiles modules)
+                    let (actions, triggers) =
+                        let myIsolate = jsIsolates.Get ()
+                        try
+                            let jsApi = jsRuntime.GetValue myIsolate
+                            let (_, actions) = testEvalActions jsApi false actions
+                            let (_, triggers) = testEvalTriggers jsApi false triggers
+                            (actions, triggers)
+                        finally
+                            jsIsolates.Return myIsolate
 
                     let (_, permissions) = resolvePermissions layout false sourcePermissions
 
