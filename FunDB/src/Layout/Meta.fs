@@ -219,6 +219,10 @@ type private MetaBuilder (layout : Layout) =
                         let fieldRef = { Entity = entityRef; Name = name }
                         let (meta, constrs) = makeColumnFieldMeta fieldRef field.ColumnName entity field
                         let extraConstrs =
+                            // We do not check that values are NULL if row is not of this entity subtype.
+                            // This is to optimize insertion and adding of new columns in case of `DefaultExpr` values set.
+                            // Say, one adds a new subtype column with `DEFAULT` set -- because we use native PostgreSQL DEFAULT and allow values to be whatever for non-subtypes,
+                            // PostgreSQL can instantly initialize the column with default values for all rows, even not of this subtype.
                             if meta.IsNullable then
                                 Seq.empty
                             else
