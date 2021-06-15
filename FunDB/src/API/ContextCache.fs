@@ -608,6 +608,8 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 | :? ResolveModulesException as err -> raisefWithInner ContextException err "Failed to resolve modules"
 
                             let jsRuntime = makeRuntime (moduleFiles modules)
+                            let myIsolate = getIsolate ()
+                            let jsApi = jsRuntime.GetValue myIsolate
 
                             let! sourceActions = buildSchemaActions transaction.System cancellationToken
                             if not <| preloadActionsAreUnchanged sourceActions preload then
@@ -617,9 +619,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                     resolveActions layout false sourceActions
                                 with
                                 | :? ResolveActionsException as err -> raisefWithInner ContextException err "Failed to resolve actions"
-                            let (_, actions) = runWithRuntime jsRuntime <| fun api ->
+                            let (_, actions) =
                                 try
-                                    testEvalActions api false actions
+                                    testEvalActions jsApi false actions
                                 with
                                 | :? ActionRunException as err -> raisefWithInner ContextException err "Failed to resolve actions"
 
@@ -631,9 +633,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                     resolveTriggers layout false sourceTriggers
                                 with
                                 | :? ResolveTriggersException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
-                            let (_, triggers) = runWithRuntime jsRuntime <| fun api ->
+                            let (_, triggers) =
                                 try
-                                    testEvalTriggers api false triggers
+                                    testEvalTriggers jsApi false triggers
                                 with
                                 | :? TriggerRunException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
                             let mergedTriggers = mergeTriggers layout triggers
