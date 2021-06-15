@@ -125,14 +125,17 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
     let currentDatabaseVersion = sprintf "%s %s" (assemblyHash.Force()) hashedPreload.Hash
 
     let jsIsolates =
-        DefaultObjectPool
+        let policy =
             { new IPooledObjectPolicy<Isolate> with
                   member this.Create () =
-                    let isolate = Isolate.NewWithHeapSize(1UL * 1024UL * 1024UL, 32UL * 1024UL * 1024UL)
-                    isolate.TerminateOnException <- true
-                    isolate
-                  member this.Return isolate = not isolate.WasNearHeapLimit
+                      let isolate = Isolate.NewWithHeapSize(1UL * 1024UL * 1024UL, 32UL * 1024UL * 1024UL)
+                      isolate.TerminateOnException <- true
+                      isolate
+                  member this.Return isolate =
+                      assert (isNull isolate.CurrentContext)
+                      not isolate.WasNearHeapLimit
             }
+        DefaultObjectPool(policy, Environment.ProcessorCount)
 
     let filterSystemViews (views : SourceUserViews) : SourceUserViews =
         { Schemas = filterPreloadedSchemas preload views.Schemas }
