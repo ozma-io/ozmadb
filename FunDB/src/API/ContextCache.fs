@@ -660,9 +660,9 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity checks"
 
                             logger.LogInformation("Updating generated user views")
-                            let (_, generatedUserViews) = runWithRuntime jsRuntime <| fun api ->
+                            let (_, generatedUserViews) =
                                 try
-                                    generateViews api layout sourceUserViews cancellationToken false
+                                    generateViews jsApi layout sourceUserViews cancellationToken false
                                 with
                                 | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
                             let! userViewsUpdater = updateUserViews transaction.System generatedUserViews cancellationToken
