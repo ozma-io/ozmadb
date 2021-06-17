@@ -1376,7 +1376,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let getResultColumnEntry (i : int) (result : ResolvedQueryColumnResult) : ResultColumn =
             let currentAttrs = Map.keysSet result.Attributes
 
-            let (newPaths, resultColumn) = compileColumnResult cteBindings paths result
+            let (newPaths, resultColumn) = compileColumnResult cteBindings paths flags.IsTopLevel result
             paths <- newPaths
 
             match result.Result with
@@ -1644,10 +1644,15 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         (info, query)
 
-    and compileColumnResult (cteBindings : CTEBindings) (paths0 : JoinPaths) (result : ResolvedQueryColumnResult) : JoinPaths * SelectColumn =
+    and compileColumnResult (cteBindings : CTEBindings) (paths0 : JoinPaths) (isTopLevel : bool) (result : ResolvedQueryColumnResult) : JoinPaths * SelectColumn =
         let mutable paths = paths0
 
-        let (newPaths, newExpr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths result.Result
+        let (newPaths, newExpr) =
+            match result.Result with
+            | FERef ref when not isTopLevel ->
+                // When used in sub-select, we don't replace subenitty with its JSON representation.
+                compileLinkedFieldRef emptyExprCompilationFlags RCTypeExpr paths ref
+            | _ -> compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths result.Result
         paths <- newPaths
 
         let compileAttr (attrName, expr) =
