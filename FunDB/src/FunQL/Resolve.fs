@@ -77,6 +77,27 @@ type private FieldMappingValue =
 
 type private FieldMapping = Map<FieldRef, FieldMappingValue>
 
+let private getFromEntityId = function
+    | FIEntity id -> id
+    | from -> failwithf "Unexpected non-entity from id: %O" from
+
+// Used to unbind field mappings for subqueries as we don't support arrows in them yet.
+let private unbindFieldMappingValue = function
+    | FVAmbiguous names -> Some (FVAmbiguous names)
+    | FVResolved info ->
+        let fromId =
+            match info.Mapping with
+            | FMTypeRestricted _ -> None
+            | FMBound bound -> Some <| getFromEntityId bound.Header.Key.FromId
+            | FMUnbound fromId -> Some fromId
+        match fromId with
+        | None -> None
+        | Some fromId ->
+            let info = { info with Mapping = FMUnbound fromId }
+            Some (FVResolved info)
+
+let private unbindFieldMapping = Map.mapMaybe (fun ref -> unbindFieldMappingValue)
+
 // None in EntityRef is used only for offset/limit expressions in set operations.
 let private getAmbiguousMapping = function
     | FVAmbiguous set -> set
@@ -653,10 +674,6 @@ let replaceEntityRefInExpr (localRef : EntityRef option) : ResolvedFieldExpr -> 
     let mapper = idFieldExprMapper resolveReference id
     mapFieldExpr mapper
 
-let getFromEntityId = function
-    | FIEntity id -> id
-    | from -> failwithf "Unexpected non-entity from id: %O" from
-
 let filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCase seq) : VirtualFieldCase seq =
     match ObjectMap.tryFindType<PossibleSubtypesMeta> extra with
     | None -> cases
@@ -1043,8 +1060,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             ref.Ref
 
         let resolveQuery query =
-            // FIXME: we don't support propagating field names into subqueries yet.
-            let ctx = { ctx with FieldMaps = [] }
+            // TODO: implement arrows for field references in subexpressions.
+            let ctx = { ctx with FieldMaps = List.map unbindFieldMapping ctx.FieldMaps }
             let (_, res) = resolveSelectExpr ctx subExprSelectFlags query
             isLocal <- false
             res
