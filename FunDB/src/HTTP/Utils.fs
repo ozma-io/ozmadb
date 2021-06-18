@@ -119,7 +119,7 @@ let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) :
                     let! ret = ctx.BindJsonAsync<'a>()
                     return Ok ret
                 with
-                | :? JsonSerializationException as e -> return Error e
+                | :? JsonException as e -> return Error e
             }
         match model with
         | Error e -> return! requestError (RERequest <| exceptionString e) next ctx

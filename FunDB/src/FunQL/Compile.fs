@@ -610,6 +610,21 @@ let addEntityChecks (entitiesMap : FromEntitiesMap) (where : SQL.ValueExpr optio
         | Some oldWhere -> Some (SQL.VEAnd (oldWhere, check))
     entitiesMap |> Map.values |> Seq.mapMaybe (fun info -> info.Check) |> Seq.fold addWhere where
 
+let private getForcedFieldName (fieldInfo : FieldMeta) (currName : FieldName)  =
+    match fieldInfo.ForceSQLName with
+    | Some name -> Some name
+    | None ->
+        // In case it's an immediate name we need to rename outermost field (i.e. `__main`).
+        // If it's not we need to keep original naming.
+        let isImmediate =
+            match fieldInfo.Bound with
+            | None -> false
+            | Some bound -> bound.Immediate
+        if isImmediate then
+            None
+        else
+            Some <| compileName currName
+
 type ExprCompilationFlags =
     { ForceNoTableRef : bool
     }
@@ -754,9 +769,16 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | DSingle (id, dom) -> f dom
         | DMulti (ns, nested) ->
             let makeCase (localId, subcase) =
-                let case = SQL.VEBinaryOp (SQL.VEColumn { Table = Some tableRef; Name = columnName (CTMeta (CMDomain ns)) }, SQL.BOEq, SQL.VEValue (SQL.VInt localId))
-                (case, domainExpression tableRef f subcase)
-            SQL.VECase (nested |> Map.toSeq |> Seq.map makeCase |> Seq.toArray, None)
+                match domainExpression tableRef f subcase with
+                | SQL.VEValue SQL.VNull -> None
+                | subexpr ->
+                    let case = SQL.VEBinaryOp (SQL.VEColumn { Table = Some tableRef; Name = columnName (CTMeta (CMDomain ns)) }, SQL.BOEq, SQL.VEValue (SQL.VInt localId))
+                    Some (case, subexpr)
+            let cases = nested |> Map.toSeq |> Seq.mapMaybe makeCase |> Seq.toArray
+            if Array.isEmpty cases then
+                SQL.VEValue SQL.VNull
+            else
+                SQL.VECase (cases, None)
 
     let fromInfoExpression (tableRef : SQL.TableRef) (f : TempDomain -> SQL.ValueExpr) = function
         | FTEntity (id, dom) -> f dom
@@ -872,10 +894,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             usedSchemas <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedSchemas
             usedSchemas <- addUsedEntityRef newEntityRef usedSchemas
 
-            let column = Option.defaultValue column.ColumnName forcedName
+            let columnName = Option.defaultValue column.ColumnName forcedName
             let pathKey =
                 { Table = (Option.get tableRef).Name
-                  Column = column
+                  Column = columnName
                   ToRootEntity = newEntity.Root
                 }
 
@@ -958,13 +980,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         match ref.Entity with
                         | Some renamedTable -> Some <| compileRenamedEntityRef renamedTable
                         | None -> Some <| compileRenamedResolvedEntityRef boundInfo.Ref.Entity
-                // In case it's an immediate name we need to rename outermost field (i.e. `__main`).
-                // If it's not we need to keep original naming.
-                let newName =
-                    match fieldInfo.ForceSQLName with
-                    | Some name -> Some name
-                    | None when not boundInfo.Immediate -> Some <| compileName ref.Name
-                    | None -> None
+                let newName = getForcedFieldName fieldInfo ref.Name
                 let pathWithEntities = Seq.zip boundInfo.Path linked.Ref.Path |> List.ofSeq
                 compilePath flags ctx linked.Extra paths0 tableRef boundInfo.Ref newName pathWithEntities
             | ([||], _) ->
@@ -1410,11 +1426,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let tableRef = compileRenamedEntityRef entityRef
                 let fromInfo = Map.find tableRef.Name fromMap
                 let fieldInfo = ObjectMap.findType<FieldMeta> resultRef.Extra
+                let newName = getForcedFieldName fieldInfo fieldRef.Name
 
                 // Add system columns (id or sub_entity - this is a generic function).
                 let makeMaybeSystemColumn (needColumn : ResolvedFieldRef -> bool) (columnConstr : int -> MetaType) (systemName : FieldName) =
-                    let mutable foundSystem = false
-
                     let getSystemColumn (domain : TempDomain) =
                         match Map.tryFind (TName fieldRef.Name) domain with
                         | None -> SQL.VEValue SQL.VNull
@@ -1425,16 +1440,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                         compileName systemName
                                     else
                                         columnName (CTMeta (columnConstr info.IdColumn))
-                                foundSystem <- true
                                 SQL.VEColumn { Table = Some tableRef; Name = colName }
                             else
                                 SQL.VEValue SQL.VNull
 
-                    let systemExpr = fromInfoExpression tableRef getSystemColumn fromInfo.FromType
-                    if foundSystem then
-                        Some systemExpr
-                    else
-                        None
+                    match fromInfoExpression tableRef getSystemColumn fromInfo.FromType with
+                    | SQL.VEValue SQL.VNull -> None
+                    | systemExpr -> Some systemExpr
 
                 let key =
                     { FromId = FIEntity fieldInfo.FromEntityId
@@ -1485,27 +1497,22 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     if not flags.IsTopLevel then
                         Seq.empty
                     else
-                        let mutable foundPun = false
-
                         let getPunColumn (domain : TempDomain) =
                             match Map.tryFind (TName fieldRef.Name) domain with
                             | None -> SQL.VEValue SQL.VNull
                             | Some info ->
                                 match layout.FindField info.Ref.Entity info.Ref.Name |> Option.get with
                                 | { Field = RColumnField { FieldType = FTReference newEntityRef } } ->
-                                    let fieldRef = { Entity = info.Ref.Entity; Name = info.Ref.Name }
-                                    let (newPaths, expr) = compilePath emptyExprCompilationFlags RCExpr ObjectMap.empty paths (Some tableRef) fieldRef None [(newEntityRef, funMain)]
+                                    let (newPaths, expr) = compilePath emptyExprCompilationFlags RCExpr ObjectMap.empty paths (Some tableRef) info.Ref newName [(newEntityRef, funMain)]
                                     paths <- newPaths
-                                    foundPun <- true
                                     expr
                                 | _ -> SQL.VEValue SQL.VNull
 
-                        let punExpr = fromInfoExpression tableRef getPunColumn fromInfo.FromType
-                        if foundPun then
+                        match fromInfoExpression tableRef getPunColumn fromInfo.FromType with
+                        | SQL.VEValue SQL.VNull -> Seq.empty
+                        | punExpr ->
                             let col = (CCPun, punExpr)
                             Seq.singleton col
-                        else
-                            Seq.empty
 
                 // Nested and default attributes.
                 let attrColumns =
