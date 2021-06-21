@@ -936,13 +936,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             (newPaths, res)
     
-    and compileReferenceArgument (extra : ObjectMap) (arg : CompiledArgument) (path : FieldName seq) (boundPath : ResolvedEntityRef seq) : SQL.SelectExpr =
+    and compileReferenceArgument (extra : ObjectMap) (ctx : ReferenceContext) (arg : CompiledArgument) (path : FieldName seq) (boundPath : ResolvedEntityRef seq) : SQL.SelectExpr =
         let (referencedRef, remainingBoundPath) = Seq.snoc boundPath
         let (firstName, remainingPath) = Seq.snoc path
         let argTableRef = compileRenamedResolvedEntityRef referencedRef
         let pathWithEntities = Seq.zip remainingBoundPath remainingPath |> List.ofSeq
         let fieldRef = { Entity = referencedRef; Name = firstName }
-        let (argPaths, expr) = compilePath emptyExprCompilationFlags RCExpr extra emptyJoinPaths (Some argTableRef) fieldRef None pathWithEntities
+        let (argPaths, expr) = compilePath emptyExprCompilationFlags ctx extra emptyJoinPaths (Some argTableRef) fieldRef None pathWithEntities
         let (fromMap, from) = compileFromExpr Map.empty None true (FEntity (None, relaxEntityRef referencedRef))
         let (entitiesMap, from) = buildJoins layout (fromToEntitiesMap fromMap) from (joinsToSeq argPaths.Map)
         let whereWithoutSubentities = SQL.VEBinaryOp (SQL.VEColumn { Table = Some argTableRef; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder arg.PlaceholderId)
@@ -1005,7 +1005,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 (paths0, SQL.VECast (SQL.VEPlaceholder argType.PlaceholderId, argType.DbType))
             else
                 let argInfo = ObjectMap.findType<ReferencePlaceholderMeta> linked.Extra
-                let selectExpr = compileReferenceArgument linked.Extra argType linked.Ref.Path argInfo.Path
+                let selectExpr = compileReferenceArgument linked.Extra ctx argType linked.Ref.Path argInfo.Path
                 (paths0, SQL.VESubquery selectExpr)
 
     and compileLinkedFieldExpr (flags : ExprCompilationFlags) (cteBindings : CTEBindings) (paths0 : JoinPaths) (expr : ResolvedFieldExpr) : JoinPaths * SQL.ValueExpr =
@@ -1560,7 +1560,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let argInfo = Map.find arg arguments.Types
                         match argInfo.FieldType with
                         | FTReference newEntityRef ->
-                            let selectExpr = compileReferenceArgument ObjectMap.empty argInfo [|funMain|] [|newEntityRef|]
+                            let selectExpr = compileReferenceArgument ObjectMap.empty RCExpr argInfo [|funMain|] [|newEntityRef|]
                             Seq.singleton (CCPun, SQL.VESubquery selectExpr)
                         | _ -> Seq.empty
                 { Domains = None
