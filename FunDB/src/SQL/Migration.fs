@@ -140,6 +140,19 @@ let private normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VESubquery query -> failwithf "Invalid subquery in local expression: %O" query
     traverse
 
+let private normalizeIndexKey = function
+    | IKColumn name -> IKColumn name
+    | IKExpression expr -> expr.Value |> normalizeLocalExpr |> String.comparable |> IKExpression
+
+let private normalizeIndexColumn (col : IndexColumn) : IndexColumn =
+    { col with Key = normalizeIndexKey col.Key }
+
+let private normalizeIndex (index : IndexMeta) : IndexMeta =
+    { index with
+          Columns = Array.map normalizeIndexColumn index.Columns
+          Predicate = index.Predicate |> Option.map (fun x -> x.Value |> normalizeLocalExpr |> String.comparable)
+    }
+
 let private migrateBuildTable (fromMeta : TableMeta) (toMeta : TableMeta) : TableOperation seq =
     seq {
         for KeyValue (columnKey, columnMeta) in toMeta.Columns do
@@ -216,7 +229,9 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
                     let mutable oldIsGood = false
                     match (oldConstraintType, constraintType) with
                     | (CMCheck expr1, CMCheck expr2) ->
-                        oldIsGood <- string (normalizeLocalExpr expr1) = string (normalizeLocalExpr expr2)
+                        let expr1 = normalizeLocalExpr expr1.Value
+                        let expr2 = normalizeLocalExpr expr2.Value
+                        oldIsGood <- string expr1 = string expr2
                     | (CMForeignKey (ref1, f1, oldDefer), CMForeignKey (ref2, f2, newDefer)) ->
                         if ref1 = ref2 && f1 = f2 then
                             yield! migrateDeferrableConstraint objRef tableName oldDefer newDefer
@@ -246,7 +261,7 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
             | OMIndex (tableName, index) ->
                 match Map.tryFind objectKey fromObjects with
                 | Some (oldObjectName, OMIndex (oldTableName, oldIndex)) ->
-                    if tableName <> oldTableName || index <> oldIndex then
+                    if tableName <> oldTableName || normalizeIndex oldIndex <> normalizeIndex index then
                         yield (SODropIndex objRef, 0)
                         yield (SOCreateIndex (objRef, tableName, index), 0)
                     else if oldObjectName <> objectName then

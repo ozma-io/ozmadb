@@ -111,7 +111,7 @@ type private MetaBuilder (layout : Layout) =
                             SQL.VEIn (col, exprs)
                     let constrKey = sprintf "__enum__%s__%s" entity.HashName field.HashName
                     let constrName = SQL.SQLName constrKey
-                    Seq.singleton (constrKey, (constrName, SQL.CMCheck expr))
+                    Seq.singleton (constrKey, (constrName, SQL.CMCheck (String.comparable expr)))
                 | _ -> Seq.empty
         (res, constr)
 
@@ -133,7 +133,7 @@ type private MetaBuilder (layout : Layout) =
             Seq.empty
         else
             let expr = modifyExpr <| compileRelatedExpr constr.Expression
-            let meta = SQL.CMCheck expr
+            let meta = SQL.CMCheck (String.comparable expr)
             let sqlKey = sprintf "__check__%s__%s" entity.HashName constr.HashName
             let sqlName = SQL.SQLName sqlKey
             Seq.singleton (sqlKey, (sqlName, SQL.OMConstraint (tableName.Name, meta)))
@@ -177,7 +177,7 @@ type private MetaBuilder (layout : Layout) =
 
                         let typeCheckKey = sprintf "__type_check__%s" entity.HashName
                         let typeCheckName = SQL.SQLName typeCheckKey
-                        let constrs = Seq.singleton (typeCheckKey, (typeCheckName, SQL.CMCheck checkExpr))
+                        let constrs = Seq.singleton (typeCheckKey, (typeCheckName, SQL.CMCheck (String.comparable checkExpr)))
                         let typeIndexKey = sprintf "__type_index__%s" entity.HashName
                         let typeIndexName = SQL.SQLName typeIndexKey
                         let subEntityIndex =
@@ -230,7 +230,7 @@ type private MetaBuilder (layout : Layout) =
                                 let expr = SQL.VENot (SQL.VEAnd (checkExpr, checkNull))
                                 let notnullName = SQL.SQLName <| sprintf "__notnull__%s__%s" entity.HashName field.HashName
                                 let notnullKey = sprintf "__notnull__%s__%s"entity.HashName field.HashName
-                                Seq.singleton (notnullKey, (notnullName, SQL.CMCheck expr))
+                                Seq.singleton (notnullKey, (notnullName, SQL.CMCheck (String.comparable expr)))
                         Some (field.ColumnName, ({ meta with IsNullable = true }, Seq.append constrs extraConstrs))
 
                 let columnObjects = entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe makeColumn |> Seq.cache

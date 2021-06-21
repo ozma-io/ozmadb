@@ -48,7 +48,7 @@ type DeferrableConstraint =
 [<NoEquality; NoComparison>]
 type ConstraintMeta =
     | CMUnique of ColumnName[] * DeferrableConstraint
-    | CMCheck of ValueExpr
+    | CMCheck of StringComparable<ValueExpr>
     | CMPrimaryKey of ColumnName[] * DeferrableConstraint
     | CMForeignKey of TableRef * (ColumnName * ColumnName)[] * DeferrableConstraint
 
@@ -383,7 +383,7 @@ type SchemaOperation =
                         let myCols = cols |> Seq.map (fun (name, refName) -> name.ToSQLString()) |> String.concat ", "
                         let refCols = cols |> Seq.map (fun (name, refName) -> refName.ToSQLString()) |> String.concat ", "
                         sprintf "FOREIGN KEY (%s) REFERENCES %s (%s) %s" myCols (ref.ToSQLString()) refCols (defer.ToSQLString())
-                    | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToSQLString())
+                    | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToString())
                 sprintf "ALTER TABLE %s ADD CONSTRAINT %s %s" ({ constr with Name = table }.ToSQLString()) (constr.Name.ToSQLString()) constraintStr
             | SORenameConstraint (constr, table, toName) -> sprintf "ALTER TABLE %s RENAME CONSTRAINT %s TO %s" ({ constr with Name = table }.ToSQLString()) (constr.Name.ToSQLString()) (toName.ToSQLString())
             | SOAlterConstraint (constr, table, alter) ->

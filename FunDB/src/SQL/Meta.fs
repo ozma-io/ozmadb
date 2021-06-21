@@ -317,7 +317,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
         let ret =
             match constr.ConType with
             | 'c' ->
-                Some <| CMCheck (parseLocalExpr constr.Source)
+                parseLocalExpr constr.Source |> String.comparable |> CMCheck |> Some
             | 'f' ->
                 let refSchema = SQLName constr.FRelClass.Namespace.NspName
                 let refName = SQLName constr.FRelClass.RelName
