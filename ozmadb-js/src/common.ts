@@ -182,9 +182,15 @@ export interface IDomainField {
   idColumn: ColumnName;
 }
 
+export interface IArgument {
+  optional: boolean;
+  argType: FieldType;
+}
+
 export interface IResultViewInfo {
   attributeTypes: AttributeTypesMap;
   rowAttributeTypes: AttributeTypesMap;
+  arguments: Record<ArgumentName, IArgument>;
   domains: Record<DomainId, Record<ColumnName, IDomainField>>;
   mainEntity?: IEntityRef;
   columns: IResultColumnInfo[];
