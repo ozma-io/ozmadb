@@ -195,7 +195,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
           Hash = hash
         }
 
-    let rec dryRunUserView (uv : ResolvedUserView) : Task<PrefetchedUserView> =
+    let rec dryRunUserView (uv : ResolvedUserView) (comment : string option) : Task<PrefetchedUserView> =
         task {
             let limited =
                 { uv.Compiled with
@@ -208,7 +208,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
             let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
 
             try
-                return! runViewExpr conn limited arguments cancellationToken <| fun info res ->
+                return! runViewExpr conn limited comment arguments cancellationToken <| fun info res ->
                     Task.FromResult
                         { UserView = uv
                           Info = mergeViewInfo uv.Resolved uv.Compiled info
@@ -231,7 +231,8 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                     | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
                     | Ok uv ->
                         try
-                            let! r = dryRunUserView uv
+                            let comment = sprintf "Dry-run of %O" ref
+                            let! r = dryRunUserView uv (Some comment)
                             return Some (name, Ok r)
                         with
                         | :? UserViewDryRunException as e when uv.AllowBroken || forceAllowBroken ->
@@ -283,4 +284,4 @@ let dryRunUserViews (conn : QueryConnection) (layout : Layout) (forceAllowBroken
 
 let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (q: ResolvedUserView) (cancellationToken : CancellationToken) : Task<PrefetchedUserView> =
     let runner = DryRunner(layout, conn, false, None, cancellationToken)
-    runner.DryRunAnonymousUserView q
+    runner.DryRunAnonymousUserView q None

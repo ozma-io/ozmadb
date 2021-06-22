@@ -79,6 +79,7 @@ type IContext =
 [<NoEquality; NoComparison>]
 type RoleInfo =
     { Role : ResolvedRole option
+      Ref : ResolvedRoleRef option
       CanRead : bool
     }
 

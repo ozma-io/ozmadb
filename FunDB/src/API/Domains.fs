@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.API.Domains
 
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
+open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
@@ -9,6 +10,20 @@ open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.Operations.Domain
 open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.API.Types
+
+let private domainComments (ref : ResolvedFieldRef) (role : RoleType) (rowId : int option) (chunk : SourceQueryChunk) =
+    let refStr = sprintf "domain for %O" ref
+    let rowIdStr =
+        match rowId with
+        | None -> ""
+        | Some id -> sprintf ", row id %i" id
+    let chunkStr = sprintf ", chunk %s" (JsonConvert.SerializeObject chunk)
+    let roleStr =
+        match role with
+        | RTRoot -> ""
+        | RTRole role when role.CanRead -> ""
+        | RTRole role -> sprintf ", role %O" role.Ref
+    String.concat "" [refStr; rowIdStr; chunkStr; roleStr]
 
 type DomainsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
@@ -25,7 +40,9 @@ type DomainsAPI (rctx : IRequestContext) =
                         match (rowId, domain.RowSpecific) with
                         | (Some id, Some rowSpecific) -> (rowSpecific, Map.add (PLocal funId) (FInt id) argValues)
                         | _ -> (domain.Generic, argValues)
-                    let! ret = getDomainValues ctx.Transaction.Connection.Query ctx.Layout expr (getReadRole rctx.User.Effective.Type) argValues chunk ctx.CancellationToken
+                    let role = getReadRole rctx.User.Effective.Type
+                    let comment = domainComments fieldRef rctx.User.Effective.Type rowId chunk
+                    let! ret = getDomainValues ctx.Transaction.Connection.Query ctx.Layout expr (Some comment) role argValues chunk ctx.CancellationToken
                     return Ok
                         { Values = ret.Values
                           PunType = ret.PunType

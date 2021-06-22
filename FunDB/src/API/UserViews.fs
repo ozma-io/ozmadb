@@ -5,6 +5,7 @@ open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
+open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
@@ -22,6 +23,23 @@ open FunWithFlags.FunDB.API.Types
 let private canExplain : RoleType -> bool = function
     | RTRoot -> true
     | RTRole role -> role.CanRead
+
+let private userViewComments (source : UserViewSource) (role : RoleType) (arguments : RawArguments option) (chunk : SourceQueryChunk) =
+    let sourceStr =
+        match source with
+        | UVAnonymous q -> "(anonymous)"
+        | UVNamed ref -> ref.ToFunQLString()
+    let argumentsStr =
+        match arguments with
+        | None -> ""
+        | Some args -> sprintf ", arguments %s" (JsonConvert.SerializeObject args)
+    let chunkStr = sprintf ", chunk %s" (JsonConvert.SerializeObject chunk)
+    let roleStr =
+        match role with
+        | RTRoot -> ""
+        | RTRole role when role.CanRead -> ""
+        | RTRole role -> sprintf ", role %O" role.Ref
+    String.concat "" [sourceStr; argumentsStr; chunkStr; roleStr]
 
 type UserViewsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
@@ -119,11 +137,9 @@ type UserViewsAPI (rctx : IRequestContext) =
                 | Error e -> return Error e
                 | Ok uv ->
                     let compiled =
-                        match rctx.User.Effective.Type with
-                        | RTRoot -> uv.UserView.Compiled
-                        | RTRole role when role.CanRead -> uv.UserView.Compiled
-                        | RTRole role ->
-                            applyRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
+                        match getReadRole rctx.User.Effective.Type with
+                        | None -> uv.UserView.Compiled
+                        | Some role -> applyRoleViewExpr ctx.Layout role uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
                     let maybeResolvedChunk =
                         try
                             Ok <| resolveViewExprChunk ctx.Layout compiled chunk
@@ -163,11 +179,9 @@ type UserViewsAPI (rctx : IRequestContext) =
             | Ok uv ->
                 try
                     let compiled =
-                        match rctx.User.Effective.Type with
-                        | RTRoot -> uv.UserView.Compiled
-                        | RTRole role when role.CanRead -> uv.UserView.Compiled
-                        | RTRole role ->
-                            applyRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
+                        match getReadRole rctx.User.Effective.Type with
+                        | None -> uv.UserView.Compiled
+                        | Some role -> applyRoleViewExpr ctx.Layout role uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
 
                     let maybeResolvedChunk =
                         try
@@ -198,8 +212,8 @@ type UserViewsAPI (rctx : IRequestContext) =
                             return Error <| UVEArguments msg
                         | Ok arguments ->
                             let getResult info (res : ExecutedViewExpr) = Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
-
-                            let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled arguments ctx.CancellationToken getResult
+                            let comments = userViewComments source rctx.User.Effective.Type (Some rawArgs) chunk
+                            let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled (Some comments) arguments ctx.CancellationToken getResult
                             return Ok { Info = puv.Info
                                         Result = res
                                       }

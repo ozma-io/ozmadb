@@ -15,6 +15,7 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.SQL.Query
+open FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DML
 
@@ -52,7 +53,7 @@ let private convertDomainValue (values : SQL.Value[]) =
       Pun = Some values.[1]
     }
 
-let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (role : ResolvedRole option) (arguments : ArgumentValuesMap) (chunk : SourceQueryChunk) (cancellationToken : CancellationToken) : Task<DomainValues> =
+let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (comments : string option) (role : ResolvedRole option) (arguments : ArgumentValuesMap) (chunk : SourceQueryChunk) (cancellationToken : CancellationToken) : Task<DomainValues> =
     task {
         let query =
             match role with
@@ -67,7 +68,7 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
 
         try
             let arguments = Map.union arguments (Map.mapKeys PLocal argValues)
-            return! connection.ExecuteQuery (query.Expression.ToSQLString()) (prepareArguments query.Arguments arguments) cancellationToken <| fun result ->
+            return! connection.ExecuteQuery (convertComments comments + query.Expression.ToSQLString()) (prepareArguments query.Arguments arguments) cancellationToken <| fun result ->
                 let values = result.Rows |> Seq.map convertDomainValue |> Seq.toArray
                 let (_, punType) = result.Columns.[1]
                 let ret =

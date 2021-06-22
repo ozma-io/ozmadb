@@ -317,9 +317,10 @@ let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * S
             } : SQL.SelectExpr
         Some (colTypes, select)
 
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
+let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (comments : string option) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
     task {
         let parameters = prepareArguments viewExpr.Query.Arguments arguments
+        let prefix = convertComments comments
 
         do! setPragmas connection viewExpr.Pragmas cancellationToken
 
@@ -333,7 +334,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
                           ColumnAttributes = Map.empty
                         }
                 | Some (colTypes, query) ->
-                    return! connection.ExecuteQuery (string query) parameters cancellationToken (parseAttributesResult colTypes >> Task.FromResult)
+                    return! connection.ExecuteQuery (prefix + string query) parameters cancellationToken (parseAttributesResult colTypes >> Task.FromResult)
             }
 
         let getColumnInfo (col : ExecutedColumnInfo) =
@@ -348,7 +349,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (ar
             | None -> Map.empty
             | Some (attrTypes, attrs) -> attrs
 
-        let! ret = connection.ExecuteQuery (viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
+        let! ret = connection.ExecuteQuery (prefix + viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
             let (info, rows) = parseResult viewExpr.MainEntity viewExpr.Domains viewExpr.Columns rawResult
 
             let mergedInfo =

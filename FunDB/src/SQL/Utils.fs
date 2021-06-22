@@ -89,3 +89,7 @@ type ISQLString =
 let optionToSQLString<'a when 'a :> ISQLString> : 'a option -> string = function
     | None -> ""
     | Some o -> o.ToSQLString()
+
+let convertComments : string option -> string = function
+    | None -> ""
+    | Some comments -> sprintf "-- %s\n" (comments.Replace("\n", "\n-- "))
