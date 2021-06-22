@@ -47,6 +47,7 @@ type UserViewColumn =
 type UserViewInfo =
     { AttributeTypes : ExecutedAttributeTypes
       RowAttributeTypes : ExecutedAttributeTypes
+      Arguments : Map<ArgumentName, ResolvedArgument>
       Domains : UVDomains
       MainEntity : ResolvedEntityRef option
       Columns : UserViewColumn[]
@@ -187,8 +188,15 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         let queryStr = compiled.Query.Expression.ToString()
         let hash = String.concatWithWhitespaces [attributesStr; queryStr] |> Hash.sha1OfString |> String.hexBytes
 
+        let filterArgs arg info =
+            match arg with
+            | PLocal name -> Some (name, info)
+            | PGlobal name -> None
+        let arguments = viewExpr.Arguments |> Map.mapWithKeysMaybe filterArgs
+
         { AttributeTypes = viewInfo.AttributeTypes
           RowAttributeTypes = viewInfo.RowAttributeTypes
+          Arguments = arguments
           Domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.FlattenedDomains
           Columns = Seq.map2 getResultColumn (Seq.mapMaybe getColumn compiled.Columns) viewInfo.Columns |> Seq.toArray
           MainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.Entity) viewExpr.MainEntity
