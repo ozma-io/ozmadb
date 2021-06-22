@@ -20,7 +20,7 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, fieldAccesses
 
     let compileRestriction (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) : FieldAccess =
         let childrenFieldAccesses = Map.find entity.Root fieldAccesses
-        let entityAccesses = Map.find entity.Root role.Flattened
+        let entityAccesses = Map.find entity.Root role.Flattened.Entities
         let applied = applyRestrictionExpression (fun access -> access.Select) layout entityAccesses childrenFieldAccesses ref
         match applied with
         | OFETrue -> None
@@ -81,7 +81,7 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
     and applyToSelectExpr (select : SelectExpr) : SelectExpr =
         match select.Extra with
         // Special case -- subentity select which gets generated when someone uses subentity in FROM.
-        | :? RealEntityAnnotation as ann ->
+        | :? RealEntityAnnotation as ann when not ann.AsRoot ->
             let accessSchema = Map.find ann.RealEntity.Schema access
             let accessEntity = Map.find ann.RealEntity.Name accessSchema
             match accessEntity with
@@ -103,7 +103,7 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
                 let fromVal = Option.get from
 
                 let restrictOne (from, where, joins) (tableName : TableName, entityInfo : FromEntityInfo) =
-                    if not entityInfo.IsInner then
+                    if not entityInfo.IsInner || entityInfo.AsRoot then
                         // We restrict them in FROM expression.
                         (from, where, joins)
                     else
@@ -164,7 +164,7 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
         mapValueExpr mapper
 
     and applyToFromExpr : FromExpr -> FromExpr = function
-        | FTable (:? RealEntityAnnotation as ann, pun, entity) when not ann.IsInner ->
+        | FTable (:? RealEntityAnnotation as ann, pun, entity) when not ann.IsInner && not ann.AsRoot ->
             let accessSchema = Map.find ann.RealEntity.Schema access
             let accessEntity = Map.find ann.RealEntity.Name accessSchema
             match accessEntity with
@@ -172,7 +172,6 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
             | Some restr ->
                 // `pun` is guaranteed to be there for all table queries.
                 FSubExpr (Option.get pun, restrictionToSelect ann.RealEntity restr)
-        // From CTE.
         | FTable (extra, pun, entity) -> FTable (extra, pun, entity)
         | FJoin join ->
             FJoin

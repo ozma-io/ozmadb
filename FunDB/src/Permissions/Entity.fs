@@ -29,7 +29,7 @@ let applyRoleInsert (layout : Layout)  (role : ResolvedRole) (query : Query<SQL.
     let tableInfo = query.Expression.Extra :?> RestrictedTableInfo
     let entity = layout.FindEntity tableInfo.Ref |> Option.get
     let flattened =
-        match Map.tryFind entity.Root role.Flattened with
+        match Map.tryFind entity.Root role.Flattened.Entities with
         | Some flat -> flat
         | _ -> raisef PermissionsEntityException "Access denied to insert"
     match Map.tryFind tableInfo.Ref flattened.Children with
@@ -51,7 +51,7 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.U
     let tableInfo = query.Expression.Extra :?> RestrictedTableInfo
     let entity = layout.FindEntity tableInfo.Ref |> Option.get
     let flattened =
-        match Map.tryFind entity.Root role.Flattened with
+        match Map.tryFind entity.Root role.Flattened.Entities with
         | Some flat -> flat
         | _ -> raisef PermissionsEntityException "Access denied to update"
     
@@ -88,7 +88,7 @@ let applyRoleDelete (layout : Layout) (role : ResolvedRole) (query : Query<SQL.D
     let tableInfo = query.Expression.Extra :?> RestrictedTableInfo
     let entity = layout.FindEntity tableInfo.Ref |> Option.get
     let flattened =
-        match Map.tryFind  entity.Root role.Flattened with
+        match Map.tryFind  entity.Root role.Flattened.Entities with
         | Some flat -> flat
         | _ -> raisef PermissionsEntityException "Access denied to delete"
     let deleteRestr =
@@ -119,7 +119,7 @@ let applyRoleDelete (layout : Layout) (role : ResolvedRole) (query : Query<SQL.D
 let serializeEntityRestricted (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) : SerializedEntity =
     let entity = layout.FindEntity entityRef |> Option.get
     let flattened =
-        match Map.tryFind entity.Root role.Flattened with
+        match Map.tryFind entity.Root role.Flattened.Entities with
         | None -> raisef PermissionsEntityException "Access denied"
         | Some access -> access
     match Map.tryFind entityRef flattened.Children with

@@ -410,10 +410,15 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
           Result = aggExpr
           Alias = None
         }
+    let fromEntity =
+        { Ref = relaxEntityRef entity.Root
+          Alias = None
+          AsRoot = false
+        }
     let singleSelect =
         { Attributes = Map.empty
           Results = [| QRExpr result |]
-          From = Some (FEntity (None, relaxEntityRef entity.Root))
+          From = Some (FEntity fromEntity)
           Where = None
           GroupBy = [||]
           OrderLimit = emptyOrderLimitClause
@@ -525,10 +530,15 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           Result = fixedCheck
           Alias = None
         }
+    let fromEntity =
+        { Ref = relaxEntityRef entity.Root
+          Alias = None
+          AsRoot = false
+        }
     let singleSelect =
         { Attributes = Map.empty
           Results = [|  QRExpr result |]
-          From = Some (FEntity (None, relaxEntityRef entity.Root))
+          From = Some (FEntity fromEntity)
           Where = None
           GroupBy = [||]
           OrderLimit = emptyOrderLimitClause

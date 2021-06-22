@@ -346,6 +346,8 @@ let private parseRelatedExpr (rawExpr : string) =
     | Ok r -> r
     | Error msg -> raisef ResolveLayoutException "Error parsing local expression: %s" msg
 
+let private relatedResolutionFlags = { emptyExprResolutionFlags with Privileged = true }
+
 //
 // PHASE 2: Building computed fields, sub entity parse expressions and other stuff.
 //
@@ -417,7 +419,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let entityInfo = SFEntity entityRef
         let (localArguments, expr) =
             try
-                resolveSingleFieldExpr wrappedLayout Map.empty localExprFromEntityId entityInfo expr
+                resolveSingleFieldExpr wrappedLayout Map.empty localExprFromEntityId relatedResolutionFlags entityInfo expr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
         let (exprInfo, usedReferences) = fieldExprUsedReferences wrappedLayout expr

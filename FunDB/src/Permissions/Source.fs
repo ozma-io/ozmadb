@@ -36,6 +36,7 @@ type SourceRole =
     { Parents : Set<ResolvedRoleRef>
       Permissions : SourceAllowedDatabase
       AllowBroken : bool
+      AllowAnonymousQueries : bool
     }
 
 type SourcePermissionsSchema =

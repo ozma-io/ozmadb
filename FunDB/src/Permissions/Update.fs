@@ -62,6 +62,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
             |> Map.ofSeq
 
         existingRole.AllowBroken <- role.AllowBroken
+        existingRole.AllowAnonymousQueries <- role.AllowAnonymousQueries
 
         let updateFunc = updateAllowedEntity
         let createFunc entityRef =

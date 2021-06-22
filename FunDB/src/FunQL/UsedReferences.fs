@@ -152,7 +152,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         buildForOrderLimitClause query.OrderLimit
 
     and buildForFromExpr : ResolvedFromExpr -> unit = function
-        | FEntity (pun, name) -> ()
+        | FEntity ent -> ()
         | FJoin join ->
             buildForFromExpr join.A
             buildForFromExpr join.B

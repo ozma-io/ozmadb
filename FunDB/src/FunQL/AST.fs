@@ -470,6 +470,28 @@ type [<NoEquality; NoComparison>] BinaryOperator =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
+type [<NoEquality; NoComparison>] FromEntity<'e> when 'e :> IFunQLName =
+    { Alias : EntityName option
+      AsRoot : bool
+      Ref : 'e
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let aliasStr =
+                match this.Alias with
+                | Some name -> sprintf "AS %s" (name.ToFunQLString())
+                | None -> ""
+            let roleStr =
+                if this.AsRoot then
+                    "WITH SUPERUSER ROLE"
+                else
+                    ""
+            String.concatWithWhitespaces [this.Ref.ToFunQLString(); roleStr; aliasStr]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 type [<NoEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e> when 'e :> IFunQLName =
     | [<CaseName(null, InnerObject=true)>] FTType of FieldExprType
     | [<CaseName("reference")>] FTReference of reference : 'e
@@ -759,7 +781,7 @@ and [<NoEquality; NoComparison>] SetOperationExpr<'e, 'f> when 'e :> IFunQLName 
 
 and [<NoEquality; NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     // We don't allow fields aliasing for entities, because we don't guarantee order of entity fields.
-    | FEntity of EntityName option * 'e
+    | FEntity of FromEntity<'e>
     | FJoin of JoinExpr<'e, 'f>
     | FSubExpr of EntityAlias * SelectExpr<'e, 'f>
     with
@@ -767,9 +789,7 @@ and [<NoEquality; NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :
 
         member this.ToFunQLString () =
             match this with
-            | FEntity (malias, t) ->
-                let aliasStr = optionToFunQLString malias
-                String.concatWithWhitespaces [t.ToFunQLString(); aliasStr]
+            | FEntity ent -> ent.ToFunQLString()
             | FSubExpr (alias, expr) ->
                 sprintf "(%s) %s" (expr.ToFunQLString()) (alias.ToFunQLString())
             | FJoin join -> join.ToFunQLString()
@@ -1104,6 +1124,7 @@ type ResolvedQueryResult = QueryResult<EntityRef, LinkedBoundFieldRef>
 type ResolvedQueryColumnResult = QueryColumnResult<EntityRef, LinkedBoundFieldRef>
 type ResolvedCommonTableExpr = CommonTableExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedCommonTableExprs = CommonTableExprs<EntityRef, LinkedBoundFieldRef>
+type ResolvedFromEntity = FromEntity<EntityRef>
 type ResolvedFromExpr = FromExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedAttributeMap = AttributeMap<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>

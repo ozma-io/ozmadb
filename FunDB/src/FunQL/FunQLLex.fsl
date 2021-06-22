@@ -169,6 +169,8 @@ and tokenizeFunQL = parse
     | f i r s t               { Parse.FIRST }
     | l a s t                 { Parse.LAST }
     | n u l l s               { Parse.NULLS }
+    | r o l e                 { Parse.ROLE }
+    | s u p e r u s e r       { Parse.SUPERUSER }
 
     // Types
     | i n t             { Parse.INT_TYPE }

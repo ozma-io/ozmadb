@@ -21,6 +21,7 @@ type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
 type ParsedAggExpr = AggExpr<EntityRef, LinkedFieldRef>
 type ParsedArgumentsMap = Map<ArgumentName, ParsedArgument>
 type ParsedOrderColumn = OrderColumn<EntityRef, LinkedFieldRef>
+type ParsedFromEntity = FromEntity<EntityRef>
 
 type ParsedMainEntity =
     { Entity : EntityRef
@@ -263,6 +264,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token NULLS
 %token FIRST
 %token LAST
+%token SUPERUSER
+%token ROLE
 
 // Types
 %token INT_TYPE
@@ -503,14 +506,24 @@ AttributeValuesNonEmpty:
     | Name EQ FieldExpr COMMA                         { [($1, $3)] }
     | Name EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
 
-EntityAlias:
+SubSelectAlias:
     | AS Name               { { Name = $2; Fields = None } }
     | AS Name ColumnAliases { { Name = $2; Fields = Some $3 } }
 
+FromEntityRole:
+    |                     { false }
+    | WITH SUPERUSER ROLE { true }
+
+FromEntityName:
+    |         { None }
+    | AS Name { Some $2 }
+
+FromEntity:
+    | EntityRef FromEntityRole FromEntityName { { Ref = $1; AsRoot = $2; Alias = $3 } }
+
 QuerySource:
-    | SubSelectExpr EntityAlias       { FSubExpr ($2, $1) }
-    | EntityRef                       { FEntity (None, $1) }
-    | EntityRef AS Name               { FEntity (Some $3, $1) }
+    | SubSelectExpr SubSelectAlias    { FSubExpr ($2, $1) }
+    | FromEntity                      { FEntity $1 }
     | LEFT_PAREN FromExpr RIGHT_PAREN { $2 }
 
 ColumnAliases:

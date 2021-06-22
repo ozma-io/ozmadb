@@ -87,19 +87,31 @@ type FlatAllowedEntity =
 
 type FlatAllowedDatabase = Map<ResolvedEntityRef, FlatAllowedEntity>
 
+type FlatRole =
+    { Entities : FlatAllowedDatabase
+      AllowAnonymousQueries : bool
+    }
+
 [<NoEquality; NoComparison>]
 type ResolvedRole =
     { Parents : Set<ResolvedRoleRef>
       Permissions : AllowedDatabase
-      Flattened : FlatAllowedDatabase
+      Flattened : FlatRole
       AllowBroken : bool
+      AllowAnonymousQueries : bool
+    }
+
+let emptyFlatRole =
+    { Entities = Map.empty
+      AllowAnonymousQueries = false
     }
 
 let emptyResolvedRole =
     { Parents = Set.empty
       Permissions = emptyAllowedDatabase
-      Flattened = Map.empty
+      Flattened = emptyFlatRole
       AllowBroken = false
+      AllowAnonymousQueries = false
     }
 
 [<NoEquality; NoComparison>]

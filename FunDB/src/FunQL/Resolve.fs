@@ -379,8 +379,8 @@ let private cteBindings (select : ResolvedSelectExpr) : ResolvedCommonTableExprs
         Map.empty
 
 let rec private findMainEntityFromExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) : ResolvedFromExpr -> RecursiveValue<ResolvedEntityRef> = function
-    | FEntity (pun, { Schema = Some schemaName; Name = name }) -> RValue { Schema = schemaName; Name = name }
-    | FEntity (pun, { Schema = None; Name = name }) ->
+    | FEntity { Ref = { Schema = Some schemaName; Name = name } } -> RValue { Schema = schemaName; Name = name }
+    | FEntity { Ref = { Schema = None; Name = name } } ->
         let cte = Map.find name ctes
         let extra = ObjectMap.findType<ResolvedCommonTableExprTempMeta> cte.Extra
         if extra.MainEntity then
@@ -752,7 +752,15 @@ let private subExprSelectFlags =
       RequireNames = false
     }
 
-type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsMap) =
+type ExprResolutionFlags =
+    { Privileged : bool
+    }
+
+let emptyExprResolutionFlags =
+    { Privileged = false
+    }
+
+type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsMap, resolveFlags : ExprResolutionFlags) =
     let mutable lastFromEntityId = 0
     let nextFromEntityId () =
         let ret = lastFromEntityId
@@ -1466,23 +1474,31 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
 
     // Set<EntityName> here is used to check uniqueness of puns.
     and resolveFromExpr (ctx : Context) (flags : SelectFlags) : ParsedFromExpr -> FieldMapping * Set<EntityRef> * ResolvedFromExpr = function
-        | FEntity (pun, ({ Schema = Some schemaName; Name = entityName } as ref)) ->
-            let resRef = { Schema = schemaName; Name = entityName }
-            let fromEntityId = nextFromEntityId ()
-            let punRef =
-                match pun with
-                | None -> None
-                | Some punName -> Some ({ Schema = None; Name = punName } : EntityRef)
-            let mapping = createFromMapping fromEntityId resRef (Option.map Some punRef) false
-            let mappingRef = Option.defaultValue ref punRef
-            (mapping, Set.singleton mappingRef, FEntity (pun, ref))
-        | FEntity (pun, ({ Schema = None; Name = entityName } as ref)) ->
-            let fields = ctx.ResolveCTE entityName
-            let newName = Option.defaultValue entityName pun
-            let mappingRef = { Schema = None; Name = newName } : EntityRef
-            let fromEntityId = nextFromEntityId ()
-            let mapping = fieldsToFieldMapping fromEntityId (Some mappingRef) fields
-            (mapping, Set.singleton mappingRef, FEntity (pun, ref))
+        | FEntity entity ->
+            let (mapping, mappingRef) =
+                match entity.Ref with
+                | { Schema = Some schemaName; Name = entityName } ->
+                    if entity.AsRoot && not resolveFlags.Privileged then
+                        raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                    let resRef = { Schema = schemaName; Name = entityName }
+                    let fromEntityId = nextFromEntityId ()
+                    let punRef =
+                        match entity.Alias with
+                        | None -> None
+                        | Some punName -> Some ({ Schema = None; Name = punName } : EntityRef)
+                    let mapping = createFromMapping fromEntityId resRef (Option.map Some punRef) false
+                    let mappingRef = Option.defaultValue entity.Ref punRef
+                    (mapping, mappingRef)
+                | { Schema = None; Name = entityName } ->
+                    if entity.AsRoot then
+                        raisef ViewResolveException "Roles can only be specified for entities"
+                    let fields = ctx.ResolveCTE entityName
+                    let newName = Option.defaultValue entityName entity.Alias
+                    let mappingRef = { Schema = None; Name = newName } : EntityRef
+                    let fromEntityId = nextFromEntityId ()
+                    let mapping = fieldsToFieldMapping fromEntityId (Some mappingRef) fields
+                    (mapping, mappingRef)
+            (mapping, Set.singleton mappingRef, FEntity entity)
         | FJoin join ->
             let (newMapping1, namesA, newA) = resolveFromExpr ctx flags join.A
             let (newMapping2, namesB, newB) = resolveFromExpr ctx flags join.B
@@ -1606,7 +1622,7 @@ and private relabelSingleSelectExpr (select : ResolvedSingleSelectExpr) : Resolv
     }
 
 and private relabelFromExpr : ResolvedFromExpr -> ResolvedFromExpr = function
-    | FEntity (pun, ref) -> FEntity (pun, ref)
+    | FEntity ent -> FEntity ent
     | FJoin join ->
         FJoin
             { Type = join.Type
@@ -1648,21 +1664,21 @@ let private buildAllArguments (layout : ILayoutBits) (rawArguments : ParsedArgum
     let allArguments = Map.union localArguments globalArgumentsMap
     (localArguments, allArguments)
 
-let resolveSelectExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (select : ParsedSelectExpr) : ResolvedArgumentsMap * ResolvedSelectExpr =
+let resolveSelectExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) (select : ParsedSelectExpr) : ResolvedArgumentsMap * ResolvedSelectExpr =
     let (localArguments, allArguments) = buildAllArguments layout arguments
-    let qualifier = QueryResolver (layout, allArguments)
+    let qualifier = QueryResolver (layout, allArguments, flags)
     let (results, qQuery) = qualifier.ResolveSelectExpr subExprSelectFlags select
     (localArguments, relabelSelectExpr qQuery)
 
-let resolveSingleFieldExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (fromEntityId : FromEntityId) (fromMapping : SingleFromMapping) (expr : ParsedFieldExpr) : ResolvedArgumentsMap * ResolvedFieldExpr =
+let resolveSingleFieldExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (fromEntityId : FromEntityId) (flags : ExprResolutionFlags) (fromMapping : SingleFromMapping) (expr : ParsedFieldExpr) : ResolvedArgumentsMap * ResolvedFieldExpr =
     let (localArguments, allArguments) = buildAllArguments layout arguments
-    let qualifier = QueryResolver (layout, allArguments)
+    let qualifier = QueryResolver (layout, allArguments, flags)
     let (info, qExpr) = qualifier.ResolveSingleFieldExpr fromEntityId fromMapping expr
     (localArguments, relabelFieldExpr qExpr)
 
-let resolveViewExpr (layout : ILayoutBits) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
+let resolveViewExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
     let (localArguments, allArguments) = buildAllArguments layout viewExpr.Arguments
-    let qualifier = QueryResolver (layout, allArguments)
+    let qualifier = QueryResolver (layout, allArguments, flags)
     let (results, qQuery) = qualifier.ResolveSelectExpr viewExprSelectFlags viewExpr.Select
     let mainEntity = Option.map (qualifier.ResolveMainEntity (getFieldsMap results) qQuery) viewExpr.MainEntity
     { Pragmas = Map.filter (fun name v -> Set.contains name allowedPragmas) viewExpr.Pragmas

@@ -121,7 +121,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         }
 
     and resolveFromExpr : ResolvedFromExpr -> ResolvedFromExpr = function
-        | FEntity (pun, name) -> FEntity (pun, name)
+        | FEntity ent -> FEntity ent
         | FJoin join ->
             FJoin
                 { Type = join.Type

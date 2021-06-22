@@ -15,7 +15,12 @@ type CompiledRestriction =
     }
 
 let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedOptimizedFieldExpr) : QueryArguments * CompiledRestriction =
-    let (info, from) = compileSingleFromExpr layout arguments (FEntity (None, relaxEntityRef ref)) (Some <| restr.ToFieldExpr())
+    let fromEntity =
+        { Ref = relaxEntityRef ref
+          Alias = None
+          AsRoot = false
+        }
+    let (info, from) = compileSingleFromExpr layout arguments (FEntity fromEntity) (Some <| restr.ToFieldExpr())
     let ret =
         { From = from.From
           Joins = from.Joins
@@ -38,7 +43,12 @@ let restrictionToSelect (ref : ResolvedEntityRef) (restr : CompiledRestriction) 
     }
 
 let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedOptimizedFieldExpr) : QueryArguments * SQL.ValueExpr =
-    let (info, from) = compileSingleFromExpr layout arguments (FEntity (None, relaxEntityRef ref)) (Some <| restr.ToFieldExpr())
+    let fromEntity =
+        { Ref = relaxEntityRef ref
+          Alias = None
+          AsRoot = false
+        }
+    let (info, from) = compileSingleFromExpr layout arguments (FEntity fromEntity) (Some <| restr.ToFieldExpr())
     let ret =
         match from.From with
         | SQL.FTable _ ->

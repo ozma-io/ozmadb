@@ -110,7 +110,7 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
 
     let (localArguments, resolvedExpr) =
         try
-            resolveSingleFieldExpr layout parsedArguments chunkFromEntityId (SFCustom customMapping) parsedExpr
+            resolveSingleFieldExpr layout parsedArguments chunkFromEntityId emptyExprResolutionFlags (SFCustom customMapping) parsedExpr
         with
         | :? ViewResolveException as e -> raisefWithInner ChunkException e ""
     let (info, usedArguments) = fieldExprUsedReferences layout resolvedExpr

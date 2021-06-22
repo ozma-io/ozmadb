@@ -70,6 +70,11 @@ let private mergeFlatEntity (a : FlatAllowedEntity) (b : FlatAllowedEntity) : Fl
 
 let private mergeFlatAllowedDatabase = Map.unionWith (fun name -> mergeFlatEntity)
 
+let private mergeFlatRole (a : FlatRole) (b: FlatRole) =
+    { Entities = mergeFlatAllowedDatabase a.Entities b.Entities
+      AllowAnonymousQueries = a.AllowAnonymousQueries || b.AllowAnonymousQueries
+    }
+
 type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb : SourceAllowedDatabase) =
     let mutable resolved : Map<ResolvedEntityRef, Result<HalfResolvedEntity, AllowedEntityError>> = Map.empty
     let mutable flattened = Map.empty
@@ -83,7 +88,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let entityInfo = SFEntity entityRef
         let (localArguments, expr) =
             try
-                resolveSingleFieldExpr layout Map.empty localExprFromEntityId entityInfo whereExpr
+                resolveSingleFieldExpr layout Map.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"
         let (exprInfo, usedReferences) = fieldExprUsedReferences layout expr
@@ -356,14 +361,19 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             | Ok (errors, role) -> role.Flattened
             | Error e -> raisefWithInner ResolvePermissionsParentException e "Error in parent %O" parentRef
         let resolver = RoleResolver (layout, forceAllowBroken, role.Permissions)
-        let flattenedParents = role.Parents |> Set.toSeq |> Seq.map resolveParent |> Seq.fold mergeFlatAllowedDatabase Map.empty
+        let flattenedParents = role.Parents |> Set.toSeq |> Seq.map resolveParent |> Seq.fold mergeFlatRole emptyFlatRole
         let (errors, resolved) = resolver.ResolveAllowedDatabase ()
+        let flattened =
+            { Entities = resolver.Flattened
+              AllowAnonymousQueries = role.AllowAnonymousQueries
+            }
 
         let ret =
             { Parents = role.Parents
               Permissions = resolved
-              Flattened = mergeFlatAllowedDatabase flattenedParents resolver.Flattened
+              Flattened = mergeFlatRole flattenedParents flattened
               AllowBroken = role.AllowBroken
+              AllowAnonymousQueries = role.AllowAnonymousQueries
             }
         (errors, ret)
 

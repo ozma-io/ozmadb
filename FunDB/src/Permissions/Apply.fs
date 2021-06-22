@@ -22,7 +22,7 @@ let unionFilteredAllowedDatabase = Map.unionWith (fun name -> Map.unionUnique)
 type private FieldsAccessAggregator (accessor : AllowedField -> ResolvedOptimizedFieldExpr, layout : Layout, role : ResolvedRole) =
     let filterDerivedEntity (ref : ResolvedEntityRef) (entity : ResolvedEntity) (usedFields : UsedFields) : ResolvedOptimizedFieldExpr =
         let flattened =
-            match Map.tryFind entity.Root role.Flattened with
+            match Map.tryFind entity.Root role.Flattened.Entities with
             | Some f -> f
             | None -> raisef PermissionsApplyException "Access denied to entity %O" ref
         let addRestriction restriction name =

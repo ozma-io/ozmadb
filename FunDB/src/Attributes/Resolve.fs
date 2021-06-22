@@ -15,6 +15,8 @@ type ResolveAttributesException (message : string, innerException : Exception) =
 
     new (message : string) = ResolveAttributesException (message, null)
 
+let private attrResolutionFlags = { emptyExprResolutionFlags with Privileged = true }
+
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let resolveAttributesField (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (fieldAttrs : SourceAttributesField) : AttributesField =
         let attrsMap =
@@ -27,7 +29,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                 let entityInfo = SFEntity entityRef
                 let (info, resolvedExpr) =
                     try
-                        resolveSingleFieldExpr layout Map.empty localExprFromEntityId entityInfo expr
+                        resolveSingleFieldExpr layout Map.empty localExprFromEntityId attrResolutionFlags entityInfo expr
                     with
                     | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
                 resolvedExpr

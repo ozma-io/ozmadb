@@ -158,6 +158,7 @@ type private SelectColumn =
 type FromEntityInfo =
     { Ref : ResolvedEntityRef
       IsInner : bool
+      AsRoot : bool
       Check : SQL.ValueExpr option
     }
 
@@ -457,11 +458,12 @@ type private SelectFlags =
 type RealEntityAnnotation =
     { RealEntity : ResolvedEntityRef
       FromPath : bool
-      // `isInner` is `true` when we can filter rows in outer query, not in the subquery. For example,
+      // `IsInner` is `true` when we can filter rows in outer query, not in the subquery. For example,
       // > foo LEFT JOIN bar
       // If we need an additional constraint on `foo`, we can add it to outer WHERE clause.
       // We cannot do the same for `bar` however, because missing rows will be "visible" as NULLs due to LEFT JOIN.
       IsInner : bool
+      AsRoot : bool
     }
 
 let private fromToEntitiesMap : FromMap -> FromEntitiesMap = Map.mapMaybe (fun name info -> info.Entity)
@@ -525,6 +527,7 @@ let joinPath (layout : Layout) (from : SQL.FromExpr) (joinKey : JoinKey) (join :
         { RealEntity = join.RealEntity
           FromPath = true
           IsInner = false
+          AsRoot = false
         } : RealEntityAnnotation
     let subquery = SQL.FTable (ann, Some alias, compileResolvedEntityRef entity.Root)
     SQL.FJoin { Type = SQL.Left; A = from; B = subquery; Condition = joinExpr }
@@ -542,6 +545,7 @@ let buildJoins (layout : Layout) (initialEntitiesMap : FromEntitiesMap) (initial
         let entity =
             { Ref = join.RealEntity
               IsInner = false
+              AsRoot = false
               Check = None
             }
         let entitiesMap = Map.add join.Name entity entitiesMap
@@ -943,7 +947,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let pathWithEntities = Seq.zip remainingBoundPath remainingPath |> List.ofSeq
         let fieldRef = { Entity = referencedRef; Name = firstName }
         let (argPaths, expr) = compilePath emptyExprCompilationFlags ctx extra emptyJoinPaths (Some argTableRef) fieldRef None pathWithEntities
-        let (fromMap, from) = compileFromExpr Map.empty None true (FEntity (None, relaxEntityRef referencedRef))
+        let fromEntity =
+            { Ref = relaxEntityRef referencedRef
+              Alias = None
+              AsRoot = false
+            }
+        let (fromMap, from) = compileFromExpr Map.empty None true (FEntity fromEntity)
         let (entitiesMap, from) = buildJoins layout (fromToEntitiesMap fromMap) from (joinsToSeq argPaths.Map)
         let whereWithoutSubentities = SQL.VEBinaryOp (SQL.VEColumn { Table = Some argTableRef; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder arg.PlaceholderId)
         let where = addEntityChecks entitiesMap (Some whereWithoutSubentities)
@@ -1682,7 +1691,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     // See description of `RealEntityAnnotation.IsInner`.
     and compileFromExpr (cteBindings : CTEBindings) (mainEntity : ResolvedEntityRef option) (isInner : bool) : ResolvedFromExpr -> FromMap * SQL.FromExpr = function
-        | FEntity (pun, { Schema = Some schema; Name = name }) ->
+        | FEntity ({ Ref = { Schema = Some schema; Name = name } } as from) ->
             let entityRef = { Schema = schema; Name = name }
             let entity = Option.getOrFailWith (fun () -> sprintf "Can't find entity %O" entityRef) <| layout.FindEntity entityRef
 
@@ -1696,12 +1705,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   IdColumn = idDefault
                 }
             let domain = Map.add (TName funMain) mainEntry domain
-            let newAlias = compileAliasFromEntity entityRef pun
+            let newAlias = compileAliasFromEntity entityRef from.Alias
 
             let ann =
                 { RealEntity = entityRef
                   FromPath = false
                   IsInner = isInner
+                  AsRoot = from.AsRoot
                 } : RealEntityAnnotation
 
             let tableRef = compileResolvedEntityRef entity.Root
@@ -1732,6 +1742,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let entityInfo =
                 { Ref = entityRef
                   IsInner = isInner
+                  AsRoot = from.AsRoot
                   Check = where
                 }
             let (mainId, mainSubEntity) =
@@ -1750,7 +1761,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             usedSchemas <- addUsedEntityRef entityRef usedSchemas
 
             (Map.singleton newAlias.Name fromInfo, fromExpr)
-        | FEntity (pun, { Schema = None; Name = name }) ->
+        | FEntity { Ref = { Schema = None; Name = name }; Alias = pun } ->
             let name' = compileName name
             let selectSig = Map.find name' cteBindings
             let compiledAlias = Option.map compileAliasFromName pun
