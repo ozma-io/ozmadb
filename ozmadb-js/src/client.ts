@@ -1,7 +1,8 @@
 import {
   IEntityRef, IEntity, IUserViewRef, IQueryChunk, IApiError, IViewExprResult, IViewInfoResult,
   ITransaction, ITransactionResult, IActionRef, IActionResult, ArgumentName, IFieldRef,
-  IDomainValuesResult, IViewExplainResult,
+  IDomainValuesResult, IViewExplainResult, IExplainedQuery, IExplainFlags, ISaveSchemasOptions,
+  IRestoreSchemasOptions,
 } from "./common";
 
 /*
@@ -31,54 +32,41 @@ const fetchJson = async (input: RequestInfo, init?: RequestInit): Promise<unknow
   return response.json();
 };
 
-export interface ISaveSchemasOptions {
-  skipPreloaded?: boolean;
-}
-
-export interface IRestoreSchemasOptions {
-  dropOthers?: boolean;
-}
-
 interface IAnonymousUserViewRequest {
   query: string;
 }
 
-interface IUserViewEntriesRequest extends IQueryChunk {
+interface IUserViewCommonRequest extends IQueryChunk {
   args?: Record<ArgumentName, any>;
   pretendUser?: string;
   pretendRole?: IEntityRef;
 }
+
+interface IUserViewEntriesRequest extends IUserViewCommonRequest { }
 
 interface IAnonymousUserViewEntriesRequest extends IUserViewEntriesRequest, IAnonymousUserViewRequest { }
 
-interface IUserViewExplainFlags {
-  verbose?: boolean;
-  analyze?: boolean;
-  costs?: boolean;
-}
-
-interface IUserViewExplainRequest extends IQueryChunk, IUserViewExplainFlags {
-  args?: Record<ArgumentName, any>;
-  pretendUser?: string;
-  pretendRole?: IEntityRef;
-}
+interface IUserViewExplainRequest extends IUserViewCommonRequest, IExplainFlags { }
 
 interface IAnonymousUserViewExplainRequest extends IUserViewExplainRequest, IAnonymousUserViewRequest { }
 
-interface IDomainsRequest extends IQueryChunk {
+interface IDomainsCommonRequest extends IQueryChunk {
   rowId?: number;
   pretendUser?: string;
   pretendRole?: IEntityRef;
 }
 
-export interface IUserViewOpts {
+interface IDomainsRequest extends IDomainsCommonRequest { }
+
+interface IDomainsExplainRequest extends IDomainsCommonRequest, IExplainFlags { }
+
+export interface IEntriesRequestOpts {
   chunk?: IQueryChunk;
   pretendUser?: string;
   pretendRole?: IEntityRef;
 }
 
-export interface IUserViewExplainOpts extends IUserViewOpts, IUserViewExplainFlags {
-}
+export interface IEntriesExplainOpts extends IEntriesRequestOpts, IExplainFlags { }
 
 export default class FunDBAPI {
   private apiUrl: string;
@@ -141,20 +129,22 @@ export default class FunDBAPI {
     return this.fetchJsonApi(`views/${path}/explain`, token, "POST", body) as Promise<IViewExplainResult>;
   };
 
-  getAnonymousUserView = async (token: string | null, query: string, args?: Record<string, unknown>, opts?: IUserViewOpts): Promise<IViewExprResult> => {
+  getAnonymousUserView = async (token: string | null, query: string, args?: Record<string, unknown>, opts?: IEntriesRequestOpts): Promise<IViewExprResult> => {
     const req: IAnonymousUserViewEntriesRequest = {
         query,
         args,
         ...opts?.chunk,
+        pretendUser: opts?.pretendUser,
         pretendRole: opts?.pretendRole,
     };
     return this.getUserView("anonymous", token, req);
   };
 
-  getNamedUserView = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, opts?: IUserViewOpts): Promise<IViewExprResult> => {
+  getNamedUserView = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, opts?: IEntriesRequestOpts): Promise<IViewExprResult> => {
     const req: IUserViewEntriesRequest = {
         args,
         ...opts?.chunk,
+        pretendUser: opts?.pretendUser,
         pretendRole: opts?.pretendRole,
     };
     return this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, req);
@@ -164,7 +154,7 @@ export default class FunDBAPI {
     return this.getUserViewInfo(`by_name/${ref.schema}/${ref.name}`, token, {});
   };
 
-  getAnonymousUserViewExplain = async (token: string | null, query: string, args?: Record<string, unknown>, opts?: IUserViewExplainOpts): Promise<IViewExplainResult> => {
+  getAnonymousUserViewExplain = async (token: string | null, query: string, args?: Record<string, unknown>, opts?: IEntriesExplainOpts): Promise<IViewExplainResult> => {
     const req: IAnonymousUserViewExplainRequest = {
       query,
       args,
@@ -178,7 +168,7 @@ export default class FunDBAPI {
     return this.getUserViewExplain("anonymous", token, req);
   };
 
-  getNamedUserViewExplain = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, opts?: IUserViewExplainOpts): Promise<IViewExplainResult> => {
+  getNamedUserViewExplain = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, opts?: IEntriesExplainOpts): Promise<IViewExplainResult> => {
     const req: IUserViewExplainRequest = {
       args,
       ...opts?.chunk,
@@ -203,13 +193,27 @@ export default class FunDBAPI {
     return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args ?? {}) as Promise<IActionResult>;
   };
 
-  getDomainValues = async (token: string | null, ref: IFieldRef, rowId?: number, opts?: IUserViewOpts): Promise<IDomainValuesResult> => {
+  getDomainValues = async (token: string | null, ref: IFieldRef, rowId?: number, opts?: IEntriesRequestOpts): Promise<IDomainValuesResult> => {
     const req: IDomainsRequest = {
       rowId,
       ...opts?.chunk,
+      pretendUser: opts?.pretendUser,
       pretendRole: opts?.pretendRole,
     };
-    return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}`, token, "POST", req) as Promise<IDomainValuesResult>;
+    return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}/entries`, token, "POST", req) as Promise<IDomainValuesResult>;
+  };
+
+  getDomainExplain = async (token: string | null, ref: IFieldRef, rowId?: number, opts?: IEntriesExplainOpts): Promise<IExplainedQuery> => {
+    const req: IDomainsExplainRequest = {
+      rowId,
+      ...opts?.chunk,
+      verbose: opts?.verbose,
+      analyze: opts?.analyze,
+      costs: opts?.costs,
+      pretendUser: opts?.pretendUser,
+      pretendRole: opts?.pretendRole,
+    };
+    return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}/explain`, token, "POST", req) as Promise<IExplainedQuery>;
   };
 
   saveSchemas = async (token: string | null, schemas: string[] | "all", options?: ISaveSchemasOptions): Promise<Blob> => {

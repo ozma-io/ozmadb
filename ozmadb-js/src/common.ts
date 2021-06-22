@@ -232,6 +232,12 @@ export interface IExplainedQuery {
   explanation: object;
 }
 
+export interface IExplainFlags {
+  verbose?: boolean;
+  analyze?: boolean;
+  costs?: boolean;
+}
+
 /*
  * User view API responses.
  */
@@ -326,6 +332,18 @@ export interface IDomainValuesResult {
   values: IDomainValue[];
   punType: ValueType;
   hash: string;
+}
+
+/*
+ * Save/restore API options.
+ */
+
+export interface ISaveSchemasOptions {
+  skipPreloaded?: boolean;
+}
+
+export interface IRestoreSchemasOptions {
+  dropOthers?: boolean;
 }
 
 /*
