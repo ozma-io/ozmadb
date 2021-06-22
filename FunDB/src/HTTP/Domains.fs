@@ -9,6 +9,7 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.API.Types
+module SQL = FunWithFlags.FunDB.SQL.Query
 
 let private domainError e =
     let handler =
@@ -26,6 +27,18 @@ type DomainRequest =
       PretendUser : UserName option
       PretendRole : ResolvedEntityRef option
       RowId : int option
+    }
+
+type DomainExplainRequest =
+    { Limit : int option
+      Offset : int option
+      Where : SourceChunkWhere option
+      PretendUser : UserName option
+      PretendRole : ResolvedEntityRef option
+      RowId : int option
+      Analyze : bool option
+      Verbose : bool option
+      Costs : bool option
     }
 
 let domainsApi : HttpHandler =
@@ -56,11 +69,51 @@ let domainsApi : HttpHandler =
                 } : SourceQueryChunk
             setPretends api req.PretendUser req.PretendRole (fun () -> returnValues api ref req.RowId chunk next ctx)
 
+    let returnExplain (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (explainOpts : SQL.ExplainOptions) next ctx =
+        task {
+            match! api.Domains.GetDomainExplain ref rowId chunk explainOpts with
+            | Ok res -> return! Successful.ok (json res) next ctx
+            | Error err -> return! domainError err next ctx
+        }
+
+    let getDomainExplain (ref : ResolvedFieldRef) (api : IFunDBAPI) =
+        queryArgs <| fun rawArgs next ctx ->
+            task {
+                let rowId = intRequestArg "id" ctx
+                let chunk =
+                    { Offset = intRequestArg "__offset" ctx
+                      Limit = intRequestArg "__limit" ctx
+                      Where = None
+                    } : SourceQueryChunk
+                let explainOpts =
+                    { Analyze = tryBoolRequestArg "__analyze" ctx
+                      Costs = tryBoolRequestArg "__costs" ctx
+                      Verbose = tryBoolRequestArg "__verbose" ctx
+                    } : SQL.ExplainOptions
+                return! returnExplain api ref rowId chunk explainOpts next ctx
+            }
+
+    let postGetDomainExplain (ref : ResolvedFieldRef) (api : IFunDBAPI) =
+        safeBindJson <| fun (req : DomainExplainRequest) (next : HttpFunc) (ctx : HttpContext) ->
+            let chunk =
+                { Offset = req.Offset
+                  Limit = req.Limit
+                  Where = req.Where
+                } : SourceQueryChunk
+            let explainOpts =
+                { Analyze = req.Analyze
+                  Costs = req.Costs
+                  Verbose = req.Verbose
+                } : SQL.ExplainOptions
+            setPretends api req.PretendUser req.PretendRole (fun () -> returnExplain api ref req.RowId chunk explainOpts next ctx)
+
     let domainApi (schema, entity, name) =
         let ref = { Entity = { Schema = FunQLName schema; Name = FunQLName entity }; Name = FunQLName name }
         choose
-            [ GET >=> withContext (getDomainValues ref)
-              POST >=> withContext (postGetDomainValues ref)
+            [ route "/entries" >=> GET >=> withContext (getDomainValues ref)
+              route "/entries" >=> POST >=> withContext (postGetDomainValues ref)
+              route "/explain" >=> GET >=> withContext (getDomainExplain ref)
+              route "/explain" >=> POST >=> withContext (postGetDomainExplain ref)
             ]
 
     choose

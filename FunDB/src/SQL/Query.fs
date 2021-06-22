@@ -13,7 +13,9 @@ open FSharp.Control.Tasks.Affine
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Parsing
+open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDB.SQL.Misc
 open FunWithFlags.FunDB.SQL.Lex
 open FunWithFlags.FunDB.SQL.Parse
 
@@ -227,3 +229,30 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
 
             return! queryFunc { Columns = columns; Rows = rows }
         }
+
+type ExplainOptions =
+    { Analyze : bool option
+      Costs : bool option
+      Verbose : bool option
+    }
+
+let defaultExplainOptions =
+    { Analyze = None
+      Costs = None
+      Verbose = None
+    }
+
+let runExplainQuery<'a when 'a :> ISQLString> (connection : QueryConnection) (query : 'a) (parameters : ExprParameters) (explainOpts : ExplainOptions) (cancellationToken : CancellationToken) : Task<JToken> =
+    task {
+        let explainQuery =
+            { Statement = query
+              Analyze = explainOpts.Analyze
+              Costs = explainOpts.Costs
+              Verbose = explainOpts.Verbose
+              Format = Some EFJson
+            } : ExplainExpr<'a>
+        let queryStr = explainQuery.ToSQLString()
+        match! connection.ExecuteValueQuery queryStr parameters cancellationToken with
+        | VJson j -> return j
+        | ret -> return failwithf "Unexpected EXPLAIN return value: %O" ret
+    }

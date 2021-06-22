@@ -8,7 +8,9 @@ open FSharp.Control.Tasks.Affine
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
+open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.Permissions.Types
@@ -76,6 +78,30 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
                       PunType = punType
                     }
                 Task.result ret
+        with
+            | :? QueryException as ex ->
+                return raisefWithInner DomainExecutionException ex.InnerException "%s" ex.Message
+    }
+
+let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (role : ResolvedRole option) (maybeArguments : ArgumentValuesMap option) (chunk : SourceQueryChunk) (explainOpts : ExplainOptions) (cancellationToken : CancellationToken) : Task<ExplainedQuery> =
+    task {
+        let query =
+            match role with
+            | None -> domain.Query
+            | Some r ->
+                try
+                    applyRoleQueryExpr layout r domain.UsedSchemas domain.Query
+                with
+                | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
+        let resolvedChunk = genericResolveChunk layout domainColumns chunk
+        let (argValues, query) = queryExprChunk layout resolvedChunk query
+        let arguments = Option.defaultWith (fun () -> query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)) maybeArguments
+
+        try
+            let arguments = Map.union arguments (Map.mapKeys PLocal argValues)
+            let compiledArgs = prepareArguments query.Arguments arguments
+            let! explanation = runExplainQuery connection query.Expression compiledArgs explainOpts cancellationToken
+            return { Query = string query.Expression; Explanation = explanation }
         with
             | :? QueryException as ex ->
                 return raisefWithInner DomainExecutionException ex.InnerException "%s" ex.Message

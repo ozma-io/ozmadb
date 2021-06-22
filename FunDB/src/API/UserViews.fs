@@ -19,6 +19,7 @@ open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.UserViews.Resolve
 open FunWithFlags.FunDB.API.Types
+module SQL = FunWithFlags.FunDB.SQL.Query
 
 let private canExplain : RoleType -> bool = function
     | RTRoot -> true
@@ -132,7 +133,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                     return Error UVEAccessDenied
         }
 
-    member this.GetUserViewExplain (source : UserViewSource) (maybeRawArguments : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
+    member this.GetUserViewExplain (source : UserViewSource) (maybeRawArguments : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : SQL.ExplainOptions) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
         task {
             if not (canExplain rctx.User.Saved.Type) then
                 logger.LogError("Explain access denied")
@@ -154,11 +155,6 @@ type UserViewsAPI (rctx : IRequestContext) =
                             Ok <| resolveViewExprChunk ctx.Layout compiled chunk
                         with
                         | :? ChunkException as e ->
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "getUserViewExplain"
-                                event.Error <- "arguments"
-                                event.Details <- exceptionString e
-                            )
                             Error <| UVEArguments (exceptionString e)
 
                     match maybeResolvedChunk with
@@ -169,16 +165,17 @@ type UserViewsAPI (rctx : IRequestContext) =
                         let compiled = { compiled with Query = query }
                         match Option.map (fun args -> convertViewArguments extraArgValues args compiled) maybeRawArguments with
                         | Some (Error msg) ->
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "getUserView"
-                                event.Error <- "arguments"
-                                event.Details <- msg
-                            )
                             return Error <| UVEArguments msg
                         | maybeRetArgs ->
                             let maybeArgs = Option.map Result.get maybeRetArgs
-                            let! res = explainViewExpr ctx.Transaction.Connection.Query compiled maybeArgs explainOpts ctx.CancellationToken
-                            return Ok res
+                            try
+                                let! res = explainViewExpr ctx.Transaction.Connection.Query compiled maybeArgs explainOpts ctx.CancellationToken
+                                return Ok res
+                            with
+                            | :? UserViewExecutionException as ex ->
+                                logger.LogError(ex, "Failed to execute user view")
+                                let str = exceptionString ex
+                                return Error (UVEExecution str)
         }
 
     member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
@@ -197,11 +194,6 @@ type UserViewsAPI (rctx : IRequestContext) =
                             Ok <| resolveViewExprChunk ctx.Layout compiled chunk
                         with
                         | :? ChunkException as e ->
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "getUserView"
-                                event.Error <- "arguments"
-                                event.Details <- exceptionString e
-                            )
                             Error <| UVEArguments (exceptionString e)
 
                     match maybeResolvedChunk with
@@ -213,11 +205,6 @@ type UserViewsAPI (rctx : IRequestContext) =
 
                         match convertViewArguments extraArgValues rawArgs compiled with
                         | Error msg ->
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "getUserView"
-                                event.Error <- "arguments"
-                                event.Details <- msg
-                            )
                             return Error <| UVEArguments msg
                         | Ok arguments ->
                             let getResult info (res : ExecutedViewExpr) = Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
@@ -227,6 +214,10 @@ type UserViewsAPI (rctx : IRequestContext) =
                                         Result = res
                                       }
                 with
+                | :? UserViewExecutionException as ex ->
+                    logger.LogError(ex, "Failed to execute user view")
+                    let str = exceptionString ex
+                    return Error (UVEExecution str)
                 | :? PermissionsApplyException as err ->
                     logger.LogError(err, "Access denied to user view")
                     rctx.WriteEvent (fun event ->

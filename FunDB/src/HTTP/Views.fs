@@ -12,6 +12,7 @@ open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.HTTP.Utils
+module SQL = FunWithFlags.FunDB.SQL.Query
 
 let private uvError e =
     let handler =
@@ -124,7 +125,7 @@ let viewsApi : HttpHandler =
         | None -> safeBindJson (doPostInfoView viewRef api)
         | Some req -> bindJsonToken req (doPostSelectFromView viewRef api)
 
-    let returnExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (maybeArgs : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : ExplainViewOptions) next ctx =
+    let returnExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (maybeArgs : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : SQL.ExplainOptions) next ctx =
         task {
             match! api.UserViews.GetUserViewExplain viewRef maybeArgs chunk flags explainOpts with
             | Ok res -> return! Successful.ok (json res) next ctx
@@ -146,7 +147,7 @@ let viewsApi : HttpHandler =
                     { Analyze = tryBoolRequestArg "__analyze" ctx
                       Costs = tryBoolRequestArg "__costs" ctx
                       Verbose = tryBoolRequestArg "__verbose" ctx
-                    } : ExplainViewOptions
+                    } : SQL.ExplainOptions
                 let maybeArgs =
                     if Map.isEmpty rawArgs then None else Some rawArgs
                 return! returnExplainView viewRef api maybeArgs chunk flags explainOpts next ctx
@@ -165,7 +166,7 @@ let viewsApi : HttpHandler =
             { Analyze = req.Analyze
               Costs = req.Costs
               Verbose = req.Verbose
-            } : ExplainViewOptions
+            } : SQL.ExplainOptions
         setPretends api req.PretendUser req.PretendRole (fun () -> returnExplainView viewRef api req.Args chunk flags explainOpts next ctx)
 
     let postExplainView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =

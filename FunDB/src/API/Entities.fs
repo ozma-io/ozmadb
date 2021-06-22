@@ -198,13 +198,6 @@ type EntitiesAPI (rctx : IRequestContext) =
                         | :? EntityExecutionException as ex ->
                             logger.LogError(ex, "Failed to insert entry")
                             let str = exceptionString ex
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "insertEntity"
-                                event.SchemaName <- entityRef.Schema.ToString()
-                                event.EntityName <- entityRef.Name.ToString()
-                                event.Error <- "execution"
-                                event.Details <- str
-                            )
                             return Error (EEExecution str)
                         | :? EntityDeniedException as ex ->
                             logger.LogError(ex, "Access denied")
@@ -250,25 +243,9 @@ type EntitiesAPI (rctx : IRequestContext) =
                         | :? EntityExecutionException as ex ->
                             logger.LogError(ex, "Failed to update entry")
                             let str = exceptionString ex
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "updateEntity"
-                                event.SchemaName <- entityRef.Schema.ToString()
-                                event.EntityName <- entityRef.Name.ToString()
-                                event.EntityId <- Nullable id
-                                event.Error <- "execution"
-                                event.Details <- str
-                            )
                             return Error (EEExecution str)
                         | :? EntityNotFoundException as ex ->
                             logger.LogError(ex, "Not found")
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "updateEntity"
-                                event.SchemaName <- entityRef.Schema.ToString()
-                                event.EntityName <- entityRef.Name.ToString()
-                                event.EntityId <- Nullable id
-                                event.Error <- "not_found"
-                                event.Details <- exceptionString ex
-                            )
                             return Error EENotFound
                         | :? EntityDeniedException as ex ->
                             logger.LogError(ex, "Access denied")
@@ -312,25 +289,9 @@ type EntitiesAPI (rctx : IRequestContext) =
                         | :? EntityExecutionException as ex ->
                             logger.LogError(ex, "Failed to delete entry")
                             let str = exceptionString ex
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "deleteEntity"
-                                event.SchemaName <- entityRef.Schema.ToString()
-                                event.EntityName <- entityRef.Name.ToString()
-                                event.EntityId <- Nullable id
-                                event.Error <- "execution"
-                                event.Details <- str
-                            )
                             return Error (EEExecution str)
                         | :? EntityNotFoundException as ex ->
                             logger.LogError(ex, "Not found")
-                            rctx.WriteEvent (fun event ->
-                                event.Type <- "deleteEntity"
-                                event.SchemaName <- entityRef.Schema.ToString()
-                                event.EntityName <- entityRef.Name.ToString()
-                                event.EntityId <- Nullable id
-                                event.Error <- "not_found"
-                                event.Details <- exceptionString ex
-                            )
                             return Error EENotFound
                         | :? EntityDeniedException as ex ->
                             logger.LogError(ex, "Access denied")

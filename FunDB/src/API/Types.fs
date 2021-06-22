@@ -31,6 +31,7 @@ open FunWithFlags.FunDB.Operations.Domain
 open FunWithFlags.FunDB.FunQL.Chunk
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
+module SQL = FunWithFlags.FunDB.SQL.Query
 
 type RawArguments = Map<string, JToken>
 
@@ -182,7 +183,7 @@ let emptyUserViewFlags =
 
 type IUserViewsAPI =
     abstract member GetUserViewInfo : UserViewSource -> UserViewFlags -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
-    abstract member GetUserViewExplain :  UserViewSource -> RawArguments option -> SourceQueryChunk -> UserViewFlags -> ExplainViewOptions -> Task<Result<ExplainedViewExpr, UserViewErrorInfo>>
+    abstract member GetUserViewExplain :  UserViewSource -> RawArguments option -> SourceQueryChunk -> UserViewFlags -> SQL.ExplainOptions -> Task<Result<ExplainedViewExpr, UserViewErrorInfo>>
     abstract member GetUserView : UserViewSource -> RawArguments -> SourceQueryChunk -> UserViewFlags -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
 
 [<SerializeAsObject("error")>]
@@ -356,6 +357,7 @@ type DomainErrorInfo =
 
 type IDomainsAPI =
     abstract member GetDomainValues : ResolvedFieldRef -> int option -> SourceQueryChunk -> Task<Result<DomainValuesResult, DomainErrorInfo>>
+    abstract member GetDomainExplain : ResolvedFieldRef -> int option -> SourceQueryChunk -> SQL.ExplainOptions -> Task<Result<ExplainedQuery, DomainErrorInfo>>
 
 type IFunDBAPI =
     abstract member Request : IRequestContext
