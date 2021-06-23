@@ -42,6 +42,19 @@ let private userViewComments (source : UserViewSource) (role : RoleType) (argume
         | RTRole role -> sprintf ", role %O" role.Ref
     String.concat "" [sourceStr; argumentsStr; chunkStr; roleStr]
 
+let canQueryAnonymously (rctx : IRequestContext) : bool =
+    let allowAnon =
+        match rctx.User.Effective.Type with
+        | RTRole { Role = Some role } -> role.Flattened.AllowAnonymousQueries
+        | RTRoot -> true
+        | _ -> false
+    if allowAnon then true else
+        // Still allow anonymous queries from triggers and actions.
+        match rctx.Source with
+        | ESAPI -> false
+        | ESTrigger ref -> true
+        | ESAction ref -> true
+
 type UserViewsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<UserViewsAPI>()
@@ -50,12 +63,7 @@ type UserViewsAPI (rctx : IRequestContext) =
         task {
             match source with
             | UVAnonymous query ->
-                let allowAnon =
-                    match rctx.User.Effective.Type with
-                    | RTRole { Role = Some role } -> role.Flattened.AllowAnonymousQueries
-                    | RTRoot -> true
-                    | _ -> false
-                if not allowAnon then
+                if not <| canQueryAnonymously rctx then
                     logger.LogError("Access denied to execute anonymous user view")
                     return Error UVEAccessDenied
                 else
