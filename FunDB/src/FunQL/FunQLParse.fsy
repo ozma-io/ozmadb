@@ -191,6 +191,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token LESS_EQ
 %token GREATER_EQ
 %token BOLD_ARROW
+%token BOLD_BANG_ARROW
+%token BANG
 %token CONCAT
 %token AT_LEFT_BRACE
 %token LIKE_OP
@@ -266,6 +268,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token LAST
 %token SUPERUSER
 %token ROLE
+%token LATERAL
 
 // Types
 %token INT_TYPE
@@ -571,11 +574,22 @@ ValueRef:
     | GLOBAL_ARGUMENT_ID { VRPlaceholder (PGlobal <| FunQLName $1) }
 
 LinkedValueRef:
-    | ValueRef LinkedFieldsList { { Ref = $1; Path = List.toArray $2 } }
+    | ValueRef LinkedFieldsList {
+        let (asRoot, path) = $2
+        { Ref = $1; Path = List.toArray path; AsRoot = asRoot }
+    }
 
 LinkedFieldsList:
-    |                                  { List.empty }
-    | BOLD_ARROW Name LinkedFieldsList { $2 :: $3 }
+    |                                       { (false, []) }
+    | BANG                                  { (true, []) }
+    | BOLD_ARROW Name LinkedFieldsList      {
+        let (asRoot, tail) = $3
+        (false, { Name = $2; AsRoot = asRoot } :: tail)
+    }
+    | BOLD_BANG_ARROW Name LinkedFieldsList {
+        let (asRoot, tail) = $3
+        (true, { Name = $2; AsRoot = asRoot } :: tail)
+    }
 
 FieldRef:
     | Name DOT Name DOT Name { { Entity = Some { Schema = Some $1; Name = $3 }; Name = $5 } }

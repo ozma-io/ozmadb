@@ -95,6 +95,8 @@ and tokenizeFunQL = parse
     | "<"    { Parse.LESS }
     | "@"    { Parse.AT }
     | "=>"   { Parse.BOLD_ARROW }
+    | "!=>"  { Parse.BOLD_BANG_ARROW }
+    | "!"    { Parse.BANG }
     | "||"   { Parse.CONCAT }
     | "~"    { Parse.MATCH_REGEX }
     | "~*"   { Parse.MATCH_REGEX_CI }
@@ -171,6 +173,7 @@ and tokenizeFunQL = parse
     | n u l l s               { Parse.NULLS }
     | r o l e                 { Parse.ROLE }
     | s u p e r u s e r       { Parse.SUPERUSER }
+    | l a t e r a l           { Parse.LATERAL }
 
     // Types
     | i n t             { Parse.INT_TYPE }

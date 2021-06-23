@@ -115,7 +115,12 @@ let applyRestrictionExpression (accessor : FlatAllowedDerivedEntity -> ResolvedO
               FromEntityId = localExprFromEntityId
               ForceSQLName = None
             } : FieldMeta
-        let boundFieldRef = { Ref = { Ref = VRColumn { Entity = Some relaxedRef; Name = funSubEntity }; Path = [||] }; Extra = ObjectMap.singleton fieldInfo } : LinkedBoundFieldRef
+        let linkedFieldRef =
+            { Ref = VRColumn { Entity = Some relaxedRef; Name = funSubEntity }
+              Path = [||]
+              AsRoot = false
+            } : LinkedFieldRef
+        let boundFieldRef = { Ref = linkedFieldRef; Extra = ObjectMap.singleton fieldInfo } : LinkedBoundFieldRef
         let subEntityRef =
             { Ref = relaxEntityRef currRef
               Extra = ObjectMap.empty

@@ -49,14 +49,14 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             usedSchemas <- addUsedFieldRef ref usedSchemas
             emptyExprInfo
 
-    and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) : (ResolvedEntityRef * FieldName) list -> ExprInfo = function
+    and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) : (ResolvedEntityRef * PathArrow) list -> ExprInfo = function
         | [] ->
             let entity = layout.FindEntity ref.Entity |> Option.get
             let field = entity.FindField ref.Name |> Option.get
             addField extra ref field
-        | (entityRef, name) :: paths ->
+        | (entityRef, arrow) :: paths ->
             usedSchemas <- addUsedFieldRef ref usedSchemas
-            let info = buildForPath extra { Entity = entityRef; Name = name } paths
+            let info = buildForPath extra { Entity = entityRef; Name = arrow.Name } paths
             { info with IsLocal = false }
 
     and buildForReference (ref : LinkedBoundFieldRef) : ExprInfo =
@@ -71,7 +71,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             usedArguments <- Set.add name usedArguments
             match ObjectMap.tryFindType<ReferencePlaceholderMeta> ref.Extra with
             | Some argInfo when not (Array.isEmpty ref.Ref.Path) ->
-                let argRef = { Entity = argInfo.Path.[0]; Name = ref.Ref.Path.[0] }
+                let argRef = { Entity = argInfo.Path.[0]; Name = ref.Ref.Path.[0].Name }
                 let pathWithEntities = Seq.zip argInfo.Path ref.Ref.Path |> Seq.skip 1 |> Seq.toList
                 buildForPath ref.Extra argRef pathWithEntities
             | _ -> emptyExprInfo

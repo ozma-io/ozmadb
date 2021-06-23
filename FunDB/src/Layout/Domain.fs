@@ -75,6 +75,7 @@ let private makeResultExpr (boundEntityRef : ResolvedEntityRef) (fieldRef : Fiel
     let column =
         { Ref = VRColumn fieldRef
           Path = [||]
+          AsRoot = false
         } : LinkedFieldRef
     let resultColumn =
         { Ref = column
@@ -125,11 +126,16 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                           FromEntityId = fieldInfo.FromEntityId
                           ForceSQLName = None
                         } : FieldMeta
-                    { Ref = { Ref = VRColumn { Entity = Some referencedEntityRef; Name = funId }; Path = [||] }; Extra = ObjectMap.add newFieldInfo extra }
+                    let linkedRef =
+                        { Ref = VRColumn { Entity = Some referencedEntityRef; Name = funId }
+                          Path = [||]
+                          AsRoot = false
+                        } : LinkedFieldRef
+                    { Ref = linkedRef; Extra = ObjectMap.add newFieldInfo extra }
                 else
-                    let name = path.[0]
+                    let firstArrow = path.[0]
                     let newBoundInfo =
-                        { Ref = { Entity = refEntityRef; Name = name }
+                        { Ref = { Entity = refEntityRef; Name = firstArrow.Name }
                           Immediate = true
                           Path = Array.skip 1 boundInfo.Path
                         } : BoundFieldMeta
@@ -138,9 +144,19 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                           FromEntityId = fieldInfo.FromEntityId
                           ForceSQLName = None
                         } : FieldMeta
-                    { Ref = { Ref = VRColumn { Entity = Some referencedEntityRef; Name = name }; Path = Array.skip 1 path }; Extra = ObjectMap.add newFieldInfo extra }
+                    let linkedRef =
+                        { Ref = VRColumn { Entity = Some referencedEntityRef; Name = firstArrow.Name }
+                          Path = Array.skip 1 path
+                          AsRoot = false
+                        } : LinkedFieldRef
+                    { Ref = linkedRef; Extra = ObjectMap.add newFieldInfo extra }
             else
-                { Ref = { Ref = VRColumn { Entity = Some rowEntityRef; Name = fieldName }; Path = path }; Extra = extra }
+                let linkedRef =
+                    { Ref = VRColumn { Entity = Some rowEntityRef; Name = fieldName }
+                      Path = path
+                      AsRoot = false
+                    } : LinkedFieldRef
+                { Ref = linkedRef; Extra = extra }
         | ref -> failwithf "Impossible reference: %O" ref
     let convertQuery query = failwithf "Impossible query: %O" query
     mapFieldExpr (idFieldExprMapper convertRef convertQuery) expr
@@ -217,8 +233,18 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
     let placeholder = PLocal funId
     let (argId, arguments) = addArgument placeholder argumentInfo emptyArguments
 
-    let idCol : ResolvedFieldExpr = FERef { Ref = { Ref = VRColumn { Entity = Some rowEntityRef; Name = funId }; Path = [||] }; Extra = ObjectMap.empty }
-    let argRef : ResolvedFieldExpr = FERef { Ref = { Ref = VRPlaceholder placeholder; Path = [||] }; Extra = ObjectMap.empty }
+    let linkedId =
+        { Ref = VRColumn { Entity = Some rowEntityRef; Name = funId }
+          Path = [||]
+          AsRoot = false
+        } : LinkedFieldRef
+    let idCol : ResolvedFieldExpr = FERef { Ref = linkedId; Extra = ObjectMap.empty }
+    let linkedPlaceholder =
+        { Ref = VRPlaceholder placeholder
+          Path = [||]
+          AsRoot = false
+        } : LinkedFieldRef
+    let argRef : ResolvedFieldExpr = FERef { Ref = linkedPlaceholder; Extra = ObjectMap.empty }
     let where = FEBinaryOp (idCol, BOEq, argRef)
     let where =
         match extraWhere with

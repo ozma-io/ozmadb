@@ -318,13 +318,13 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
             Seq.singleton (key, trigger)
         | _ -> Seq.empty
 
-    and buildPathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) : (ResolvedEntityRef * FieldName) list -> (PathTriggerKey * PathTrigger) seq = function
+    and buildPathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) : (ResolvedEntityRef * PathArrow) list -> (PathTriggerKey * PathTrigger) seq = function
         | [] -> Seq.empty
-        | [(entityRef, fieldName)] -> buildSinglePathTriggers extra outerRef entityRef fieldName
-        | (entityRef, fieldName) :: refs ->
-            let outerTriggers = buildSinglePathTriggers extra outerRef entityRef fieldName
+        | [(entityRef, arrow)] -> buildSinglePathTriggers extra outerRef entityRef arrow.Name
+        | (entityRef, arrow) :: refs ->
+            let outerTriggers = buildSinglePathTriggers extra outerRef entityRef arrow.Name
             let refEntity = layout.FindEntity entityRef |> Option.get
-            let refField = refEntity.FindField fieldName |> Option.get
+            let refField = refEntity.FindField arrow.Name |> Option.get
 
             let innerFieldRef = { Entity = entityRef; Name = refField.Name }
             let innerTriggers = buildPathTriggers extra innerFieldRef refs

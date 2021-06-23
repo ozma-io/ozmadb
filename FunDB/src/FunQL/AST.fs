@@ -354,21 +354,40 @@ type NullsOrder =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type LinkedRef<'f> when 'f :> IFunQLName =
-    { Ref : 'f
-      Path : FieldName[]
+type PathArrow =
+    { Name : FieldName
+      AsRoot : bool
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            Seq.append (Seq.singleton <| this.Ref.ToFunQLString()) (Seq.collect (fun (p : FieldName) -> ["=>"; p.ToFunQLString()]) this.Path) |> String.concat ""
+            let refStr = this.Name.ToFunQLString()
+            let asRootStr = if this.AsRoot then "!" else ""
+            sprintf "=>%s%s" refStr asRootStr
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+type LinkedRef<'f> when 'f :> IFunQLName =
+    { Ref : 'f
+      AsRoot : bool
+      Path : PathArrow[]
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let refStr = this.Ref.ToFunQLString()
+            let asRootStr = if this.AsRoot then "!" else ""
+            let refSeq = seq { refStr; asRootStr }
+            Seq.append refSeq (this.Path |> Seq.map (fun p -> p.ToFunQLString())) |> String.concat ""
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
         member this.ToName () =
             if not (Array.isEmpty this.Path) then
-                Array.last this.Path
+                let arrow = Array.last this.Path
+                arrow.Name
             else
                 this.Ref.ToName ()
 

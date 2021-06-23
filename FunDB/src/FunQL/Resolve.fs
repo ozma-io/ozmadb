@@ -12,6 +12,9 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 // and all further processing code can avoid any checks.
 // ...that is, except checking references to other views.
 
+type ViewResolveException (message : string) =
+    inherit Exception(message)
+
 // Unique id of this FROM. Used to distinguish between same entities; fields with same id correspond to same rows.
 type FromEntityId = int
 type FromId =
@@ -20,11 +23,8 @@ type FromId =
 
 type FromFieldKey =
     { FromId : FromId
-      Path : FieldName[]
+      Path : FieldName list
     }
-
-type ViewResolveException (message : string) =
-    inherit Exception(message)
 
 [<NoEquality; NoComparison>]
 type private BoundFieldHeader =
@@ -169,7 +169,7 @@ let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntit
         let expandName name : (FieldRef * BoundFieldHeader) seq =
             let key =
                 { FromId = FIEntity fromEntityId
-                  Path = [||]
+                  Path = []
                 }
             let header =
                 { ParentEntity = parentRef
@@ -194,7 +194,7 @@ let private customToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEnti
         let field = entity.FindField boundRef.Name |> Option.get
         let key =
             { FromId = FIEntity fromEntityId
-              Path = [||]
+              Path = []
             }
         let header =
             { ParentEntity = boundRef.Entity
@@ -541,50 +541,6 @@ type private OldBoundField =
     | OBField of BoundField
     | OBHeader of BoundFieldHeader
 
-let private resolvePath (layout : ILayoutBits) (typeCtxs : TypeContextsMap) (firstOldBoundField : OldBoundField) (fullPath : FieldName list) : BoundField list =
-    let getBoundField (oldBoundField : OldBoundField) : BoundField =
-        let (cachedBound, header) =
-            match oldBoundField with
-            | OBField bound -> (Some bound, bound.Header)
-            | OBHeader header -> (None, header)
-        match findFieldWithContext layout typeCtxs header.Key header.ParentEntity header.Name with
-        | None ->
-            assert Option.isNone cachedBound
-            raisef ViewResolveException "Field not found: %O" { Entity = header.ParentEntity; Name = header.Name }
-        | Some (entityRef, entity, field) ->
-            match cachedBound with
-            | Some cached when cached.Ref.Entity = entityRef -> cached
-            | _ ->
-                { Header = header
-                  Ref = { Entity = entityRef; Name = header.Name }
-                  Field = resolvedFieldToBits field.Field
-                  Entity = entity
-                  ForceRename = field.ForceRename
-                  Name = field.Name
-                }
-
-    let rec traverse (boundField : BoundField) : FieldName list -> BoundField list = function
-        | [] -> [boundField]
-        | (ref :: refs) ->
-            match boundField.Field with
-            | RColumnField { FieldType = FTReference entityRef } ->
-                let refKey =
-                    { FromId = boundField.Header.Key.FromId
-                      Path = Array.append boundField.Header.Key.Path [|boundField.Ref.Name|]
-                    }
-                let refHeader =
-                    { Key = refKey
-                      ParentEntity = entityRef
-                      Name = ref
-                      Immediate = false
-                    }
-                let nextBoundField = getBoundField (OBHeader refHeader)
-                let boundFields = traverse nextBoundField refs
-                boundField :: boundFields
-            | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
-
-    traverse (getBoundField firstOldBoundField) fullPath
-
 let private boundFieldInfo (typeCtxs : TypeContextsMap) (inner : BoundField) (extras : obj seq) : ObjectMap =
     let commonExtras =
         seq {
@@ -609,31 +565,33 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
                 match fieldInfo.Bound with
                 | Some bound -> bound
                 | _ -> raisef ViewResolveException "Unbound field in a type assertion"
+            let arrowNames = field.Ref.Path |> Seq.map (fun arr -> arr.Name) |> Seq.toList
             let typeCtxKey =
                 { FromId = FIEntity fieldInfo.FromEntityId
-                  Path = Array.exceptLast (Array.append [| boundInfo.Ref.Name |] field.Ref.Path)
+                  Path = List.exceptLast (boundInfo.Ref.Name :: arrowNames)
                 }
             let fieldRef =
                 if Array.isEmpty field.Ref.Path then
                     boundInfo.Ref
                 else
                     let entityRef = Array.last boundInfo.Path
-                    let fieldName = Array.last field.Ref.Path
-                    { Entity = entityRef; Name = fieldName }
+                    let fieldArrow = Array.last field.Ref.Path
+                    { Entity = entityRef; Name = fieldArrow.Name }
             (fieldRef, typeCtxKey)
         | VRPlaceholder arg ->
             let pathInfo =
                 match ObjectMap.tryFindType<ReferencePlaceholderMeta> field.Extra with
                 | Some info -> info
                 | None -> raisef ViewResolveException "Unbound field in a type assertion"
+            let arrowNames = field.Ref.Path |> Seq.map (fun arr -> arr.Name) |> Seq.toList
             let typeCtxKey =
                 { FromId = FIPlaceholder arg
-                  Path = Array.exceptLast field.Ref.Path
+                  Path = List.exceptLast arrowNames
                 }
             let fieldRef =
                     let entityRef = Array.last pathInfo.Path
-                    let fieldName = Array.last field.Ref.Path
-                    { Entity = entityRef; Name = fieldName }
+                    let fieldArrow = Array.last field.Ref.Path
+                    { Entity = entityRef; Name = fieldArrow.Name }
             (fieldRef, typeCtxKey)
 
     let fields = layout.FindEntity fieldRef.Entity |> Option.get
@@ -821,7 +779,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             | _ -> raisef ViewResolveException "Entity not found: %O" ref
         let key =
             { FromId = FIEntity fromEntityId
-              Path = [||]
+              Path = []
             }
 
         let makeBoundField (name : FieldName) (field : ResolvedFieldBits) =
@@ -865,7 +823,55 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         let extraMapping = typeRestrictedFieldsToFieldMapping layout fromEntityId mappingRef entityRef (entity.Children |> Map.keys)
         Map.union extraMapping mapping
 
+    let resolvePath (typeCtxs : TypeContextsMap) (firstOldBoundField : OldBoundField) (fullPath : PathArrow list) : BoundField list =
+        let getBoundField (oldBoundField : OldBoundField) : BoundField =
+            let (cachedBound, header) =
+                match oldBoundField with
+                | OBField bound -> (Some bound, bound.Header)
+                | OBHeader header -> (None, header)
+            match findFieldWithContext layout typeCtxs header.Key header.ParentEntity header.Name with
+            | None ->
+                assert Option.isNone cachedBound
+                raisef ViewResolveException "Field not found: %O" { Entity = header.ParentEntity; Name = header.Name }
+            | Some (entityRef, entity, field) ->
+                match cachedBound with
+                | Some cached when cached.Ref.Entity = entityRef -> cached
+                | _ ->
+                    { Header = header
+                      Ref = { Entity = entityRef; Name = header.Name }
+                      Field = resolvedFieldToBits field.Field
+                      Entity = entity
+                      ForceRename = field.ForceRename
+                      Name = field.Name
+                    }
+
+        let rec traverse (boundField : BoundField) : PathArrow list -> BoundField list = function
+            | [] -> [boundField]
+            | (ref :: refs) ->
+                if ref.AsRoot && not resolveFlags.Privileged then
+                    raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                match boundField.Field with
+                | RColumnField { FieldType = FTReference entityRef } ->
+                    let refKey =
+                        { FromId = boundField.Header.Key.FromId
+                          Path = List.append boundField.Header.Key.Path [boundField.Ref.Name]
+                        }
+                    let refHeader =
+                        { Key = refKey
+                          ParentEntity = entityRef
+                          Name = ref.Name
+                          Immediate = false
+                        }
+                    let nextBoundField = getBoundField (OBHeader refHeader)
+                    let boundFields = traverse nextBoundField refs
+                    boundField :: boundFields
+                | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
+
+        traverse (getBoundField firstOldBoundField) fullPath
+
     let resolveReference (mappings : FieldMapping list) (typeCtxs : TypeContextsMap) (f : LinkedFieldRef) : ReferenceInfo =
+        if f.AsRoot && not resolveFlags.Privileged then
+            raisef ViewResolveException "Cannot specify roles in non-privileged user views"
         match f.Ref with
         | VRColumn ref ->
             let rec findInMappings = function
@@ -884,7 +890,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 | _ when Array.isEmpty f.Path -> None
                 | _ -> raisef ViewResolveException "Dereference on an unbound field in %O" f
 
-            let boundFields = Option.map (fun old -> resolvePath layout typeCtxs old (Array.toList f.Path)) oldBoundField
+            let boundFields = Option.map (fun old -> resolvePath typeCtxs old (Array.toList f.Path)) oldBoundField
 
             let fromEntityId =
                 match info.Mapping with
@@ -926,7 +932,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             let newRef = { Entity = info.Entity; Name = ref.Name } : FieldRef
             { InnerField = Option.map fst innerBoundInfo
               OuterField = outerBoundField
-              Ref = { Ref = { Ref = VRColumn newRef; Path = f.Path }; Extra = extra }
+              Ref = { Ref = { f with Ref = VRColumn newRef }; Extra = extra }
             }
         | VRPlaceholder arg ->
             let argInfo =
@@ -939,33 +945,33 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 else
                     match argInfo.ArgType with
                     | FTReference parentEntity ->
-                        let (name, remainingPath) =
+                        let (firstArrow, remainingPath) =
                             match Array.toList f.Path with
                             | head :: tail -> (head, tail)
                             | _ -> failwith "Impossible"
                         let key =
                             { FromId = FIPlaceholder arg
-                              Path = [||]
+                              Path = []
                             }
                         let (entityRef, argEntity, argField) =
-                            match findFieldWithContext layout typeCtxs key parentEntity name with
+                            match findFieldWithContext layout typeCtxs key parentEntity firstArrow.Name with
                             | Some ret -> ret
-                            | None -> raisef ViewResolveException "Field doesn't exist in %O: %O" parentEntity name
+                            | None -> raisef ViewResolveException "Field doesn't exist in %O: %O" parentEntity firstArrow.Name
                         let argHeader =
                             { Key = key
                               ParentEntity = parentEntity
-                              Name = name
+                              Name = firstArrow.Name
                               Immediate = false
                             }
                         let outer : BoundField =
                             { Header = argHeader
-                              Ref = { Entity = entityRef; Name = name }
+                              Ref = { Entity = entityRef; Name = firstArrow.Name }
                               Entity = argEntity
                               Field = resolvedFieldToBits argField.Field
                               ForceRename = argField.ForceRename
                               Name = argField.Name
                             }
-                        let fields = resolvePath layout typeCtxs (OBField outer) remainingPath
+                        let fields = resolvePath typeCtxs (OBField outer) remainingPath
                         assert (List.length fields = Array.length f.Path)
                         let inner = List.last fields
                         let boundPath =
@@ -980,14 +986,14 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                     | _ -> raisef ViewResolveException "Argument is not a reference: %O" ref
             { InnerField = innerBoundField
               OuterField = None
-              Ref = { Ref = { Ref = VRPlaceholder arg; Path = f.Path }; Extra = boundInfo }
+              Ref = { Ref = { f with Ref = VRPlaceholder arg }; Extra = boundInfo }
             }
 
     let resolveLimitFieldExpr (expr : ParsedFieldExpr) : ResolvedFieldExpr =
         let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
-            | { Ref = VRPlaceholder name; Path = [||] } ->
+            | { Ref = VRPlaceholder name; Path = [||] } as ref ->
                 if Map.containsKey name arguments then
-                    { Ref = { Ref = VRPlaceholder name; Path = [||] }; Extra = ObjectMap.empty }
+                    { Ref = ref; Extra = ObjectMap.empty }
                 else
                     raisef ViewResolveException "Undefined placeholder: %O" name
             | ref -> raisef ViewResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
