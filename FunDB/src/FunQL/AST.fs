@@ -798,19 +798,34 @@ and [<NoEquality; NoComparison>] SetOperationExpr<'e, 'f> when 'e :> IFunQLName 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+and [<NoEquality; NoComparison>] SubSelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { Alias : EntityAlias
+      Select : SelectExpr<'e, 'f>
+      Lateral : bool
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let lateralStr =
+                if this.Lateral then "LATERAL" else ""
+            let exprStr = sprintf "(%s)" (this.Select.ToFunQLString())
+            String.concatWithWhitespaces [lateralStr; exprStr; this.Alias.ToFunQLString()]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 and [<NoEquality; NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     // We don't allow fields aliasing for entities, because we don't guarantee order of entity fields.
     | FEntity of FromEntity<'e>
     | FJoin of JoinExpr<'e, 'f>
-    | FSubExpr of EntityAlias * SelectExpr<'e, 'f>
+    | FSubExpr of SubSelectExpr<'e, 'f>
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             match this with
             | FEntity ent -> ent.ToFunQLString()
-            | FSubExpr (alias, expr) ->
-                sprintf "(%s) %s" (expr.ToFunQLString()) (alias.ToFunQLString())
+            | FSubExpr subsel -> subsel.ToFunQLString()
             | FJoin join -> join.ToFunQLString()
 
         interface IFunQLString with

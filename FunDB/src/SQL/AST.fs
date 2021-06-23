@@ -567,10 +567,26 @@ and [<NoEquality; NoComparison>] AggExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+and [<NoEquality; NoComparison>] SubSelectExpr =
+    { Alias : TableAlias
+      Select : SelectExpr
+      Lateral : bool
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let lateralStr =
+                if this.Lateral then "LATERAL" else ""
+            let exprStr = sprintf "(%s)" (this.Select.ToSQLString()) 
+            String.concatWithWhitespaces [lateralStr; exprStr; this.Alias.ToSQLString()]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 and [<NoEquality; NoComparison>] FromExpr =
     | FTable of obj * TableAlias option * TableRef // obj is extra meta info
     | FJoin of JoinExpr
-    | FSubExpr of TableAlias * SelectExpr
+    | FSubExpr of SubSelectExpr
     with
         override this.ToString () = this.ToSQLString()
 
@@ -579,8 +595,7 @@ and [<NoEquality; NoComparison>] FromExpr =
             | FTable (_, malias, t) ->
                 let aliasStr = optionToSQLString malias
                 String.concatWithWhitespaces [t.ToSQLString(); aliasStr]
-            | FSubExpr (alias, expr) ->
-                sprintf "(%s) %s" (expr.ToSQLString()) (alias.ToSQLString())
+            | FSubExpr subsel -> subsel.ToSQLString()
             | FJoin join -> join.ToSQLString()
 
         interface ISQLString with

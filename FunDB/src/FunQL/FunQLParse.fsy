@@ -525,9 +525,10 @@ FromEntity:
     | EntityRef FromEntityRole FromEntityName { { Ref = $1; AsRoot = $2; Alias = $3 } }
 
 QuerySource:
-    | SubSelectExpr SubSelectAlias    { FSubExpr ($2, $1) }
-    | FromEntity                      { FEntity $1 }
-    | LEFT_PAREN FromExpr RIGHT_PAREN { $2 }
+    | SubSelectExpr SubSelectAlias         { FSubExpr { Lateral = false; Select = $1; Alias = $2; } }
+    | LATERAL SubSelectExpr SubSelectAlias { FSubExpr { Lateral = true; Select = $2; Alias = $3; } }
+    | FromEntity                           { FEntity $1 }
+    | LEFT_PAREN FromExpr RIGHT_PAREN      { $2 }
 
 ColumnAliases:
     | LEFT_PAREN ColumnAliasesList RIGHT_PAREN { List.toArray $2 }

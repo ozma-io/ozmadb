@@ -515,7 +515,7 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
                           Condition = useNewInValueExpr join.Condition
                         }
                 (valExpr, name, Some ret)
-        | SQL.FSubExpr (alias, q) -> failwith "Unexpected subexpression"
+        | SQL.FSubExpr subsel -> failwith "Unexpected subexpression"
 
     member this.UseNewInSelectExpr expr = useNewInSelectExpr expr
 

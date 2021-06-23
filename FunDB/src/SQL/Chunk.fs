@@ -61,9 +61,14 @@ type private ChunkApplier (chunk : QueryChunk) =
                   Tree = values
                   Extra = null
                 }
+            let subsel =
+                { Select = innerSelect
+                  Alias = fromAlias
+                  Lateral = false
+                }
             let outerSelect =
                 { Columns = [| SCAll None |]
-                  From = Some <| FSubExpr (fromAlias, innerSelect)
+                  From = Some <| FSubExpr subsel
                   Where = None
                   GroupBy = [||]
                   OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
@@ -88,9 +93,14 @@ type private ChunkApplier (chunk : QueryChunk) =
                 { Name = SQLName "inner"
                   Columns = None
                 }
+            let subsel =
+                { Select = select
+                  Alias = fromAlias
+                  Lateral = false
+                }
             let outerSelect =
                 { Columns = [| SCAll None |]
-                  From = Some <| FSubExpr (fromAlias, select)
+                  From = Some <| FSubExpr subsel
                   Where = Some where
                   GroupBy = [||]
                   OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause

@@ -157,7 +157,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             buildForFromExpr join.A
             buildForFromExpr join.B
             ignore <| buildForFieldExpr join.Condition
-        | FSubExpr (name, q) -> buildForSelectExpr q
+        | FSubExpr subsel -> buildForSelectExpr subsel.Select
 
     member this.BuildForSelectExpr expr = buildForSelectExpr expr
     member this.BuildForFieldExpr expr = buildForFieldExpr expr

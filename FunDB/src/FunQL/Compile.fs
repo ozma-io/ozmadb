@@ -536,6 +536,9 @@ let private makeJoinNode (layout : Layout) (joinKey : JoinKey) (join : JoinPath)
     SQL.FJoin { Type = SQL.Left; A = from; B = subquery; Condition = joinExpr }
 
 let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : SQL.FromExpr) : SQL.FromExpr =
+    // TODO: this is implemented as such to insert JOINs at proper places considering LATERAL JOINs.
+    // However, we don't support outer join paths inside sub-selects anyway, so JOINs are always appended
+    // at the upper level.
     let rec findNode = function
         | SQL.FJoin joinExpr as from ->
             let (foundA, insertA, fromA) = findNode joinExpr.A
@@ -558,7 +561,7 @@ let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : 
                 match from with
                 | SQL.FTable (extra, alias, ref) ->
                     alias |> Option.map (fun a -> a.Name) |> Option.defaultValue ref.Name
-                | SQL.FSubExpr (alias, expr) -> alias.Name
+                | SQL.FSubExpr subsel -> subsel.Alias.Name
                 | _ -> failwith "Impossible"
             if realName = joinKey.Table then
                 (true, true, from)
@@ -587,7 +590,7 @@ let buildJoins (layout : Layout) (initialEntitiesMap : FromEntitiesMap) (initial
         let entity =
             { Ref = join.RealEntity
               IsInner = false
-              AsRoot = false
+              AsRoot = joinKey.AsRoot
               Check = None
             }
         let entitiesMap = Map.add join.Name entity entitiesMap
@@ -1435,7 +1438,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 else
                     match finalField.Field with
                     | RColumnField { FieldType = FTReference newEntityRef } ->
-                        let mainArrow = { finalArrow with Name = funMain }
+                        let mainArrow = { Name = funMain; AsRoot = false }
                         let punRef = replacePath (Array.append path [|mainArrow|]) (Array.append boundPath [|newEntityRef|])
                         let (newPaths, punExpr) = compileLinkedFieldRef emptyExprCompilationFlags RCExpr paths punRef
                         paths <- newPaths
@@ -1525,7 +1528,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let getNewDomain (domain : TempDomain) =
                     match Map.tryFind (TName fieldRef.Name) domain with
                     | Some info ->
-                        Map.singleton resultColumn.Name { info with IdColumn = idCol }
+                        let newInfo =
+                            { info with
+                                IdColumn = idCol
+                                AsRoot = info.AsRoot || resultRef.Ref.AsRoot
+                            }
+                        Map.singleton resultColumn.Name newInfo
                     | None -> Map.empty
                 let rec getNewDomains = function
                     | DSingle (id, domain) -> DSingle (id, getNewDomain domain)
@@ -1563,7 +1571,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                         { Name = funMain
                                           AsRoot = false
                                         }
-                                    let (newPaths, expr) = compilePath emptyExprCompilationFlags RCExpr ObjectMap.empty paths (Some tableRef) info.Ref newName info.AsRoot [(newEntityRef, mainArrow)]
+                                    let asRoot = info.AsRoot || resultRef.Ref.AsRoot
+                                    let (newPaths, expr) = compilePath emptyExprCompilationFlags RCExpr ObjectMap.empty paths (Some tableRef) info.Ref newName asRoot [(newEntityRef, mainArrow)]
                                     paths <- newPaths
                                     expr
                                 | _ -> SQL.VEValue SQL.VNull
@@ -1794,7 +1803,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                           Extra = null
                         } : SQL.SingleSelectExpr
                     let expr = { Extra = ann; CTEs = None; Tree = SQL.SSelect select } : SQL.SelectExpr
-                    let subExpr = SQL.FSubExpr (newAlias, expr)
+                    let subsel =
+                        { Select = expr
+                          Alias = newAlias
+                          Lateral = false
+                        } : SQL.SubSelectExpr
+                    let subExpr = SQL.FSubExpr subsel
                     (subExpr, None)
             let entityInfo =
                 { Ref = entityRef
@@ -1856,25 +1870,30 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   Condition = joinExpr
                 } : SQL.JoinExpr
             (fromMap, SQL.FJoin ret)
-        | FSubExpr (alias, q) ->
+        | FSubExpr subsel ->
             let flags =
                 { MainEntity = mainEntity
                   IsTopLevel = false
                   MetaColumns = true
                 }
-            let (info, expr) = compileSelectExpr flags cteBindings None q
+            let (info, expr) = compileSelectExpr flags cteBindings None subsel.Select
             let (info, fields) =
-                match alias.Fields with
+                match subsel.Alias.Fields with
                 | None -> (info, None)
                 | Some fields ->
                     let info = renameSelectInfo fields info
                     let fields = info.Columns |> Array.map (mapColumnType getFinalName >> columnName)
                     (info, Some fields)
             let compiledAlias =
-                { Name = compileName alias.Name
+                { Name = compileName subsel.Alias.Name
                   Columns = fields
                 } : SQL.TableAlias
-            let ret = SQL.FSubExpr (compiledAlias, expr)
+            let compiledSubsel =
+                { Alias = compiledAlias
+                  Select = expr
+                  Lateral = subsel.Lateral
+                } : SQL.SubSelectExpr
+            let ret = SQL.FSubExpr compiledSubsel
             let fromInfo = subentityFromInfo mainEntity info
             (Map.singleton compiledAlias.Name fromInfo, ret)
 

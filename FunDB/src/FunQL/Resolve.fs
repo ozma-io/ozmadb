@@ -393,8 +393,8 @@ let rec private findMainEntityFromExpr (ctes : ResolvedCommonTableExprsMap) (cur
         | Left -> findMainEntityFromExpr ctes currentCte join.A
         | Right -> findMainEntityFromExpr ctes currentCte join.B
         | _ -> raisef ViewResolveException "Unsupported JOIN type when validating main entity"
-    | FSubExpr (name, subExpr) ->
-        mapRecursiveValue fst <| findMainEntityExpr ctes currentCte subExpr
+    | FSubExpr subsel ->
+        mapRecursiveValue fst <| findMainEntityExpr ctes currentCte subsel.Select
 
 and private findMainEntityTreeExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) : ResolvedSelectTreeExpr -> RecursiveValue<ResolvedEntityRef * ResolvedQueryResult[] > = function
     | SSelect sel when not (Array.isEmpty sel.GroupBy) -> raisef ViewResolveException "Queries with GROUP BY cannot use FOR INSERT INTO"
@@ -1446,7 +1446,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             match query.From with
             | None -> (ctx, None)
             | Some from ->
-                let (newMapping, _, res) = resolveFromExpr ctx flags from
+                let (newMapping, _, res) = resolveFromExpr ctx Map.empty flags from
                 let ctx = { ctx with FieldMaps = newMapping :: ctx.FieldMaps }
                 (ctx, Some res)
         let qWhere = Option.map (resolveNonaggrFieldExpr ctx) query.Where
@@ -1479,9 +1479,9 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         (newFields, newQuery)
 
     // Set<EntityName> here is used to check uniqueness of puns.
-    and resolveFromExpr (ctx : Context) (flags : SelectFlags) : ParsedFromExpr -> FieldMapping * Set<EntityRef> * ResolvedFromExpr = function
+    and resolveFromExpr (ctx : Context) (fieldMapping : FieldMapping) (flags : SelectFlags) : ParsedFromExpr -> FieldMapping * Set<EntityRef> * ResolvedFromExpr = function
         | FEntity entity ->
-            let (mapping, mappingRef) =
+            let (newMapping, mappingRef) =
                 match entity.Ref with
                 | { Schema = Some schemaName; Name = entityName } ->
                     if entity.AsRoot && not resolveFlags.Privileged then
@@ -1504,18 +1504,18 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                     let fromEntityId = nextFromEntityId ()
                     let mapping = fieldsToFieldMapping fromEntityId (Some mappingRef) fields
                     (mapping, mappingRef)
-            (mapping, Set.singleton mappingRef, FEntity entity)
+            let fieldMapping = Map.unionWith (fun _ -> unionFieldMappingValue) fieldMapping newMapping
+            (fieldMapping, Set.singleton mappingRef, FEntity entity)
         | FJoin join ->
-            let (newMapping1, namesA, newA) = resolveFromExpr ctx flags join.A
-            let (newMapping2, namesB, newB) = resolveFromExpr ctx flags join.B
+            let (fieldMapping, namesA, newA) = resolveFromExpr ctx fieldMapping flags join.A
+            let (fieldMapping, namesB, newB) = resolveFromExpr ctx fieldMapping flags join.B
 
             let names =
                 try
                     Set.unionUnique namesA namesB
                 with
                 | Failure msg -> raisef ViewResolveException "Clashing entity names in a join: %s" msg
-            let newMapping = Map.unionWith (fun _ -> unionFieldMappingValue) newMapping1 newMapping2
-            let newCtx = { ctx with FieldMaps = newMapping :: ctx.FieldMaps }
+            let newCtx = { ctx with FieldMaps = fieldMapping :: ctx.FieldMaps }
 
             let (info, newFieldExpr) = resolveFieldExpr newCtx join.Condition
             if not info.IsLocal then
@@ -1528,15 +1528,22 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                   B = newB
                   Condition = newFieldExpr
                 }
-            (newMapping, names, FJoin ret)
-        | FSubExpr (alias, q) ->
-            let (info, newQ) = resolveSelectExpr ctx { flags with RequireNames = Option.isNone alias.Fields; OneColumn = false } q
-            let info = applyAlias alias info
+            (fieldMapping, names, FJoin ret)
+        | FSubExpr subsel ->
+            let localCtx =
+                if subsel.Lateral then
+                    { ctx with FieldMaps = fieldMapping :: ctx.FieldMaps }
+                else
+                    ctx
+            let (info, newQ) = resolveSelectExpr localCtx { flags with RequireNames = Option.isNone subsel.Alias.Fields; OneColumn = false } subsel.Select
+            let info = applyAlias subsel.Alias info
             let fields = getFieldsMap info
-            let mappingRef = { Schema = None; Name = alias.Name } : EntityRef
+            let mappingRef = { Schema = None; Name = subsel.Alias.Name } : EntityRef
             let fromEntityId = nextFromEntityId ()
-            let mapping = fieldsToFieldMapping fromEntityId (Some mappingRef) fields
-            (mapping, Set.singleton mappingRef, FSubExpr (alias, newQ))
+            let newMapping = fieldsToFieldMapping fromEntityId (Some mappingRef) fields
+            let fieldMapping = Map.unionWith (fun _ -> unionFieldMappingValue) fieldMapping newMapping
+            let newSubsel = { Alias = subsel.Alias; Lateral = subsel.Lateral; Select = newQ }
+            (fieldMapping, Set.singleton mappingRef, FSubExpr newSubsel)
 
     let resolveMainEntity (fields : QSubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
         let ref = resolveEntityRef main.Entity
@@ -1636,7 +1643,7 @@ and private relabelFromExpr : ResolvedFromExpr -> ResolvedFromExpr = function
               B = relabelFromExpr join.B
               Condition = relabelFieldExpr join.Condition
             }
-    | FSubExpr (name, subExpr) -> FSubExpr (name, relabelSelectExpr subExpr)
+    | FSubExpr subsel -> FSubExpr { subsel with Select = relabelSelectExpr subsel.Select }
 
 and private relabelFieldExpr (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
     let mapper = idFieldExprMapper id relabelSelectExpr

@@ -129,7 +129,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
                   B = resolveFromExpr join.B
                   Condition = resolveFieldExpr join.Condition
                 }
-        | FSubExpr (name, q) -> FSubExpr (name, resolveSelectExpr q)
+        | FSubExpr subsel -> FSubExpr { subsel with Select = resolveSelectExpr subsel.Select }
 
     member this.ResolveSelectExpr expr = resolveSelectExpr expr
 

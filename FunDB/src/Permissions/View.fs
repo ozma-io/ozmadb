@@ -171,7 +171,12 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
             | None -> FTable (ann, pun, entity)
             | Some restr ->
                 // `pun` is guaranteed to be there for all table queries.
-                FSubExpr (Option.get pun, restrictionToSelect ann.RealEntity restr)
+                let subsel =
+                    { Alias = Option.get pun
+                      Select = restrictionToSelect ann.RealEntity restr
+                      Lateral = false
+                    }
+                FSubExpr subsel
         | FTable (extra, pun, entity) -> FTable (extra, pun, entity)
         | FJoin join ->
             FJoin
@@ -180,8 +185,8 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
                   B = applyToFromExpr join.B
                   Condition = applyToValueExpr join.Condition
                 }
-        | FSubExpr (alias, q) ->
-            FSubExpr (alias, applyToSelectExpr q)
+        | FSubExpr subsel ->
+            FSubExpr { subsel with Select = applyToSelectExpr subsel.Select }
 
     member this.ApplyToSelectExpr = applyToSelectExpr
     member this.ApplyToValueExpr = applyToValueExpr
