@@ -109,8 +109,9 @@ type UserViewsAPI (rctx : IRequestContext) =
                 | PLocal (FunQLName lname) ->
                     match Map.tryFind lname rawArgs with
                     | Some argStr ->
-                        match parseValueFromJson arg.FieldType false argStr with
+                        match parseValueFromJson arg.FieldType arg.Optional argStr with
                         | None -> Error <| sprintf "Cannot convert argument %O to type %O" name arg.FieldType
+                        | Some FNull -> Ok None
                         | Some arg -> Ok (Some (name, arg))
                     | _ -> Ok None
                 | PGlobal gname -> Ok (Some (name, Map.find gname rctx.GlobalArguments))
