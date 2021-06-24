@@ -350,14 +350,18 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
         let canOrder = index.Class.Am.CanOrder.Value
 
         let mutable exprI = 0
-        let makeColumn (i : int) (num : ColumnNum) =
-            let key =
-                if num <> 0s then
-                    IKColumn <| Map.find num columnIds
-                else
-                    let ret = expressions.[exprI]
-                    exprI <- exprI + 1
-                    IKExpression <| String.comparable ret
+
+        let makeKey (i : int) =
+            let num = index.IndKey.[i]
+            if num <> 0s then
+                IKColumn <| Map.find num columnIds
+            else
+                let ret = expressions.[exprI]
+                exprI <- exprI + 1
+                IKExpression <| String.comparable ret
+
+        let makeColumn (i : int) =
+            let key = makeKey i
             let opClass = index.Classes.[i] |> Option.ofObj |> Option.map SQLName
             let options = index.IndOption.[i]
             let order =
@@ -389,9 +393,11 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                 let pred = parseLocalExpr index.PredSource
                 Some <| String.comparable pred
 
-        let columns = Array.mapi makeColumn index.IndKey
+        let columns = seq { for i in 0 .. int index.IndNKeyAtts - 1 -> makeColumn i } |> Seq.toArray
+        let includedColumns = seq { for i in int index.IndNKeyAtts .. index.IndKey.Length - 1 -> makeKey i } |> Seq.toArray
         let ret =
             { Columns = columns
+              IncludedColumns = includedColumns
               IsUnique = index.IndIsUnique
               Predicate = pred
               AccessMethod = SQLName index.Class.Am.AmName

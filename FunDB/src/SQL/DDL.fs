@@ -88,6 +88,7 @@ type IndexColumn =
 [<StructuralEquality; NoComparison>]
 type IndexMeta =
     { Columns : IndexColumn[]
+      IncludedColumns : IndexKey[]
       IsUnique : bool
       AccessMethod : AccessMethodName
       Predicate : StringComparable<ValueExpr> option
@@ -397,11 +398,16 @@ type SchemaOperation =
                     pars.Columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
                 let uniqueStr = if pars.IsUnique then "UNIQUE" else ""
                 let suffixStr = sprintf "INDEX %s ON %s USING %s (%s)" (index.Name.ToSQLString()) ({ index with Name = table }.ToSQLString()) (pars.AccessMethod.ToSQLString()) columnsStr
+                let includeStr =
+                    if Array.isEmpty pars.IncludedColumns then
+                        ""
+                    else
+                        pars.IncludedColumns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "INCLUDE (%s)"
                 let predStr =
                     match pars.Predicate with
                     | None -> ""
                     | Some pred -> sprintf "WHERE %O" pred
-                String.concatWithWhitespaces ["CREATE"; uniqueStr; suffixStr; predStr]
+                String.concatWithWhitespaces ["CREATE"; uniqueStr; suffixStr; includeStr; predStr]
             | SORenameIndex (index, toName) -> sprintf "ALTER INDEX %s RENAME TO %s" (index.ToSQLString()) (toName.ToSQLString())
             | SODropIndex index -> sprintf "DROP INDEX %s" (index.ToSQLString())
             | SOCreateOrReplaceFunction (func, args, def) ->

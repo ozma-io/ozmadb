@@ -77,6 +77,7 @@ type private LayoutUpdater (db : SystemContext) as this =
     let updateIndexes (entity : Entity) : Map<FieldName, SourceIndex> -> Map<FieldName, Index> -> Map<FieldName, Index> =
         let updateIndexFunc _ (newIndex : SourceIndex) (oldIndex : Index) =
             oldIndex.Expressions <- newIndex.Expressions
+            oldIndex.IncludedExpressions <- newIndex.IncludedExpressions
             oldIndex.IsUnique <- newIndex.IsUnique
             oldIndex.Predicate <- Option.toObj newIndex.Predicate
             oldIndex.Type <- string newIndex.Type

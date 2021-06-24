@@ -524,11 +524,29 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
     let resolveIndex (entityRef : ResolvedEntityRef) (indexName : IndexName) (index : SourceIndex) : ResolvedIndex =
         if Array.isEmpty index.Expressions then
             raise <| ResolveLayoutException "Empty index"
+
+        let entity = initialWrappedLayout.FindEntity entityRef |> Option.get
+        let resolveIncludedExpr x =
+            let expr = resolveLocalExpr entityRef (parseRelatedExpr x)
+            let isGood =
+                match expr with
+                | { Expr = FERef { Ref = { Ref = VRColumn col } } } ->
+                    match entity.FindField col.Name with
+                    | Some { Field = RColumnField _ }
+                    | Some { Field = RId }
+                    | Some { Field = RSubEntity } -> true
+                    | _ -> false
+                | _ -> false
+            if not isGood then
+                raisef ResolveLayoutException "Expressions are not supported as included index columns"
+            expr
         
         let exprs = Array.map (resolveIndexColumn entityRef index.Type) index.Expressions
+        let includedExprs = Array.map (fun x -> (resolveLocalExpr entityRef (parseRelatedExpr x)).Expr) index.IncludedExpressions
         let predicate = Option.map (fun x -> (resolveLocalExpr entityRef (parseRelatedExpr x)).Expr) index.Predicate
 
         { Expressions = exprs
+          IncludedExpressions = includedExprs
           HashName = makeHashName indexName
           IsUnique = index.IsUnique
           Predicate = predicate

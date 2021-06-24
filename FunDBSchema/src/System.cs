@@ -346,6 +346,9 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("array(string)")]
         [Required]
         public string[] Expressions { get; set; } = null!;
+        [ColumnField("array(string)", Default="array[]")]
+        [Required]
+        public string[] IncludedExpressions { get; set; } = null!;
         [ColumnField("bool", Default="false")]
         public bool IsUnique { get; set; }
         [ColumnField("string")]

@@ -421,6 +421,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public uint IndexRelId { get; set; }
         [Column(TypeName="oid")]
         public uint IndRelId { get; set; }
+        public Int16 IndNKeyAtts { get; set;}
         public bool IndIsUnique { get; set; }
         [Required]
         public Int16[] IndKey { get; set; } = null!;

@@ -54,6 +54,7 @@ type ResolvedCheckConstraint =
 [<NoEquality; NoComparison>]
 type ResolvedIndex =
     { Expressions : ResolvedIndexColumn[]
+      IncludedExpressions : ResolvedFieldExpr[]
       HashName : HashName // Guaranteed to be unique in an entity.
       IsUnique : bool
       Predicate : ResolvedFieldExpr option

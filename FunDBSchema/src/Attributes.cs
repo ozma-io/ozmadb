@@ -49,6 +49,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
     {
         public string Name { get; }
         public string[] Expressions { get; }
+        public string[]? IncludedExpressions { get; set; }
         public bool IsUnique { get; set; }
         public string? Predicate { get; set; }
         public string? Type { get; set; }

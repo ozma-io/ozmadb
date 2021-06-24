@@ -68,8 +68,10 @@ type private MetaBuilder (layout : Layout) =
                 Option.unionWith (curry SQL.VEAnd) (Some check) predicate
 
         let columns = Array.map (makeIndexColumnMeta entity index) index.Expressions
+        let includedColumns = Array.map (compileRelatedExpr >> simplifyIndex) index.IncludedExpressions
 
         { Columns = columns
+          IncludedColumns = includedColumns
           IsUnique = index.IsUnique
           Predicate = Option.map String.comparable predicate
           AccessMethod = SQL.SQLName <| index.Type.ToFunQLString()
@@ -182,6 +184,7 @@ type private MetaBuilder (layout : Layout) =
                         let typeIndexName = SQL.SQLName typeIndexKey
                         let subEntityIndex =
                             { Columns = [| defaultIndexColumn sqlFunSubEntity |]
+                              IncludedColumns = [||]
                               IsUnique = false
                               Predicate = None
                               AccessMethod = defaultIndexType
@@ -269,6 +272,7 @@ type private MetaBuilder (layout : Layout) =
                 let sqlName = SQL.SQLName key
                 let refIndex =
                     { Columns = [| defaultIndexColumn field.ColumnName |]
+                      IncludedColumns = [||]
                       IsUnique = false
                       Predicate = None
                       AccessMethod = defaultIndexType

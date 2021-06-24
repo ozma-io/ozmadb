@@ -48,6 +48,7 @@ let private makeSourceCheckConstraint (constr : CheckConstraintAttribute) : FunQ
 let private makeSourceIndex (index : IndexAttribute) : FunQLName * SourceIndex =
     let res =
         { Expressions = index.Expressions
+          IncludedExpressions = if isNull index.IncludedExpressions then [||] else index.IncludedExpressions
           IsUnique = index.IsUnique
           Predicate = Option.ofObj index.Predicate
           Type = index.Type |> Option.ofObj |> Option.map (fun typ -> Map.find typ indexTypesMap) |> Option.defaultValue ITBTree

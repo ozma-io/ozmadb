@@ -38,6 +38,7 @@ let indexTypesMap = unionNames (unionCases typeof<IndexType>) |> Map.mapWithKeys
 
 type SourceIndex =
     { Expressions : string[]
+      IncludedExpressions : string[]
       IsUnique : bool
       Type : IndexType
       Predicate : string option
@@ -56,11 +57,6 @@ type SourceComputedField =
       IsVirtual : bool
     }
 
-type SourceField =
-    | SColumnField of SourceColumnField
-    | SComputedField of SourceComputedField
-    | SId
-
 type SourceEntity =
     { ColumnFields : Map<FieldName, SourceColumnField>
       ComputedFields : Map<FieldName, SourceComputedField>
@@ -78,19 +74,7 @@ type SourceEntity =
       IsAbstract : bool
       IsFrozen : bool
       Parent : ResolvedEntityRef option
-    } with
-        member this.FindField (name : FieldName) =
-            if name = funId then
-                Some SId
-            else if name = funMain then
-                this.FindField this.MainField
-            else
-                match Map.tryFind name this.ColumnFields with
-                | Some col -> Some <| SColumnField col
-                | None ->
-                    match Map.tryFind name this.ComputedFields with
-                    | Some comp -> Some <| SComputedField comp
-                    | None -> None
+    }
 
 type SourceSchema =
     { Entities : Map<EntityName, SourceEntity>
@@ -111,9 +95,6 @@ type SourceLayout =
             match Map.tryFind entity.Schema this.Schemas with
             | None -> None
             | Some schema -> Map.tryFind entity.Name schema.Entities
-
-        member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
-            this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
 
 let emptySourceLayout : SourceLayout =
     { Schemas = Map.empty
