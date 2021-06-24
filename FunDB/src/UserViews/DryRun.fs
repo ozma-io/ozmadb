@@ -223,7 +223,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                           PureAttributes = getPureAttributes uv.Resolved uv.Compiled res
                         }
             with
-            | :? QueryException as err ->
+            | :? UserViewExecutionException as err ->
                 return raisefWithInner UserViewDryRunException err "Test execution error"
         }
 
