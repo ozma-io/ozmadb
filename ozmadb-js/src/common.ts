@@ -229,6 +229,7 @@ export interface IExecutedViewExpr {
 
 export interface IExplainedQuery {
   query: string;
+  parameters: Record<number, any>;
   explanation: object;
 }
 
