@@ -378,6 +378,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
 
 type ExplainedQuery =
     { Query : string
+      Parameters : ExprParameters
       Explanation : JToken
     }
 
@@ -400,7 +401,7 @@ let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr)
                     | None -> return None
                     | Some (colTypes, query) ->
                         let! ret = runExplainQuery connection query parameters explainOpts cancellationToken
-                        return Some { Query = string query; Explanation = ret }
+                        return Some { Query = string query; Parameters = parameters; Explanation = ret }
                 }
         
             let! result = runExplainQuery connection viewExpr.Query.Expression parameters explainOpts cancellationToken
@@ -408,7 +409,7 @@ let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr)
             do! unsetPragmas connection viewExpr.Pragmas cancellationToken
 
             return
-                { Rows = { Query = string viewExpr.Query.Expression; Explanation = result }
+                { Rows = { Query = string viewExpr.Query.Expression; Parameters = parameters; Explanation = result }
                   Attributes = attrsResult
                 }
         with

@@ -12,19 +12,20 @@ open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.API.Types
 module SQL = FunWithFlags.FunDB.SQL.Query
 
-let private domainComments (ref : ResolvedFieldRef) (role : RoleType) (rowId : int option) (chunk : SourceQueryChunk) =
+let private domainComments (ref : ResolvedFieldRef) (role : RoleType) (rowId : int option) (argValues : LocalArgumentsMap) (chunk : SourceQueryChunk) =
     let refStr = sprintf "domain for %O" ref
     let rowIdStr =
         match rowId with
         | None -> ""
         | Some id -> sprintf ", row id %i" id
+    let argsStr = sprintf ", args %s" (JsonConvert.SerializeObject argValues)
     let chunkStr = sprintf ", chunk %s" (JsonConvert.SerializeObject chunk)
     let roleStr =
         match role with
         | RTRoot -> ""
         | RTRole role when role.CanRead -> ""
         | RTRole role -> sprintf ", role %O" role.Ref
-    String.concat "" [refStr; rowIdStr; chunkStr; roleStr]
+    String.concat "" [refStr; rowIdStr; argsStr; chunkStr; roleStr]
 
 let private canExplain : RoleType -> bool = function
     | RTRoot -> true
@@ -46,7 +47,7 @@ type DomainsAPI (rctx : IRequestContext) =
                         | (Some id, Some rowSpecific) -> (rowSpecific, Map.add (PLocal funId) (FInt id) argValues)
                         | _ -> (domain.Generic, argValues)
                     let role = getReadRole rctx.User.Effective.Type
-                    let comment = domainComments fieldRef rctx.User.Effective.Type rowId chunk
+                    let comment = domainComments fieldRef rctx.User.Effective.Type rowId rctx.GlobalArguments chunk
                     let! ret = getDomainValues ctx.Transaction.Connection.Query ctx.Layout expr (Some comment) role argValues chunk ctx.CancellationToken
                     return Ok
                         { Values = ret.Values

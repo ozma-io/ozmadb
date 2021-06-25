@@ -25,15 +25,12 @@ let private canExplain : RoleType -> bool = function
     | RTRoot -> true
     | RTRole role -> role.CanRead
 
-let private userViewComments (source : UserViewSource) (role : RoleType) (arguments : RawArguments option) (chunk : SourceQueryChunk) =
+let private userViewComments (source : UserViewSource) (role : RoleType) (arguments : ArgumentValuesMap) (chunk : SourceQueryChunk) =
     let sourceStr =
         match source with
         | UVAnonymous q -> "(anonymous)"
         | UVNamed ref -> ref.ToFunQLString()
-    let argumentsStr =
-        match arguments with
-        | None -> ""
-        | Some args -> sprintf ", arguments %s" (JsonConvert.SerializeObject args)
+    let argumentsStr = sprintf ", arguments %s" (JsonConvert.SerializeObject arguments)
     let chunkStr = sprintf ", chunk %s" (JsonConvert.SerializeObject chunk)
     let roleStr =
         match role with
@@ -217,7 +214,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                             return Error <| UVEArguments msg
                         | Ok arguments ->
                             let getResult info (res : ExecutedViewExpr) = Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
-                            let comments = userViewComments source rctx.User.Effective.Type (Some rawArgs) chunk
+                            let comments = userViewComments source rctx.User.Effective.Type arguments chunk
                             let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled (Some comments) arguments ctx.CancellationToken getResult
                             return Ok { Info = puv.Info
                                         Result = res

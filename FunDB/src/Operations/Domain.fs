@@ -101,7 +101,7 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
             let arguments = Map.union arguments (Map.mapKeys PLocal argValues)
             let compiledArgs = prepareArguments query.Arguments arguments
             let! explanation = runExplainQuery connection query.Expression compiledArgs explainOpts cancellationToken
-            return { Query = string query.Expression; Explanation = explanation }
+            return { Query = string query.Expression; Parameters = compiledArgs; Explanation = explanation }
         with
             | :? QueryException as ex ->
                 return raisefWithInner DomainExecutionException ex.InnerException "%s" ex.Message
