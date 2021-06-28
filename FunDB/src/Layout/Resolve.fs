@@ -476,6 +476,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
     let resolveCheckConstraint (entityRef : ResolvedEntityRef) (constrName : ConstraintName) (constr : SourceCheckConstraint) : ResolvedCheckConstraint =
         let expr = resolveRelatedExpr initialWrappedLayout entityRef (parseRelatedExpr constr.Expression)
+        if expr.Info.HasQuery then
+            raisef ResolveLayoutException "Subqueries are not allowed here"
         if not <| Set.isEmpty expr.References.UsedArguments then
             raisef ResolveLayoutException "Arguments are not allowed here"
         { Expression = expr.Expr
