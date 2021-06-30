@@ -311,7 +311,7 @@ let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMet
             | OMIndex (tableName, _) ->
                 match Map.tryFind objectKey toMeta.Objects with
                 | Some (newObjectName, OMIndex _) -> ()
-                | _ -> yield (SODropIndex objRef, 0)
+                | _ -> () // yield (SODropIndex objRef, 0)
             | OMFunction overloads ->
                 match Map.tryFind objectKey toMeta.Objects with
                 | Some (newObjectName, OMFunction _) -> ()
