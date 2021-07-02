@@ -293,15 +293,13 @@ let private postprocessTrigger (compiledRef : SQL.TableRef) (trig : PathTrigger)
     { trig with Expression = newExpr }
 
 type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : ResolvedEntityRef) =
-    let rec buildSinglePathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) (refEntityRef : ResolvedEntityRef) (fieldName : FieldName) : (PathTriggerKey * PathTrigger) seq =
-        let refEntity = layout.FindEntity refEntityRef |> Option.get
-        let refField = refEntity.FindField fieldName |> Option.get
+    let rec buildSinglePathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) (refFieldRef : ResolvedFieldRef) : (PathTriggerKey * PathTrigger) seq =
+        let refEntity = layout.FindEntity refFieldRef.Entity |> Option.get
+        let refField = refEntity.FindField refFieldRef.Name |> Option.get
 
         match refField.Field with
         | RComputedField comp ->
-            match comp.VirtualCases with
-            | None -> buildExprTriggers comp.Expression
-            | Some cases -> computedFieldCases layout extra refField.Name cases |> Seq.map snd |> Seq.collect buildExprTriggers
+            computedFieldCases layout extra refFieldRef comp |> Seq.map (fun (case, comp) -> comp.Expression) |> Seq.collect buildExprTriggers
         | RColumnField col ->
             let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
             let expr = SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
@@ -311,7 +309,7 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
                   EntityPath = []
                 }
             let trigger =
-                { Fields = Map.singleton refField.Name refEntityRef
+                { Fields = Map.singleton refField.Name refFieldRef.Entity
                   Root = refEntity.Root
                   Expression = expr
                 }
@@ -320,9 +318,9 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
 
     and buildPathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) : (ResolvedEntityRef * PathArrow) list -> (PathTriggerKey * PathTrigger) seq = function
         | [] -> Seq.empty
-        | [(entityRef, arrow)] -> buildSinglePathTriggers extra outerRef entityRef arrow.Name
+        | [(entityRef, arrow)] -> buildSinglePathTriggers extra outerRef { Entity = entityRef; Name = arrow.Name }
         | (entityRef, arrow) :: refs ->
-            let outerTriggers = buildSinglePathTriggers extra outerRef entityRef arrow.Name
+            let outerTriggers = buildSinglePathTriggers extra outerRef { Entity = entityRef; Name = arrow.Name }
             let refEntity = layout.FindEntity entityRef |> Option.get
             let refField = refEntity.FindField arrow.Name |> Option.get
 
@@ -375,11 +373,8 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
                     let newOuterFields = findOuterFields newExpr
                     outerFields <- Set.union outerFields newOuterFields
 
-                match comp.VirtualCases with
-                | None -> runForExpr comp.Expression
-                | Some cases ->
-                    for (case, expr) in computedFieldCases layout ref.Extra boundInfo.Ref.Name cases do
-                        runForExpr expr
+                for (case, comp) in computedFieldCases layout ref.Extra boundInfo.Ref comp do
+                    runForExpr comp.Expression
             | RColumnField col ->
                 outerFields <- Set.add field.Name outerFields
             | _ -> ()

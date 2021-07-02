@@ -9,6 +9,7 @@ open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Arguments
+open FunWithFlags.FunDB.FunQL.Typecheck
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Attributes.Merge
 module SQL = FunWithFlags.FunDB.SQL.Utils
@@ -390,29 +391,6 @@ let private composeExhaustingIf (compileTag : 'tag -> SQL.ValueExpr) (options : 
 type private ReferenceContext =
     | RCExpr
     | RCTypeExpr
-
-let private compileBinaryOp = function
-    | BOLess -> SQL.BOLess
-    | BOLessEq -> SQL.BOLessEq
-    | BOGreater -> SQL.BOGreater
-    | BOGreaterEq -> SQL.BOGreaterEq
-    | BOEq -> SQL.BOEq
-    | BONotEq -> SQL.BONotEq
-    | BOConcat -> SQL.BOConcat
-    | BOLike -> SQL.BOLike
-    | BOILike -> SQL.BOILike
-    | BONotLike -> SQL.BONotLike
-    | BONotILike -> SQL.BONotILike
-    | BOMatchRegex -> SQL.BOMatchRegex
-    | BOMatchRegexCI -> SQL.BOMatchRegexCI
-    | BONotMatchRegex -> SQL.BONotMatchRegex
-    | BONotMatchRegexCI -> SQL.BONotMatchRegexCI
-    | BOPlus -> SQL.BOPlus
-    | BOMinus -> SQL.BOMinus
-    | BOMultiply -> SQL.BOMultiply
-    | BODivide -> SQL.BODivide
-    | BOJsonArrow -> SQL.BOJsonArrow
-    | BOJsonTextArrow -> SQL.BOJsonTextArrow
 
 let makeCheckExprFor (subEntityColumn : SQL.ValueExpr) (entities : IEntityBits seq) : SQL.ValueExpr =
     let options = entities |> Seq.map (fun x -> x.TypeName |> SQL.VString |> SQL.VEValue) |> Seq.toArray
@@ -909,26 +887,23 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             // We also always assume that all fields referenced in computed field are immediate. This is set during computed fields resolution.
             assert (Option.isNone forcedName)
             let localRef = tableRef |> Option.map (fun ref -> { Schema = Option.map decompileName ref.Schema; Name = decompileName ref.Name } : EntityRef)
-            match comp.VirtualCases with
-            | None -> compileLinkedFieldExpr flags Map.empty paths0 <| replaceEntityRefInExpr localRef comp.Expression
-            | Some cases ->
-                let mutable paths = paths0
+            let mutable paths = paths0
 
-                let compileCase (case : VirtualFieldCase, caseExpr : ResolvedFieldExpr) =
-                    let entities = case.PossibleEntities |> Seq.map (fun ref -> layout.FindEntity ref |> Option.get :> IEntityBits)
-                    let (newPaths, newExpr) = compileLinkedFieldExpr flags Map.empty paths <| replaceEntityRefInExpr localRef caseExpr
-                    paths <- newPaths
-                    (entities, newExpr)
+            let compileCase (case : VirtualFieldCase, caseComp : ResolvedComputedField) =
+                let entities = case.PossibleEntities |> Seq.map (fun ref -> layout.FindEntity ref |> Option.get :> IEntityBits)
+                let (newPaths, newExpr) = compileLinkedFieldExpr flags Map.empty paths <| replaceEntityRefInExpr localRef caseComp.Expression
+                paths <- newPaths
+                (entities, newExpr)
 
-                // It's safe to use even in case when a virtual field exists in an entity with no `sub_entity` column, because
-                // in this case `composeExhaustingIf` will omit the check completely.
-                let subEntityColumn = SQL.VEColumn { Table = tableRef; Name = sqlFunSubEntity }
-                let expr =
-                    computedFieldCases layout extra fieldInfo.Name cases
-                        |> Seq.map compileCase
-                        |> Seq.toArray
-                        |> composeExhaustingIf (makeCheckExprFor subEntityColumn)
-                (paths, expr)
+            // It's safe to use even in case when a virtual field exists in an entity with no `sub_entity` column, because
+            // in this case `composeExhaustingIf` will omit the check completely.
+            let subEntityColumn = SQL.VEColumn { Table = tableRef; Name = sqlFunSubEntity }
+            let expr =
+                computedFieldCases layout extra fieldRef comp
+                    |> Seq.map compileCase
+                    |> Seq.toArray
+                    |> composeExhaustingIf (makeCheckExprFor subEntityColumn)
+            (paths, expr)
 
     and compilePath (flags : ExprCompilationFlags) (ctx : ReferenceContext) (extra : ObjectMap) (paths : JoinPaths) (tableRef : SQL.TableRef option) (fieldRef : ResolvedFieldRef) (forcedName : SQL.ColumnName option) (asRoot : bool) : (ResolvedEntityRef * PathArrow) list -> JoinPaths * SQL.ValueExpr = function
         | [] -> compileRef flags ctx extra paths tableRef fieldRef forcedName

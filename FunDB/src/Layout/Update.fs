@@ -46,6 +46,7 @@ type private LayoutUpdater (db : SystemContext) as this =
             oldComputed.Expression <- newComputed.Expression
             oldComputed.AllowBroken <- newComputed.AllowBroken
             oldComputed.IsVirtual <- newComputed.IsVirtual
+            oldComputed.IsMaterialized <- newComputed.IsMaterialized
         let createComputedFunc (FunQLName name) =
             ComputedField (
                 Name = name,

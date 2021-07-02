@@ -298,31 +298,6 @@ let mapValueType (func : 'a -> 'b) : ValueType<'a> -> ValueType<'b> = function
 type DBValueType = ValueType<TypeName>
 type SimpleValueType = ValueType<SimpleType>
 
-let valueSimpleType : Value -> SimpleValueType option = function
-    | VInt i -> Some <| VTScalar STInt
-    | VBigInt i -> Some <| VTScalar STBigInt
-    | VDecimal d -> Some <| VTScalar STDecimal
-    | VString s -> Some <| VTScalar STString
-    | VBool b -> Some <| VTScalar STBool
-    | VDateTime dt -> Some <| VTScalar STDateTime
-    | VDate dt -> Some <| VTScalar STDate
-    | VInterval int -> Some <| VTScalar STInterval
-    | VRegclass rc -> Some <| VTScalar STRegclass
-    | VJson j -> Some <| VTScalar STJson
-    | VUuid u -> Some <| VTScalar STUuid
-    | VIntArray vals -> Some <| VTArray STInt
-    | VBigIntArray vals -> Some <| VTArray STBigInt
-    | VDecimalArray vals -> Some <| VTArray STDecimal
-    | VStringArray vals -> Some <| VTArray STString
-    | VBoolArray vals -> Some <| VTArray STBool
-    | VDateTimeArray vals -> Some <| VTArray STDateTime
-    | VDateArray vals -> Some <| VTArray STDate
-    | VIntervalArray vals -> Some <| VTArray STInterval
-    | VRegclassArray vals -> Some <| VTArray STRegclass
-    | VJsonArray vals -> Some <| VTArray STJson
-    | VUuidArray vals -> Some <| VTArray STUuid
-    | VNull -> None
-
 let findSimpleValueType : DBValueType -> SimpleValueType option = function
     | VTScalar a -> Option.map VTScalar (findSimpleType a)
     | VTArray a -> Option.map VTArray (findSimpleType a)

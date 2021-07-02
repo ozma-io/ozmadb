@@ -142,15 +142,24 @@ let parseUdtName (str : string) : DBValueType =
 
 let private makeColumnMeta (attr : Attribute) : ColumnMeta =
     try
+        let dataType =
+            match attr.Type.TypType with
+            | 'b' -> parseUdtName attr.Type.TypName
+            | typ -> raisef SQLMetaException "Unsupported column data type type %c" typ
+        let genExpr = attr.AttrDef |> Option.ofObj |> Option.map (fun def -> parseLocalExpr def.Source)
         let columnType =
-            if attr.Type.TypType <> 'b' then
-                raisef SQLMetaException "Unsupported non-base type: %s" attr.Type.TypName
-            parseUdtName attr.Type.TypName
-        let defaultExpr = attr.AttrDef |> Option.ofObj |> Option.map (fun def -> parseLocalExpr def.Source)
+            match attr.AttGenerated with
+            | '\000' -> CTPlain { DefaultExpr = genExpr }
+            | 's' ->
+                match genExpr with
+                | None -> raisef SQLMetaException "Stored generated column must have default expression"
+                | Some e -> CTGeneratedStored e
+            | typ -> raisef SQLMetaException "Unsupported GENERATED type %c" typ
+
         { Name = SQLName attr.AttName
-          ColumnType = columnType
+          DataType = dataType
           IsNullable = not attr.AttNotNull
-          DefaultExpr = defaultExpr
+          ColumnType = columnType
         }
     with
     | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In column %s" attr.AttName
@@ -390,8 +399,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
             if isNull index.PredSource then
                 None
             else
-                let pred = parseLocalExpr index.PredSource
-                Some <| String.comparable pred
+                parseLocalExpr index.PredSource |> String.comparable |> Some
 
         let columns = seq { for i in 0 .. int index.IndNKeyAtts - 1 -> makeColumn i } |> Seq.toArray
         let includedColumns = seq { for i in int index.IndNKeyAtts .. index.IndKey.Length - 1 -> makeKey i } |> Seq.toArray

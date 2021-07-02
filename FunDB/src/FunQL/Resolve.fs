@@ -12,8 +12,10 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 // and all further processing code can avoid any checks.
 // ...that is, except checking references to other views.
 
-type ViewResolveException (message : string) =
-    inherit Exception(message)
+type ViewResolveException (message : string, innerException : exn) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = ViewResolveException (message, null)
 
 // Unique id of this FROM. Used to distinguish between same entities; fields with same id correspond to same rows.
 type FromEntityId = int
@@ -660,7 +662,7 @@ let replaceEntityRefInExpr (localRef : EntityRef option) : ResolvedFieldExpr -> 
     let mapper = idFieldExprMapper resolveReference id
     mapFieldExpr mapper
 
-let filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCase seq) : VirtualFieldCase seq =
+let private filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCase seq) : VirtualFieldCase seq =
     match ObjectMap.tryFindType<PossibleSubtypesMeta> extra with
     | None -> cases
     | Some meta ->
@@ -672,18 +674,26 @@ let filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCase seq) :
                 Some { case with PossibleEntities = possibleCases }
         cases |> Seq.mapMaybe filterCase
 
-let computedFieldCases (layout : ILayoutBits) (extra : ObjectMap) (name : FieldName) (cases : VirtualFieldCase seq) : (VirtualFieldCase * ResolvedFieldExpr) seq =
-    let filteredCases = filterCasesWithSubtypes extra cases
+let computedFieldCases (layout : ILayoutBits) (extra : ObjectMap) (ref : ResolvedFieldRef) (comp : ResolvedComputedField) : (VirtualFieldCase * ResolvedComputedField) seq =
+    match comp.Virtual with
+    | None ->
+        let nonvirtualCase =
+            { PossibleEntities = Set.singleton ref.Entity
+              Ref = ref.Entity
+            }
+        Seq.singleton (nonvirtualCase, comp)
+    | Some virtInfo ->
+        let filteredCases = filterCasesWithSubtypes extra virtInfo.Cases
 
-    let compileCase (case : VirtualFieldCase) =
-        let caseEntity = layout.FindEntity case.Ref |> Option.get
-        let caseField =
-            match caseEntity.FindField name with
-            | Some { Field = RComputedField comp } -> comp
-            | _ -> failwithf "Unexpected non-column field %O" name
-        (case, caseField.Expression)
+        let compileCase (case : VirtualFieldCase) =
+            let caseEntity = layout.FindEntity case.Ref |> Option.get
+            let caseField =
+                match caseEntity.FindField ref.Name with
+                | Some { Field = RComputedField comp } -> comp
+                | _ -> failwithf "Unexpected non-computed field %O" ref.Name
+            (case, caseField)
 
-    Seq.map compileCase filteredCases
+        Seq.map compileCase filteredCases
 
 type private SelectFlags =
     { OneColumn : bool
@@ -1095,11 +1105,13 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 isLocal <- false
             else
                 match ref.OuterField with
-                | Some ({ Field = RComputedField _ } as outer) ->
+                | Some ({ Field = RComputedField _; Ref = fieldRef } as outer) ->
+                    // Find full field, we only have IComputedFieldBits in OuterField..
                     match outer.Entity.FindField outer.Ref.Name with
                     | Some { Field = RComputedField comp } ->
-                        if not comp.IsLocal then
-                            isLocal <- false
+                        for (case, caseComp) in computedFieldCases layout ref.Ref.Extra fieldRef comp do
+                            if not caseComp.IsLocal then
+                                isLocal <- false
                     | _ -> failwith "Impossible"
                 | _ -> ()
 
@@ -1131,13 +1143,13 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 let applyOne (cond, e) =
                     let mergedTypeCtxs = andTypeContexts outerTypeCtxs curTypeCtxs
                     let (condTypeCtxs, newCond) = traverse mergedTypeCtxs cond
-                    let (typeCtxs_, newE) = traverse (andTypeContexts mergedTypeCtxs condTypeCtxs) e
+                    let (typeCtxs, newE) = traverse (andTypeContexts mergedTypeCtxs condTypeCtxs) e
                     curTypeCtxs <- andTypeContexts curTypeCtxs (notTypeContexts condTypeCtxs)
                     (newCond, newE)
                 let newEs = Array.map applyOne es
                 let applyElse e =
                     let mergedTypeCtxs = andTypeContexts outerTypeCtxs curTypeCtxs
-                    let (typeCtxs_, newE) = traverse mergedTypeCtxs e
+                    let (typeCtxs, newE) = traverse mergedTypeCtxs e
                     newE
                 let newEls = Option.map applyElse els
                 (emptyCondTypeContexts, FECase (newEs, newEls))
@@ -1158,57 +1170,57 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                     }
                 (ctx, FEOfType (newF, newNam))
             | FEDistinct (a, b) ->
-                let (typeCtxs_, newA) = traverse outerTypeCtxs a
-                let (typeCtxs_, newB) = traverse outerTypeCtxs b
+                let (typeCtxs, newA) = traverse outerTypeCtxs a
+                let (typeCtxs, newB) = traverse outerTypeCtxs b
                 (emptyCondTypeContexts, FEDistinct (newA, newB))
             | FENotDistinct (a, b) ->
-                let (typeCtxs_, newA) = traverse outerTypeCtxs a
-                let (typeCtxs_, newB) = traverse outerTypeCtxs b
+                let (typeCtxs, newA) = traverse outerTypeCtxs a
+                let (typeCtxs, newB) = traverse outerTypeCtxs b
                 (emptyCondTypeContexts, FENotDistinct (newA, newB))
             | FEBinaryOp (a, op, b) ->
-                let (typeCtxs_, newA) = traverse outerTypeCtxs a
-                let (typeCtxs_, newB) = traverse outerTypeCtxs b
+                let (typeCtxs, newA) = traverse outerTypeCtxs a
+                let (typeCtxs, newB) = traverse outerTypeCtxs b
                 (emptyCondTypeContexts, FEBinaryOp (newA, op, newB))
             | FESimilarTo (e, pat) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
-                let (typeCtxs_, newPat) = traverse outerTypeCtxs pat
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newPat) = traverse outerTypeCtxs pat
                 (emptyCondTypeContexts, FESimilarTo (newE, newPat))
             | FENotSimilarTo (e, pat) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
-                let (typeCtxs_, newPat) = traverse outerTypeCtxs pat
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newPat) = traverse outerTypeCtxs pat
                 (emptyCondTypeContexts, FENotSimilarTo (newE, newPat))
             | FEIn (e, vals) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
                 let newVals = Array.map (traverse outerTypeCtxs >> snd) vals
                 (emptyCondTypeContexts, FEIn (newE, newVals))
             | FENotIn (e, vals) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
                 let newVals = Array.map (traverse outerTypeCtxs >> snd) vals
                 (emptyCondTypeContexts, FENotIn (newE, newVals))
             | FEInQuery (e, query) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
                 let newQuery = resolveQuery query
                 (emptyCondTypeContexts, FEInQuery (newE, newQuery))
             | FENotInQuery (e, query) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
                 let newQuery = resolveQuery query
                 (emptyCondTypeContexts, FENotInQuery (newE, newQuery))
             | FEAny (e, op, arr) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
-                let (typeCtxs_, newArr) = traverse outerTypeCtxs arr
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newArr) = traverse outerTypeCtxs arr
                 (emptyCondTypeContexts, FEAny (newE, op, newArr))
             | FEAll (e, op, arr) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
-                let (typeCtxs_, newArr) = traverse outerTypeCtxs arr
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newArr) = traverse outerTypeCtxs arr
                 (emptyCondTypeContexts, FEAll (newE, op, newArr))
             | FECast (e, typ) ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
                 (emptyCondTypeContexts, FECast (newE, typ))
             | FEIsNull e ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
                 (emptyCondTypeContexts, FEIsNull newE)
             | FEIsNotNull e ->
-                let (typeCtxs_, newE) = traverse outerTypeCtxs e
+                let (typeCtxs, newE) = traverse outerTypeCtxs e
                 (emptyCondTypeContexts, FEIsNotNull newE)
             | FEJsonArray vals ->
                 let newVals = Array.map (traverse outerTypeCtxs >> snd) vals
@@ -1699,3 +1711,28 @@ let resolveViewExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (viewEx
       Select = relabelSelectExpr qQuery
       MainEntity = mainEntity
     }
+
+let makeSingleFieldExpr (boundEntityRef : ResolvedEntityRef) (fieldRef : FieldRef) : ResolvedFieldExpr =
+    let boundInfo =
+        { Ref =
+            { Entity = boundEntityRef
+              Name = fieldRef.Name
+            }
+          Immediate = true
+          Path = [||]
+        } : BoundFieldMeta
+    let fieldInfo =
+        { Bound = Some boundInfo
+          FromEntityId = localExprFromEntityId
+          ForceSQLName = None
+        } : FieldMeta
+    let column =
+        { Ref = VRColumn fieldRef
+          Path = [||]
+          AsRoot = false
+        } : LinkedFieldRef
+    let resultColumn =
+        { Ref = column
+          Extra = ObjectMap.singleton fieldInfo
+        }
+    FERef resultColumn

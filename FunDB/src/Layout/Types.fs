@@ -33,8 +33,6 @@ type ReferenceRef =
 // Used instead of names in system generated identifiers to ensure that they do not exceed PostgreSQL identifier length restrictions (63 bytes).
 type HashName = string
 
-let hashNameLength = 20
-
 type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>
 
 [<NoEquality; NoComparison>]
@@ -79,6 +77,12 @@ type VirtualFieldCase =
       PossibleEntities : Set<ResolvedEntityRef>
     }
 
+[<NoEquality; NoComparison>]
+type VirtualField =
+    { Cases : VirtualFieldCase[]
+      InheritedFrom : ResolvedEntityRef option
+    }
+
 // These fields are available without fully resolving a computed field.
 type IComputedFieldBits =
     abstract member InheritedFrom : ResolvedEntityRef option
@@ -86,18 +90,30 @@ type IComputedFieldBits =
     abstract member IsVirtual : bool
 
 [<NoEquality; NoComparison>]
+type RootComputedField =
+    { Type : ResolvedFieldType
+      IsLocal : bool
+    }
+
+[<NoEquality; NoComparison>]
 type ResolvedComputedField =
     { Expression : ResolvedFieldExpr
       InheritedFrom : ResolvedEntityRef option
       AllowBroken : bool
-      IsLocal : bool // Doesn't take virtual field cases into account.
+      ColumnName : SQL.ColumnName
       HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity.
-      VirtualCases : (VirtualFieldCase array) option
+      Virtual : VirtualField option
+      IsMaterialized : bool
+      // These don't take virtual field cases into account.
+      Type : ResolvedFieldType option // `None` means unknown type.
+      IsLocal : bool
+      // But this one does.
+      Root : RootComputedField option
     } with
         interface IComputedFieldBits with
             member this.InheritedFrom = this.InheritedFrom
             member this.AllowBroken = this.AllowBroken
-            member this.IsVirtual = Option.isSome this.VirtualCases
+            member this.IsVirtual = Option.isSome this.Virtual
 
 [<NoEquality; NoComparison>]
 type GenericResolvedField<'col, 'comp> =
@@ -262,7 +278,7 @@ let rec checkInheritance (layout : ILayoutBits) (parentRef : ResolvedEntityRef) 
         | Some childParentRef -> checkInheritance layout parentRef childParentRef
 
 let filterLayout (f : SchemaName -> bool) (layout : Layout) : Layout =
-    { Schemas = Map.filter (fun name schema -> f name) layout.Schemas
+    { Schemas = layout.Schemas |> Map.filter (fun name schema -> f name)
     }
 
 type ErroredEntity =

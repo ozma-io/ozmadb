@@ -298,6 +298,8 @@ namespace FunWithFlags.FunDBSchema.System
         public bool AllowBroken { get; set; }
         [ColumnField("bool", Default="false")]
         public bool IsVirtual { get; set; }
+        [ColumnField("bool", Default="false")]
+        public bool IsMaterialized { get; set; }
 
         [ColumnField("string")]
         [Required]

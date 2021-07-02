@@ -13,7 +13,7 @@ type MigrationPlan = SchemaOperation[]
 
 // Order for table operations so that dependencies are not violated.
 let private tableOperationOrder = function
-    | TODeleteColumn _ -> 1
+    | TODropColumn _ -> 0
     | TOCreateColumn _ -> 1
     | TOAlterColumnType _ -> 2
     | TOAlterColumnNull _ -> 2
@@ -153,22 +153,38 @@ let private normalizeIndex (index : IndexMeta) : IndexMeta =
           Predicate = index.Predicate |> Option.map (fun x -> x.Value |> normalizeLocalExpr |> String.comparable)
     }
 
+let private migrateColumnAttrs (fromMeta : ColumnMeta) (toMeta : ColumnMeta) : TableOperation seq =
+    seq {
+        if fromMeta.DataType <> toMeta.DataType then
+            yield TOAlterColumnType (toMeta.Name, toMeta.DataType)
+        if fromMeta.IsNullable <> toMeta.IsNullable then
+            yield TOAlterColumnNull (toMeta.Name, toMeta.IsNullable)
+    }
+
 let private migrateBuildTable (fromMeta : TableMeta) (toMeta : TableMeta) : TableOperation seq =
     seq {
         for KeyValue (columnKey, columnMeta) in toMeta.Columns do
             match Map.tryFind columnKey fromMeta.Columns with
             | None -> yield TOCreateColumn columnMeta
             | Some oldColumnMeta ->
-                if oldColumnMeta.ColumnType <> columnMeta.ColumnType then
-                    yield TOAlterColumnType (columnMeta.Name, columnMeta.ColumnType)
-                if oldColumnMeta.IsNullable <> columnMeta.IsNullable then
-                    yield TOAlterColumnNull (columnMeta.Name, columnMeta.IsNullable)
-                if Option.map (normalizeLocalExpr >> String.comparable) oldColumnMeta.DefaultExpr <> Option.map (normalizeLocalExpr >> String.comparable) columnMeta.DefaultExpr then
-                    yield TOAlterColumnDefault (columnMeta.Name, columnMeta.DefaultExpr)
+                match (oldColumnMeta.ColumnType, columnMeta.ColumnType) with
+                | (CTPlain oldPlain, CTPlain plain) ->
+                    if Option.map (normalizeLocalExpr >> string) oldPlain.DefaultExpr <> Option.map (normalizeLocalExpr >> string) plain.DefaultExpr then
+                        yield TOAlterColumnDefault (columnMeta.Name, plain.DefaultExpr)
+                    yield! migrateColumnAttrs oldColumnMeta columnMeta
+                | (CTGeneratedStored oldGenExpr, CTGeneratedStored genExpr) ->
+                    if string (normalizeLocalExpr oldGenExpr) <> string (normalizeLocalExpr genExpr) then
+                        yield TODropColumn columnMeta.Name
+                        yield TOCreateColumn columnMeta
+                    else
+                        yield! migrateColumnAttrs oldColumnMeta columnMeta
+                | (_, _) ->
+                    yield TODropColumn columnMeta.Name
+                    yield TOCreateColumn columnMeta
 
         for KeyValue (columnKey, columnMeta) in fromMeta.Columns do
             if not (Map.containsKey columnKey toMeta.Columns) then
-                yield TODeleteColumn columnMeta.Name
+                yield TODropColumn columnMeta.Name
     }
 
 let private migrateAlterTable (objRef : SchemaObject) (fromMeta : TableMeta) (toMeta : TableMeta) : OrderedSchemaOperation seq =
@@ -354,6 +370,17 @@ let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) (cancellati
     unitTask {
         if not <| Array.isEmpty plan then
             for action in plan do
+                match action with
+                | SOAlterTable (ref, ops) ->
+                    if not (ref.Schema = None || ref.Schema = Some (SQLName "public")) then
+                        for op in ops do
+                            match op with
+                            | TODropColumn name -> failwithf "Refusing to drop column %O.%O" ref name
+                            | _ -> ()
+                | SODropSequence ref ->
+                    if not (ref.Schema = None || ref.Schema = Some (SQLName "public")) then
+                        failwithf "Refusing to drop sequence %O" ref.Name
+                | _ -> ()
                 let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty cancellationToken
                 ()
             // Clear prepared statements so that things don't break if e.g. database types have changed.

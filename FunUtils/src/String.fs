@@ -4,12 +4,18 @@ open System
 open System.Text.RegularExpressions
 
 type StringComparable<'a> (inner : 'a) =
-    let innerString = string inner
+    let mutable innerString = None
 
-    member this.String = innerString
+    member this.String =
+        match innerString with
+        | None ->
+            let str = string inner
+            innerString <- Some str
+            str
+        | Some str -> str
     member this.Value = inner
 
-    override this.ToString () = innerString
+    override this.ToString () = this.String
 
     override x.Equals yobj =
         match yobj with

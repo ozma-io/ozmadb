@@ -71,6 +71,7 @@ type PrettyComputedField =
     { Expression : string
       AllowBroken : bool
       IsVirtual : bool
+      IsMaterialized : bool
       DefaultAttributes : SourceAttributesField option
     }
 
@@ -286,6 +287,7 @@ let private prettifyComputedField (defaultAttrs : SourceAttributesField option) 
     { Expression = field.Expression
       AllowBroken = field.AllowBroken
       IsVirtual = field.IsVirtual
+      IsMaterialized = field.IsMaterialized
       DefaultAttributes = defaultAttrs
     }
 
@@ -294,7 +296,8 @@ let private deprettifyComputedField (field : PrettyComputedField) : SourceAttrib
         { Expression = field.Expression
           AllowBroken = field.AllowBroken
           IsVirtual = field.IsVirtual
-        }
+          IsMaterialized = field.IsMaterialized
+        } : SourceComputedField
     (field.DefaultAttributes, ret)
 
 let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : SourceEntity) : PrettyEntity =

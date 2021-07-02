@@ -15,6 +15,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.SQL.Utils
 
 module SQL = FunWithFlags.FunDB.SQL.AST
+module SQL = FunWithFlags.FunDB.SQL.Typecheck
 
 type IFunQLName =
     interface
@@ -1281,7 +1282,6 @@ let allowedFunctions : Map<FunctionName, FunctionRepr> =
     Map.ofList
         [ // Numbers
           (FunQLName "abs", FRFunction <| SQL.SQLName "abs")
-          (FunQLName "isfinite", FRFunction <| SQL.SQLName "isfinite")
           (FunQLName "round", FRFunction <| SQL.SQLName "round")
           // Strings
           (FunQLName "to_char", FRFunction <| SQL.SQLName "to_char")
@@ -1291,11 +1291,19 @@ let allowedFunctions : Map<FunctionName, FunctionRepr> =
           (FunQLName "age", FRFunction <| SQL.SQLName "age")
           (FunQLName "date_part", FRFunction <| SQL.SQLName "date_part")
           (FunQLName "date_trunc", FRFunction <| SQL.SQLName "date_trunc")
+          (FunQLName "isfinite", FRFunction <| SQL.SQLName "isfinite")
           // Special
           (FunQLName "coalesce", FRSpecial SQL.SFCoalesce)
           (FunQLName "least", FRSpecial SQL.SFLeast)
           (FunQLName "greatest", FRSpecial SQL.SFGreatest)
         ]
+
+let private checkAllowedFunctions () =
+    allowedFunctions
+    |> Map.values |> Seq.mapMaybe (function | FRFunction name -> Some name; | _ -> None)
+    |> Seq.forall (fun name -> Map.containsKey name SQL.sqlKnownFunctions)
+
+assert checkAllowedFunctions ()
 
 let allowedPragmas : Set<PragmaName> =
     Set.ofList

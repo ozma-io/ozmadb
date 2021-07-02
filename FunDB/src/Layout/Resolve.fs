@@ -12,8 +12,7 @@ open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.UsedReferences
-open FunWithFlags.FunDB.FunQL.Compile
-open FunWithFlags.FunDB.FunQL.Arguments
+open FunWithFlags.FunDB.FunQL.Typecheck
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Source
 module SQL = FunWithFlags.FunDB.SQL.Utils
@@ -53,18 +52,22 @@ let private reduceDefaultExpr : ParsedFieldExpr -> FieldValue option = function
 
 let private hashNameSuffixLength = 4
 
-let private makeHashName (FunQLName name) =
-    if String.length name <= hashNameLength then
+let private hashNameLength = 20
+
+let private makeHashNameFor (maxLength : int) name =
+    if String.length name <= maxLength then
         name
     else
-        assert (hashNameLength >= hashNameSuffixLength)
-        let prefix = String.truncate (hashNameLength - hashNameSuffixLength) name
+        assert (maxLength >= hashNameSuffixLength)
         use md5 = MD5.Create ()
         let md5Bytes = md5.ComputeHash(Encoding.UTF8.GetBytes(name))
         let stringBuilder = StringBuilder ()
+        ignore <| stringBuilder.Append(String.truncate (maxLength - hashNameSuffixLength) name)
         for i = 1 to hashNameSuffixLength / 2 do
-            ignore <| stringBuilder.Append(md5Bytes.[0].ToString("x2"))
-        sprintf "%s%s" prefix (stringBuilder.ToString())
+            ignore <| stringBuilder.Append(md5Bytes.[i - 1].ToString("x2"))
+        string stringBuilder
+
+let private makeHashName (FunQLName name) = makeHashNameFor hashNameLength name
 
 let private resolveEntityRef (name : EntityRef) =
     match tryResolveEntityRef name with
@@ -74,8 +77,10 @@ let private resolveEntityRef (name : EntityRef) =
 [<NoEquality; NoComparison>]
 type private HalfResolvedComputedField =
     { Source : SourceComputedField
+      ColumnName : SQL.SQLName
       HashName : HashName
       InheritedFrom : ResolvedEntityRef option
+      VirtualInheritedFrom : ResolvedEntityRef option
     } with
         interface IComputedFieldBits with
             member this.AllowBroken = this.Source.AllowBroken
@@ -118,7 +123,7 @@ type private HalfResolvedEntity =
             member this.Children = this.Children
 
 
-type private HalfResolvedEntities = Map<ResolvedEntityRef, HalfResolvedEntity>
+type private HalfResolvedEntitiesMap = Map<ResolvedEntityRef, HalfResolvedEntity>
 
 let private resolveUniqueConstraint (entity : HalfResolvedEntity) (constrName : ConstraintName) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.Columns then
@@ -132,16 +137,32 @@ let private resolveUniqueConstraint (entity : HalfResolvedEntity) (constrName : 
       HashName = makeHashName constrName
     }
 
+let private sqlColumnName (ref : ResolvedEntityRef) (entity : SourceEntity) (fieldName : FieldName) : SQL.SQLName =
+    let str =
+        match entity.Parent with
+        | None -> string fieldName
+        | Some p when p.Schema = ref.Schema -> sprintf "%O__%O" ref.Name fieldName
+        | Some p -> sprintf "%O__%O__%O" ref.Schema ref.Name fieldName
+    SQL.SQLName (makeHashNameFor SQL.sqlIdentifierLength str)
+
 //
 // PHASE 1: Building column fields.
 //
 
 type private Phase1Resolver (layout : SourceLayout) =
-    let mutable cachedEntities : HalfResolvedEntities = Map.empty
+    let mutable cachedEntities : HalfResolvedEntitiesMap = Map.empty
+    let mutable rootEntities : Set<ResolvedEntityRef> = Set.empty
 
     let unionComputedField (name : FieldName) (parent : HalfResolvedComputedField) (child : HalfResolvedComputedField) =
         if parent.Source.IsVirtual && child.Source.IsVirtual then
-            child
+            let virtualInherited =
+                match parent.VirtualInheritedFrom with
+                | None ->
+                    // `parent` is root virtual field. Parents always have `InheritedFrom`, so we can use it in this case.
+                    Option.get parent.InheritedFrom
+                | Some inherited -> inherited
+
+            { child with VirtualInheritedFrom = Some virtualInherited }
         else
             raisef ResolveLayoutException "Computed field names clash: %O" name
 
@@ -179,19 +200,13 @@ type private Phase1Resolver (layout : SourceLayout) =
                 | Error msg -> raisef ResolveLayoutException "Error parsing column field default expression: %s" msg
         let fieldType = resolveFieldType ref entity fieldType
 
-        let columnName =
-            match entity.Parent with
-            | None -> fieldName.ToString()
-            | Some p when p.Schema = ref.Schema -> sprintf "%O__%O" ref.Name fieldName
-            | Some p -> sprintf "%O__%O__%O" ref.Schema ref.Name fieldName
-
         { FieldType = fieldType
           ValueType = compileFieldType fieldType
           DefaultValue = defaultValue
           IsNullable = col.IsNullable
           IsImmutable = col.IsImmutable
           InheritedFrom = None
-          ColumnName = SQL.SQLName columnName
+          ColumnName = sqlColumnName ref entity fieldName
           HashName = makeHashName fieldName
         }
 
@@ -207,6 +222,8 @@ type private Phase1Resolver (layout : SourceLayout) =
                 checkFieldName name
                 { Source = field
                   InheritedFrom = None
+                  VirtualInheritedFrom = None
+                  ColumnName = sqlColumnName entityRef entity name
                   HashName = makeHashName name
                 }
             with
@@ -250,7 +267,9 @@ type private Phase1Resolver (layout : SourceLayout) =
 
         let root =
             match parent with
-            | None -> entityRef
+            | None ->
+                rootEntities <- Set.add entityRef rootEntities
+                entityRef
             | Some p -> p.Root
 
         let typeName =
@@ -337,8 +356,24 @@ type private Phase1Resolver (layout : SourceLayout) =
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In schema %O" name
         Map.iter iterSchema layout.Schemas
 
+    let checkEntityColumnNames (rootEntity : HalfResolvedEntity) =
+        let collectColumns (entity : HalfResolvedEntity) =
+            let cols = entity.ColumnFields |> Map.values |> Seq.mapMaybe (fun field -> if Option.isNone field.InheritedFrom then Some field.ColumnName else None)
+            let comps = entity.ComputedFields |> Map.values |> Seq.mapMaybe (fun field -> if Option.isNone field.InheritedFrom then Some field.ColumnName else None)
+            Seq.append cols comps
+        
+        let selfColumns = collectColumns rootEntity
+        let childrenColumns = rootEntity.Children |> Map.keys |> Seq.collect (fun ref -> collectColumns (Map.find ref cachedEntities))
+        try
+            Seq.append selfColumns childrenColumns |> Set.ofSeqUnique |> ignore
+        with
+        | Failure msg -> raisef ResolveLayoutException "Column names clash: %s" msg
+
     member this.ResolveLayout () =
         resolveLayout ()
+        for root in rootEntities do
+            let entity = Map.find root cachedEntities
+            checkEntityColumnNames entity
         cachedEntities
 
 let private parseRelatedExpr (rawExpr : string) =
@@ -358,7 +393,7 @@ type private RelatedExpr =
       Expr : ResolvedFieldExpr
     }
 
-type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntities, forceAllowBroken : bool) =
+type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntitiesMap, forceAllowBroken : bool) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, Result<ResolvedComputedField, exn>> = Map.empty
 
     let rec makeWrappedLayout (stack : Set<ResolvedFieldRef>) : ILayoutBits =
@@ -430,17 +465,39 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           Expr = expr
         }
 
-    and resolveOneComputedExpr (stack : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) (hashName : HashName) (comp : SourceComputedField) : ResolvedComputedField =
+    and resolveOneComputeField (stack : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) (comp : HalfResolvedComputedField) : ResolvedComputedField =
         let wrappedLayout = makeWrappedLayout stack
         // Computed fields are always assumed to reference immediate fields. Also read shortcomings of current computed field compilation in Compile.fs.
-        let expr = resolveRelatedExpr wrappedLayout entityRef (parseRelatedExpr comp.Expression)
+        let expr = resolveRelatedExpr wrappedLayout entityRef (parseRelatedExpr comp.Source.Expression)
+        if comp.Source.IsMaterialized then
+            if expr.Info.HasQuery then
+                raisef ResolveLayoutException "Queries are not supported in materialized computed fields"
+            if not <| Set.isEmpty expr.References.UsedArguments then
+                raisef ResolveLayoutException "Arguments are not allowed in materialized computed fields"
+        let exprType =
+            try
+                typecheckFieldExpr wrappedLayout expr.Expr
+            with
+            | :? ViewTypecheckException as e -> raisefWithInner ResolveLayoutException e "Failed to typecheck computed column"
+        let virtualInfo =
+            if comp.Source.IsVirtual then
+                Some
+                    { // Place random stuff there for now, we calculate virtual cases in a later phase.
+                      Cases = [||]
+                      InheritedFrom = comp.VirtualInheritedFrom
+                    }
+            else
+                None
         { Expression = expr.Expr
+          Type = exprType
           InheritedFrom = None
           IsLocal = expr.Info.IsLocal
-          AllowBroken = comp.AllowBroken
-          HashName = hashName
-          // Place random stuff there for now, we calculate virtual cases in a later phase.
-          VirtualCases = if comp.IsVirtual then Some [||] else None
+          AllowBroken = comp.Source.AllowBroken
+          HashName = comp.HashName
+          ColumnName = comp.ColumnName
+          Virtual = virtualInfo
+          Root = None
+          IsMaterialized = comp.Source.IsMaterialized
         }
 
     and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : HalfResolvedComputedField) : Result<ResolvedComputedField, exn> =
@@ -458,7 +515,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     raisef ResolveLayoutException "Cycle detected in computed fields: %O" stack
                 let newStack = Set.add fieldRef stack
                 try
-                    let field = Ok <| resolveOneComputedExpr newStack fieldRef.Entity entity comp.HashName comp.Source
+                    let field = Ok <| resolveOneComputeField newStack fieldRef.Entity entity comp
                     cachedComputedFields <- Map.add fieldRef field cachedComputedFields
                     field
                 with
@@ -693,19 +750,19 @@ type private Phase3Resolver (layout : Layout) =
         let childVirtualCases = findVirtualChildren entity fieldRef.Name |> Seq.toArray
         let handledChildren = childVirtualCases |> Seq.map (fun c -> c.PossibleEntities) |> Set.unionMany
 
-        let isNameHandled (ref, entity : ResolvedEntity) =
+        let isMyselfHandled (ref, entity : ResolvedEntity) =
             not (entity.IsAbstract || Set.contains ref handledChildren)
 
         let childrenEntities = entity.Children |> Map.keys |> Seq.map (fun ref -> (ref, layout.FindEntity ref |> Option.get))
         let allEntities = Seq.append (Seq.singleton (fieldRef.Entity, entity)) childrenEntities
-        let options = allEntities |> Seq.filter isNameHandled |> Seq.map fst |> Set.ofSeq
+        let myCases = allEntities |> Seq.filter isMyselfHandled |> Seq.map fst |> Set.ofSeq
 
-        if Set.isEmpty options then
+        if Set.isEmpty myCases then
             childVirtualCases
         else
             let myCase =
                 { Ref = fieldRef.Entity
-                  PossibleEntities = options
+                  PossibleEntities = myCases
                 }
             Array.append childVirtualCases [|myCase|]
 
@@ -733,11 +790,33 @@ type private Phase3Resolver (layout : Layout) =
             | _ -> findVirtualChildren childEntity fieldName
 
     let resolveOneComputedField (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedComputedField =
-        match comp.VirtualCases with
-        | None -> comp
-        | Some _ ->
-            let cases = resolveVirtualCases entity fieldRef comp
-            { comp with VirtualCases = Some cases }
+        let (comp, isRoot) =
+            match comp.Virtual with
+            | None -> (comp, true)
+            | Some virtInfo ->
+                let cases = resolveVirtualCases entity fieldRef comp
+                let virtInfo = { virtInfo with Cases = cases }
+                ({ comp with Virtual = Some virtInfo }, Option.isNone virtInfo.InheritedFrom)
+
+        if not isRoot then
+            comp
+        else
+            let mutable isLocal = true
+            let getCaseType (case, currComp : ResolvedComputedField) =
+                if currComp.IsMaterialized <> comp.IsMaterialized then
+                  raisef ResolveLayoutException "Virtual computed fields cannot be partially materialized: %O" fieldRef
+                if not comp.IsLocal then
+                    isLocal <- false
+                comp.Type
+            let caseTypes = computedFieldCases layout ObjectMap.empty fieldRef comp |> Seq.map getCaseType
+            match unionTypes caseTypes with
+            | None -> raisef ResolveLayoutException "Could not unify types for virtual field cases: %O" fieldRef
+            | Some typ ->
+                let root =
+                    { IsLocal = isLocal
+                      Type = typ
+                    }
+                { comp with Root = Some root }
 
     let rec resolveComputedField (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedComputedField =
         match comp.InheritedFrom with
@@ -766,7 +845,8 @@ type private Phase3Resolver (layout : Layout) =
         }
 
     let resolveLayout () : Layout =
-        { Schemas = Map.map resolveSchema layout.Schemas
+        let schemas = Map.map resolveSchema layout.Schemas
+        { Schemas = schemas
         } : Layout
 
     member this.ResolveLayout () = resolveLayout ()

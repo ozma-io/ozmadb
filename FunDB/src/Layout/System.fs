@@ -34,6 +34,7 @@ let private makeSourceComputedField (field : ComputedFieldAttribute) : FunQLName
         { Expression = field.Expression
           AllowBroken = false
           IsVirtual = field.IsVirtual
+          IsMaterialized = field.IsMaterialized
         }
     (FunQLName field.Name, res)
 

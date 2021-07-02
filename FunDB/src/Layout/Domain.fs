@@ -58,31 +58,6 @@ let private hasLocalDependencies (ref : ResolvedFieldRef) (usedSchemas : UsedSch
     // We always have at least one field in used local fields: the reference itself. Hence we just check that size is larger than 1.
     Set.count localEntity > 1
 
-let private makeResultExpr (boundEntityRef : ResolvedEntityRef) (fieldRef : FieldRef) : ResolvedFieldExpr =
-    let boundInfo =
-        { Ref =
-            { Entity = boundEntityRef
-              Name = fieldRef.Name
-            }
-          Immediate = true
-          Path = [||]
-        } : BoundFieldMeta
-    let fieldInfo =
-        { Bound = Some boundInfo
-          FromEntityId = localExprFromEntityId
-          ForceSQLName = None
-        } : FieldMeta
-    let column =
-        { Ref = VRColumn fieldRef
-          Path = [||]
-          AsRoot = false
-        } : LinkedFieldRef
-    let resultColumn =
-        { Ref = column
-          Extra = ObjectMap.singleton fieldInfo
-        }
-    FERef resultColumn
-
 let private makeResultColumn (name : FieldName option) (expr : ResolvedFieldExpr) : ResolvedQueryResult =
     let col =
         { Attributes = Map.empty
@@ -165,8 +140,8 @@ let private queryHash (expr : SQL.SelectExpr) : string =
     expr |> string |> Hash.sha1OfString |> String.hexBytes
 
 let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : UsedSchemas * Query<SQL.SelectExpr> =
-    let idExpr = makeResultExpr refEntityRef { Entity = Some referencedEntityRef; Name = funId }
-    let mainExpr = makeResultExpr refEntityRef { Entity = Some referencedEntityRef; Name = funMain }
+    let idExpr = makeSingleFieldExpr refEntityRef { Entity = Some referencedEntityRef; Name = funId }
+    let mainExpr = makeSingleFieldExpr refEntityRef { Entity = Some referencedEntityRef; Name = funMain }
     let mainSortColumn =
         { Expr = mainExpr
           Order = None

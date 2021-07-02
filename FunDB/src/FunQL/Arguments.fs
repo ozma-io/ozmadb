@@ -4,6 +4,7 @@ open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Typecheck
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -37,27 +38,6 @@ type Query<'e when 'e :> ISQLString> =
     { Expression : 'e
       Arguments : QueryArguments
     }
-
-let private compileScalarType : ScalarFieldType -> SQL.SimpleType = function
-    | SFTInt -> SQL.STInt
-    | SFTDecimal -> SQL.STDecimal
-    | SFTString -> SQL.STString
-    | SFTBool -> SQL.STBool
-    | SFTDateTime -> SQL.STDateTime
-    | SFTDate -> SQL.STDate
-    | SFTInterval -> SQL.STInterval
-    | SFTJson -> SQL.STJson
-    | SFTUserViewRef -> SQL.STJson
-    | SFTUuid -> SQL.STUuid
-
-let compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
-    | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
-    | FETArray stype -> SQL.VTArray <| compileScalarType stype
-
-let compileFieldType : FieldType<_> -> SQL.SimpleValueType = function
-    | FTType fetype -> compileFieldExprType fetype
-    | FTReference ent -> SQL.VTScalar SQL.STInt
-    | FTEnum vals -> SQL.VTScalar SQL.STString
 
 let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgument) : CompiledArgument =
     { PlaceholderId = placeholderId

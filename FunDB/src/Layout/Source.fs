@@ -55,6 +55,7 @@ type SourceComputedField =
     { Expression : string
       AllowBroken : bool
       IsVirtual : bool
+      IsMaterialized : bool
     }
 
 type SourceEntity =

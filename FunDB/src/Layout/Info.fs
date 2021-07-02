@@ -78,7 +78,7 @@ let serializeComputedField (comp : ResolvedComputedField) : SerializedComputedFi
       InheritedFrom = comp.InheritedFrom
       AllowBroken = comp.AllowBroken
       IsBroken = false
-      IsVirtual = Option.isSome comp.VirtualCases
+      IsVirtual = Option.isSome comp.Virtual
     }
 
 let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField =

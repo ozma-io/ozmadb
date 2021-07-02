@@ -276,6 +276,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Int16 AttNum { get; set; }
         public bool AttNotNull { get; set; }
         public bool AttIsDropped { get; set; }
+        public char AttGenerated { get; set; }
 
         [ForeignKey("AttRelId")]
         public Class? RelClass { get; set; }

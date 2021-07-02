@@ -67,6 +67,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
         public string Name { get; }
         public string Expression { get; }
         public bool IsVirtual { get; set; }
+        public bool IsMaterialized { get; set; }
 
         public ComputedFieldAttribute(string name, string expression)
         {

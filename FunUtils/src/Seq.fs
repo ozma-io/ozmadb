@@ -357,3 +357,5 @@ let trySnoc (s : 'a seq) : ('a * 'a seq) option =
         Some (i.Current, ofEnumerator i)
     else
         None
+
+let (|Snoc|_|) (s : 'a seq) : ('a * 'a seq) option = trySnoc s

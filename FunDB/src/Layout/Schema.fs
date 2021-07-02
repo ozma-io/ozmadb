@@ -30,6 +30,7 @@ let private makeSourceComputedField (field : ComputedField) : SourceComputedFiel
     { Expression = field.Expression
       AllowBroken = field.AllowBroken
       IsVirtual = field.IsVirtual
+      IsMaterialized = field.IsMaterialized
     }
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraint) : SourceUniqueConstraint =
