@@ -188,7 +188,7 @@ let private minusOverloads =
       ((STDate, STInterval), STDateTime)
       ((STDateTime, STInterval), STDateTime)
       ((STInterval, STInterval), STInterval)
-      ((STDateTime, STDateTime), STDateTime)
+      ((STDateTime, STDateTime), STInterval)
     ] |> binScalarsToSignatures
 
 let private multiplyOverloads =
