@@ -20,15 +20,14 @@ let infoApi : HttpHandler =
     let ping = Map.empty |> json |> Successful.ok
 
     let isInitialized (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
-        task {
-            let logFactory = ctx.GetService<ILoggerFactory>()
-            let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
-            use conn = new DatabaseConnection(logFactory, connectionString)
-            use trans = new DatabaseTransaction(conn, IsolationLevel.ReadCommitted)
-            let! isInitialized = instanceIsInitialized trans
-            let ret = { IsInitialized = isInitialized }
-            return! Successful.ok (json ret) next ctx
-        }
+        let logFactory = ctx.GetService<ILoggerFactory>()
+        let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
+        openAndCheckTransaction logFactory connectionString IsolationLevel.ReadCommitted ctx.RequestAborted <| fun trans ->
+            task {
+                let! isInitialized = instanceIsInitialized trans
+                let ret = { IsInitialized = isInitialized }
+                return! Successful.ok (json ret) next ctx
+            }
 
     let clearInstancesCache (info : UserTokenInfo) (next : HttpFunc) (ctx : HttpContext) =
         if not info.IsRoot then
