@@ -528,7 +528,7 @@ let private findFieldWithContext (layout : ILayoutBits) (typeCtxs : TypeContexts
                 let inheritedFrom =
                     match field.Field with
                     // These should have been found in parent entity.
-                    | RId | RSubEntity -> failwith "Impossible"
+                    | RId | RSubEntity -> None
                     | RColumnField col -> col.InheritedFrom
                     | RComputedField comp -> comp.InheritedFrom
                 match inheritedFrom with
