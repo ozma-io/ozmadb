@@ -410,6 +410,9 @@ let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) (cancellati
                 | SODropSequence ref ->
                     if not (ref.Schema = None || ref.Schema = Some (SQLName "public")) then
                         failwithf "Refusing to drop sequence %O" ref.Name
+                | SODropTable ref ->
+                    if not (ref.Schema = None || ref.Schema = Some (SQLName "public")) then
+                        failwithf "Refusing to drop table %O" ref.Name
                 | _ -> ()
                 let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty cancellationToken
                 ()
