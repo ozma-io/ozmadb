@@ -70,6 +70,7 @@ let sqlImplicitCasts : ImplicitCastsMap =
     Map.ofList
         [ (VTScalar STInt, Set.ofList [VTScalar STDecimal; VTScalar STBigInt])
           (VTScalar STBigInt, Set.ofList [VTScalar STDecimal])
+          (VTScalar STDate, Set.ofList [VTScalar STDateTime])
         ]
 
 let tryImplicitCasts (wanted : SimpleValueType) (given : SimpleValueType) =
@@ -269,7 +270,6 @@ let rec private trySignature (inexactNum : int) (notPreferredNum : int) (compare
                     notPreferredNum + 1
             trySignature (inexactNum + 1) notPreferredNum rest
         | Some argTyp ->
-            eprintfn "Failed to cast %O to %O" argTyp sigTyp
             None
         | None ->
             let notPreferredNum =
@@ -349,6 +349,7 @@ let findFunctionOverloads (signatures : FunctionSignaturesMap) (args : SimpleVal
         |> Seq.mapMaybe (fun (sign, ret) -> trySignature 0 0 (Seq.zip sign args) |> Option.map (fun key -> (key, (sign, ret))))
         |> Seq.sortBy fst
         |> Seq.toArray
+
     if Array.isEmpty sortedSignatures then
         None
     else
@@ -382,7 +383,6 @@ let findBinaryOpOverloads (signatures : BinaryOperatorSignaturesMap) (a : Simple
         if minErrors = 0 then
             Some <| convertBack firstFunc
         else
-            eprintfn "sorted signatures for %O . %O: %O" a b (sortedSignatures |> Seq.map (fun (key, (sign, ret)) -> sprintf "%O %O %O" key ret sign) |> Seq.map string |> String.concat ", ")
             let considered = sortedSignatures |> Seq.takeWhile (fun (key, pair) -> key = minKey) |> Seq.map snd |> Seq.toArray
             // 2.a
             let checkArgs =

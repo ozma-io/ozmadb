@@ -178,6 +178,7 @@ let inline genericFindField (getColumnField : FieldName -> 'col option) (getComp
             Some { Name = funSubEntity; ForceRename = false; Field = RSubEntity }
         else if name = funMain then
             // We set name `main` by default for main fields, otherwise name may spontaneously clash in the future.
+            let name = Option.get <| traverse fields.MainField
             Option.map (fun f -> { f with ForceRename = true }) <| traverse fields.MainField
         else
             match getColumnField name with

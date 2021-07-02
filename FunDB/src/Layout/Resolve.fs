@@ -292,6 +292,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                     || Map.containsKey entity.MainField columnFields
                     || Map.containsKey entity.MainField computedFields) then
                 raisef ResolveLayoutException "Nonexistent main field: %O" entity.MainField
+
         ret
 
     let rec addIndirectChildren (childRef : ResolvedEntityRef) (entity : HalfResolvedEntity) =
@@ -668,6 +669,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             indexes |> Map.values |> Seq.map (fun c -> c.HashName) |> Set.ofSeqUnique |> ignore
         with
         | Failure msg -> raisef ResolveLayoutException "Index names clash (first %i characters): %s" hashNameLength msg
+
+        let wrappedEntity = initialWrappedLayout.FindEntity entityRef |> Option.get
+        // Check that main field is valid.
+        wrappedEntity.FindField funMain |> Option.get |> ignore
 
         let ret =
             { ColumnFields = entity.ColumnFields
