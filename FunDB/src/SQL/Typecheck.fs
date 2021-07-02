@@ -167,7 +167,7 @@ let private concatOverloads =
         ]
 
 let private likeOverloads =
-    [ ((STString, STString), STString)
+    [ ((STString, STString), STBool)
     ] |> binScalarsToSignatures
 
 let private plusOverloads =
