@@ -12,6 +12,8 @@ type ExtensionName = SQLName
 type OpClassName = SQLName
 type AccessMethodName = SQLName
 type MigrationKey = string
+type MigrationKeysSet = Set<MigrationKey>
+type MigrationObjectsMap<'v> = Map<SQLName, MigrationKeysSet * 'v>
 
 [<NoEquality; NoComparison>]
 type PlainColumnMeta =
@@ -46,8 +48,7 @@ type ColumnType =
 
 [<NoEquality; NoComparison>]
 type ColumnMeta =
-    { Name : ColumnName
-      DataType : DBValueType
+    { DataType : DBValueType
       ColumnType : ColumnType
       IsNullable : bool
     } with
@@ -55,7 +56,7 @@ type ColumnMeta =
 
         member this.ToSQLString () =
             let notNullStr = if this.IsNullable then "NULL" else "NOT NULL"
-            sprintf "%s %s %s %s" (this.Name.ToSQLString()) (this.DataType.ToSQLString()) notNullStr (this.ColumnType.ToSQLString())
+            sprintf "%s %s %s" (this.DataType.ToSQLString()) notNullStr (this.ColumnType.ToSQLString())
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -156,7 +157,7 @@ type IndexMeta =
 
 [<NoEquality; NoComparison>]
 type TableMeta =
-    { Columns : Map<MigrationKey, ColumnMeta>
+    { Columns : MigrationObjectsMap<ColumnMeta>
     }
 
 let emptyTableMeta =
@@ -321,22 +322,20 @@ type ObjectMeta =
     | OMFunction of Map<FunctionSignature, FunctionDefinition>
     | OMTrigger of TableName * TriggerDefinition
 
-type SchemaObjects = Map<MigrationKey, SQLName * ObjectMeta>
+type SchemaObjects = MigrationObjectsMap<ObjectMeta>
 
 [<NoEquality; NoComparison>]
 type SchemaMeta =
-    { Name : SchemaName
-      Objects : SchemaObjects
+    { Objects : SchemaObjects
     }
 
 let unionSchemaMeta (a : SchemaMeta) (b : SchemaMeta) =
-    { Name = b.Name
-      Objects = Map.unionUnique a.Objects b.Objects
+    { Objects = Map.unionUnique a.Objects b.Objects
     }
 
 [<NoEquality; NoComparison>]
 type DatabaseMeta =
-    { Schemas : Map<MigrationKey, SchemaMeta>
+    { Schemas : MigrationObjectsMap<SchemaMeta>
       Extensions : Set<ExtensionName>
     }
 
@@ -346,18 +345,18 @@ let emptyDatabaseMeta =
     }
 
 let unionDatabaseMeta (a : DatabaseMeta) (b : DatabaseMeta) =
-    { Schemas = Map.unionWith (fun key -> unionSchemaMeta) a.Schemas b.Schemas
+    { Schemas = Map.unionWith (fun key (keys1, meta1) (keys2, meta2) -> (Set.union keys1 keys2, unionSchemaMeta meta1 meta2)) a.Schemas b.Schemas
       Extensions = Set.union a.Extensions b.Extensions
     }
 
 let filterDatabaseMeta (f : SchemaName -> bool) (meta : DatabaseMeta) =
-    { Schemas = Map.filter (fun name schema -> f schema.Name) meta.Schemas
+    { Schemas = Map.filter (fun name (keys, meta) -> f name) meta.Schemas
       Extensions = meta.Extensions
     }
 
 [<NoEquality; NoComparison>]
 type TableOperation =
-    | TOCreateColumn of ColumnMeta
+    | TOCreateColumn of ColumnName * ColumnMeta
     | TODropColumn of ColumnName
     | TOAlterColumnType of ColumnName * DBValueType
     | TOAlterColumnNull of ColumnName * bool
@@ -367,7 +366,7 @@ type TableOperation =
 
         member this.ToSQLString () =
             match this with
-            | TOCreateColumn pars -> sprintf "ADD COLUMN %s" (pars.ToSQLString())
+            | TOCreateColumn (name, pars) -> sprintf "ADD COLUMN %s %s" (name.ToSQLString()) (pars.ToSQLString())
             | TODropColumn col -> sprintf "DROP COLUMN %s" (col.ToSQLString())
             | TOAlterColumnType (col, typ) -> sprintf "ALTER COLUMN %s SET DATA TYPE %s" (col.ToSQLString()) (typ.ToSQLString())
             | TOAlterColumnNull (col, isNullable) -> sprintf "ALTER COLUMN %s %s NOT NULL" (col.ToSQLString()) (if isNullable then "DROP" else "SET")

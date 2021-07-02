@@ -171,8 +171,8 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
           Language = PLPgSQL.plPgSQLName
           Definition = checkProgram.ToPLPgSQLString()
         } : SQL.FunctionDefinition
-    let checkFunctionKey = sprintf "__ref_type_check__%s__%s" entity.HashName field.HashName
-    let checkFunctionName = SQL.SQLName checkFunctionKey
+    let checkFunctionKey = sprintf "__ref_type_check__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+    let checkFunctionName = SQL.SQLName <| sprintf "__ref_type_check__%s__%s" entity.HashName field.HashName
     let checkFunctionObject = SQL.OMFunction <| Map.singleton [||] checkFunctionDefinition
 
     let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = field.ColumnName }
@@ -191,8 +191,8 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
           FunctionName = { Schema = Some fromSchema; Name = checkFunctionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkUpdateTriggerKey = sprintf "__ref_type_update__%s__%s" entity.HashName field.HashName
-    let checkUpdateTriggerName = SQL.SQLName checkUpdateTriggerKey
+    let checkUpdateTriggerKey = sprintf "__ref_type_update__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+    let checkUpdateTriggerName = SQL.SQLName <| sprintf "__ref_type_update__%s__%s" entity.HashName field.HashName
     let checkUpdateTriggerObject = SQL.OMTrigger (fromTable, checkUpdateTriggerDefinition)
 
     let checkInsertTriggerDefinition =
@@ -204,17 +204,17 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
           FunctionName = { Schema = Some fromSchema; Name = checkFunctionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkInsertTriggerKey = sprintf "__ref_type_insert__%s__%s" entity.HashName field.HashName
-    let checkInsertTriggerName = SQL.SQLName checkInsertTriggerKey
+    let checkInsertTriggerKey =sprintf "__ref_type_insert__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+    let checkInsertTriggerName = SQL.SQLName <| sprintf "__ref_type_insert__%s__%s" entity.HashName field.HashName
     let checkInsertTriggerObject = SQL.OMTrigger (fromTable, checkInsertTriggerDefinition)
 
     let objects =
-        [ (checkFunctionKey, (checkFunctionName, checkFunctionObject))
-          (checkUpdateTriggerKey, (checkUpdateTriggerName, checkUpdateTriggerObject))
-          (checkInsertTriggerKey, (checkInsertTriggerName, checkInsertTriggerObject))
+        [ (checkFunctionName, (Set.singleton checkFunctionKey, checkFunctionObject))
+          (checkUpdateTriggerName, (Set.singleton checkUpdateTriggerKey, checkUpdateTriggerObject))
+          (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
         ]
         |> Map.ofSeq
-    { Schemas = Map.singleton (fromSchema.ToString()) { Name = fromSchema; Objects = objects }
+    { Schemas = Map.singleton (fromSchema) (Set.empty, { Objects = objects })
       Extensions = Set.empty
     }
 
@@ -241,6 +241,9 @@ let private pathTriggerName (key : PathTriggerFullKey) =
     let pathBytes = Encoding.UTF8.GetBytes pathStr
     let str = pathTriggerHasher.ComputeHash(pathBytes).AsHexString()
     String.truncate 40 str
+
+let private pathTriggerKey (key : PathTriggerFullKey) =
+    JsonConvert.SerializeObject key
 
 type private PathTrigger =
     { // Map from field names to field root entities.
@@ -568,8 +571,8 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           Language = PLPgSQL.plPgSQLName
           Definition = checkProgram.ToPLPgSQLString()
         } : SQL.FunctionDefinition
-    let checkFunctionKey = sprintf "__out_chcon_check__%s__%s" entity.HashName constr.HashName
-    let checkFunctionName = SQL.SQLName checkFunctionKey
+    let checkFunctionKey = sprintf "__out_chcon_check__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
+    let checkFunctionName = SQL.SQLName <| sprintf "__out_chcon_check__%s__%s" entity.HashName constr.HashName
     let checkFunctionObject = SQL.OMFunction <| Map.singleton [||] checkFunctionDefinition
 
     let fieldDistinctCheck name =
@@ -606,8 +609,8 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           FunctionName = { Schema = Some schemaName; Name = checkFunctionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkUpdateTriggerKey = sprintf "__out_chcon_update__%s__%s" entity.HashName constr.HashName
-    let checkUpdateTriggerName = SQL.SQLName checkUpdateTriggerKey
+    let checkUpdateTriggerKey = sprintf "__out_chcon_update__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
+    let checkUpdateTriggerName = SQL.SQLName <| sprintf "__out_chcon_update__%s__%s" entity.HashName constr.HashName
     let checkUpdateTriggerObject = SQL.OMTrigger (tableName, checkUpdateTriggerDefinition)
 
     let checkInsertTriggerDefinition =
@@ -619,17 +622,17 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           FunctionName = { Schema = Some schemaName; Name = checkFunctionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkInsertTriggerKey = sprintf "__out_chcon_insert__%s__%s" entity.HashName constr.HashName
-    let checkInsertTriggerName = SQL.SQLName checkInsertTriggerKey
+    let checkInsertTriggerKey = sprintf "__out_chcon_insert__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
+    let checkInsertTriggerName = SQL.SQLName <| sprintf "__out_chcon_insert__%s__%s" entity.HashName constr.HashName
     let checkInsertTriggerObject = SQL.OMTrigger (tableName, checkInsertTriggerDefinition)
 
     let objects =
-        [ (checkFunctionKey, (checkFunctionName, checkFunctionObject))
-          (checkUpdateTriggerKey, (checkUpdateTriggerName, checkUpdateTriggerObject))
-          (checkInsertTriggerKey, (checkInsertTriggerName, checkInsertTriggerObject))
+        [ (checkFunctionName, (Set.singleton checkFunctionKey, checkFunctionObject))
+          (checkUpdateTriggerName, (Set.singleton checkUpdateTriggerKey, checkUpdateTriggerObject))
+          (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
         ]
         |> Map.ofSeq
-    { Schemas = Map.singleton (string schemaName) { Name = schemaName; Objects = objects }
+    { Schemas = Map.singleton schemaName (Set.empty, { Objects = objects })
       Extensions = Set.empty
     }
 
@@ -637,7 +640,9 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
 // We don't support them right now, but beware of this!
 let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (aggCheck : SQL.SingleSelectExpr) (key : PathTriggerKey) (trigger : PathTrigger) : SQL.DatabaseMeta =
     let entity = layout.FindEntity constrRef.Entity |> Option.get
-    let triggerName = pathTriggerName { ConstraintRef = constrRef; Key = key }
+    let fullTriggerKey = { ConstraintRef = constrRef; Key = key }
+    let triggerName = pathTriggerName fullTriggerKey
+    let triggerKey = pathTriggerKey fullTriggerKey
 
     let aggCheck =
         { aggCheck with
@@ -674,8 +679,8 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
           Language = PLPgSQL.plPgSQLName
           Definition = checkProgram.ToPLPgSQLString()
         } : SQL.FunctionDefinition
-    let checkFunctionKey = sprintf "__in_chcon_check__%s" triggerName
-    let checkFunctionName = SQL.SQLName checkFunctionKey
+    let checkFunctionKey = sprintf "__in_chcon_check__%s" triggerKey
+    let checkFunctionName = SQL.SQLName <| sprintf "__in_chcon_check__%s" triggerName
     let checkFunctionObject = SQL.OMFunction <| Map.singleton [||] checkFunctionDefinition
 
     let getFieldInfo (fieldName, fieldEntityRef) =
@@ -717,18 +722,18 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
           FunctionName = { Schema = Some schemaName; Name = checkFunctionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkUpdateTriggerKey = sprintf "__in_chcon_update__%s" triggerName
-    let checkUpdateTriggerName = SQL.SQLName checkUpdateTriggerKey
+    let checkUpdateTriggerKey = sprintf "__in_chcon_update__%s" triggerKey
+    let checkUpdateTriggerName = SQL.SQLName <| sprintf "__in_chcon_update__%s" triggerName
     let checkUpdateTriggerObject = SQL.OMTrigger (triggerTableName, checkUpdateTriggerDefinition)
 
-    let functionObjects = Map.singleton checkFunctionKey (checkFunctionName, checkFunctionObject)
+    let functionObjects = Map.singleton checkFunctionName (Set.singleton checkFunctionKey, checkFunctionObject)
     let functionDbMeta : SQL.DatabaseMeta =
-        { Schemas = Map.singleton (string schemaName) { Name = schemaName; Objects = functionObjects }
+        { Schemas = Map.singleton schemaName (Set.empty, { Objects = functionObjects })
           Extensions = Set.empty
         }
-    let triggerObjects = Map.singleton checkUpdateTriggerKey (checkUpdateTriggerName, checkUpdateTriggerObject)
+    let triggerObjects = Map.singleton checkUpdateTriggerName (Set.singleton checkUpdateTriggerKey, checkUpdateTriggerObject)
     let triggerDbMeta : SQL.DatabaseMeta =
-        { Schemas = Map.singleton (string triggerSchemaName) { Name = triggerSchemaName; Objects = triggerObjects }
+        { Schemas = Map.singleton triggerSchemaName (Set.empty, { Objects = triggerObjects })
           Extensions = Set.empty
         }
 

@@ -69,7 +69,7 @@ let private deleteBuildTable (table : TableRef) (tableMeta : TableMeta) : Ordere
 
 let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta) : OrderedSchemaOperation seq =
     seq {
-        for KeyValue (_, (objectName, obj)) in schemaMeta.Objects do
+        for KeyValue (objectName, (keys, obj)) in schemaMeta.Objects do
             let objRef = { Schema = Some schemaName; Name = objectName }
             match obj with
             | OMTable tableMeta ->
@@ -153,50 +153,83 @@ let private normalizeIndex (index : IndexMeta) : IndexMeta =
           Predicate = index.Predicate |> Option.map (fun x -> x.Value |> normalizeLocalExpr |> String.comparable)
     }
 
-let private migrateColumnAttrs (fromMeta : ColumnMeta) (toMeta : ColumnMeta) : TableOperation seq =
+let private migrateColumnAttrs (name : ColumnName) (fromMeta : ColumnMeta) (toMeta : ColumnMeta) : TableOperation seq =
     seq {
         if fromMeta.DataType <> toMeta.DataType then
-            yield TOAlterColumnType (toMeta.Name, toMeta.DataType)
+            yield TOAlterColumnType (name, toMeta.DataType)
         if fromMeta.IsNullable <> toMeta.IsNullable then
-            yield TOAlterColumnNull (toMeta.Name, toMeta.IsNullable)
+            yield TOAlterColumnNull (name, toMeta.IsNullable)
     }
 
-let private migrateBuildTable (fromMeta : TableMeta) (toMeta : TableMeta) : TableOperation seq =
+let private buildKeyedObjects (objects : MigrationObjectsMap<'a>) : Map<string, Set<SQLName>> =
+    let keyObjs = objects |> Map.keys |> Seq.map (fun name -> (string name, Set.singleton name)) |> Map.ofSeq
+    let addKey keyObjs (name, (keys, o)) =
+        let addMyKey keyObjs key = Map.addWith Set.union key (Set.singleton name) keyObjs
+        keys |> Seq.fold addMyKey keyObjs
+    objects |> Map.toSeq |> Seq.fold addKey keyObjs
+
+let private matchMigrationObjects (isSameObject : 'a -> 'a -> bool) (createNew : SQLName -> 'a -> 'b seq) (modifyOld : SQLName -> 'a -> SQLName -> 'a -> 'b seq) (dropOld : SQLName -> 'a -> 'b seq) (fromObjects : MigrationObjectsMap<'a>) (toObjects : MigrationObjectsMap<'a>) : 'b seq =
     seq {
-        for KeyValue (columnKey, columnMeta) in toMeta.Columns do
-            match Map.tryFind columnKey fromMeta.Columns with
-            | None -> yield TOCreateColumn columnMeta
-            | Some oldColumnMeta ->
-                match (oldColumnMeta.ColumnType, columnMeta.ColumnType) with
-                | (CTPlain oldPlain, CTPlain plain) ->
-                    if Option.map (normalizeLocalExpr >> string) oldPlain.DefaultExpr <> Option.map (normalizeLocalExpr >> string) plain.DefaultExpr then
-                        yield TOAlterColumnDefault (columnMeta.Name, plain.DefaultExpr)
-                    yield! migrateColumnAttrs oldColumnMeta columnMeta
-                | (CTGeneratedStored oldGenExpr, CTGeneratedStored genExpr) ->
-                    if string (normalizeLocalExpr oldGenExpr) <> string (normalizeLocalExpr genExpr) then
-                        yield TODropColumn columnMeta.Name
-                        yield TOCreateColumn columnMeta
-                    else
-                        yield! migrateColumnAttrs oldColumnMeta columnMeta
-                | (_, _) ->
-                    yield TODropColumn columnMeta.Name
-                    yield TOCreateColumn columnMeta
+        let keyedFromObjects = buildKeyedObjects fromObjects
+        let mutable currFromObjects = fromObjects
+        for KeyValue (newObjectName, (newObjectKeys, newObject)) in toObjects do
+            let tryPossibleObject oldObjectName =
+                match Map.tryFind oldObjectName currFromObjects with
+                | Some (oldObjectKeys, oldObject) when isSameObject oldObject newObject ->
+                    currFromObjects <- Map.remove oldObjectName currFromObjects
+                    Some <| modifyOld oldObjectName oldObject newObjectName newObject
+                | _ -> None
+            let tryPossibleKey oldKey =
+                match Map.tryFind oldKey keyedFromObjects with
+                | Some objectNames -> objectNames |> Seq.mapMaybe tryPossibleObject |> Seq.first
+                | None -> None
 
-        for KeyValue (columnKey, columnMeta) in fromMeta.Columns do
-            if not (Map.containsKey columnKey toMeta.Columns) then
-                yield TODropColumn columnMeta.Name
+            let possibleKeys = Seq.append (Seq.singleton <| string newObjectName) newObjectKeys
+            match possibleKeys |> Seq.mapMaybe tryPossibleKey |> Seq.first with
+            | None -> yield! createNew newObjectName newObject
+            | Some existing -> yield! existing
+
+        for KeyValue (oldObjectName, (oldObjectKeys, oldObject)) in currFromObjects do
+            yield! dropOld oldObjectName oldObject
     }
+
+let private migrateBuildTable (fromMeta : TableMeta) (toMeta : TableMeta) : (ColumnName * ColumnName)[] * TableOperation[] =
+    let mutable renames = []
+
+    let createNew columnName columnMeta = Seq.singleton <| TOCreateColumn (columnName, columnMeta)
+    let modifyOld oldColumnName (oldColumnMeta : ColumnMeta) newColumnName (newColumnMeta : ColumnMeta) =
+        seq {
+            match (oldColumnMeta.ColumnType, newColumnMeta.ColumnType) with
+            | (CTPlain oldPlain, CTPlain plain) ->
+                if oldColumnName <> newColumnName then
+                    renames <- (oldColumnName, newColumnName) :: renames
+                if Option.map (normalizeLocalExpr >> string) oldPlain.DefaultExpr <> Option.map (normalizeLocalExpr >> string) plain.DefaultExpr then
+                    yield TOAlterColumnDefault (newColumnName, plain.DefaultExpr)
+                yield! migrateColumnAttrs newColumnName oldColumnMeta newColumnMeta
+            | (CTGeneratedStored oldGenExpr, CTGeneratedStored genExpr) ->
+                if oldColumnName <> newColumnName then
+                    renames <- (oldColumnName, newColumnName) :: renames
+                if string (normalizeLocalExpr oldGenExpr) <> string (normalizeLocalExpr genExpr) then
+                    yield TODropColumn oldColumnName
+                    yield TOCreateColumn (newColumnName, newColumnMeta)
+                else
+                    yield! migrateColumnAttrs newColumnName oldColumnMeta newColumnMeta
+            | (_, _) ->
+                yield TODropColumn oldColumnName
+                yield TOCreateColumn (newColumnName, newColumnMeta)
+        }
+    let dropOld columnName columnMeta = Seq.singleton <| TODropColumn columnName
+
+    let tableOps = matchMigrationObjects (fun _ _ -> true) createNew modifyOld dropOld fromMeta.Columns toMeta.Columns |> Seq.toArray
+    (Array.ofList renames, tableOps)
 
 let private migrateAlterTable (objRef : SchemaObject) (fromMeta : TableMeta) (toMeta : TableMeta) : OrderedSchemaOperation seq =
     seq {
-        for KeyValue (columnKey, columnMeta) in toMeta.Columns do
-            match Map.tryFind columnKey fromMeta.Columns with
-            | Some oldColumnMeta when oldColumnMeta.Name <> columnMeta.Name ->
-                yield (SORenameTableColumn (objRef, oldColumnMeta.Name, columnMeta.Name), 0)
-            | _ -> ()
-        let changes = migrateBuildTable fromMeta toMeta |> Array.ofSeq
-        if not <| Array.isEmpty changes then
-            yield (SOAlterTable (objRef, changes |> Array.sortBy tableOperationOrder), 0)
+        let (renames, tableOps) = migrateBuildTable fromMeta toMeta
+        for (oldName, newName) in renames do
+            yield (SORenameTableColumn (objRef, oldName, newName), 0)
+        if not <| Array.isEmpty tableOps then
+            yield (SOAlterTable (objRef, tableOps |> Array.sortBy tableOperationOrder), 0)
     }
 
 let private migrateOverloads (objRef : SchemaObject) (oldOverloads : Map<FunctionSignature, FunctionDefinition>) (newOverloads : Map<FunctionSignature, FunctionDefinition>) : OrderedSchemaOperation seq =
@@ -217,150 +250,147 @@ let private migrateDeferrableConstraint (objRef : SchemaObject) (tableName : Tab
             yield (SOAlterConstraint (objRef, tableName, newDefer), 0)
     }
 
-let private migrateBuildSchema (fromObjects : SchemaObjects) (toMeta : SchemaMeta) : OrderedSchemaOperation seq =
-    seq {
-        for KeyValue (objectKey, (objectName, obj)) in toMeta.Objects do
-            let objRef = { Schema = Some toMeta.Name; Name = objectName }
-            match obj with
-            | OMTable tableMeta ->
-                match Map.tryFind objectKey fromObjects with
-                | Some (oldObjectName, OMTable oldTableMeta) ->
-                    if oldObjectName <> objectName then
-                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
-                        yield (SORenameTable (oldObjRef, objectName), 0)
-                    yield! migrateAlterTable objRef oldTableMeta tableMeta
-                | _ ->
-                    yield (SOCreateTable objRef, 0)
-                    yield! migrateAlterTable objRef emptyTableMeta tableMeta
+let private migrateBuildSchema (schemaName : SchemaName) (fromObjects : SchemaObjects) (toObjects : SchemaObjects) : OrderedSchemaOperation seq =
+    let isSameObject oldObject newObject =
+        match (oldObject, newObject) with
+        | (OMTable _, OMTable _) -> true
+        | (OMSequence, OMSequence) -> true
+        | (OMConstraint (oldTableName, oldConstraintType), OMConstraint (newTableName, newConstraintType)) when oldTableName = newTableName ->
+            match (oldConstraintType, newConstraintType) with
+            | (CMCheck expr1, CMCheck expr2) ->
+                let expr1 = normalizeLocalExpr expr1.Value
+                let expr2 = normalizeLocalExpr expr2.Value
+                string expr1 = string expr2
+            | (CMForeignKey (ref1, f1, oldDefer), CMForeignKey (ref2, f2, newDefer)) ->
+                ref1 = ref2 && f1 = f2
+            | (CMPrimaryKey (p1, oldDefer), CMPrimaryKey (p2, newDefer)) ->
+                p1 = p2
+            | (CMUnique (u1, oldDefer), CMUnique (u2, newDefer)) ->
+                u1 = u2
+            | _ -> false
+        | (OMIndex (oldTableName, oldIndex), OMIndex (newTableName, newIndex)) ->
+            oldTableName = newTableName && normalizeIndex oldIndex = normalizeIndex newIndex
+        | (OMFunction _, OMFunction _) -> true
+        | (OMTrigger (oldTableName, oldTrigger), OMTrigger (newTableName, newTrigger)) ->
+            oldTableName = newTableName  && oldTrigger = newTrigger
+        | _ -> false
+
+    let createNew objectName objectMeta =
+        let objRef = { Schema = Some schemaName; Name = objectName }
+        match objectMeta with
+        | OMTable tableMeta ->
+            seq {
+                yield (SOCreateTable objRef, 0)
+                yield! migrateAlterTable objRef emptyTableMeta tableMeta
+            }
+        | OMSequence -> Seq.singleton <| (SOCreateSequence objRef, 0)
+        | OMConstraint (tableName, constraintType) -> Seq.singleton (SOCreateConstraint (objRef, tableName, constraintType), 0)
+        | OMIndex (tableName, index) -> Seq.singleton (SOCreateIndex (objRef, tableName, index), 0)
+        | OMFunction newOverloads -> migrateOverloads objRef Map.empty newOverloads
+        | OMTrigger (tableName, trigger) -> Seq.singleton (SOCreateTrigger (objRef, tableName, trigger), 0)
+
+    let modifyOld oldObjectName (oldObjectMeta : ObjectMeta) newObjectName (newObjectMeta : ObjectMeta) =
+        seq {
+            let objRef = { Schema = Some schemaName; Name = newObjectName }
+            match newObjectMeta with
+            | OMTable newTableMeta ->
+                match oldObjectMeta with
+                | OMTable oldTableMeta ->
+                    if oldObjectName <> newObjectName then
+                        let oldObjRef = { Schema = Some schemaName; Name = oldObjectName }
+                        yield (SORenameTable (oldObjRef, newObjectName), 0)
+                    yield! migrateAlterTable objRef oldTableMeta newTableMeta
+                | _ -> failwith "Impossible"
             | OMSequence ->
-                match Map.tryFind objectKey fromObjects with
-                | Some (oldObjectName, OMSequence) ->
-                    if oldObjectName <> objectName then
-                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
-                        yield (SORenameSequence (oldObjRef, objectName), 0)
-                | _ -> yield (SOCreateSequence objRef, 0)
-            | OMConstraint (tableName, constraintType) ->
-                match Map.tryFind objectKey fromObjects with
-                | Some (oldObjectName, OMConstraint (oldTableName, oldConstraintType)) ->
-                    let mutable oldIsGood = false
-                    match (oldConstraintType, constraintType) with
-                    | (CMCheck expr1, CMCheck expr2) ->
-                        let expr1 = normalizeLocalExpr expr1.Value
-                        let expr2 = normalizeLocalExpr expr2.Value
-                        oldIsGood <- string expr1 = string expr2
+                match oldObjectMeta with
+                | OMSequence ->
+                    if oldObjectName <> newObjectName then
+                        let oldObjRef = { Schema = Some schemaName; Name = oldObjectName }
+                        yield (SORenameSequence (oldObjRef, newObjectName), 0)
+                | _ -> failwith "Impossible"
+            | OMConstraint (newTableName, newConstraintType) ->
+                match oldObjectMeta with
+                | OMConstraint (oldTableName, oldConstraintType) ->
+                    match (oldConstraintType, newConstraintType) with
+                    | (CMCheck expr1, CMCheck expr2) -> ()
                     | (CMForeignKey (ref1, f1, oldDefer), CMForeignKey (ref2, f2, newDefer)) ->
-                        if ref1 = ref2 && f1 = f2 then
-                            yield! migrateDeferrableConstraint objRef tableName oldDefer newDefer
-                            oldIsGood <- true
+                        yield! migrateDeferrableConstraint objRef newTableName oldDefer newDefer
                     | (CMPrimaryKey (p1, oldDefer), CMPrimaryKey (p2, newDefer)) ->
-                        if p1 = p2 then
-                            yield! migrateDeferrableConstraint objRef tableName oldDefer newDefer
-                            oldIsGood <- true
+                        yield! migrateDeferrableConstraint objRef newTableName oldDefer newDefer
                     | (CMUnique (u1, oldDefer), CMUnique (u2, newDefer)) ->
-                        if u1 = u2 then
-                            yield! migrateDeferrableConstraint objRef tableName oldDefer newDefer
-                            oldIsGood <- true
+                        yield! migrateDeferrableConstraint objRef newTableName oldDefer newDefer
                     | _ -> ()
 
-                    if oldIsGood then
-                        if oldObjectName <> objectName then
-                            let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
-                            yield (SORenameConstraint (oldObjRef, tableName, objectName), 0)
-                    else
-                        let isPrimaryKey =
-                            match oldConstraintType with
-                            | CMPrimaryKey _ -> 1
-                            | _ -> 0
-                        yield (SODropConstraint (objRef, oldTableName), isPrimaryKey)
-                        yield (SOCreateConstraint (objRef, tableName, constraintType), 0)
-                | _ -> yield (SOCreateConstraint (objRef, tableName, constraintType), 0)
-            | OMIndex (tableName, index) ->
-                match Map.tryFind objectKey fromObjects with
-                | Some (oldObjectName, OMIndex (oldTableName, oldIndex)) ->
-                    if tableName <> oldTableName || normalizeIndex oldIndex <> normalizeIndex index then
-                        yield (SODropIndex objRef, 0)
-                        yield (SOCreateIndex (objRef, tableName, index), 0)
-                    else if oldObjectName <> objectName then
-                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
-                        yield (SORenameIndex (oldObjRef, objectName), 0)
-                | _ -> yield (SOCreateIndex (objRef, tableName, index), 0)
+                    if oldObjectName <> newObjectName then
+                        let oldObjRef = { Schema = Some schemaName; Name = oldObjectName }
+                        yield (SORenameConstraint (oldObjRef, newTableName, newObjectName), 0)
+                | _ -> failwith "Impossible"
+            | OMIndex (newTableName, newIndex) ->
+                match oldObjectMeta with
+                | OMIndex (oldTableName, oldIndex) ->
+                    if oldObjectName <> newObjectName then
+                        let oldObjRef = { Schema = Some schemaName; Name = oldObjectName }
+                        yield (SORenameIndex (oldObjRef, newObjectName), 0)
+                | _ -> failwith "Impossible"
             | OMFunction newOverloads ->
-                match Map.tryFind objectKey fromObjects with
-                | Some (oldObjectName, OMFunction oldOverloads) ->
-                    if oldObjectName <> objectName then
-                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
+                match oldObjectMeta with
+                | OMFunction oldOverloads ->
+                    if oldObjectName <> newObjectName then
+                        let oldObjRef = { Schema = Some schemaName; Name = oldObjectName }
                         for KeyValue (signature, _) in oldOverloads do
-                            yield (SORenameFunction (oldObjRef, signature, objectName), 0)
+                            yield (SORenameFunction (oldObjRef, signature, newObjectName), 0)
                     yield! migrateOverloads objRef oldOverloads newOverloads
-                | _ -> yield! migrateOverloads objRef Map.empty newOverloads
-            | OMTrigger (tableName, trigger) ->
-                match Map.tryFind objectKey fromObjects with
-                | Some (oldObjectName, OMTrigger (oldTableName, oldTrigger)) ->
-                    if tableName <> oldTableName || trigger <> oldTrigger then
-                        yield (SODropTrigger (objRef, oldTableName), 0)
-                        yield (SOCreateTrigger (objRef, tableName, trigger), 0)
-                    else if oldObjectName <> objectName then
-                        let oldObjRef = { Schema = Some toMeta.Name; Name = oldObjectName }
-                        yield (SORenameTrigger (oldObjRef, tableName, objectName), 0)
-                | _ -> yield (SOCreateTrigger (objRef, tableName, trigger), 0)
-
-        for KeyValue (objectKey, (objectName, obj)) in fromObjects do
-            let objRef = { Schema = Some toMeta.Name; Name = objectName }
-            match obj with
-            | OMTable tableMeta ->
-                match Map.tryFind objectKey toMeta.Objects with
-                | Some (newObjectName, OMTable _) -> ()
-                | _ -> yield! deleteBuildTable objRef tableMeta
-            | OMSequence ->
-                match Map.tryFind objectKey toMeta.Objects with
-                | Some (newObjectName, OMSequence) -> ()
-                | _ -> yield (SODropSequence objRef, 0)
-            | OMConstraint (tableName, oldConstraintType) ->
-                match Map.tryFind objectKey toMeta.Objects with
-                | Some (newObjectName, OMConstraint _) -> ()
-                | _ ->
-                    let isPrimaryKey =
-                        match oldConstraintType with
-                        | CMPrimaryKey _ -> 1
-                        | _ -> 0
-                    yield (SODropConstraint (objRef, tableName), isPrimaryKey)
-            | OMIndex (tableName, _) ->
-                match Map.tryFind objectKey toMeta.Objects with
-                | Some (newObjectName, OMIndex _) -> ()
-                | _ -> yield (SODropIndex objRef, 0)
-            | OMFunction overloads ->
-                match Map.tryFind objectKey toMeta.Objects with
-                | Some (newObjectName, OMFunction _) -> ()
-                | _ ->
-                    for KeyValue (signature, def) in overloads do
-                        yield (SODropFunction (objRef, signature), 0)
-            | OMTrigger (tableName, _) ->
-                match Map.tryFind objectKey toMeta.Objects with
-                | Some (newObjectName, OMTrigger _) -> ()
-                | _ -> yield (SODropTrigger (objRef, tableName), 0)
+                | _ -> failwith "Impossible"
+            | OMTrigger (newTableName, newTrigger) ->
+                match oldObjectMeta with
+                | OMTrigger (oldTableName, oldTrigger) ->
+                    if oldObjectName <> newObjectName then
+                        let oldObjRef = { Schema = Some schemaName; Name = oldObjectName }
+                        yield (SORenameTrigger (oldObjRef, newTableName, newObjectName), 0)
+                | _ -> failwith "Impossible"
         }
+
+    let dropOld objectName objectMeta =
+            let objRef = { Schema = Some schemaName; Name = objectName }
+            match objectMeta with
+            | OMTable tableMeta -> deleteBuildTable objRef tableMeta
+            | OMSequence -> Seq.singleton (SODropSequence objRef, 0)
+            | OMConstraint (tableName, constraintType) ->
+                let isPrimaryKey =
+                    match constraintType with
+                    | CMPrimaryKey _ -> 1
+                    | _ -> 0
+                Seq.singleton (SODropConstraint (objRef, tableName), isPrimaryKey)
+            | OMIndex _ -> Seq.singleton (SODropIndex objRef, 0)
+            | OMFunction overloads -> overloads |> Map.keys |> Seq.map (fun signature -> (SODropFunction (objRef, signature), 0))
+            | OMTrigger (tableName, _) -> Seq.singleton (SODropTrigger (objRef, tableName), 0)
+
+    matchMigrationObjects isSameObject createNew modifyOld dropOld fromObjects toObjects
 
 let private migrateBuildDatabase (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : OrderedSchemaOperation seq =
     seq {
         for extName in toMeta.Extensions do
             if not <| Set.contains extName fromMeta.Extensions then
                 yield (SOCreateExtension extName, 0)
-        for KeyValue (schemaKey, schemaMeta) in toMeta.Schemas do
-            match Map.tryFind schemaKey fromMeta.Schemas with
-            | None ->
-                yield (SOCreateSchema schemaMeta.Name, 0)
-                yield! migrateBuildSchema Map.empty schemaMeta
-            | Some oldSchemaMeta ->
-                if oldSchemaMeta.Name <> schemaMeta.Name then
-                    yield (SORenameSchema (oldSchemaMeta.Name, schemaMeta.Name), 0)
-                yield! migrateBuildSchema oldSchemaMeta.Objects schemaMeta
 
-        for KeyValue (schemaKey, schemaMeta) in fromMeta.Schemas do
-            if not (Map.containsKey schemaKey toMeta.Schemas) then
-                yield! deleteBuildSchema schemaMeta.Name schemaMeta
         for extName in fromMeta.Extensions do
             if not <| Set.contains extName toMeta.Extensions then
                 yield (SODropExtension extName, 0)
+
+        let createNew schemaName schemaMeta =
+            seq {
+                yield (SOCreateSchema schemaName, 0)
+                yield! migrateBuildSchema schemaName Map.empty schemaMeta.Objects
+            }
+        let modifyOld oldSchemaName oldSchemaMeta newSchemaName newSchemaMeta =
+            seq {
+                if oldSchemaName <> newSchemaName then
+                    yield (SORenameSchema (oldSchemaName, newSchemaName), 0)
+                yield! migrateBuildSchema newSchemaName oldSchemaMeta.Objects newSchemaMeta.Objects
+            }
+        let dropOld schemaName schemaMeta = deleteBuildSchema schemaName schemaMeta
+
+        yield! matchMigrationObjects (fun _ _ -> true) createNew modifyOld dropOld fromMeta.Schemas toMeta.Schemas
     }
 
 let planDatabaseMigration (fromMeta : DatabaseMeta) (toMeta : DatabaseMeta) : MigrationPlan =

@@ -6,67 +6,60 @@ module FunQL = FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL
 
-// We need to be defensive here; if we cannot correlate something, don't error out but just skip it.
-
-let private correlateSchemaMeta (schemaKey : MigrationKey) (schema : SchemaMeta) : SchemaMeta =
+let private correlateSchemaMeta (schemaName : SchemaName) (schemaKeys : MigrationKeysSet, schema : SchemaMeta) : MigrationKeysSet * SchemaMeta =
     let mutable idColumns = Map.empty
     let metaObjects = schema.Objects
 
-    let correlatePrimaryConstraint key ((objectName, object) as pair) =
+    let correlatePrimaryConstraint objectName ((keys, object) as pair) =
         match object with
         | OMConstraint (tableName, CMPrimaryKey ([|idCol|], defer)) when not (Map.containsKey tableName idColumns) ->
-            let newKey = sprintf "__correlated__primary__%O" tableName
-            if Map.containsKey newKey metaObjects then
-                (key, pair)
-            else
-                idColumns <- Map.add tableName idCol idColumns
-                (newKey, pair)                
-        | _ -> (key, pair)
+            let newKey = sprintf "__primary__%O" tableName
+            idColumns <- Map.add tableName idCol idColumns
+            (Set.add newKey keys, object)
+        | _ -> pair
     
-    let metaObjects = metaObjects |> Map.mapWithKeysUnique correlatePrimaryConstraint
+    let metaObjects = metaObjects |> Map.map correlatePrimaryConstraint
 
     let mutable idSequences = Map.empty
 
-    let correlateTableObjects key (objectName, object) =
+    let correlateTableObjects objectName (keys, object) =
         match object with
         | OMTable tabl ->
             let tableColumns = tabl.Columns
             let tableColumns =
                 match Map.tryFind objectName idColumns with
-                | Some idName when not <| Map.containsKey "__correlated__id" tableColumns ->
-                    let correlateIdColumn key (column : ColumnMeta) =
-                        if column.Name = idName then
+                | Some idName ->
+                    let correlateIdColumn name (keys, column : ColumnMeta) =
+                        if name = idName then
                             match column.ColumnType with
                             | CTPlain { DefaultExpr = Some (VEFunc (SQLName "nextval", [| VEValue (VRegclass { Schema = idSeqSchema; Name = idSeqName }) |])) }
-                              when idSeqSchema = Some schema.Name || (schema.Name = SQLName "public" && idSeqSchema = None) ->
+                              when idSeqSchema = Some schemaName || (schemaName = SQLName "public" && idSeqSchema = None) ->
                                 idSequences <- Map.add idSeqName objectName idSequences
                             | _ -> ()
-                            ("__correlated__id", column)
+                            (Set.add "id" keys, column)
                         else
-                            (key, column)
+                            (keys, column)
 
-                    tableColumns |> Map.mapWithKeysUnique correlateIdColumn
+                    tableColumns |> Map.map correlateIdColumn
                 | _ -> tableColumns
-            (objectName, OMTable { tabl with Columns = tableColumns })
-        | _ -> (objectName, object)
+            (keys, OMTable { tabl with Columns = tableColumns })
+        | _ -> (keys, object)
 
     let metaObjects = metaObjects |> Map.map correlateTableObjects
 
-    let correlateSequence key ((objectName, object) as pair) : (MigrationKey * (SQLName * ObjectMeta)) =
+    let correlateSequence objectName ((keys, object) as pair) : MigrationKeysSet * ObjectMeta =
         match object with
         | OMSequence ->
             match Map.tryFind objectName idSequences with
             | Some tableName ->
-                let newKey = sprintf "__correlated__idseq__%O" tableName
-                if Map.containsKey newKey metaObjects then
-                    (key, pair)
-                else
-                    (newKey, pair)
-            | _ -> (key, pair)
-        | _ -> (key, pair)
+                let newKey = sprintf "__idseq__%O" tableName
+                (Set.add newKey keys, object)
+            | _ -> pair
+        | _ -> pair
 
-    let metaObjects = metaObjects |> Map.mapWithKeysUnique correlateSequence
-    { schema with Objects = metaObjects }
+    let metaObjects = metaObjects |> Map.map correlateSequence
+    let ret = { schema with Objects = metaObjects }
+    (schemaKeys, ret)
 
 let correlateDatabaseMeta (meta : DatabaseMeta) : DatabaseMeta =
     { meta with Schemas = Map.map correlateSchemaMeta meta.Schemas }

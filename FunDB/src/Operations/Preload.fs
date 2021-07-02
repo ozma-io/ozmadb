@@ -14,6 +14,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.System
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
@@ -234,12 +235,12 @@ let filterPreloadedSchemas (preload : Preload) = Map.filter (fun name _ -> Map.c
 let filterUserSchemas (preload : Preload) = Map.filter (fun name _ -> not <| Map.containsKey name preload.Schemas)
 
 let filterPreloadedMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
-    { Schemas = Map.filter (fun name _ -> Map.containsKey (FunQLName name) preload.Schemas) meta.Schemas
+    { Schemas = Map.filter (fun name _ -> Map.containsKey (decompileName name) preload.Schemas) meta.Schemas
       Extensions = meta.Extensions
     } : SQL.DatabaseMeta
 
 let filterUserMeta (preload : Preload) (meta : SQL.DatabaseMeta) =
-    { Schemas = Map.filter (fun name _ -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta.Schemas
+    { Schemas = Map.filter (fun name _ -> not <| Map.containsKey (decompileName name) preload.Schemas) meta.Schemas
       Extensions = meta.Extensions
     } : SQL.DatabaseMeta
 
