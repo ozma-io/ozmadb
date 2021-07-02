@@ -899,7 +899,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             // in this case `composeExhaustingIf` will omit the check completely.
             let subEntityColumn = SQL.VEColumn { Table = tableRef; Name = sqlFunSubEntity }
             let expr =
-                computedFieldCases layout extra fieldRef comp
+                computedFieldCases layout extra { fieldRef with Name = fieldInfo.Name } comp
                     |> Seq.map compileCase
                     |> Seq.toArray
                     |> composeExhaustingIf (makeCheckExprFor subEntityColumn)

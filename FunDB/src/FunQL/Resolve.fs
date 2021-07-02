@@ -1108,8 +1108,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 | Some ({ Field = RComputedField _; Ref = fieldRef } as outer) ->
                     // Find full field, we only have IComputedFieldBits in OuterField..
                     match outer.Entity.FindField outer.Ref.Name with
-                    | Some { Field = RComputedField comp } ->
-                        for (case, caseComp) in computedFieldCases layout ref.Ref.Extra fieldRef comp do
+                    | Some { Field = RComputedField comp; Name = realName } ->
+                        for (case, caseComp) in computedFieldCases layout ref.Ref.Extra { fieldRef with Name = realName } comp do
                             if not caseComp.IsLocal then
                                 isLocal <- false
                     | _ -> failwith "Impossible"

@@ -299,7 +299,7 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
 
         match refField.Field with
         | RComputedField comp ->
-            computedFieldCases layout extra refFieldRef comp |> Seq.map (fun (case, comp) -> comp.Expression) |> Seq.collect buildExprTriggers
+            computedFieldCases layout extra { refFieldRef with Name = refField.Name } comp |> Seq.map (fun (case, comp) -> comp.Expression) |> Seq.collect buildExprTriggers
         | RColumnField col ->
             let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
             let expr = SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
@@ -373,7 +373,7 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
                     let newOuterFields = findOuterFields newExpr
                     outerFields <- Set.union outerFields newOuterFields
 
-                for (case, comp) in computedFieldCases layout ref.Extra boundInfo.Ref comp do
+                for (case, comp) in computedFieldCases layout ref.Extra { boundInfo.Ref with Name = field.Name } comp do
                     runForExpr comp.Expression
             | RColumnField col ->
                 outerFields <- Set.add field.Name outerFields

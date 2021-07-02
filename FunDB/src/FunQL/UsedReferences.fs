@@ -39,7 +39,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
     let rec addField (extra : ObjectMap) (ref : ResolvedFieldRef) (field : ResolvedFieldInfo) : ExprInfo =
         match field.Field with
         | RComputedField comp ->
-            computedFieldCases layout extra ref comp
+            computedFieldCases layout extra { ref with Name = field.Name } comp
             |> Seq.map (fun (case, comp) -> buildForFieldExpr comp.Expression)
             |> Seq.fold unionExprInfo emptyExprInfo
         | _ ->
