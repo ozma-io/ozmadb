@@ -162,7 +162,11 @@ type private Phase1Resolver (layout : SourceLayout) =
                     Option.get parent.InheritedFrom
                 | Some inherited -> inherited
 
-            { child with VirtualInheritedFrom = Some virtualInherited }
+            { child with
+                  VirtualInheritedFrom = Some virtualInherited
+                  // Always use root column name.
+                  ColumnName = parent.ColumnName
+            }
         else
             raisef ResolveLayoutException "Computed field names clash: %O" name
 
@@ -357,10 +361,18 @@ type private Phase1Resolver (layout : SourceLayout) =
             | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In schema %O" name
         Map.iter iterSchema layout.Schemas
 
-    let checkEntityColumnNames (rootEntity : HalfResolvedEntity) =
+    let checkEntityColumnNames (rootRef : ResolvedEntityRef) (rootEntity : HalfResolvedEntity) =
         let collectColumns (entity : HalfResolvedEntity) =
-            let cols = entity.ColumnFields |> Map.values |> Seq.mapMaybe (fun field -> if Option.isNone field.InheritedFrom then Some field.ColumnName else None)
-            let comps = entity.ComputedFields |> Map.values |> Seq.mapMaybe (fun field -> if Option.isNone field.InheritedFrom then Some field.ColumnName else None)
+            let cols =
+                entity.ColumnFields
+                |> Map.values
+                |> Seq.filter (fun field -> Option.isNone field.InheritedFrom)
+                |> Seq.map (fun field -> field.ColumnName)
+            let comps =
+                entity.ComputedFields
+                |> Map.values
+                |> Seq.filter (fun field -> Option.isNone field.InheritedFrom && Option.isNone field.VirtualInheritedFrom)
+                |> Seq.map (fun field -> field.ColumnName)
             Seq.append cols comps
         
         let selfColumns = collectColumns rootEntity
@@ -374,7 +386,7 @@ type private Phase1Resolver (layout : SourceLayout) =
         resolveLayout ()
         for root in rootEntities do
             let entity = Map.find root cachedEntities
-            checkEntityColumnNames entity
+            checkEntityColumnNames root entity
         cachedEntities
 
 let private parseRelatedExpr (rawExpr : string) =
@@ -475,6 +487,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 raisef ResolveLayoutException "Queries are not supported in materialized computed fields"
             if not <| Set.isEmpty expr.References.UsedArguments then
                 raisef ResolveLayoutException "Arguments are not allowed in materialized computed fields"
+            if expr.References.HasRestrictedEntities then
+                raisef ResolveLayoutException "Restricted (plain) join arrows are not allowed in materialized computed fields"
         let exprType =
             try
                 typecheckFieldExpr wrappedLayout expr.Expr
@@ -493,6 +507,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           Type = exprType
           InheritedFrom = None
           IsLocal = expr.Info.IsLocal
+          UsedSchemas = expr.References.UsedSchemas
           AllowBroken = comp.Source.AllowBroken
           HashName = comp.HashName
           ColumnName = comp.ColumnName
@@ -807,18 +822,23 @@ type private Phase3Resolver (layout : Layout) =
             comp
         else
             let mutable isLocal = true
+            let mutable usedSchemas = Map.empty
+
             let getCaseType (case, currComp : ResolvedComputedField) =
                 if currComp.IsMaterialized <> comp.IsMaterialized then
                   raisef ResolveLayoutException "Virtual computed fields cannot be partially materialized: %O" fieldRef
                 if not comp.IsLocal then
                     isLocal <- false
+                usedSchemas <- mergeUsedSchemas currComp.UsedSchemas usedSchemas
                 comp.Type
             let caseTypes = computedFieldCases layout ObjectMap.empty fieldRef comp |> Seq.map getCaseType
+
             match unionTypes caseTypes with
             | None -> raisef ResolveLayoutException "Could not unify types for virtual field cases: %O" fieldRef
             | Some typ ->
                 let root =
                     { IsLocal = isLocal
+                      UsedSchemas = usedSchemas
                       Type = typ
                     }
                 { comp with Root = Some root }

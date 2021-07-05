@@ -4,6 +4,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL
+open FunWithFlags.FunDB.SQL.DML
 
 type IPLPgSQLString =
     abstract member ToPLPgSQLString : unit -> string
@@ -76,6 +77,9 @@ type RaiseMessage =
 type Statement =
     | StDefinition of SchemaOperation
     | StIfThenElse of (ValueExpr * Statements)[] * Statements option
+    | StUpdate of UpdateExpr
+    | StInsert of InsertExpr
+    | StDelete of DeleteExpr
     | StRaise of RaiseStatement
     | StReturn of ValueExpr
     with
@@ -103,6 +107,9 @@ type Statement =
                         | None -> ""
                         | Some stmts -> sprintf "ELSE %s" (stmtsToString stmts)
                     String.concatWithWhitespaces [firstStr; otherCases; elseStr; "END IF"]
+                | StUpdate update -> update.ToSQLString()
+                | StInsert insert -> insert.ToSQLString()
+                | StDelete delete -> delete.ToSQLString()
                 | StRaise raise -> raise.ToPLPgSQLString()
                 | StReturn expr -> sprintf "RETURN %s" (expr.ToSQLString())
             sprintf "%s;" str

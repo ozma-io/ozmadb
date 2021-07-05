@@ -16,6 +16,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
+module SQL = FunWithFlags.FunDB.SQL.DML
 module PLPgSQL = FunWithFlags.FunDB.SQL.PLPgSQL
 
 type LayoutIntegrityException (message : string, innerException : Exception) =
@@ -31,21 +32,25 @@ type ColumnOfTypeAssertion =
 type LayoutAssertions =
     { ColumnOfTypeAssertions : Set<ColumnOfTypeAssertion>
       CheckConstraints : Map<ResolvedConstraintRef, ResolvedFieldExpr>
+      MaterializedFields : Set<ResolvedFieldRef>
     }
 
 let unionLayoutAssertions (a : LayoutAssertions) (b : LayoutAssertions) : LayoutAssertions =
     { ColumnOfTypeAssertions = Set.union a.ColumnOfTypeAssertions b.ColumnOfTypeAssertions
       CheckConstraints = Map.union a.CheckConstraints b.CheckConstraints
+      MaterializedFields = Set.union a.MaterializedFields b.MaterializedFields
     }
 
 let differenceLayoutAssertions (a : LayoutAssertions) (b : LayoutAssertions) : LayoutAssertions =
     { ColumnOfTypeAssertions = Set.difference a.ColumnOfTypeAssertions b.ColumnOfTypeAssertions
       CheckConstraints = Map.difference a.CheckConstraints b.CheckConstraints
+      MaterializedFields = Set.difference a.MaterializedFields b.MaterializedFields
     }
 
 let emptyLayoutAssertions : LayoutAssertions =
     { ColumnOfTypeAssertions = Set.empty
       CheckConstraints = Map.empty
+      MaterializedFields = Set.empty
     }
 
 type private AssertionsBuilder (layout : Layout) =
@@ -71,6 +76,15 @@ type private AssertionsBuilder (layout : Layout) =
             for KeyValue (colName, col) in entity.ColumnFields do
                 let ref = { Entity = entityRef; Name = colName }
                 yield! columnFieldAssertions ref col
+            for KeyValue (compName, comp) in entity.ComputedFields do
+                match comp with
+                | Ok { IsMaterialized = true; Root = Some { IsLocal = false } } ->
+                    let ref = { Entity = entityRef; Name = compName }
+                    yield
+                        { emptyLayoutAssertions with
+                              MaterializedFields = Set.singleton ref
+                        }
+                | _ -> ()
             for KeyValue (constrName, constr) in entity.CheckConstraints do
                 if not constr.IsLocal then
                     let ref = { Entity = entityRef; Name = constrName }
@@ -144,10 +158,14 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
         } : SQL.SingleSelectExpr
     let raiseCall =
         { Level = PLPgSQL.RLException
-          Message = None
+          Message =
+            Some
+                { Format = sprintf "Value in %O is not of type %O" fromFieldRef toEntityRef
+                  Options = [||]
+                }
           Options =
             Map.ofList
-                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "integrity_constraint_violation"))
+                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "column_of_type_assertion"))
                   (PLPgSQL.ROColumn, SQL.VEValue (SQL.VString <| fromFieldRef.Name.ToString()))
                   (PLPgSQL.ROTable, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Name.ToString()))
                   (PLPgSQL.ROSchema, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Schema.ToString()))
@@ -164,16 +182,16 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
         { Declarations = [||]
           Body = [| checkStmt; returnNullStatement |]
         } : PLPgSQL.Program
-    let checkFunctionDefinition =
+    let functionDefinition =
         { Arguments = [||]
           ReturnValue = SQL.FRValue (SQL.SQLRawString "trigger")
           Behaviour = SQL.FBStable
           Language = PLPgSQL.plPgSQLName
           Definition = checkProgram.ToPLPgSQLString()
         } : SQL.FunctionDefinition
-    let checkFunctionKey = sprintf "__ref_type_check__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-    let checkFunctionName = SQL.SQLName <| sprintf "__ref_type_check__%s__%s" entity.HashName field.HashName
-    let checkFunctionObject = SQL.OMFunction <| Map.singleton [||] checkFunctionDefinition
+    let functionKey = sprintf "__ref_type_check__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+    let functionName = SQL.SQLName <| sprintf "__ref_type_check__%s__%s" entity.HashName field.HashName
+    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
 
     let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = field.ColumnName }
     let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
@@ -182,35 +200,35 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
             SQL.VEAnd (SQL.VEIsNotNull (checkNewColumn), SQL.VEDistinct (checkOldColumn, checkNewColumn))
         else
             SQL.VEBinaryOp (checkOldColumn, SQL.BONotEq, checkNewColumn)
-    let checkUpdateTriggerDefinition =
+    let updateTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEUpdate (Some [| field.ColumnName |]) |]
           Mode = SQL.TMEachRow
           Condition = Some <| String.comparable checkUpdateTriggerCondition
-          FunctionName = { Schema = Some fromSchema; Name = checkFunctionName }
+          FunctionName = { Schema = Some fromSchema; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkUpdateTriggerKey = sprintf "__ref_type_update__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-    let checkUpdateTriggerName = SQL.SQLName <| sprintf "__ref_type_update__%s__%s" entity.HashName field.HashName
-    let checkUpdateTriggerObject = SQL.OMTrigger (fromTable, checkUpdateTriggerDefinition)
+    let updateTriggerKey = sprintf "__ref_type_update__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+    let updateTriggerName = SQL.SQLName <| sprintf "01_ref_type_update__%s__%s" entity.HashName field.HashName
+    let updateTriggerObject = SQL.OMTrigger (fromTable, updateTriggerDefinition)
 
-    let checkInsertTriggerDefinition =
+    let insertTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEInsert |]
           Mode = SQL.TMEachRow
           Condition = None
-          FunctionName = { Schema = Some fromSchema; Name = checkFunctionName }
+          FunctionName = { Schema = Some fromSchema; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
     let checkInsertTriggerKey =sprintf "__ref_type_insert__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-    let checkInsertTriggerName = SQL.SQLName <| sprintf "__ref_type_insert__%s__%s" entity.HashName field.HashName
-    let checkInsertTriggerObject = SQL.OMTrigger (fromTable, checkInsertTriggerDefinition)
+    let checkInsertTriggerName = SQL.SQLName <| sprintf "01_ref_type_insert__%s__%s" entity.HashName field.HashName
+    let checkInsertTriggerObject = SQL.OMTrigger (fromTable, insertTriggerDefinition)
 
     let objects =
-        [ (checkFunctionName, (Set.singleton checkFunctionKey, checkFunctionObject))
-          (checkUpdateTriggerName, (Set.singleton checkUpdateTriggerKey, checkUpdateTriggerObject))
+        [ (functionName, (Set.singleton functionKey, functionObject))
+          (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerObject))
           (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
         ]
         |> Map.ofSeq
@@ -295,14 +313,38 @@ let private postprocessTrigger (compiledRef : SQL.TableRef) (trig : PathTrigger)
     let newExpr = SQL.mapValueExpr mapper trig.Expression
     { trig with Expression = newExpr }
 
-type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : ResolvedEntityRef) =
+let rec private findOuterFields (layout : Layout) (expr : ResolvedFieldExpr) : Set<FieldName> =
+    let mutable outerFields = Set.empty
+
+    let iterReference (ref : LinkedBoundFieldRef) =
+        let fieldInfo = ObjectMap.findType<FieldMeta> ref.Extra
+        let boundInfo = Option.get fieldInfo.Bound
+        let field = layout.FindField boundInfo.Ref.Entity boundInfo.Ref.Name |> Option.get
+        match field.Field with
+        | RColumnField col ->
+            outerFields <- Set.add field.Name outerFields
+        | RComputedField comp when comp.IsMaterialized ->
+            outerFields <- Set.add field.Name outerFields
+        | RComputedField comp ->
+            for (case, comp) in computedFieldCases layout ref.Extra { boundInfo.Ref with Name = field.Name } comp do
+                let fields = findOuterFields layout comp.Expression
+                outerFields <- Set.union fields outerFields
+        | _ -> ()
+
+    let mapper =
+        { idFieldExprIter with
+            FieldReference = iterReference
+        }
+    iterFieldExpr mapper expr
+
+    outerFields
+
+type private AffectedByExprBuilder (layout : Layout, constrEntityRef : ResolvedEntityRef) =
     let rec buildSinglePathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) (refFieldRef : ResolvedFieldRef) : (PathTriggerKey * PathTrigger) seq =
         let refEntity = layout.FindEntity refFieldRef.Entity |> Option.get
         let refField = refEntity.FindField refFieldRef.Name |> Option.get
 
         match refField.Field with
-        | RComputedField comp ->
-            computedFieldCases layout extra { refFieldRef with Name = refField.Name } comp |> Seq.map (fun (case, comp) -> comp.Expression) |> Seq.collect buildExprTriggers
         | RColumnField col ->
             let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
             let expr = SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
@@ -317,6 +359,22 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
                   Expression = expr
                 }
             Seq.singleton (key, trigger)
+        | RComputedField comp when comp.IsMaterialized ->
+            let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
+            let expr = SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
+
+            let key =
+                { Ref = outerRef
+                  EntityPath = []
+                }
+            let trigger =
+                { Fields = Map.singleton refField.Name refFieldRef.Entity
+                  Root = refEntity.Root
+                  Expression = expr
+                }
+            Seq.singleton (key, trigger)
+        | RComputedField comp ->
+            computedFieldCases layout extra { refFieldRef with Name = refField.Name } comp |> Seq.map (fun (case, comp) -> comp.Expression) |> Seq.collect buildExprTriggers
         | _ -> Seq.empty
 
     and buildPathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) : (ResolvedEntityRef * PathArrow) list -> (PathTriggerKey * PathTrigger) seq = function
@@ -360,71 +418,15 @@ type private CheckConstraintAffectedBuilder (layout : Layout, constrEntityRef : 
 
         triggers
 
-    let rec findOuterFields (expr : ResolvedFieldExpr) : Set<FieldName> =
-        let allTriggers = buildExprTriggers
-
-        let mutable triggers = Map.empty
-        let mutable outerFields = Set.empty
-
-        let iterReference (ref : LinkedBoundFieldRef) =
-            let fieldInfo = ObjectMap.findType<FieldMeta> ref.Extra
-            let boundInfo = Option.get fieldInfo.Bound
-            let field = layout.FindField boundInfo.Ref.Entity boundInfo.Ref.Name |> Option.get
-            match field.Field with
-            | RComputedField comp ->
-                let runForExpr (newExpr : ResolvedFieldExpr) =
-                    let newOuterFields = findOuterFields newExpr
-                    outerFields <- Set.union outerFields newOuterFields
-
-                for (case, comp) in computedFieldCases layout ref.Extra { boundInfo.Ref with Name = field.Name } comp do
-                    runForExpr comp.Expression
-            | RColumnField col ->
-                outerFields <- Set.add field.Name outerFields
-            | _ -> ()
-
-        let mapper =
-            { idFieldExprIter with
-                FieldReference = iterReference
-            }
-        iterFieldExpr mapper expr
-
-        outerFields
+    let finalizeTriggers (triggers : (PathTriggerKey * PathTrigger) seq) : Map<PathTriggerKey, PathTrigger> =
+        let sqlRef = compileRenamedResolvedEntityRef constrEntityRef
+        triggers |> Seq.fold (fun trigs (key, trig) -> Map.addWith unionPathTrigger key (postprocessTrigger sqlRef trig) trigs) Map.empty
 
     // Returns encountered outer fields, and also path triggers.
-    let findCheckConstraintAffected (expr : ResolvedFieldExpr) : Map<PathTriggerKey, PathTrigger> =
-        let sqlRef = compileRenamedResolvedEntityRef constrEntityRef
-        buildExprTriggers expr |> Seq.fold (fun trigs (key, trig) -> Map.addWith unionPathTrigger key (postprocessTrigger sqlRef trig) trigs) Map.empty
+    let findAffectedByExpr (expr : ResolvedFieldExpr) : Map<PathTriggerKey, PathTrigger> =
+        buildExprTriggers expr |> finalizeTriggers
 
-    member this.FindOuterFields expr = findOuterFields expr
-    member this.FindCheckConstraintAffected expr = findCheckConstraintAffected expr
-
-let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.SelectExpr =
-    let entity = layout.FindEntity constrRef.Entity |> Option.get
-    let fixedCheck = replaceEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
-    let aggExpr = FEAggFunc (FunQLName "bool_and", AEAll [| fixedCheck |])
-
-    let result =
-        { Attributes = Map.empty
-          Result = aggExpr
-          Alias = None
-        }
-    let fromEntity =
-        { Ref = relaxEntityRef entity.Root
-          Alias = None
-          AsRoot = false
-        }
-    let singleSelect =
-        { Attributes = Map.empty
-          Results = [| QRExpr result |]
-          From = Some (FEntity fromEntity)
-          Where = None
-          GroupBy = [||]
-          OrderLimit = emptyOrderLimitClause
-          Extra = ObjectMap.empty
-        } : ResolvedSingleSelectExpr
-    let select = { CTEs = None; Tree = SSelect singleSelect; Extra = ObjectMap.empty }
-    let (arguments, ret) = compileSelectExpr layout emptyArguments select
-    ret
+    member this.FindAffectedByExpr expr = findAffectedByExpr expr
 
 // Replaces entity references with `new` in simple cases.
 type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
@@ -517,9 +519,22 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
 
     member this.UseNewInSelectExpr expr = useNewInSelectExpr expr
 
-let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (outerFields : Set<FieldName>) (check : ResolvedFieldExpr) : SQL.DatabaseMeta =
+let private distinctCheck (columnName : SQL.ColumnName) =
+    let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = columnName }
+    let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = columnName }
+    SQL.VEDistinct (checkOldColumn, checkNewColumn)
+
+let private buildUpdateCheck (entity : ResolvedEntity) (outerFields : FieldName seq) =
+    let fieldDistinctCheck name =
+        let columnName = getColumnName entity name
+        distinctCheck columnName
+
+    outerFields |> Seq.map fieldDistinctCheck |> Seq.fold1 (curry SQL.VEAnd)
+
+let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.DatabaseMeta =
     let entity = layout.FindEntity constrRef.Entity |> Option.get
     let constr = Map.find constrRef.Name entity.CheckConstraints
+    let outerFields = findOuterFields layout check
 
     let fixedCheck = replaceEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
 
@@ -550,10 +565,14 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
 
     let raiseCall =
         { Level = PLPgSQL.RLException
-          Message = None
+          Message =
+            Some
+                { Format = sprintf "Constraint %O is violated" constrRef
+                  Options = [||]
+                }
           Options =
             Map.ofList
-                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "integrity_constraint_violation"))
+                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "outer_check_constraint_assertion"))
                   (PLPgSQL.ROTable, SQL.VEValue (constrRef.Entity.Name |> string |> SQL.VString))
                   (PLPgSQL.ROSchema, SQL.VEValue (constrRef.Entity.Schema |> string |> SQL.VString))
                 ]
@@ -564,22 +583,16 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
         { Declarations = [||]
           Body = [| checkStmt; returnNullStatement |]
         } : PLPgSQL.Program
-    let checkFunctionDefinition =
+    let functionDefinition =
         { Arguments = [||]
           ReturnValue = SQL.FRValue (SQL.SQLRawString "trigger")
           Behaviour = SQL.FBStable
           Language = PLPgSQL.plPgSQLName
           Definition = checkProgram.ToPLPgSQLString()
         } : SQL.FunctionDefinition
-    let checkFunctionKey = sprintf "__out_chcon_check__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
-    let checkFunctionName = SQL.SQLName <| sprintf "__out_chcon_check__%s__%s" entity.HashName constr.HashName
-    let checkFunctionObject = SQL.OMFunction <| Map.singleton [||] checkFunctionDefinition
-
-    let fieldDistinctCheck name =
-        let field = Map.find name entity.ColumnFields
-        let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = field.ColumnName }
-        let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
-        SQL.VEDistinct (checkOldColumn, checkNewColumn)
+    let functionKey = sprintf "__out_chcon_check__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
+    let functionName = SQL.SQLName <| sprintf "__out_chcon_check__%s__%s" entity.HashName constr.HashName
+    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
 
     let checkExpr =
         if Option.isNone entity.Parent then
@@ -587,48 +600,47 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
         else
             Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
-    let updateCheck = outerFields |> Seq.map fieldDistinctCheck |> Seq.fold1 (curry SQL.VEAnd)
+    let updateCheck = buildUpdateCheck entity outerFields
     let updateCheck =
         match checkExpr with
         | None -> updateCheck
         | Some check ->
             SQL.VEAnd (check, updateCheck)
 
-    let getColumnName name = (Map.find name entity.ColumnFields).ColumnName
-    let affectedColumns = outerFields |> Seq.map getColumnName |> Seq.toArray
+    let affectedColumns = outerFields |> Seq.map (getColumnName entity) |> Seq.toArray
 
     let schemaName = compileName entity.Root.Schema
     let tableName = compileName entity.Root.Name
 
-    let checkUpdateTriggerDefinition =
+    let updateTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEUpdate (Some affectedColumns) |]
           Mode = SQL.TMEachRow
           Condition = Some <| String.comparable updateCheck
-          FunctionName = { Schema = Some schemaName; Name = checkFunctionName }
+          FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkUpdateTriggerKey = sprintf "__out_chcon_update__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
-    let checkUpdateTriggerName = SQL.SQLName <| sprintf "__out_chcon_update__%s__%s" entity.HashName constr.HashName
-    let checkUpdateTriggerObject = SQL.OMTrigger (tableName, checkUpdateTriggerDefinition)
+    let updateTriggerKey = sprintf "__out_chcon_update__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
+    let updateTriggerName = SQL.SQLName <| sprintf "01_out_chcon_update__%s__%s" entity.HashName constr.HashName
+    let updateTriggerObject = SQL.OMTrigger (tableName, updateTriggerDefinition)
 
-    let checkInsertTriggerDefinition =
+    let insertTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEInsert |]
           Mode = SQL.TMEachRow
           Condition = Option.map (fun check -> String.comparable check ) checkExpr
-          FunctionName = { Schema = Some schemaName; Name = checkFunctionName }
+          FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
     let checkInsertTriggerKey = sprintf "__out_chcon_insert__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
-    let checkInsertTriggerName = SQL.SQLName <| sprintf "__out_chcon_insert__%s__%s" entity.HashName constr.HashName
-    let checkInsertTriggerObject = SQL.OMTrigger (tableName, checkInsertTriggerDefinition)
+    let checkInsertTriggerName = SQL.SQLName <| sprintf "01_out_chcon_insert__%s__%s" entity.HashName constr.HashName
+    let checkInsertTriggerObject = SQL.OMTrigger (tableName, insertTriggerDefinition)
 
     let objects =
-        [ (checkFunctionName, (Set.singleton checkFunctionKey, checkFunctionObject))
-          (checkUpdateTriggerName, (Set.singleton checkUpdateTriggerKey, checkUpdateTriggerObject))
+        [ (functionName, (Set.singleton functionKey, functionObject))
+          (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerObject))
           (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
         ]
         |> Map.ofSeq
@@ -656,10 +668,14 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
 
     let raiseCall =
         { Level = PLPgSQL.RLException
-          Message = None
+          Message =
+            Some
+                { Format = sprintf "Constraint %O is violated" constrRef
+                  Options = [||]
+                }
           Options =
             Map.ofList
-                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "integrity_constraint_violation"))
+                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "inner_check_constraint_assertion"))
                   (PLPgSQL.ROTable, SQL.VEValue (constrRef.Entity.Name |> string |> SQL.VString))
                   (PLPgSQL.ROSchema, SQL.VEValue (constrRef.Entity.Schema |> string |> SQL.VString))
                 ]
@@ -670,7 +686,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
         { Declarations = [||]
           Body = [| checkStmt; returnNullStatement |]
         } : PLPgSQL.Program
-    let checkFunctionDefinition =
+    let functionDefinition =
         { Arguments = [||]
           ReturnValue = SQL.FRValue (SQL.SQLRawString "trigger")
           // Otherwise changes are invisible from the trigger.
@@ -679,19 +695,15 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
           Language = PLPgSQL.plPgSQLName
           Definition = checkProgram.ToPLPgSQLString()
         } : SQL.FunctionDefinition
-    let checkFunctionKey = sprintf "__in_chcon_check__%s" triggerKey
-    let checkFunctionName = SQL.SQLName <| sprintf "__in_chcon_check__%s" triggerName
-    let checkFunctionObject = SQL.OMFunction <| Map.singleton [||] checkFunctionDefinition
+    let functionKey = sprintf "__in_chcon_check__%s" triggerKey
+    let functionName = SQL.SQLName <| sprintf "__in_chcon_check__%s" triggerName
+    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
 
     let getFieldInfo (fieldName, fieldEntityRef) =
         let fieldEntity = layout.FindEntity fieldEntityRef |> Option.get
-        let field = Map.find fieldName fieldEntity.ColumnFields
-        let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = field.ColumnName }
-        let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
-        let expr = SQL.VEDistinct (checkOldColumn, checkNewColumn)
-        (field.ColumnName, expr)
+        getColumnName fieldEntity fieldName
 
-    let fieldsInfo = trigger.Fields |> Map.toSeq |> Seq.map getFieldInfo |> Seq.cache
+    let affectedColumns = trigger.Fields |> Map.toSeq |> Seq.map getFieldInfo |> Seq.toArray
 
     let checkExpr =
         if Option.isNone entity.Parent then
@@ -699,13 +711,11 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
         else
             Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
-    let updateCheck = fieldsInfo |> Seq.map snd |> Seq.fold1 (curry SQL.VEAnd)
+    let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEAnd)
     let updateCheck =
         match checkExpr with
         | None -> updateCheck
         | Some check -> SQL.VEAnd (check, updateCheck)
-
-    let affectedColumns = fieldsInfo |> Seq.map fst |> Seq.toArray
 
     let schemaName = compileName entity.Root.Schema
 
@@ -713,25 +723,25 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
     let triggerSchemaName = compileName trigger.Root.Schema
     let triggerTableName = compileName trigger.Root.Name
 
-    let checkUpdateTriggerDefinition =
+    let updateTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
           Order = SQL.TOAfter
           Events = [| SQL.TEUpdate (Some affectedColumns) |]
           Mode = SQL.TMEachRow
           Condition = Some <| String.comparable updateCheck
-          FunctionName = { Schema = Some schemaName; Name = checkFunctionName }
+          FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkUpdateTriggerKey = sprintf "__in_chcon_update__%s" triggerKey
-    let checkUpdateTriggerName = SQL.SQLName <| sprintf "__in_chcon_update__%s" triggerName
-    let checkUpdateTriggerObject = SQL.OMTrigger (triggerTableName, checkUpdateTriggerDefinition)
+    let updateTriggerKey = sprintf "__in_chcon_update__%s" triggerKey
+    let updateTriggerName = SQL.SQLName <| sprintf "01_in_chcon_update__%s" triggerName
+    let updateTriggerObject = SQL.OMTrigger (triggerTableName, updateTriggerDefinition)
 
-    let functionObjects = Map.singleton checkFunctionName (Set.singleton checkFunctionKey, checkFunctionObject)
+    let functionObjects = Map.singleton functionName (Set.singleton functionKey, functionObject)
     let functionDbMeta : SQL.DatabaseMeta =
         { Schemas = Map.singleton schemaName (Set.empty, { Objects = functionObjects })
           Extensions = Set.empty
         }
-    let triggerObjects = Map.singleton checkUpdateTriggerName (Set.singleton checkUpdateTriggerKey, checkUpdateTriggerObject)
+    let triggerObjects = Map.singleton updateTriggerName (Set.singleton updateTriggerKey, updateTriggerObject)
     let triggerDbMeta : SQL.DatabaseMeta =
         { Schemas = Map.singleton triggerSchemaName (Set.empty, { Objects = triggerObjects })
           Extensions = Set.empty
@@ -739,13 +749,57 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
 
     SQL.unionDatabaseMeta functionDbMeta triggerDbMeta
 
+let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.SelectExpr =
+    let entity = layout.FindEntity constrRef.Entity |> Option.get
+    let fixedCheck = replaceEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
+    let aggExpr = FEAggFunc (FunQLName "bool_and", AEAll [| fixedCheck |])
+
+    let result =
+        { Attributes = Map.empty
+          Result = aggExpr
+          Alias = None
+        }
+    let fromEntity =
+        { Ref = relaxEntityRef entity.Root
+          Alias = None
+          AsRoot = false
+        }
+    let singleSelect =
+        { Attributes = Map.empty
+          Results = [| QRExpr result |]
+          From = Some (FEntity fromEntity)
+          Where = None
+          GroupBy = [||]
+          OrderLimit = emptyOrderLimitClause
+          Extra = ObjectMap.empty
+        } : ResolvedSingleSelectExpr
+    let select = { CTEs = None; Tree = SSelect singleSelect; Extra = ObjectMap.empty }
+    let (arguments, ret) = compileSelectExpr layout emptyArguments select
+    ret
+
+let private compileCheckConstraintBulkCheck (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.SelectExpr =
+    let entity = layout.FindEntity constrRef.Entity |> Option.get
+
+    let singleSelect =
+        match compileAggregateCheckConstraintCheck layout constrRef check with
+        | { CTEs = None; Tree = SQL.SSelect select } -> select
+        | _ -> failwith "Impossible non-single check constraint select"
+
+    let checkExpr =
+        if Option.isNone entity.Parent then
+            None
+        else
+            Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
+
+    let singleSelect = { singleSelect with Where = Option.unionWith (curry SQL.VEAnd) checkExpr singleSelect.Where }
+    { CTEs = None; Tree = SQL.SSelect singleSelect; Extra = null }
+
 let buildCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.DatabaseMeta =
-    let builder = CheckConstraintAffectedBuilder(layout, constrRef.Entity)
-    let outerFields = builder.FindOuterFields check
-    let triggers = builder.FindCheckConstraintAffected check
+    let builder = AffectedByExprBuilder(layout, constrRef.Entity)
+    let triggers = builder.FindAffectedByExpr check
 
     // First pair of triggers: outer, e.g., check when the row itself is updated.
-    let outerMeta = buildOuterCheckConstraintAssertion layout constrRef outerFields check
+    let outerMeta = buildOuterCheckConstraintAssertion layout constrRef check
     // Next triggers -- for each dependent field we need to check that a change doesn't violate the constraint.
     let checkExpr =
         match compileAggregateCheckConstraintCheck layout constrRef check with
@@ -756,6 +810,259 @@ let buildCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstra
         |> Seq.map (fun (key, trig) -> buildInnerCheckConstraintAssertion layout constrRef checkExpr key trig)
         |> Seq.fold SQL.unionDatabaseMeta outerMeta
 
+let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) (outerFields : Set<FieldName>) (update : SQL.UpdateExpr) : SQL.DatabaseMeta =
+    let entity = layout.FindEntity fieldRef.Entity |> Option.get
+
+    let tableRef = compileResolvedEntityRef entity.Root
+    let updateId = { Table = Some tableRef; Name = sqlFunId } : SQL.ColumnRef
+    let idExpr = SQL.VEBinaryOp (SQL.VEColumn updateId, SQL.BOEq, SQL.VEColumn sqlNewId)
+
+    let update =
+        { update with
+              Where = Option.unionWith (curry SQL.VEAnd) (Some idExpr) update.Where
+        }
+
+    let updateStmt = PLPgSQL.StUpdate update
+
+    let program =
+        { Declarations = [||]
+          Body = [| updateStmt; returnNullStatement |]
+        } : PLPgSQL.Program
+    let functionDefinition =
+        { Arguments = [||]
+          ReturnValue = SQL.FRValue (SQL.SQLRawString "trigger")
+          Behaviour = SQL.FBVolatile
+          Language = PLPgSQL.plPgSQLName
+          Definition = program.ToPLPgSQLString()
+        } : SQL.FunctionDefinition
+    let functionKey = sprintf "__out_mat_store__%O__%O__%O" fieldRef.Entity.Schema fieldRef.Entity.Name fieldRef.Name
+    let functionName = SQL.SQLName <| sprintf "__out_mat_store__%s__%s" entity.HashName comp.HashName
+    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
+
+    let checkExpr =
+        if Option.isNone entity.Parent then
+            None
+        else
+            Some <| makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
+
+    let updateCheck = buildUpdateCheck entity outerFields
+    let updateCheck =
+        match checkExpr with
+        | None -> updateCheck
+        | Some check ->
+            SQL.VEAnd (check, updateCheck)
+
+    let affectedColumns = outerFields |> Seq.map (getColumnName entity) |> Seq.toArray
+
+    let schemaName = compileName entity.Root.Schema
+    let tableName = compileName entity.Root.Name
+
+    let updateTriggerDefinition =
+        { IsConstraint = None
+          Order = SQL.TOAfter
+          Events = [| SQL.TEUpdate (Some affectedColumns) |]
+          Mode = SQL.TMEachRow
+          Condition = Some <| String.comparable updateCheck
+          FunctionName = { Schema = Some schemaName; Name = functionName }
+          FunctionArgs = [||]
+        } : SQL.TriggerDefinition
+    let updateTriggerKey = sprintf "__out_mat_update__%O__%O__%O" fieldRef.Entity.Schema fieldRef.Entity.Name fieldRef.Name
+    let updateTriggerName = SQL.SQLName <| sprintf "00_out_mat_update__%s__%s" entity.HashName comp.HashName
+    let updateTriggerObject = SQL.OMTrigger (tableName, updateTriggerDefinition)
+
+    let insertTriggerDefinition =
+        { IsConstraint = None
+          Order = SQL.TOAfter
+          Events = [| SQL.TEInsert |]
+          Mode = SQL.TMEachRow
+          Condition = Option.map (fun check -> String.comparable check ) checkExpr
+          FunctionName = { Schema = Some schemaName; Name = functionName }
+          FunctionArgs = [||]
+        } : SQL.TriggerDefinition
+    let checkInsertTriggerKey = sprintf "__out_mat_insert__%O__%O__%O" fieldRef.Entity.Schema fieldRef.Entity.Name fieldRef.Name
+    let checkInsertTriggerName = SQL.SQLName <| sprintf "00_out_mat_insert__%s__%s" entity.HashName comp.HashName
+    let checkInsertTriggerObject = SQL.OMTrigger (tableName, insertTriggerDefinition)
+
+    let objects =
+        [ (functionName, (Set.singleton functionKey, functionObject))
+          (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerObject))
+          (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
+        ]
+        |> Map.ofSeq
+    { Schemas = Map.singleton schemaName (Set.empty, { Objects = objects })
+      Extensions = Set.empty
+    }
+
+// This check is built on assumption that we can collect affected rows after the operation. This is true in all cases except one: DELETE with SET NULL foreign key.
+// We don't support them right now, but beware of this!
+let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) (update : SQL.UpdateExpr) (key : PathTriggerKey) (trigger : PathTrigger) : SQL.DatabaseMeta =
+    let entity = layout.FindEntity fieldRef.Entity |> Option.get
+    let fullTriggerKey = { ConstraintRef = fieldRef; Key = key }
+    let triggerName = pathTriggerName fullTriggerKey
+    let triggerKey = pathTriggerKey fullTriggerKey
+
+    let update =
+        { update with
+              Where = Option.unionWith (curry SQL.VEAnd) (Some trigger.Expression) update.Where
+        }
+
+    let updateStmt = PLPgSQL.StUpdate update
+
+    let program =
+        { Declarations = [||]
+          Body = [| updateStmt; returnNullStatement |]
+        } : PLPgSQL.Program
+    let functionDefinition =
+        { Arguments = [||]
+          ReturnValue = SQL.FRValue (SQL.SQLRawString "trigger")
+          Behaviour = SQL.FBVolatile
+          Language = PLPgSQL.plPgSQLName
+          Definition = program.ToPLPgSQLString()
+        } : SQL.FunctionDefinition
+    let functionKey = sprintf "__in_mat_store__%s" triggerKey
+    let functionName = SQL.SQLName <| sprintf "__in_mat_store__%s" triggerName
+    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
+
+    let getFieldInfo (fieldName, fieldEntityRef) =
+        let fieldEntity = layout.FindEntity fieldEntityRef |> Option.get
+        getColumnName fieldEntity fieldName
+
+    let affectedColumns = trigger.Fields |> Map.toSeq |> Seq.map getFieldInfo |> Seq.toArray
+
+    let checkExpr =
+        if Option.isNone entity.Parent then
+            None
+        else
+            Some <| makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
+
+    let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEAnd)
+    let updateCheck =
+        match checkExpr with
+        | None -> updateCheck
+        | Some check -> SQL.VEAnd (check, updateCheck)
+
+    let schemaName = compileName entity.Root.Schema
+
+    // We guarantee that `Fields` is non-empty.
+    let triggerSchemaName = compileName trigger.Root.Schema
+    let triggerTableName = compileName trigger.Root.Name
+
+    let updateTriggerDefinition =
+        { IsConstraint = None
+          Order = SQL.TOAfter
+          Events = [| SQL.TEUpdate (Some affectedColumns) |]
+          Mode = SQL.TMEachRow
+          Condition = Some <| String.comparable updateCheck
+          FunctionName = { Schema = Some schemaName; Name = functionName }
+          FunctionArgs = [||]
+        } : SQL.TriggerDefinition
+    let updateTriggerKey = sprintf "__in_mat_update__%s" triggerKey
+    let updateTriggerName = SQL.SQLName <| sprintf "00_in_mat_update__%s" triggerName
+    let updateTriggerObject = SQL.OMTrigger (triggerTableName, updateTriggerDefinition)
+
+    let functionObjects = Map.singleton functionName (Set.singleton functionKey, functionObject)
+    let functionDbMeta : SQL.DatabaseMeta =
+        { Schemas = Map.singleton schemaName (Set.empty, { Objects = functionObjects })
+          Extensions = Set.empty
+        }
+    let triggerObjects = Map.singleton updateTriggerName (Set.singleton updateTriggerKey, updateTriggerObject)
+    let triggerDbMeta : SQL.DatabaseMeta =
+        { Schemas = Map.singleton triggerSchemaName (Set.empty, { Objects = triggerObjects })
+          Extensions = Set.empty
+        }
+
+    SQL.unionDatabaseMeta functionDbMeta triggerDbMeta
+
+let private expandMaterializedField (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedFieldExpr =
+    let cases = computedFieldCases layout ObjectMap.empty fieldRef comp |> Seq.toArray
+    if Array.isEmpty cases then
+        FEValue FNull
+    else if Array.length cases = 1 then
+        let (case, comp) = cases.[0]
+        comp.Expression
+    else
+        let subEntityPlainRef = { Entity = Some <| relaxEntityRef fieldRef.Entity; Name = funSubEntity } : FieldRef
+        let subEntityRef = { Ref = { Ref = VRColumn subEntityPlainRef; Path = [||]; AsRoot = false }; Extra = ObjectMap.empty } : LinkedBoundFieldRef
+        let buildCase (case : VirtualFieldCase, comp : ResolvedComputedField) =
+            let info = { CheckForTypes = Some case.PossibleEntities } : SubEntityMeta
+            let extra = ObjectMap.singleton info
+            let subEntity = { Ref = relaxEntityRef case.Ref; Extra = extra } : SubEntityRef
+            let check = FEInheritedFrom (subEntityRef, subEntity)
+            (check, comp.Expression)
+        let switchCases = cases |> Seq.take (Array.length cases - 1) |> Seq.map buildCase |> Seq.toArray
+        let (lastCase, lastComp) = cases.[Array.length cases - 1]
+        FECase (switchCases, Some lastComp.Expression)
+
+let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : SQL.UpdateExpr =
+    let entity = layout.FindEntity fieldRef.Entity |> Option.get
+    let expr = expandMaterializedField layout fieldRef comp
+    let fixedExpr = replaceEntityRefInExpr (Some <| relaxEntityRef entity.Root) expr
+    let result =
+        { Attributes = Map.empty
+          Result = fixedExpr
+          Alias = None
+        }
+    let fromEntity =
+        { Ref = relaxEntityRef entity.Root
+          Alias = None
+          AsRoot = false
+        }
+    let singleSelect =
+        { Attributes = Map.empty
+          Results = [|  QRExpr result |]
+          From = Some (FEntity fromEntity)
+          Where = None
+          GroupBy = [||]
+          OrderLimit = emptyOrderLimitClause
+          Extra = ObjectMap.empty
+        } : ResolvedSingleSelectExpr
+    let select = { CTEs = None; Tree = SSelect singleSelect; Extra = ObjectMap.empty }
+    let (compiledResult, compiledFrom) =
+        match compileSelectExpr layout emptyArguments select with
+        | (_, { Tree = SQL.SSelect { Columns = [| SQL.SCExpr (alias, result) |]; From = Some from } }) -> (result, from)
+        | _ -> failwith "Unexpected compilation result"
+
+    let tableRef = compileResolvedEntityRef entity.Root
+    let updateId = { Table = Some tableRef; Name = sqlFunId } : SQL.ColumnRef
+    let joinedUpdateId = { Table = Some <| compileRenamedResolvedEntityRef fieldRef.Entity; Name = sqlFunId } : SQL.ColumnRef
+    let joinSame = SQL.VEBinaryOp (SQL.VEColumn updateId, SQL.BOEq, SQL.VEColumn joinedUpdateId)
+    { Name = compileResolvedEntityRef entity.Root
+      Columns = Map.singleton comp.ColumnName (null, compiledResult)
+      From = Some compiledFrom
+      Where = Some joinSame
+      Extra = null
+    } : SQL.UpdateExpr
+
+let private compileMaterializedFieldBulkStore (layout : Layout) (fieldRef : ResolvedFieldRef) : SQL.UpdateExpr =
+    let entity = layout.FindEntity fieldRef.Entity |> Option.get
+    let comp =
+        match entity.FindField fieldRef.Name with
+        | Some { Field = RComputedField ({ IsMaterialized = true; Root = Some _ } as comp); ForceRename = false } -> comp
+        | _ -> failwith "Impossible non-computed field"
+
+    compileMaterializedFieldUpdate layout fieldRef comp
+
+let buildMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedFieldRef) : SQL.DatabaseMeta =
+    let entity = layout.FindEntity fieldRef.Entity |> Option.get
+    let comp =
+        match entity.FindField fieldRef.Name with
+        | Some { Field = RComputedField ({ IsMaterialized = true; Root = Some _ } as comp); ForceRename = false } -> comp
+        | _ -> failwith "Impossible non-computed field"
+    let expr = expandMaterializedField layout fieldRef comp
+    let builder = AffectedByExprBuilder(layout, fieldRef.Entity)
+    let triggers = builder.FindAffectedByExpr expr
+
+    let compiled = compileMaterializedFieldUpdate layout fieldRef comp
+    let outerFields = findOuterFields layout expr
+
+    // First pair of triggers: outer, e.g., check when the row itself is updated.
+    let outerMeta = buildOuterMaterializedFieldStore layout fieldRef comp outerFields compiled
+    // Next triggers -- for each dependent field we need to check that a change doesn't violate the constraint.
+    triggers
+        |> Map.toSeq
+        |> Seq.map (fun (key, trig) -> buildInnerMaterializedFieldStore layout fieldRef comp compiled key trig)
+        |> Seq.fold SQL.unionDatabaseMeta outerMeta
+
 let buildAssertionsMeta (layout : Layout) (asserts : LayoutAssertions) : SQL.DatabaseMeta =
     let mapFieldOfType fieldOfType = buildColumnOfTypeAssertion layout fieldOfType.FromField fieldOfType.ToEntity
     let colOfTypes = asserts.ColumnOfTypeAssertions |> Set.toSeq |> Seq.map mapFieldOfType
@@ -763,7 +1070,10 @@ let buildAssertionsMeta (layout : Layout) (asserts : LayoutAssertions) : SQL.Dat
     let mapCheck (key, expr) = buildCheckConstraintAssertion layout key expr
     let checkConstrs = asserts.CheckConstraints |> Map.toSeq |> Seq.map mapCheck
 
-    Seq.concat [colOfTypes; checkConstrs] |> Seq.fold SQL.unionDatabaseMeta SQL.emptyDatabaseMeta
+    let mapMaterialized fieldRef = buildMaterializedFieldStore layout fieldRef
+    let matStores = asserts.MaterializedFields |> Seq.map mapMaterialized
+
+    Seq.concat [colOfTypes; checkConstrs; matStores] |> Seq.fold SQL.unionDatabaseMeta SQL.emptyDatabaseMeta
 
 let private compileColumnOfTypeCheck (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.SelectExpr =
     let entity = layout.FindEntity fromFieldRef.Entity |> Option.get
@@ -821,9 +1131,14 @@ let checkAssertions (conn : QueryConnection) (layout : Layout) (assertions : Lay
             | :? LayoutIntegrityException as ex -> raisefWithInner LayoutIntegrityException ex "Failed to check that all %O values point to %O entries" columnOfType.FromField columnOfType.ToEntity
 
         for KeyValue(constrRef, expr) in assertions.CheckConstraints do
-            let query = compileAggregateCheckConstraintCheck layout constrRef expr
+            let query = compileCheckConstraintBulkCheck layout constrRef expr
             try
                 do! runIntegrityCheck conn query cancellationToken
             with
             | :? LayoutIntegrityException as ex -> raisefWithInner LayoutIntegrityException ex "Failed to validate check constraint %O" constrRef
+
+        for fieldRef in assertions.MaterializedFields do
+            let query = compileMaterializedFieldBulkStore layout fieldRef
+            let! _ = conn.ExecuteNonQuery (query.ToSQLString()) Map.empty cancellationToken
+            ()
     }

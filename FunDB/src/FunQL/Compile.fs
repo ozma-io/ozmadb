@@ -655,10 +655,12 @@ let private getForcedFieldName (fieldInfo : FieldMeta) (currName : FieldName)  =
 
 type ExprCompilationFlags =
     { ForceNoTableRef : bool
+      ForceNoMaterialized : bool
     }
 
 let emptyExprCompilationFlags =
     { ForceNoTableRef = false
+      ForceNoMaterialized = false
     }
 
 type CompiledSingleFrom =
@@ -875,6 +877,16 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | RColumnField col ->
             usedSchemas <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedSchemas
             (paths0, SQL.VEColumn <| realColumn col.ColumnName)
+        | RComputedField comp when comp.IsMaterialized && not flags.ForceNoMaterialized ->
+            let rootInfo =
+                match comp.Virtual with
+                | Some { InheritedFrom = Some rootRef } ->
+                    let rootEntity = layout.FindEntity rootRef |> Option.get
+                    let rootField = Map.find fieldRef.Name rootEntity.ComputedFields |> Result.get
+                    Option.get rootField.Root
+                | _ -> Option.get comp.Root
+            usedSchemas <- mergeUsedSchemas rootInfo.UsedSchemas usedSchemas
+            (paths0, SQL.VEColumn <| realColumn comp.ColumnName)
         | RComputedField comp ->
             // Right now don't support renamed fields for computed fields.
             // It's okay because this is impossible: `FROM foo (a, b, c)`, and we don't propagate computed fields.
@@ -889,18 +901,30 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let localRef = tableRef |> Option.map (fun ref -> { Schema = Option.map decompileName ref.Schema; Name = decompileName ref.Name } : EntityRef)
             let mutable paths = paths0
 
+            let possibleEntities =
+                match ObjectMap.tryFindType<PossibleSubtypesMeta> extra with
+                | None -> None
+                | Some meta -> Some meta.PossibleSubtypes
+
             let compileCase (case : VirtualFieldCase, caseComp : ResolvedComputedField) =
-                let entities = case.PossibleEntities |> Seq.map (fun ref -> layout.FindEntity ref |> Option.get :> IEntityBits)
-                let (newPaths, newExpr) = compileLinkedFieldExpr flags Map.empty paths <| replaceEntityRefInExpr localRef caseComp.Expression
-                paths <- newPaths
-                (entities, newExpr)
+                let entityRefs =
+                    match possibleEntities with
+                    | None -> case.PossibleEntities
+                    | Some possible -> Set.intersect possible case.PossibleEntities
+                if Set.isEmpty entityRefs then
+                    None
+                else
+                    let entities = entityRefs |> Seq.map (fun ref -> layout.FindEntity ref |> Option.get :> IEntityBits)
+                    let (newPaths, newExpr) = compileLinkedFieldExpr flags Map.empty paths <| replaceEntityRefInExpr localRef caseComp.Expression
+                    paths <- newPaths
+                    Some (entities, newExpr)
 
             // It's safe to use even in case when a virtual field exists in an entity with no `sub_entity` column, because
             // in this case `composeExhaustingIf` will omit the check completely.
             let subEntityColumn = SQL.VEColumn { Table = tableRef; Name = sqlFunSubEntity }
             let expr =
                 computedFieldCases layout extra { fieldRef with Name = fieldInfo.Name } comp
-                    |> Seq.map compileCase
+                    |> Seq.mapMaybe compileCase
                     |> Seq.toArray
                     |> composeExhaustingIf (makeCheckExprFor subEntityColumn)
             (paths, expr)

@@ -70,6 +70,7 @@ type InsertExpr =
 type UpdateExpr =
     { Name : TableRef
       Columns : Map<ColumnName, obj * ValueExpr> // obj is extra metadata
+      From : FromExpr option
       Where : ValueExpr option
       Extra : obj
     } with
@@ -79,12 +80,16 @@ type UpdateExpr =
             assert (not <| Map.isEmpty this.Columns)
 
             let valuesExpr = this.Columns |> Map.toSeq |> Seq.map (fun (name, (extra, expr)) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())) |> String.concat ", "
+            let fromStr = 
+                match this.From with
+                | Some f -> sprintf "FROM %s" (f.ToSQLString())
+                | None -> ""
             let condExpr =
                 match this.Where with
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
             let updateStr = sprintf "UPDATE %s SET %s" (this.Name.ToSQLString()) valuesExpr
-            String.concatWithWhitespaces [updateStr; condExpr]
+            String.concatWithWhitespaces [updateStr; fromStr; condExpr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()

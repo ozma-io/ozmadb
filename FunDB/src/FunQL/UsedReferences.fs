@@ -12,6 +12,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 type UsedReferences =
     { UsedSchemas : UsedSchemas
       UsedArguments : UsedArguments
+      HasRestrictedEntities : bool
     }
 
 type ExprInfo =
@@ -35,6 +36,7 @@ let private unionExprInfo (a : ExprInfo) (b : ExprInfo) =
 type private UsedReferencesBuilder (layout : ILayoutBits) =
     let mutable usedArguments : UsedArguments = Set.empty
     let mutable usedSchemas : UsedSchemas = Map.empty
+    let mutable hasRestrictedEntities = false
 
     let rec addField (extra : ObjectMap) (ref : ResolvedFieldRef) (field : ResolvedFieldInfo) : ExprInfo =
         match field.Field with
@@ -46,14 +48,16 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             usedSchemas <- addUsedFieldRef ref usedSchemas
             emptyExprInfo
 
-    and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) : (ResolvedEntityRef * PathArrow) list -> ExprInfo = function
+    and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) (asRoot : bool) : (ResolvedEntityRef * PathArrow) list -> ExprInfo = function
         | [] ->
             let entity = layout.FindEntity ref.Entity |> Option.get
             let field = entity.FindField ref.Name |> Option.get
             addField extra ref field
         | (entityRef, arrow) :: paths ->
             usedSchemas <- addUsedFieldRef ref usedSchemas
-            let info = buildForPath extra { Entity = entityRef; Name = arrow.Name } paths
+            if not asRoot then
+                hasRestrictedEntities <- true
+            let info = buildForPath extra { Entity = entityRef; Name = arrow.Name } arrow.AsRoot paths
             { info with IsLocal = false }
 
     and buildForReference (ref : LinkedBoundFieldRef) : ExprInfo =
@@ -62,7 +66,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             match ObjectMap.tryFindType<FieldMeta> ref.Extra with
             | Some { Bound = Some boundInfo } ->
                 let pathWithEntities = Seq.zip boundInfo.Path ref.Ref.Path |> Seq.toList
-                buildForPath ref.Extra boundInfo.Ref pathWithEntities
+                buildForPath ref.Extra boundInfo.Ref ref.Ref.AsRoot pathWithEntities
             | _ -> emptyExprInfo
         | VRPlaceholder name ->
             usedArguments <- Set.add name usedArguments
@@ -70,7 +74,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             | Some argInfo when not (Array.isEmpty ref.Ref.Path) ->
                 let argRef = { Entity = argInfo.Path.[0]; Name = ref.Ref.Path.[0].Name }
                 let pathWithEntities = Seq.zip argInfo.Path ref.Ref.Path |> Seq.skip 1 |> Seq.toList
-                buildForPath ref.Extra argRef pathWithEntities
+                buildForPath ref.Extra argRef ref.Ref.AsRoot pathWithEntities
             | _ -> emptyExprInfo
 
     and buildForResult : ResolvedQueryResult -> unit = function
@@ -149,7 +153,9 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         buildForOrderLimitClause query.OrderLimit
 
     and buildForFromExpr : ResolvedFromExpr -> unit = function
-        | FEntity ent -> ()
+        | FEntity fromEnt ->
+            if not fromEnt.AsRoot then
+                hasRestrictedEntities <- true
         | FJoin join ->
             buildForFromExpr join.A
             buildForFromExpr join.B
@@ -161,12 +167,14 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
 
     member this.UsedSchemas = usedSchemas
     member this.UsedArguments = usedArguments
+    member this.HasRestrictedEntities = hasRestrictedEntities
 
 let selectExprUsedReferences (layout : ILayoutBits) (expr : ResolvedSelectExpr) : UsedReferences =
     let builder = UsedReferencesBuilder (layout)
     builder.BuildForSelectExpr expr
     { UsedSchemas = builder.UsedSchemas
       UsedArguments = builder.UsedArguments
+      HasRestrictedEntities = builder.HasRestrictedEntities
     }
 
 let fieldExprUsedReferences (layout : ILayoutBits) (expr : ResolvedFieldExpr) : ExprInfo * UsedReferences =
@@ -175,5 +183,6 @@ let fieldExprUsedReferences (layout : ILayoutBits) (expr : ResolvedFieldExpr) : 
     let ret =
         { UsedSchemas = builder.UsedSchemas
           UsedArguments = builder.UsedArguments
+          HasRestrictedEntities = builder.HasRestrictedEntities
         }
     (info, ret)

@@ -92,6 +92,7 @@ type IComputedFieldBits =
 [<NoEquality; NoComparison>]
 type RootComputedField =
     { Type : ResolvedFieldType
+      UsedSchemas : UsedSchemas
       IsLocal : bool
     }
 
@@ -106,6 +107,7 @@ type ResolvedComputedField =
       IsMaterialized : bool
       // These don't take virtual field cases into account.
       Type : ResolvedFieldType option // `None` means unknown type.
+      UsedSchemas : UsedSchemas
       IsLocal : bool
       // But this one does.
       Root : RootComputedField option
@@ -188,6 +190,12 @@ let inline genericFindField (getColumnField : FieldName -> 'col option) (getComp
                 | Some comp -> Some { Name = name; ForceRename = false; Field = RComputedField comp }
                 | None -> None
     traverse
+
+let getColumnName (entity : IEntityBits) (name : FieldName) : SQL.ColumnName =
+    match entity.FindField name |> Option.get with
+    | { Field = RComputedField comp } when comp.IsMaterialized -> comp.ColumnName
+    | { Field = RColumnField col } -> col.ColumnName
+    | _ -> failwithf "No column name for field %O" name
 
 [<NoEquality; NoComparison>]
 type ResolvedEntity =

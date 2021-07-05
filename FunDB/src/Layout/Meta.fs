@@ -20,6 +20,11 @@ let private relatedCompilationFlags =
         ForceNoTableRef = true
     }
 
+let private materializedCompilationFlags =
+    { relatedCompilationFlags with
+        ForceNoMaterialized = true
+    }
+
 let private funExtensions =
     Set.ofSeq
         [ SQL.SQLName "pg_trgm"
@@ -122,7 +127,9 @@ type private MetaBuilder (layout : Layout) =
         let rootInfo = Option.get field.Root
         let columnType =
             if rootInfo.IsLocal then
-                SQL.CTGeneratedStored (makeSingleFieldExpr ref.Entity { Entity = None; Name = ref.Name } |> compileRelatedExpr)
+                let resolved = makeSingleFieldExpr ref.Entity { Entity = None; Name = ref.Name }
+                let (arguments, compiled) = compileSingleFieldExpr layout materializedCompilationFlags emptyArguments resolved
+                SQL.CTGeneratedStored compiled
             else
                 SQL.CTPlain { DefaultExpr = None }
 

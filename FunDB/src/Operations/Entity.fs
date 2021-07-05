@@ -198,6 +198,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let expr =
             { Name = tableRef
               Columns = columns
+              From = None
               Where = Some whereExpr
               Extra = ({ Ref = entityRef } : RestrictedTableInfo)
             } : SQL.UpdateExpr
