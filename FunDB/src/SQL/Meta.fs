@@ -236,7 +236,7 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
               Name = SQLName trigger.Function.ProName
             }
         let isConstraint =
-            if not trigger.TgConstraint.HasValue then
+            if isNull trigger.Constraint then
                 None
             else
                 Some <| makeDeferrableConstraint trigger.Constraint
