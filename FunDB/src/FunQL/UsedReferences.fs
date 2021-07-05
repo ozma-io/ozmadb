@@ -41,9 +41,14 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
     let rec addField (extra : ObjectMap) (ref : ResolvedFieldRef) (field : ResolvedFieldInfo) : ExprInfo =
         match field.Field with
         | RComputedField comp ->
-            computedFieldCases layout extra { ref with Name = field.Name } comp
-            |> Seq.map (fun (case, comp) -> buildForFieldExpr comp.Expression)
-            |> Seq.fold unionExprInfo emptyExprInfo
+            let info =
+                computedFieldCases layout extra { ref with Name = field.Name } comp
+                |> Seq.map (fun (case, comp) -> buildForFieldExpr comp.Expression)
+                |> Seq.fold unionExprInfo emptyExprInfo
+            if comp.IsMaterialized then
+                { info with IsLocal = true }
+            else
+                info
         | _ ->
             usedSchemas <- addUsedFieldRef ref usedSchemas
             emptyExprInfo
