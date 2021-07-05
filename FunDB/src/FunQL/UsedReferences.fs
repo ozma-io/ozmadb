@@ -46,7 +46,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
                 |> Seq.map (fun (case, comp) -> buildForFieldExpr comp.Expression)
                 |> Seq.fold unionExprInfo emptyExprInfo
             if comp.IsMaterialized then
-                { info with IsLocal = true }
+                emptyExprInfo
             else
                 info
         | _ ->

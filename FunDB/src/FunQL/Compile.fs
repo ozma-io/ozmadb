@@ -680,7 +680,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     let mutable usedSchemas = Map.empty
 
     let replacer = NameReplacer ()
-    let mutable lastRenamedTableId = 0
 
     let columnName : ColumnType -> SQL.SQLName = function
         | CTMeta (CMRowAttribute (FunQLName name)) -> replacer.ConvertName <| sprintf "__row_attr__%s" name
