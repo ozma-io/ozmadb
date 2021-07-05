@@ -400,20 +400,6 @@ let migrateDatabase (query : QueryConnection) (plan : MigrationPlan) (cancellati
     unitTask {
         if not <| Array.isEmpty plan then
             for action in plan do
-                match action with
-                | SOAlterTable (ref, ops) ->
-                    if not (ref.Schema = None || ref.Schema = Some (SQLName "public")) then
-                        for op in ops do
-                            match op with
-                            | TODropColumn name -> failwithf "Refusing to drop column %O.%O" ref name
-                            | _ -> ()
-                | SODropSequence ref ->
-                    if not (ref.Schema = None || ref.Schema = Some (SQLName "public")) then
-                        failwithf "Refusing to drop sequence %O" ref.Name
-                | SODropTable ref ->
-                    if not (ref.Schema = None || ref.Schema = Some (SQLName "public")) then
-                        failwithf "Refusing to drop table %O" ref.Name
-                | _ -> ()
                 let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty cancellationToken
                 ()
             // Clear prepared statements so that things don't break if e.g. database types have changed.
