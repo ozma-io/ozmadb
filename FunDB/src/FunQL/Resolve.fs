@@ -7,6 +7,7 @@ open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.Layout.Types
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
+module SQL = FunWithFlags.FunDB.SQL.Typecheck
 
 // Validates fields and expressions to the point where database can catch all the remaining problems
 // and all further processing code can avoid any checks.
@@ -307,10 +308,28 @@ let resolveArgumentFieldType (layout : ILayoutBits) : ParsedFieldType -> Resolve
             raisef ViewResolveException "Enums must not be empty"
         FTEnum vals
 
-let resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : ResolvedArgument =
-    { ArgType = resolveArgumentFieldType layout arg.ArgType
-      Optional = arg.Optional
-    }
+let fieldValueType : FieldValue -> ResolvedFieldType option = function
+    | FInt _ -> Some <| FTType (FETScalar SFTInt)
+    | FDecimal _ -> Some <| FTType (FETScalar SFTDecimal)
+    | FString _ -> Some <| FTType (FETScalar SFTString)
+    | FBool _ -> Some <| FTType (FETScalar SFTBool)
+    | FDateTime _-> Some <| FTType (FETScalar SFTDateTime)
+    | FDate _ -> Some <| FTType (FETScalar SFTDate)
+    | FInterval _ -> Some <| FTType (FETScalar SFTInterval)
+    | FJson _ -> Some <| FTType (FETScalar SFTJson)
+    | FUserViewRef _ -> Some <| FTType (FETScalar SFTUserViewRef)
+    | FUuid _ -> Some <| FTType (FETScalar SFTUuid)
+    | FIntArray _ -> Some <| FTType (FETArray SFTInt)
+    | FDecimalArray _ -> Some <| FTType (FETArray SFTDecimal)
+    | FStringArray _ -> Some <| FTType (FETArray SFTString)
+    | FBoolArray _ -> Some <| FTType (FETArray SFTBool)
+    | FDateTimeArray _ -> Some <| FTType (FETArray SFTDateTime)
+    | FDateArray _ -> Some <| FTType (FETArray SFTDate)
+    | FIntervalArray _ -> Some <| FTType (FETArray SFTInterval)
+    | FJsonArray _ -> Some <| FTType (FETArray SFTJson)
+    | FUserViewRefArray _ -> Some <| FTType (FETArray SFTUserViewRef)
+    | FUuidArray _ -> Some <| FTType (FETArray SFTUuid)
+    | FNull -> None
 
 let getGlobalArgument = function
     | PGlobal arg -> Some arg
@@ -694,6 +713,38 @@ let computedFieldCases (layout : ILayoutBits) (extra : ObjectMap) (ref : Resolve
             (case, caseField)
 
         Seq.map compileCase filteredCases
+
+let private resolveMainEntity (layout : ILayoutBits) (fields : QSubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
+    let ref = resolveEntityRef main.Entity
+    let entity =
+        match layout.FindEntity ref with
+        | None -> raisef ViewResolveException "Entity not found: %O" main.Entity
+        | Some e -> e :?> ResolvedEntity
+    if entity.IsAbstract then
+        raisef ViewResolveException "Entity is abstract: %O" main.Entity
+    let (foundRef, columns) = findMainEntity query
+    if foundRef <> ref then
+        raisef ViewResolveException "Cannot map main entity to the expression: %O, possible value: %O" ref foundRef
+
+    let getField : ResolvedQueryResult -> (FieldName * FieldName) option = function
+        | QRAll _ -> failwith "Impossible QRAll"
+        | QRExpr result ->
+            let name = result.TryToName () |> Option.get
+            match Map.tryFind name fields with
+            | Some (Some { Ref = fieldRef; Field = RColumnField _ }) when fieldRef.Entity = ref -> Some (name, fieldRef.Name)
+            | _ -> None
+    let mappedResults = columns |> Seq.mapMaybe getField |> Map.ofSeqUnique
+
+    let checkField fieldName (field : ResolvedColumnField) =
+        if Option.isNone field.DefaultValue && not field.IsNullable then
+            if not (Map.containsKey fieldName mappedResults) then
+                raisef ViewResolveException "Required inserted entity field is not in the view expression: %O" fieldName
+    entity.ColumnFields |> Map.iter checkField
+
+    { Entity = ref
+      FieldsToColumns = Map.reverse mappedResults
+      ColumnsToFields = mappedResults
+    }
 
 type private SelectFlags =
     { OneColumn : bool
@@ -1557,40 +1608,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             let newSubsel = { Alias = subsel.Alias; Lateral = subsel.Lateral; Select = newQ }
             (fieldMapping, Set.singleton mappingRef, FSubExpr newSubsel)
 
-    let resolveMainEntity (fields : QSubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
-        let ref = resolveEntityRef main.Entity
-        let entity =
-            match layout.FindEntity ref with
-            | None -> raisef ViewResolveException "Entity not found: %O" main.Entity
-            | Some e -> e :?> ResolvedEntity
-        if entity.IsAbstract then
-            raisef ViewResolveException "Entity is abstract: %O" main.Entity
-        let (foundRef, columns) = findMainEntity query
-        if foundRef <> ref then
-            raisef ViewResolveException "Cannot map main entity to the expression: %O, possible value: %O" ref foundRef
-
-        let getField : ResolvedQueryResult -> (FieldName * FieldName) option = function
-            | QRAll _ -> failwith "Impossible QRAll"
-            | QRExpr result ->
-                let name = result.TryToName () |> Option.get
-                match Map.tryFind name fields with
-                | Some (Some { Ref = fieldRef; Field = RColumnField _ }) when fieldRef.Entity = ref -> Some (name, fieldRef.Name)
-                | _ -> None
-        let mappedResults = columns |> Seq.mapMaybe getField |> Map.ofSeqUnique
-
-        let checkField fieldName (field : ResolvedColumnField) =
-            if Option.isNone field.DefaultValue && not field.IsNullable then
-                if not (Map.containsKey fieldName mappedResults) then
-                    raisef ViewResolveException "Required inserted entity field is not in the view expression: %O" fieldName
-        entity.ColumnFields |> Map.iter checkField
-
-        { Entity = ref
-          FieldsToColumns = Map.reverse mappedResults
-          ColumnsToFields = mappedResults
-        }
-
     member this.ResolveSelectExpr flags select = resolveSelectExpr emptyContext flags select
-    member this.ResolveMainEntity fields select main = resolveMainEntity fields select main
 
     member this.ResolveSingleFieldExpr (fromEntityId : FromEntityId) (fromMapping : SingleFromMapping) expr =
         let mapping =
@@ -1602,6 +1620,17 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
               FieldMaps = [mapping]
             }
         resolveFieldExpr context expr
+
+    member this.ResolveArgumentAttributes attrsMap =
+        let resolveOne name (expr : ParsedFieldExpr) : ResolvedFieldExpr =
+            let (info, res) = resolveFieldExpr emptyContext expr
+            if not info.IsLocal then
+                raisef ViewResolveException "Non-local expressions are not supported in argument attributes"
+            if info.HasAggregates then
+                raisef ViewResolveException "Aggregate functions are not allowed here"
+            res
+
+        Map.map resolveOne attrsMap
 
 // Remove and replace unneeded Extra fields.
 let rec private relabelSelectExpr (select : ResolvedSelectExpr) : ResolvedSelectExpr =
@@ -1683,29 +1712,89 @@ and private relabelQueryColumnResult (result : ResolvedQueryColumnResult) : Reso
       Alias = result.Alias
     }
 
-let private buildAllArguments (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * ResolvedArgumentsMap =
+let compileScalarType : ScalarFieldType -> SQL.SimpleType = function
+    | SFTInt -> SQL.STInt
+    | SFTDecimal -> SQL.STDecimal
+    | SFTString -> SQL.STString
+    | SFTBool -> SQL.STBool
+    | SFTDateTime -> SQL.STDateTime
+    | SFTDate -> SQL.STDate
+    | SFTInterval -> SQL.STInterval
+    | SFTJson -> SQL.STJson
+    | SFTUserViewRef -> SQL.STJson
+    | SFTUuid -> SQL.STUuid
+
+let compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
+    | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
+    | FETArray stype -> SQL.VTArray <| compileScalarType stype
+
+let compileFieldType : FieldType<_> -> SQL.SimpleValueType = function
+    | FTType fetype -> compileFieldExprType fetype
+    | FTReference ent -> SQL.VTScalar SQL.STInt
+    | FTEnum vals -> SQL.VTScalar SQL.STString
+
+let isSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (maybeGiven : ResolvedFieldType option) : bool =
+    match maybeGiven with
+    | None -> true
+    | Some given ->
+        match (wanted, given) with
+        | (FTReference wantedRef, FTReference givenRef) when wantedRef = givenRef -> true
+        | (FTReference wantedRef, FTReference givenRef) ->
+            let wantedEntity = layout.FindEntity wantedRef |> Option.get
+            Map.containsKey givenRef wantedEntity.Children
+        | (FTEnum wantedVals, FTEnum givenVals) -> Set.isEmpty (Set.difference givenVals wantedVals)
+        | (FTType (FETScalar SFTInt), FTReference _) -> true
+        | (FTType (FETScalar SFTString), FTEnum _) -> true
+        | (FTType a, FTType b) when a = b -> true
+        | (FTType a, FTType b) -> SQL.tryImplicitCasts (compileFieldExprType a) (compileFieldExprType b)
+        | _ -> false
+
+let isValueOfSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (value : FieldValue) : bool =
+    match (wanted, value) with
+    | (FTEnum wantedVals, FString str) -> Set.contains str wantedVals
+    | _ -> isSubtype layout wanted (fieldValueType value)
+
+let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : ResolvedArgument =
+    let argType = resolveArgumentFieldType layout arg.ArgType
+    match arg.DefaultValue with
+    | None -> ()
+    | Some def ->
+        match def with
+        | FNull when not arg.Optional ->
+            raisef ViewResolveException "Invalid default value, expected %O" argType
+        | _ -> ()
+        if not (isValueOfSubtype layout argType def) then
+            raisef ViewResolveException "Invalid default value, expected %O" argType
+    let attrsQualifier = QueryResolver (layout, Map.empty, emptyExprResolutionFlags)
+    { ArgType = argType
+      Optional = arg.Optional
+      DefaultValue = arg.DefaultValue
+      Attributes = attrsQualifier.ResolveArgumentAttributes arg.Attributes
+    }
+
+let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * ResolvedArgumentsMap =
     let arguments = rawArguments |> Map.map (fun name -> resolveArgument layout)
     let localArguments = Map.mapKeys PLocal arguments
     let allArguments = Map.union localArguments globalArgumentsMap
     (localArguments, allArguments)
 
 let resolveSelectExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) (select : ParsedSelectExpr) : ResolvedArgumentsMap * ResolvedSelectExpr =
-    let (localArguments, allArguments) = buildAllArguments layout arguments
+    let (localArguments, allArguments) = resolveArgumentsMap layout arguments
     let qualifier = QueryResolver (layout, allArguments, flags)
     let (results, qQuery) = qualifier.ResolveSelectExpr subExprSelectFlags select
     (localArguments, relabelSelectExpr qQuery)
 
 let resolveSingleFieldExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (fromEntityId : FromEntityId) (flags : ExprResolutionFlags) (fromMapping : SingleFromMapping) (expr : ParsedFieldExpr) : ResolvedArgumentsMap * ResolvedFieldExpr =
-    let (localArguments, allArguments) = buildAllArguments layout arguments
+    let (localArguments, allArguments) = resolveArgumentsMap layout arguments
     let qualifier = QueryResolver (layout, allArguments, flags)
     let (info, qExpr) = qualifier.ResolveSingleFieldExpr fromEntityId fromMapping expr
     (localArguments, relabelFieldExpr qExpr)
 
 let resolveViewExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
-    let (localArguments, allArguments) = buildAllArguments layout viewExpr.Arguments
+    let (localArguments, allArguments) = resolveArgumentsMap layout viewExpr.Arguments
     let qualifier = QueryResolver (layout, allArguments, flags)
     let (results, qQuery) = qualifier.ResolveSelectExpr viewExprSelectFlags viewExpr.Select
-    let mainEntity = Option.map (qualifier.ResolveMainEntity (getFieldsMap results) qQuery) viewExpr.MainEntity
+    let mainEntity = Option.map (resolveMainEntity layout (getFieldsMap results) qQuery) viewExpr.MainEntity
     { Pragmas = Map.filter (fun name v -> Set.contains name allowedPragmas) viewExpr.Pragmas
       Arguments = localArguments
       Select = relabelSelectExpr qQuery

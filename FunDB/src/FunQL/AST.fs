@@ -512,7 +512,7 @@ type [<NoEquality; NoComparison>] FromEntity<'e> when 'e :> IFunQLName =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type [<NoEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e> when 'e :> IFunQLName =
+type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e> when 'e :> IFunQLName =
     | [<CaseName(null, InnerObject=true)>] FTType of FieldExprType
     | [<CaseName("reference")>] FTReference of reference : 'e
     | [<CaseName("enum")>] FTEnum of values : Set<string>
@@ -1171,24 +1171,31 @@ type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 type PragmasMap = Map<PragmaName, FieldValue>
 
 [<NoEquality; NoComparison>]
-type Argument<'e> when 'e :> IFunQLName =
-    { ArgType: FieldType<'e>
+type Argument<'te, 'e, 'f> when 'te :> IFunQLName and 'e :> IFunQLName and 'f :> IFunQLName =
+    { ArgType: FieldType<'te>
       Optional: bool
+      DefaultValue : FieldValue option
+      Attributes : AttributeMap<'e, 'f>
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             let typeStr = this.ArgType.ToFunQLString()
-            if this.Optional then
-                sprintf "%s NULL" typeStr
-            else
-                typeStr
+            let optionalStr = if this.Optional then "NULL" else typeStr
+            let defaultStr =
+                match this.DefaultValue with
+                | None -> ""
+                | Some def -> sprintf "DEFAULT %s" (def.ToFunQLString())
+            let attrsStr =
+                if Map.isEmpty this.Attributes
+                then ""
+                else renderAttributesMap this.Attributes
+            String.concatWithWhitespaces [typeStr; optionalStr; defaultStr; attrsStr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-type ParsedArgument = Argument<EntityRef>
-type ResolvedArgument = Argument<ResolvedEntityRef>
+type ResolvedArgument = Argument<ResolvedEntityRef, EntityRef, LinkedBoundFieldRef>
 
 let funId = FunQLName "id"
 let funSubEntity = FunQLName "sub_entity"
@@ -1238,19 +1245,21 @@ type UsedArguments = Set<Placeholder>
 
 type LocalArgumentsMap = Map<ArgumentName, FieldValue>
 
+let requiredArgument (argType : FieldType<'te>) : Argument<'te, 'e, 'f> =
+    { ArgType = argType
+      Optional = false
+      DefaultValue = None
+      Attributes = Map.empty
+    }
+
 // Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
 let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
     Map.ofSeq
-        [ (FunQLName "lang", { ArgType = FTType <| FETScalar SFTString
-                               Optional = false })
-          (FunQLName "user", { ArgType = FTType <| FETScalar SFTString
-                               Optional = false })
-          (FunQLName "user_id", { ArgType = FTReference ({ Schema = funSchema; Name = funUsers })
-                                  Optional = true })
-          (FunQLName "transaction_time", { ArgType = FTType <| FETScalar SFTDateTime
-                                           Optional = false })
-          (FunQLName "transaction_id", { ArgType = FTType <| FETScalar SFTInt
-                                         Optional = false })
+        [ (FunQLName "lang", requiredArgument (FTType <| FETScalar SFTString))
+          (FunQLName "user", requiredArgument (FTType <| FETScalar SFTString))
+          (FunQLName "user_id", requiredArgument (FTReference ({ Schema = funSchema; Name = funUsers })))
+          (FunQLName "transaction_time", requiredArgument (FTType <| FETScalar SFTDateTime))
+          (FunQLName "transaction_id", requiredArgument (FTType <| FETScalar SFTInt))
         ]
 
 let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal

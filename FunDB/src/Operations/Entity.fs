@@ -107,7 +107,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             | Some arg ->
                 Some
                     { Placeholder = PLocal fieldName
-                      Argument = { ArgType = field.FieldType; Optional = isOptional }
+                      Argument = { requiredArgument field.FieldType with Optional = isOptional }
                       Column = field.ColumnName
                       Extra = ({ Name = fieldName } : RestrictedColumnInfo)
                     }
@@ -120,7 +120,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             if hasSubType entity then
                 let value =
                     { Placeholder = PLocal funSubEntity
-                      Argument = { ArgType = FTType (FETScalar SFTString); Optional = false }
+                      Argument = requiredArgument <| FTType (FETScalar SFTString)
                       Column = sqlFunSubEntity
                       Extra = null
                     }
@@ -161,7 +161,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         return! runIntQuery connection globalArgs query rawArgs cancellationToken
     }
 
-let private funIdArg = { ArgType = FTType (FETScalar SFTInt); Optional = false }
+let private funIdArg = requiredArgument <| FTType (FETScalar SFTInt)
 
 let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
     unitTask {
@@ -172,7 +172,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             | Some arg ->
                 Some
                     { Placeholder = PLocal fieldName
-                      Argument = { ArgType = field.FieldType; Optional = fieldIsOptional field }
+                      Argument = { requiredArgument field.FieldType with Optional = fieldIsOptional field }
                       Column = field.ColumnName
                       Extra = ({ Name = fieldName } : RestrictedColumnInfo)
                     }

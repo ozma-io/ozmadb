@@ -12,27 +12,6 @@ type ViewTypecheckException (message : string, innerException : exn) =
 
     new (message : string) = ViewTypecheckException (message, null)
 
-let compileScalarType : ScalarFieldType -> SQL.SimpleType = function
-    | SFTInt -> SQL.STInt
-    | SFTDecimal -> SQL.STDecimal
-    | SFTString -> SQL.STString
-    | SFTBool -> SQL.STBool
-    | SFTDateTime -> SQL.STDateTime
-    | SFTDate -> SQL.STDate
-    | SFTInterval -> SQL.STInterval
-    | SFTJson -> SQL.STJson
-    | SFTUserViewRef -> SQL.STJson
-    | SFTUuid -> SQL.STUuid
-
-let compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
-    | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
-    | FETArray stype -> SQL.VTArray <| compileScalarType stype
-
-let compileFieldType : FieldType<_> -> SQL.SimpleValueType = function
-    | FTType fetype -> compileFieldExprType fetype
-    | FTReference ent -> SQL.VTScalar SQL.STInt
-    | FTEnum vals -> SQL.VTScalar SQL.STString
-
 let decompileScalarType : SQL.SimpleType -> ScalarFieldType = function
     | SQL.STInt -> SFTInt
     | SQL.STBigInt -> failwith "Unexpected bigint encountered"
@@ -49,29 +28,6 @@ let decompileScalarType : SQL.SimpleType -> ScalarFieldType = function
 let decompileFieldExprType : SQL.SimpleValueType -> FieldExprType = function
     | SQL.VTScalar typ -> FETScalar <| decompileScalarType typ
     | SQL.VTArray typ -> FETArray <| decompileScalarType typ
-
-let fieldValueType : FieldValue -> ResolvedFieldType option = function
-    | FInt _ -> Some <| FTType (FETScalar SFTInt)
-    | FDecimal _ -> Some <| FTType (FETScalar SFTDecimal)
-    | FString _ -> Some <| FTType (FETScalar SFTString)
-    | FBool _ -> Some <| FTType (FETScalar SFTBool)
-    | FDateTime _-> Some <| FTType (FETScalar SFTDateTime)
-    | FDate _ -> Some <| FTType (FETScalar SFTDate)
-    | FInterval _ -> Some <| FTType (FETScalar SFTInterval)
-    | FJson _ -> Some <| FTType (FETScalar SFTJson)
-    | FUserViewRef _ -> Some <| FTType (FETScalar SFTUserViewRef)
-    | FUuid _ -> Some <| FTType (FETScalar SFTUuid)
-    | FIntArray _ -> Some <| FTType (FETArray SFTInt)
-    | FDecimalArray _ -> Some <| FTType (FETArray SFTDecimal)
-    | FStringArray _ -> Some <| FTType (FETArray SFTString)
-    | FBoolArray _ -> Some <| FTType (FETArray SFTBool)
-    | FDateTimeArray _ -> Some <| FTType (FETArray SFTDateTime)
-    | FDateArray _ -> Some <| FTType (FETArray SFTDate)
-    | FIntervalArray _ -> Some <| FTType (FETArray SFTInterval)
-    | FJsonArray _ -> Some <| FTType (FETArray SFTJson)
-    | FUserViewRefArray _ -> Some <| FTType (FETArray SFTUserViewRef)
-    | FUuidArray _ -> Some <| FTType (FETArray SFTUuid)
-    | FNull -> None
 
 let private eraseFieldType : FieldType<'e> -> FieldExprType = function
     | FTReference ref -> FETScalar SFTInt
@@ -131,27 +87,9 @@ let private checkBinaryOp (op : BinaryOperator) (a : ResolvedFieldType option) (
 
 let private scalarJson = FTType (FETScalar SFTJson)
 
-let private scalarString = FTType (FETScalar SFTString)
-
 let private scalarBool = FTType (FETScalar SFTBool)
 
 type private Typechecker (layout : ILayoutBits) =
-    let isSubtype (wanted : ResolvedFieldType) (maybeGiven : ResolvedFieldType option) : bool =
-        match maybeGiven with
-        | None -> true
-        | Some given ->
-            match (wanted, given) with
-            | (FTReference wantedRef, FTReference givenRef) when wantedRef = givenRef -> true
-            | (FTReference wantedRef, FTReference givenRef) ->
-                let wantedEntity = layout.FindEntity wantedRef |> Option.get
-                Map.containsKey givenRef wantedEntity.Children
-            | (FTEnum wantedVals, FTEnum givenVals) -> Set.isEmpty (Set.difference givenVals wantedVals)
-            | (FTType (FETScalar SFTInt), FTReference _) -> true
-            | (FTType (FETScalar SFTString), FTEnum _) -> true
-            | (FTType a, FTType b) when a = b -> true
-            | (FTType a, FTType b) -> SQL.tryImplicitCasts (compileFieldExprType a) (compileFieldExprType b)
-            | _ -> false
-
     let rec typecheckFieldRef (linked : LinkedBoundFieldRef) : ResolvedFieldType option =
         match linked.Ref.Ref with
         | VRPlaceholder arg -> failwith "Not implemented"
@@ -175,10 +113,10 @@ type private Typechecker (layout : ILayoutBits) =
 
     and typecheckBinaryLogical (a : ResolvedFieldExpr) (b : ResolvedFieldExpr) : ResolvedFieldType =
         let ta = typecheckFieldExpr a
-        if not <| isSubtype scalarBool ta then
+        if not <| isSubtype layout scalarBool ta then
             raisef ViewTypecheckException "Boolean expected, %O found" ta
         let tb = typecheckFieldExpr b
-        if not <| isSubtype scalarBool tb then
+        if not <| isSubtype layout scalarBool tb then
             raisef ViewTypecheckException "Boolean expected, %O found" tb
         scalarBool
 
@@ -215,7 +153,7 @@ type private Typechecker (layout : ILayoutBits) =
     and typecheckCase (es : (ResolvedFieldExpr * ResolvedFieldExpr)[]) (els : ResolvedFieldExpr option) : ResolvedFieldType =
         for (check, expr) in es do
             let checkt = typecheckFieldExpr check
-            if not <| isSubtype scalarBool checkt then
+            if not <| isSubtype layout scalarBool checkt then
                 raisef ViewTypecheckException "Boolean expected, %O found" checkt
 
         let allVals = Seq.append (Seq.map snd es) (Option.toSeq els) |> Seq.map typecheckFieldExpr

@@ -19,6 +19,7 @@ type ParsedCommonTableExpr = CommonTableExpr<EntityRef, LinkedFieldRef>
 type ParsedCommonTableExprs = CommonTableExprs<EntityRef, LinkedFieldRef>
 type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
 type ParsedAggExpr = AggExpr<EntityRef, LinkedFieldRef>
+type ParsedArgument = Argument<EntityRef, EntityRef, LinkedFieldRef>
 type ParsedArgumentsMap = Map<ArgumentName, ParsedArgument>
 type ParsedOrderColumn = OrderColumn<EntityRef, LinkedFieldRef>
 type ParsedFromEntity = FromEntity<EntityRef>
@@ -269,6 +270,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token SUPERUSER
 %token ROLE
 %token LATERAL
+%token DEFAULT
 
 // Types
 %token INT_TYPE
@@ -353,14 +355,22 @@ ArgumentsList:
 
 ArgumentsListNonEmpty:
     | ArgumentEntry                             { [ $1 ] }
+    | ArgumentEntry COMMA                       { [ $1 ] }
     | ArgumentEntry COMMA ArgumentsListNonEmpty { $1 :: $3 }
 
 ArgumentEntry:
     | ARGUMENT_ID Argument { (FunQLName $1, $2) }
 
 Argument:
-    | FieldType      { { ArgType = $1; Optional = false } }
-    | FieldType NULL { { ArgType = $1; Optional = true } }
+    | FieldType ArgNullable ArgDefault MaybeAttributeMap { { ArgType = $1; Optional = $2; DefaultValue = $3; Attributes = $4 } }
+
+ArgNullable:
+    |      { false }
+    | NULL { true }
+
+ArgDefault:
+    |               { None }
+    | DEFAULT Value { Some $2 }
 
 SelectVal:
     | SingleUnlimitedSelectExpr { { CTEs = None; Tree = SSelect $1; Extra = ObjectMap.empty } }

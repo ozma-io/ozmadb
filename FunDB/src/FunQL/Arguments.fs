@@ -4,7 +4,7 @@ open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Typecheck
+open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -20,6 +20,7 @@ type CompiledArgument =
       FieldType : ResolvedFieldType
       DbType : SQL.DBValueType
       Optional : bool
+      DefaultValue : FieldValue option
     }
 
 type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
@@ -39,11 +40,37 @@ type Query<'e when 'e :> ISQLString> =
       Arguments : QueryArguments
     }
 
+let compileArray (vals : 'a array) : SQL.ValueArray<'a> = Array.map SQL.AVValue vals
+
+let compileFieldValue : FieldValue -> SQL.Value = function
+    | FInt i -> SQL.VInt i
+    | FDecimal d -> SQL.VDecimal d
+    | FString s -> SQL.VString s
+    | FBool b -> SQL.VBool b
+    | FDateTime dt -> SQL.VDateTime dt
+    | FDate d -> SQL.VDate d
+    | FInterval int -> SQL.VInterval int
+    | FJson j -> SQL.VJson j
+    | FUuid u -> SQL.VUuid u
+    | FUserViewRef r -> SQL.VJson <| JToken.FromObject(r)
+    | FIntArray vals -> SQL.VIntArray (compileArray vals)
+    | FDecimalArray vals -> SQL.VDecimalArray (compileArray vals)
+    | FStringArray vals -> SQL.VStringArray (compileArray vals)
+    | FBoolArray vals -> SQL.VBoolArray (compileArray vals)
+    | FDateTimeArray vals -> SQL.VDateTimeArray (compileArray vals)
+    | FDateArray vals -> SQL.VDateArray (compileArray vals)
+    | FIntervalArray vals -> SQL.VIntervalArray (compileArray vals)
+    | FJsonArray vals -> SQL.VJsonArray (compileArray vals)
+    | FUserViewRefArray vals -> SQL.VJsonArray (vals |> Array.map (fun x -> JToken.FromObject(x)) |> compileArray)
+    | FUuidArray vals -> SQL.VUuidArray (compileArray vals)
+    | FNull -> SQL.VNull
+
 let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgument) : CompiledArgument =
     { PlaceholderId = placeholderId
       FieldType = arg.ArgType
       DbType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType arg.ArgType)
       Optional = arg.Optional
+      DefaultValue = arg.DefaultValue
     }
 
 let emptyArguments =
@@ -107,40 +134,17 @@ let private typecheckArgument (fieldType : FieldType<_>) (value : FieldValue) : 
     // Most casting/typechecking will be done by database or Npgsql
     | _ -> ()
 
-let compileArray (vals : 'a array) : SQL.ValueArray<'a> = Array.map SQL.AVValue vals
-
-let compileFieldValue : FieldValue -> SQL.Value = function
-    | FInt i -> SQL.VInt i
-    | FDecimal d -> SQL.VDecimal d
-    | FString s -> SQL.VString s
-    | FBool b -> SQL.VBool b
-    | FDateTime dt -> SQL.VDateTime dt
-    | FDate d -> SQL.VDate d
-    | FInterval int -> SQL.VInterval int
-    | FJson j -> SQL.VJson j
-    | FUuid u -> SQL.VUuid u
-    | FUserViewRef r -> SQL.VJson <| JToken.FromObject(r)
-    | FIntArray vals -> SQL.VIntArray (compileArray vals)
-    | FDecimalArray vals -> SQL.VDecimalArray (compileArray vals)
-    | FStringArray vals -> SQL.VStringArray (compileArray vals)
-    | FBoolArray vals -> SQL.VBoolArray (compileArray vals)
-    | FDateTimeArray vals -> SQL.VDateTimeArray (compileArray vals)
-    | FDateArray vals -> SQL.VDateArray (compileArray vals)
-    | FIntervalArray vals -> SQL.VIntervalArray (compileArray vals)
-    | FJsonArray vals -> SQL.VJsonArray (compileArray vals)
-    | FUserViewRefArray vals -> SQL.VJsonArray (vals |> Array.map (fun x -> JToken.FromObject(x)) |> compileArray)
-    | FUuidArray vals -> SQL.VUuidArray (compileArray vals)
-    | FNull -> SQL.VNull
-
 let prepareArguments (args : QueryArguments) (values : ArgumentValuesMap) : ExprParameters =
     let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
         let (notFound, value) =
             match Map.tryFind name values with
             | None ->
-                if mapping.Optional then
-                    (true, FNull)
-                else
-                    raisef ArgumentCheckException "Argument not found: %O" name
+                let defValue =
+                    match mapping.DefaultValue with
+                    | Some def -> def
+                    | None when mapping.Optional -> FNull
+                    | None -> raisef ArgumentCheckException "Argument not found: %O" name
+                (true, defValue)
             | Some value -> (false, value)
         if not (mapping.Optional && notFound) then
             typecheckArgument mapping.FieldType value

@@ -131,13 +131,22 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
                 }
         | FSubExpr subsel -> FSubExpr { subsel with Select = resolveSelectExpr subsel.Select }
 
+    let resolveArgument (arg : ResolvedArgument) : ResolvedArgument =
+        { arg with Attributes = resolveAttributes arg.Attributes }
+
+    let resolveArgumentsMap (argsMap : ResolvedArgumentsMap) : ResolvedArgumentsMap =
+        Map.map (fun name -> resolveArgument) argsMap
+
     member this.ResolveSelectExpr expr = resolveSelectExpr expr
+    member this.ResolveArgumentsMap argsMap = resolveArgumentsMap argsMap
 
 // checkViewExists is supposed to throw an exception if the view doesn't exist -- this way we can distinguish between views that aren't found
 // and views that are broken while resolving user views.
 let dereferenceViewExpr (checkViewExists : ResolvedUserViewRef -> unit) (homeSchema : SchemaName option) (expr : ResolvedViewExpr) : ResolvedViewExpr =
     let resolver = ReferenceResolver (checkViewExists, homeSchema)
-    let select' = resolver.ResolveSelectExpr expr.Select
+    let args = resolver.ResolveArgumentsMap expr.Arguments
+    let select = resolver.ResolveSelectExpr expr.Select
     { expr with
-          Select = select'
+          Arguments = args
+          Select = select
     }

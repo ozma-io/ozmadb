@@ -215,6 +215,6 @@ let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : Fun
         let expr = applier.ApplyToValueExpr expr
         (typ, name, expr)
     { view with
-          AttributesQuery = Option.map (fun info -> { info with AttributeColumns = Array.map mapAttributeColumn info.AttributeColumns }) view.AttributesQuery
+          AttributesQuery = { view.AttributesQuery with AttributeColumns = Array.map mapAttributeColumn view.AttributesQuery.AttributeColumns }
           Query = newQuery
     }

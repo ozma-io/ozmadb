@@ -201,10 +201,7 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
           B = refFrom
           Condition = FEValue (FBool true)
         }
-    let argumentInfo =
-        { ArgType = FTReference entityRef
-          Optional = false
-        } : ResolvedArgument
+    let argumentInfo = requiredArgument <| FTReference entityRef
     let placeholder = PLocal funId
     let (argId, arguments) = addArgument placeholder argumentInfo emptyArguments
 

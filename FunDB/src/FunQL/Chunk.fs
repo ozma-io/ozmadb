@@ -56,10 +56,7 @@ let emptyQueryChunk =
       Where = None
     } : SourceQueryChunk
 
-let private limitOffsetArgument =
-    { ArgType = FTType (FETScalar SFTInt)
-      Optional = false
-    } : ResolvedArgument
+let private limitOffsetArgument = requiredArgument <| FTType (FETScalar SFTInt)
 
 let private maybeAddAnonymousInt (int : int option) (argValues : LocalArgumentsMap) (arguments : QueryArguments) : LocalArgumentsMap * QueryArguments * SQL.ValueExpr option =
     match int with
@@ -95,7 +92,7 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
 
     let parseChunkArgument (arg : SourceChunkArgument) : ParsedArgument =
         match parse tokenizeFunQL fieldType arg.Type with
-        | Ok r -> { ArgType = r; Optional = false }
+        | Ok r -> requiredArgument r
         | Error msg -> raisef ChunkException "Error parsing argument type: %s" msg
     let parsedArguments = Map.map (fun name -> parseChunkArgument) chunk.Arguments
 

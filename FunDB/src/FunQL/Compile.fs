@@ -72,6 +72,7 @@ let rec private mergeDomains (doms1 : GenericDomains<'e>) (doms2 : GenericDomain
 
 type MetaType =
     | CMRowAttribute of AttributeName
+    | CMArgAttribute of ArgumentName * AttributeName
     | CMDomain of DomainNamespaceId
     | CMId of DomainIdColumn
     | CMSubEntity of DomainIdColumn
@@ -90,6 +91,7 @@ type GenericColumnType<'e> =
 // FIXME: drop when we implement typecheck.
 let metaSQLType : MetaType -> SQL.SimpleType option = function
     | CMRowAttribute _ -> None
+    | CMArgAttribute _ -> None
     | CMDomain _ -> Some SQL.STInt
     | CMId _ -> Some SQL.STInt
     | CMSubEntity _ -> Some SQL.STString
@@ -295,12 +297,17 @@ type CompiledAttributesExpr =
       AttributeColumns : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[]
     }
 
+let private emptyAttributesExpr =
+    { PureColumns = [||]
+      AttributeColumns = [||]
+    }
+
 type CompiledPragmasMap = Map<SQL.ParameterName, SQL.Value>
 
 [<NoEquality; NoComparison>]
 type CompiledViewExpr =
     { Pragmas : CompiledPragmasMap
-      AttributesQuery : CompiledAttributesExpr option
+      AttributesQuery : CompiledAttributesExpr
       Query : Query<SQL.SelectExpr>
       UsedSchemas : UsedSchemas
       Columns : (ColumnType * SQL.ColumnName)[]
@@ -690,6 +697,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | CTMeta (CMSubEntity field) -> replacer.ConvertName <| sprintf "__sub_entity__%O" field
         | CTMeta CMMainId -> SQL.SQLName "__main_id"
         | CTMeta CMMainSubEntity -> SQL.SQLName "__main_sub_entity"
+        | CTMeta (CMArgAttribute (FunQLName arg, FunQLName name)) -> replacer.ConvertName <| sprintf "__arg_attr__%s__%s" arg name
         | CTColumn (FunQLName column) -> SQL.SQLName column
 
     let renameSelectInfo (columns : FieldName[]) (info : SelectInfo) : SelectInfo =
@@ -1924,6 +1932,20 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             }
         compileSelectExpr flags Map.empty None select
 
+    member this.CompileArgumentAttributes (args : ResolvedArgumentsMap) : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[] =
+        let compileArgAttr argName (name, expr) =
+            let (newPaths, col) = compileLinkedFieldExpr emptyExprCompilationFlags Map.empty emptyJoinPaths expr
+            if not <| Map.isEmpty newPaths.Map then
+                failwith "Unexpected join paths in argument atribute expression"
+            let colType = CTMeta <| CMArgAttribute (argName, name)
+            (colType, columnName colType, col)
+        let compileArg (pl : Placeholder, arg : ResolvedArgument) =
+            match pl with
+            | PLocal name -> arg.Attributes |> Map.toSeq |> Seq.map (compileArgAttr name)
+            | PGlobal name -> Seq.empty
+
+        args |> Map.toSeq |> Seq.collect compileArg |> Seq.toArray
+
     member this.ColumnName name = columnName name
 
     member this.UsedSchemas = usedSchemas
@@ -2061,6 +2083,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let arguments = compileArguments viewExpr.Arguments
     let compiler = QueryCompiler (layout, defaultAttrs, arguments)
     let (info, expr) = compiler.CompileSelectExpr mainEntityRef true viewExpr.Select
+    let argAttrs = compiler.CompileArgumentAttributes viewExpr.Arguments
     let arguments = compiler.Arguments
     let columns = Array.map (mapColumnType getFinalName) info.Columns
 
@@ -2073,7 +2096,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let onlyPureAttrs = Seq.catMaybes allPureAttrs |> Seq.toArray
     let attrQuery =
         if Array.isEmpty onlyPureAttrs then
-            None
+            emptyAttributesExpr
         else
             let filterPureColumn (info : PureColumn) =
                 match info.ColumnType with
@@ -2081,10 +2104,12 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
                 | CTColumnMeta (colName, CCCellAttribute name) when info.Purity = Pure -> true
                 | _ -> false
             let (pureColumns, attributeColumns) = onlyPureAttrs |> Seq.partition filterPureColumn
-            Some
-                { PureColumns = convertPureColumns pureColumns
-                  AttributeColumns = convertPureColumns attributeColumns
-                }
+            { PureColumns = convertPureColumns pureColumns
+              AttributeColumns = convertPureColumns attributeColumns
+            }
+
+    let attrQuery =
+        { attrQuery with PureColumns = Array.append attrQuery.PureColumns argAttrs }
 
     let domains = mapDomainsFields getFinalName info.Domains
     let flattenedDomains = flattenDomains domains
