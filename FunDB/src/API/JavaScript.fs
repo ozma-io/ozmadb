@@ -16,6 +16,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.JavaScript.Runtime
@@ -194,6 +195,17 @@ type APITemplate (isolate : Isolate) =
                     | Ok r -> return r
                     | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
                 }
+            runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
+        ))
+
+        fundbTemplate.Set("pretendRole", FunctionTemplate.New(isolate, fun args ->
+            let context = isolate.CurrentContext
+            if args.Length <> 2 then
+                throwCallError context "Number of arguments must be 2"
+            let ref = jsDeserialize context args.[0] : ResolvedRoleRef
+            let func = args.[1].GetFunction()
+            let handle = Option.get currentHandle
+            let run () = handle.API.Request.PretendRole ref <| fun () -> func.CallAsync(null)
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
 

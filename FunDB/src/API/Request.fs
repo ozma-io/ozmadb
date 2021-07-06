@@ -129,12 +129,15 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         addDetails event
         event
 
-    let checkRoot () =
+    let checkPrivileged () =
         match currentUser.Saved.Type with
         | RTRoot -> ()
         | _ ->
-            logger.LogError("This feature is only available for root users, not for {}", currentUser.Effective.Name)
-            raise <| RequestException RENoRole
+            match source with
+            | ESAction _ | ESTrigger _ -> ()
+            | ESAPI ->
+                logger.LogError("This feature is only available for root users, not for {}", currentUser.Effective.Name)
+                raise <| RequestException RENoRole
 
     static member Create (opts : RequestParams) : Task<RequestContext> =
         task {
@@ -209,7 +212,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
 
     member this.PretendUser (userName : UserName) (func : unit -> Task<'a>) : Task<'a> =
         task {
-            checkRoot ()
+            checkPrivileged ()
             let! maybeUser = fetchUser ctx.Transaction.System userName true ctx.CancellationToken
             let roleType =
                 match maybeUser with
@@ -240,7 +243,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         }
 
     member this.PretendRole (newRole : ResolvedRoleRef) (func : unit -> Task<'a>) : Task<'a> =
-        checkRoot ()
+        checkPrivileged ()
         let effectiveRole =
             match ctx.Permissions.Find newRole with
             | Some (Ok role) -> RTRole { Role = Some role; Ref = Some newRole; CanRead = opts.CanRead }
