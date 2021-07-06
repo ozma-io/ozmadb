@@ -274,6 +274,8 @@ class FunDBError extends Error {
   }
 }
 global.FunDBError = FunDBError;
+
+global.asDateArgument = (date) => date.toISOString().split('T')[0];
     "
     let preludeScript = UnboundScript.Compile(Value.String.New(isolate, preludeScriptSource.Trim()), ScriptOrigin("prelude.js"))
 
