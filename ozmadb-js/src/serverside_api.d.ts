@@ -14,7 +14,7 @@ export interface IFunDBAPI {
   updateEntity: (ref: IEntityRef, id: number, args: Record<string, unknown>) => Promise<void>;
   deleteEntity: (ref: IEntityRef, id: number) => Promise<void>;
   deferConstraints: <T>(inner: () => Promise<T>) => Promise<T>;
-  pretendRole: <T>(ref: IRoleRef, inner: () => Promise<T>) => Promise<T>;
+  pretendRole: <T>(ref: "root" | IRoleRef, inner: () => Promise<T>) => Promise<T>;
   getDomainValues: (ref: IFieldRef, chunk?: IQueryChunk) => Promise<IDomainValuesResult>;
   writeEvent: (message: string) => void;
   writeEventSync: (message: string) => void;
