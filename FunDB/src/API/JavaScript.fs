@@ -202,10 +202,17 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length <> 2 then
                 throwCallError context "Number of arguments must be 2"
-            let ref = jsDeserialize context args.[0] : ResolvedRoleRef
+            let asRole =
+                match args.[0].Data with
+                | :? Value.Object -> Some <| (jsDeserialize context args.[0] : ResolvedRoleRef)
+                | :? Value.String as str when str.Get() = "root" -> None
+                | _ -> throwCallError context "Invalid argument `role`"
             let func = args.[1].GetFunction()
             let handle = Option.get currentHandle
-            let run () = handle.API.Request.PretendRole ref <| fun () -> func.CallAsync(null)
+            let run =
+                match asRole with
+                | None -> fun () -> handle.API.Request.PretendRoot <| fun () -> func.CallAsync(null)
+                | Some ref -> fun () -> handle.API.Request.PretendRole ref <| fun () -> func.CallAsync(null)
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
 

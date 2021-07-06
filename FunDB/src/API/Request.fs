@@ -242,6 +242,11 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             return! setCurrentUser newUser func
         }
 
+    member this.PretendRoot (func : unit -> Task<'a>) : Task<'a> =
+        checkPrivileged ()
+        let newUser = { currentUser.Effective with Type = RTRoot }
+        setCurrentUser newUser func
+
     member this.PretendRole (newRole : ResolvedRoleRef) (func : unit -> Task<'a>) : Task<'a> =
         checkPrivileged ()
         let effectiveRole =
@@ -264,5 +269,6 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         member this.WriteEvent addDetails = this.WriteEvent addDetails
         member this.WriteEventSync addDetails = this.WriteEventSync addDetails
         member this.RunWithSource newSource func = this.RunWithSource newSource func
+        member this.PretendRoot func = this.PretendRoot func
         member this.PretendRole newRole func = this.PretendRole newRole func
         member this.PretendUser newUserName func = this.PretendUser newUserName func

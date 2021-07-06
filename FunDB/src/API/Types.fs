@@ -130,6 +130,7 @@ type IRequestContext =
     abstract member WriteEventSync : (EventEntry -> unit) -> unit
     abstract member RunWithSource : EventSource -> (unit -> Task<'a>) -> Task<'a>
     abstract member PretendRole : ResolvedRoleRef -> (unit -> Task<'a>) -> Task<'a>
+    abstract member PretendRoot : (unit -> Task<'a>) -> Task<'a>
     abstract member PretendUser : UserName -> (unit -> Task<'a>) -> Task<'a>
 
 type IAPIError =
