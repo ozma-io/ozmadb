@@ -1,5 +1,5 @@
 import {
-  IEntityRef, IEntity, UserViewSource, IViewExprResult, IViewInfoResult, IQueryChunk, ILayout, UserViewName,
+  IEntityRef, IRoleRef, IEntity, UserViewSource, IViewExprResult, IViewInfoResult, IQueryChunk, ILayout, UserViewName,
   IFieldRef, IDomainValuesResult,
 } from "./common";
 
@@ -13,7 +13,8 @@ export interface IFunDBAPI {
   insertEntity: (ref: IEntityRef, args: Record<string, unknown>) => Promise<number | undefined>;
   updateEntity: (ref: IEntityRef, id: number, args: Record<string, unknown>) => Promise<void>;
   deleteEntity: (ref: IEntityRef, id: number) => Promise<void>;
-  deferConstraints: <T>(inner: () => T) => Promise<T>;
+  deferConstraints: <T>(inner: () => Promise<T>) => Promise<T>;
+  pretendRole: <T>(ref: IRoleRef, inner: () => Promise<T>) => Promise<T>;
   getDomainValues: (ref: IFieldRef, chunk?: IQueryChunk) => Promise<IDomainValuesResult>;
   writeEvent: (message: string) => void;
   writeEventSync: (message: string) => void;

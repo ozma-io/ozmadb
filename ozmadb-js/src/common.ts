@@ -23,6 +23,8 @@ export interface IEntityRef {
   name: EntityName;
 }
 
+export type IRoleRef = IEntityRef;
+
 export interface IFieldRef {
   entity: IEntityRef;
   name: FieldName;
