@@ -185,6 +185,9 @@ export interface IDomainField {
 export interface IArgument {
   optional: boolean;
   argType: FieldType;
+  defaultValue?: any;
+  attributeTypes: AttributeTypesMap;
+  attributes: AttributesMap;
 }
 
 export interface IResultViewInfo {
