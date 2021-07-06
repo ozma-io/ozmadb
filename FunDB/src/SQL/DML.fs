@@ -80,7 +80,7 @@ type UpdateExpr =
             assert (not <| Map.isEmpty this.Columns)
 
             let valuesExpr = this.Columns |> Map.toSeq |> Seq.map (fun (name, (extra, expr)) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())) |> String.concat ", "
-            let fromStr = 
+            let fromStr =
                 match this.From with
                 | Some f -> sprintf "FROM %s" (f.ToSQLString())
                 | None -> ""

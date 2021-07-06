@@ -59,6 +59,13 @@ let intersect (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
 let difference (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
     Map.filter (fun k v -> not (Map.containsKey k b)) a
 
+let differenceWithValues (isEqual : 'k -> 'v -> 'v -> bool) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
+    let filterOne k v1 =
+        match Map.tryFind k b with
+        | Some v2 -> not (isEqual k v1 v2)
+        | None -> true
+    Map.filter filterOne a
+
 let singleton (k : 'k) (v : 'v) : Map<'k, 'v> = Seq.singleton (k, v) |> Map.ofSeq
 
 let update (func : 'k -> 'a -> 'b option) (map : Map<'k, 'a>) : Map<'k, 'b> =

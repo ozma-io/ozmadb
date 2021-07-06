@@ -32,26 +32,56 @@ type ColumnOfTypeAssertion =
 type LayoutAssertions =
     { ColumnOfTypeAssertions : Set<ColumnOfTypeAssertion>
       CheckConstraints : Map<ResolvedConstraintRef, ResolvedFieldExpr>
-      MaterializedFields : Set<ResolvedFieldRef>
+      MaterializedFields : Map<ResolvedFieldRef, ResolvedFieldExpr>
     }
 
 let unionLayoutAssertions (a : LayoutAssertions) (b : LayoutAssertions) : LayoutAssertions =
     { ColumnOfTypeAssertions = Set.union a.ColumnOfTypeAssertions b.ColumnOfTypeAssertions
       CheckConstraints = Map.union a.CheckConstraints b.CheckConstraints
-      MaterializedFields = Set.union a.MaterializedFields b.MaterializedFields
+      MaterializedFields = Map.union a.MaterializedFields b.MaterializedFields
     }
 
 let differenceLayoutAssertions (a : LayoutAssertions) (b : LayoutAssertions) : LayoutAssertions =
     { ColumnOfTypeAssertions = Set.difference a.ColumnOfTypeAssertions b.ColumnOfTypeAssertions
-      CheckConstraints = Map.difference a.CheckConstraints b.CheckConstraints
-      MaterializedFields = Set.difference a.MaterializedFields b.MaterializedFields
+      CheckConstraints = Map.differenceWithValues (fun name a b -> string a = string b) a.CheckConstraints b.CheckConstraints
+      MaterializedFields = Map.differenceWithValues (fun name a b -> string a = string b) a.MaterializedFields b.MaterializedFields
     }
 
 let emptyLayoutAssertions : LayoutAssertions =
     { ColumnOfTypeAssertions = Set.empty
       CheckConstraints = Map.empty
-      MaterializedFields = Set.empty
+      MaterializedFields = Map.empty
     }
+
+let private expandMaterializedField (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedFieldExpr =
+    let cases = computedFieldCases layout ObjectMap.empty fieldRef comp |> Seq.toArray
+    if Array.isEmpty cases then
+        FEValue FNull
+    else if Array.length cases = 1 then
+        let (case, comp) = cases.[0]
+        comp.Expression
+    else
+        let subEntityInfo =
+            { Bound =
+                Some
+                    { Ref = { fieldRef with Name = funSubEntity }
+                      Immediate = true
+                      Path = [||]
+                    }
+              FromEntityId = localExprFromEntityId
+              ForceSQLName = None
+            } : FieldMeta
+        let subEntityPlainRef = { Entity = Some <| relaxEntityRef fieldRef.Entity; Name = funSubEntity } : FieldRef
+        let subEntityRef = { Ref = { Ref = VRColumn subEntityPlainRef; Path = [||]; AsRoot = false }; Extra = ObjectMap.singleton subEntityInfo } : LinkedBoundFieldRef
+        let buildCase (case : VirtualFieldCase, comp : ResolvedComputedField) =
+            let info = { CheckForTypes = Some case.PossibleEntities } : SubEntityMeta
+            let extra = ObjectMap.singleton info
+            let subEntity = { Ref = relaxEntityRef case.Ref; Extra = extra } : SubEntityRef
+            let check = FEInheritedFrom (subEntityRef, subEntity)
+            (check, comp.Expression)
+        let switchCases = cases |> Seq.take (Array.length cases - 1) |> Seq.map buildCase |> Seq.toArray
+        let (lastCase, lastComp) = cases.[Array.length cases - 1]
+        FECase (switchCases, Some lastComp.Expression)
 
 type private AssertionsBuilder (layout : Layout) =
     let columnFieldAssertions (fieldRef : ResolvedFieldRef) (field : ResolvedColumnField) : LayoutAssertions seq =
@@ -76,13 +106,13 @@ type private AssertionsBuilder (layout : Layout) =
             for KeyValue (colName, col) in entity.ColumnFields do
                 let ref = { Entity = entityRef; Name = colName }
                 yield! columnFieldAssertions ref col
-            for KeyValue (compName, comp) in entity.ComputedFields do
-                match comp with
-                | Ok { IsMaterialized = true; Root = Some { IsLocal = false } } ->
+            for KeyValue (compName, maybeComp) in entity.ComputedFields do
+                match maybeComp with
+                | Ok ({ IsMaterialized = true; Root = Some { IsLocal = false } } as comp) ->
                     let ref = { Entity = entityRef; Name = compName }
                     yield
                         { emptyLayoutAssertions with
-                              MaterializedFields = Set.singleton ref
+                              MaterializedFields = Map.singleton ref (expandMaterializedField layout ref comp)
                         }
                 | _ -> ()
             for KeyValue (constrName, constr) in entity.CheckConstraints do
@@ -313,8 +343,8 @@ let private postprocessTrigger (compiledRef : SQL.TableRef) (trig : PathTrigger)
     let newExpr = SQL.mapValueExpr mapper trig.Expression
     { trig with Expression = newExpr }
 
-let rec private findOuterFields (layout : Layout) (expr : ResolvedFieldExpr) : Set<FieldName> =
-    let mutable outerFields = Set.empty
+let rec private findOuterFields (layout : Layout) (expr : ResolvedFieldExpr) : Map<FieldName, ResolvedEntityRef> =
+    let mutable outerFields = Map.empty
 
     let iterReference (ref : LinkedBoundFieldRef) =
         let fieldInfo = ObjectMap.findType<FieldMeta> ref.Extra
@@ -322,13 +352,13 @@ let rec private findOuterFields (layout : Layout) (expr : ResolvedFieldExpr) : S
         let field = layout.FindField boundInfo.Ref.Entity boundInfo.Ref.Name |> Option.get
         match field.Field with
         | RColumnField col ->
-            outerFields <- Set.add field.Name outerFields
+            outerFields <- Map.add field.Name boundInfo.Ref.Entity outerFields
         | RComputedField comp when comp.IsMaterialized ->
-            outerFields <- Set.add field.Name outerFields
+            outerFields <- Map.add field.Name boundInfo.Ref.Entity outerFields
         | RComputedField comp ->
             for (case, comp) in computedFieldCases layout ref.Extra { boundInfo.Ref with Name = field.Name } comp do
                 let fields = findOuterFields layout comp.Expression
-                outerFields <- Set.union fields outerFields
+                outerFields <- Map.union fields outerFields
         | _ -> ()
 
     let mapper =
@@ -524,8 +554,9 @@ let private distinctCheck (columnName : SQL.ColumnName) =
     let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = columnName }
     SQL.VEDistinct (checkOldColumn, checkNewColumn)
 
-let private buildUpdateCheck (entity : ResolvedEntity) (outerFields : FieldName seq) =
-    let fieldDistinctCheck name =
+let private buildUpdateCheck (layout : Layout) (outerFields : (FieldName * ResolvedEntityRef) seq) =
+    let fieldDistinctCheck (name, entityRef) =
+        let entity = layout.FindEntity entityRef |> Option.get
         let columnName = getColumnName entity name
         distinctCheck columnName
 
@@ -600,14 +631,18 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
         else
             Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
-    let updateCheck = buildUpdateCheck entity outerFields
+    let updateCheck = buildUpdateCheck layout (Map.toSeq outerFields)
     let updateCheck =
         match checkExpr with
         | None -> updateCheck
         | Some check ->
             SQL.VEAnd (check, updateCheck)
 
-    let affectedColumns = outerFields |> Seq.map (getColumnName entity) |> Seq.toArray
+    let getFieldColumnName (name, entityRef) =
+        let entity = layout.FindEntity entityRef |> Option.get
+        getColumnName entity name
+
+    let affectedColumns = outerFields |> Map.toSeq |> Seq.map getFieldColumnName |> Seq.toArray
 
     let schemaName = compileName entity.Root.Schema
     let tableName = compileName entity.Root.Name
@@ -810,7 +845,7 @@ let buildCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstra
         |> Seq.map (fun (key, trig) -> buildInnerCheckConstraintAssertion layout constrRef checkExpr key trig)
         |> Seq.fold SQL.unionDatabaseMeta outerMeta
 
-let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) (outerFields : Set<FieldName>) (update : SQL.UpdateExpr) : SQL.DatabaseMeta =
+let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) (outerFields : Map<FieldName, ResolvedEntityRef>) (update : SQL.UpdateExpr) : SQL.DatabaseMeta =
     let entity = layout.FindEntity fieldRef.Entity |> Option.get
 
     let tableRef = compileResolvedEntityRef entity.Root
@@ -845,14 +880,18 @@ let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedField
         else
             Some <| makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
 
-    let updateCheck = buildUpdateCheck entity outerFields
+    let updateCheck = buildUpdateCheck layout (Map.toSeq outerFields)
     let updateCheck =
         match checkExpr with
         | None -> updateCheck
         | Some check ->
             SQL.VEAnd (check, updateCheck)
 
-    let affectedColumns = outerFields |> Seq.map (getColumnName entity) |> Seq.toArray
+    let getFieldColumnName (name, entityRef) =
+        let entity = layout.FindEntity entityRef |> Option.get
+        getColumnName entity name
+
+    let affectedColumns = outerFields |> Map.toSeq |> Seq.map getFieldColumnName |> Seq.toArray
 
     let schemaName = compileName entity.Root.Schema
     let tableName = compileName entity.Root.Name
@@ -973,29 +1012,8 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
 
     SQL.unionDatabaseMeta functionDbMeta triggerDbMeta
 
-let private expandMaterializedField (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedFieldExpr =
-    let cases = computedFieldCases layout ObjectMap.empty fieldRef comp |> Seq.toArray
-    if Array.isEmpty cases then
-        FEValue FNull
-    else if Array.length cases = 1 then
-        let (case, comp) = cases.[0]
-        comp.Expression
-    else
-        let subEntityPlainRef = { Entity = Some <| relaxEntityRef fieldRef.Entity; Name = funSubEntity } : FieldRef
-        let subEntityRef = { Ref = { Ref = VRColumn subEntityPlainRef; Path = [||]; AsRoot = false }; Extra = ObjectMap.empty } : LinkedBoundFieldRef
-        let buildCase (case : VirtualFieldCase, comp : ResolvedComputedField) =
-            let info = { CheckForTypes = Some case.PossibleEntities } : SubEntityMeta
-            let extra = ObjectMap.singleton info
-            let subEntity = { Ref = relaxEntityRef case.Ref; Extra = extra } : SubEntityRef
-            let check = FEInheritedFrom (subEntityRef, subEntity)
-            (check, comp.Expression)
-        let switchCases = cases |> Seq.take (Array.length cases - 1) |> Seq.map buildCase |> Seq.toArray
-        let (lastCase, lastComp) = cases.[Array.length cases - 1]
-        FECase (switchCases, Some lastComp.Expression)
-
-let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : SQL.UpdateExpr =
+let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) (expr : ResolvedFieldExpr) : SQL.UpdateExpr =
     let entity = layout.FindEntity fieldRef.Entity |> Option.get
-    let expr = expandMaterializedField layout fieldRef comp
     let fixedExpr = replaceEntityRefInExpr (Some <| relaxEntityRef entity.Root) expr
     let result =
         { Attributes = Map.empty
@@ -1033,26 +1051,25 @@ let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : Resolve
       Extra = null
     } : SQL.UpdateExpr
 
-let private compileMaterializedFieldBulkStore (layout : Layout) (fieldRef : ResolvedFieldRef) : SQL.UpdateExpr =
+let private compileMaterializedFieldBulkStore (layout : Layout) (fieldRef : ResolvedFieldRef) (expr : ResolvedFieldExpr) : SQL.UpdateExpr =
     let entity = layout.FindEntity fieldRef.Entity |> Option.get
     let comp =
         match entity.FindField fieldRef.Name with
         | Some { Field = RComputedField ({ IsMaterialized = true; Root = Some _ } as comp); ForceRename = false } -> comp
         | _ -> failwith "Impossible non-computed field"
 
-    compileMaterializedFieldUpdate layout fieldRef comp
+    compileMaterializedFieldUpdate layout fieldRef comp expr
 
-let buildMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedFieldRef) : SQL.DatabaseMeta =
+let buildMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedFieldRef) (expr : ResolvedFieldExpr) : SQL.DatabaseMeta =
     let entity = layout.FindEntity fieldRef.Entity |> Option.get
     let comp =
         match entity.FindField fieldRef.Name with
         | Some { Field = RComputedField ({ IsMaterialized = true; Root = Some _ } as comp); ForceRename = false } -> comp
         | _ -> failwith "Impossible non-computed field"
-    let expr = expandMaterializedField layout fieldRef comp
     let builder = AffectedByExprBuilder(layout, fieldRef.Entity)
     let triggers = builder.FindAffectedByExpr expr
 
-    let compiled = compileMaterializedFieldUpdate layout fieldRef comp
+    let compiled = compileMaterializedFieldUpdate layout fieldRef comp expr
     let outerFields = findOuterFields layout expr
 
     // First pair of triggers: outer, e.g., check when the row itself is updated.
@@ -1070,8 +1087,8 @@ let buildAssertionsMeta (layout : Layout) (asserts : LayoutAssertions) : SQL.Dat
     let mapCheck (key, expr) = buildCheckConstraintAssertion layout key expr
     let checkConstrs = asserts.CheckConstraints |> Map.toSeq |> Seq.map mapCheck
 
-    let mapMaterialized fieldRef = buildMaterializedFieldStore layout fieldRef
-    let matStores = asserts.MaterializedFields |> Seq.map mapMaterialized
+    let mapMaterialized (fieldRef, expr) = buildMaterializedFieldStore layout fieldRef expr
+    let matStores = asserts.MaterializedFields |> Map.toSeq |> Seq.map mapMaterialized
 
     Seq.concat [colOfTypes; checkConstrs; matStores] |> Seq.fold SQL.unionDatabaseMeta SQL.emptyDatabaseMeta
 
@@ -1137,8 +1154,8 @@ let checkAssertions (conn : QueryConnection) (layout : Layout) (assertions : Lay
             with
             | :? LayoutIntegrityException as ex -> raisefWithInner LayoutIntegrityException ex "Failed to validate check constraint %O" constrRef
 
-        for fieldRef in assertions.MaterializedFields do
-            let query = compileMaterializedFieldBulkStore layout fieldRef
+        for KeyValue(fieldRef, expr) in assertions.MaterializedFields do
+            let query = compileMaterializedFieldBulkStore layout fieldRef expr
             let! _ = conn.ExecuteNonQuery (query.ToSQLString()) Map.empty cancellationToken
             ()
     }

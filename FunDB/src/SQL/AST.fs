@@ -552,7 +552,7 @@ and [<NoEquality; NoComparison>] SubSelectExpr =
         member this.ToSQLString () =
             let lateralStr =
                 if this.Lateral then "LATERAL" else ""
-            let exprStr = sprintf "(%s)" (this.Select.ToSQLString()) 
+            let exprStr = sprintf "(%s)" (this.Select.ToSQLString())
             String.concatWithWhitespaces [lateralStr; exprStr; this.Alias.ToSQLString()]
 
         interface ISQLString with

@@ -10,7 +10,7 @@ open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 
-// Used to create indexes for 
+// Used to create indexes for
 type private PathReferencesMap =  Map<ResolvedFieldRef, ResolvedEntity * ResolvedColumnField>
 
 let private subEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
@@ -57,7 +57,7 @@ type private MetaBuilder (layout : Layout) =
     let makeIndexColumnMeta (entity : ResolvedEntity) (index : ResolvedIndex) (col : ResolvedIndexColumn) : SQL.IndexColumn =
         let key = compileRelatedExpr col.Expr |> simplifyIndex
         let opClass = col.OpClass |> Option.map (fun opClass -> Map.find opClass allowedOpClasses |> Map.find index.Type)
-        
+
         { Key = key
           OpClass = opClass
           Order = Option.map compileOrder col.Order

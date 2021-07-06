@@ -374,7 +374,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 |> Seq.filter (fun field -> Option.isNone field.InheritedFrom && Option.isNone field.VirtualInheritedFrom)
                 |> Seq.map (fun field -> field.ColumnName)
             Seq.append cols comps
-        
+
         let selfColumns = collectColumns rootEntity
         let childrenColumns = rootEntity.Children |> Map.keys |> Seq.collect (fun ref -> collectColumns (Map.find ref cachedEntities))
         try
@@ -546,6 +546,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     }
             else
                 None
+
         { Expression = expr.Expr
           Type = exprType
           InheritedFrom = None
@@ -658,7 +659,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             if not isGood then
                 raisef ResolveLayoutException "Expressions are not supported as included index columns"
             expr
-        
+
         let exprs = Array.map (resolveIndexColumn entityRef index.Type) index.Expressions
         let includedExprs = Array.map (fun x -> (resolveLocalExpr entityRef (parseRelatedExpr x)).Expr) index.IncludedExpressions
         let predicate = Option.map (fun x -> (resolveLocalExpr entityRef (parseRelatedExpr x)).Expr) index.Predicate
@@ -820,10 +821,10 @@ type private Phase3Resolver (layout : Layout) =
             let mutable isLocal = true
             let mutable usedSchemas = Map.empty
 
-            let getCaseType (case, currComp : ResolvedComputedField) =
+            let getCaseType (case : VirtualFieldCase, currComp : ResolvedComputedField) =
                 if currComp.IsMaterialized <> comp.IsMaterialized then
                   raisef ResolveLayoutException "Virtual computed fields cannot be partially materialized: %O" fieldRef
-                if not comp.IsLocal then
+                if not currComp.IsLocal then
                     isLocal <- false
                 usedSchemas <- mergeUsedSchemas currComp.UsedSchemas usedSchemas
                 comp.Type

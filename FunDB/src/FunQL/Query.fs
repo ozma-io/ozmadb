@@ -403,7 +403,7 @@ let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr)
                         let! ret = runExplainQuery connection query parameters explainOpts cancellationToken
                         return Some { Query = string query; Parameters = parameters; Explanation = ret }
                 }
-        
+
             let! result = runExplainQuery connection viewExpr.Query.Expression parameters explainOpts cancellationToken
 
             do! unsetPragmas connection viewExpr.Pragmas cancellationToken

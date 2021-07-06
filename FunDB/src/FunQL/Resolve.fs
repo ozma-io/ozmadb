@@ -31,7 +31,7 @@ type FromFieldKey =
 [<NoEquality; NoComparison>]
 type private BoundFieldHeader =
     { ParentEntity : ResolvedEntityRef // Parent entity which may or may not contain field `Name`. Headers are refined with type contexts, yielding `BoundField`s.
-      Name : FieldName 
+      Name : FieldName
       Key : FromFieldKey
       // Means that field is selected directly from an entity and not from a subexpression.
       Immediate : bool
@@ -656,7 +656,7 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
 
 let replaceEntityRefInExpr (localRef : EntityRef option) : ResolvedFieldExpr -> ResolvedFieldExpr =
     let resolveReference : LinkedBoundFieldRef -> LinkedBoundFieldRef = function
-    | { Ref = { Ref = VRColumn col } } as ref -> 
+    | { Ref = { Ref = VRColumn col } } as ref ->
         { ref with Ref = { ref.Ref with Ref = VRColumn { col with Entity = localRef } } }
     | ref -> ref
     let mapper = idFieldExprMapper resolveReference id
@@ -745,7 +745,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 { AllowedSubtypes = newAllowed
                   Type = ctx.Type
                 }
-    
+
     let notTypeContexts ctx =
         if ctx.ExtraConditionals then
             emptyTypeContexts

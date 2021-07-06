@@ -17,7 +17,7 @@ let private correlateSchemaMeta (schemaName : SchemaName) (schemaKeys : Migratio
             idColumns <- Map.add tableName idCol idColumns
             (Set.add newKey keys, object)
         | _ -> pair
-    
+
     let metaObjects = metaObjects |> Map.map correlatePrimaryConstraint
 
     let mutable idSequences = Map.empty

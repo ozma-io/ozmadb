@@ -850,7 +850,7 @@ Name:
 
 IndexOpClass:
     |      { None }
-    | Name { Some $1 } 
+    | Name { Some $1 }
 
 NullsOrder:
     |             { None }

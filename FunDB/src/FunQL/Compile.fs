@@ -984,7 +984,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   NextJoinId = nextJoinId
                 }
             (newPaths, res)
-    
+
     and compileReferenceArgument (extra : ObjectMap) (ctx : ReferenceContext) (arg : CompiledArgument) (asRoot : bool) (path : PathArrow seq) (boundPath : ResolvedEntityRef seq) : SQL.SelectExpr =
         let (referencedRef, remainingBoundPath) = Seq.snoc boundPath
         let (firstArrow, remainingPath) = Seq.snoc path
@@ -1336,7 +1336,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | None ->
                 { HasAggregates = false
                 }
-            | Some extra -> extra 
+            | Some extra -> extra
 
         let (fromMap, from) =
             match select.From with

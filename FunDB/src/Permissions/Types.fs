@@ -37,7 +37,7 @@ type AllowedEntity =
       Check : ResolvedOptimizedFieldExpr
       // Are you allowed to INSERT?
       Insert : bool
-      // Which entries are you allowed to SELECT, on top of parent entities? 
+      // Which entries are you allowed to SELECT, on top of parent entities?
       Select : ResolvedOptimizedFieldExpr option
       // Which entries are you allowed to UPDATE (on top of SELECT, but only for this entity' fields)?
       Update : ResolvedOptimizedFieldExpr

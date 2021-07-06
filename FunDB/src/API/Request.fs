@@ -97,7 +97,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             ] |> Map.ofList
         assert (Map.keysSet globalArgumentTypes = Map.keysSet globalArguments)
         globalArguments
-    
+
     let mutable currentUser = initialUserInfo
     let mutable globalArguments = getGlobalArguments initialUserInfo
 

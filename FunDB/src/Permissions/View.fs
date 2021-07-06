@@ -43,7 +43,7 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, fieldAccesses
             compileEntityAccess name schema usedEntities
 
         Map.map mapSchema usedSchemas
-    
+
     member this.Arguments = arguments
     member this.CompileSchemaAccess usedSchemas = compileSchemaAccess usedSchemas
 

@@ -54,7 +54,7 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.U
         match Map.tryFind entity.Root role.Flattened.Entities with
         | Some flat -> flat
         | _ -> raisef PermissionsEntityException "Access denied to update"
-    
+
     let getUsedField (extra : obj, expr) =
         let colInfo = extra :?> RestrictedColumnInfo
         let field = Map.find colInfo.Name entity.ColumnFields

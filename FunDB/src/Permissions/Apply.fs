@@ -44,7 +44,7 @@ type private FieldsAccessAggregator (accessor : AllowedField -> ResolvedOptimize
         let mapEntity (name : EntityName, usedFields : UsedFields) : FilteredAllowedDatabase =
             let entity = Map.find name schema.Entities
             let ref = { Schema = schemaName; Name = name } : ResolvedEntityRef
-            
+
             let child =
                 try
                     filterDerivedEntity ref entity usedFields
@@ -64,7 +64,7 @@ type private FieldsAccessAggregator (accessor : AllowedField -> ResolvedOptimize
             | :? PermissionsApplyException as e -> raisefWithInner PermissionsApplyException e "Access denied for schema %O" name
 
         usedSchemas |> Map.toSeq |> Seq.map mapSchema |> Seq.fold unionFilteredAllowedDatabase Map.empty
-    
+
     member this.FilterUsedSchemas usedSchemas = filterUsedSchemas usedSchemas
 
 let filterAccessForUsedSchemas (accessor : AllowedField -> ResolvedOptimizedFieldExpr) (layout : Layout) (role : ResolvedRole) (usedSchemas : UsedSchemas) : FilteredAllowedDatabase =
