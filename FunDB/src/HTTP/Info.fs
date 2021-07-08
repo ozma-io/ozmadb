@@ -44,7 +44,7 @@ let infoApi : HttpHandler =
             match api.Request.User.Effective.Type with
             | RTRoot ->
                 do! api.Request.Context.CheckIntegrity ()
-                return! Successful.ok (json Map.empty) next ctx
+                return! commitAndOk api next ctx
             | RTRole _ -> return! requestError REAccessDenied next ctx
         }
 
