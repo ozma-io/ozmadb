@@ -281,7 +281,7 @@ let private randomAccessedAtLaxSpan () =
     // A minute +/- ~5 seconds.
     TimeSpan.FromMinutes(1.0 + (2.0 * randomAccessedAtGen.Value.NextDouble() - 0.5) * 0.09)
 
-let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
+let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) : HttpHandler =
     let makeContext (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
         task {
             let logger = ctx.GetLogger("withContext")
@@ -328,10 +328,11 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
                           Language = lang
                           Context = dbCtx
                         }
-                let currTime = DateTime.UtcNow
-                match inst.Instance.AccessedAt with
-                | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
-                | _ ->  do! inst.Instance.UpdateAccessedAt currTime
+                if touchAccessedAt then
+                    let currTime = DateTime.UtcNow
+                    match inst.Instance.AccessedAt with
+                    | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
+                    | _ ->  do! inst.Instance.UpdateAccessedAt currTime
                 do! inst.Instance.DisposeAsync ()
                 return! f (FunDBAPI rctx) next ctx
             with
@@ -345,3 +346,6 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
         }
 
     lookupInstance makeContext
+
+let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler = withContextGeneric true f
+let withContextHidden (f : IFunDBAPI -> HttpHandler) : HttpHandler = withContextGeneric false f

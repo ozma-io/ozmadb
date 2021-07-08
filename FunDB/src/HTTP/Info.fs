@@ -49,8 +49,8 @@ let infoApi : HttpHandler =
         }
 
     choose
-        [ route "/check_access" >=> GET >=> withContext (fun _ -> ping)
-          route "/check_integrity" >=> POST >=> withContext checkIntegrity
+        [ route "/check_access" >=> GET >=> withContextHidden (fun _ -> ping)
+          route "/check_integrity" >=> POST >=> withContextHidden checkIntegrity
           route "/is_initialized" >=> GET >=> lookupInstance isInitialized
           route "/clear_instances_cache" >=> POST >=> resolveUser clearInstancesCache
           route "/ping" >=> GET >=> ping
