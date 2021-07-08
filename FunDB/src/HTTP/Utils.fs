@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open System.Security.Claims
 open Microsoft.Extensions.Primitives
 open Microsoft.Extensions.Logging
+open Microsoft.Extensions.Hosting
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.Affine
@@ -303,7 +304,22 @@ let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler =
                 | None -> "en-US"
 
             try
-                use! dbCtx = cacheStore.GetCache ctx.RequestAborted
+                let longRunning =
+                    if inst.IsRoot then
+                        let headers = ctx.Request.Headers.["X-LongRunning"]
+                        if headers.Count > 0 then
+                            headers.[headers.Count - 1].ToLowerInvariant() = "yes"
+                        else
+                            false
+                    else
+                        false
+                let cancellationToken =
+                    if longRunning then
+                        let lifetime = ctx.GetService<IHostApplicationLifetime>()
+                        lifetime.ApplicationStopping
+                    else
+                        ctx.RequestAborted
+                use! dbCtx = cacheStore.GetCache cancellationToken
                 let! rctx =
                     RequestContext.Create
                         { UserName = inst.UserName

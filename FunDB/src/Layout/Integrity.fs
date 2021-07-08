@@ -266,12 +266,8 @@ let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRe
       Extensions = Set.empty
     }
 
-// Need to be public for JsonConvert
-type PathTriggerKey =
-    { Ref : ResolvedFieldRef
-      // This is path without the last dereference; for example, triggers for foo=>bar and foo=>baz will be merged into trigger for entity E, which handles bar and baz.
-      EntityPath : FieldName list
-    }
+// This is path without the last dereference; for example, triggers for foo=>bar and foo=>baz will be merged into trigger for entity E, which handles bar and baz.
+type PathTriggerKey = ResolvedFieldRef list
 
 let private pathTriggerHasher =
     let config = CityHashConfig()
@@ -294,37 +290,42 @@ let private pathTriggerKey (key : PathTriggerFullKey) =
     JsonConvert.SerializeObject key
 
 type private PathTrigger =
-    { // Map from field names to field root entities.
-      Fields : Map<FieldName, ResolvedEntityRef>
+    { // Map from field root entities to set of field names.
+      Fields : Map<ResolvedEntityRef, Set<FieldName>>
       Root : ResolvedEntityRef
-      Expression : SQL.ValueExpr
     }
 
 let private unionPathTrigger (a : PathTrigger) (b : PathTrigger) : PathTrigger =
     { // Values should be the same.
-      Fields = Map.union a.Fields b.Fields
+      Fields = Map.unionWith (fun name -> Set.union) a.Fields b.Fields
       Root = b.Root
-      Expression = b.Expression
     }
 
-let private expandPathTriggerExpr (outerField : FieldName) (innerEntity : ResolvedEntityRef) (innerExpr : SQL.ValueExpr) : SQL.ValueExpr =
-    let singleSelectExpr : SQL.SingleSelectExpr =
-        { Columns = [| SQL.SCExpr (None, SQL.VEColumn sqlPlainId) |]
-          From = Some (SQL.FTable (null, None, compileResolvedEntityRef innerEntity))
-          Extra = null
-          Where = Some innerExpr
-          GroupBy = [||]
-          OrderLimit = SQL.emptyOrderLimitClause
-        }
-    let selectExpr : SQL.SelectExpr =
-        { CTEs = None
-          Tree = SQL.SSelect singleSelectExpr
-          Extra = null
-        }
-    let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerField }
-    SQL.VEInQuery (SQL.VEColumn leftRef, selectExpr)
+let private buildPathTriggerExpression (entityRef : ResolvedEntityRef) (key : PathTriggerKey) : SQL.ValueExpr =
+    let rec traverse : PathTriggerKey -> SQL.ValueExpr = function
+        | [] -> failwith "Unexpected empty key for path trigger"
+        | [outerRef] ->
+            let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
+            SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
+        | outerRef :: refs ->
+            let innerExpr = traverse refs
+            let singleSelectExpr : SQL.SingleSelectExpr =
+                { Columns = [| SQL.SCExpr (None, SQL.VEColumn sqlPlainId) |]
+                  From = Some (SQL.FTable (null, None, compileResolvedEntityRef outerRef.Entity))
+                  Extra = null
+                  Where = Some innerExpr
+                  GroupBy = [||]
+                  OrderLimit = SQL.emptyOrderLimitClause
+                }
+            let selectExpr : SQL.SelectExpr =
+                { CTEs = None
+                  Tree = SQL.SSelect singleSelectExpr
+                  Extra = null
+                }
+            let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
+            SQL.VEInQuery (SQL.VEColumn leftRef, selectExpr)
 
-let private postprocessTrigger (compiledRef : SQL.TableRef) (trig : PathTrigger) : PathTrigger =
+    let expr = traverse key
     // Replace outer table-less references with named references, so that we can insert this expression
     // into compiled FunQL query.
     // For example:
@@ -335,13 +336,14 @@ let private postprocessTrigger (compiledRef : SQL.TableRef) (trig : PathTrigger)
     // > foo <> new.id
     // Becomes:
     // > schema__other_ent.foo <> new.id
+    let compiledRef = compileRenamedResolvedEntityRef entityRef
     let mapRef (ref : SQL.ColumnRef) =
         match ref.Table with
         | None -> { ref with Table = Some compiledRef }
         | Some _ -> ref
     let mapper = { SQL.idValueExprMapper with ColumnReference = mapRef }
-    let newExpr = SQL.mapValueExpr mapper trig.Expression
-    { trig with Expression = newExpr }
+    SQL.mapValueExpr mapper expr
+
 
 let rec private findOuterFields (layout : Layout) (expr : ResolvedFieldExpr) : Map<FieldName, ResolvedEntityRef> =
     let mutable outerFields = Map.empty
@@ -370,64 +372,36 @@ let rec private findOuterFields (layout : Layout) (expr : ResolvedFieldExpr) : M
     outerFields
 
 type private AffectedByExprBuilder (layout : Layout, constrEntityRef : ResolvedEntityRef) =
-    let rec buildSinglePathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) (refFieldRef : ResolvedFieldRef) : (PathTriggerKey * PathTrigger) seq =
-        let refEntity = layout.FindEntity refFieldRef.Entity |> Option.get
-        let refField = refEntity.FindField refFieldRef.Name |> Option.get
+    let rec buildOuterPathTrigger (extra : ObjectMap) (fieldRef : ResolvedFieldRef) : (PathTriggerKey * PathTrigger) seq =
+        let refEntity = layout.FindEntity fieldRef.Entity |> Option.get
+        let refField = refEntity.FindField fieldRef.Name |> Option.get
+
+        let columnFieldTrigger () : (PathTriggerKey * PathTrigger) seq =
+            let trigger =
+                { Fields = Map.singleton fieldRef.Entity (Set.singleton fieldRef.Name)
+                  Root = refEntity.Root
+                }
+            Seq.singleton ([], trigger)
 
         match refField.Field with
-        | RColumnField col ->
-            let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
-            let expr = SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
-
-            let key =
-                { Ref = outerRef
-                  EntityPath = []
-                }
-            let trigger =
-                { Fields = Map.singleton refField.Name refFieldRef.Entity
-                  Root = refEntity.Root
-                  Expression = expr
-                }
-            Seq.singleton (key, trigger)
-        | RComputedField comp when comp.IsMaterialized ->
-            let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
-            let expr = SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
-
-            let key =
-                { Ref = outerRef
-                  EntityPath = []
-                }
-            let trigger =
-                { Fields = Map.singleton refField.Name refFieldRef.Entity
-                  Root = refEntity.Root
-                  Expression = expr
-                }
-            Seq.singleton (key, trigger)
+        | RColumnField col -> columnFieldTrigger ()
+        | RComputedField comp when comp.IsMaterialized -> columnFieldTrigger ()
         | RComputedField comp ->
-            computedFieldCases layout extra { refFieldRef with Name = refField.Name } comp |> Seq.map (fun (case, comp) -> comp.Expression) |> Seq.collect buildExprTriggers
+            computedFieldCases layout extra { fieldRef with Name = refField.Name } comp |> Seq.map (fun (case, comp) -> comp.Expression) |> Seq.collect buildExprTriggers
         | _ -> Seq.empty
 
     and buildPathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) : (ResolvedEntityRef * PathArrow) list -> (PathTriggerKey * PathTrigger) seq = function
-        | [] -> Seq.empty
-        | [(entityRef, arrow)] -> buildSinglePathTriggers extra outerRef { Entity = entityRef; Name = arrow.Name }
+        | [] -> buildOuterPathTrigger extra outerRef
         | (entityRef, arrow) :: refs ->
-            let outerTriggers = buildSinglePathTriggers extra outerRef { Entity = entityRef; Name = arrow.Name }
+            let outerTriggers = buildOuterPathTrigger extra outerRef
             let refEntity = layout.FindEntity entityRef |> Option.get
             let refField = refEntity.FindField arrow.Name |> Option.get
 
             let innerFieldRef = { Entity = entityRef; Name = refField.Name }
             let innerTriggers = buildPathTriggers extra innerFieldRef refs
 
-            let expandPathTrigger (key, trigger : PathTrigger) =
-                let newKey =
-                    { Ref = outerRef
-                      EntityPath = refField.Name :: key.EntityPath
-                    }
-                let newTrigger =
-                    { trigger with
-                          Expression = expandPathTriggerExpr outerRef.Name entityRef trigger.Expression
-                    }
-                (newKey, newTrigger)
+            let expandPathTrigger (key : PathTriggerKey, trigger : PathTrigger) =
+                (outerRef :: key, trigger)
             let wrappedTriggers = Seq.map expandPathTrigger innerTriggers
             Seq.append outerTriggers wrappedTriggers
 
@@ -449,8 +423,9 @@ type private AffectedByExprBuilder (layout : Layout, constrEntityRef : ResolvedE
         triggers
 
     let finalizeTriggers (triggers : (PathTriggerKey * PathTrigger) seq) : Map<PathTriggerKey, PathTrigger> =
-        let sqlRef = compileRenamedResolvedEntityRef constrEntityRef
-        triggers |> Seq.fold (fun trigs (key, trig) -> Map.addWith unionPathTrigger key (postprocessTrigger sqlRef trig) trigs) Map.empty
+        triggers
+        |> Seq.filter (fun (key, trig) -> not (List.isEmpty key))
+        |> Seq.fold (fun trigs (key, trig) -> Map.addWith unionPathTrigger key trig trigs) Map.empty
 
     // Returns encountered outer fields, and also path triggers.
     let findAffectedByExpr (expr : ResolvedFieldExpr) : Map<PathTriggerKey, PathTrigger> =
@@ -560,7 +535,7 @@ let private buildUpdateCheck (layout : Layout) (outerFields : (FieldName * Resol
         let columnName = getColumnName entity name
         distinctCheck columnName
 
-    outerFields |> Seq.map fieldDistinctCheck |> Seq.fold1 (curry SQL.VEAnd)
+    outerFields |> Seq.map fieldDistinctCheck |> Seq.fold1 (curry SQL.VEOr)
 
 let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.DatabaseMeta =
     let entity = layout.FindEntity constrRef.Entity |> Option.get
@@ -683,6 +658,12 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
       Extensions = Set.empty
     }
 
+let private getPathTriggerAffected (layout : Layout) (trigger : PathTrigger) : SQL.ColumnName[] =
+    let getFieldInfo (entity, fields) =
+        let fieldEntity = layout.FindEntity entity |> Option.get
+        Seq.map (getColumnName fieldEntity) fields
+    trigger.Fields |> Map.toSeq |> Seq.collect getFieldInfo |> Seq.toArray
+
 // This check is built on assumption that we can collect affected rows after the operation. This is true in all cases except one: DELETE with SET NULL foreign key.
 // We don't support them right now, but beware of this!
 let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (aggCheck : SQL.SingleSelectExpr) (key : PathTriggerKey) (trigger : PathTrigger) : SQL.DatabaseMeta =
@@ -691,9 +672,10 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
     let triggerName = pathTriggerName fullTriggerKey
     let triggerKey = pathTriggerKey fullTriggerKey
 
+    let whereExpr = buildPathTriggerExpression constrRef.Entity key
     let aggCheck =
         { aggCheck with
-              Where = Some <| Option.addWith (curry SQL.VEAnd) trigger.Expression aggCheck.Where
+              Where = Some <| Option.addWith (curry SQL.VEAnd) whereExpr aggCheck.Where
         }
     let checkSelect : SQL.SelectExpr =
         { CTEs = None
@@ -734,11 +716,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
     let functionName = SQL.SQLName <| sprintf "__in_chcon_check__%s" triggerName
     let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
 
-    let getFieldInfo (fieldName, fieldEntityRef) =
-        let fieldEntity = layout.FindEntity fieldEntityRef |> Option.get
-        getColumnName fieldEntity fieldName
-
-    let affectedColumns = trigger.Fields |> Map.toSeq |> Seq.map getFieldInfo |> Seq.toArray
+    let affectedColumns = getPathTriggerAffected layout trigger
 
     let checkExpr =
         if Option.isNone entity.Parent then
@@ -746,7 +724,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
         else
             Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
-    let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEAnd)
+    let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEOr)
     let updateCheck =
         match checkExpr with
         | None -> updateCheck
@@ -940,9 +918,11 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
     let triggerName = pathTriggerName fullTriggerKey
     let triggerKey = pathTriggerKey fullTriggerKey
 
+    let whereExpr = buildPathTriggerExpression fieldRef.Entity key
+
     let update =
         { update with
-              Where = Option.unionWith (curry SQL.VEAnd) (Some trigger.Expression) update.Where
+              Where = Option.unionWith (curry SQL.VEAnd) (Some whereExpr) update.Where
         }
 
     let updateStmt = PLPgSQL.StUpdate update
@@ -962,11 +942,7 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
     let functionName = SQL.SQLName <| sprintf "__in_mat_store__%s" triggerName
     let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
 
-    let getFieldInfo (fieldName, fieldEntityRef) =
-        let fieldEntity = layout.FindEntity fieldEntityRef |> Option.get
-        getColumnName fieldEntity fieldName
-
-    let affectedColumns = trigger.Fields |> Map.toSeq |> Seq.map getFieldInfo |> Seq.toArray
+    let affectedColumns = getPathTriggerAffected layout trigger
 
     let checkExpr =
         if Option.isNone entity.Parent then
@@ -974,7 +950,7 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
         else
             Some <| makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
 
-    let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEAnd)
+    let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEOr)
     let updateCheck =
         match checkExpr with
         | None -> updateCheck

@@ -70,6 +70,7 @@ type IContext =
 
     abstract member ScheduleMigration : unit -> unit
     abstract member Commit : unit -> Task
+    abstract member CheckIntegrity : unit -> Task
     abstract member GetAnonymousView : string -> Task<PrefetchedUserView>
     abstract member ResolveAnonymousView : SchemaName option -> string -> Task<PrefetchedUserView>
     abstract member WriteEvent : EventEntry -> unit

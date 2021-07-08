@@ -765,6 +765,15 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             with
                             | :? DbUpdateException as ex -> return raisefWithInner ContextException ex "Failed to commit"
                     }
+                
+                let checkIntegrity () =
+                    unitTask {
+                        let assertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
+                        try
+                            do! checkAssertions transaction.Connection.Query oldState.Context.Layout assertions cancellationToken
+                        with
+                        | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity checks"
+                    }
 
                 let mutable maybeApi = None
                 let setAPI api =
@@ -831,6 +840,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           member this.Commit () = commit ()
                           member this.ScheduleMigration () =
                             needMigration <- true
+                          member this.CheckIntegrity () = checkIntegrity ()
                           member this.GetAnonymousView query = getAnonymousView query
                           member this.ResolveAnonymousView homeSchema query = resolveAnonymousView homeSchema query
                           member this.WriteEvent event = eventLogger.WriteEvent(connectionString, event)

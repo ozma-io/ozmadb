@@ -10,6 +10,7 @@ open Npgsql
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.API.InstancesCache
 open FunWithFlags.FunDB.API.ContextCache
+open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.HTTP.Utils
 
 type IsInitializedResponse =
@@ -38,8 +39,18 @@ let infoApi : HttpHandler =
             NpgsqlConnection.ClearAllPools ()
             Successful.ok (json Map.empty) next ctx
 
+    let checkIntegrity (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) =
+        task {
+            match api.Request.User.Effective.Type with
+            | RTRoot ->
+                do! api.Request.Context.CheckIntegrity ()
+                return! Successful.ok (json Map.empty) next ctx
+            | RTRole _ -> return! requestError REAccessDenied next ctx
+        }
+
     choose
         [ route "/check_access" >=> GET >=> withContext (fun _ -> ping)
+          route "/check_integrity" >=> POST >=> withContext checkIntegrity
           route "/is_initialized" >=> GET >=> lookupInstance isInitialized
           route "/clear_instances_cache" >=> POST >=> resolveUser clearInstancesCache
           route "/ping" >=> GET >=> ping
