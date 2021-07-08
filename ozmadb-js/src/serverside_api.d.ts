@@ -1,8 +1,9 @@
 import {
   IEntityRef, IRoleRef, IEntity, UserViewSource, IViewExprResult, IViewInfoResult, IQueryChunk, ILayout, UserViewName,
-  IFieldRef, IDomainValuesResult,
+  IFieldRef, IDomainValuesResult, IApiError,
 } from "./common";
 
+export declare const renderDate: (date : Date) => string;
 export declare const renderFunQLName: (name: string) => string;
 export declare const renderFunQLValue: (value: unknown) => string;
 
@@ -21,6 +22,12 @@ export interface IFunDBAPI {
 }
 
 export declare const FunDB: IFunDBAPI;
+
+export class FunDBError extends Error {
+  constructor(body: IApiError);
+
+  body: IApiError;
+}
 
 export interface ITriggerInsertSource {
   type: "insert";
