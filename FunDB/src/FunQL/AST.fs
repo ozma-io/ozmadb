@@ -1278,6 +1278,8 @@ let allowedAggregateFunctions : Map<FunctionName, SQL.FunctionName> =
           (FunQLName "every", SQL.SQLName "every")
           // Strings
           (FunQLName "string_agg", SQL.SQLName "string_agg")
+          // Arrays
+          (FunQLName "array_agg", SQL.SQLName "array_agg")
           // JSON
           (FunQLName "json_agg", SQL.SQLName "jsonb_agg")
           (FunQLName "json_object_agg", SQL.SQLName "jsonb_object_agg")
