@@ -78,43 +78,6 @@ let private splitResults (results : Result seq) : ParsedAttributeMap * QueryResu
     let results = results |> Seq.mapMaybe getResult |> Seq.toArray
     (attributes, results)
 
-// We restrict casts to work only on values to clarify their types. This is because arbitrary casting breaks array abstraction, allowing to create nested arrays.
-let private restrictCast (expr : ParsedFieldExpr) (exprType : FieldExprType) : unit =
-    match expr with
-    | FEValue v ->
-        match v with
-        | FNull -> ()
-        | FStringArray _
-        | FIntArray _
-        | FBoolArray _
-        | FDecimalArray _
-        | FJsonArray _
-        | FUserViewRefArray _
-        | FDateArray _
-        | FDateTimeArray _
-        | FIntervalArray _
-        | FUuidArray _ ->
-            match exprType with
-            | FETArray _ -> ()
-            | FETScalar _ -> failwith "Casting cannot be performed between arrays and scalars"
-        | FString _
-        | FInt _
-        | FDecimal _
-        | FBool _
-        | FJson _
-        | FUserViewRef _
-        | FDate _
-        | FDateTime _
-        | FInterval _
-        | FUuid _ ->
-            match exprType with
-            | FETScalar _ -> ()
-            | FETArray _ -> failwith "Casting cannot be performed between arrays and scalars"
-    | _ ->
-        match exprType with
-        | FETScalar _ -> ()
-        | FETArray _ -> failwith "Cannot cast arbitrary values to arrays"
-
 let private applyJoin fromExpr1 (joinType, fromExpr2, whereExpr) =
     FJoin { Type = joinType; A = fromExpr1; B = fromExpr2; Condition = whereExpr }
 
@@ -719,7 +682,7 @@ FieldExprMisc:
 
     | FieldExprMisc IN FieldInSource                  { inExpr FEIn FEInQuery $1 $3 }
     | FieldExprMisc NOT IN FieldInSource              { inExpr FENotIn FENotInQuery $1 $4 }
-    | FieldExprMisc DOUBLE_COLON FieldExprType        { restrictCast $1 $3; FECast ($1, $3) }
+    | FieldExprMisc DOUBLE_COLON FieldExprType        { FECast ($1, $3) }
     | CaseExpr                                        { $1 }
     | LinkedValueRef INHERITED FROM EntityRef         { FEInheritedFrom ($1, { Ref = $4; Extra = ObjectMap.empty }) }
     | LinkedValueRef OFTYPE EntityRef                 { FEOfType ($1, { Ref = $3; Extra = ObjectMap.empty }) }
