@@ -72,7 +72,6 @@ let private mergeFlatAllowedDatabase = Map.unionWith (fun name -> mergeFlatEntit
 
 let private mergeFlatRole (a : FlatRole) (b: FlatRole) =
     { Entities = mergeFlatAllowedDatabase a.Entities b.Entities
-      AllowAnonymousQueries = a.AllowAnonymousQueries || b.AllowAnonymousQueries
     }
 
 type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb : SourceAllowedDatabase) =
@@ -365,7 +364,6 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
         let (errors, resolved) = resolver.ResolveAllowedDatabase ()
         let flattened =
             { Entities = resolver.Flattened
-              AllowAnonymousQueries = role.AllowAnonymousQueries
             }
 
         let ret =
@@ -373,7 +371,6 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
               Permissions = resolved
               Flattened = mergeFlatRole flattenedParents flattened
               AllowBroken = role.AllowBroken
-              AllowAnonymousQueries = role.AllowAnonymousQueries
             }
         (errors, ret)
 

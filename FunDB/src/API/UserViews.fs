@@ -39,19 +39,6 @@ let private userViewComments (source : UserViewSource) (role : RoleType) (argume
         | RTRole role -> sprintf ", role %O" role.Ref
     String.concat "" [sourceStr; argumentsStr; chunkStr; roleStr]
 
-let canQueryAnonymously (rctx : IRequestContext) : bool =
-    let allowAnon =
-        match rctx.User.Effective.Type with
-        | RTRole { Role = Some role } -> role.Flattened.AllowAnonymousQueries
-        | RTRoot -> true
-        | _ -> false
-    if allowAnon then true else
-        // Still allow anonymous queries from triggers and actions.
-        match rctx.Source with
-        | ESAPI -> false
-        | ESTrigger ref -> true
-        | ESAction ref -> true
-
 type UserViewsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<UserViewsAPI>()
@@ -60,21 +47,17 @@ type UserViewsAPI (rctx : IRequestContext) =
         task {
             match source with
             | UVAnonymous query ->
-                if not <| canQueryAnonymously rctx then
-                    logger.LogError("Access denied to execute anonymous user view")
-                    return Error UVEAccessDenied
-                else
-                    try
-                        let! anon =
-                            if flags.ForceRecompile then
-                                ctx.ResolveAnonymousView None query
-                            else
-                                ctx.GetAnonymousView query
-                        return Ok anon
-                    with
-                    | :? UserViewResolveException as err ->
-                        logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
-                        return Error <| UVECompilation (exceptionString err)
+                try
+                    let! anon =
+                        if flags.ForceRecompile then
+                            ctx.ResolveAnonymousView None query
+                        else
+                            ctx.GetAnonymousView query
+                    return Ok anon
+                with
+                | :? UserViewResolveException as err ->
+                    logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
+                    return Error <| UVECompilation (exceptionString err)
             | UVNamed ref ->
                 if flags.ForceRecompile then
                     let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.Schema && uv.Name = string ref.Name).FirstOrDefaultAsync(ctx.CancellationToken)

@@ -46,7 +46,6 @@ let private makeSourceRole (role : Role) : SourceRole =
     { Parents = role.Parents |> Seq.map (fun role -> { Schema = FunQLName role.Parent.Schema.Name; Name = FunQLName role.Parent.Name }) |> Set.ofSeqUnique
       Permissions = makeSourceAllowedDatabase role
       AllowBroken = role.AllowBroken
-      AllowAnonymousQueries = role.AllowAnonymousQueries
     }
 
 let private makeSourcePermissionsSchema (schema : Schema) : SourcePermissionsSchema =

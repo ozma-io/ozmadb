@@ -403,7 +403,6 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
         [ColumnField("bool", Default="false")]
-        public bool AllowAnonymousQueries { get; set; }
 
         public List<RoleParent>? Parents { get; set; }
         public List<RoleParent>? Children { get; set; }
