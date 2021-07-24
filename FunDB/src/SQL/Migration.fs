@@ -100,6 +100,13 @@ type private AColumnMeta =
     }
 
 // Convert tree the way PostgreSQL converts it internally, but drop type casts.
+// I couldn't find any spec on how exactly does PostgreSQL converts values, so this all is based on experiments.
+let private normalizeIn (constr : ValueExpr * BinaryOperator * ValueExpr -> ValueExpr) (e : ValueExpr) (op : BinaryOperator) (vals: ValueExpr[]) =
+    if vals.Length = 1 then
+        VEBinaryOp (e, op, vals.[0])
+    else
+        constr (e, op, VEArray vals)
+
 let private normalizeLocalExpr : ValueExpr -> ValueExpr =
     let rec traverse = function
         | VECast (v, typ) -> traverse v
@@ -126,10 +133,11 @@ let private normalizeLocalExpr : ValueExpr -> ValueExpr =
         | VENotSimilarTo (e, pat) -> VENotSimilarTo (traverse e, traverse pat)
         | VEIsNull e -> VEIsNull (traverse e)
         | VEIsNotNull e -> VEIsNotNull (traverse e)
-        | VEIn (e, vals) -> VEAny (traverse e, BOEq, VEArray (Array.map traverse vals))
-        | VENotIn (e, vals) -> VEAll (traverse e, BONotEq, VEArray (Array.map traverse vals))
+        // PostgreSQL converts IN and NOT IN, but not ANY and ALL.
+        | VEIn (e, vals) -> normalizeIn VEAny (traverse e) BOEq (Array.map traverse vals)
+        | VENotIn (e, vals) -> normalizeIn VEAll (traverse e) BONotEq (Array.map traverse vals)
         | VEAny (e, op, arr) -> VEAny (traverse e, op, traverse arr)
-        | VEAll (e, op, arr) -> VEAny (traverse e, op, traverse arr)
+        | VEAll (e, op, arr) -> VEAll (traverse e, op, traverse arr)
         | VEInQuery (e, query) -> failwithf "Invalid subquery in local expression: %O" query
         | VENotInQuery (e, query) -> failwithf "Invalid subquery in local expression: %O" query
         | VEFunc (name, args) -> VEFunc (name, Array.map traverse args)
