@@ -114,8 +114,8 @@ type APITemplate (isolate : Isolate) =
 
         fundbTemplate.Set("getUserView", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
-            if args.Length < 1 || args.Length > 2 then
-                throwCallError context "Number of arguments must be between 1 and 2"
+            if args.Length < 1 || args.Length > 3 then
+                throwCallError context "Number of arguments must be between 1 and 3"
             let source = jsDeserialize context args.[0] : UserViewSource
             let uvArgs =
                 if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
