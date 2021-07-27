@@ -18,7 +18,7 @@ export interface IFunDBAPI {
   pretendRole: <T>(ref: "root" | IRoleRef, inner: () => Promise<T>) => Promise<T>;
   getDomainValues: (ref: IFieldRef, chunk?: IQueryChunk) => Promise<IDomainValuesResult>;
   writeEvent: (message: string) => void;
-  writeEventSync: (message: string) => void;
+  writeEventSync: (message: string) => Promise<void>;
 }
 
 export declare const FunDB: IFunDBAPI;
