@@ -181,7 +181,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     | Ok args ->
                         try
                             let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef args ctx.CancellationToken
-                            rctx.WriteEventSync (fun event ->
+                            do! rctx.WriteEventSync (fun event ->
                                 event.Type <- "insertEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
                                 event.EntityName <- entityRef.Name.ToString()
@@ -228,7 +228,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     | Ok args ->
                         try
                             do! updateEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef id args ctx.CancellationToken
-                            rctx.WriteEventSync (fun event ->
+                            do! rctx.WriteEventSync (fun event ->
                                 event.Type <- "updateEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
                                 event.EntityName <- entityRef.Name.ToString()
@@ -273,7 +273,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                 | Ok () ->
                     try
                         do! deleteEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef id ctx.CancellationToken
-                        rctx.WriteEventSync (fun event ->
+                        do! rctx.WriteEventSync (fun event ->
                             event.Type <- "deleteEntity"
                             event.SchemaName <- entityRef.Schema.ToString()
                             event.EntityName <- entityRef.Name.ToString()
@@ -322,7 +322,9 @@ type EntitiesAPI (rctx : IRequestContext) =
                 }
             match! transaction.Operations |> Seq.indexed |> Seq.traverseResultTask handleOne with
             | Ok results ->
-                return Ok { Results = Array.ofSeq results }
+                let resultsArr = Array.ofSeq results
+                logger.LogInformation("Executed {} operations in a transaction", resultsArr.Length)
+                return Ok { Results = resultsArr }
             | Error e ->
                 return Error e
         }

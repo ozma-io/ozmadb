@@ -115,7 +115,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                             ()
                         if modified || not (Set.isEmpty droppedSchemas) then
                             ctx.ScheduleMigration ()
-                        rctx.WriteEventSync (fun event ->
+                        do! rctx.WriteEventSync (fun event ->
                             event.Type <- "restoreSchemas"
                             event.Details <- sprintf "{\"dropOthers\":%b,\"dumps\":%s}" dropOthers (JsonConvert.SerializeObject dumps)
                         )

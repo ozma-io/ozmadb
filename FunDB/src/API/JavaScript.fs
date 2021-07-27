@@ -33,19 +33,73 @@ type APICallErrorInfo =
         interface IAPIError with
             member this.Message = this.Message
 
-type private APIHandle =
-    { API : IFunDBAPI
-      Logger : ILogger
+type private APIHandle (api : IFunDBAPI) =
+    let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
+    let mutable lock = None
+
+    member this.API = api
+    member this.Logger = logger
+    member this.Lock =
+        match lock with
+        | None ->
+            let newLock = Task.AsyncSemaphore(1)
+            lock <- Some newLock
+            newLock
+        | Some l -> l
+
+    member inline this.StackLock (f : unit -> Task<'a>) : Task<'a> =
+        task {
+            let oldLock = lock
+            lock <- None
+            try
+                return! f ()
+            finally
+                lock <- oldLock
+        }
+
+let inline private wrapApiCall (handle : APIHandle) (wrap : (unit -> Task<'a>) -> Task<'b>) (f : unit -> Task<'a>) : Task<'b> =
+    task {
+        let mutable lockTaken = false
+        do! handle.Lock.WaitAsync()
+        lockTaken <- true
+        try
+            return! wrap <| fun () ->
+                task {
+                    handle.Lock.Release()
+                    lockTaken <- false
+                    let! r = f ()
+                    do! handle.Lock.WaitAsync()
+                    lockTaken <- true
+                    return r
+                }
+        finally
+            if lockTaken then
+                handle.Lock.Release()
     }
 
-let private runApiCall<'a, 'e when 'e :> IAPIError> (context : Context) (f : unit -> Task<Result<'a, 'e>>) : Func<Task<Value.Value>> =
+let inline private runVoidApiCall (handle : APIHandle) (context : Context)  (f : unit -> Task) : Func<Task<Value.Value>> =
     let run () =
-        task {
-            let! res = f ()
-            match res with
-            | Ok r -> return V8JsonWriter.Serialize(context, r)
-            | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
-        }
+        Task.lock handle.Lock <| fun () ->
+            task {
+                do! handle.StackLock <| fun () ->
+                    task {
+                        do! f ()
+                        return ()
+                    }
+                return Value.Undefined.New(context.Isolate)
+            }
+    Func<_>(run)
+
+let inline private runResultApiCall<'a, 'e when 'e :> IAPIError> (handle : APIHandle) (context : Context) (f : unit -> Task<Result<'a, 'e>>) : Func<Task<Value.Value>> =
+    let run () =
+        Task.unmaskableLock handle.Lock <| fun unmask ->
+            task {
+                let! res = handle.StackLock f
+                unmask ()
+                match res with
+                | Ok r -> return V8JsonWriter.Serialize(context, r)
+                | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
+            }
     Func<_>(run)
 
 type APITemplate (isolate : Isolate) =
@@ -128,7 +182,7 @@ type APITemplate (isolate : Isolate) =
                 else
                     emptyQueryChunk
             let handle = Option.get currentHandle
-            let run = runApiCall context <| fun () -> handle.API.UserViews.GetUserView source uvArgs chunk emptyUserViewFlags
+            let run = runResultApiCall handle context <| fun () -> handle.API.UserViews.GetUserView source uvArgs chunk emptyUserViewFlags
             runtime.EventLoop.NewPromise(context, run).Value
         ))
         fundbTemplate.Set("getUserViewInfo", FunctionTemplate.New(isolate, fun args ->
@@ -137,7 +191,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let source = jsDeserialize context args.[0] : UserViewSource
             let handle = Option.get currentHandle
-            let run = runApiCall context <| fun () -> handle.API.UserViews.GetUserViewInfo source emptyUserViewFlags
+            let run = runResultApiCall handle context <| fun () -> handle.API.UserViews.GetUserViewInfo source emptyUserViewFlags
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
@@ -147,7 +201,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
             let handle = Option.get currentHandle
-            let run = runApiCall context <| fun () -> handle.API.Entities.GetEntityInfo ref
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.GetEntityInfo ref
             runtime.EventLoop.NewPromise(context, run).Value
         ))
         fundbTemplate.Set("insertEntity", FunctionTemplate.New(isolate, fun args ->
@@ -157,7 +211,7 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
             let rawArgs = jsDeserialize context args.[1] : RawArguments
             let handle = Option.get currentHandle
-            let run = runApiCall context <| fun () -> handle.API.Entities.InsertEntity ref rawArgs
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.InsertEntity ref rawArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
         fundbTemplate.Set("updateEntity", FunctionTemplate.New(isolate, fun args ->
@@ -168,7 +222,7 @@ type APITemplate (isolate : Isolate) =
             let id = jsInt context args.[1]
             let rawArgs = jsDeserialize context args.[2] : RawArguments
             let handle = Option.get currentHandle
-            let run = runApiCall context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
         fundbTemplate.Set("deleteEntity", FunctionTemplate.New(isolate, fun args ->
@@ -178,7 +232,7 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
             let id = jsInt context args.[1]
             let handle = Option.get currentHandle
-            let run = runApiCall context <| fun () -> handle.API.Entities.DeleteEntity ref id
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.DeleteEntity ref id
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
@@ -190,7 +244,7 @@ type APITemplate (isolate : Isolate) =
             let handle = Option.get currentHandle
             let run () =
                 task {
-                    let! res = handle.API.Entities.DeferConstraints <| fun () -> func.CallAsync(null)
+                    let! res =  wrapApiCall handle handle.API.Entities.DeferConstraints (fun () -> func.CallAsync(null))
                     match res with
                     | Ok r -> return r
                     | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
@@ -209,10 +263,11 @@ type APITemplate (isolate : Isolate) =
                 | _ -> throwCallError context "Invalid argument `role`"
             let func = args.[1].GetFunction()
             let handle = Option.get currentHandle
-            let run =
+            let wrapper =
                 match asRole with
-                | None -> fun () -> handle.API.Request.PretendRoot <| fun () -> func.CallAsync(null)
-                | Some ref -> fun () -> handle.API.Request.PretendRole ref <| fun () -> func.CallAsync(null)
+                | None -> handle.API.Request.PretendRoot
+                | Some ref -> handle.API.Request.PretendRole ref
+            let run () = wrapApiCall handle wrapper (fun () -> func.CallAsync(null))
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
 
@@ -232,7 +287,7 @@ type APITemplate (isolate : Isolate) =
                 else
                     emptyQueryChunk
             let handle = Option.get currentHandle
-            let run = runApiCall context <| fun () -> handle.API.Domains.GetDomainValues ref rowId chunk
+            let run = runResultApiCall handle context <| fun () -> handle.API.Domains.GetDomainValues ref rowId chunk
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
@@ -257,11 +312,12 @@ type APITemplate (isolate : Isolate) =
             let details = jsString context args.[0]
             let handle = Option.get currentHandle
             handle.Logger.LogInformation("Source {} wrote sync event from JavaScript: {}", string handle.API.Request.Source, details)
-            handle.API.Request.WriteEventSync (fun event ->
-                event.Type <- "jsEvent"
-                event.Details <- details
-            )
-            Value.Undefined.New(isolate)
+            let run = runVoidApiCall handle context <| fun () ->
+                handle.API.Request.WriteEventSync (fun event ->
+                    event.Type <- "jsEvent"
+                    event.Details <- details
+                )
+            runtime.EventLoop.NewPromise(context, run).Value
         ))
 
         template
@@ -285,10 +341,7 @@ global.asDateArgument = global.renderDate;
 
     member this.SetAPI (api : IFunDBAPI) =
         assert (Option.isNone currentHandle)
-        currentHandle <- Some
-            { API = api
-              Logger = api.Request.Context.LoggerFactory.CreateLogger<APITemplate>()
-            }
+        currentHandle <- Some <| APIHandle(api)
 
     member this.ResetAPI api =
         currentHandle <- None

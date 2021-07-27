@@ -5,6 +5,7 @@ open Printf
 open System
 open System.Collections.Generic
 open System.Collections.ObjectModel
+open System.Threading
 open System.Runtime.ExceptionServices
 open Microsoft.FSharp.Reflection
 
@@ -85,3 +86,16 @@ let rec exceptionString (e : exn) : string =
             e.Message
         else
             sprintf "%s: %s" e.Message inner
+
+let inline unmaskableLock (k : 'Lock) (f : (unit -> unit) -> 'a) : 'a =
+    let mutable lockWasTaken = false
+    try
+        Monitor.Enter(k, ref lockWasTaken)
+        let inline unmask () =
+            if lockWasTaken then
+                Monitor.Exit(k)
+                lockWasTaken <- false
+        f unmask
+    finally
+        if lockWasTaken then
+            Monitor.Exit(k)

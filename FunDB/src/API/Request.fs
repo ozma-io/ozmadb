@@ -193,8 +193,9 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
     member this.WriteEvent (addDetails : EventEntry -> unit) =
         ctx.WriteEvent (makeEvent addDetails)
 
-    member this.WriteEventSync (addDetails : EventEntry -> unit) =
+    member this.WriteEventSync (addDetails : EventEntry -> unit) : Task =
         ignore <| ctx.Transaction.System.Events.Add(makeEvent addDetails)
+        ctx.Transaction.SystemSaveChangesAsync(this.Context.CancellationToken) :> Task
 
     member this.RunWithSource (newSource : EventSource) (func : unit -> Task<'a>) : Task<'a> =
         task {

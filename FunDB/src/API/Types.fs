@@ -128,7 +128,7 @@ type IRequestContext =
     abstract Source : EventSource with get
 
     abstract member WriteEvent : (EventEntry -> unit) -> unit
-    abstract member WriteEventSync : (EventEntry -> unit) -> unit
+    abstract member WriteEventSync : (EventEntry -> unit) -> Task
     abstract member RunWithSource : EventSource -> (unit -> Task<'a>) -> Task<'a>
     abstract member PretendRole : ResolvedRoleRef -> (unit -> Task<'a>) -> Task<'a>
     abstract member PretendRoot : (unit -> Task<'a>) -> Task<'a>
