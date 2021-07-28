@@ -1,8 +1,5 @@
 module FunWithFlags.FunDB.UserViews.Resolve
 
-open NetJs
-open NetJs.Value
-
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.UserViews.Types
@@ -13,11 +10,9 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Resolve
-open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.FunQL.Dereference
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Attributes.Merge
-module SQL = FunWithFlags.FunDB.SQL.AST
 
 type UserViewResolveException (message : string, innerException : Exception) =
     inherit Exception(message, innerException)

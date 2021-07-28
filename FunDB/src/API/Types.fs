@@ -177,10 +177,16 @@ type UserViewInfoResult =
 
 type UserViewFlags =
     { ForceRecompile : bool
+      NoAttributes : bool
+      NoTracking : bool
+      NoPuns : bool
     }
 
 let emptyUserViewFlags =
     { ForceRecompile = false
+      NoAttributes = false
+      NoTracking = false
+      NoPuns = false
     } : UserViewFlags
 
 type IUserViewsAPI =

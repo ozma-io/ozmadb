@@ -39,45 +39,69 @@ let private userViewComments (source : UserViewSource) (role : RoleType) (argume
         | RTRole role -> sprintf ", role %O" role.Ref
     String.concat "" [sourceStr; argumentsStr; chunkStr; roleStr]
 
+let private removeColumnAttributes (col : UserViewColumn) =
+    { col with
+          AttributeTypes = Map.empty
+          CellAttributeTypes = Map.empty
+    }
+
+let private applyFlags (flags : UserViewFlags) (view : PrefetchedUserView) =
+    let view =
+        if not flags.NoAttributes then
+            view
+        else
+            let info =
+                { view.Info with
+                      AttributeTypes = Map.empty
+                      RowAttributeTypes = Map.empty
+                      Columns = Array.map removeColumnAttributes view.Info.Columns
+                }
+            view
+    view
+
 type UserViewsAPI (rctx : IRequestContext) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<UserViewsAPI>()
 
     let resolveSource (source : UserViewSource) (flags : UserViewFlags) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
         task {
-            match source with
-            | UVAnonymous query ->
-                try
-                    let! anon =
-                        if flags.ForceRecompile then
-                            ctx.ResolveAnonymousView None query
-                        else
-                            ctx.GetAnonymousView query
-                    return Ok anon
-                with
-                | :? UserViewResolveException as err ->
-                    logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
-                    return Error <| UVECompilation (exceptionString err)
-            | UVNamed ref ->
-                if flags.ForceRecompile then
-                    let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.Schema && uv.Name = string ref.Name).FirstOrDefaultAsync(ctx.CancellationToken)
-                    if isNull uv then
-                        return Error UVENotFound
-                    else
+            let! maybeUv =
+                task {
+                    match source with
+                    | UVAnonymous query ->
                         try
-                            let! anon = ctx.ResolveAnonymousView (Some ref.Schema) uv.Query
+                            let! anon =
+                                if flags.ForceRecompile then
+                                    ctx.ResolveAnonymousView None query
+                                else
+                                    ctx.GetAnonymousView query
                             return Ok anon
                         with
                         | :? UserViewResolveException as err ->
-                            logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
+                            logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
                             return Error <| UVECompilation (exceptionString err)
-                else
-                    match ctx.UserViews.Find ref with
-                    | None -> return Error UVENotFound
-                    | Some (Error e) ->
-                        logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
-                        return Error <| UVECompilation (exceptionString e)
-                    | Some (Ok cached) -> return Ok cached
+                    | UVNamed ref ->
+                        if flags.ForceRecompile then
+                            let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.Schema && uv.Name = string ref.Name).FirstOrDefaultAsync(ctx.CancellationToken)
+                            if isNull uv then
+                                return Error UVENotFound
+                            else
+                                try
+                                    let! anon = ctx.ResolveAnonymousView (Some ref.Schema) uv.Query
+                                    return Ok anon
+                                with
+                                | :? UserViewResolveException as err ->
+                                    logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
+                                    return Error <| UVECompilation (exceptionString err)
+                        else
+                            match ctx.UserViews.Find ref with
+                            | None -> return Error UVENotFound
+                            | Some (Error e) ->
+                                logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
+                                return Error <| UVECompilation (exceptionString e)
+                            | Some (Ok cached) -> return Ok cached
+                }
+            return Result.map (applyFlags flags) maybeUv
         }
 
     let convertViewArguments (extraArguments : ArgumentValuesMap) (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValuesMap, string> =
@@ -196,7 +220,14 @@ type UserViewsAPI (rctx : IRequestContext) =
                         | Error msg ->
                             return Error <| UVEArguments msg
                         | Ok arguments ->
-                            let getResult info (res : ExecutedViewExpr) = Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
+                            let getResult info (res : ExecutedViewExpr) =
+                                let res =
+                                    { res with
+                                          Attributes = Map.union uv.PureAttributes.Attributes res.Attributes
+                                          ColumnAttributes = Array.map2 Map.union uv.PureAttributes.ColumnAttributes res.ColumnAttributes
+                                          Rows = Array.ofSeq res.Rows
+                                    }
+                                Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
                             let comments = userViewComments source rctx.User.Effective.Type arguments chunk
                             let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled (Some comments) arguments ctx.CancellationToken getResult
                             return Ok { Info = puv.Info

@@ -34,6 +34,9 @@ let private flagIfDebug (flag : bool) : bool =
 type UserViewRequest =
     { Args: RawArguments
       ForceRecompile : bool
+      NoAttributes : bool
+      NoTracking : bool
+      NoPuns : bool
       Offset : int option
       Limit : int option
       Where : SourceChunkWhere option
@@ -44,6 +47,9 @@ type UserViewRequest =
 type UserViewExplainRequest =
     { Args: RawArguments option
       ForceRecompile : bool
+      NoAttributes : bool
+      NoTracking : bool
+      NoPuns : bool
       Offset : int option
       Limit : int option
       Where : SourceChunkWhere option
@@ -75,6 +81,9 @@ let viewsApi : HttpHandler =
             task {
                 let flags =
                     { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+                      NoAttributes = boolRequestArg "__no_attributes" ctx
+                      NoTracking = boolRequestArg "__no_tracking" ctx
+                      NoPuns = boolRequestArg "__no_puns" ctx
                     } : UserViewFlags
                 let chunk =
                     { Offset = intRequestArg "__offset" ctx
@@ -87,6 +96,9 @@ let viewsApi : HttpHandler =
     let doPostSelectFromView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewRequest) (next : HttpFunc) (ctx : HttpContext) =
         let flags =
             { ForceRecompile = flagIfDebug req.ForceRecompile
+              NoAttributes = req.NoAttributes
+              NoTracking = req.NoTracking
+              NoPuns = req.NoPuns
             } : UserViewFlags
         let chunk =
             { Offset = req.Offset
@@ -104,6 +116,9 @@ let viewsApi : HttpHandler =
         task {
             let flags =
                 { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+                  NoAttributes = false
+                  NoTracking = false
+                  NoPuns = false
                 } : UserViewFlags
             match! api.UserViews.GetUserViewInfo viewRef flags with
             | Ok res -> return! Successful.ok (json res) next ctx
@@ -114,6 +129,9 @@ let viewsApi : HttpHandler =
         task {
             let flags =
                 { ForceRecompile = flagIfDebug req.ForceRecompile
+                  NoAttributes = false
+                  NoTracking = false
+                  NoPuns = false
                 } : UserViewFlags
             match! api.UserViews.GetUserViewInfo viewRef flags with
             | Ok res -> return! Successful.ok (json res) next ctx
@@ -137,6 +155,9 @@ let viewsApi : HttpHandler =
             task {
                 let flags =
                     { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+                      NoAttributes = boolRequestArg "__no_attributes" ctx
+                      NoTracking = boolRequestArg "__no_tracking" ctx
+                      NoPuns = boolRequestArg "__no_puns" ctx
                     } : UserViewFlags
                 let chunk =
                     { Offset = intRequestArg "__offset" ctx
@@ -156,6 +177,9 @@ let viewsApi : HttpHandler =
     let doPostExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewExplainRequest) (next : HttpFunc) (ctx : HttpContext) =
         let flags =
             { ForceRecompile = flagIfDebug req.ForceRecompile
+              NoAttributes = req.NoAttributes
+              NoTracking = req.NoTracking
+              NoPuns = req.NoPuns
             } : UserViewFlags
         let chunk =
             { Offset = req.Offset

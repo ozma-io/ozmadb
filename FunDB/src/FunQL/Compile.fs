@@ -2088,7 +2088,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let columns = Array.map (mapColumnType getFinalName) info.Columns
 
     let allPureAttrs = findPureExprAttributes columns expr
-    let newExpr = filterNonpureExprColumns allPureAttrs expr
+    let expr = filterNonpureExprColumns allPureAttrs expr
 
     let checkColumn i _ = Option.isNone allPureAttrs.[i]
     let newColumns = Seq.filteri checkColumn columns |> Seq.toArray
@@ -2120,7 +2120,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
 
     { Pragmas = Map.mapWithKeys compilePragma viewExpr.Pragmas
       AttributesQuery = attrQuery
-      Query = { Expression = newExpr; Arguments = arguments }
+      Query = { Expression = expr; Arguments = arguments }
       UsedSchemas = compiler.UsedSchemas
       Columns = columnsWithNames
       Domains = domains

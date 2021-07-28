@@ -109,7 +109,7 @@ let private getColumn : (ColumnType * SQL.ColumnName) -> FunQLName option = func
     | (CTColumn c, _) -> Some c
     | _ -> None
 
-let private getPureAttributes (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (res : ExecutedViewExpr) : PureAttributes =
+let private getPureAttributes (compiled : CompiledViewExpr) (res : ExecutedViewExpr) : PureAttributes =
     let getPureAttr = function
     | (CTMeta (CMRowAttribute attrName), name, attr) -> Some attrName
     | _ -> None
@@ -229,10 +229,15 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
 
             try
                 return! runViewExpr conn limited comment arguments cancellationToken <| fun info res ->
+                    let nonpureCompiled = 
+                        { uv.Compiled with
+                              AttributesQuery = { uv.Compiled.AttributesQuery with PureColumns = [||] }
+                        }
+                    let nonpureUv = { uv with Compiled = nonpureCompiled }
                     Task.FromResult
-                        { UserView = uv
+                        { UserView = nonpureUv
                           Info = mergeViewInfo uv.Resolved uv.Compiled info res
-                          PureAttributes = getPureAttributes uv.Resolved uv.Compiled res
+                          PureAttributes = getPureAttributes uv.Compiled res
                         }
             with
             | :? UserViewExecutionException as err ->
