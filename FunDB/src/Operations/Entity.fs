@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Entity
 open FunWithFlags.FunDB.SQL.Query
+module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DML
 
@@ -35,11 +36,12 @@ type EntityId = int
 
 let private subEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
 
-let private runQuery (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>) (globalArgs : LocalArgumentsMap) (query : Query<'q>) (placeholders : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<'a> =
+let private runQuery (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>) (globalArgs : LocalArgumentsMap) (query : Query<'q>) (comments : string option) (placeholders : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<'a> =
     task {
         try
             let args = Map.union (Map.mapKeys PGlobal globalArgs) (Map.mapKeys PLocal placeholders)
-            return! runFunc (query.Expression.ToSQLString()) (prepareArguments query.Arguments args) cancellationToken
+            let prefix = SQL.convertComments comments
+            return! runFunc (prefix + query.Expression.ToSQLString()) (prepareArguments query.Arguments args) cancellationToken
         with
             | :? QueryException as ex ->
                 return raisefWithInner EntityExecutionException ex ""
@@ -47,9 +49,9 @@ let private runQuery (runFunc : string -> ExprParameters -> CancellationToken ->
 
 let private runNonQuery (connection : QueryConnection) = runQuery connection.ExecuteNonQuery
 
-let private runIntQuery (connection : QueryConnection) globalArgs query placeholders cancellationToken =
+let private runIntQuery (connection : QueryConnection) globalArgs query comments placeholders cancellationToken =
     task {
-        match! runQuery connection.ExecuteValueQuery globalArgs query placeholders cancellationToken with
+        match! runQuery connection.ExecuteValueQuery globalArgs query comments placeholders cancellationToken with
         | SQL.VInt i -> return i
         // FIXME FIXME: should use int64 everywhere instead!
         | SQL.VBigInt i -> return (int i)
@@ -81,7 +83,7 @@ let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRe
             { Expression = testExpr
               Arguments = emptyArguments
             }
-        let! count = runIntQuery connection Map.empty testQuery Map.empty cancellationToken
+        let! count = runIntQuery connection Map.empty testQuery None Map.empty cancellationToken
         if count > 0 then
             raisef EntityDeniedException "Access denied"
         else
@@ -97,7 +99,7 @@ type private ValueColumn =
 
 let private fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.DefaultValue || field.IsNullable
 
-let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<int> =
+let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (comments : string option) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<int> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             let isOptional = fieldIsOptional field
@@ -158,12 +160,12 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e ""
 
-        return! runIntQuery connection globalArgs query rawArgs cancellationToken
+        return! runIntQuery connection globalArgs query comments rawArgs cancellationToken
     }
 
 let private funIdArg = requiredArgument <| FTType (FETScalar SFTInt)
 
-let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
+let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (comments : string option) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
             match Map.tryFind fieldName rawArgs with
@@ -216,12 +218,12 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e ""
 
-        let! affected = runNonQuery connection globalArgs restricted (Map.add funId (FInt id) rawArgs) cancellationToken
+        let! affected = runNonQuery connection globalArgs restricted comments (Map.add funId (FInt id) rawArgs) cancellationToken
         if affected = 0 then
             do! countAndThrow connection tableRef whereExpr cancellationToken
     }
 
-let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (cancellationToken : CancellationToken) : Task =
+let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (comments : string option) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let entity = layout.FindEntity entityRef |> Option.get
 
@@ -259,7 +261,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                 | :? PermissionsEntityException as e ->
                     raisefWithInner EntityDeniedException e ""
 
-        let! affected = runNonQuery connection globalArgs restricted (Map.singleton funId (FInt id)) cancellationToken
+        let! affected = runNonQuery connection globalArgs restricted comments (Map.singleton funId (FInt id)) cancellationToken
         if affected = 0 then
             do! countAndThrow connection tableRef whereExpr cancellationToken
     }

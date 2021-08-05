@@ -28,7 +28,7 @@ let private canExplain : RoleType -> bool = function
 let private userViewComments (source : UserViewSource) (role : RoleType) (arguments : ArgumentValuesMap) (chunk : SourceQueryChunk) =
     let sourceStr =
         match source with
-        | UVAnonymous q -> "(anonymous)"
+        | UVAnonymous q -> sprintf "(%s)" q
         | UVNamed ref -> ref.ToFunQLString()
     let argumentsStr = sprintf ", arguments %s" (JsonConvert.SerializeObject arguments)
     let chunkStr = sprintf ", chunk %s" (JsonConvert.SerializeObject chunk)

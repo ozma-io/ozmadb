@@ -30,6 +30,32 @@ let private convertEntityArguments (rawArgs : RawArguments) (entity : ResolvedEn
     | Ok res -> res |> Seq.mapMaybe id |> Map.ofSeq |> Ok
     | Error err -> Error err
 
+let private insertEntityComments (ref : ResolvedEntityRef) (role : RoleType) (arguments : LocalArgumentsMap) =
+    let refStr = sprintf "insert into %O" ref
+    let argumentsStr = sprintf ", arguments %s" (JsonConvert.SerializeObject arguments)
+    let roleStr =
+        match role with
+        | RTRoot -> ""
+        | RTRole role -> sprintf ", role %O" role.Ref
+    String.concat "" [refStr; argumentsStr; roleStr]
+
+let private updateEntityComments (ref : ResolvedEntityRef) (role : RoleType) (id : int) (arguments : LocalArgumentsMap) =
+    let refStr = sprintf "update %O, id %i" ref id
+    let argumentsStr = sprintf ", arguments %s" (JsonConvert.SerializeObject arguments)
+    let roleStr =
+        match role with
+        | RTRoot -> ""
+        | RTRole role -> sprintf ", role %O" role.Ref
+    String.concat "" [refStr; argumentsStr; roleStr]
+
+let private deleteEntityComments (ref : ResolvedEntityRef) (role : RoleType) (id : int) =
+    let refStr = sprintf "delete from %O, id %i" ref id
+    let roleStr =
+        match role with
+        | RTRoot -> ""
+        | RTRole role -> sprintf ", role %O" role.Ref
+    String.concat "" [refStr; roleStr]
+
 type private BeforeTriggerError =
     | BEError of EntityErrorInfo
     | BECancelled
@@ -180,7 +206,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                     | Error BECancelled -> return Ok None
                     | Ok args ->
                         try
-                            let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef args ctx.CancellationToken
+                            let comments = insertEntityComments entityRef rctx.User.Effective.Type args
+                            let! newId = insertEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef (Some comments) args ctx.CancellationToken
                             do! rctx.WriteEventSync (fun event ->
                                 event.Type <- "insertEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
@@ -227,7 +254,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                     | Error BECancelled -> return Ok ()
                     | Ok args ->
                         try
-                            do! updateEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef id args ctx.CancellationToken
+                            let comments = updateEntityComments entityRef rctx.User.Effective.Type id args
+                            do! updateEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef id (Some comments) args ctx.CancellationToken
                             do! rctx.WriteEventSync (fun event ->
                                 event.Type <- "updateEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
@@ -272,7 +300,8 @@ type EntitiesAPI (rctx : IRequestContext) =
                 | Error BECancelled -> return Ok ()
                 | Ok () ->
                     try
-                        do! deleteEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef id ctx.CancellationToken
+                        let comments = deleteEntityComments entityRef rctx.User.Effective.Type id
+                        do! deleteEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef id (Some comments) ctx.CancellationToken
                         do! rctx.WriteEventSync (fun event ->
                             event.Type <- "deleteEntity"
                             event.SchemaName <- entityRef.Schema.ToString()
