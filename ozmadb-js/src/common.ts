@@ -64,7 +64,7 @@ export interface IScalarSimpleType {
 
 export interface IArraySimpleType {
   type: "array";
-  subtype: SimpleType;
+  subtype: IScalarSimpleType;
 }
 
 export type ValueType = IScalarSimpleType | IArraySimpleType;
@@ -73,28 +73,30 @@ export type ValueType = IScalarSimpleType | IArraySimpleType;
  * Column field types. More high-level, include references and enumerations.
  */
 
-export type FieldValueType = "int" | "decimal" | "string" | "bool" | "datetime" | "date" | "interval" | "json" | "uuid";
+export type FieldSimpleValueType = "int" | "decimal" | "string" | "bool" | "datetime" | "date" | "interval" | "json" | "uuid";
 
-export interface IScalarFieldType {
-  type: FieldValueType;
+export interface IScalarSimpleFieldType {
+  type: FieldSimpleValueType;
 }
 
-export interface IArrayFieldType {
-  type: "array";
-  subtype: FieldValueType;
-}
-
-export interface IReferenceFieldType {
+export interface IReferenceScalarFieldType {
   type: "reference";
   entity: IEntityRef;
 }
 
-export interface IEnumFieldType {
+export interface IEnumScalarFieldType {
   type: "enum";
   values: string[];
 }
 
-export type FieldType = IScalarFieldType | IArrayFieldType | IReferenceFieldType | IEnumFieldType;
+export type ScalarFieldType = IScalarSimpleFieldType | IReferenceScalarFieldType | IEnumScalarFieldType;
+
+export interface IArrayFieldType {
+  type: "array";
+  subtype: ScalarFieldType;
+}
+
+export type FieldType = ScalarFieldType | IArrayFieldType;
 
 /*
  * Database entity definition.
