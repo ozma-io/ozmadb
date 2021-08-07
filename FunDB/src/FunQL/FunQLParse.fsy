@@ -664,36 +664,36 @@ FieldExprMisc:
     | FieldExprMisc DIVIDE FieldExprMisc             { FEBinaryOp ($1, BODivide, $3) }
 
     // Now the same, but for ANY/ALL. I hate this.
-    | FieldExprMisc LIKE_OP AnyAllOp                  { $3 BOLike $1 }
-    | FieldExprMisc NOT_LIKE_OP AnyAllOp              { $3 BONotLike $1 }
-    | FieldExprMisc ILIKE_OP AnyAllOp                 { $3 BOILike $1 }
-    | FieldExprMisc NOT_ILIKE_OP AnyAllOp             { $3 BONotILike $1 }
-    | FieldExprMisc MATCH_REGEX AnyAllOp              { $3 BOMatchRegex $1 }
-    | FieldExprMisc MATCH_REGEX_CI AnyAllOp           { $3 BOMatchRegexCI $1 }
-    | FieldExprMisc NOT_MATCH_REGEX AnyAllOp          { $3 BONotMatchRegex $1 }
-    | FieldExprMisc NOT_MATCH_REGEX_CI AnyAllOp       { $3 BONotMatchRegexCI $1 }
-    | FieldExprMisc CONCAT AnyAllOp                   { $3 BOConcat $1 }
-    | FieldExprMisc ARROW AnyAllOp                    { $3 BOJsonArrow $1 }
-    | FieldExprMisc DOUBLE_ARROW AnyAllOp             { $3 BOJsonTextArrow $1 }
-    | FieldExprMisc PLUS AnyAllOp                     { $3 BOPlus $1 }
-    | FieldExprMisc MINUS AnyAllOp                    { $3 BOMinus $1 }
-    | FieldExprMisc MULTIPLY AnyAllOp                 { $3 BOMultiply $1 }
-    | FieldExprMisc DIVIDE AnyAllOp                   { $3 BODivide $1 }
+    | FieldExprMisc LIKE_OP AnyAllOp            { $3 BOLike $1 }
+    | FieldExprMisc NOT_LIKE_OP AnyAllOp        { $3 BONotLike $1 }
+    | FieldExprMisc ILIKE_OP AnyAllOp           { $3 BOILike $1 }
+    | FieldExprMisc NOT_ILIKE_OP AnyAllOp       { $3 BONotILike $1 }
+    | FieldExprMisc MATCH_REGEX AnyAllOp        { $3 BOMatchRegex $1 }
+    | FieldExprMisc MATCH_REGEX_CI AnyAllOp     { $3 BOMatchRegexCI $1 }
+    | FieldExprMisc NOT_MATCH_REGEX AnyAllOp    { $3 BONotMatchRegex $1 }
+    | FieldExprMisc NOT_MATCH_REGEX_CI AnyAllOp { $3 BONotMatchRegexCI $1 }
+    | FieldExprMisc CONCAT AnyAllOp             { $3 BOConcat $1 }
+    | FieldExprMisc ARROW AnyAllOp              { $3 BOJsonArrow $1 }
+    | FieldExprMisc DOUBLE_ARROW AnyAllOp       { $3 BOJsonTextArrow $1 }
+    | FieldExprMisc PLUS AnyAllOp               { $3 BOPlus $1 }
+    | FieldExprMisc MINUS AnyAllOp              { $3 BOMinus $1 }
+    | FieldExprMisc MULTIPLY AnyAllOp           { $3 BOMultiply $1 }
+    | FieldExprMisc DIVIDE AnyAllOp             { $3 BODivide $1 }
 
-    | FieldExprMisc IN FieldInSource                  { inExpr FEIn FEInQuery $1 $3 }
-    | FieldExprMisc NOT IN FieldInSource              { inExpr FENotIn FENotInQuery $1 $4 }
-    | FieldExprMisc DOUBLE_COLON FieldExprType        { FECast ($1, $3) }
-    | CaseExpr                                        { $1 }
-    | LinkedValueRef INHERITED FROM EntityRef         { FEInheritedFrom ($1, { Ref = $4; Extra = ObjectMap.empty }) }
-    | LinkedValueRef OFTYPE EntityRef                 { FEOfType ($1, { Ref = $3; Extra = ObjectMap.empty }) }
-    | LinkedValueRef                                  { FERef $1 }
-    | Value                                           { FEValue $1 }
-    | Name ParenedExprList                            { makeFunc $1 $2 }
-    | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN         { makeAggFunc $1 $3 }
-    | JsonObject                                      { $1 }
-    | JsonArray                                       { $1 }
-    | SubSelectExpr                                   { FESubquery $1 }
-    | LEFT_PAREN FieldExpr RIGHT_PAREN                { $2 }
+    | FieldExprMisc IN FieldInSource            { inExpr FEIn FEInQuery $1 $3 }
+    | FieldExprMisc NOT IN FieldInSource        { inExpr FENotIn FENotInQuery $1 $4 }
+    | FieldExprMisc DOUBLE_COLON FieldType      { FECast ($1, $3) }
+    | CaseExpr                                  { $1 }
+    | LinkedValueRef INHERITED FROM EntityRef   { FEInheritedFrom ($1, { Ref = $4; Extra = ObjectMap.empty }) }
+    | LinkedValueRef OFTYPE EntityRef           { FEOfType ($1, { Ref = $3; Extra = ObjectMap.empty }) }
+    | LinkedValueRef                            { FERef $1 }
+    | Value                                     { FEValue $1 }
+    | Name ParenedExprList                      { makeFunc $1 $2 }
+    | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN   { makeAggFunc $1 $3 }
+    | JsonObject                                { $1 }
+    | JsonArray                                 { $1 }
+    | SubSelectExpr                             { FESubquery $1 }
+    | LEFT_PAREN FieldExpr RIGHT_PAREN          { $2 }
 
 AggFuncArgs:
     | ALL ExprList       { AEAll $2 }
@@ -794,25 +794,22 @@ NonEmptyJsonItems:
     | FieldExpr COMMA NonEmptyJsonItems { $1 :: $3 }
 
 ScalarType:
-    | INT_TYPE      { SFTInt }
-    | DECIMAL_TYPE  { SFTDecimal }
-    | STRING_TYPE   { SFTString }
-    | BOOL_TYPE     { SFTBool }
-    | DATETIME_TYPE { SFTDateTime }
-    | DATE_TYPE     { SFTDate }
-    | INTERVAL_TYPE { SFTInterval }
-    | JSON_TYPE     { SFTJson }
-    | UVREF_TYPE    { SFTUserViewRef }
-    | UUID_TYPE     { SFTUuid }
-
-FieldExprType:
-    | ScalarType                               { FETScalar $1 }
-    | ARRAY LEFT_PAREN ScalarType RIGHT_PAREN  { FETArray $3 }
+    | INT_TYPE                                        { SFTInt }
+    | DECIMAL_TYPE                                    { SFTDecimal }
+    | STRING_TYPE                                     { SFTString }
+    | BOOL_TYPE                                       { SFTBool }
+    | DATETIME_TYPE                                   { SFTDateTime }
+    | DATE_TYPE                                       { SFTDate }
+    | INTERVAL_TYPE                                   { SFTInterval }
+    | JSON_TYPE                                       { SFTJson }
+    | UVREF_TYPE                                      { SFTUserViewRef }
+    | UUID_TYPE                                       { SFTUuid }
+    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { SFTReference $3 }
+    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN       { SFTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 FieldType:
-    | FieldExprType                                   { FTType $1 }
-    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { FTReference $3 }
-    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN       { FTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
+    | ScalarType                               { FTScalar $1 }
+    | ARRAY LEFT_PAREN ScalarType RIGHT_PAREN  { FTArray $3 }
 
 EnumList:
     | STRING                { [ $1 ] }

@@ -2,7 +2,6 @@ module FunWithFlags.FunDB.FunQL.AST
 
 open System
 open System.ComponentModel
-open Microsoft.FSharp.Reflection
 open System.Threading.Tasks
 open NpgsqlTypes
 open Newtonsoft.Json
@@ -16,6 +15,11 @@ open FunWithFlags.FunDB.SQL.Utils
 
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Typecheck
+
+type UnexpectedExprException (message : string, innerException : Exception) =
+    inherit Exception(message, innerException)
+
+    new (message : string) = UnexpectedExprException (message, null)
 
 type IFunQLName =
     interface
@@ -255,7 +259,7 @@ type FieldValuePrettyConverter () =
         | FUuidArray vals -> serialize vals
         | FNull -> writer.WriteNull()
 
-type ScalarFieldType =
+type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarFieldType<'e> when 'e :> IFunQLName =
     | [<CaseName("int")>] SFTInt
     | [<CaseName("decimal")>] SFTDecimal
     | [<CaseName("string")>] SFTString
@@ -266,29 +270,40 @@ type ScalarFieldType =
     | [<CaseName("json")>] SFTJson
     | [<CaseName("uvref")>] SFTUserViewRef
     | [<CaseName("uuid")>] SFTUuid
-    with
-        static member private Fields = unionNames (unionCases typeof<ScalarFieldType>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
-
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            let (case, _) = FSharpValue.GetUnionFields(this, typeof<ScalarFieldType>)
-            Map.find case.Name ScalarFieldType.Fields
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
-[<SerializeAsObject("type")>]
-type FieldExprType =
-    | [<CaseName(null)>] FETScalar of Type : ScalarFieldType
-    | [<CaseName("array")>] FETArray of Subtype : ScalarFieldType
+    | [<CaseName("reference")>] SFTReference of Entity : 'e
+    | [<CaseName("enum")>] SFTEnum of Values : Set<string>
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             match this with
-            | FETScalar s -> s.ToFunQLString()
-            | FETArray valType -> sprintf "array(%s)" (valType.ToFunQLString())
+            | SFTInt -> "int"
+            | SFTDecimal -> "decimal"
+            | SFTString -> "string"
+            | SFTBool -> "bool"
+            | SFTDateTime -> "datetime"
+            | SFTDate -> "date"
+            | SFTInterval -> "interval"
+            | SFTJson -> "json"
+            | SFTUserViewRef -> "uvref"
+            | SFTUuid -> "uuid"
+            | SFTReference e -> sprintf "reference(%s)" (e.ToFunQLString())
+            | SFTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map renderFunQLString |> String.concat ", ")
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+[<StructuralEquality; NoComparison; SerializeAsObject("type", AllowUnknownType=true)>]
+type FieldType<'e> when 'e :> IFunQLName =
+    | [<CaseName(null, InnerObject=true)>] FTScalar of Type : ScalarFieldType<'e>
+    | [<CaseName("array")>] FTArray of Subtype : ScalarFieldType<'e>
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | FTScalar s -> s.ToFunQLString()
+            | FTArray valType -> sprintf "array(%s)" (valType.ToFunQLString())
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -512,22 +527,6 @@ type [<NoEquality; NoComparison>] FromEntity<'e> when 'e :> IFunQLName =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] FieldType<'e> when 'e :> IFunQLName =
-    | [<CaseName(null, InnerObject=true)>] FTType of FieldExprType
-    | [<CaseName("reference")>] FTReference of reference : 'e
-    | [<CaseName("enum")>] FTEnum of values : Set<string>
-    with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            match this with
-            | FTType t -> t.ToFunQLString()
-            | FTReference e -> sprintf "reference(%s)" (e.ToFunQLString())
-            | FTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map renderFunQLString |> String.concat ", ")
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
 and AttributeMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, FieldExpr<'e, 'f>>
 
 and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
@@ -547,7 +546,7 @@ and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FENotInQuery of FieldExpr<'e, 'f> * SelectExpr<'e, 'f>
     | FEAny of FieldExpr<'e, 'f> * BinaryOperator * FieldExpr<'e, 'f>
     | FEAll of FieldExpr<'e, 'f> * BinaryOperator * FieldExpr<'e, 'f>
-    | FECast of FieldExpr<'e, 'f> * FieldExprType
+    | FECast of FieldExpr<'e, 'f> * FieldType<'e>
     | FEIsNull of FieldExpr<'e, 'f>
     | FEIsNotNull of FieldExpr<'e, 'f>
     | FECase of (FieldExpr<'e, 'f> * FieldExpr<'e, 'f>)[] * (FieldExpr<'e, 'f> option)
@@ -905,27 +904,6 @@ type IndexColumn<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type FieldTypePrettyConverter () =
-    inherit JsonConverter ()
-
-    override this.CanConvert (objectType : Type) =
-        isUnionCase<FieldType<_>> objectType
-
-    override this.CanRead = false
-
-    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, serializer : JsonSerializer) : obj =
-        raise <| NotImplementedException()
-
-    override this.WriteJson (writer : JsonWriter, value : obj, serializer : JsonSerializer) : unit =
-        let serialize value = serializer.Serialize(writer, value)
-        match castUnion<FieldType<IFunQLName>> value with
-        | Some (FTType st) -> serialize st
-        | Some (FTReference ref) ->
-            [("type", "reference":> obj); ("entity", ref :> obj)] |> Map.ofList |> serialize
-        | Some (FTEnum vals) ->
-            [("type", "enum" :> obj); ("values", vals :> obj)] |> Map.ofList |> serialize
-        | None -> failwith "impossible"
-
 type SubEntityContext =
     | SECInheritedFrom
     | SECOfType
@@ -933,18 +911,61 @@ type SubEntityContext =
 type FieldExprMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQLName and 'e2 :> IFunQLName and 'f2 :> IFunQLName =
     { Value : FieldValue -> FieldValue
       FieldReference : 'f1 -> 'f2
+      EntityReference : 'e1 -> 'e2
       Query : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>
-      Aggregate : AggExpr<'e1, 'f1> -> AggExpr<'e1, 'f1>
+      PreAggregate : AggExpr<'e1, 'f1> -> AggExpr<'e1, 'f1>
       SubEntity : SubEntityContext -> 'f2 -> SubEntityRef -> SubEntityRef
     }
 
-let idFieldExprMapper (fieldReference : 'f1 -> 'f2) (query : SelectExpr<'e1, 'f1> -> SelectExpr<'e2, 'f2>) =
+let idFieldExprMapper =
     { Value = id
-      FieldReference = fieldReference
-      Query = query
-      Aggregate = id
+      FieldReference = id
+      EntityReference = id
+      Query = id
+      PreAggregate = id
       SubEntity = fun _ _ r -> r
     }
+
+let queryFieldExprMapper (fieldFunc : 'f1 -> 'f2) (queryFunc : SelectExpr<'e, 'f1> -> SelectExpr<'e, 'f2>) =
+    { Value = id
+      FieldReference = fieldFunc
+      EntityReference = id
+      Query = queryFunc
+      PreAggregate = id
+      SubEntity = fun _ _ r -> r
+    }
+
+let onlyFieldExprMapper (fieldFunc : 'f1 -> 'f2) =
+    { Value = id
+      FieldReference = fieldFunc
+      EntityReference = id
+      Query = fun query -> raisef UnexpectedExprException "Unexpected subquery in expression"
+      PreAggregate = fun agg -> raisef UnexpectedExprException "Unexpected aggregate in expression"
+      SubEntity = fun _ _ r -> r
+    }
+
+let mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1, 'f1> -> AggExpr<'e2, 'f2> = function
+    | AEAll exprs -> AEAll (Array.map func exprs)
+    | AEDistinct expr -> AEDistinct (func expr)
+    | AEStar -> AEStar
+
+let mapScalarFieldType (func : 'e1 -> 'e2) : ScalarFieldType<'e1> -> ScalarFieldType<'e2> = function
+    | SFTInt -> SFTInt
+    | SFTDecimal -> SFTDecimal
+    | SFTString -> SFTString
+    | SFTBool -> SFTBool
+    | SFTDateTime -> SFTDateTime
+    | SFTDate -> SFTDate
+    | SFTInterval -> SFTInterval
+    | SFTJson -> SFTJson
+    | SFTUserViewRef -> SFTUserViewRef
+    | SFTUuid -> SFTUuid
+    | SFTReference e -> SFTReference (func e)
+    | SFTEnum vals -> SFTEnum vals
+
+let mapFieldType (func : 'e1 -> 'e2) : FieldType<'e1> -> FieldType<'e2> = function
+    | FTScalar typ -> FTScalar <| mapScalarFieldType func typ
+    | FTArray typ -> FTArray <| mapScalarFieldType func typ
 
 let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
     let rec traverse = function
@@ -964,14 +985,14 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
         | FENotInQuery (e, query) -> FENotInQuery (traverse e, mapper.Query query)
         | FEAny (e, op, arr) -> FEAny (traverse e, op, traverse arr)
         | FEAll (e, op, arr) -> FEAll (traverse e, op, traverse arr)
-        | FECast (e, typ) -> FECast (traverse e, typ)
+        | FECast (e, typ) -> FECast (traverse e, mapFieldType mapper.EntityReference typ)
         | FEIsNull e -> FEIsNull (traverse e)
         | FEIsNotNull e -> FEIsNotNull (traverse e)
         | FECase (es, els) -> FECase (Array.map (fun (cond, e) -> (traverse cond, traverse e)) es, Option.map traverse els)
         | FEJsonArray vals -> FEJsonArray (Array.map traverse vals)
         | FEJsonObject obj -> FEJsonObject (Map.map (fun name -> traverse) obj)
         | FEFunc (name, args) -> FEFunc (name, Array.map traverse args)
-        | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse (mapper.Aggregate args))
+        | FEAggFunc (name, args) -> FEAggFunc (name, mapAggExpr traverse (mapper.PreAggregate args))
         | FESubquery query -> FESubquery (mapper.Query query)
         | FEInheritedFrom (f, nam) ->
             let ref = mapper.FieldReference f
@@ -981,28 +1002,57 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
             FEOfType (ref, mapper.SubEntity SECOfType ref nam)
     traverse
 
-and mapAggExpr (func : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : AggExpr<'e1, 'f1> -> AggExpr<'e2, 'f2> = function
-    | AEAll exprs -> AEAll (Array.map func exprs)
-    | AEDistinct expr -> AEDistinct (func expr)
-    | AEStar -> AEStar
-
 type FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQLName and 'e2 :> IFunQLName and 'f2 :> IFunQLName =
     { Value : FieldValue -> Task<FieldValue>
       FieldReference : 'f1 -> Task<'f2>
+      EntityReference : 'e1 -> Task<'e2>
       Query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>
-      Aggregate : AggExpr<'e1, 'f1> -> Task<AggExpr<'e1, 'f1>>
+      PreAggregate : AggExpr<'e1, 'f1> -> Task<AggExpr<'e1, 'f1>>
       SubEntity : SubEntityContext -> 'f2 -> SubEntityRef -> Task<SubEntityRef>
     }
 
-let idFieldExprTaskMapper (fieldReference : 'f1 -> Task<'f2>) (query : SelectExpr<'e1, 'f1> -> Task<SelectExpr<'e2, 'f2>>) =
+let idFieldExprTaskMapper : FieldExprTaskMapper<'e, 'f, 'e, 'f> =
     { Value = Task.result
-      FieldReference = fieldReference
-      Query = query
-      Aggregate = Task.result
+      FieldReference = Task.result
+      EntityReference = Task.result
+      Query = Task.result
+      PreAggregate = Task.result
       SubEntity = fun _ _ r -> Task.result r
     }
 
-let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
+let onlyFieldExprTaskMapper (fieldFunc : 'f1 -> Task<'f2>) : FieldExprTaskMapper<'e, 'f1, 'e, 'f2> =
+    { Value = Task.result
+      FieldReference = fieldFunc
+      EntityReference = Task.result
+      Query = fun query -> raisef UnexpectedExprException "Unexpected subquery in expression"
+      PreAggregate = fun agg -> raisef UnexpectedExprException "Unexpected aggregate in expression"
+      SubEntity = fun _ _ r -> Task.result r
+    }
+
+let mapTaskAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>) : AggExpr<'e1, 'f1> -> Task<AggExpr<'e2, 'f2>> = function
+    | AEAll exprs -> Task.map AEAll (Array.mapTask func exprs)
+    | AEDistinct expr -> Task.map AEDistinct (func expr)
+    | AEStar -> Task.result AEStar
+
+let mapTaskScalarFieldType (func : 'e1 -> Task<'e2>) : ScalarFieldType<'e1> -> Task<ScalarFieldType<'e2>> = function
+    | SFTInt -> Task.result SFTInt
+    | SFTDecimal -> Task.result SFTDecimal
+    | SFTString -> Task.result SFTString
+    | SFTBool -> Task.result SFTBool
+    | SFTDateTime -> Task.result SFTDateTime
+    | SFTDate -> Task.result SFTDate
+    | SFTInterval -> Task.result SFTInterval
+    | SFTJson -> Task.result SFTJson
+    | SFTUserViewRef -> Task.result SFTUserViewRef
+    | SFTUuid -> Task.result SFTUuid
+    | SFTReference e -> Task.map SFTReference (func e)
+    | SFTEnum vals -> Task.result <| SFTEnum vals
+
+let mapTaskFieldType (func : 'e1 -> Task<'e2>) : FieldType<'e1> -> Task<FieldType<'e2>> = function
+    | FTScalar typ -> Task.map FTScalar (mapTaskScalarFieldType func typ)
+    | FTArray typ -> Task.map FTArray (mapTaskScalarFieldType func typ)
+
+let mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>> =
     let rec traverse = function
         | FEValue value -> Task.map FEValue (mapper.Value value)
         | FERef r -> Task.map FERef (mapper.FieldReference r)
@@ -1020,7 +1070,7 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
         | FENotInQuery (e, query) -> Task.map2 (curry FENotInQuery) (traverse e) (mapper.Query query)
         | FEAny (e, op, arr) -> Task.map2 (fun e arr -> FEAny (e, op, arr)) (traverse e) (traverse arr)
         | FEAll (e, op, arr) -> Task.map2 (fun e arr -> FEAll (e, op, arr)) (traverse e) (traverse arr)
-        | FECast (e, typ) -> Task.map (fun newE -> FECast (newE, typ)) (traverse e)
+        | FECast (e, typ) -> Task.map2 (fun e typ -> FECast (e, typ)) (traverse e) (mapTaskFieldType mapper.EntityReference typ)
         | FEIsNull e -> Task.map FEIsNull (traverse e)
         | FEIsNotNull e -> Task.map FEIsNotNull (traverse e)
         | FECase (es, els) ->
@@ -1036,7 +1086,7 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
         | FEFunc (name, args) -> Task.map (fun x -> FEFunc (name, x)) (Array.mapTask traverse args)
         | FEAggFunc (name, args) ->
             task {
-                let! args1 = mapper.Aggregate args
+                let! args1 = mapper.PreAggregate args
                 return! Task.map (fun x -> FEAggFunc (name, x)) (mapTaskAggExpr traverse args1)
             }
         | FESubquery query -> Task.map FESubquery (mapper.Query query)
@@ -1054,14 +1104,10 @@ let rec mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : Fi
             }
     traverse
 
-and mapTaskAggExpr (func : FieldExpr<'e1, 'f1> -> Task<FieldExpr<'e2, 'f2>>) : AggExpr<'e1, 'f1> -> Task<AggExpr<'e2, 'f2>> = function
-    | AEAll exprs -> Task.map AEAll (Array.mapTask func exprs)
-    | AEDistinct expr -> Task.map AEDistinct (func expr)
-    | AEStar -> Task.result AEStar
-
 type FieldExprIter<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Value : FieldValue -> unit
       FieldReference : 'f -> unit
+      EntityReference : 'e -> unit
       Query : SelectExpr<'e, 'f> -> unit
       Aggregate : AggExpr<'e, 'f> -> unit
       SubEntity : SubEntityContext -> 'f -> SubEntityRef -> unit
@@ -1070,12 +1116,36 @@ type FieldExprIter<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
 let idFieldExprIter =
     { Value = fun _ -> ()
       FieldReference = fun _ -> ()
+      EntityReference = fun _ -> ()
       Query = fun _ -> ()
       Aggregate = fun _ -> ()
       SubEntity = fun _ _ _ -> ()
     }
 
-let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> unit =
+let iterScalarFieldType (func : 'e1 -> unit) : ScalarFieldType<'e1> -> unit = function
+    | SFTInt -> ()
+    | SFTDecimal -> ()
+    | SFTString -> ()
+    | SFTBool -> ()
+    | SFTDateTime -> ()
+    | SFTDate -> ()
+    | SFTInterval -> ()
+    | SFTJson -> ()
+    | SFTUserViewRef -> ()
+    | SFTUuid -> ()
+    | SFTReference e -> func e
+    | SFTEnum vals -> ()
+
+let iterFieldType (func : 'e1 -> unit) : FieldType<'e1> -> unit = function
+    | FTScalar typ -> iterScalarFieldType func typ
+    | FTArray typ -> iterScalarFieldType func typ
+
+let iterAggExpr (func : FieldExpr<'e, 'f> -> unit) : AggExpr<'e, 'f> -> unit = function
+    | AEAll exprs -> Array.iter func exprs
+    | AEDistinct expr -> func expr
+    | AEStar -> ()
+
+let iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> unit =
     let rec traverse = function
         | FEValue value -> mapper.Value value
         | FERef r -> mapper.FieldReference r
@@ -1093,7 +1163,7 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FENotInQuery (e, query) -> traverse e; mapper.Query query
         | FEAny (e, op, arr) -> traverse e; traverse arr
         | FEAll (e, op, arr) -> traverse e; traverse arr
-        | FECast (e, typ) -> traverse e
+        | FECast (e, typ) -> iterFieldType mapper.EntityReference typ; traverse e
         | FEIsNull e -> traverse e
         | FEIsNotNull e -> traverse e
         | FECase (es, els) ->
@@ -1110,11 +1180,6 @@ let rec iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> un
         | FEOfType (f, nam) -> mapper.FieldReference f; mapper.SubEntity SECOfType f nam
     traverse
 
-and iterAggExpr (func : FieldExpr<'e, 'f> -> unit) : AggExpr<'e, 'f> -> unit = function
-    | AEAll exprs -> Array.iter func exprs
-    | AEDistinct expr -> func expr
-    | AEStar -> ()
-
 let emptyOrderLimitClause = { OrderBy = [||]; Limit = None; Offset = None }
 
 type FunQLVoid = private FunQLVoid of unit with
@@ -1128,7 +1193,10 @@ type LinkedFieldRef = LinkedRef<ValueRef<FieldRef>>
 type LinkedFieldName = LinkedRef<ValueRef<FieldName>>
 
 type ParsedFieldType = FieldType<EntityRef>
+type ParsedScalarFieldType = ScalarFieldType<EntityRef>
+
 type ResolvedFieldType = FieldType<ResolvedEntityRef>
+type ResolvedScalarFieldType = ScalarFieldType<ResolvedEntityRef>
 
 type LocalFieldExpr = FieldExpr<FunQLVoid, FieldName>
 
@@ -1255,11 +1323,11 @@ let requiredArgument (argType : FieldType<'te>) : Argument<'te, 'e, 'f> =
 // Map of registered global arguments. Should be in sync with RequestContext's globalArguments.
 let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
     Map.ofSeq
-        [ (FunQLName "lang", requiredArgument (FTType <| FETScalar SFTString))
-          (FunQLName "user", requiredArgument (FTType <| FETScalar SFTString))
-          (FunQLName "user_id", requiredArgument (FTReference ({ Schema = funSchema; Name = funUsers })))
-          (FunQLName "transaction_time", requiredArgument (FTType <| FETScalar SFTDateTime))
-          (FunQLName "transaction_id", requiredArgument (FTType <| FETScalar SFTInt))
+        [ (FunQLName "lang", requiredArgument (FTScalar SFTString))
+          (FunQLName "user", requiredArgument (FTScalar SFTString))
+          (FunQLName "user_id", requiredArgument (FTScalar (SFTReference { Schema = funSchema; Name = funUsers })))
+          (FunQLName "transaction_time", requiredArgument (FTScalar SFTDateTime))
+          (FunQLName "transaction_id", requiredArgument (FTScalar SFTInt))
         ]
 
 let globalArgumentsMap = globalArgumentTypes |> Map.mapKeys PGlobal
@@ -1349,38 +1417,30 @@ let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable 
         with
         | :? JsonSerializationException -> None
 
-let private parseValueFromJson' (fieldExprType : FieldExprType) : bool -> JToken -> FieldValue option =
+let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> FieldValue option =
     let parseSingleValueStrict f = parseSingleValue (f >> Some)
     match fieldExprType with
-    | FETArray SFTString -> parseSingleValueStrict FStringArray
-    | FETArray SFTInt -> parseSingleValueStrict FIntArray
-    | FETArray SFTDecimal -> parseSingleValueStrict FDecimalArray
-    | FETArray SFTBool -> parseSingleValueStrict FBoolArray
-    | FETArray SFTDateTime -> parseSingleValue (Array.map convertDateTime >> FDateTimeArray >> Some)
-    | FETArray SFTDate -> parseSingleValue (Seq.traverseOption trySqlDate >> Option.map (Array.ofSeq >> FDateArray))
-    | FETArray SFTInterval -> parseSingleValue (Seq.traverseOption trySqlInterval >> Option.map (Array.ofSeq >> FIntervalArray))
-    | FETArray SFTJson -> parseSingleValueStrict FJsonArray
-    | FETArray SFTUserViewRef -> parseSingleValueStrict FUserViewRefArray
-    | FETArray SFTUuid -> parseSingleValueStrict FUuidArray
-    | FETScalar SFTString -> parseSingleValueStrict FString
-    | FETScalar SFTInt -> parseSingleValueStrict FInt
-    | FETScalar SFTDecimal -> parseSingleValueStrict FDecimal
-    | FETScalar SFTBool -> parseSingleValueStrict FBool
-    | FETScalar SFTDateTime -> parseSingleValue (convertDateTime >> FDateTime >> Some)
-    | FETScalar SFTDate -> parseSingleValue (trySqlDate >> Option.map FDate)
-    | FETScalar SFTInterval -> parseSingleValue (trySqlInterval >> Option.map FInterval)
-    | FETScalar SFTJson -> parseSingleValueStrict FJson
-    | FETScalar SFTUserViewRef -> parseSingleValueStrict FUserViewRef
-    | FETScalar SFTUuid -> parseSingleValueStrict FUuid
-
-let parseValueFromJson (fieldType : FieldType<_>) (isNullable : bool) (tok : JToken) : FieldValue option =
-    match fieldType with
-    | FTType feType -> parseValueFromJson' feType isNullable tok
-    | FTReference ref -> parseSingleValue (FInt >> Some) isNullable tok
-    | FTEnum values ->
-        let checkAndEncode v =
-            if Set.contains v values then
-                Some <| FString v
-            else
-                None
-        parseSingleValue checkAndEncode isNullable tok
+    | FTArray SFTString -> parseSingleValueStrict FStringArray
+    | FTArray SFTInt -> parseSingleValueStrict FIntArray
+    | FTArray SFTDecimal -> parseSingleValueStrict FDecimalArray
+    | FTArray SFTBool -> parseSingleValueStrict FBoolArray
+    | FTArray SFTDateTime -> parseSingleValue (Array.map convertDateTime >> FDateTimeArray >> Some)
+    | FTArray SFTDate -> parseSingleValue (Seq.traverseOption trySqlDate >> Option.map (Array.ofSeq >> FDateArray))
+    | FTArray SFTInterval -> parseSingleValue (Seq.traverseOption trySqlInterval >> Option.map (Array.ofSeq >> FIntervalArray))
+    | FTArray SFTJson -> parseSingleValueStrict FJsonArray
+    | FTArray SFTUserViewRef -> parseSingleValueStrict FUserViewRefArray
+    | FTArray SFTUuid -> parseSingleValueStrict FUuidArray
+    | FTArray (SFTReference _) -> parseSingleValueStrict FIntArray
+    | FTArray (SFTEnum vals) -> parseSingleValue (fun xs -> if Seq.forall (fun x -> Set.contains x vals) xs then Some (FStringArray xs) else None)
+    | FTScalar SFTString -> parseSingleValueStrict FString
+    | FTScalar SFTInt -> parseSingleValueStrict FInt
+    | FTScalar SFTDecimal -> parseSingleValueStrict FDecimal
+    | FTScalar SFTBool -> parseSingleValueStrict FBool
+    | FTScalar SFTDateTime -> parseSingleValue (convertDateTime >> FDateTime >> Some)
+    | FTScalar SFTDate -> parseSingleValue (trySqlDate >> Option.map FDate)
+    | FTScalar SFTInterval -> parseSingleValue (trySqlInterval >> Option.map FInterval)
+    | FTScalar SFTJson -> parseSingleValueStrict FJson
+    | FTScalar SFTUserViewRef -> parseSingleValueStrict FUserViewRef
+    | FTScalar SFTUuid -> parseSingleValueStrict FUuid
+    | FTScalar (SFTReference _) -> parseSingleValueStrict FInt
+    | FTScalar (SFTEnum vals) -> parseSingleValue (fun x -> if Set.contains x vals then Some (FString x) else None)

@@ -294,41 +294,70 @@ let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
     | Some ref -> ref
     | None -> raisef ViewResolveException "Unspecified schema in name: %O" name
 
-let resolveArgumentFieldType (layout : ILayoutBits) : ParsedFieldType -> ResolvedFieldType = function
-    | FTType ft -> FTType ft
-    | FTReference entityRef ->
+let resolveScalarFieldType (layout : IEntitiesSet) : ParsedScalarFieldType -> ResolvedScalarFieldType = function
+    | SFTInt -> SFTInt
+    | SFTDecimal -> SFTDecimal
+    | SFTString -> SFTString
+    | SFTBool -> SFTBool
+    | SFTDateTime -> SFTDateTime
+    | SFTDate -> SFTDate
+    | SFTInterval -> SFTInterval
+    | SFTJson -> SFTJson
+    | SFTUserViewRef -> SFTUserViewRef
+    | SFTUuid -> SFTUuid
+    | SFTReference entityRef ->
         let resolvedRef = resolveEntityRef entityRef
-        let refEntity =
-            match layout.FindEntity resolvedRef with
-            | Some refEntity when not refEntity.IsHidden -> refEntity
-            | _ -> raisef ViewResolveException "Cannot find entity %O from reference type" resolvedRef
-        FTReference resolvedRef
-    | FTEnum vals ->
+        if not <| layout.HasVisibleEntity resolvedRef then
+            raisef ViewResolveException "Cannot find entity %O from reference type" resolvedRef
+        SFTReference resolvedRef
+    | SFTEnum vals ->
         if Set.isEmpty vals then
             raisef ViewResolveException "Enums must not be empty"
-        FTEnum vals
+        SFTEnum vals
+
+let resolveFieldType (layout : IEntitiesSet) : ParsedFieldType -> ResolvedFieldType = function
+    | FTArray typ -> FTArray <| resolveScalarFieldType layout typ
+    | FTScalar typ -> FTScalar <| resolveScalarFieldType layout typ
+
+let resolveCastScalarFieldType : ScalarFieldType<_> -> ScalarFieldType<_> = function
+    | SFTInt -> SFTInt
+    | SFTDecimal -> SFTDecimal
+    | SFTString -> SFTString
+    | SFTBool -> SFTBool
+    | SFTDateTime -> SFTDateTime
+    | SFTDate -> SFTDate
+    | SFTInterval -> SFTInterval
+    | SFTJson -> SFTJson
+    | SFTUserViewRef -> SFTUserViewRef
+    | SFTUuid -> SFTUuid
+    | SFTReference entityRef -> raisef ViewResolveException "Cannot cast to reference type"
+    | SFTEnum vals -> raisef ViewResolveException "Cannot cast to enum type"
+
+let resolveCastFieldType : FieldType<_> -> FieldType<_> = function
+    | FTArray typ -> FTArray <| resolveCastScalarFieldType typ
+    | FTScalar typ -> FTScalar <| resolveCastScalarFieldType typ
 
 let fieldValueType : FieldValue -> ResolvedFieldType option = function
-    | FInt _ -> Some <| FTType (FETScalar SFTInt)
-    | FDecimal _ -> Some <| FTType (FETScalar SFTDecimal)
-    | FString _ -> Some <| FTType (FETScalar SFTString)
-    | FBool _ -> Some <| FTType (FETScalar SFTBool)
-    | FDateTime _-> Some <| FTType (FETScalar SFTDateTime)
-    | FDate _ -> Some <| FTType (FETScalar SFTDate)
-    | FInterval _ -> Some <| FTType (FETScalar SFTInterval)
-    | FJson _ -> Some <| FTType (FETScalar SFTJson)
-    | FUserViewRef _ -> Some <| FTType (FETScalar SFTUserViewRef)
-    | FUuid _ -> Some <| FTType (FETScalar SFTUuid)
-    | FIntArray _ -> Some <| FTType (FETArray SFTInt)
-    | FDecimalArray _ -> Some <| FTType (FETArray SFTDecimal)
-    | FStringArray _ -> Some <| FTType (FETArray SFTString)
-    | FBoolArray _ -> Some <| FTType (FETArray SFTBool)
-    | FDateTimeArray _ -> Some <| FTType (FETArray SFTDateTime)
-    | FDateArray _ -> Some <| FTType (FETArray SFTDate)
-    | FIntervalArray _ -> Some <| FTType (FETArray SFTInterval)
-    | FJsonArray _ -> Some <| FTType (FETArray SFTJson)
-    | FUserViewRefArray _ -> Some <| FTType (FETArray SFTUserViewRef)
-    | FUuidArray _ -> Some <| FTType (FETArray SFTUuid)
+    | FInt _ -> Some <| FTScalar SFTInt
+    | FDecimal _ -> Some <| FTScalar SFTDecimal
+    | FString _ -> Some <| FTScalar SFTString
+    | FBool _ -> Some <| FTScalar SFTBool
+    | FDateTime _-> Some <| FTScalar SFTDateTime
+    | FDate _ -> Some <| FTScalar SFTDate
+    | FInterval _ -> Some <| FTScalar SFTInterval
+    | FJson _ -> Some <| FTScalar SFTJson
+    | FUserViewRef _ -> Some <| FTScalar SFTUserViewRef
+    | FUuid _ -> Some <| FTScalar SFTUuid
+    | FIntArray _ -> Some <| FTArray SFTInt
+    | FDecimalArray _ -> Some <| FTArray SFTDecimal
+    | FStringArray _ -> Some <| FTArray SFTString
+    | FBoolArray _ -> Some <| FTArray SFTBool
+    | FDateTimeArray _ -> Some <| FTArray SFTDateTime
+    | FDateArray _ -> Some <| FTArray SFTDate
+    | FIntervalArray _ -> Some <| FTArray SFTInterval
+    | FJsonArray _ -> Some <| FTArray SFTJson
+    | FUserViewRefArray _ -> Some <| FTArray SFTUserViewRef
+    | FUuidArray _ -> Some <| FTArray SFTUuid
     | FNull -> None
 
 let getGlobalArgument = function
@@ -678,7 +707,7 @@ let replaceEntityRefInExpr (localRef : EntityRef option) : ResolvedFieldExpr -> 
     | { Ref = { Ref = VRColumn col } } as ref ->
         { ref with Ref = { ref.Ref with Ref = VRColumn { col with Entity = localRef } } }
     | ref -> ref
-    let mapper = idFieldExprMapper resolveReference id
+    let mapper = onlyFieldExprMapper resolveReference
     mapFieldExpr mapper
 
 let private filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCase seq) : VirtualFieldCase seq =
@@ -912,7 +941,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 if ref.AsRoot && not resolveFlags.Privileged then
                     raisef ViewResolveException "Cannot specify roles in non-privileged user views"
                 match boundField.Field with
-                | RColumnField { FieldType = FTReference entityRef } ->
+                | RColumnField { FieldType = FTScalar (SFTReference entityRef) } ->
                     let refKey =
                         { FromId = boundField.Header.Key.FromId
                           Path = List.append boundField.Header.Key.Path [boundField.Ref.Name]
@@ -1005,7 +1034,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                     (None, ObjectMap.empty)
                 else
                     match argInfo.ArgType with
-                    | FTReference parentEntity ->
+                    | FTScalar (SFTReference parentEntity) ->
                         let (firstArrow, remainingPath) =
                             match Array.toList f.Path with
                             | head :: tail -> (head, tail)
@@ -1058,15 +1087,15 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 else
                     raisef ViewResolveException "Undefined placeholder: %O" name
             | ref -> raisef ViewResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
-        let voidQuery query = raisef ViewResolveException "Forbidden subquery in LIMIT or OFFSET: %O" query
-        let voidAggr aggr = raisef ViewResolveException "Forbidden aggregate function in LIMIT or OFFSET"
         let voidSubEntity field subEntity = raisef ViewResolveException "Forbidden type assertion in LIMIT or OFFSET"
         let mapper =
-            { idFieldExprMapper resolveReference voidQuery with
-                  Aggregate = voidAggr
+            { onlyFieldExprMapper resolveReference with
                   SubEntity = voidSubEntity
             }
-        mapFieldExpr mapper expr
+        try
+            mapFieldExpr mapper expr
+        with
+        | :? UnexpectedExprException as e -> raisefWithInner ViewResolveException e ""
 
     let applyAlias (alias : EntityAlias) (results : QSubqueryFields) : QSubqueryFields =
         checkName alias.Name
@@ -1266,7 +1295,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 (emptyCondTypeContexts, FEAll (newE, op, newArr))
             | FECast (e, typ) ->
                 let (typeCtxs, newE) = traverse outerTypeCtxs e
-                (emptyCondTypeContexts, FECast (newE, typ))
+                (emptyCondTypeContexts, FECast (newE, resolveCastFieldType typ))
             | FEIsNull e ->
                 let (typeCtxs, newE) = traverse outerTypeCtxs e
                 (emptyCondTypeContexts, FEIsNull newE)
@@ -1687,7 +1716,7 @@ and private relabelFromExpr : ResolvedFromExpr -> ResolvedFromExpr = function
     | FSubExpr subsel -> FSubExpr { subsel with Select = relabelSelectExpr subsel.Select }
 
 and private relabelFieldExpr (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
-    let mapper = idFieldExprMapper id relabelSelectExpr
+    let mapper = { idFieldExprMapper with Query = relabelSelectExpr }
     mapFieldExpr mapper expr
 
 and private relabelOrderLimitClause (clause : ResolvedOrderLimitClause) : ResolvedOrderLimitClause =
@@ -1712,7 +1741,7 @@ and private relabelQueryColumnResult (result : ResolvedQueryColumnResult) : Reso
       Alias = result.Alias
     }
 
-let compileScalarType : ScalarFieldType -> SQL.SimpleType = function
+let compileScalarType : ScalarFieldType<_> -> SQL.SimpleType = function
     | SFTInt -> SQL.STInt
     | SFTDecimal -> SQL.STDecimal
     | SFTString -> SQL.STString
@@ -1723,39 +1752,44 @@ let compileScalarType : ScalarFieldType -> SQL.SimpleType = function
     | SFTJson -> SQL.STJson
     | SFTUserViewRef -> SQL.STJson
     | SFTUuid -> SQL.STUuid
-
-let compileFieldExprType : FieldExprType -> SQL.SimpleValueType = function
-    | FETScalar stype -> SQL.VTScalar <| compileScalarType stype
-    | FETArray stype -> SQL.VTArray <| compileScalarType stype
+    | SFTReference ent -> SQL.STInt
+    | SFTEnum vals -> SQL.STString
 
 let compileFieldType : FieldType<_> -> SQL.SimpleValueType = function
-    | FTType fetype -> compileFieldExprType fetype
-    | FTReference ent -> SQL.VTScalar SQL.STInt
-    | FTEnum vals -> SQL.VTScalar SQL.STString
+    | FTScalar stype -> SQL.VTScalar <| compileScalarType stype
+    | FTArray stype -> SQL.VTArray <| compileScalarType stype
+
+let isScalarValueSubtype (layout : ILayoutBits) (wanted : ResolvedScalarFieldType) (given : ResolvedScalarFieldType) : bool =
+    match (wanted, given) with
+    | (a, b) when a = b -> true
+    | (SFTReference wantedRef, SFTReference givenRef) ->
+        let wantedEntity = layout.FindEntity wantedRef |> Option.get
+        Map.containsKey givenRef wantedEntity.Children
+    | (SFTEnum wantedVals, SFTEnum givenVals) -> Set.isEmpty (Set.difference givenVals wantedVals)
+    | (SFTInt, SFTReference _) -> true
+    | (SFTString, SFTEnum _) -> true
+    | (a, b) -> SQL.tryImplicitCasts (compileScalarType a) (compileScalarType b)
+    | _ -> false
+
+let isValueSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (given : ResolvedFieldType) : bool =
+    match (wanted, given) with
+    | (FTScalar wantedTyp, FTScalar givenTyp)
+    | (FTArray wantedTyp, FTArray givenTyp) -> isScalarValueSubtype layout wantedTyp givenTyp
+    | _ -> false
 
 let isSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (maybeGiven : ResolvedFieldType option) : bool =
     match maybeGiven with
     | None -> true
-    | Some given ->
-        match (wanted, given) with
-        | (FTReference wantedRef, FTReference givenRef) when wantedRef = givenRef -> true
-        | (FTReference wantedRef, FTReference givenRef) ->
-            let wantedEntity = layout.FindEntity wantedRef |> Option.get
-            Map.containsKey givenRef wantedEntity.Children
-        | (FTEnum wantedVals, FTEnum givenVals) -> Set.isEmpty (Set.difference givenVals wantedVals)
-        | (FTType (FETScalar SFTInt), FTReference _) -> true
-        | (FTType (FETScalar SFTString), FTEnum _) -> true
-        | (FTType a, FTType b) when a = b -> true
-        | (FTType a, FTType b) -> SQL.tryImplicitCasts (compileFieldExprType a) (compileFieldExprType b)
-        | _ -> false
+    | Some given -> isValueSubtype layout wanted given
 
 let isValueOfSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (value : FieldValue) : bool =
     match (wanted, value) with
-    | (FTEnum wantedVals, FString str) -> Set.contains str wantedVals
+    | (FTScalar (SFTEnum wantedVals), FString str) -> Set.contains str wantedVals
+    | (FTArray (SFTEnum wantedVals), FStringArray strs) -> Seq.forall (fun str -> Set.contains str wantedVals) wantedVals
     | _ -> isSubtype layout wanted (fieldValueType value)
 
 let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : ResolvedArgument =
-    let argType = resolveArgumentFieldType layout arg.ArgType
+    let argType = resolveFieldType layout arg.ArgType
     match arg.DefaultValue with
     | None -> ()
     | Some def ->

@@ -89,6 +89,9 @@ let unionSourceSchema (a : SourceSchema) (b : SourceSchema) : SourceSchema =
     { Entities = Map.unionUnique a.Entities b.Entities
     }
 
+type IEntitiesSet =
+    abstract member HasVisibleEntity : ResolvedEntityRef -> bool
+
 type SourceLayout =
     { Schemas : Map<SchemaName, SourceSchema>
     } with
@@ -96,6 +99,12 @@ type SourceLayout =
             match Map.tryFind entity.Schema this.Schemas with
             | None -> None
             | Some schema -> Map.tryFind entity.Name schema.Entities
+
+        interface IEntitiesSet with
+            member this.HasVisibleEntity ref =
+                match this.FindEntity ref with
+                | Some entity when not entity.IsHidden -> true
+                | _ -> false
 
 let emptySourceLayout : SourceLayout =
     { Schemas = Map.empty

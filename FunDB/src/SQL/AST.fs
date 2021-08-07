@@ -216,6 +216,7 @@ type ValuePrettyConverter () =
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
 // Used when interpreting query results and for compiling FunQL.
+[<SerializeAsObject("type")>]
 type SimpleType =
     | [<CaseName("int")>] STInt
     | [<CaseName("bigint")>] STBigInt
@@ -276,9 +277,9 @@ let findSimpleType (str : TypeName) : SimpleType option =
     | "uuid" -> Some STUuid
     | _ -> None
 
-[<SerializeAsObject("type")>]
+[<SerializeAsObject("type", AllowUnknownType=true)>]
 type ValueType<'t> when 't :> ISQLString =
-    | [<CaseName(null)>] VTScalar of Type : 't
+    | [<CaseName(null, InnerObject=true)>] VTScalar of Type : 't
     | [<CaseName("array")>] VTArray of Subtype : 't
     with
         override this.ToString () = this.ToSQLString()

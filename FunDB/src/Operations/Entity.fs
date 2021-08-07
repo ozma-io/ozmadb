@@ -122,7 +122,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             if hasSubType entity then
                 let value =
                     { Placeholder = PLocal funSubEntity
-                      Argument = requiredArgument <| FTType (FETScalar SFTString)
+                      Argument = requiredArgument <| FTScalar SFTString
                       Column = sqlFunSubEntity
                       Extra = null
                     }
@@ -163,7 +163,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         return! runIntQuery connection globalArgs query comments rawArgs cancellationToken
     }
 
-let private funIdArg = requiredArgument <| FTType (FETScalar SFTInt)
+let private funIdArg = requiredArgument <| FTScalar SFTInt
 
 let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (comments : string option) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
     unitTask {

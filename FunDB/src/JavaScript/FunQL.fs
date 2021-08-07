@@ -64,8 +64,8 @@ let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
         | FECast (e, typ) ->
             let (isArray, scalarName) =
                 match typ with
-                | FETScalar st -> (false, st)
-                | FETArray st -> (true, st)
+                | FTScalar st -> (false, st)
+                | FTArray st -> (true, st)
             JSCall (JSObjectAccess (JSVar "context", "cast"), [| go e; JSValue (JSBool isArray); JSValue (JSString (scalarName.ToFunQLString())) |])
         | FEIsNull e -> JSStrictEq (go e, JSValue JSNull)
         | FEIsNotNull e -> JSStrictNotEq (go e, JSValue JSNull)

@@ -12,7 +12,7 @@ type ViewTypecheckException (message : string, innerException : exn) =
 
     new (message : string) = ViewTypecheckException (message, null)
 
-let decompileScalarType : SQL.SimpleType -> ScalarFieldType = function
+let decompileScalarType : SQL.SimpleType -> ScalarFieldType<_> = function
     | SQL.STInt -> SFTInt
     | SQL.STBigInt -> failwith "Unexpected bigint encountered"
     | SQL.STRegclass -> failwith "Unexpected regclass encountered"
@@ -25,14 +25,9 @@ let decompileScalarType : SQL.SimpleType -> ScalarFieldType = function
     | SQL.STJson -> SFTJson
     | SQL.STUuid -> SFTUuid
 
-let decompileFieldExprType : SQL.SimpleValueType -> FieldExprType = function
-    | SQL.VTScalar typ -> FETScalar <| decompileScalarType typ
-    | SQL.VTArray typ -> FETArray <| decompileScalarType typ
-
-let private eraseFieldType : FieldType<'e> -> FieldExprType = function
-    | FTReference ref -> FETScalar SFTInt
-    | FTEnum vals -> FETScalar SFTString
-    | FTType typ -> typ
+let decompileFieldType : SQL.SimpleValueType -> FieldType<_> = function
+    | SQL.VTScalar typ -> FTScalar <| decompileScalarType typ
+    | SQL.VTArray typ -> FTArray <| decompileScalarType typ
 
 let compileBinaryOp = function
     | BOLess -> SQL.BOLess
@@ -59,7 +54,7 @@ let compileBinaryOp = function
 
 let unionTypes (args : (ResolvedFieldType option) seq) : ResolvedFieldType option =
     let sqlArgs = args |> Seq.map (Option.map compileFieldType)
-    SQL.unionTypes sqlArgs |> Option.map (decompileFieldExprType >> FTType)
+    SQL.unionTypes sqlArgs |> Option.map decompileFieldType
 
 let private checkFunc (name : FunctionName) (args : (ResolvedFieldType option) seq) : ResolvedFieldType =
     try
@@ -69,7 +64,7 @@ let private checkFunc (name : FunctionName) (args : (ResolvedFieldType option) s
             let sqlArgs = args |> Seq.map (Option.map compileFieldType) |> Seq.toArray
             match SQL.findFunctionOverloads overloads sqlArgs with
             | None -> raisef ViewTypecheckException "Couldn't deduce function overload"
-            | Some (typs, ret) -> FTType <| decompileFieldExprType ret
+            | Some (typs, ret) -> decompileFieldType ret
         | FRSpecial SQL.SFLeast
         | FRSpecial SQL.SFGreatest
         | FRSpecial SQL.SFCoalesce ->
@@ -83,11 +78,11 @@ let private checkBinaryOp (op : BinaryOperator) (a : ResolvedFieldType option) (
     let overloads = SQL.binaryOperatorSignature (compileBinaryOp op)
     match SQL.findBinaryOpOverloads overloads (Option.map compileFieldType a) (Option.map compileFieldType b) with
     | None -> raisef ViewTypecheckException "Couldn't deduce operator overload for %O %O %O" a op b
-    | Some (typs, ret) -> FTType <| decompileFieldExprType ret
+    | Some (typs, ret) -> decompileFieldType ret
 
-let private scalarJson = FTType (FETScalar SFTJson)
+let private scalarJson = FTScalar SFTJson
 
-let private scalarBool = FTType (FETScalar SFTBool)
+let private scalarBool = FTScalar SFTBool
 
 type private Typechecker (layout : ILayoutBits) =
     let rec typecheckFieldRef (linked : LinkedBoundFieldRef) : ResolvedFieldType option =
@@ -106,7 +101,7 @@ type private Typechecker (layout : ILayoutBits) =
             let entity = layout.FindEntity fieldRef.Entity |> Option.get
             let field = entity.FindField fieldRef.Name |> Option.get
             match field.Field with
-            | RId -> Some <| FTReference fieldRef.Entity
+            | RId -> Some (FTScalar <| SFTReference fieldRef.Entity)
             | RSubEntity -> Some scalarJson
             | RColumnField col -> Some col.FieldType
             | RComputedField comp -> comp.Type
@@ -122,19 +117,19 @@ type private Typechecker (layout : ILayoutBits) =
 
     and typecheckAnyLogical (a : ResolvedFieldExpr) : ResolvedFieldType =
         let inner = typecheckFieldExpr a
-        FTType (FETScalar SFTBool)
+        FTScalar SFTBool
 
     and typecheckEqLogical (a : ResolvedFieldExpr) (b : ResolvedFieldExpr) : ResolvedFieldType =
         let ta = typecheckFieldExpr a
         let tb =  typecheckFieldExpr b
-        FTType (FETScalar SFTBool)
+        FTScalar SFTBool
 
     and typecheckInValues (e : ResolvedFieldExpr) (vals :ResolvedFieldExpr[]) : ResolvedFieldType =
         let typ = typecheckFieldExpr e
         for v in vals do
             let vt = typecheckFieldExpr v
             ignore <| checkBinaryOp BOEq typ vt
-        FTType (FETScalar SFTBool)
+        FTScalar SFTBool
 
     and typecheckLike (e : ResolvedFieldExpr) (pat : ResolvedFieldExpr) : ResolvedFieldType =
         let te = typecheckFieldExpr e
@@ -144,10 +139,10 @@ type private Typechecker (layout : ILayoutBits) =
 
     and typecheckInArray (e : ResolvedFieldExpr) (op : BinaryOperator) (arr : ResolvedFieldExpr) : ResolvedFieldType =
         let te = typecheckFieldExpr e
-        match typecheckFieldExpr arr |> Option.map eraseFieldType with
+        match typecheckFieldExpr arr with
         | None -> ()
-        | Some (FETArray atyp) -> ignore <| checkBinaryOp op te (atyp |> FETScalar |> FTType |> Some)
-        | Some (FETScalar ftyp) -> raisef ViewTypecheckException "Array expected, %O found" ftyp
+        | Some (FTArray atyp) -> ignore <| checkBinaryOp op te (atyp |> FTScalar |> Some)
+        | Some (FTScalar ftyp) -> raisef ViewTypecheckException "Array expected, %O found" ftyp
         scalarBool
 
     and typecheckCase (es : (ResolvedFieldExpr * ResolvedFieldExpr)[]) (els : ResolvedFieldExpr option) : ResolvedFieldType =
@@ -166,7 +161,7 @@ type private Typechecker (layout : ILayoutBits) =
         | FERef r -> typecheckFieldRef r
         | FENot e ->
             match typecheckFieldExpr e with
-            | Some (FTType (FETScalar SFTBool)) as typ -> typ
+            | Some (FTScalar SFTBool) as typ -> typ
             | _ -> None
         | FEAnd (a, b) -> Some <| typecheckBinaryLogical a b
         | FEOr (a, b) -> Some <| typecheckBinaryLogical a b
@@ -186,25 +181,25 @@ type private Typechecker (layout : ILayoutBits) =
         | FENotInQuery (e, query) -> failwith "Not implemented"
         | FECast (e, typ) ->
             // We always expect cast to succeed; worst case it's impossible, whatever.
-            Some (FTType typ)
+            Some (mapFieldType (tryResolveEntityRef >> Option.get) typ)
         | FEIsNull e -> Some <| typecheckAnyLogical e
         | FEIsNotNull e -> Some <| typecheckAnyLogical e
         | FECase (es, els) -> Some <| typecheckCase es els
         | FEJsonArray vals ->
             for v in vals do
                 ignore <| typecheckFieldExpr v
-            Some <| FTType (FETScalar SFTJson)
+            Some <| FTScalar SFTJson
         | FEJsonObject obj ->
             for KeyValue(name, v) in obj do
                 ignore <| typecheckFieldExpr v
-            Some <| FTType (FETScalar SFTJson)
+            Some <| FTScalar SFTJson
         | FEFunc (name, args) ->
             let argTypes = Seq.map typecheckFieldExpr args
             Some <| checkFunc name argTypes
         | FEAggFunc (name, args) -> failwith "Not implemented"
         | FESubquery query -> failwith "Not implemented"
-        | FEInheritedFrom (f, nam) -> Some (FTType (FETScalar SFTBool))
-        | FEOfType (f, nam) -> Some (FTType (FETScalar SFTBool))
+        | FEInheritedFrom (f, nam) -> Some (FTScalar SFTBool)
+        | FEOfType (f, nam) -> Some (FTScalar SFTBool)
 
     member this.TypecheckFieldExpr expr = typecheckFieldExpr expr
 

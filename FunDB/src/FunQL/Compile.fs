@@ -264,32 +264,31 @@ type private JoinId = int
 let compileJoinId (jid : JoinId) : SQL.TableName =
     SQL.SQLName <| sprintf "__join__%i" jid
 
-let defaultCompiledExprArgument : FieldExprType -> FieldValue = function
-    | FETArray SFTString -> FStringArray [||]
-    | FETArray SFTInt -> FIntArray [||]
-    | FETArray SFTDecimal -> FDecimalArray [||]
-    | FETArray SFTBool -> FBoolArray [||]
-    | FETArray SFTDateTime -> FDateTimeArray [||]
-    | FETArray SFTDate -> FDateArray [||]
-    | FETArray SFTInterval -> FIntervalArray [||]
-    | FETArray SFTJson -> FJsonArray [||]
-    | FETArray SFTUserViewRef -> FUserViewRefArray [||]
-    | FETArray SFTUuid -> FUuidArray [||]
-    | FETScalar SFTString -> FString ""
-    | FETScalar SFTInt -> FInt 0
-    | FETScalar SFTDecimal -> FDecimal 0m
-    | FETScalar SFTBool -> FBool false
-    | FETScalar SFTDateTime -> FDateTime NpgsqlDateTime.Epoch
-    | FETScalar SFTDate -> FDate NpgsqlDate.Epoch
-    | FETScalar SFTInterval -> FInterval NpgsqlTimeSpan.Zero
-    | FETScalar SFTJson -> FJson (JObject ())
-    | FETScalar SFTUserViewRef -> FUserViewRef { Schema = None; Name = FunQLName "" }
-    | FETScalar SFTUuid -> FUuid Guid.Empty
-
-let defaultCompiledArgument : ResolvedFieldType -> FieldValue = function
-    | FTType feType -> defaultCompiledExprArgument feType
-    | FTReference entityRef -> FInt 0
-    | FTEnum values -> values |> Set.toSeq |> Seq.first |> Option.get |> FString
+let defaultCompiledArgument : FieldType<_> -> FieldValue = function
+    | FTArray SFTString -> FStringArray [||]
+    | FTArray SFTInt -> FIntArray [||]
+    | FTArray SFTDecimal -> FDecimalArray [||]
+    | FTArray SFTBool -> FBoolArray [||]
+    | FTArray SFTDateTime -> FDateTimeArray [||]
+    | FTArray SFTDate -> FDateArray [||]
+    | FTArray SFTInterval -> FIntervalArray [||]
+    | FTArray SFTJson -> FJsonArray [||]
+    | FTArray SFTUserViewRef -> FUserViewRefArray [||]
+    | FTArray SFTUuid -> FUuidArray [||]
+    | FTArray (SFTReference entityRef) -> FIntArray [||]
+    | FTArray (SFTEnum vals) -> FStringArray [||]
+    | FTScalar SFTString -> FString ""
+    | FTScalar SFTInt -> FInt 0
+    | FTScalar SFTDecimal -> FDecimal 0m
+    | FTScalar SFTBool -> FBool false
+    | FTScalar SFTDateTime -> FDateTime NpgsqlDateTime.Epoch
+    | FTScalar SFTDate -> FDate NpgsqlDate.Epoch
+    | FTScalar SFTInterval -> FInterval NpgsqlTimeSpan.Zero
+    | FTScalar SFTJson -> FJson (JObject ())
+    | FTScalar SFTUserViewRef -> FUserViewRef { Schema = None; Name = FunQLName "" }
+    | FTScalar SFTUuid -> FUuid Guid.Empty
+    | FTScalar (SFTReference entityRef) -> FInt 0
+    | FTScalar (SFTEnum vals) -> vals |> Set.toSeq |> Seq.first |> Option.get |> FString
 
 // Evaluation of column-wise or global attributes
 type CompiledAttributesExpr =
@@ -943,7 +942,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let newEntity = layout.FindEntity newEntityRef |> Option.get
             let (fieldInfo, column) =
                 match entity.FindField fieldRef.Name with
-                | Some ({ Field = RColumnField ({ FieldType = FTReference _ } as column) } as fieldInfo) ->
+                | Some ({ Field = RColumnField ({ FieldType = FTScalar (SFTReference _) } as column) } as fieldInfo) ->
                     (fieldInfo, column)
                 | _ -> failwith "Impossible"
 
@@ -1102,7 +1101,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | FENotInQuery (a, query) -> SQL.VENotInQuery (traverse a, compileSubSelectExpr query)
             | FEAny (e, op, arr) -> SQL.VEAny (traverse e, compileBinaryOp op, traverse arr)
             | FEAll (e, op, arr) -> SQL.VEAll (traverse e, compileBinaryOp op, traverse arr)
-            | FECast (e, typ) -> SQL.VECast (traverse e, SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldExprType typ))
+            | FECast (e, typ) -> SQL.VECast (traverse e, SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType typ))
             | FEIsNull a -> SQL.VEIsNull (traverse a)
             | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
             | FECase (es, els) -> SQL.VECase (Array.map (fun (cond, expr) -> (traverse cond, traverse expr)) es, Option.map traverse els)
@@ -1443,7 +1442,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     Seq.empty
                 else
                     match finalField.Field with
-                    | RColumnField { FieldType = FTReference newEntityRef } ->
+                    | RColumnField { FieldType = FTScalar (SFTReference newEntityRef) } ->
                         let mainArrow = { Name = funMain; AsRoot = false }
                         let punRef = replacePath (Array.append path [|mainArrow|]) (Array.append boundPath [|newEntityRef|])
                         let (newPaths, punExpr) = compileLinkedFieldRef emptyExprCompilationFlags RCExpr paths punRef
@@ -1572,7 +1571,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             | None -> SQL.VEValue SQL.VNull
                             | Some info ->
                                 match layout.FindField info.Ref.Entity info.Ref.Name |> Option.get with
-                                | { Field = RColumnField { FieldType = FTReference newEntityRef } } ->
+                                | { Field = RColumnField { FieldType = FTScalar (SFTReference newEntityRef) } } ->
                                     let mainArrow =
                                         { Name = funMain
                                           AsRoot = false
@@ -1634,7 +1633,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     else
                         let argInfo = Map.find arg arguments.Types
                         match argInfo.FieldType with
-                        | FTReference newEntityRef ->
+                        | FTScalar (SFTReference newEntityRef) ->
                             let mainArrow =
                                 { Name = funMain
                                   AsRoot = false

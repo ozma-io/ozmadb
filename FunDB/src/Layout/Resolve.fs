@@ -41,12 +41,12 @@ let private reduceDefaultExpr : ParsedFieldExpr -> FieldValue option = function
     | FEValue value -> Some value
     | FECast (FEValue value, typ) ->
         match (value, typ) with
-        | (FString s, FETScalar SFTDate) -> Option.map FDate <| SQL.trySqlDate s
-        | (FString s, FETScalar SFTDateTime) -> Option.map FDateTime <| SQL.trySqlDateTime s
-        | (FString s, FETScalar SFTInterval) -> Option.map FInterval <| SQL.trySqlInterval s
-        | (FStringArray vals, FETArray SFTDate) -> Option.map (FDateArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlDate vals)
-        | (FStringArray vals, FETArray SFTDateTime) -> Option.map (FDateTimeArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlDateTime vals)
-        | (FStringArray vals, FETArray SFTInterval) -> Option.map (FIntervalArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlInterval vals)
+        | (FString s, FTScalar SFTDate) -> Option.map FDate <| SQL.trySqlDate s
+        | (FString s, FTScalar SFTDateTime) -> Option.map FDateTime <| SQL.trySqlDateTime s
+        | (FString s, FTScalar SFTInterval) -> Option.map FInterval <| SQL.trySqlInterval s
+        | (FStringArray vals, FTArray SFTDate) -> Option.map (FDateArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlDate vals)
+        | (FStringArray vals, FTArray SFTDateTime) -> Option.map (FDateTimeArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlDateTime vals)
+        | (FStringArray vals, FTArray SFTInterval) -> Option.map (FIntervalArray << Array.ofSeq) (Seq.traverseOption SQL.trySqlInterval vals)
         | _ -> None
     | _ -> None
 
@@ -170,21 +170,14 @@ type private Phase1Resolver (layout : SourceLayout) =
         else
             raisef ResolveLayoutException "Computed field names clash: %O" name
 
-    let resolveFieldType (ref : ResolvedEntityRef) (entity : SourceEntity) : ParsedFieldType -> ResolvedFieldType = function
-        | FTType ft -> FTType ft
-        | FTReference entityRef ->
-            let resolvedRef = resolveEntityRef entityRef
-            let refEntity =
-                match layout.FindEntity(resolvedRef) with
-                | Some refEntity when not refEntity.IsHidden -> refEntity
-                | _ -> raisef ResolveLayoutException "Cannot find entity %O from reference type" resolvedRef
-            if refEntity.ForbidExternalReferences && ref.Schema <> resolvedRef.Schema then
-                raisef ResolveLayoutException "References from other schemas to entity %O are forbidden" entityRef
-            FTReference resolvedRef
-        | FTEnum vals ->
-            if Set.isEmpty vals then
-                raisef ResolveLayoutException "Enums must not be empty"
-            FTEnum vals
+    let resolveFieldType (ft : ParsedFieldType) : ResolvedFieldType =
+        try
+            match resolveFieldType layout ft with
+            | FTArray (SFTReference _) -> raisef ResolveLayoutException "Arrays of references are not supported"
+            | FTArray (SFTEnum _) -> raisef ResolveLayoutException "Arrays of enums are not supported"
+            | t -> t
+        with
+        | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
 
     let resolveColumnField (ref : ResolvedEntityRef) (entity : SourceEntity) (fieldName : FieldName) (col : SourceColumnField) : ResolvedColumnField =
         let fieldType =
@@ -202,7 +195,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                     | Some v -> Some v
                     | None -> raisef ResolveLayoutException "Default expression is not trivial: %s" def
                 | Error msg -> raisef ResolveLayoutException "Error parsing column field default expression: %s" msg
-        let fieldType = resolveFieldType ref entity fieldType
+        let fieldType = resolveFieldType fieldType
 
         { FieldType = fieldType
           ValueType = compileFieldType fieldType
@@ -450,6 +443,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
         let mutable cachedEntities = Map.empty
         { new ILayoutBits with
+            member this.HasVisibleEntity ref =
+                match Map.tryFind ref entities with
+                | Some entity when not entity.Source.IsHidden -> true
+                | _ -> false
             member this.FindEntity ref =
                 match Map.tryFind ref cachedEntities with
                 | Some cached -> Some cached

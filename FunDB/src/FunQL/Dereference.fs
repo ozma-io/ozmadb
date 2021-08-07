@@ -46,7 +46,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
 
     and resolveFieldExpr (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
         let mapper =
-            { idFieldExprMapper id resolveSelectExpr with
+            { queryFieldExprMapper id resolveSelectExpr with
                 Value = resolveValue
             }
         mapFieldExpr mapper expr

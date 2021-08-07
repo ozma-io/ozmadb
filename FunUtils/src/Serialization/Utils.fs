@@ -20,6 +20,7 @@ type UnionCase =
 type SerializeAsObjectAttribute (caseFieldName : string) =
     inherit Attribute ()
     member this.CaseFieldName = caseFieldName
+    member val AllowUnknownType = false with get, set
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Method)>]
@@ -217,6 +218,7 @@ type CaseAsObjectInfo =
 
 type UnionAsObjectInfo =
     { CaseField : string
+      AllowUnknownType : bool
       Cases : Map<string option, CaseAsObjectInfo>
     }
 
@@ -247,6 +249,7 @@ let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
         let cases = unionCases objectType |> Seq.map caseInfo |> Map.ofSeq
         let ret =
             { CaseField = asObject.CaseFieldName
+              AllowUnknownType = asObject.AllowUnknownType
               Cases = cases
             }
         Some ret

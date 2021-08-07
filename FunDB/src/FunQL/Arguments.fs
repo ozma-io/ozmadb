@@ -126,9 +126,14 @@ let compileArguments (args : ResolvedArgumentsMap) : QueryArguments =
 
 let private typecheckArgument (fieldType : FieldType<_>) (value : FieldValue) : unit =
     match fieldType with
-    | FTEnum vals ->
+    | FTScalar (SFTEnum vals) ->
         match value with
         | FString str when Set.contains str vals -> ()
+        | FNull -> ()
+        | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
+    | FTArray (SFTEnum vals) ->
+        match value with
+        | FStringArray strs when Seq.forall (fun str -> Set.contains str vals) strs -> ()
         | FNull -> ()
         | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
     // Most casting/typechecking will be done by database or Npgsql

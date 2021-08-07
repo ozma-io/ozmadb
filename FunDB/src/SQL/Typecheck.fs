@@ -35,7 +35,7 @@ type UnaryOperatorSignaturesMap = Map<HoledValueType, HoledValueType>
 
 type BinaryOperatorSignaturesMap = Map<HoledValueType * HoledValueType, HoledValueType>
 
-type ImplicitCastsMap = Map<SimpleValueType, Set<SimpleValueType>>
+type ImplicitCastsMap = Map<SimpleType, Set<SimpleType>>
 
 let sqlSimpleTypes = unionCases typeof<SimpleType> |> Seq.map (fun case -> FSharpValue.MakeUnion(case.Info, [||]) :?> SimpleType) |> Set.ofSeq
 
@@ -68,21 +68,27 @@ let sqlPreferredTypes : Set<SimpleValueType> =
 
 let sqlImplicitCasts : ImplicitCastsMap =
     Map.ofList
-        [ (VTScalar STInt, Set.ofList [VTScalar STDecimal; VTScalar STBigInt])
-          (VTScalar STBigInt, Set.ofList [VTScalar STDecimal])
-          (VTScalar STDate, Set.ofList [VTScalar STDateTime])
+        [ (STInt, Set.ofList [STDecimal; STBigInt])
+          (STBigInt, Set.ofList [STDecimal])
+          (STDate, Set.ofList [STDateTime])
         ]
 
-let tryImplicitCasts (wanted : SimpleValueType) (given : SimpleValueType) =
+let tryImplicitCasts (wanted : SimpleType) (given : SimpleType) =
     match Map.tryFind given sqlImplicitCasts with
     | None -> false
     | Some newGiven -> newGiven |> Seq.contains wanted
+
+let tryImplicitValueCasts (wanted : SimpleValueType) (given : SimpleValueType) =
+    match (wanted, given) with
+    | (VTScalar wantedTyp, VTScalar givenTyp) -> tryImplicitCasts wantedTyp givenTyp
+    | (VTArray wantedTyp, VTArray givenTyp) -> tryImplicitCasts wantedTyp givenTyp
+    | _ -> false
 
 let canAcceptType (wanted : SimpleValueType) (given : SimpleValueType) =
     if wanted = given then
         true
     else
-        tryImplicitCasts wanted given
+        tryImplicitValueCasts wanted given
 
 let private specializeHoledType (pl : HolePlaceholder) (holedTyp : HoledValueType) : SimpleValueType option =
     match holedTyp with
@@ -262,7 +268,7 @@ let rec private trySignature (inexactNum : int) (notPreferredNum : int) (compare
     | Seq.Snoc ((sigTyp, margTyp), rest) ->
         match margTyp with
         | Some argTyp when argTyp = sigTyp -> trySignature inexactNum notPreferredNum rest
-        | Some argTyp when tryImplicitCasts sigTyp argTyp ->
+        | Some argTyp when tryImplicitValueCasts sigTyp argTyp ->
             let notPreferredNum =
                 if Set.contains sigTyp sqlPreferredTypes then
                     notPreferredNum
@@ -408,7 +414,7 @@ let unionTypes (args : (SimpleValueType option) seq) : SimpleValueType option =
             else
                 if candidateTyp = argTyp then
                     Ok candidateTyp
-                else if tryImplicitCasts argTyp candidateTyp && not (tryImplicitCasts candidateTyp argTyp) then
+                else if tryImplicitValueCasts argTyp candidateTyp && not (tryImplicitValueCasts candidateTyp argTyp) then
                     Ok argTyp
                 else
                     Ok candidateTyp

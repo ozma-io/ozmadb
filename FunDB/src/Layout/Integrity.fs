@@ -24,31 +24,31 @@ type LayoutIntegrityException (message : string, innerException : Exception) =
 
     new (message : string) = LayoutIntegrityException (message, null)
 
-type ColumnOfTypeAssertion =
+type ReferenceOfTypeAssertion =
     { FromField : ResolvedFieldRef
       ToEntity : ResolvedEntityRef
     }
 
 type LayoutAssertions =
-    { ColumnOfTypeAssertions : Set<ColumnOfTypeAssertion>
+    { ReferenceOfTypeAssertions : Set<ReferenceOfTypeAssertion>
       CheckConstraints : Map<ResolvedConstraintRef, ResolvedFieldExpr>
       MaterializedFields : Map<ResolvedFieldRef, ResolvedFieldExpr>
     }
 
 let unionLayoutAssertions (a : LayoutAssertions) (b : LayoutAssertions) : LayoutAssertions =
-    { ColumnOfTypeAssertions = Set.union a.ColumnOfTypeAssertions b.ColumnOfTypeAssertions
+    { ReferenceOfTypeAssertions = Set.union a.ReferenceOfTypeAssertions b.ReferenceOfTypeAssertions
       CheckConstraints = Map.union a.CheckConstraints b.CheckConstraints
       MaterializedFields = Map.union a.MaterializedFields b.MaterializedFields
     }
 
 let differenceLayoutAssertions (a : LayoutAssertions) (b : LayoutAssertions) : LayoutAssertions =
-    { ColumnOfTypeAssertions = Set.difference a.ColumnOfTypeAssertions b.ColumnOfTypeAssertions
+    { ReferenceOfTypeAssertions = Set.difference a.ReferenceOfTypeAssertions b.ReferenceOfTypeAssertions
       CheckConstraints = Map.differenceWithValues (fun name a b -> string a = string b) a.CheckConstraints b.CheckConstraints
       MaterializedFields = Map.differenceWithValues (fun name a b -> string a = string b) a.MaterializedFields b.MaterializedFields
     }
 
 let emptyLayoutAssertions : LayoutAssertions =
-    { ColumnOfTypeAssertions = Set.empty
+    { ReferenceOfTypeAssertions = Set.empty
       CheckConstraints = Map.empty
       MaterializedFields = Map.empty
     }
@@ -87,7 +87,7 @@ type private AssertionsBuilder (layout : Layout) =
     let columnFieldAssertions (fieldRef : ResolvedFieldRef) (field : ResolvedColumnField) : LayoutAssertions seq =
         seq {
             match field.FieldType with
-            | FTReference toRef ->
+            | FTScalar (SFTReference toRef) ->
                 let refEntity = layout.FindEntity toRef |> Option.get
                 if Option.isSome refEntity.Parent then
                     let assertion =
@@ -96,7 +96,7 @@ type private AssertionsBuilder (layout : Layout) =
                         }
                     yield
                         { emptyLayoutAssertions with
-                              ColumnOfTypeAssertions = Set.singleton assertion
+                              ReferenceOfTypeAssertions = Set.singleton assertion
                         }
             | _ -> ()
         }
@@ -166,7 +166,7 @@ type private CheckTriggerOptions =
       Expression : SQL.SelectExpr
     }
 
-let buildColumnOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.DatabaseMeta =
+let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.DatabaseMeta =
     let entity = layout.FindEntity fromFieldRef.Entity |> Option.get
     let field = Map.find fromFieldRef.Name entity.ColumnFields
     let refEntity = layout.FindEntity toEntityRef |> Option.get
@@ -1057,8 +1057,8 @@ let buildMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedFieldRef) 
         |> Seq.fold SQL.unionDatabaseMeta outerMeta
 
 let buildAssertionsMeta (layout : Layout) (asserts : LayoutAssertions) : SQL.DatabaseMeta =
-    let mapFieldOfType fieldOfType = buildColumnOfTypeAssertion layout fieldOfType.FromField fieldOfType.ToEntity
-    let colOfTypes = asserts.ColumnOfTypeAssertions |> Set.toSeq |> Seq.map mapFieldOfType
+    let mapFieldOfType fieldOfType = buildReferenceOfTypeAssertion layout fieldOfType.FromField fieldOfType.ToEntity
+    let colOfTypes = asserts.ReferenceOfTypeAssertions |> Set.toSeq |> Seq.map mapFieldOfType
 
     let mapCheck (key, expr) = buildCheckConstraintAssertion layout key expr
     let checkConstrs = asserts.CheckConstraints |> Map.toSeq |> Seq.map mapCheck
@@ -1068,7 +1068,7 @@ let buildAssertionsMeta (layout : Layout) (asserts : LayoutAssertions) : SQL.Dat
 
     Seq.concat [colOfTypes; checkConstrs; matStores] |> Seq.fold SQL.unionDatabaseMeta SQL.emptyDatabaseMeta
 
-let private compileColumnOfTypeCheck (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.SelectExpr =
+let private compileReferenceOfTypeCheck (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.SelectExpr =
     let entity = layout.FindEntity fromFieldRef.Entity |> Option.get
     let field = Map.find fromFieldRef.Name entity.ColumnFields
     let refEntity = layout.FindEntity toEntityRef |> Option.get
@@ -1116,8 +1116,8 @@ let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) 
 
 let checkAssertions (conn : QueryConnection) (layout : Layout) (assertions : LayoutAssertions) (cancellationToken : CancellationToken) : Task =
     unitTask {
-        for columnOfType in assertions.ColumnOfTypeAssertions do
-            let query = compileColumnOfTypeCheck layout columnOfType.FromField columnOfType.ToEntity
+        for columnOfType in assertions.ReferenceOfTypeAssertions do
+            let query = compileReferenceOfTypeCheck layout columnOfType.FromField columnOfType.ToEntity
             try
                 do! runIntegrityCheck conn query cancellationToken
             with

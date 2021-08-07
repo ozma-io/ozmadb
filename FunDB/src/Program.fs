@@ -42,7 +42,6 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 let httpJsonSettings =
     let converters : JsonConverter[] = [|
         FunQL.FieldValuePrettyConverter ()
-        FunQL.FieldTypePrettyConverter ()
         SQL.ValuePrettyConverter ()
     |]
     let constructors = Array.map (fun conv -> fun _ -> Some conv) converters

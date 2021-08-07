@@ -96,14 +96,14 @@ type private MetaBuilder (layout : Layout) =
             } : SQL.ColumnMeta
         let constr =
             match field.FieldType with
-                | FTReference entityRef ->
+                | FTScalar (SFTReference entityRef) ->
                     // FIXME: support restrictions!
                     let refEntity = layout.FindEntity entityRef |> Option.get
                     let tableRef = compileResolvedEntityRef refEntity.Root
                     let constrKey = sprintf "__foreign__%O__%O__%O" ref.Entity.Schema ref.Entity.Name ref.Name
                     let constrName = SQL.SQLName <| sprintf "__foreign__%s__%s"  entity.HashName field.HashName
                     Seq.singleton (constrName, (Set.singleton constrKey, SQL.CMForeignKey (tableRef, [| (field.ColumnName, sqlFunId) |], SQL.DCDeferrable false)))
-                | FTEnum vals ->
+                | FTScalar (SFTEnum vals) ->
                     let expr =
                         let col = SQL.VEColumn { Table = None; Name = field.ColumnName }
                         let makeValue value = SQL.VEValue (SQL.VString value)
@@ -298,7 +298,7 @@ type private MetaBuilder (layout : Layout) =
 
         let makeReferenceIndex (name, field : ResolvedColumnField) =
             match field with
-            | { InheritedFrom = None; FieldType = FTReference refEntityRef } ->
+            | { InheritedFrom = None; FieldType = FTScalar (SFTReference refEntityRef) } ->
                 // We build indexes for all references to speed up non-local check constraint integrity lookups,
                 // and DELETE operations on related fields (PostgreSQL will make use of this index internally, that's why we don't set a predicate).
                 let key = sprintf "__refindex__%O__%O__%O" entityRef.Schema entityRef.Name name

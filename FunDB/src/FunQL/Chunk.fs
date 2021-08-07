@@ -56,7 +56,7 @@ let emptyQueryChunk =
       Where = None
     } : SourceQueryChunk
 
-let private limitOffsetArgument = requiredArgument <| FTType (FETScalar SFTInt)
+let private limitOffsetArgument = requiredArgument <| FTScalar SFTInt
 
 let private maybeAddAnonymousInt (int : int option) (argValues : LocalArgumentsMap) (arguments : QueryArguments) : LocalArgumentsMap * QueryArguments * SQL.ValueExpr option =
     match int with

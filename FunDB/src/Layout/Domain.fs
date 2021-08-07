@@ -133,8 +133,7 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                     } : LinkedFieldRef
                 { Ref = linkedRef; Extra = extra }
         | ref -> failwithf "Impossible reference: %O" ref
-    let convertQuery query = failwithf "Impossible query: %O" query
-    mapFieldExpr (idFieldExprMapper convertRef convertQuery) expr
+    mapFieldExpr (onlyFieldExprMapper convertRef) expr
 
 let private queryHash (expr : SQL.SelectExpr) : string =
     expr |> string |> Hash.sha1OfString |> String.hexBytes
@@ -201,7 +200,7 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
           B = refFrom
           Condition = FEValue (FBool true)
         }
-    let argumentInfo = requiredArgument <| FTReference entityRef
+    let argumentInfo = requiredArgument <| FTScalar (SFTReference entityRef)
     let placeholder = PLocal funId
     let (argId, arguments) = addArgument placeholder argumentInfo emptyArguments
 
@@ -291,7 +290,7 @@ type private DomainsBuilder (layout : Layout) =
 
     let buildFieldDomain (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (field : ResolvedColumnField) : FieldDomain option =
         match field.FieldType with
-        | FTReference refEntityRef -> Some <| buildReferenceFieldDomain entity fieldRef refEntityRef
+        | FTScalar (SFTReference refEntityRef) -> Some <| buildReferenceFieldDomain entity fieldRef refEntityRef
         // We can also potentially make domains for enums and booleans.
         | _ -> None
 

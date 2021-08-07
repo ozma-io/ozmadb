@@ -256,7 +256,11 @@ type ResolvedSchema =
     { Entities : Map<EntityName, ResolvedEntity>
     }
 
+type IEntitiesSet = Source.IEntitiesSet
+
 type ILayoutBits =
+    inherit IEntitiesSet
+
     abstract member FindEntity : ResolvedEntityRef -> IEntityBits option
 
 [<NoEquality; NoComparison>]
@@ -270,6 +274,12 @@ type Layout =
 
         member this.FindField (entity : ResolvedEntityRef) (field : FieldName) =
             this.FindEntity(entity) |> Option.bind (fun entity -> entity.FindField(field))
+
+        interface IEntitiesSet with
+            member this.HasVisibleEntity ref =
+                match this.FindEntity ref with
+                | Some entity when not entity.IsHidden -> true
+                | _ -> false
 
         interface ILayoutBits with
             member this.FindEntity ref = Option.map (fun e -> e :> IEntityBits) (this.FindEntity ref)
