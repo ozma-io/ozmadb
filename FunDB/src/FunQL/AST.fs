@@ -917,7 +917,7 @@ type FieldExprMapper<'e1, 'f1, 'e2, 'f2> when 'e1 :> IFunQLName and 'f1 :> IFunQ
       SubEntity : SubEntityContext -> 'f2 -> SubEntityRef -> SubEntityRef
     }
 
-let idFieldExprMapper =
+let idFieldExprMapper : FieldExprMapper<'a, 'b, 'a, 'b> =
     { Value = id
       FieldReference = id
       EntityReference = id

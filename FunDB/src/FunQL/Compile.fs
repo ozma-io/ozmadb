@@ -921,7 +921,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     None
                 else
                     let entities = entityRefs |> Seq.map (fun ref -> layout.FindEntity ref |> Option.get :> IEntityBits)
-                    let (newPaths, newExpr) = compileLinkedFieldExpr flags Map.empty paths <| replaceEntityRefInExpr localRef caseComp.Expression
+                    let (newPaths, newExpr) = compileLinkedFieldExpr flags Map.empty paths <| replaceTopLevelEntityRefInExpr localRef caseComp.Expression
                     paths <- newPaths
                     Some (entities, newExpr)
 
@@ -1599,7 +1599,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         | Some attrs ->
                             let makeDefaultAttr name =
                                 let attr = Map.find name attrs
-                                let expr = replaceEntityRefInExpr (Some entityRef) attr.Expression
+                                let expr = replaceTopLevelEntityRefInExpr (Some entityRef) attr.Expression
                                 let attrCol = CCCellAttribute name
                                 let (newPaths, compiled) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
                                 paths <- newPaths

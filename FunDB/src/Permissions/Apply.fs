@@ -73,7 +73,7 @@ let filterAccessForUsedSchemas (accessor : AllowedField -> ResolvedOptimizedFiel
 
 // Rename top-level entities in a restriction expression
 let private renameRestriction (entityRef : EntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
-    mapOptimizedFieldExpr (replaceEntityRefInExpr (Some entityRef)) restr
+    mapOptimizedFieldExpr (replaceTopLevelEntityRefInExpr (Some entityRef)) restr
 
 type private TypeCheckedExprs = Map<string, ResolvedOptimizedFieldExpr * ResolvedOptimizedFieldExpr>
 

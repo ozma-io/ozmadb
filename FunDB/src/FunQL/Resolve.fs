@@ -702,12 +702,12 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
 
 // Public helper functions.
 
-let replaceEntityRefInExpr (localRef : EntityRef option) : ResolvedFieldExpr -> ResolvedFieldExpr =
+let replaceTopLevelEntityRefInExpr (localRef : EntityRef option) : ResolvedFieldExpr -> ResolvedFieldExpr =
     let resolveReference : LinkedBoundFieldRef -> LinkedBoundFieldRef = function
     | { Ref = { Ref = VRColumn col } } as ref ->
         { ref with Ref = { ref.Ref with Ref = VRColumn { col with Entity = localRef } } }
     | ref -> ref
-    let mapper = onlyFieldExprMapper resolveReference
+    let mapper = { idFieldExprMapper with FieldReference = resolveReference }
     mapFieldExpr mapper
 
 let private filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCase seq) : VirtualFieldCase seq =

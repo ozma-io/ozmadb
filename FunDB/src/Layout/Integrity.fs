@@ -542,7 +542,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let constr = Map.find constrRef.Name entity.CheckConstraints
     let outerFields = findOuterFields layout check
 
-    let fixedCheck = replaceEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
+    let fixedCheck = replaceTopLevelEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
 
     let result =
         { Attributes = Map.empty
@@ -764,7 +764,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
 
 let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.SelectExpr =
     let entity = layout.FindEntity constrRef.Entity |> Option.get
-    let fixedCheck = replaceEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
+    let fixedCheck = replaceTopLevelEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
     let aggExpr = FEAggFunc (FunQLName "bool_and", AEAll [| fixedCheck |])
 
     let result =
@@ -990,7 +990,7 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
 
 let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) (expr : ResolvedFieldExpr) : SQL.UpdateExpr =
     let entity = layout.FindEntity fieldRef.Entity |> Option.get
-    let fixedExpr = replaceEntityRefInExpr (Some <| relaxEntityRef entity.Root) expr
+    let fixedExpr = replaceTopLevelEntityRefInExpr (Some <| relaxEntityRef entity.Root) expr
     let result =
         { Attributes = Map.empty
           Result = fixedExpr
