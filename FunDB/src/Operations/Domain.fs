@@ -95,7 +95,7 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
                 | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
         let resolvedChunk = genericResolveChunk layout domainColumns chunk
         let (argValues, query) = queryExprChunk layout resolvedChunk query
-        let arguments = Option.defaultWith (fun () -> query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)) maybeArguments
+        let arguments = Option.defaultWith (fun () -> query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)) maybeArguments
 
         try
             let arguments = Map.union arguments (Map.mapKeys PLocal argValues)

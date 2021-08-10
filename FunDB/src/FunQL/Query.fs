@@ -407,7 +407,7 @@ type ExplainedViewExpr =
 let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (maybeArguments : ArgumentValuesMap option) (explainOpts : ExplainOptions) (cancellationToken : CancellationToken) : Task<ExplainedViewExpr> =
     task {
         try
-            let arguments = Option.defaultWith (fun () -> viewExpr.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)) maybeArguments
+            let arguments = Option.defaultWith (fun () -> viewExpr.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)) maybeArguments
             let parameters = prepareArguments viewExpr.Query.Arguments arguments
 
             do! setPragmas connection viewExpr.Pragmas cancellationToken

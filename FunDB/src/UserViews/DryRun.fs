@@ -225,7 +225,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                           }
                       AttributesQuery = { uv.Compiled.AttributesQuery with AttributeColumns = Array.map limitAttributeColumn uv.Compiled.AttributesQuery.AttributeColumns }
                 }
-            let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg.FieldType)
+            let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)
 
             try
                 return! runViewExpr conn limited comment arguments cancellationToken <| fun info res ->

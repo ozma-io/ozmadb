@@ -264,7 +264,7 @@ type private JoinId = int
 let compileJoinId (jid : JoinId) : SQL.TableName =
     SQL.SQLName <| sprintf "__join__%i" jid
 
-let defaultCompiledArgument : FieldType<_> -> FieldValue = function
+let private defaultCompiledArgumentValue : FieldType<_> -> FieldValue = function
     | FTArray SFTString -> FStringArray [||]
     | FTArray SFTInt -> FIntArray [||]
     | FTArray SFTDecimal -> FDecimalArray [||]
@@ -289,6 +289,15 @@ let defaultCompiledArgument : FieldType<_> -> FieldValue = function
     | FTScalar SFTUuid -> FUuid Guid.Empty
     | FTScalar (SFTReference entityRef) -> FInt 0
     | FTScalar (SFTEnum vals) -> vals |> Set.toSeq |> Seq.first |> Option.get |> FString
+
+let defaultCompiledArgument (arg : CompiledArgument) : FieldValue =
+    match arg.DefaultValue with
+    | Some v -> v
+    | None ->
+        if arg.Optional then
+            FNull
+        else
+            defaultCompiledArgumentValue arg.FieldType
 
 // Evaluation of column-wise or global attributes
 type CompiledAttributesExpr =
