@@ -349,7 +349,7 @@ let private extraDefaultAttributesEntry = "extra_default_attributes.yaml"
 let private userViewsGeneratorMetaEntry = "user_views_generator.yaml"
 let private userViewsGeneratorEntry = "user_views_generator.mjs"
 
-let private maxFilesSize = 1L * 1024L * 1024L // 1MB
+let private maxFilesSize = 32L * 1024L * 1024L // 32MB
 
 let myYamlSerializer = makeYamlSerializer { defaultYamlSerializerSettings with NamingConvention = CamelCaseNamingConvention.Instance }
 

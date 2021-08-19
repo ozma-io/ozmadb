@@ -1405,7 +1405,7 @@ let allowedPragmas : Set<PragmaName> =
           FunQLName "enable_tidscan"
         ]
 
-let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
+let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
     if tok.Type = JTokenType.Null then
         if isNullable then
             Some FNull
@@ -1415,7 +1415,7 @@ let private parseSingleValue (constrFunc : 'A -> FieldValue option) (isNullable 
         try
             constrFunc <| tok.ToObject()
         with
-        | :? JsonSerializationException -> None
+        | :? JsonReaderException -> None
 
 let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> FieldValue option =
     let parseSingleValueStrict f = parseSingleValue (f >> Some)
