@@ -3,23 +3,25 @@ module FunWithFlags.FunDB.API.Triggers
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
-open NetJs
 open NetJs.Json
 open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types
-open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.API.Types
 
-type TriggerRunException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type TriggerRunException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = TriggerRunException (message, null)
+    new (message : string, innerException : Exception) =
+        TriggerRunException (message, innerException, isUserException innerException)
+
+    new (message : string) = TriggerRunException (message, null, true)
 
 [<SerializeAsObject("type")>]
 type SerializedTriggerSource =
@@ -39,7 +41,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
             runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
         with
         | :? JavaScriptRuntimeException as e ->
-            raisefWithInner TriggerRunException e "Couldn't initialize trigger"
+            raisefUserWithInner TriggerRunException e "Couldn't initialize trigger"
 
     let runArgsTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
         task {

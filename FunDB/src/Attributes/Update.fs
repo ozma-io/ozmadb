@@ -56,7 +56,7 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) as 
             try
                 updateAttributesDatabase schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
+            | e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas

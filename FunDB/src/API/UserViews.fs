@@ -90,7 +90,7 @@ type UserViewsAPI (rctx : IRequestContext) =
                                     let! anon = ctx.ResolveAnonymousView (Some ref.Schema) uv.Query
                                     return Ok anon
                                 with
-                                | :? UserViewResolveException as err ->
+                                | :? UserViewResolveException as err when err.IsUserException ->
                                     logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
                                     return Error <| UVECompilation (exceptionString err)
                         else

@@ -83,7 +83,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
             try
                 updateAllowedDatabase schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In allowed schema %O" name
+            | e -> raisefWithInner SystemUpdaterException e "In allowed schema %O" name
         let createFunc (FunQLName name) =
             Role (
                 Name = name,
@@ -96,7 +96,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
             try
                 updatePermissionsSchema schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
+            | e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas

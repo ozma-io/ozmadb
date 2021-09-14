@@ -8,6 +8,7 @@ open System.Text
 open System.Data.HashFunction.CityHash
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
@@ -19,10 +20,13 @@ module SQL = FunWithFlags.FunDB.SQL.DDL
 module SQL = FunWithFlags.FunDB.SQL.DML
 module PLPgSQL = FunWithFlags.FunDB.SQL.PLPgSQL
 
-type LayoutIntegrityException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type LayoutIntegrityException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = LayoutIntegrityException (message, null)
+    new (message : string, innerException : Exception) =
+        LayoutIntegrityException (message, innerException, isUserException innerException)
+
+    new (message : string) = LayoutIntegrityException (message, null, true)
 
 type ReferenceOfTypeAssertion =
     { FromField : ResolvedFieldRef
@@ -1111,7 +1115,7 @@ let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) 
             | SQL.VNull -> () // No rows found
             | ret -> raisef LayoutIntegrityException "Expected `true`, got %O" ret
         with
-        | :? QueryException as ex -> raisefWithInner LayoutIntegrityException ex "Query exception"
+        | :? QueryException as e -> raisefUserWithInner LayoutIntegrityException e "Query exception"
     }
 
 let checkAssertions (conn : QueryConnection) (layout : Layout) (assertions : LayoutAssertions) (cancellationToken : CancellationToken) : Task =
@@ -1121,14 +1125,14 @@ let checkAssertions (conn : QueryConnection) (layout : Layout) (assertions : Lay
             try
                 do! runIntegrityCheck conn query cancellationToken
             with
-            | :? LayoutIntegrityException as ex -> raisefWithInner LayoutIntegrityException ex "Failed to check that all %O values point to %O entries" columnOfType.FromField columnOfType.ToEntity
+            | e -> raisefWithInner LayoutIntegrityException e "Failed to check that all %O values point to %O entries" columnOfType.FromField columnOfType.ToEntity
 
         for KeyValue(constrRef, expr) in assertions.CheckConstraints do
             let query = compileCheckConstraintBulkCheck layout constrRef expr
             try
                 do! runIntegrityCheck conn query cancellationToken
             with
-            | :? LayoutIntegrityException as ex -> raisefWithInner LayoutIntegrityException ex "Failed to validate check constraint %O" constrRef
+            | e -> raisefWithInner LayoutIntegrityException e "Failed to validate check constraint %O" constrRef
 
         for KeyValue(fieldRef, expr) in assertions.MaterializedFields do
             let query = compileMaterializedFieldBulkStore layout fieldRef expr

@@ -7,6 +7,7 @@ open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
@@ -16,10 +17,13 @@ open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Misc
 
-type UserViewExecutionException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type UserViewExecutionException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = UserViewExecutionException (message, null)
+    new (message : string, innerException : Exception) =
+        UserViewExecutionException (message, innerException, isUserException innerException)
+
+    new (message : string) = UserViewExecutionException (message, null, true)
 
 type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
 type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
@@ -390,7 +394,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
             do! unsetPragmas connection viewExpr.Pragmas cancellationToken
             return ret
         with
-        | :? QueryException as e -> return raisefWithInner UserViewExecutionException e ""
+        | :? QueryException as e -> return raisefUserWithInner UserViewExecutionException e ""
     }
 
 type ExplainedQuery =
@@ -430,5 +434,5 @@ let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr)
                   Attributes = attrsResult
                 }
         with
-        | :? QueryException as e -> return raisefWithInner UserViewExecutionException e ""
+        | :? QueryException as e -> return raisefUserWithInner UserViewExecutionException e ""
     }

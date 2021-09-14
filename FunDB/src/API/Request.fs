@@ -11,6 +11,7 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.API.Types
@@ -25,7 +26,7 @@ type RequestErrorInfo =
             | RENoRole -> "Access denied"
 
 type RequestException (info : RequestErrorInfo) =
-    inherit Exception(info.Message)
+    inherit UserException(info.Message)
 
     member this.Info = info
 

@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Layout.Domain
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Resolve
@@ -8,6 +9,14 @@ open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DML
+
+type LayoutDomainException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        LayoutDomainException (message, innerException, isUserException innerException)
+
+    new (message : string) = LayoutDomainException (message, null, true)
 
 // Field domains, that is, all possible values for a field considering check constraints.
 
@@ -77,15 +86,15 @@ let rowEntityRef : EntityRef = { Schema = None; Name = rowName }
 let referencedName = FunQLName "referenced"
 let referencedEntityRef : EntityRef = { Schema = None; Name = referencedName }
 
-// Generic check is the one that only has has references to one field, itself of reference type.
+// Generic check is the one that only has references to one field, itself of reference type.
 // For example, `user_id=>account_id=>balance > 0`.
-// Convert this to just `account_id=>balance > 0`, so that we can use it SELECT for referenced entity.
+// Convert this to just `account_id=>balance > 0`, so that we can use it in SELECT for referenced entity.
 //
 // Row-specific check is the one that has both references to the field we build domain for, as well as other local fields.
 // We split them into references to two separate entities: `row` and `referenced`.
 let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName : FieldName) (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
     let convertRef : LinkedBoundFieldRef -> LinkedBoundFieldRef = function
-        | { Ref = { Ref = VRColumn { Name = fieldName }; Path = path }; Extra = extra } ->
+        | { Ref = { Ref = VRColumn { Name = fieldName }; Path = path }; Extra = extra } as ref ->
             let fieldInfo = ObjectMap.findType<FieldMeta> extra
             let boundInfo = Option.get fieldInfo.Bound
             if fieldName = refFieldName then
@@ -109,8 +118,9 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                     { Ref = linkedRef; Extra = ObjectMap.add newFieldInfo extra }
                 else
                     let firstArrow = path.[0]
+                    let firstEntityRef = boundInfo.Path.[0]
                     let newBoundInfo =
-                        { Ref = { Entity = refEntityRef; Name = firstArrow.Name }
+                        { Ref = { Entity = firstEntityRef; Name = firstArrow.Name }
                           Immediate = true
                           Path = Array.skip 1 boundInfo.Path
                         } : BoundFieldMeta
@@ -164,7 +174,11 @@ let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : 
           Tree = SSelect single
           Extra = ObjectMap.empty
         }
-    let (info, expr) = compileSelectExpr layout arguments select
+    let (info, expr) =
+        try
+            compileSelectExpr layout arguments select
+        with
+        | e -> raisefWithInner LayoutDomainException e "While compiling %O" select
     let query =
         { Expression = expr
           Arguments = info.Arguments
@@ -300,7 +314,10 @@ type private DomainsBuilder (layout : Layout) =
                 None
             else
                 let ref = { Entity = entityRef; Name = name }
-                buildFieldDomain entity ref field
+                try
+                    buildFieldDomain entity ref field
+                with
+                | e -> raisefWithInner LayoutDomainException e "In field %O" name
         let res = entity.ColumnFields |> Map.mapMaybe mapField
         if Map.isEmpty res then
             None
@@ -313,7 +330,10 @@ type private DomainsBuilder (layout : Layout) =
                 None
             else
                 let ref = { Schema = schemaName; Name = name }
-                buildEntityDomains ref entity
+                try
+                    buildEntityDomains ref entity
+                with
+                | e -> raisefWithInner LayoutDomainException e "In entity %O" name
         let res = schema.Entities |> Map.mapMaybe mapEntity
         if Map.isEmpty res then
             None
@@ -321,9 +341,13 @@ type private DomainsBuilder (layout : Layout) =
             Some { Entities = res }
 
     let buildLayoutDomains () : LayoutDomains =
-        let res = layout.Schemas |> Map.mapMaybe buildSchemaDomains
-        { Schemas = res
-        }
+        let mapSchema name schema =
+            try
+                buildSchemaDomains name schema
+            with
+            | e -> raisefWithInner LayoutDomainException e "In schema %O" name
+        let res = layout.Schemas |> Map.mapMaybe mapSchema
+        { Schemas = res }
 
     member this.BuildLayoutDomains () = buildLayoutDomains ()
 

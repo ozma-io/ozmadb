@@ -93,7 +93,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                             return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEArguments str))
                         | Ok newArgs -> return Ok newArgs
                 with
-                | :? TriggerRunException as ex ->
+                | :? TriggerRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in trigger {}", ref)
                         let str = exceptionString ex
                         rctx.WriteEvent (fun event ->
@@ -117,7 +117,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     do! run script
                     return Ok ()
                 with
-                | :? TriggerRunException as ex ->
+                | :? TriggerRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in trigger {}", ref)
                         let str = exceptionString ex
                         rctx.WriteEvent (fun event ->
@@ -150,7 +150,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     else
                         return Error BECancelled
                 with
-                | :? TriggerRunException as ex ->
+                | :? TriggerRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in trigger {}", ref)
                         let str = exceptionString ex
                         rctx.WriteEvent (fun event ->
@@ -178,7 +178,7 @@ type EntitiesAPI (rctx : IRequestContext) =
                     let res = getEntityInfo ctx.Layout (getReadRole rctx.User.Effective.Type) entityRef entity
                     return Ok res
                 with
-                    | :? EntityDeniedException as ex ->
+                    | :? EntityDeniedException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Access denied")
                         rctx.WriteEvent (fun event ->
                             event.Type <- "getEntityInfo"
@@ -222,11 +222,11 @@ type EntitiesAPI (rctx : IRequestContext) =
                             | Error e -> return Error e
                             | Ok () -> return Ok (Some newId)
                         with
-                        | :? EntityExecutionException as ex ->
+                        | :? EntityExecutionException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Failed to insert entry")
                             let str = exceptionString ex
                             return Error (EEExecution str)
-                        | :? EntityDeniedException as ex ->
+                        | :? EntityDeniedException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Access denied")
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "insertEntity"
@@ -268,14 +268,14 @@ type EntitiesAPI (rctx : IRequestContext) =
                             let afterTriggers = findMergedTriggersUpdate entityRef TTAfter (Map.keys args) ctx.Triggers
                             return! Seq.foldResultTask (applyUpdateTriggerAfter entityRef id args) () afterTriggers
                         with
-                        | :? EntityExecutionException as ex ->
+                        | :? EntityExecutionException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Failed to update entry")
                             let str = exceptionString ex
                             return Error (EEExecution str)
-                        | :? EntityNotFoundException as ex ->
+                        | :? EntityNotFoundException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Not found")
                             return Error EENotFound
-                        | :? EntityDeniedException as ex ->
+                        | :? EntityDeniedException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Access denied")
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "updateEntity"
@@ -315,14 +315,14 @@ type EntitiesAPI (rctx : IRequestContext) =
                         | Error e -> return Error e
                         | Ok () -> return Ok ()
                     with
-                        | :? EntityExecutionException as ex ->
+                        | :? EntityExecutionException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Failed to delete entry")
                             let str = exceptionString ex
                             return Error (EEExecution str)
-                        | :? EntityNotFoundException as ex ->
+                        | :? EntityNotFoundException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Not found")
                             return Error EENotFound
-                        | :? EntityDeniedException as ex ->
+                        | :? EntityDeniedException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Access denied")
                             rctx.WriteEvent (fun event ->
                                 event.Type <- "deleteEntity"

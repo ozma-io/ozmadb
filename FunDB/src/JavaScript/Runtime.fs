@@ -10,11 +10,15 @@ open NetJs.Value
 open NetJs.Template
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 
-type JavaScriptRuntimeException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type JavaScriptRuntimeException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = JavaScriptRuntimeException (message, null)
+    new (message : string, innerException : Exception) =
+        JavaScriptRuntimeException (message, innerException, isUserException innerException)
+
+    new (message : string) = JavaScriptRuntimeException (message, null, true)
 
 type IsolateLocal<'a when 'a : not struct> (create : Isolate -> 'a) =
     let table = ConditionalWeakTable<Isolate, 'a> ()
@@ -89,7 +93,7 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
             try
                 Module.Compile(String.New(context.Isolate, file.Source), ScriptOrigin(normalized, IsModule = true))
             with
-            | :? JSException as e -> raisefWithInner JavaScriptRuntimeException e "Uncaught error during compilation:\n%s" (stackTraceString e)
+            | :? JSException as e -> raisefUserWithInner JavaScriptRuntimeException e "Uncaught error during compilation:\n%s" (stackTraceString e)
         { Path = normalized
           Module = modul
           DirPath = POSIXPath.dirName normalized
@@ -142,7 +146,7 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
         try
             jsModule.Module.Instantiate(context, Func<_, _, _> resolveOne)
         with
-        | :? JSException as e -> raisefWithInner JavaScriptRuntimeException e "Uncaught error during instantiation:\n%s" (stackTraceString e)
+        | :? JSException as e -> raisefUserWithInner JavaScriptRuntimeException e "Uncaught error during instantiation:\n%s" (stackTraceString e)
         jsModule.Module
 
     member this.CreateDefaultFunction (file : ModuleFile) =
@@ -152,12 +156,12 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
                 ignore <| jsModule.Evaluate()
                 jsModule
             with
-            | :? JSException as e -> raisefWithInner JavaScriptRuntimeException e "Uncaught error during evaluation:\n%s" (stackTraceString e)
+            | :? JSException as e -> raisefUserWithInner JavaScriptRuntimeException e "Uncaught error during evaluation:\n%s" (stackTraceString e)
         try
             jsModule.Namespace.Get("default").GetFunction()
         with
-        | :? JSException as e -> raisefWithInner JavaScriptRuntimeException e "Couldn't get default module:\n%s" (stackTraceString e)
-        | :? NetJsException as e -> raisefWithInner JavaScriptRuntimeException e "Couldn't get default module"
+        | :? JSException as e -> raisefUserWithInner JavaScriptRuntimeException e "Couldn't get default module:\n%s" (stackTraceString e)
+        | :? NetJsException as e -> raisefUserWithInner JavaScriptRuntimeException e "Couldn't get default module"
 
     member this.Context = context
     member this.Isolate = isolate
@@ -200,7 +204,7 @@ let inline runFunctionInRuntime (runtime : IJSRuntime) (func : Function) (cancel
                 }
         with
         | :? JSException as e ->
-            return raisefWithInner JavaScriptRuntimeException e "Unhandled exception %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
+            return raisefUserWithInner JavaScriptRuntimeException e "Unhandled exception %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
         | :? NetJsException as e ->
-            return raisefWithInner JavaScriptRuntimeException e "Failed to run"
+            return raisefUserWithInner JavaScriptRuntimeException e "Failed to run"
     }

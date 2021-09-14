@@ -25,7 +25,7 @@ type ActionsAPI (rctx : IRequestContext) =
                             return Ok { Result = res }
                         }
                 with
-                    | :? ActionRunException as ex ->
+                    | :? ActionRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in action {}", ref)
                         let str = exceptionString ex
                         rctx.WriteEvent (fun event ->

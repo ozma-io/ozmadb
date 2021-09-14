@@ -20,6 +20,7 @@ open NetJs
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Parsing
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.EventLogger
 open FunWithFlags.FunDB.Layout.Types
@@ -63,10 +64,13 @@ open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.JavaScript
 open FunWithFlags.FunDB.API.Triggers
 
-type ContextException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type ContextException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ContextException (message, null)
+    new (message : string, innerException : Exception) =
+        ContextException (message, innerException, isUserException innerException)
+
+    new (message : string) = ContextException (message, null, true)
 
 [<NoEquality; NoComparison>]
 type private AnonymousUserView =
@@ -583,7 +587,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 try
                                     resolveLayout sourceLayout false
                                 with
-                                | :? ResolveLayoutException as err -> raisefWithInner ContextException err "Failed to resolve layout"
+                                | :? ResolveLayoutException as e -> raisefWithInner ContextException e "Failed to resolve layout"
 
                             let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
                             if not <| preloadPermissionsAreUnchanged sourcePermissions preload then
@@ -592,7 +596,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 try
                                     resolvePermissions layout false sourcePermissions
                                 with
-                                | :? ResolvePermissionsException as err -> raisefWithInner ContextException err "Failed to resolve permissions"
+                                | :? ResolvePermissionsException as e -> raisefWithInner ContextException e "Failed to resolve permissions"
 
                             let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
                             if not <| preloadAttributesAreUnchanged sourceAttrs preload then
@@ -601,7 +605,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 try
                                     resolveAttributes layout false sourceAttrs
                                 with
-                                | :? ResolveAttributesException as err -> raisefWithInner ContextException err "Failed to resolve default attributes"
+                                | :? ResolveAttributesException as e -> raisefWithInner ContextException e "Failed to resolve default attributes"
                             let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
                             let! sourceModules = buildSchemaModules transaction.System cancellationToken
@@ -611,7 +615,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 try
                                     resolveModules layout sourceModules
                                 with
-                                | :? ResolveModulesException as err -> raisefWithInner ContextException err "Failed to resolve modules"
+                                | :? ResolveModulesException as e -> raisefWithInner ContextException e "Failed to resolve modules"
 
                             let jsRuntime = makeRuntime (moduleFiles modules)
                             let myIsolate = getIsolate ()
@@ -624,12 +628,12 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 try
                                     resolveActions layout false sourceActions
                                 with
-                                | :? ResolveActionsException as err -> raisefWithInner ContextException err "Failed to resolve actions"
+                                | :? ResolveActionsException as e -> raisefWithInner ContextException e "Failed to resolve actions"
                             let (_, actions) =
                                 try
                                     testEvalActions jsApi false actions
                                 with
-                                | :? ActionRunException as err -> raisefWithInner ContextException err "Failed to resolve actions"
+                                | :? ActionRunException as e -> raisefWithInner ContextException e "Failed to resolve actions"
 
                             let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                             if not <| preloadTriggersAreUnchanged sourceTriggers preload then
@@ -656,14 +660,14 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                             try
                                 do! migrateDatabase transaction.Connection.Query migration cancellationToken
                             with
-                            | :? QueryException as err -> return raisefWithInner ContextException err "Migration error"
+                            | :? QueryException as e -> return raisefUserWithInner ContextException e "Migration error"
 
                             let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
                             let addedAssertions = differenceLayoutAssertions newAssertions oldAssertions
                             try
                                 do! checkAssertions transaction.Connection.Query layout addedAssertions cancellationToken
                             with
-                            | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity checks"
+                            | :? LayoutIntegrityException as e -> return raisefWithInner ContextException e "Failed to perform integrity checks"
 
                             logger.LogInformation("Updating generated user views")
                             let (_, generatedUserViews) =
@@ -698,7 +702,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 let! _ = transaction.Commit(cancellationToken)
                                 ()
                             with
-                            | :? DbUpdateException as err -> raisefWithInner ContextException err "State update error"
+                            | :? DbUpdateException as e -> raisefUserWithInner ContextException e "State update error"
 
                             let! (_, goodUserViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUserViews userViews cancellationToken
 
@@ -763,7 +767,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 let! _ = transaction.Commit (cancellationToken)
                                 ()
                             with
-                            | :? DbUpdateException as ex -> return raisefWithInner ContextException ex "Failed to commit"
+                            | :? DbUpdateException as e -> return raisefUserWithInner ContextException e "Failed to commit"
                     }
                 
                 let checkIntegrity () =
@@ -772,7 +776,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                         try
                             do! checkAssertions transaction.Connection.Query oldState.Context.Layout assertions cancellationToken
                         with
-                        | :? LayoutIntegrityException as err -> return raisefWithInner ContextException err "Failed to perform integrity checks"
+                        | :? LayoutIntegrityException as e -> return raisefWithInner ContextException e "Failed to perform integrity checks"
                     }
 
                 let mutable maybeApi = None

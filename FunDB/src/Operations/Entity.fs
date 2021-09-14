@@ -5,6 +5,7 @@ open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
@@ -17,20 +18,29 @@ module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DML
 
-type EntityExecutionException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type EntityExecutionException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = EntityExecutionException (message, null)
+    new (message : string, innerException : Exception) =
+        EntityExecutionException (message, innerException, isUserException innerException)
 
-type EntityNotFoundException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+    new (message : string) = EntityExecutionException (message, null, true)
 
-    new (message : string) = EntityNotFoundException (message, null)
+type EntityNotFoundException(message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-type EntityDeniedException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+    new (message : string, innerException : Exception) =
+        EntityNotFoundException (message, innerException, isUserException innerException)
 
-    new (message : string) = EntityDeniedException (message, null)
+    new (message : string) = EntityNotFoundException (message, null, true)
+
+type EntityDeniedException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        EntityDeniedException (message, innerException, isUserException innerException)
+
+    new (message : string) = EntityDeniedException (message, null, true)
 
 type EntityId = int
 

@@ -1,16 +1,20 @@
 module FunWithFlags.FunDB.Actions.Resolve
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Types
 
-type ResolveActionsException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type ResolveActionsException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ResolveActionsException (message, null)
+    new (message : string, innerException : Exception) =
+        ResolveActionsException (message, innerException, isUserException innerException)
+
+    new (message : string) = ResolveActionsException (message, null, true)
 
 let private checkName (FunQLName name) : unit =
     if not <| goodName name then
@@ -27,7 +31,7 @@ type private Phase1Resolver (layout : Layout) =
                     }
                 Ok ret
             with
-            | :? ResolveActionsException as e -> raisefWithInner ResolveActionsException e "In action %O" name
+            | e -> raisefWithInner ResolveActionsException e "In action %O" name
 
         { Actions = Map.map mapAction schema.Actions
         }
@@ -39,7 +43,7 @@ type private Phase1Resolver (layout : Layout) =
                     raisef ResolveActionsException "Unknown schema name"
                 resolveActionsSchema schema
             with
-            | :? ResolveActionsException as e -> raisefWithInner ResolveActionsException e "In actions schema %O" name
+            | e -> raisefWithInner ResolveActionsException e "In actions schema %O" name
 
         { Schemas = Map.map (fun name -> resolveActionsSchema) source.Schemas
         }

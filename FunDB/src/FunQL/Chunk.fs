@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.FunQL.Chunk
 
 open Newtonsoft.Json.Linq
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
@@ -14,10 +15,13 @@ open FunWithFlags.FunDB.FunQL.Compile
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Chunk
 
-type ChunkException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type ChunkException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ChunkException (message, null)
+    new (message : string, innerException : Exception) =
+        ChunkException (message, innerException, isUserException innerException)
+
+    new (message : string) = ChunkException (message, null, true)
 
 type SourceChunkArgument =
     { Type : string

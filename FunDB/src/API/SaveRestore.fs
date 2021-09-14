@@ -10,7 +10,6 @@ open Newtonsoft.Json
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.API.Types
 
@@ -60,7 +59,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                     let! schemasSeq = names |> Seq.mapTask (fun name -> saveSchema ctx.Transaction.System name ctx.CancellationToken |> Task.map (fun x -> (name, x)))
                     return Ok (Map.ofSeq schemasSeq)
                 with
-                | :? SaveSchemaException as ex ->
+                | :? SaveSchemaException as ex when ex.IsUserException ->
                     match ex.Info with
                     | SENotFound -> return Error RSENotFound
         }
@@ -121,7 +120,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                         )
                         return Ok ()
                     with
-                    | :? RestoreSchemaException as e -> return Error <| RREConsistency (exceptionString e)
+                    | :? RestoreSchemaException as e when e.IsUserException -> return Error <| RREConsistency (exceptionString e)
         }
 
     member this.RestoreZipSchemas (stream : Stream) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
@@ -130,7 +129,7 @@ type SaveRestoreAPI (rctx : IRequestContext) =
                 try
                     Ok <| schemasFromZipFile stream
                 with
-                | :? RestoreSchemaException as e -> Error (RREInvalidFormat <| exceptionString e)
+                | :? RestoreSchemaException as e when e.IsUserException -> Error (RREInvalidFormat <| exceptionString e)
             match maybeDumps with
             | Error e -> return Error e
             | Ok dumps ->

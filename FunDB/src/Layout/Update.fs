@@ -138,7 +138,7 @@ type private LayoutUpdater (db : SystemContext) as this =
             try
                 updateSchema schema existingSchema
             with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
+            | e -> raisefWithInner SystemUpdaterException e "In schema %O" name
         let createFunc (FunQLName name) =
             Schema (
                 Name = name

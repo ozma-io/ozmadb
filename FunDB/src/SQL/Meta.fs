@@ -10,6 +10,7 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Parsing
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.SQL.Utils
@@ -23,10 +24,13 @@ open FunWithFlags.FunDBSchema.PgCatalog
 
 type ColumnNum = int16
 
-type SQLMetaException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type SQLMetaException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = SQLMetaException (message, null)
+    new (message : string, innerException : Exception) =
+        SQLMetaException (message, innerException, isUserException innerException)
+
+    new (message : string) = SQLMetaException (message, null, true)
 
 let private publicSchema = SQLName "public"
 
@@ -161,7 +165,7 @@ let private makeColumnMeta (attr : Attribute) : ColumnMeta =
           ColumnType = columnType
         }
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In column %s" attr.AttName
+    | e -> raisefWithInner SQLMetaException e "In column %s" attr.AttName
 
 type private TableColumnIds = Map<ColumnNum, ColumnName>
 
@@ -251,7 +255,7 @@ let private makeTriggerMeta (columnIds : TableColumnIds) (trigger : Trigger) : T
             }
         (SQLName trigger.TgName, def)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In trigger %s" trigger.TgName
+    | e -> raisefWithInner SQLMetaException e "In trigger %s" trigger.TgName
 
 let private makeUnconstrainedTableMeta (cl : Class) : TableName * (Map<SQLName, ObjectMeta> * TableMeta * PgTableMeta) =
     try
@@ -270,7 +274,7 @@ let private makeUnconstrainedTableMeta (cl : Class) : TableName * (Map<SQLName, 
             }
         (tableName, (triggers, res, meta))
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In table %s" cl.RelName
+    | e -> raisefWithInner SQLMetaException e "In table %s" cl.RelName
 
 let private makeSequenceMeta (cl : Class) : SequenceName * ObjectMeta =
     (SQLName cl.RelName, OMSequence)
@@ -298,7 +302,7 @@ let private makeFunctionMeta (proc : Proc) : FunctionName * Map<FunctionSignatur
             }
         (SQLName proc.ProName, Map.singleton signature def)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In function %s" proc.ProName
+    | e -> raisefWithInner SQLMetaException e "In function %s" proc.ProName
 
 let private tagName (name : SQLName) a = (name, (Set.empty, a))
 
@@ -316,7 +320,7 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
             }
         (SQLName ns.NspName, res)
     with
-    | :? SQLMetaException as e -> raisefWithInner SQLMetaException e "In schema %s" ns.NspName
+    | e -> raisefWithInner SQLMetaException e "In schema %s" ns.NspName
 
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =

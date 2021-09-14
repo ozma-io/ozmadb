@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Permissions.Apply
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Layout.Types
@@ -8,10 +9,13 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type PermissionsApplyException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type PermissionsApplyException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = PermissionsApplyException (message, null)
+    new (message : string, innerException : Exception) =
+        PermissionsApplyException (message, innerException, isUserException innerException)
+
+    new (message : string) = PermissionsApplyException (message, null, true)
 
 type FilteredAllowedEntity = Map<ResolvedEntityRef, ResolvedOptimizedFieldExpr>
 
@@ -49,7 +53,7 @@ type private FieldsAccessAggregator (accessor : AllowedField -> ResolvedOptimize
                 try
                     filterDerivedEntity ref entity usedFields
                 with
-                | :? PermissionsApplyException as e -> raisefWithInner PermissionsApplyException e "Access denied for entity %O" name
+                | e -> raisefWithInner PermissionsApplyException e "Access denied for entity %O" name
 
             Map.singleton entity.Root (Map.singleton ref child)
 
@@ -61,7 +65,7 @@ type private FieldsAccessAggregator (accessor : AllowedField -> ResolvedOptimize
             try
                 filterUsedEntities name schema usedEntities
             with
-            | :? PermissionsApplyException as e -> raisefWithInner PermissionsApplyException e "Access denied for schema %O" name
+            | e -> raisefWithInner PermissionsApplyException e "Access denied for schema %O" name
 
         usedSchemas |> Map.toSeq |> Seq.map mapSchema |> Seq.fold unionFilteredAllowedDatabase Map.empty
 

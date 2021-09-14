@@ -1,17 +1,20 @@
 module FunWithFlags.FunDB.Modules.Resolve
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Modules.Source
 open FunWithFlags.FunDB.Modules.Types
-open FunWithFlags.FunDB.JavaScript.Runtime
 
-type ResolveModulesException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type ResolveModulesException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ResolveModulesException (message, null)
+    new (message : string, innerException : Exception) =
+        ResolveModulesException (message, innerException, isUserException innerException)
+
+    new (message : string) = ResolveModulesException (message, null, true)
 
 let private checkName (FunQLName name) : unit =
     if not <| goodName name then
@@ -33,7 +36,7 @@ type private Phase1Resolver (layout : Layout) =
                 { Source = modul.Source
                 }
             with
-            | :? ResolveModulesException as e -> raisefWithInner ResolveModulesException e "In module %O" path
+            | e -> raisefWithInner ResolveModulesException e "In module %O" path
 
         let modules = Map.map mapModule schema.Modules
 
@@ -47,7 +50,7 @@ type private Phase1Resolver (layout : Layout) =
                     raisef ResolveModulesException "Unknown schema name"
                 resolveModulesSchema schema
             with
-            | :? ResolveModulesException as e -> raisefWithInner ResolveModulesException e "In modules schema %O" name
+            | e -> raisefWithInner ResolveModulesException e "In modules schema %O" name
 
         { Schemas = Map.map (fun name -> resolveModulesSchema) source.Schemas
         }

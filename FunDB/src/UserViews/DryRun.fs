@@ -5,6 +5,7 @@ open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.FunQL.AST
@@ -100,10 +101,13 @@ let mergePrefetchedUserViews (a : PrefetchedUserViews) (b : PrefetchedUserViews)
         | _ -> failwith "Cannot merge different error types"
     { Schemas = Map.unionWith (fun name -> mergeOne) a.Schemas b.Schemas }
 
-type UserViewDryRunException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type UserViewDryRunException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = UserViewDryRunException (message, null)
+    new (message : string, innerException : Exception) =
+        UserViewDryRunException (message, innerException, isUserException innerException)
+
+    new (message : string) = UserViewDryRunException (message, null, true)
 
 let private getColumn : (ColumnType * SQL.ColumnName) -> FunQLName option = function
     | (CTColumn c, _) -> Some c
@@ -265,8 +269,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                                 errors <- Map.add name (e :> exn) errors
                             return Some (name, Error (e :> exn))
                 with
-                | :? UserViewDryRunException as e ->
-                    return raisefWithInner UserViewDryRunException e "In user view %O" name
+                | e -> return raisefWithInner UserViewDryRunException e "In user view %O" name
             }
 
         let! userViews = schema.UserViews |> Map.toSeq |> Seq.mapTask mapUserView |> Task.map (Seq.catMaybes >> Map.ofSeq)
@@ -286,8 +289,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
                             errors <- Map.add name (UEUserViews schemaErrors) errors
                         return Ok newSchema
                     with
-                    | :? UserViewDryRunException as e ->
-                        return raisefWithInner UserViewDryRunException e "In schema %O" name
+                    | e -> return raisefWithInner UserViewDryRunException e "In schema %O" name
                 }
             | Error e -> Task.result (Error e)
 

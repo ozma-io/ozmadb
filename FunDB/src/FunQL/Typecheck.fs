@@ -1,16 +1,20 @@
 module FunWithFlags.FunDB.FunQL.Typecheck
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Typecheck
 
-type ViewTypecheckException (message : string, innerException : exn) =
-    inherit Exception(message, innerException)
+type ViewTypecheckException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ViewTypecheckException (message, null)
+    new (message : string, innerException : Exception) =
+        ViewTypecheckException (message, innerException, isUserException innerException)
+
+    new (message : string) = ViewTypecheckException (message, null, true)
 
 let decompileScalarType : SQL.SimpleType -> ScalarFieldType<_> = function
     | SQL.STInt -> SFTInt
@@ -72,7 +76,7 @@ let private checkFunc (name : FunctionName) (args : (ResolvedFieldType option) s
             | Some ret -> ret
             | None -> raisef ViewTypecheckException "Cannot unify values of different types"
     with
-    | :? ViewTypecheckException as e -> raisefWithInner ViewTypecheckException e "In function call %O%O" name (Seq.toList args)
+    | e -> raisefWithInner ViewTypecheckException e "In function call %O%O" name (Seq.toList args)
 
 let private checkBinaryOp (op : BinaryOperator) (a : ResolvedFieldType option) (b : ResolvedFieldType option) : ResolvedFieldType =
     let overloads = SQL.binaryOperatorSignature (compileBinaryOp op)

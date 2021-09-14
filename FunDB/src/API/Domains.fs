@@ -55,13 +55,13 @@ type DomainsAPI (rctx : IRequestContext) =
                           Hash = expr.Hash
                         }
                 with
-                | :? ChunkException as ex ->
+                | :? ChunkException as ex when ex.IsUserException ->
                     return Error <| DEArguments (exceptionString ex)
-                | :? DomainExecutionException as ex ->
+                | :? DomainExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to get domain values")
                     let str = exceptionString ex
                     return Error (DEExecution str)
-                | :? DomainDeniedException as ex ->
+                | :? DomainDeniedException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Access denied")
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getDomainValues"
@@ -97,13 +97,13 @@ type DomainsAPI (rctx : IRequestContext) =
                         let! ret = explainDomainValues ctx.Transaction.Connection.Query ctx.Layout expr role (Some argValues) chunk explainOpts ctx.CancellationToken
                         return Ok ret
                     with
-                    | :? ChunkException as ex ->
+                    | :? ChunkException as ex when ex.IsUserException ->
                         return Error <| DEArguments (exceptionString ex)
-                    | :? DomainExecutionException as ex ->
+                    | :? DomainExecutionException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Failed to get domain explain")
                         let str = exceptionString ex
                         return Error (DEExecution str)
-                    | :? DomainDeniedException as ex ->
+                    | :? DomainDeniedException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Access denied")
                         rctx.WriteEvent (fun event ->
                             event.Type <- "getDomainExplain"

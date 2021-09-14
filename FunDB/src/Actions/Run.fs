@@ -4,19 +4,22 @@ open Newtonsoft.Json.Linq
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
-open NetJs
 open NetJs.Value
 open NetJs.Json
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Actions.Types
 
-type ActionRunException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type ActionRunException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ActionRunException (message, null)
+    new (message : string, innerException : Exception) =
+        ActionRunException (message, innerException, isUserException innerException)
+
+    new (message : string) = ActionRunException (message, null, true)
 
 type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
@@ -92,7 +95,7 @@ type private TestActionEvaluator (runtime : IJSRuntime, forceAllowBroken : bool)
                         errors <- Map.add name (e :> exn) errors
                     Error (e :> exn)
             with
-            | :? ActionRunException as e -> raisefWithInner ActionRunException e "In action %O" name
+            | e -> raisefWithInner ActionRunException e "In action %O" name
 
         let ret =
             { Actions = entityActions.Actions |> Map.map (fun name -> Result.bind (mapAction name))
@@ -109,7 +112,7 @@ type private TestActionEvaluator (runtime : IJSRuntime, forceAllowBroken : bool)
                     errors <- Map.add name dbErrors errors
                 newSchema
             with
-            | :? ActionRunException as e -> raisefWithInner ActionRunException e "In schema %O" name
+            | e -> raisefWithInner ActionRunException e "In schema %O" name
 
         let ret =
             { Schemas = actions.Schemas |> Map.map mapDatabase

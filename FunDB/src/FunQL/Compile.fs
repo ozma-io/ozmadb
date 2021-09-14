@@ -6,6 +6,7 @@ open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Arguments
@@ -16,6 +17,14 @@ module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type DomainIdColumn = int
+
+type CompileException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        CompileException (message, innerException, isUserException innerException)
+
+    new (message : string) = CompileException (message, null, true)
 
 // These are not the same domains as in Layout!
 //
@@ -867,8 +876,15 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let finalName = Option.defaultValue name forcedName
             { Table = tableRef; Name = finalName } : SQL.ColumnRef
 
-        let entity = layout.FindEntity fieldRef.Entity |> Option.get
-        let fieldInfo = entity.FindField fieldRef.Name |> Option.get
+        let entity =
+            match layout.FindEntity fieldRef.Entity with
+            | None -> raisef CompileException "Failed to find entity of %O" fieldRef
+            | Some e -> e
+            
+        let fieldInfo =
+            match entity.FindField fieldRef.Name with
+            | None -> raisef CompileException "Failed to find field of %O" fieldRef
+            | Some f -> f
 
         match fieldInfo.Field with
         | RId ->

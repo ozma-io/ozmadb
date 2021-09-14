@@ -6,6 +6,7 @@ open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.FunQL.Compile
@@ -14,22 +15,28 @@ open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.Permissions.Types
-open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.View
+open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DML
 
-type DomainExecutionException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type DomainDeniedException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = DomainExecutionException (message, null)
+    new (message : string, innerException : Exception) =
+        DomainDeniedException (message, innerException, isUserException innerException)
 
-type DomainDeniedException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+    new (message : string) = DomainDeniedException (message, null, true)
 
-    new (message : string) = DomainDeniedException (message, null)
+type DomainExecutionException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        DomainExecutionException (message, innerException, isUserException innerException)
+
+    new (message : string) = DomainExecutionException (message, null, true)
 
 let private domainColumns =
     Map.ofList
@@ -79,8 +86,7 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
                     }
                 Task.result ret
         with
-            | :? QueryException as ex ->
-                return raisefWithInner DomainExecutionException ex.InnerException "%s" ex.Message
+            | :? QueryException as e -> return raisefUserWithInner DomainExecutionException e ""
     }
 
 let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (role : ResolvedRole option) (maybeArguments : ArgumentValuesMap option) (chunk : SourceQueryChunk) (explainOpts : ExplainOptions) (cancellationToken : CancellationToken) : Task<ExplainedQuery> =
@@ -103,6 +109,5 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
             let! explanation = runExplainQuery connection query.Expression compiledArgs explainOpts cancellationToken
             return { Query = string query.Expression; Parameters = compiledArgs; Explanation = explanation }
         with
-            | :? QueryException as ex ->
-                return raisefWithInner DomainExecutionException ex.InnerException "%s" ex.Message
+            | :? QueryException as e -> return raisefUserWithInner DomainExecutionException e ""
     }

@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.UserViews.Resolve
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Source
@@ -15,7 +16,7 @@ open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Attributes.Merge
 
 type UserViewResolveException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+    inherit UserException(message, innerException)
 
     new (message : string) = UserViewResolveException (message, null)
 
@@ -79,7 +80,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, flags : E
                         }
                     Error ret
             with
-            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "In user view %O" name
+            | e -> raisefWithInner UserViewResolveException e "In user view %O" name
 
         let uvs = schema.UserViews |> Map.map mapUserView
 
@@ -94,7 +95,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, flags : E
                     raisef UserViewResolveException "Unknown schema name"
                 resolveUserViewsSchema schema
             with
-            | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "In schema %O" name
+            | e -> raisefWithInner UserViewResolveException e "In schema %O" name
         uvs.Schemas |> Map.map mapSchema
 
     member this.ResolveUserView uv = resolveUserView uv
@@ -166,7 +167,7 @@ type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
                             if not uv.AllowBroken then
                                 errors <- Map.add name (e :> exn) errors
                             Error (e :> exn)
-                        | :? UserViewResolveException as e -> raisefWithInner UserViewResolveException e "In user view %O" ref
+                        | e -> raisefWithInner UserViewResolveException e "In user view %O" ref
                     cachedViews <- Map.add ref r cachedViews
                     r
 

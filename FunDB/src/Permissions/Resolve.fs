@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Permissions.Resolve
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
@@ -13,15 +14,21 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
 
-type ResolvePermissionsException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type ResolvePermissionsException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ResolvePermissionsException (message, null)
+    new (message : string, innerException : Exception) =
+        ResolvePermissionsException (message, innerException, isUserException innerException)
 
-type ResolvePermissionsParentException (message : string, innerException : Exception) =
-    inherit ResolvePermissionsException(message, innerException)
+    new (message : string) = ResolvePermissionsException (message, null, true)
 
-    new (message : string) = ResolvePermissionsParentException (message, null)
+type ResolvePermissionsParentException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        ResolvePermissionsParentException (message, innerException, isUserException innerException)
+
+    new (message : string) = ResolvePermissionsParentException (message, null, true)
 
 let private checkName (FunQLName name) : unit =
     if not <| goodName name then
@@ -116,7 +123,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             try
                 resolveAllowedField { Entity = entityRef; Name = name } entity allowedField
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
+            | e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
 
         let resolveOne allowIds = Option.map (resolveRestriction entityRef entity allowIds)
         let fields = allowedEntity.Fields |> Map.map mapField
@@ -164,7 +171,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                 if allowedField.Change && optimizedIsFalse allowedEntity.Check then
                     raisef ResolvePermissionsException "Cannot allow to change without providing check expression"
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
+            | e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
 
         Map.iter iterField allowedEntity.Fields
 
@@ -309,7 +316,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                             errors <- Map.add name e.Error errors
                         Error e
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In allowed entity %O" name
+            | e -> raisefWithInner ResolvePermissionsException e "In allowed entity %O" name
 
         let ret =
             { Entities = allowedSchema.Entities |> Map.map mapEntity
@@ -330,7 +337,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     errors <- Map.add name schemaErrors errors
                 newAllowed
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In allowed schema %O" name
+            | e -> raisefWithInner ResolvePermissionsException e "In allowed schema %O" name
 
         let ret =
             { Schemas = allowedDb.Schemas |> Map.map mapSchema
@@ -407,7 +414,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                         errors <- Map.add name (ERFatal e) errors
                     Error e
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In role %O" name
+            | e -> raisefWithInner ResolvePermissionsException e "In role %O" name
 
         let ret =
             { Roles = schema.Roles |> Map.map mapRole
@@ -426,7 +433,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
                     errors <- Map.add name schemaErrors errors
                 newSchema
             with
-            | :? ResolvePermissionsException as e -> raisefWithInner ResolvePermissionsException e "In schema %O" name
+            | e -> raisefWithInner ResolvePermissionsException e "In schema %O" name
 
         let ret =
             { Schemas = permissions.Schemas |> Map.map mapSchema

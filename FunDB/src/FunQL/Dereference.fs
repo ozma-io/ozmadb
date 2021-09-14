@@ -1,11 +1,17 @@
 module FunWithFlags.FunDB.FunQL.Dereference
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 
-type ViewDereferenceException (message : string) =
-    inherit Exception(message)
+type ViewDereferenceException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        ViewDereferenceException (message, innerException, isUserException innerException)
+
+    new (message : string) = ViewDereferenceException (message, null, true)
 
 type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, homeSchema : SchemaName option) =
     let resolveRef (ref : UserViewRef) : UserViewRef =

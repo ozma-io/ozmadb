@@ -3,7 +3,6 @@ module FunWithFlags.FunDB.Operations.SaveRestore
 open System.ComponentModel
 open System.Threading
 open System.Threading.Tasks
-open System.Linq
 open System.IO
 open System.IO.Compression
 open Newtonsoft.Json
@@ -15,6 +14,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.IO
 open FunWithFlags.FunUtils.Parsing
 open FunWithFlags.FunUtils.Serialization.Yaml
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
@@ -50,14 +50,17 @@ type SaveSchemaErrorInfo =
             | SENotFound -> "Schema not found"
 
 type SaveSchemaException (info : SaveSchemaErrorInfo) =
-    inherit Exception(info.Message)
+    inherit UserException(info.Message)
 
     member this.Info = info
 
-type RestoreSchemaException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type RestoreSchemaException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = RestoreSchemaException (message, null)
+    new (message : string, innerException : Exception) =
+        RestoreSchemaException (message, innerException, isUserException innerException)
+
+    new (message : string) = RestoreSchemaException (message, null, true)
 
 type PrettyColumnField =
     { Type : string
@@ -207,32 +210,32 @@ let restoreSchemas (db : SystemContext) (dumps : Map<SchemaName, SchemaDump>) (c
             try
                 updatePermissions db newPerms cancellationToken
             with
-            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore permissions"
+            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore permissions"
         let! userViewsUpdater =
             try
                 updateUserViews db newUserViews cancellationToken
             with
-            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore user views"
+            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore user views"
         let! attributesUpdater =
             try
                 updateAttributes db newAttributes cancellationToken
             with
-            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore attributes"
+            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore attributes"
         let! modulesUpdater =
             try
                 updateModules db newModules cancellationToken
             with
-            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore modules"
+            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore modules"
         let! actionsUpdater =
             try
                 updateActions db newActions cancellationToken
             with
-            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore actions"
+            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore actions"
         let! triggersUpdater =
             try
                 updateTriggers db newTriggers cancellationToken
             with
-            | :? SystemUpdaterException as e -> raisefWithInner RestoreSchemaException e "Failed to restore triggers"
+            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore triggers"
 
         let! updated1 = layoutUpdater ()
         let! updated2 = permissionsUpdater ()
@@ -433,7 +436,7 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
             try
                 fn reader
             with
-            | :? IOException as e -> raisefWithInner RestoreSchemaException e "Error during reading archive entry %s" entry.FullName
+            | :? IOException as e -> raisefUserWithInner RestoreSchemaException e "Error during reading archive entry %s" entry.FullName
         leftSize <- leftSize - stream.BytesRead
         ret
 
@@ -441,7 +444,7 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
         try
             downcast myYamlDeserializer.Deserialize(reader, typeof<'a>)
         with
-        | :? JsonSerializationException as e -> raisefWithInner RestoreSchemaException e "Error during deserializing archive entry %s" entry.FullName
+        | :? JsonSerializationException as e -> raisefUserWithInner RestoreSchemaException e "Error during deserializing archive entry %s" entry.FullName
 
     let mutable encounteredActions : Map<ActionRef, PrettyActionMeta * string> = Map.empty
     let mutable encounteredTriggers : Map<TriggerRef, PrettyTriggerMeta option * string> = Map.empty

@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.FunQL.Resolve
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Parse
@@ -13,10 +14,13 @@ module SQL = FunWithFlags.FunDB.SQL.Typecheck
 // and all further processing code can avoid any checks.
 // ...that is, except checking references to other views.
 
-type ViewResolveException (message : string, innerException : exn) =
-    inherit Exception(message, innerException)
+type ViewResolveException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ViewResolveException (message, null)
+    new (message : string, innerException : Exception) =
+        ViewResolveException (message, innerException, isUserException innerException)
+
+    new (message : string) = ViewResolveException (message, null, true)
 
 // Unique id of this FROM. Used to distinguish between same entities; fields with same id correspond to same rows.
 type FromEntityId = int

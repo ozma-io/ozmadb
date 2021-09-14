@@ -5,6 +5,7 @@ open NetJs
 open NetJs.Json
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
@@ -12,10 +13,13 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.JavaScript.Runtime
 
-type UserViewGenerateException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type UserViewGenerateException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = UserViewGenerateException (message, null)
+    new (message : string, innerException : Exception) =
+        UserViewGenerateException (message, innerException, isUserException innerException)
+
+    new (message : string) = UserViewGenerateException (message, null, true)
 
 let private convertUserView (KeyValue (k, v : Value.Value)) =
     let query = v.GetString().Get()
@@ -31,7 +35,7 @@ type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scri
             runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
         with
         | :? NetJsException as e ->
-            raisefWithInner UserViewGenerateException e "Couldn't initialize user view generator"
+            raisefUserWithInner UserViewGenerateException e "Couldn't initialize user view generator"
 
     let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
         try
@@ -39,9 +43,9 @@ type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scri
             newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
         with
         | :? JSException as e ->
-            raisefWithInner UserViewGenerateException e "Unhandled exception in user view generator %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
+            raisefUserWithInner UserViewGenerateException e "Unhandled exception in user view generator %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
         | :? NetJsException as e ->
-            raisefWithInner UserViewGenerateException e "Couldn't generate user views"
+            raisefUserWithInner UserViewGenerateException e "Couldn't generate user views"
 
     member this.Generate layout cancellationToken = generateUserViews layout cancellationToken
     member this.Runtime = runtime

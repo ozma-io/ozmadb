@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Permissions.Entity
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Optimize
@@ -12,10 +13,13 @@ open FunWithFlags.FunDB.Permissions.Compile
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DML
 
-type PermissionsEntityException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type PermissionsEntityException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = PermissionsEntityException (message, null)
+    new (message : string, innerException : Exception) =
+        PermissionsEntityException (message, innerException, isUserException innerException)
+
+    new (message : string) = PermissionsEntityException (message, null, true)
 
 type RestrictedTableInfo =
     { Ref : ResolvedEntityRef

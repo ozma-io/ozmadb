@@ -1,10 +1,10 @@
 module FunWithFlags.FunDB.Layout.Resolve
 
-open Newtonsoft.Json.Linq
 open System.Security.Cryptography
 open System.Text
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
@@ -18,10 +18,13 @@ open FunWithFlags.FunDB.Layout.Source
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type ResolveLayoutException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type ResolveLayoutException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
 
-    new (message : string) = ResolveLayoutException (message, null)
+    new (message : string, innerException : Exception) =
+        ResolveLayoutException (message, innerException, isUserException innerException)
+
+    new (message : string) = ResolveLayoutException (message, null, true)
 
 let private checkName (FunQLName name) : unit =
     if not (goodName name) || String.length name > SQL.sqlIdentifierLength then
@@ -213,7 +216,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 checkFieldName name
                 resolveColumnField entityRef entity name field
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In column field %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In column field %O" name
         let mapComputedField name (field : SourceComputedField) =
             try
                 checkFieldName name
@@ -224,7 +227,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                   HashName = makeHashName name
                 }
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In computed field %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In computed field %O" name
 
         let selfColumnFields = Map.map mapColumnField entity.ColumnFields
         let columnFields =
@@ -336,7 +339,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 cachedEntities <- Map.add ref entityWithChild cachedEntities
                 entity
         with
-        | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In entity %O" ref
+        | e -> raisefWithInner ResolveLayoutException e "In entity %O" ref
 
     let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) =
         let rec iterEntity name entity =
@@ -351,7 +354,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 checkSchemaName name
                 resolveSchema name schema
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In schema %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In schema %O" name
         Map.iter iterSchema layout.Schemas
 
     let checkEntityColumnNames (rootRef : ResolvedEntityRef) (rootEntity : HalfResolvedEntity) =
@@ -682,7 +685,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     Error e
                 | Ok r -> Ok r
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In computed field %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In computed field %O" name
 
         let computedFields = Map.map mapComputedField entity.ComputedFields
 
@@ -692,7 +695,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 checkName name
                 resolveCheckConstraint entityRef name constr
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In check constraint %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In check constraint %O" name
         let checkConstraints = Map.map mapCheckConstraint entity.Source.CheckConstraints
 
         try
@@ -705,7 +708,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 checkName name
                 resolveUniqueConstraint entity name constr
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In unique constraint %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In unique constraint %O" name
         let uniqueConstraints = Map.map mapUniqueConstraint entity.Source.UniqueConstraints
 
         try
@@ -718,7 +721,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 checkName name
                 resolveIndex entityRef name index
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In index %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In index %O" name
         let indexes = Map.map mapIndex entity.Source.Indexes
 
         try
@@ -766,7 +769,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     errors <- Map.add name entityErrors errors
                 entity
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In entity %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In entity %O" name
 
         let entities = schema.Entities |> Map.map mapEntity
 
@@ -790,7 +793,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     errors <- Map.add name schemaErrors errors
                 ret
             with
-            | :? ResolveLayoutException as e -> raisefWithInner ResolveLayoutException e "In schema %O" name
+            | e -> raisefWithInner ResolveLayoutException e "In schema %O" name
 
         let ret =
             { Schemas = Map.map mapSchema layout.Schemas

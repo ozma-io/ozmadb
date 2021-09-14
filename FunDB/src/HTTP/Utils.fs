@@ -60,7 +60,7 @@ let requestError e =
 
 let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
     logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
-    clearResponse >=> requestError (REInternal ex.Message)
+    clearResponse >=> requestError (REInternal "Internal error")
 
 let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError RENoEndpoint
 

@@ -159,10 +159,10 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 return! runFunc command
             with
             // 40001: could not serialize access due to concurrent update
-            | :? PostgresException as ex when ex.SqlState = "40001" ->
-                return raisefWithInner ConcurrentUpdateException ex "Concurrent update detected"
-            | :? PostgresException as ex ->
-                return raisefWithInner QueryException ex "Error while executing"
+            | :? PostgresException as e when e.SqlState = "40001" ->
+                return raisefWithInner ConcurrentUpdateException e "Concurrent update detected"
+            | :? PostgresException as e ->
+                return raisefWithInner QueryException e "Error while executing"
         }
 
     member this.Connection = connection
