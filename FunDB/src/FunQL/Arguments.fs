@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.FunQL.Arguments
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.SQL.Query
@@ -10,7 +11,7 @@ open FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ArgumentCheckException (message : string) =
-    inherit Exception(message)
+    inherit UserException(message)
 
 type PlaceholderId = int
 

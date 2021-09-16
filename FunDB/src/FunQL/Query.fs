@@ -395,6 +395,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
             return ret
         with
         | :? QueryException as e -> return raisefUserWithInner UserViewExecutionException e ""
+        | :? ArgumentCheckException as e -> return raisefUserWithInner UserViewExecutionException e "Arguments preparation failed"
     }
 
 type ExplainedQuery =
@@ -435,4 +436,5 @@ let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr)
                 }
         with
         | :? QueryException as e -> return raisefUserWithInner UserViewExecutionException e ""
+        | :? ArgumentCheckException as e -> return raisefUserWithInner UserViewExecutionException e "Arguments preparation failed"
     }

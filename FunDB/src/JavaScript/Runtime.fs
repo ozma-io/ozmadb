@@ -74,7 +74,7 @@ let private convertPath (p : Path) =
         normalized
 
 let stackTraceString (e : JSException) =
-    match JSException.GetStackTrace e.Value with
+    match e.JSStackTrace with
     | null -> "(no stack trace)"
     | trace -> trace.ToPrettyString()
 
