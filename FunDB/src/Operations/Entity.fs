@@ -54,7 +54,7 @@ let private runQuery (runFunc : string -> ExprParameters -> CancellationToken ->
             return! runFunc (prefix + query.Expression.ToSQLString()) (prepareArguments query.Arguments args) cancellationToken
         with
             | :? QueryException as ex ->
-                return raisefWithInner EntityExecutionException ex ""
+                return raisefUserWithInner EntityExecutionException ex ""
     }
 
 let private runNonQuery (connection : QueryConnection) = runQuery connection.ExecuteNonQuery
