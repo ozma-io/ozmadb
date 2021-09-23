@@ -8,7 +8,6 @@ open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
-module SQL = FunWithFlags.FunDB.SQL.DML
 
 type LayoutDomainException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)

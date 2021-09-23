@@ -161,7 +161,7 @@ type [<NoEquality; NoComparison>] Value =
             | VDateTimeArray vals -> renderArray string "timestamp" vals
             | VDateArray vals -> renderArray string "date" vals
             | VIntervalArray vals -> renderArray string "interval" vals
-            | VRegclassArray vals -> renderArray (fun (x : SchemaObject) -> x.ToSQLString()) "regclass" vals
+            | VRegclassArray vals -> renderArray toSQLString "regclass" vals
             | VJsonArray vals -> renderArray renderSqlJson "jsonb" vals
             | VUuidArray vals -> renderArray string "uuid" vals
             | VNull -> "NULL"
@@ -375,7 +375,7 @@ type TableAlias =
             let columnsStr =
                 match this.Columns with
                 | None -> ""
-                | Some cols -> cols |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
+                | Some cols -> cols |> Seq.map toSQLString |> String.concat ", " |> sprintf "(%s)"
             String.concatWithWhitespaces ["AS"; this.Name.ToSQLString(); columnsStr]
 
         interface ISQLString with
@@ -449,6 +449,56 @@ type [<NoEquality; NoComparison>] SpecialFunction =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
 
+type [<NoEquality; NoComparison>] LockStrength =
+    | LSUpdate
+    | LSNoKeyUpdate
+    | LSShare
+    | LSNoKeyShare
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | LSUpdate -> "UPDATE"
+            | LSNoKeyUpdate -> "NO KEY UPDATE"
+            | LSShare -> "SHARE"
+            | LSNoKeyShare -> "NO KEY SHARE"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString ()    
+
+type [<NoEquality; NoComparison>] LockWait =
+    | LWNoWait
+    | LWSkipLocked
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | LWNoWait -> "NO WAIT"
+            | LWSkipLocked -> "SKIP LOCKED"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString ()    
+
+type [<NoEquality; NoComparison>] LockClause =
+    { Strength : LockStrength
+      Tables : TableName[]
+      Waiting : LockWait option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let tableStr =
+                if Array.isEmpty this.Tables then
+                    ""
+                else
+                    this.Tables |> Seq.map toSQLString |> String.concat ", " |> sprintf "OF %s"
+            String.concatWithWhitespaces [this.Strength.ToSQLString(); tableStr; optionToSQLString this.Waiting]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString ()    
+
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
 type [<NoEquality; NoComparison>] ValueExpr =
     | VEValue of Value
@@ -500,16 +550,16 @@ type [<NoEquality; NoComparison>] ValueExpr =
             | VENotSimilarTo (e, pat) -> sprintf "(%s) NOT SIMILAR TO (%s)" (e.ToSQLString()) (pat.ToSQLString())
             | VEIn (e, vals) ->
                 assert (not <| Array.isEmpty vals)
-                sprintf "(%s) IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+                sprintf "(%s) IN (%s)" (e.ToSQLString()) (vals |> Seq.map toSQLString |> String.concat ", ")
             | VENotIn (e, vals) ->
                 assert (not <| Array.isEmpty vals)
-                sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+                sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (vals |> Seq.map toSQLString |> String.concat ", ")
             | VEInQuery (e, query) -> sprintf "(%s) IN (%s)" (e.ToSQLString()) (query.ToSQLString())
             | VENotInQuery (e, query) -> sprintf "(%s) NOT IN (%s)" (e.ToSQLString()) (query.ToSQLString())
             | VEIsNull a -> sprintf "(%s) IS NULL" (a.ToSQLString())
             | VEIsNotNull a -> sprintf "(%s) IS NOT NULL" (a.ToSQLString())
-            | VESpecialFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
-            | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map (fun arg -> arg.ToSQLString()) |> String.concat ", ")
+            | VESpecialFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map toSQLString |> String.concat ", ")
+            | VEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map toSQLString |> String.concat ", ")
             | VEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args.ToSQLString())
             | VECast (e, typ) -> sprintf "(%s) :: %s" (e.ToSQLString()) (typ.ToSQLString())
             | VECase (es, els) ->
@@ -519,7 +569,7 @@ type [<NoEquality; NoComparison>] ValueExpr =
                     | None -> ""
                     | Some e -> sprintf "ELSE %s" (e.ToSQLString())
                 String.concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
-            | VEArray vals -> sprintf "ARRAY[%s]" (vals |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", ")
+            | VEArray vals -> sprintf "ARRAY[%s]" (vals |> Seq.map toSQLString |> String.concat ", ")
             | VESubquery query -> sprintf "(%s)" (query.ToSQLString())
 
         interface ISQLString with
@@ -536,7 +586,7 @@ and [<NoEquality; NoComparison>] AggExpr =
             match this with
             | AEAll exprs ->
                 assert (not <| Array.isEmpty exprs)
-                exprs |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                exprs |> Seq.map toSQLString |> String.concat ", "
             | AEDistinct expr -> sprintf "DISTINCT %s" (expr.ToSQLString())
             | AEStar -> "*"
 
@@ -614,12 +664,13 @@ and [<NoEquality; NoComparison>] SingleSelectExpr =
       Where : ValueExpr option
       GroupBy : ValueExpr[]
       OrderLimit : OrderLimitClause
+      Locking : LockClause option
       Extra : obj
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            let resultsStr = this.Columns |> Seq.map (fun res -> res.ToSQLString()) |> String.concat ", "
+            let resultsStr = this.Columns |> Seq.map toSQLString |> String.concat ", "
             let fromStr =
                 match this.From with
                 | None -> ""
@@ -632,7 +683,7 @@ and [<NoEquality; NoComparison>] SingleSelectExpr =
                 if Array.isEmpty this.GroupBy then
                     ""
                 else
-                    sprintf "GROUP BY %s" (this.GroupBy |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+                    sprintf "GROUP BY %s" (this.GroupBy |> Seq.map toSQLString |> String.concat ", ")
 
             String.concatWithWhitespaces ["SELECT"; resultsStr; fromStr; whereStr; groupByStr; this.OrderLimit.ToSQLString()]
 
@@ -665,7 +716,7 @@ and [<NoEquality; NoComparison>] OrderLimitClause =
                 let orderByStr =
                     if Array.isEmpty this.OrderBy
                     then ""
-                    else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map (fun ord -> ord.ToSQLString()) |> String.concat ", ")
+                    else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map toSQLString |> String.concat ", ")
                 let limitStr =
                     match this.Limit with
                     | Some e -> sprintf "LIMIT %s" (e.ToSQLString())
@@ -693,7 +744,7 @@ and [<NoEquality; NoComparison>] SelectTreeExpr =
                 assert not (Array.isEmpty values)
                 let printOne (array : ValueExpr array) =
                     assert not (Array.isEmpty array)
-                    array |> Seq.map (fun v -> v.ToSQLString()) |> String.concat ", " |> sprintf "(%s)"
+                    array |> Seq.map toSQLString |> String.concat ", " |> sprintf "(%s)"
                 let valuesStr = values |> Seq.map printOne |> String.concat ", "
                 sprintf "VALUES %s" valuesStr
             | SSetOp setOp -> setOp.ToSQLString()
@@ -704,8 +755,28 @@ and [<NoEquality; NoComparison>] SelectTreeExpr =
 and [<NoEquality; NoComparison>] CommonTableExpr =
     { Fields : ColumnName[] option
       Materialized : bool option
-      Expr : SelectExpr
-    }
+      Expr : DataExpr
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let fieldsStr =
+                match this.Fields with
+                | None -> ""
+                | Some args ->
+                    assert (not (Array.isEmpty args))
+                    let argsStr = args |> Seq.map toSQLString |> String.concat ", "
+                    sprintf "(%s)" argsStr
+            let materialized =
+                match this.Materialized with
+                | None -> ""
+                | Some false -> "NOT MATERIALIZED"
+                | Some true -> "MATERIALIZED"
+            let exprStr = sprintf "(%s)" (this.Expr.ToSQLString())
+            String.concatWithWhitespaces [fieldsStr; "AS"; materialized; exprStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] CommonTableExprs =
     { Recursive : bool
@@ -716,21 +787,7 @@ and [<NoEquality; NoComparison>] CommonTableExprs =
         member this.ToSQLString () =
             assert (not (Array.isEmpty this.Exprs))
             let oneExpr (name : TableName, cte : CommonTableExpr) =
-                let nameStr =
-                    match cte.Fields with
-                    | None ->
-                        name.ToSQLString()
-                    | Some args ->
-                        assert (not (Array.isEmpty args))
-                        let argsStr = args |> Array.map (fun x -> x.ToSQLString()) |> String.concat ", "
-                        sprintf "%s(%s)" (name.ToSQLString()) argsStr
-                let materialized =
-                    match cte.Materialized with
-                    | None -> ""
-                    | Some false -> "NOT MATERIALIZED"
-                    | Some true -> "MATERIALIZED"
-                let exprStr = sprintf "(%s)" (cte.Expr.ToSQLString())
-                String.concatWithWhitespaces [nameStr; "AS"; materialized; exprStr]
+                sprintf "%s %s" (name.ToSQLString()) (cte.ToSQLString())
             let exprs =
                 this.Exprs
                 |> Seq.map oneExpr
@@ -769,6 +826,129 @@ and [<NoEquality; NoComparison>] SetOperationExpr =
             String.concatWithWhitespaces [aStr; this.Operation.ToSQLString(); allowDuplicatesStr; bStr; this.OrderLimit.ToSQLString()]
 
         override this.ToString () = this.ToSQLString()
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] InsertValue =
+    | IVValue of ValueExpr
+    | IVDefault
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | IVValue e -> e.ToSQLString()
+            | IVDefault -> "DEFAULT"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] InsertSource =
+    | ISValues of InsertValue[][]
+    | ISSelect of SelectExpr
+    | ISDefaultValues
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | ISValues values ->
+                let renderInsertValue (values : InsertValue[]) =
+                    values |> Seq.map toSQLString |> String.concat ", " |> sprintf "(%s)"
+
+                assert (not <| Array.isEmpty values)
+                sprintf "VALUES %s" (values |> Seq.map renderInsertValue |> String.concat ", ")
+            | ISSelect sel -> sel.ToSQLString()
+            | ISDefaultValues -> "DEFAULT VALUES"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] InsertExpr =
+    { Table : TableRef
+      Columns : (obj * ColumnName)[] // obj is extra metadata
+      Source : InsertSource
+      Returning : SelectedColumn[]
+      Extra : obj
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let returningStr =
+                if Array.isEmpty this.Returning then
+                    ""
+                else
+                    let resultsStr = this.Returning |> Seq.map toSQLString |> String.concat ", "
+                    sprintf "RETURNING %s" resultsStr
+            let insertStr =
+                sprintf "INSERT INTO %s (%s) %s"
+                    (this.Table.ToSQLString())
+                    (this.Columns |> Seq.map (fun (extra, x) -> x.ToSQLString()) |> String.concat ", ")
+                    (this.Source.ToSQLString())
+            String.concatWithWhitespaces [insertStr; returningStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] UpdateExpr =
+    { Table : TableRef
+      Columns : Map<ColumnName, obj * ValueExpr> // obj is extra metadata
+      From : FromExpr option
+      Where : ValueExpr option
+      Extra : obj
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            assert (not <| Map.isEmpty this.Columns)
+
+            let valuesExpr = this.Columns |> Map.toSeq |> Seq.map (fun (name, (extra, expr)) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())) |> String.concat ", "
+            let fromStr =
+                match this.From with
+                | Some f -> sprintf "FROM %s" (f.ToSQLString())
+                | None -> ""
+            let condExpr =
+                match this.Where with
+                | Some c -> sprintf "WHERE %s" (c.ToSQLString())
+                | None -> ""
+            let updateStr = sprintf "UPDATE %s SET %s" (this.Table.ToSQLString()) valuesExpr
+            String.concatWithWhitespaces [updateStr; fromStr; condExpr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] DeleteExpr =
+    { Table : TableRef
+      Where : ValueExpr option
+      Extra : obj
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let condExpr =
+                match this.Where with
+                | Some c -> sprintf "WHERE %s" (c.ToSQLString())
+                | None -> ""
+            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.Table.ToSQLString(); condExpr])
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] DataExpr =
+    | DESelect of SelectExpr
+    | DEInsert of InsertExpr
+    | DEUpdate of UpdateExpr
+    | DEDelete of DeleteExpr
+     with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | DESelect sel -> sel.ToSQLString()
+            | DEInsert ins -> ins.ToSQLString()
+            | DEUpdate upd -> upd.ToSQLString()
+            | DEDelete del -> del.ToSQLString()
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -907,3 +1087,25 @@ let rec private normalizeArrayValue (constr : 'a -> Value) : ArrayValue<'a> -> V
 
 and normalizeArray (constr : 'a -> Value) (arr : ArrayValue<'a>[]) : ValueExpr =
     VEArray (Array.map (normalizeArrayValue constr) arr)
+
+let emptySingleSelectExpr : SingleSelectExpr =
+    { Columns = [||]
+      From = None
+      Where = None
+      GroupBy = [||]
+      OrderLimit = emptyOrderLimitClause
+      Locking = None
+      Extra = null
+    }
+
+let subSelectExpr (alias : TableAlias) (select : SelectExpr) : SubSelectExpr =
+    { Alias = alias
+      Select = select
+      Lateral = false
+    }
+
+let selectExpr (tree : SelectTreeExpr) : SelectExpr =
+    { CTEs = None
+      Tree = tree
+      Extra = null
+    }

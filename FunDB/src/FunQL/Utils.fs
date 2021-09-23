@@ -43,6 +43,8 @@ let rec renderFunQLJson (j : JToken) : string =
 let renderAttributesMap<'e, 'f when 'e :> IFunQLString and 'e : comparison and 'f :> IFunQLString>(attrs : Map<'e, 'f>) =
     attrs |> Map.toSeq |> Seq.map (fun (name, e) -> sprintf "%s = %s" (name.ToFunQLString()) (e.ToFunQLString())) |> String.concat ", " |> sprintf "@{ %s }"
 
+let toFunQLString<'a when 'a :> IFunQLString> (o : 'a) = o.ToFunQLString()
+
 let optionToFunQLString<'a when 'a :> IFunQLString> : 'a option -> string = function
     | None -> ""
     | Some o -> o.ToFunQLString()

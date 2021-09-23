@@ -54,6 +54,11 @@ let httpJsonSettings =
     jsonSettings
 
 type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
+    let connectionString =
+        let builder = NpgsqlConnectionStringBuilder(connectionString)
+        builder.Enlist <- false
+        string builder
+
     interface IInstancesSource with
         member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
             task {

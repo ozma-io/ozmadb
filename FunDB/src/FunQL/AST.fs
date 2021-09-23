@@ -395,7 +395,7 @@ type LinkedRef<'f> when 'f :> IFunQLName =
             let refStr = this.Ref.ToFunQLString()
             let asRootStr = if this.AsRoot then "!" else ""
             let refSeq = seq { refStr; asRootStr }
-            Seq.append refSeq (this.Path |> Seq.map (fun p -> p.ToFunQLString())) |> String.concat ""
+            Seq.append refSeq (this.Path |> Seq.map toFunQLString) |> String.concat ""
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -447,7 +447,7 @@ type EntityAlias =
             let columnsStr =
                 match this.Fields with
                 | None -> ""
-                | Some cols -> cols |> Array.map (fun x -> x.ToFunQLString()) |> String.concat ", " |> sprintf "(%s)"
+                | Some cols -> cols |> Seq.map toFunQLString |> String.concat ", " |> sprintf "(%s)"
             String.concatWithWhitespaces ["AS"; this.Name.ToFunQLString(); columnsStr]
 
         interface IFunQLString with
@@ -574,10 +574,10 @@ and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
             | FENotSimilarTo (e, pat) -> sprintf "(%s) NOT SIMILAR TO (%s)" (e.ToFunQLString()) (pat.ToFunQLString())
             | FEIn (e, vals) ->
                 assert (not <| Array.isEmpty vals)
-                sprintf "(%s) IN (%s)" (e.ToFunQLString()) (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
+                sprintf "(%s) IN (%s)" (e.ToFunQLString()) (vals |> Seq.map toFunQLString |> String.concat ", ")
             | FENotIn (e, vals) ->
                 assert (not <| Array.isEmpty vals)
-                sprintf "(%s) NOT IN (%s)" (e.ToFunQLString()) (vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", ")
+                sprintf "(%s) NOT IN (%s)" (e.ToFunQLString()) (vals |> Seq.map toFunQLString |> String.concat ", ")
             | FEInQuery (e, query) -> sprintf "(%s) IN (%s)" (e.ToFunQLString()) (query.ToFunQLString())
             | FENotInQuery (e, query) -> sprintf "(%s) NOT IN (%s)" (e.ToFunQLString()) (query.ToFunQLString())
             | FEAny (e, op, arr) -> sprintf "(%s) %s ANY (%s)" (e.ToFunQLString()) (op.ToFunQLString()) (arr.ToFunQLString())
@@ -592,9 +592,9 @@ and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
                     | None -> ""
                     | Some e -> sprintf "ELSE %s" (e.ToFunQLString())
                 String.concatWithWhitespaces ["CASE"; esStr; elsStr; "END"]
-            | FEJsonArray vals -> vals |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", " |> sprintf "[%s]"
+            | FEJsonArray vals -> vals |> Seq.map toFunQLString |> String.concat ", " |> sprintf "[%s]"
             | FEJsonObject obj -> obj |> Map.toSeq |> Seq.map (fun (k, v) -> sprintf "%s: %s" (k.ToFunQLString()) (v.ToFunQLString())) |> String.concat ", " |> sprintf "{%s}"
-            | FEFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args |> Seq.map (fun arg -> arg.ToFunQLString()) |> String.concat ", ")
+            | FEFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args |> Seq.map toFunQLString |> String.concat ", ")
             | FEAggFunc (name, args) -> sprintf "%s(%s)" (name.ToFunQLString()) (args.ToFunQLString())
             | FESubquery q -> sprintf "(%s)" (q.ToFunQLString())
             | FEInheritedFrom (f, ref) -> sprintf "%s INHERITED FROM %s" (f.ToFunQLString()) (ref.Ref.ToFunQLString())
@@ -614,7 +614,7 @@ and [<NoEquality; NoComparison>] AggExpr<'e, 'f> when 'e :> IFunQLName and 'f :>
             match this with
             | AEAll exprs ->
                 assert (not <| Array.isEmpty exprs)
-                exprs |> Array.map (fun x -> x.ToFunQLString()) |> String.concat ", "
+                exprs |> Array.map toFunQLString |> String.concat ", "
             | AEDistinct expr -> sprintf "DISTINCT %s" (expr.ToFunQLString())
             | AEStar -> "*"
 
@@ -696,7 +696,7 @@ and [<NoEquality; NoComparison>] OrderLimitClause<'e, 'f> when 'e :> IFunQLName 
             let orderByStr =
                 if Array.isEmpty this.OrderBy
                 then ""
-                else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map (fun ord -> ord.ToFunQLString()) |> String.concat ", ")
+                else sprintf "ORDER BY %s" (this.OrderBy |> Seq.map toFunQLString |> String.concat ", ")
             let limitStr =
                 match this.Limit with
                 | Some e -> sprintf "LIMIT %s" (e.ToFunQLString())
@@ -723,7 +723,7 @@ and [<NoEquality; NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName 
 
         member this.ToFunQLString () =
             let attributesStrs = this.Attributes |> Map.toSeq |> Seq.map (fun (name, expr) -> sprintf "@%s = %s" (name.ToFunQLString()) (expr.ToFunQLString()))
-            let resultsStrs = this.Results |> Seq.map (fun res -> res.ToFunQLString())
+            let resultsStrs = this.Results |> Seq.map toFunQLString
             let resultStr = Seq.append attributesStrs resultsStrs |> String.concat ", "
             let fromStr =
                 match this.From with
@@ -737,7 +737,7 @@ and [<NoEquality; NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName 
                 if Array.isEmpty this.GroupBy then
                     ""
                 else
-                    sprintf "GROUP BY %s" (this.GroupBy |> Array.map (fun x -> x.ToFunQLString()) |> String.concat ", ")
+                    sprintf "GROUP BY %s" (this.GroupBy |> Array.map toFunQLString |> String.concat ", ")
 
             sprintf "SELECT %s" (String.concatWithWhitespaces [resultStr; fromStr; whereStr; groupByStr; this.OrderLimit.ToFunQLString()])
 
@@ -756,7 +756,7 @@ and [<NoEquality; NoComparison>] SelectTreeExpr<'e, 'f> when 'e :> IFunQLName an
                 assert not (Array.isEmpty values)
                 let printOne (array : FieldExpr<'e, 'f> array) =
                     assert not (Array.isEmpty array)
-                    array |> Seq.map (fun v -> v.ToFunQLString()) |> String.concat ", " |> sprintf "(%s)"
+                    array |> Seq.map toFunQLString |> String.concat ", " |> sprintf "(%s)"
                 let valuesStr = values |> Seq.map printOne |> String.concat ", "
                 sprintf "VALUES %s" valuesStr
             | SSetOp setOp -> setOp.ToFunQLString ()
@@ -851,7 +851,26 @@ and CommonTableExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
       Materialized : bool option
       Expr : SelectExpr<'e, 'f>
       Extra : ObjectMap
-    }
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let fieldsStr =
+                match this.Fields with
+                | None -> ""
+                | Some args ->
+                    assert (not (Array.isEmpty args))
+                    let argsStr = args |> Seq.map toFunQLString |> String.concat ", "
+                    sprintf "(%s)" argsStr
+            let materializedStr =
+                match this.Materialized with
+                | None -> ""
+                | Some true -> "MATERIALIZED"
+                | Some false -> "NOT MATERIALIZED"
+            String.concatWithWhitespaces [fieldsStr; "AS"; materializedStr; this.Expr.ToFunQLString()]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
 
 and [<NoEquality; NoComparison>] CommonTableExprs<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Recursive : bool
@@ -868,7 +887,7 @@ and [<NoEquality; NoComparison>] CommonTableExprs<'e, 'f> when 'e :> IFunQLName 
                     | None -> name.ToFunQLString()
                     | Some args ->
                         assert (not (Array.isEmpty args))
-                        let argsStr = args |> Array.map (fun x -> x.ToFunQLString()) |> String.concat ", "
+                        let argsStr = args |> Seq.map toFunQLString |> String.concat ", "
                         sprintf "%s(%s)" (name.ToFunQLString()) argsStr
                 let materializedStr =
                     match cte.Materialized with
@@ -882,6 +901,124 @@ and [<NoEquality; NoComparison>] CommonTableExprs<'e, 'f> when 'e :> IFunQLName 
                 |> String.concat ", "
             let recursive = if this.Recursive then "RECURSIVE" else ""
             String.concatWithWhitespaces ["WITH"; recursive; exprs]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] InsertValue<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | IVValue of FieldExpr<'e, 'f>
+    | IVDefault
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | IVValue e -> e.ToFunQLString()
+            | IVDefault -> "DEFAULT"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] InsertSource<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | ISValues of InsertValue<'e, 'f>[][]
+    | ISSelect of SelectExpr<'e, 'f>
+    | ISDefaultValues
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | ISValues values ->
+                let renderInsertValue (values : InsertValue<'e, 'f>[]) =
+                    values |> Seq.map toFunQLString |> String.concat ", " |> sprintf "(%s)"
+
+                assert (not <| Array.isEmpty values)
+                sprintf "VALUES %s" (values |> Seq.map renderInsertValue |> String.concat ", ")
+            | ISSelect sel -> sel.ToFunQLString()
+            | ISDefaultValues -> "DEFAULT VALUES"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] InsertExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { CTEs : CommonTableExprs<'e, 'f> option
+      Entity : 'e
+      Fields : FieldName[]
+      Source : InsertSource<'e, 'f>
+      Extra : obj
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            sprintf "INSERT INTO %s (%s) %s"
+                (this.Entity.ToFunQLString())
+                (this.Fields |> Seq.map toFunQLString |> String.concat ", ")
+                (this.Source.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] UpdateExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { CTEs : CommonTableExprs<'e, 'f> option
+      Entity : 'e
+      Fields : Map<FieldName, FieldExpr<'e, 'f>> // obj is extra metadata
+      From : FromExpr<'e, 'f> option
+      Where : FieldExpr<'e, 'f> option
+      Extra : obj
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            assert (not <| Map.isEmpty this.Fields)
+
+            let valuesExpr = this.Fields |> Map.toSeq |> Seq.map (fun (name, expr) -> sprintf "%s = %s" (name.ToFunQLString()) (expr.ToFunQLString())) |> String.concat ", "
+            let fromStr =
+                match this.From with
+                | Some f -> sprintf "FROM %s" (f.ToFunQLString())
+                | None -> ""
+            let condExpr =
+                match this.Where with
+                | Some c -> sprintf "WHERE %s" (c.ToFunQLString())
+                | None -> ""
+            let updateStr = sprintf "UPDATE %s SET %s" (this.Entity.ToFunQLString()) valuesExpr
+            String.concatWithWhitespaces [updateStr; fromStr; condExpr]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] DeleteExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { CTEs : CommonTableExprs<'e, 'f> option
+      Entity : 'e
+      Using : FromExpr<'e, 'f> option
+      Where : FieldExpr<'e, 'f> option
+      Extra : obj
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let condExpr =
+                match this.Where with
+                | Some c -> sprintf "WHERE %s" (c.ToFunQLString())
+                | None -> ""
+            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.Entity.ToFunQLString(); condExpr])
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] DataExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | DESelect of SelectExpr<'e, 'f>
+    | DEInsert of InsertExpr<'e, 'f>
+    | DEUpdate of UpdateExpr<'e, 'f>
+    | DEDelete of DeleteExpr<'e, 'f>
+     with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | DESelect sel -> sel.ToFunQLString()
+            | DEInsert ins -> ins.ToFunQLString()
+            | DEUpdate upd -> upd.ToFunQLString()
+            | DEDelete del -> del.ToFunQLString()
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()

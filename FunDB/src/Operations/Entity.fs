@@ -16,7 +16,6 @@ open FunWithFlags.FunDB.Permissions.Entity
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
-module SQL = FunWithFlags.FunDB.SQL.DML
 
 type EntityExecutionException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
@@ -81,16 +80,13 @@ let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : Re
 let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (whereExpr : SQL.ValueExpr) (cancellationToken : CancellationToken) =
     unitTask {
         let testExpr =
-            SQL.SSelect
-                { Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
+            { SQL.emptySingleSelectExpr with
+                  Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
                   From = Some <| SQL.FTable (null, None, tableRef)
                   Where = Some whereExpr
-                  GroupBy = [||]
-                  OrderLimit = SQL.emptyOrderLimitClause
-                  Extra = null
-                }
+            }
         let testQuery =
-            { Expression = testExpr
+            { Expression = SQL.SSelect testExpr
               Arguments = emptyArguments
             }
         let! count = runIntQuery connection Map.empty testQuery None Map.empty cancellationToken
@@ -150,9 +146,9 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
         let expr =
-            { Name = compileResolvedEntityRef entity.Root
+            { Table = compileResolvedEntityRef entity.Root
               Columns = columns
-              Values = SQL.IValues [| valuesWithSys |]
+              Source = SQL.ISValues [| valuesWithSys |]
               Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
               Extra = ({ Ref = entityRef } : RestrictedTableInfo)
             } : SQL.InsertExpr
@@ -208,7 +204,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                 whereId
 
         let expr =
-            { Name = tableRef
+            { Table = tableRef
               Columns = columns
               From = None
               Where = Some whereExpr
@@ -253,7 +249,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let tableRef = compileResolvedEntityRef entity.Root
 
         let expr =
-            { Name = tableRef
+            { Table = tableRef
               Where = Some whereExpr
               Extra = ({ Ref = entityRef } : RestrictedTableInfo)
             } : SQL.DeleteExpr

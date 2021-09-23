@@ -56,23 +56,13 @@ type private ChunkApplier (chunk : QueryChunk) =
                 { Name = SQLName "inner"
                   Columns = None
                 }
-            let innerSelect =
-                { CTEs = None
-                  Tree = values
-                  Extra = null
-                }
-            let subsel =
-                { Select = innerSelect
-                  Alias = fromAlias
-                  Lateral = false
-                }
+            let innerSelect = selectExpr values
+            let subsel = subSelectExpr fromAlias innerSelect
             let outerSelect =
-                { Columns = [| SCAll None |]
-                  From = Some <| FSubExpr subsel
-                  Where = None
-                  GroupBy = [||]
-                  OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
-                  Extra = null
+                { emptySingleSelectExpr with
+                    Columns = [| SCAll None |]
+                    From = Some <| FSubExpr subsel
+                    OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
                 }
             SSelect outerSelect
         | SSetOp setOp ->
@@ -93,25 +83,15 @@ type private ChunkApplier (chunk : QueryChunk) =
                 { Name = SQLName "inner"
                   Columns = None
                 }
-            let subsel =
-                { Select = select
-                  Alias = fromAlias
-                  Lateral = false
-                }
+            let subsel = subSelectExpr fromAlias select
             let outerSelect =
-                { Columns = [| SCAll None |]
-                  From = Some <| FSubExpr subsel
-                  Where = Some where
-                  GroupBy = [||]
-                  OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
-                  Extra = null
+                { emptySingleSelectExpr with
+                      Columns = [| SCAll None |]
+                      From = Some <| FSubExpr subsel
+                      Where = Some where
+                      OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
                 }
-            let ret =
-                { CTEs = None
-                  Tree = SSelect outerSelect
-                  Extra = null
-                }
-            ret
+            selectExpr (SSelect outerSelect)
 
     member this.ApplySelectExpr select = applySelectExpr select
 

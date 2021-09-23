@@ -4,7 +4,8 @@ open Microsoft.Extensions.Logging
 
 open FunWithFlags.FunDB.API.Types
 
-type PermissionsAPI (rctx : IRequestContext) =
+type PermissionsAPI (api : IFunDBAPI) =
+    let rctx = api.Request
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<PermissionsAPI>()
 

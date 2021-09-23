@@ -39,7 +39,7 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) as 
         let newAttrsMap = schema.Schemas |> Map.toSeq |> Seq.collect addNewAttrsSchemaKey |> Map.ofSeq
 
         let updateFunc _ = updateAttributesField
-        let createFunc fieldRef =
+        let createFunc (fieldRef : ResolvedFieldRef) =
             let entity =
                 match Map.tryFind fieldRef.Entity allEntitiesMap with
                 | Some id -> id

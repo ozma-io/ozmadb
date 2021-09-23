@@ -10,7 +10,8 @@ open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDB.Actions.Run
 open FunWithFlags.FunDB.API.Types
 
-type ActionsAPI (rctx : IRequestContext) =
+type ActionsAPI (api : IFunDBAPI) =
+    let rctx = api.Request
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<ActionsAPI>()
 

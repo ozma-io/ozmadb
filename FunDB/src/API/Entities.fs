@@ -60,7 +60,8 @@ type private BeforeTriggerError =
     | BEError of EntityErrorInfo
     | BECancelled
 
-type EntitiesAPI (rctx : IRequestContext) =
+type EntitiesAPI (api : IFunDBAPI) =
+    let rctx = api.Request
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<EntitiesAPI>()
     let query = ctx.Transaction.Connection.Query

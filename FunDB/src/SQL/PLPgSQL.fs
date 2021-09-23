@@ -4,7 +4,6 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL
-open FunWithFlags.FunDB.SQL.DML
 
 type IPLPgSQLString =
     abstract member ToPLPgSQLString : unit -> string

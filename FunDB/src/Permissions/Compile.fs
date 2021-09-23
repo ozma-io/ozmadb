@@ -30,13 +30,11 @@ let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : 
 
 let restrictionToSelect (ref : ResolvedEntityRef) (restr : CompiledRestriction) : SQL.SelectExpr =
     let select =
-        { Columns = [| SQL.SCAll (Some <| compileRenamedResolvedEntityRef ref) |]
-          From = Some restr.From
-          Where = Some restr.Where
-          GroupBy = [||]
-          OrderLimit = SQL.emptyOrderLimitClause
-          Extra = null
-        } : SQL.SingleSelectExpr
+        { SQL.emptySingleSelectExpr with
+              Columns = [| SQL.SCAll (Some <| compileRenamedResolvedEntityRef ref) |]
+              From = Some restr.From
+              Where = Some restr.Where
+        }
     { CTEs = None
       Tree = SQL.SSelect select
       Extra = null
@@ -63,13 +61,11 @@ let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (argumen
             SQL.mapValueExpr mapper expr
         | _ ->
             let select =
-                { Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = Some <| compileRenamedResolvedEntityRef ref; Name = sqlFunId }) |]
-                  From = Some from.From
-                  Where = from.Where
-                  GroupBy = [||]
-                  OrderLimit = SQL.emptyOrderLimitClause
-                  Extra = null
-                } : SQL.SingleSelectExpr
+                { SQL.emptySingleSelectExpr with
+                      Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = Some <| compileRenamedResolvedEntityRef ref; Name = sqlFunId }) |]
+                      From = Some from.From
+                      Where = from.Where
+                }
             let subexpr = { CTEs = None; Extra = null; Tree = SQL.SSelect select } : SQL.SelectExpr
             let idColumn = SQL.VEColumn { Table = None; Name = sqlFunId }
             SQL.VEInQuery (idColumn, subexpr)

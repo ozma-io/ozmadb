@@ -31,7 +31,8 @@ let private canExplain : RoleType -> bool = function
     | RTRoot -> true
     | RTRole role -> role.CanRead
 
-type DomainsAPI (rctx : IRequestContext) =
+type DomainsAPI (api : IFunDBAPI) =
+    let rctx = api.Request
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<DomainsAPI>()
 

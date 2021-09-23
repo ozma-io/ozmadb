@@ -326,18 +326,10 @@ let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * S
         None
     else
         let query =
-            { Columns = allColumns |> Seq.map (fun (typ, name, col) -> SQL.SCExpr (Some name, col)) |> Seq.toArray
-              From = None
-              Where = None
-              GroupBy = [||]
-              OrderLimit = SQL.emptyOrderLimitClause
-              Extra = null
-            } : SQL.SingleSelectExpr
-        let select =
-            { CTEs = None
-              Tree = SQL.SSelect query
-              Extra = null
-            } : SQL.SelectExpr
+            { SQL.emptySingleSelectExpr with
+                  Columns = allColumns |> Seq.map (fun (typ, name, col) -> SQL.SCExpr (Some name, col)) |> Seq.toArray
+            }
+        let select = SQL.selectExpr (SQL.SSelect query)
         Some (colTypes, select)
 
 let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (comments : string option) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =

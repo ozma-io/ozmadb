@@ -33,7 +33,8 @@ let private canRestore : RoleType -> bool = function
     | RTRoot -> true
     | RTRole _ -> false
 
-type SaveRestoreAPI (rctx : IRequestContext) =
+type SaveRestoreAPI (api : IFunDBAPI) =
+    let rctx = api.Request
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<SaveRestoreAPI>()
 

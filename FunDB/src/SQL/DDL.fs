@@ -98,11 +98,11 @@ type ConstraintMeta =
             match this with
             | CMUnique (exprs, defer) ->
                 assert (not <| Array.isEmpty exprs)
-                let exprsStr = exprs |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                let exprsStr = exprs |> Seq.map toSQLString |> String.concat ", "
                 sprintf "UNIQUE (%s) %s" exprsStr (defer.ToSQLString())
             | CMPrimaryKey (cols, defer) ->
                 assert (not <| Array.isEmpty cols)
-                let colsStr = cols |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                let colsStr = cols |> Seq.map toSQLString |> String.concat ", "
                 sprintf "PRIMARY KEY (%s) %s" colsStr (defer.ToSQLString())
             | CMForeignKey (ref, cols, defer) ->
                 let myCols = cols |> Seq.map (fun (name, refName) -> name.ToSQLString()) |> String.concat ", "
@@ -280,7 +280,7 @@ type TriggerEvent =
             | TEUpdate None -> "UPDATE"
             | TEUpdate (Some cols) ->
                 assert (not <| Array.isEmpty cols)
-                cols |> Seq.map (fun c -> c.ToSQLString()) |> String.concat ", " |> sprintf "UPDATE OF %s"
+                cols |> Seq.map toSQLString |> String.concat ", " |> sprintf "UPDATE OF %s"
             | TEDelete -> "DELETE"
             | TETruncate -> "TRUNCATE"
 
@@ -416,7 +416,7 @@ type SchemaOperation =
             | SODropSchema schema -> sprintf "DROP SCHEMA %s" (schema.ToSQLString())
             | SOCreateTable table -> sprintf "CREATE TABLE %s ()" (table.ToSQLString())
             | SORenameTable (table, toName) -> sprintf "ALTER TABLE %s RENAME TO %s" (table.ToSQLString()) (toName.ToSQLString())
-            | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", ")
+            | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map toSQLString |> String.concat ", ")
             | SORenameTableColumn (table, col, toCol) -> sprintf "ALTER TABLE %s RENAME COLUMN %s TO %s" (table.ToSQLString()) (col.ToSQLString()) (toCol.ToSQLString())
             | SODropTable table -> sprintf "DROP TABLE %s" (table.ToSQLString())
             | SOCreateSequence seq -> sprintf "CREATE SEQUENCE %s" (seq.ToSQLString())
@@ -433,14 +433,14 @@ type SchemaOperation =
             | SOCreateIndex (index, table, pars) ->
                 let columnsStr =
                     assert (not <| Array.isEmpty pars.Columns)
-                    pars.Columns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", "
+                    pars.Columns |> Seq.map toSQLString |> String.concat ", "
                 let uniqueStr = if pars.IsUnique then "UNIQUE" else ""
                 let suffixStr = sprintf "INDEX %s ON %s USING %s (%s)" (index.Name.ToSQLString()) ({ index with Name = table }.ToSQLString()) (pars.AccessMethod.ToSQLString()) columnsStr
                 let includeStr =
                     if Array.isEmpty pars.IncludedColumns then
                         ""
                     else
-                        pars.IncludedColumns |> Seq.map (fun x -> x.ToSQLString()) |> String.concat ", " |> sprintf "INCLUDE (%s)"
+                        pars.IncludedColumns |> Seq.map toSQLString |> String.concat ", " |> sprintf "INCLUDE (%s)"
                 let predStr =
                     match pars.Predicate with
                     | None -> ""
@@ -467,7 +467,7 @@ type SchemaOperation =
             | SOCreateTrigger (trigger, table, def) ->
                 assert (not <| Array.isEmpty def.Events)
                 let constraintStr = if Option.isSome def.IsConstraint then "CONSTRAINT" else ""
-                let eventsStr = def.Events |> Seq.map (fun e -> e.ToSQLString()) |> String.concat " OR "
+                let eventsStr = def.Events |> Seq.map toSQLString |> String.concat " OR "
                 let triggerStr =
                     sprintf "TRIGGER %s %s %s ON %s"
                         (trigger.Name.ToSQLString())

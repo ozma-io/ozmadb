@@ -17,7 +17,6 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
-module SQL = FunWithFlags.FunDB.SQL.DML
 module PLPgSQL = FunWithFlags.FunDB.SQL.PLPgSQL
 
 type LayoutIntegrityException (message : string, innerException : Exception, isUserException : bool) =
@@ -183,13 +182,11 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
     let toColumn = SQL.VEColumn { Table = Some toRef; Name = sqlFunId }
     let whereExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
     let singleSelect =
-        { Columns = [| SQL.SCExpr (None, checkExpr) |]
-          From = Some <| SQL.FTable (null, None, toRef)
-          Where = Some whereExpr
-          GroupBy = [||]
-          OrderLimit = SQL.emptyOrderLimitClause
-          Extra = null
-        } : SQL.SingleSelectExpr
+        { SQL.emptySingleSelectExpr with
+              Columns = [| SQL.SCExpr (None, checkExpr) |]
+              From = Some <| SQL.FTable (null, None, toRef)
+              Where = Some whereExpr
+        }
     let raiseCall =
         { Level = PLPgSQL.RLException
           Message =
@@ -313,19 +310,13 @@ let private buildPathTriggerExpression (entityRef : ResolvedEntityRef) (key : Pa
             SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
         | outerRef :: refs ->
             let innerExpr = traverse refs
-            let singleSelectExpr : SQL.SingleSelectExpr =
-                { Columns = [| SQL.SCExpr (None, SQL.VEColumn sqlPlainId) |]
-                  From = Some (SQL.FTable (null, None, compileResolvedEntityRef outerRef.Entity))
-                  Extra = null
-                  Where = Some innerExpr
-                  GroupBy = [||]
-                  OrderLimit = SQL.emptyOrderLimitClause
+            let singleSelectExpr =
+                { SQL.emptySingleSelectExpr with
+                      Columns = [| SQL.SCExpr (None, SQL.VEColumn sqlPlainId) |]
+                      From = Some (SQL.FTable (null, None, compileResolvedEntityRef outerRef.Entity))
+                      Where = Some innerExpr
                 }
-            let selectExpr : SQL.SelectExpr =
-                { CTEs = None
-                  Tree = SQL.SSelect singleSelectExpr
-                  Extra = null
-                }
+            let selectExpr = SQL.selectExpr (SQL.SSelect singleSelectExpr)
             let leftRef : SQL.ColumnRef = { Table = None; Name = compileName outerRef.Name }
             SQL.VEInQuery (SQL.VEColumn leftRef, selectExpr)
 
@@ -474,6 +465,7 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
           Where = Option.unionWith (curry SQL.VEAnd) currWhere extraWhere
           GroupBy = Array.map useNewInValueExpr query.GroupBy
           OrderLimit = useNewInOrderLimitClause query.OrderLimit
+          Locking = query.Locking
           Extra = query.Extra
         }
 
@@ -1024,7 +1016,7 @@ let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : Resolve
     let updateId = { Table = Some tableRef; Name = sqlFunId } : SQL.ColumnRef
     let joinedUpdateId = { Table = Some <| compileRenamedResolvedEntityRef fieldRef.Entity; Name = sqlFunId } : SQL.ColumnRef
     let joinSame = SQL.VEBinaryOp (SQL.VEColumn updateId, SQL.BOEq, SQL.VEColumn joinedUpdateId)
-    { Name = compileResolvedEntityRef entity.Root
+    { Table = compileResolvedEntityRef entity.Root
       Columns = Map.singleton comp.ColumnName (null, compiledResult)
       From = Some compiledFrom
       Where = Some joinSame
@@ -1095,17 +1087,11 @@ let private compileReferenceOfTypeCheck (layout : Layout) (fromFieldRef : Resolv
     let subEntityColumn = SQL.VEColumn { Table = Some joinRef; Name = sqlFunSubEntity }
     let checkExpr = makeCheckExpr subEntityColumn layout toEntityRef
     let singleSelect =
-        { Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "bool_and", SQL.AEAll [| checkExpr |])) |]
-          From = Some join
-          Where = None
-          GroupBy = [||]
-          OrderLimit = SQL.emptyOrderLimitClause
-          Extra = null
-        } : SQL.SingleSelectExpr
-    { CTEs = None
-      Tree = SQL.SSelect singleSelect
-      Extra = null
-    }
+        { SQL.emptySingleSelectExpr with
+              Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "bool_and", SQL.AEAll [| checkExpr |])) |]
+              From = Some join
+        }
+    SQL.selectExpr (SQL.SSelect singleSelect)
 
 let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) (cancellationToken : CancellationToken) : Task =
     unitTask {

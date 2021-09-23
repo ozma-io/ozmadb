@@ -59,7 +59,8 @@ let private applyFlags (flags : UserViewFlags) (view : PrefetchedUserView) =
             view
     view
 
-type UserViewsAPI (rctx : IRequestContext) =
+type UserViewsAPI (api : IFunDBAPI) =
+    let rctx = api.Request
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<UserViewsAPI>()
 

@@ -1039,15 +1039,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               WhereWithoutSubentities = Some whereWithoutSubentities
             } : SelectFromInfo
 
-        // TODO: This SELECT could be moved into a subquery to improve case with multiple usages of the same argument.
+        // TODO: This SELECT could be moved into a CTE to improve case with multiple usages of the same argument.
         let singleSelect =
-            { Columns = [| SQL.SCExpr (None, expr) |]
-              From = Some from
-              Where = where
-              GroupBy = [||]
-              OrderLimit = SQL.emptyOrderLimitClause
-              Extra = extra
-            } : SQL.SingleSelectExpr
+            { SQL.emptySingleSelectExpr with
+                  Columns = [| SQL.SCExpr (None, expr) |]
+                  From = Some from
+                  Where = where
+                  Extra = extra
+            }
         { CTEs = None
           Tree = SQL.SSelect singleSelect
           Extra = null
@@ -1339,7 +1338,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 (info, Some retFields)
         let ret =
             { Fields = fields
-              Expr = expr
+              Expr = SQL.DESelect expr
               Materialized = Some <| Option.defaultValue false cte.Materialized
             } : SQL.CommonTableExpr
         (info, ret)
@@ -1749,6 +1748,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               Where = where
               GroupBy = groupBy
               OrderLimit = orderLimit
+              Locking = None
               Extra = info
             } : SQL.SingleSelectExpr
 
@@ -1825,19 +1825,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     let subEntityCol = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
                     let checkExpr = makeCheckExpr subEntityCol layout entityRef
                     let select =
-                        { Columns = [| SQL.SCAll None |]
-                          From = Some <| SQL.FTable (null, None, tableRef)
-                          Where = Some checkExpr
-                          GroupBy = [||]
-                          OrderLimit = SQL.emptyOrderLimitClause
-                          Extra = null
-                        } : SQL.SingleSelectExpr
+                        { SQL.emptySingleSelectExpr with
+                              Columns = [| SQL.SCAll None |]
+                              From = Some <| SQL.FTable (null, None, tableRef)
+                              Where = Some checkExpr
+                        }
                     let expr = { Extra = ann; CTEs = None; Tree = SQL.SSelect select } : SQL.SelectExpr
-                    let subsel =
-                        { Select = expr
-                          Alias = newAlias
-                          Lateral = false
-                        } : SQL.SubSelectExpr
+                    let subsel = SQL.subSelectExpr newAlias expr
                     let subExpr = SQL.FSubExpr subsel
                     (subExpr, None)
             let entityInfo =

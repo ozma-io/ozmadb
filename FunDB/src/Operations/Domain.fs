@@ -20,7 +20,6 @@ open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
-module SQL = FunWithFlags.FunDB.SQL.DML
 
 type DomainDeniedException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)

@@ -67,10 +67,16 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
                 }
         | SValues values -> SValues values
 
+    and applyToDataExpr : DataExpr -> DataExpr = function
+        | DESelect expr -> DESelect (applyToSelectExpr expr)
+        | DEInsert expr -> failwith "Not implemented"
+        | DEUpdate expr -> failwith "Not implemented"
+        | DEDelete expr -> failwith "Not implemented"
+
     and applyToCommonTableExpr (cte : CommonTableExpr) =
         { Fields = cte.Fields
           Materialized = cte.Materialized
-          Expr = applyToSelectExpr cte.Expr
+          Expr = applyToDataExpr cte.Expr
         }
 
     and applyToCommonTableExprs (ctes : CommonTableExprs) =
@@ -140,6 +146,7 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
           Where = where
           GroupBy = Array.map applyToValueExpr query.GroupBy
           OrderLimit = applyToOrderLimitClause query.OrderLimit
+          Locking = query.Locking
           Extra = query.Extra
         }
 

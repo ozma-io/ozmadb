@@ -11,7 +11,6 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.Compile
 module SQL = FunWithFlags.FunDB.SQL.AST
-module SQL = FunWithFlags.FunDB.SQL.DML
 
 type PermissionsEntityException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)

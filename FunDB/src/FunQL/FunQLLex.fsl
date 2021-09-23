@@ -154,6 +154,7 @@ and tokenizeFunQL = parse
     | u n i o n               { Parse.UNION }
     | i n t e r s e c t       { Parse.INTERSECT }
     | u p d a t e             { Parse.UPDATE }
+    | d e l e t e             { Parse.DELETE }
     | o f                     { Parse.OF }
     | v a l u e s             { Parse.VALUES }
     | a l l                   { Parse.ALL }
@@ -175,6 +176,7 @@ and tokenizeFunQL = parse
     | s u p e r u s e r       { Parse.SUPERUSER }
     | l a t e r a l           { Parse.LATERAL }
     | d e f a u l t           { Parse.DEFAULT }
+    | u s i n g               { Parse.USING }
 
     // Types
     | i n t             { Parse.INT_TYPE }

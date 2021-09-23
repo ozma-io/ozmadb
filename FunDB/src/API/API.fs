@@ -9,12 +9,12 @@ open FunWithFlags.FunDB.API.Permissions
 open FunWithFlags.FunDB.API.Domains
 
 type FunDBAPI (rctx : IRequestContext) as this =
-    let uv = UserViewsAPI rctx
-    let entities = EntitiesAPI rctx
-    let saveRestore = SaveRestoreAPI rctx
-    let actions = ActionsAPI rctx
-    let permissions = PermissionsAPI rctx
-    let domains = DomainsAPI rctx
+    let uv = UserViewsAPI this
+    let entities = EntitiesAPI this
+    let saveRestore = SaveRestoreAPI this
+    let actions = ActionsAPI this
+    let permissions = PermissionsAPI this
+    let domains = DomainsAPI this
 
     do
         rctx.Context.SetAPI this

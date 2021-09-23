@@ -23,6 +23,10 @@ type ParsedArgument = Argument<EntityRef, EntityRef, LinkedFieldRef>
 type ParsedArgumentsMap = Map<ArgumentName, ParsedArgument>
 type ParsedOrderColumn = OrderColumn<EntityRef, LinkedFieldRef>
 type ParsedFromEntity = FromEntity<EntityRef>
+type ParsedInsertExpr = InsertExpr<EntityRef, LinkedFieldRef>
+type ParsedUpdateExpr = UpdateExpr<EntityRef, LinkedFieldRef>
+type ParsedDeleteExpr = DeleteExpr<EntityRef, LinkedFieldRef>
+type ParsedDataExpr = DataExpr<EntityRef, LinkedFieldRef>
 
 type ParsedMainEntity =
     { Entity : EntityRef
@@ -45,20 +49,20 @@ type private Result =
 
 [<NoEquality; NoComparison>]
 type private InSource =
-    | ISValues of ParsedFieldExpr[]
-    | ISSelect of ParsedSelectExpr
+    | InValues of ParsedFieldExpr[]
+    | InSelect of ParsedSelectExpr
 
 let private inExpr (valuesConstr : (ParsedFieldExpr * ParsedFieldExpr[]) -> ParsedFieldExpr)
                    (selectConstr : (ParsedFieldExpr * ParsedSelectExpr) -> ParsedFieldExpr)
                    (needle : ParsedFieldExpr)
                    (haystack : InSource) : ParsedFieldExpr =
     match haystack with
-    | ISValues vals -> valuesConstr (needle, vals)
-    | ISSelect sel -> selectConstr (needle, sel)
+    | InValues vals -> valuesConstr (needle, vals)
+    | InSelect sel -> selectConstr (needle, sel)
 
 let private extractInOneSource : ParsedFieldExpr[] -> InSource = function
-    | [| FESubquery sel |] -> ISSelect sel
-    | vals -> ISValues vals
+    | [| FESubquery sel |] -> InSelect sel
+    | vals -> InValues vals
 
 let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
     try
@@ -213,6 +217,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token INTERSECT
 %token EXCEPT
 %token UPDATE
+%token DELETE
 %token OF
 %token VALUES
 %token DISTINCT
@@ -234,6 +239,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token ROLE
 %token LATERAL
 %token DEFAULT
+%token USING
 
 // Types
 %token INT_TYPE
@@ -251,7 +257,6 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 
 // Misc
 %token EOF
-
 
 %left OR
 %left AND
@@ -281,12 +286,20 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %start indexColumn
 %type <ParsedIndexColumn> indexColumn
 
+%start dataExpr
+%type <ParsedDataExpr> dataExpr
+
+%type <ParsedSelectExpr> SelectExpr
+%type <ParsedInsertExpr> InsertExpr
+%type <ParsedUpdateExpr> UpdateExpr
+%type <ParsedDeleteExpr> DeleteExpr
 %type <FieldRef> FieldRef
 
 %%
 
 // Entry points
 viewExpr : ViewExpr EOF { $1 }
+dataExpr : DataExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
 attributeMap : AttributeMap EOF { $1 }
@@ -294,8 +307,10 @@ indexColumn : IndexColumn EOF { $1 }
 
 // Expressions
 
+// SELECT
+
 ViewExpr:
-    | MaybeArguments MaybePragmas UnparenSelectExpr InsertEntityClause { { Pragmas = $2; Arguments = $1; Select = $3; MainEntity = $4 } }
+    | MaybeArguments MaybePragmas SelectExpr InsertEntityClause { { Pragmas = $2; Arguments = $1; Select = $3; MainEntity = $4 } }
 
 MaybePragmas:
     | MaybePragmasList { parseMap "Clashing pragma names" $1 }
@@ -344,6 +359,10 @@ WithExpr:
     | WITH WithBindings           { { Recursive = false; Exprs = Array.ofList $2; Extra = ObjectMap.empty } }
     | WITH RECURSIVE WithBindings { { Recursive = true; Exprs = Array.ofList $3; Extra = ObjectMap.empty } }
 
+MaybeWithExpr:
+    | WithExpr { Some $1 }
+    |          { None }
+
 WithBinding:
     | Name WithBindingBody { ($1, $2) }
 
@@ -362,9 +381,8 @@ WithBindings:
     | WithBinding COMMA WithBindings { $1 :: $3 }
 
 // We don't allow select expressions with nested parentheses now because it's difficult to implement as LALR(1) for all our cases (or I'm missing something obvious).
-UnparenSelectExpr:
-    | WithExpr SelectTreeExpr { { CTEs = Some $1; Tree = $2; Extra = ObjectMap.empty } }
-    | SelectTreeExpr          { { CTEs = None; Tree = $1; Extra = ObjectMap.empty } }
+SelectExpr:
+    | MaybeWithExpr SelectTreeExpr { { CTEs = $1; Tree = $2; Extra = ObjectMap.empty } }
 
 Values:
     | VALUES ValuesEntryList { SValues (List.toArray $2) }
@@ -376,7 +394,7 @@ SelectTreeExpr:
     | SelectVal SetOp ALL SetOpExpr OrderLimitClause { SSetOp { Operation = $2; AllowDuplicates = true; A = $1; B = $4; OrderLimit = $5 } }
 
 SubSelectExpr:
-    | LEFT_PAREN UnparenSelectExpr RIGHT_PAREN { $2 }
+    | LEFT_PAREN SelectExpr RIGHT_PAREN { $2 }
 
 SetOp:
     | UNION     { Union }
@@ -643,7 +661,7 @@ FieldExprLike:
 
 // Implemented in this way because there is a conflict between multi-paren-ed SelectExpr and FieldExpr with a SelectExpr inside.
 FieldInSource:
-    | SubSelectExpr           { ISSelect $1 }
+    | SubSelectExpr           { InSelect $1 }
     | ParenedNonEmptyExprList { extractInOneSource $1 }
 
 FieldExprMisc:
@@ -829,3 +847,63 @@ NullsOrder:
 
 IndexColumn:
     | FieldExpr IndexOpClass SortOrder NullsOrder { { Expr = $1; OpClass = $2; Order = $3; Nulls = $4 } }
+
+// INSERT
+
+InsertExpr:
+    | MaybeWithExpr INSERT INTO EntityRef ColumnAliases InsertSource { { CTEs = $1; Entity = $4; Fields = $5; Source = $6; Extra = null } }
+
+InsertSource:
+    | DEFAULT VALUES               { ISDefaultValues }
+    | SelectExpr                   { ISSelect $1 }
+    | VALUES InsertValuesEntryList { ISValues (List.toArray $2) }
+
+InsertValuesEntryList:
+    | InsertValuesEntry                             { [$1] }
+    | InsertValuesEntry COMMA                       { [$1] }
+    | InsertValuesEntry COMMA InsertValuesEntryList { $1 :: $3 }
+
+InsertValuesEntry:
+    | LEFT_PAREN InsertValueItemsList RIGHT_PAREN { List.toArray $2 }
+
+InsertValueItemsList:
+    | InsertValue                            { [$1] }
+    | InsertValue COMMA                      { [$1] }
+    | InsertValue COMMA InsertValueItemsList { $1 :: $3 }
+
+InsertValue:
+    | FieldExpr { IVValue $1 }
+    | DEFAULT   { IVDefault }
+
+// UPDATE
+
+UpdateExpr:
+    | MaybeWithExpr UPDATE EntityRef SET UpdateAssigns FromClause WhereClause { { CTEs = $1; Entity = $3; Fields = $5; From = $6; Where = $7; Extra = null } }
+
+UpdateAssigns:
+    | UpdateAssignsList { parseMap "Clashing assignments" $1 }
+
+UpdateAssignsList:
+    | UpdateAssign                         { [$1] }
+    | UpdateAssign COMMA                   { [$1] }
+    | UpdateAssign COMMA UpdateAssignsList { $1 :: $3 }
+
+UpdateAssign:
+    | Name EQ FieldExpr { ($1, $3) }
+
+// DELETE
+
+DeleteExpr:
+    | MaybeWithExpr DELETE FROM EntityRef UsingClause WhereClause { { CTEs = $1; Entity = $4; Using = $5; Where = $6; Extra = null } }
+
+UsingClause:
+    |                { None }
+    | USING FromExpr { Some $2 }
+
+// Data expressions
+
+DataExpr:
+    | SelectExpr { DESelect $1 }
+    | InsertExpr { DEInsert $1 }
+    | UpdateExpr { DEUpdate $1 }
+    | DeleteExpr { DEDelete $1 }

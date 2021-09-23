@@ -196,6 +196,7 @@ let instanceConnectionString (instance : IInstance) (modify : NpgsqlConnectionSt
 #if DEBUG
     builder.IncludeErrorDetails <- true
 #endif
+    builder.Enlist <- false
     modify builder
     builder.ConnectionString
 
