@@ -894,7 +894,8 @@ and [<NoEquality; NoComparison>] InsertSource =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] InsertExpr =
-    { Table : OperationTable
+    { CTEs : CommonTableExprs option
+      Table : OperationTable
       Columns : (obj * ColumnName)[] // obj is extra metadata
       Source : InsertSource
       Returning : SelectedColumn[]
@@ -903,6 +904,7 @@ and [<NoEquality; NoComparison>] InsertExpr =
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
+            let ctesStr = optionToSQLString this.CTEs
             let returningStr =
                 if Array.isEmpty this.Returning then
                     ""
@@ -914,13 +916,14 @@ and [<NoEquality; NoComparison>] InsertExpr =
                     (this.Table.ToSQLString())
                     (this.Columns |> Seq.map (fun (extra, x) -> x.ToSQLString()) |> String.concat ", ")
                     (this.Source.ToSQLString())
-            String.concatWithWhitespaces [insertStr; returningStr]
+            String.concatWithWhitespaces [ctesStr; insertStr; returningStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] UpdateExpr =
-    { Table : OperationTable
+    { CTEs : CommonTableExprs option
+      Table : OperationTable
       Columns : Map<ColumnName, obj * ValueExpr> // obj is extra metadata
       From : FromExpr option
       Where : ValueExpr option
@@ -931,6 +934,7 @@ and [<NoEquality; NoComparison>] UpdateExpr =
         member this.ToSQLString () =
             assert (not <| Map.isEmpty this.Columns)
 
+            let ctesStr = optionToSQLString this.CTEs
             let valuesExpr = this.Columns |> Map.toSeq |> Seq.map (fun (name, (extra, expr)) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())) |> String.concat ", "
             let fromStr =
                 match this.From with
@@ -941,13 +945,14 @@ and [<NoEquality; NoComparison>] UpdateExpr =
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
             let updateStr = sprintf "UPDATE %s SET %s" (this.Table.ToSQLString()) valuesExpr
-            String.concatWithWhitespaces [updateStr; fromStr; condExpr]
+            String.concatWithWhitespaces [ctesStr; updateStr; fromStr; condExpr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] DeleteExpr =
-    { Table : OperationTable
+    { CTEs : CommonTableExprs option
+      Table : OperationTable
       Using : FromExpr option
       Where : ValueExpr option
       Extra : obj
@@ -955,6 +960,7 @@ and [<NoEquality; NoComparison>] DeleteExpr =
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
+            let ctesStr = optionToSQLString this.CTEs
             let usingStr =
                 match this.Using with
                 | Some f -> sprintf "USING %s" (f.ToSQLString())
@@ -963,7 +969,8 @@ and [<NoEquality; NoComparison>] DeleteExpr =
                 match this.Where with
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
-            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.Table.ToSQLString(); usingStr; condExpr])
+            let deleteStr = sprintf "DELETE FROM %s" (this.Table.ToSQLString())
+            String.concatWithWhitespaces [ctesStr; deleteStr; usingStr; condExpr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -1132,7 +1139,8 @@ let emptySingleSelectExpr : SingleSelectExpr =
     }
 
 let insertExpr (table : OperationTable) (columns : (obj * ColumnName)[]) (source : InsertSource) : InsertExpr =
-    { Table = table
+    { CTEs = None
+      Table = table
       Columns = columns
       Source = source
       Returning = [||]
@@ -1140,7 +1148,8 @@ let insertExpr (table : OperationTable) (columns : (obj * ColumnName)[]) (source
     }
 
 let updateExpr (table : OperationTable) : UpdateExpr =
-    { Table = table
+    { CTEs = None
+      Table = table
       Columns = Map.empty
       From = None
       Where = None
@@ -1148,7 +1157,8 @@ let updateExpr (table : OperationTable) : UpdateExpr =
     }
 
 let deleteExpr (table : OperationTable) : DeleteExpr =
-    { Table = table
+    { CTEs = None
+      Table = table
       Using = None
       Where = None
       Extra = null

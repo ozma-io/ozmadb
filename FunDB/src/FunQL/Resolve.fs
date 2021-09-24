@@ -1640,7 +1640,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             let newSubsel = { Alias = subsel.Alias; Lateral = subsel.Lateral; Select = newQ }
             (fieldMapping, Set.singleton mappingRef, FSubExpr newSubsel)
 
-    and resolveInsertValue (ctx : Context) = function
+    and resolveInsertValue (ctx : Context) : ParsedInsertValue -> ResolvedInsertValue = function
         | IVDefault -> IVDefault
         | IVValue expr ->
             let (info, newExpr) = resolveFieldExpr ctx expr

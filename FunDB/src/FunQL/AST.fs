@@ -952,10 +952,13 @@ and [<NoEquality; NoComparison>] InsertExpr<'e, 'f> when 'e :> IFunQLName and 'f
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            sprintf "INSERT INTO %s (%s) %s"
-                (this.Entity.ToFunQLString())
-                (this.Fields |> Seq.map toFunQLString |> String.concat ", ")
-                (this.Source.ToFunQLString())
+            let ctesStr = optionToFunQLString this.CTEs
+            let insertStr =
+                sprintf "INSERT INTO %s (%s) %s"
+                    (this.Entity.ToFunQLString())
+                    (this.Fields |> Seq.map toFunQLString |> String.concat ", ")
+                    (this.Source.ToFunQLString())
+            String.concatWithWhitespaces [ctesStr; insertStr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -973,6 +976,7 @@ and [<NoEquality; NoComparison>] UpdateExpr<'e, 'f> when 'e :> IFunQLName and 'f
         member this.ToFunQLString () =
             assert (not <| Map.isEmpty this.Fields)
 
+            let ctesStr = optionToFunQLString this.CTEs
             let valuesExpr = this.Fields |> Map.toSeq |> Seq.map (fun (name, expr) -> sprintf "%s = %s" (name.ToFunQLString()) (expr.ToFunQLString())) |> String.concat ", "
             let fromStr =
                 match this.From with
@@ -983,7 +987,7 @@ and [<NoEquality; NoComparison>] UpdateExpr<'e, 'f> when 'e :> IFunQLName and 'f
                 | Some c -> sprintf "WHERE %s" (c.ToFunQLString())
                 | None -> ""
             let updateStr = sprintf "UPDATE %s SET %s" (this.Entity.ToFunQLString()) valuesExpr
-            String.concatWithWhitespaces [updateStr; fromStr; condExpr]
+            String.concatWithWhitespaces [ctesStr; updateStr; fromStr; condExpr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -998,6 +1002,7 @@ and [<NoEquality; NoComparison>] DeleteExpr<'e, 'f> when 'e :> IFunQLName and 'f
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
+            let ctesStr = optionToFunQLString this.CTEs
             let usingStr =
                 match this.Using with
                 | Some f -> sprintf "USING %s" (f.ToFunQLString())
@@ -1006,7 +1011,8 @@ and [<NoEquality; NoComparison>] DeleteExpr<'e, 'f> when 'e :> IFunQLName and 'f
                 match this.Where with
                 | Some c -> sprintf "WHERE %s" (c.ToFunQLString())
                 | None -> ""
-            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.Entity.ToFunQLString(); usingStr; condExpr])
+            let deleteStr = sprintf "DELETE FROM %s" (this.Entity.ToFunQLString())
+            String.concatWithWhitespaces [ctesStr; deleteStr; usingStr; condExpr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -1376,10 +1382,12 @@ type ResolvedAttributeMap = AttributeMap<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>
 type ResolvedAggExpr = AggExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderColumn = OrderColumn<EntityRef, LinkedBoundFieldRef>
+type ResolvedInsertValue = InsertValue<EntityRef, LinkedBoundFieldRef>
 type ResolvedInsertExpr = InsertExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedUpdateExpr = UpdateExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedDeleteExpr = DeleteExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedDataExpr = DataExpr<EntityRef, LinkedBoundFieldRef>
+type ResolvedOperationEntity = OperationEntity<EntityRef>
 
 type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 

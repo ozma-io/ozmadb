@@ -23,6 +23,7 @@ type ParsedArgument = Argument<EntityRef, EntityRef, LinkedFieldRef>
 type ParsedArgumentsMap = Map<ArgumentName, ParsedArgument>
 type ParsedOrderColumn = OrderColumn<EntityRef, LinkedFieldRef>
 type ParsedFromEntity = FromEntity<EntityRef>
+type ParsedInsertValue = InsertValue<EntityRef, LinkedFieldRef>
 type ParsedInsertExpr = InsertExpr<EntityRef, LinkedFieldRef>
 type ParsedUpdateExpr = UpdateExpr<EntityRef, LinkedFieldRef>
 type ParsedDeleteExpr = DeleteExpr<EntityRef, LinkedFieldRef>
