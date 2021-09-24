@@ -499,6 +499,36 @@ type [<NoEquality; NoComparison>] LockClause =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()    
 
+type [<NoEquality; NoComparison>] OperationTable =
+    { Table : TableRef
+      Alias : TableName option
+      Extra : obj
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let aliasStr =
+                match this.Alias with
+                | None -> ""
+                | Some alias -> sprintf "AS %s" (toSQLString alias)
+            String.concatWithWhitespaces [toSQLString this.Table; aliasStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString () 
+
+type [<NoEquality; NoComparison>] FromTable =
+    { Table : TableRef
+      Alias : TableAlias option
+      Extra : obj
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            String.concatWithWhitespaces [toSQLString this.Table; optionToSQLString this.Alias]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString () 
+
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
 type [<NoEquality; NoComparison>] ValueExpr =
     | VEValue of Value
@@ -610,7 +640,7 @@ and [<NoEquality; NoComparison>] SubSelectExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] FromExpr =
-    | FTable of obj * TableAlias option * TableRef // obj is extra meta info
+    | FTable of FromTable
     | FJoin of JoinExpr
     | FSubExpr of SubSelectExpr
     with
@@ -618,9 +648,7 @@ and [<NoEquality; NoComparison>] FromExpr =
 
         member this.ToSQLString () =
             match this with
-            | FTable (_, malias, t) ->
-                let aliasStr = optionToSQLString malias
-                String.concatWithWhitespaces [t.ToSQLString(); aliasStr]
+            | FTable ftable -> ftable.ToSQLString()
             | FSubExpr subsel -> subsel.ToSQLString()
             | FJoin join -> join.ToSQLString()
 
@@ -866,7 +894,7 @@ and [<NoEquality; NoComparison>] InsertSource =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] InsertExpr =
-    { Table : TableRef
+    { Table : OperationTable
       Columns : (obj * ColumnName)[] // obj is extra metadata
       Source : InsertSource
       Returning : SelectedColumn[]
@@ -892,7 +920,7 @@ and [<NoEquality; NoComparison>] InsertExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] UpdateExpr =
-    { Table : TableRef
+    { Table : OperationTable
       Columns : Map<ColumnName, obj * ValueExpr> // obj is extra metadata
       From : FromExpr option
       Where : ValueExpr option
@@ -919,7 +947,7 @@ and [<NoEquality; NoComparison>] UpdateExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] DeleteExpr =
-    { Table : TableRef
+    { Table : OperationTable
       Using : FromExpr option
       Where : ValueExpr option
       Extra : obj
@@ -1103,7 +1131,7 @@ let emptySingleSelectExpr : SingleSelectExpr =
       Extra = null
     }
 
-let insertExpr (table : TableRef) (columns : (obj * ColumnName)[]) (source : InsertSource) : InsertExpr =
+let insertExpr (table : OperationTable) (columns : (obj * ColumnName)[]) (source : InsertSource) : InsertExpr =
     { Table = table
       Columns = columns
       Source = source
@@ -1111,7 +1139,7 @@ let insertExpr (table : TableRef) (columns : (obj * ColumnName)[]) (source : Ins
       Extra = null
     }
 
-let updateExpr (table : TableRef) : UpdateExpr =
+let updateExpr (table : OperationTable) : UpdateExpr =
     { Table = table
       Columns = Map.empty
       From = None
@@ -1119,7 +1147,7 @@ let updateExpr (table : TableRef) : UpdateExpr =
       Extra = null
     }
 
-let deleteExpr (table : TableRef) : DeleteExpr =
+let deleteExpr (table : OperationTable) : DeleteExpr =
     { Table = table
       Using = None
       Where = None
@@ -1136,4 +1164,16 @@ let selectExpr (tree : SelectTreeExpr) : SelectExpr =
     { CTEs = None
       Tree = tree
       Extra = null
+    }
+
+let fromTable (ref : TableRef) : FromTable =
+    { Extra = null
+      Alias = None
+      Table = ref
+    }
+
+let operationTable (ref : TableRef) : OperationTable =
+    { Extra = null
+      Alias = None
+      Table = ref
     }

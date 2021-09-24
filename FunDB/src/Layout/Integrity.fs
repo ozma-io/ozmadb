@@ -181,10 +181,11 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
     let fromColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
     let toColumn = SQL.VEColumn { Table = Some toRef; Name = sqlFunId }
     let whereExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
+    let fTable = SQL.fromTable toRef
     let singleSelect =
         { SQL.emptySingleSelectExpr with
               Columns = [| SQL.SCExpr (None, checkExpr) |]
-              From = Some <| SQL.FTable (null, None, toRef)
+              From = Some <| SQL.FTable fTable
               Where = Some whereExpr
         }
     let raiseCall =
@@ -310,10 +311,11 @@ let private buildPathTriggerExpression (entityRef : ResolvedEntityRef) (key : Pa
             SQL.VEBinaryOp (SQL.VEColumn leftRef, SQL.BOEq, SQL.VEColumn sqlNewId)
         | outerRef :: refs ->
             let innerExpr = traverse refs
+            let fTable = SQL.fromTable <| compileResolvedEntityRef outerRef.Entity
             let singleSelectExpr =
                 { SQL.emptySingleSelectExpr with
                       Columns = [| SQL.SCExpr (None, SQL.VEColumn sqlPlainId) |]
-                      From = Some (SQL.FTable (null, None, compileResolvedEntityRef outerRef.Entity))
+                      From = Some (SQL.FTable fTable)
                       Where = Some innerExpr
                 }
             let selectExpr = SQL.selectExpr (SQL.SSelect singleSelectExpr)
@@ -491,10 +493,10 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
 
     // ValueExpr returned is a piece that goes into WHERE clause.
     and useNewInFromExpr : SQL.FromExpr -> (SQL.ValueExpr option * SQL.TableName option * SQL.FromExpr option) = function
-        | SQL.FTable (extra, pun, entity) as from ->
-            let ann = extra :?> RealEntityAnnotation
+        | SQL.FTable fTable as from ->
+            let ann = fTable.Extra :?> RealEntityAnnotation
             if not ann.FromPath && ann.RealEntity = constrEntityRef then
-                (None, pun |> Option.map (fun x -> x.Name), None)
+                (None, fTable.Alias |> Option.map (fun x -> x.Name), None)
             else
                 (None, None, Some from)
         | SQL.FJoin join as expr ->
@@ -1016,7 +1018,8 @@ let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : Resolve
     let updateId = { Table = Some tableRef; Name = sqlFunId } : SQL.ColumnRef
     let joinedUpdateId = { Table = Some <| compileRenamedResolvedEntityRef fieldRef.Entity; Name = sqlFunId } : SQL.ColumnRef
     let joinSame = SQL.VEBinaryOp (SQL.VEColumn updateId, SQL.BOEq, SQL.VEColumn joinedUpdateId)
-    { SQL.updateExpr (compileResolvedEntityRef entity.Root) with
+    let opTable = SQL.operationTable tableRef
+    { SQL.updateExpr opTable with
           Columns = Map.singleton comp.ColumnName (null, compiledResult)
           From = Some compiledFrom
           Where = Some joinSame
@@ -1076,11 +1079,13 @@ let private compileReferenceOfTypeCheck (layout : Layout) (fromFieldRef : Resolv
     let fromColumn = SQL.VEColumn { Table = Some fromRef; Name = field.ColumnName }
     let toColumn = SQL.VEColumn { Table = Some joinRef; Name = sqlFunId }
     let joinExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
+    let fTableA = SQL.fromTable fromRef
+    let fTableB = { SQL.fromTable toRef with Alias = Some joinAlias }
     let join =
         SQL.FJoin
             { Type = SQL.JoinType.Left
-              A = SQL.FTable (null, None, fromRef)
-              B = SQL.FTable (null, Some joinAlias, toRef)
+              A = SQL.FTable fTableA
+              B = SQL.FTable fTableB
               Condition = joinExpr
             }
     let subEntityColumn = SQL.VEColumn { Table = Some joinRef; Name = sqlFunSubEntity }

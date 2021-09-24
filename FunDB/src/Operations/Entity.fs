@@ -82,7 +82,7 @@ let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRe
         let testExpr =
             { SQL.emptySingleSelectExpr with
                   Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
-                  From = Some <| SQL.FTable (null, None, tableRef)
+                  From = Some <| SQL.FTable (SQL.fromTable tableRef)
                   Where = Some whereExpr
             }
         let testQuery =
@@ -145,8 +145,9 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let values = argumentTypes |> Seq.map (fun value -> arguments.Types.[value.Placeholder].PlaceholderId |> SQL.VEPlaceholder |> SQL.IVValue)
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
+        let opTable = SQL.operationTable <| compileResolvedEntityRef entity.Root
         let expr =
-            { SQL.insertExpr (compileResolvedEntityRef entity.Root) columns (SQL.ISValues [| valuesWithSys |]) with
+            { SQL.insertExpr opTable columns (SQL.ISValues [| valuesWithSys |]) with
                   Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
                   Extra = ({ Ref = entityRef } : RestrictedTableInfo)
             }
@@ -201,8 +202,9 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             else
                 whereId
 
+        let opTable = SQL.operationTable tableRef
         let expr =
-            { SQL.updateExpr tableRef with
+            { SQL.updateExpr opTable with
                   Columns = columns
                   Where = Some whereExpr
                   Extra = ({ Ref = entityRef } : RestrictedTableInfo)
@@ -245,8 +247,9 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                 whereExpr
         let tableRef = compileResolvedEntityRef entity.Root
 
+        let opTable = SQL.operationTable tableRef
         let expr =
-            { SQL.deleteExpr tableRef with
+            { SQL.deleteExpr opTable with
                   Where = Some whereExpr
                   Extra = ({ Ref = entityRef } : RestrictedTableInfo)
             }

@@ -527,7 +527,9 @@ type [<NoEquality; NoComparison>] FromEntity<'e> when 'e :> IFunQLName =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and AttributeMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, FieldExpr<'e, 'f>>
+type OperationEntity<'e> when 'e :> IFunQLName = FromEntity<'e>
+
+type AttributeMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, FieldExpr<'e, 'f>>
 
 and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FEValue of FieldValue
@@ -942,10 +944,10 @@ and [<NoEquality; NoComparison>] InsertSource<'e, 'f> when 'e :> IFunQLName and 
 
 and [<NoEquality; NoComparison>] InsertExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { CTEs : CommonTableExprs<'e, 'f> option
-      Entity : 'e
+      Entity : OperationEntity<'e>
       Fields : FieldName[]
       Source : InsertSource<'e, 'f>
-      Extra : obj
+      Extra : ObjectMap
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -960,11 +962,11 @@ and [<NoEquality; NoComparison>] InsertExpr<'e, 'f> when 'e :> IFunQLName and 'f
 
 and [<NoEquality; NoComparison>] UpdateExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { CTEs : CommonTableExprs<'e, 'f> option
-      Entity : 'e
-      Fields : Map<FieldName, FieldExpr<'e, 'f>> // obj is extra metadata
+      Entity : OperationEntity<'e>
+      Fields : Map<FieldName, FieldExpr<'e, 'f>>
       From : FromExpr<'e, 'f> option
       Where : FieldExpr<'e, 'f> option
-      Extra : obj
+      Extra : ObjectMap
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -988,7 +990,7 @@ and [<NoEquality; NoComparison>] UpdateExpr<'e, 'f> when 'e :> IFunQLName and 'f
 
 and [<NoEquality; NoComparison>] DeleteExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { CTEs : CommonTableExprs<'e, 'f> option
-      Entity : 'e
+      Entity : OperationEntity<'e>
       Using : FromExpr<'e, 'f> option
       Where : FieldExpr<'e, 'f> option
       Extra : obj
@@ -1374,6 +1376,10 @@ type ResolvedAttributeMap = AttributeMap<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>
 type ResolvedAggExpr = AggExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderColumn = OrderColumn<EntityRef, LinkedBoundFieldRef>
+type ResolvedInsertExpr = InsertExpr<EntityRef, LinkedBoundFieldRef>
+type ResolvedUpdateExpr = UpdateExpr<EntityRef, LinkedBoundFieldRef>
+type ResolvedDeleteExpr = DeleteExpr<EntityRef, LinkedBoundFieldRef>
+type ResolvedDataExpr = DataExpr<EntityRef, LinkedBoundFieldRef>
 
 type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 

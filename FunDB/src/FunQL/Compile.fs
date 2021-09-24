@@ -534,7 +534,12 @@ let private makeJoinNode (layout : Layout) (joinKey : JoinKey) (join : JoinPath)
           IsInner = false
           AsRoot = joinKey.AsRoot
         } : RealEntityAnnotation
-    let subquery = SQL.FTable (ann, Some alias, compileResolvedEntityRef entity.Root)
+    let fTable =
+        { Extra = ann
+          Alias = Some alias
+          Table = compileResolvedEntityRef entity.Root
+        } : SQL.FromTable
+    let subquery = SQL.FTable fTable
     SQL.FJoin { Type = SQL.Left; A = from; B = subquery; Condition = joinExpr }
 
 let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : SQL.FromExpr) : SQL.FromExpr =
@@ -561,8 +566,8 @@ let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : 
         | from ->
             let realName =
                 match from with
-                | SQL.FTable (extra, alias, ref) ->
-                    alias |> Option.map (fun a -> a.Name) |> Option.defaultValue ref.Name
+                | SQL.FTable fTable ->
+                    fTable.Alias |> Option.map (fun a -> a.Name) |> Option.defaultValue fTable.Table.Name
                 | SQL.FSubExpr subsel -> subsel.Alias.Name
                 | _ -> failwith "Impossible"
             if realName = joinKey.Table then
@@ -1814,20 +1819,31 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let (fromExpr, where) =
                 match entity.Parent with
                 | None ->
-                    let fromExpr = SQL.FTable (ann, Some newAlias, tableRef)
+                    let fTable =
+                        { Extra = ann
+                          Alias = Some newAlias
+                          Table = tableRef
+                        } : SQL.FromTable
+                    let fromExpr = SQL.FTable fTable
                     (fromExpr, None)
                 | Some parent when isInner ->
-                    let fromExpr = SQL.FTable (ann, Some newAlias, tableRef)
+                    let fTable =
+                        { Extra = ann
+                          Alias = Some newAlias
+                          Table = tableRef
+                        } : SQL.FromTable
+                    let fromExpr = SQL.FTable fTable
                     let subEntityCol = SQL.VEColumn { Table = Some { Schema = None; Name = newAlias.Name }; Name = sqlFunSubEntity }
                     let checkExpr = makeCheckExpr subEntityCol layout entityRef
                     (fromExpr, Some checkExpr)
                 | Some parent ->
+                    let fTable = SQL.fromTable tableRef
                     let subEntityCol = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
                     let checkExpr = makeCheckExpr subEntityCol layout entityRef
                     let select =
                         { SQL.emptySingleSelectExpr with
                               Columns = [| SQL.SCAll None |]
-                              From = Some <| SQL.FTable (null, None, tableRef)
+                              From = Some <| SQL.FTable fTable
                               Where = Some checkExpr
                         }
                     let expr = { Extra = ann; CTEs = None; Tree = SQL.SSelect select } : SQL.SelectExpr
@@ -1862,7 +1878,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let compiledAlias = Option.map compileAliasFromName pun
             let newName = Option.defaultValue name pun
             let fromInfo = subentityFromInfo mainEntity selectSig
-            let ret = SQL.FTable (null, compiledAlias, { Schema = None; Name = name' })
+            let fTable =
+                { Extra = null
+                  Alias = compiledAlias
+                  Table = { Schema = None; Name = name' }
+                } : SQL.FromTable
+            let ret = SQL.FTable fTable
             (Map.singleton (compileName newName) fromInfo, ret)
         | FJoin join ->
             // We should redo main entities; this duplication is ugly.

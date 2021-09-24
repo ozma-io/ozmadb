@@ -171,20 +171,16 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
         mapValueExpr mapper
 
     and applyToFromExpr : FromExpr -> FromExpr = function
-        | FTable (:? RealEntityAnnotation as ann, pun, entity) when not ann.IsInner && not ann.AsRoot ->
+        | FTable ({ Extra = :? RealEntityAnnotation as ann } as fTable) when not ann.IsInner && not ann.AsRoot ->
             let accessSchema = Map.find ann.RealEntity.Schema access
             let accessEntity = Map.find ann.RealEntity.Name accessSchema
             match accessEntity with
-            | None -> FTable (ann, pun, entity)
+            | None -> FTable fTable
             | Some restr ->
-                // `pun` is guaranteed to be there for all table queries.
-                let subsel =
-                    { Alias = Option.get pun
-                      Select = restrictionToSelect ann.RealEntity restr
-                      Lateral = false
-                    }
+                // `Alias` is guaranteed to be there for all table queries.
+                let subsel = subSelectExpr (Option.get fTable.Alias) (restrictionToSelect ann.RealEntity restr)
                 FSubExpr subsel
-        | FTable (extra, pun, entity) -> FTable (extra, pun, entity)
+        | FTable fTable -> FTable fTable
         | FJoin join ->
             FJoin
                 { Type = join.Type

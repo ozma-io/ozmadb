@@ -851,7 +851,7 @@ IndexColumn:
 // INSERT
 
 InsertExpr:
-    | MaybeWithExpr INSERT INTO EntityRef ColumnAliases InsertSource { { CTEs = $1; Entity = $4; Fields = $5; Source = $6; Extra = null } }
+    | MaybeWithExpr INSERT INTO FromEntity ColumnAliases InsertSource { { CTEs = $1; Entity = $4; Fields = $5; Source = $6; Extra = ObjectMap.empty } }
 
 InsertSource:
     | DEFAULT VALUES               { ISDefaultValues }
@@ -878,7 +878,7 @@ InsertValue:
 // UPDATE
 
 UpdateExpr:
-    | MaybeWithExpr UPDATE EntityRef SET UpdateAssigns FromClause WhereClause { { CTEs = $1; Entity = $3; Fields = $5; From = $6; Where = $7; Extra = null } }
+    | MaybeWithExpr UPDATE FromEntity SET UpdateAssigns FromClause WhereClause { { CTEs = $1; Entity = $3; Fields = $5; From = $6; Where = $7; Extra = ObjectMap.empty } }
 
 UpdateAssigns:
     | UpdateAssignsList { parseMap "Clashing assignments" $1 }
@@ -894,7 +894,7 @@ UpdateAssign:
 // DELETE
 
 DeleteExpr:
-    | MaybeWithExpr DELETE FROM EntityRef UsingClause WhereClause { { CTEs = $1; Entity = $4; Using = $5; Where = $6; Extra = null } }
+    | MaybeWithExpr DELETE FROM FromEntity UsingClause WhereClause { { CTEs = $1; Entity = $4; Using = $5; Where = $6; Extra = ObjectMap.empty } }
 
 UsingClause:
     |                { None }
