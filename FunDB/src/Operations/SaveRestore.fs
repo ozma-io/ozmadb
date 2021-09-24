@@ -477,26 +477,26 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                 | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.yaml$" [rawSchemaName; rawEntityName; rawTriggerName] ->
                     let ref = { Schema = schemaName; Entity = { Schema = FunQLName rawSchemaName; Name = FunQLName rawEntityName }; Name = FunQLName rawTriggerName }
                     let prettyTriggerMeta : PrettyTriggerMeta = deserializeEntry entry
-                    let (prevMeta, prevProc) = Map.findWithDefault ref (fun () -> (None, "")) encounteredTriggers
+                    let (prevMeta, prevProc) = Map.findWithDefaultThunk ref (fun () -> (None, "")) encounteredTriggers
                     assert (Option.isNone prevMeta)
                     encounteredTriggers <- Map.add ref (Some prettyTriggerMeta, prevProc) encounteredTriggers
                     emptySchemaDump
                 | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.mjs$" [rawSchemaName; rawEntityName; rawTriggerName] ->
                     let ref = { Schema = schemaName; Entity = { Schema = FunQLName rawSchemaName; Name = FunQLName rawEntityName }; Name = FunQLName rawTriggerName }
                     let rawProcedure = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevProc) = Map.findWithDefault ref (fun () -> (None, "")) encounteredTriggers
+                    let (prevMeta, prevProc) = Map.findWithDefaultThunk ref (fun () -> (None, "")) encounteredTriggers
                     encounteredTriggers <- Map.add ref (prevMeta, rawProcedure) encounteredTriggers
                     emptySchemaDump
                 | CIRegex @"^actions/([^/]+)\.yaml$" [rawActionName] ->
                     let ref = { Schema = schemaName; Name = FunQLName rawActionName }
                     let prettyActionMeta : PrettyActionMeta = deserializeEntry entry
-                    let (prevMeta, prevFunc) = Map.findWithDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
+                    let (prevMeta, prevFunc) = Map.findWithDefaultThunk ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
                     encounteredActions <- Map.add ref (prettyActionMeta, prevFunc) encounteredActions
                     emptySchemaDump
                 | CIRegex @"^actions/([^/]+)\.mjs$" [rawActionName] ->
                     let ref = { Schema = schemaName; Name = FunQLName rawActionName }
                     let rawFunc = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevFunc) = Map.findWithDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
+                    let (prevMeta, prevFunc) = Map.findWithDefaultThunk ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
                     encounteredActions <- Map.add ref (prevMeta, rawFunc) encounteredActions
                     emptySchemaDump
                 | CIRegex @"^modules/(.*)$" [rawModuleName] ->
@@ -514,13 +514,13 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                 | CIRegex @"^user_views/([^/]+)\.yaml$" [rawName] ->
                     let ref = { Schema = schemaName; Name = FunQLName rawName }
                     let prettyUvMeta : PrettyUserViewMeta = deserializeEntry entry
-                    let (prevMeta, prevUv) = Map.findWithDefault ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
+                    let (prevMeta, prevUv) = Map.findWithDefaultThunk ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
                     encounteredUserViews <- Map.add ref (prettyUvMeta, prevUv) encounteredUserViews
                     emptySchemaDump
                 | CIRegex @"^user_views/([^/]+)\.funql$" [rawName] ->
                     let ref = { Schema = schemaName; Name = FunQLName rawName }
                     let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevUv) = Map.findWithDefault ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
+                    let (prevMeta, prevUv) = Map.findWithDefaultThunk ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
                     encounteredUserViews <- Map.add ref (prevMeta, rawUv) encounteredUserViews
                     emptySchemaDump
                 | fileName when fileName = extraDefaultAttributesEntry ->
@@ -530,12 +530,12 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                     }
                 | fileName when fileName = userViewsGeneratorMetaEntry ->
                     let prettyGeneratorMeta : PrettyUserViewsGeneratorScriptMeta = deserializeEntry entry
-                    let (prevMeta, prevScript) = Map.findWithDefault schemaName (fun () -> (emptyPrettyUserViewsGeneratorScriptMeta, "")) encounteredUserViewGeneratorScripts
+                    let (prevMeta, prevScript) = Map.findWithDefaultThunk schemaName (fun () -> (emptyPrettyUserViewsGeneratorScriptMeta, "")) encounteredUserViewGeneratorScripts
                     encounteredUserViewGeneratorScripts <- Map.add schemaName (prettyGeneratorMeta, prevScript) encounteredUserViewGeneratorScripts
                     emptySchemaDump
                 | fileName when fileName = userViewsGeneratorEntry ->
                     let script = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevScript) = Map.findWithDefault schemaName (fun () -> (emptyPrettyUserViewsGeneratorScriptMeta, "")) encounteredUserViewGeneratorScripts
+                    let (prevMeta, prevScript) = Map.findWithDefaultThunk schemaName (fun () -> (emptyPrettyUserViewsGeneratorScriptMeta, "")) encounteredUserViewGeneratorScripts
                     encounteredUserViewGeneratorScripts <- Map.add schemaName (prevMeta, script) encounteredUserViewGeneratorScripts
                     emptySchemaDump
                 | fileName -> raisef RestoreSchemaException "Invalid archive entry %O/%s" schemaName fileName

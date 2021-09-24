@@ -58,16 +58,16 @@ let applyRoleUpdate (layout : Layout) (role : ResolvedRole) (query : Query<SQL.U
         | Some flat -> flat
         | _ -> raisef PermissionsEntityException "Access denied to update"
 
-    let getUsedField (extra : obj, expr) =
+    let addUsedRoleField usedDatabase (extra : obj, expr) =
         let colInfo = extra :?> RestrictedColumnInfo
         let field = Map.find colInfo.Name entity.ColumnFields
         let parentEntity = Option.defaultValue tableInfo.Ref field.InheritedFrom
-        addUsedField parentEntity.Schema parentEntity.Name colInfo.Name Map.empty
-    let usedSchemas = query.Expression.Columns |> Map.values |> Seq.map getUsedField |> Seq.fold mergeUsedSchemas Map.empty
+        addUsedField parentEntity.Schema parentEntity.Name colInfo.Name updateUsedField usedDatabase
+    let usedDatabase = query.Expression.Columns |> Map.values |> Seq.fold addUsedRoleField emptyUsedDatabase
 
     let fieldsAccess =
         try
-            let access = filterAccessForUsedSchemas (fun field -> if field.Change then field.Select else OFEFalse) layout role usedSchemas
+            let access = filterAccessForUsedDatabase (fun field -> if field.Change then field.Select else OFEFalse) layout role usedDatabase
             Map.find entity.Root access
         with
         | :? PermissionsApplyException as e -> raisefWithInner PermissionsEntityException e ""

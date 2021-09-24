@@ -146,12 +146,10 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
         let expr =
-            { Table = compileResolvedEntityRef entity.Root
-              Columns = columns
-              Source = SQL.ISValues [| valuesWithSys |]
-              Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
-              Extra = ({ Ref = entityRef } : RestrictedTableInfo)
-            } : SQL.InsertExpr
+            { SQL.insertExpr (compileResolvedEntityRef entity.Root) columns (SQL.ISValues [| valuesWithSys |]) with
+                  Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
+                  Extra = ({ Ref = entityRef } : RestrictedTableInfo)
+            }
         let query =
             { Expression = expr
               Arguments = arguments
@@ -204,12 +202,11 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                 whereId
 
         let expr =
-            { Table = tableRef
-              Columns = columns
-              From = None
-              Where = Some whereExpr
-              Extra = ({ Ref = entityRef } : RestrictedTableInfo)
-            } : SQL.UpdateExpr
+            { SQL.updateExpr tableRef with
+                  Columns = columns
+                  Where = Some whereExpr
+                  Extra = ({ Ref = entityRef } : RestrictedTableInfo)
+            }
         let query =
             { Expression = expr
               Arguments = arguments
@@ -249,10 +246,10 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let tableRef = compileResolvedEntityRef entity.Root
 
         let expr =
-            { Table = tableRef
-              Where = Some whereExpr
-              Extra = ({ Ref = entityRef } : RestrictedTableInfo)
-            } : SQL.DeleteExpr
+            { SQL.deleteExpr tableRef with
+                  Where = Some whereExpr
+                  Extra = ({ Ref = entityRef } : RestrictedTableInfo)
+            }
         let query =
             { Expression = expr
               Arguments = arguments

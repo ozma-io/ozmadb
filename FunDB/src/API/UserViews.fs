@@ -131,7 +131,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                     match rctx.User.Effective.Type with
                     | RTRoot -> ()
                     | RTRole role when role.CanRead -> ()
-                    | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedSchemas
+                    | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedDatabase
                     return Ok { Info = uv.Info
                                 PureAttributes = uv.PureAttributes.Attributes
                                 PureColumnAttributes = uv.PureAttributes.ColumnAttributes
@@ -163,7 +163,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                     let compiled =
                         match getReadRole rctx.User.Effective.Type with
                         | None -> uv.UserView.Compiled
-                        | Some role -> applyRoleViewExpr ctx.Layout role uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
+                        | Some role -> applyRoleViewExpr ctx.Layout role uv.UserView.Compiled.UsedDatabase uv.UserView.Compiled
                     let maybeResolvedChunk =
                         try
                             Ok <| resolveViewExprChunk ctx.Layout compiled chunk
@@ -201,7 +201,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                     let compiled =
                         match getReadRole rctx.User.Effective.Type with
                         | None -> uv.UserView.Compiled
-                        | Some role -> applyRoleViewExpr ctx.Layout role uv.UserView.Compiled.UsedSchemas uv.UserView.Compiled
+                        | Some role -> applyRoleViewExpr ctx.Layout role uv.UserView.Compiled.UsedDatabase uv.UserView.Compiled
 
                     let maybeResolvedChunk =
                         try

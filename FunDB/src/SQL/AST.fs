@@ -920,17 +920,22 @@ and [<NoEquality; NoComparison>] UpdateExpr =
 
 and [<NoEquality; NoComparison>] DeleteExpr =
     { Table : TableRef
+      Using : FromExpr option
       Where : ValueExpr option
       Extra : obj
     } with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
+            let usingStr =
+                match this.Using with
+                | Some f -> sprintf "USING %s" (f.ToSQLString())
+                | None -> ""
             let condExpr =
                 match this.Where with
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
-            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.Table.ToSQLString(); condExpr])
+            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.Table.ToSQLString(); usingStr; condExpr])
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -1095,6 +1100,29 @@ let emptySingleSelectExpr : SingleSelectExpr =
       GroupBy = [||]
       OrderLimit = emptyOrderLimitClause
       Locking = None
+      Extra = null
+    }
+
+let insertExpr (table : TableRef) (columns : (obj * ColumnName)[]) (source : InsertSource) : InsertExpr =
+    { Table = table
+      Columns = columns
+      Source = source
+      Returning = [||]
+      Extra = null
+    }
+
+let updateExpr (table : TableRef) : UpdateExpr =
+    { Table = table
+      Columns = Map.empty
+      From = None
+      Where = None
+      Extra = null
+    }
+
+let deleteExpr (table : TableRef) : DeleteExpr =
+    { Table = table
+      Using = None
+      Where = None
       Extra = null
     }
 

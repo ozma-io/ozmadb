@@ -996,11 +996,15 @@ and [<NoEquality; NoComparison>] DeleteExpr<'e, 'f> when 'e :> IFunQLName and 'f
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
+            let usingStr =
+                match this.Using with
+                | Some f -> sprintf "USING %s" (f.ToFunQLString())
+                | None -> ""
             let condExpr =
                 match this.Where with
                 | Some c -> sprintf "WHERE %s" (c.ToFunQLString())
                 | None -> ""
-            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.Entity.ToFunQLString(); condExpr])
+            sprintf "DELETE FROM %s" (String.concatWithWhitespaces [this.Entity.ToFunQLString(); usingStr; condExpr])
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -1412,39 +1416,125 @@ let funEvents = FunQLName "events"
 
 let systemColumns = Set.ofList [funId; funSubEntity]
 
-type UsedFields = Set<FieldName>
-type UsedEntities = Map<EntityName, UsedFields>
-type UsedSchemas = Map<SchemaName, UsedEntities>
+type UsedField =
+    { Select : bool
+      Update : bool
+      Insert : bool
+    }
 
-let usedEntityFields (ref : ResolvedEntityRef) (usedSchemas : UsedSchemas) : UsedFields option =
-    match Map.tryFind ref.Schema usedSchemas with
-    | None -> None
-    | Some usedEntities -> Map.tryFind ref.Name usedEntities
+let emptyUsedField : UsedField =
+    { Select = false
+      Update = false
+      Insert = false
+    }
 
-let isFieldUsed (ref : ResolvedFieldRef) (usedSchemas : UsedSchemas) : bool =
-    match usedEntityFields ref.Entity usedSchemas with
-    | None -> false
-    | Some usedFields -> Set.contains ref.Name usedFields
+let selectUsedField =
+    { emptyUsedField with Select = true }
 
-let addUsedEntity (schemaName : SchemaName) (entityName : EntityName) (usedSchemas : UsedSchemas) : UsedSchemas =
-    let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
-    let oldEntity = Map.findWithDefault entityName (fun () -> Set.empty) oldSchema
-    Map.add schemaName (Map.add entityName oldEntity oldSchema) usedSchemas
+let updateUsedField =
+    { emptyUsedField with Update = true }
 
-let addUsedEntityRef (ref : ResolvedEntityRef) =
-    addUsedEntity ref.Schema ref.Name
+let unionUsedFields (a : UsedField) (b : UsedField) : UsedField =
+    { Select = a.Select || b.Select
+      Update = a.Update || b.Update
+      Insert = a.Insert || b.Insert
+    }
 
-let addUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldName : FieldName) (usedSchemas : UsedSchemas) : UsedSchemas =
-    let oldSchema = Map.findWithDefault schemaName (fun () -> Map.empty) usedSchemas
-    let oldEntity = Map.findWithDefault entityName (fun () -> Set.empty) oldSchema
-    let newEntity = Set.add fieldName oldEntity
-    Map.add schemaName (Map.add entityName newEntity oldSchema) usedSchemas
+type UsedEntity =
+    { Select : bool
+      Delete : bool
+      Fields : Map<FieldName, UsedField>
+    }
+
+let emptyUsedEntity : UsedEntity =
+    { Select = false
+      Delete = false
+      Fields = Map.empty
+    }
+
+let selectUsedEntity =
+    { emptyUsedEntity with Select = true }
+
+let unionUsedEntities (a : UsedEntity) (b : UsedEntity) : UsedEntity =
+    { Select = a.Select || b.Select
+      Delete = a.Delete || b.Delete
+      Fields = Map.unionWith (fun name -> unionUsedFields) a.Fields b.Fields
+    }
+
+let addUsedEntityField (fieldName : FieldName) (usedField : UsedField) (usedEntity : UsedEntity) =
+    let newField =
+        match Map.tryFind fieldName usedEntity.Fields with
+        | None -> usedField
+        | Some oldField -> unionUsedFields oldField usedField
+    { usedEntity with
+          // Propagate field `SELECT` to entity.
+          Select = usedEntity.Select || usedField.Select
+          Fields = Map.add fieldName newField usedEntity.Fields
+    }
+
+// Making these structs to remove runtime cost of wrapping.
+[<Struct>]
+type UsedSchema =
+    { Entities : Map<EntityName, UsedEntity>
+    }
+
+let emptyUsedSchema : UsedSchema =
+    { Entities = Map.empty
+    }
+
+let unionUsedSchemas (a : UsedSchema) (b : UsedSchema) : UsedSchema =
+    { Entities = Map.unionWith (fun name -> unionUsedEntities) a.Entities b.Entities
+    }
+
+[<Struct>]
+type UsedDatabase =
+    { Schemas : Map<SchemaName, UsedSchema>
+    } with
+    member this.FindEntity (ref : ResolvedEntityRef) =
+        match Map.tryFind ref.Schema this.Schemas with
+        | None -> None
+        | Some schema -> Map.tryFind ref.Name schema.Entities
+
+    member this.FindField (ref : ResolvedEntityRef) (name : FieldName) =
+        match this.FindEntity ref with
+        | None -> None
+        | Some entity -> Map.tryFind name entity.Fields
+
+let emptyUsedDatabase : UsedDatabase =
+    { Schemas = Map.empty
+    }
+
+let unionUsedDatabases (a : UsedDatabase) (b : UsedDatabase) : UsedDatabase =
+    { Schemas = Map.unionWith (fun name -> unionUsedSchemas) a.Schemas b.Schemas
+    }
+
+let addUsedEntity (schemaName : SchemaName) (entityName : EntityName) (usedEntity : UsedEntity) (usedDatabase : UsedDatabase) : UsedDatabase =
+    let oldSchema = Map.findWithDefault schemaName emptyUsedSchema usedDatabase.Schemas
+    let newEntity =
+        match Map.tryFind entityName oldSchema.Entities with
+        | None -> usedEntity
+        | Some oldEntity -> unionUsedEntities oldEntity usedEntity
+    let newSchema =
+        { Entities = Map.add entityName newEntity oldSchema.Entities
+        }
+    { Schemas = Map.add schemaName newSchema usedDatabase.Schemas
+    }
+
+let addUsedEntityRef (ref : ResolvedEntityRef) (usedEntity : UsedEntity) (usedDatabase : UsedDatabase) =
+    addUsedEntity ref.Schema ref.Name usedEntity usedDatabase
+
+let addUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldName : FieldName) (usedField : UsedField) (usedDatabase : UsedDatabase) : UsedDatabase =
+    let oldSchema = Map.findWithDefault schemaName emptyUsedSchema usedDatabase.Schemas
+    let oldEntity = Map.findWithDefault entityName emptyUsedEntity oldSchema.Entities
+    let newEntity = addUsedEntityField fieldName usedField oldEntity
+    let newSchema =
+        { Entities = Map.add entityName newEntity oldSchema.Entities
+        }
+    { Schemas = Map.add schemaName newSchema usedDatabase.Schemas
+    }
 
 let addUsedFieldRef (ref : ResolvedFieldRef) =
     addUsedField ref.Entity.Schema ref.Entity.Name ref.Name
-
-let mergeUsedSchemas : UsedSchemas -> UsedSchemas -> UsedSchemas =
-    Map.unionWith (fun _ -> Map.unionWith (fun _ -> Set.union))
 
 type UsedArguments = Set<Placeholder>
 

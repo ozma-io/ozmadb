@@ -131,7 +131,7 @@ type private NameReplacer () =
             | Some n -> n
             | None ->
                 let trimmed = String.truncate (SQL.sqlIdentifierLength - 12) name
-                let num = Map.findWithDefault trimmed (fun () -> 0) lastIds + 1
+                let num = Map.findWithDefault trimmed 0 lastIds + 1
                 let newName = SQL.SQLName <| sprintf "%s%i" trimmed num
                 lastIds <- Map.add trimmed num lastIds
                 existing <- Map.add name newName existing
@@ -326,7 +326,7 @@ type CompiledViewExpr =
     { Pragmas : CompiledPragmasMap
       AttributesQuery : CompiledAttributesExpr
       Query : Query<SQL.SelectExpr>
-      UsedSchemas : UsedSchemas
+      UsedDatabase : UsedDatabase
       Columns : (ColumnType * SQL.ColumnName)[]
       Domains : Domains
       MainEntity : ResolvedEntityRef option
@@ -701,7 +701,7 @@ type CompiledSingleFrom =
 type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttributes, initialArguments : QueryArguments) =
     // Only compiler can robustly detect used schemas and arguments, accounting for meta columns.
     let mutable arguments = initialArguments
-    let mutable usedSchemas = Map.empty
+    let mutable usedDatabase = emptyUsedDatabase
 
     let replacer = NameReplacer ()
 
@@ -888,10 +888,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         match fieldInfo.Field with
         | RId ->
-            usedSchemas <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedSchemas
+            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name selectUsedField usedDatabase
             (paths0, SQL.VEColumn <| realColumn sqlFunId)
         | RSubEntity ->
-            usedSchemas <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedSchemas
+            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name selectUsedField usedDatabase
 
             match ctx with
             | RCExpr ->
@@ -906,7 +906,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | RCTypeExpr ->
                 (paths0, SQL.VEColumn <| realColumn sqlFunSubEntity)
         | RColumnField col ->
-            usedSchemas <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedSchemas
+            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name selectUsedField usedDatabase
             (paths0, SQL.VEColumn <| realColumn col.ColumnName)
         | RComputedField comp when comp.IsMaterialized && not flags.ForceNoMaterialized ->
             let rootInfo =
@@ -916,7 +916,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     let rootField = Map.find fieldRef.Name rootEntity.ComputedFields |> Result.get
                     Option.get rootField.Root
                 | _ -> Option.get comp.Root
-            usedSchemas <- mergeUsedSchemas rootInfo.UsedSchemas usedSchemas
+            usedDatabase <- unionUsedDatabases rootInfo.UsedDatabase usedDatabase
             (paths0, SQL.VEColumn <| realColumn comp.ColumnName)
         | RComputedField comp ->
             // Right now don't support renamed fields for computed fields.
@@ -971,8 +971,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     (fieldInfo, column)
                 | _ -> failwith "Impossible"
 
-            usedSchemas <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedSchemas
-            usedSchemas <- addUsedEntityRef newEntityRef usedSchemas
+            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name selectUsedField usedDatabase
+            usedDatabase <- addUsedEntityRef newEntityRef selectUsedEntity usedDatabase
 
             let columnName = Option.defaultValue column.ColumnName forcedName
             let pathKey =
@@ -1853,7 +1853,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   MainSubEntity = mainSubEntity
                 }
 
-            usedSchemas <- addUsedEntityRef entityRef usedSchemas
+            usedDatabase <- addUsedEntityRef entityRef selectUsedEntity usedDatabase
 
             (Map.singleton newAlias.Name fromInfo, fromExpr)
         | FEntity { Ref = { Schema = None; Name = name }; Alias = pun } ->
@@ -1966,7 +1966,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     member this.ColumnName name = columnName name
 
-    member this.UsedSchemas = usedSchemas
+    member this.UsedDatabase = usedDatabase
     member this.Arguments = arguments
 
 type private PurityStatus = Pure | RowPure
@@ -2064,7 +2064,7 @@ let rec private flattenDomains : Domains -> FlattenedDomains = function
 
 type CompiledExprInfo =
     { Arguments : QueryArguments
-      UsedSchemas : UsedSchemas
+      UsedDatabase : UsedDatabase
     }
 
 let compileSingleFromExpr (layout : Layout) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : CompiledExprInfo * CompiledSingleFrom =
@@ -2072,7 +2072,7 @@ let compileSingleFromExpr (layout : Layout) (arguments : QueryArguments) (from :
     let ret = compiler.CompileSingleFromExpr from where
     let info =
         { Arguments = compiler.Arguments
-          UsedSchemas = compiler.UsedSchemas
+          UsedDatabase = compiler.UsedDatabase
         }
     (info, ret)
 
@@ -2081,7 +2081,7 @@ let compileSingleFieldExpr (layout : Layout) (flags : ExprCompilationFlags) (arg
     let newExpr = compiler.CompileSingleFieldExpr flags expr
     let info =
         { Arguments = compiler.Arguments
-          UsedSchemas = compiler.UsedSchemas
+          UsedDatabase = compiler.UsedDatabase
         }
     (info, newExpr)
 
@@ -2090,7 +2090,7 @@ let compileSelectExpr (layout : Layout) (arguments : QueryArguments) (viewExpr :
     let (info, select) = compiler.CompileSelectExpr None false viewExpr
     let retInfo =
         { Arguments = compiler.Arguments
-          UsedSchemas = compiler.UsedSchemas
+          UsedDatabase = compiler.UsedDatabase
         }
     (retInfo, select)
 
@@ -2139,7 +2139,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     { Pragmas = Map.mapWithKeys compilePragma viewExpr.Pragmas
       AttributesQuery = attrQuery
       Query = { Expression = expr; Arguments = arguments }
-      UsedSchemas = compiler.UsedSchemas
+      UsedDatabase = compiler.UsedDatabase
       Columns = columnsWithNames
       Domains = domains
       FlattenedDomains = flattenedDomains

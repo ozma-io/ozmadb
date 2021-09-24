@@ -29,29 +29,29 @@ type private AccessCompiler (layout : Layout, role : ResolvedRole, fieldAccesses
             arguments <- newArguments
             Some restriction
 
-    let compileEntityAccess (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedEntities : FunQL.UsedEntities) : EntityAccess =
-        let mapEntity (name : FunQL.EntityName) (usedFields : FunQL.UsedFields) =
+    let compileEntityAccess (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedSchema : FunQL.UsedSchema) : EntityAccess =
+        let mapEntity (name : FunQL.EntityName) (usedEntity : FunQL.UsedEntity) =
             let entity = Map.find name schema.Entities
             let ref = { Schema = schemaName; Name = name } : FunQL.ResolvedEntityRef
             compileRestriction ref entity
 
-        Map.map mapEntity usedEntities
+        Map.map mapEntity usedSchema.Entities
 
-    let compileSchemaAccess (usedSchemas : FunQL.UsedSchemas) : SchemaAccess =
-        let mapSchema (name : FunQL.SchemaName) (usedEntities : FunQL.UsedEntities) =
+    let compileSchemaAccess (usedDatabase : FunQL.UsedDatabase) : SchemaAccess =
+        let mapSchema (name : FunQL.SchemaName) (usedSchema : FunQL.UsedSchema) =
             let schema = Map.find name layout.Schemas
-            compileEntityAccess name schema usedEntities
+            compileEntityAccess name schema usedSchema
 
-        Map.map mapSchema usedSchemas
+        Map.map mapSchema usedDatabase.Schemas
 
     member this.Arguments = arguments
-    member this.CompileSchemaAccess usedSchemas = compileSchemaAccess usedSchemas
+    member this.CompileSchemaAccess usedDatabase = compileSchemaAccess usedDatabase
 
 // Can throw PermissionsApplyException.
-let private compileRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (arguments : QueryArguments) : QueryArguments * SchemaAccess =
-    let filteredAccess = filterAccessForUsedSchemas (fun field -> field.Select) layout role usedSchemas
+let private compileRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedDatabase : FunQL.UsedDatabase) (arguments : QueryArguments) : QueryArguments * SchemaAccess =
+    let filteredAccess = filterAccessForUsedDatabase (fun field -> field.Select) layout role usedDatabase
     let accessCompiler = AccessCompiler (layout, role, filteredAccess, arguments)
-    let access = accessCompiler.CompileSchemaAccess usedSchemas
+    let access = accessCompiler.CompileSchemaAccess usedDatabase
     (accessCompiler.Arguments, access)
 
 type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
@@ -198,20 +198,20 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
     member this.ApplyToSelectExpr = applyToSelectExpr
     member this.ApplyToValueExpr = applyToValueExpr
 
-let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (query : Query<SelectExpr>) : Query<SelectExpr> =
-    let (arguments, access) = compileRoleViewExpr layout role usedSchemas query.Arguments
+let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedDatabase : FunQL.UsedDatabase) (query : Query<SelectExpr>) : Query<SelectExpr> =
+    let (arguments, access) = compileRoleViewExpr layout role usedDatabase query.Arguments
     let applier = PermissionsApplier (layout, access)
     let expression = applier.ApplyToSelectExpr query.Expression
     { Expression = expression
       Arguments = arguments
     }
 
-let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) : unit =
-    let filteredAccess = filterAccessForUsedSchemas (fun field -> field.Select) layout role usedSchemas
+let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedDatabase : FunQL.UsedDatabase) : unit =
+    let filteredAccess = filterAccessForUsedDatabase (fun field -> field.Select) layout role usedDatabase
     ()
 
-let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedSchemas : FunQL.UsedSchemas) (view : CompiledViewExpr) : CompiledViewExpr =
-    let (arguments, access) = compileRoleViewExpr layout role usedSchemas view.Query.Arguments
+let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedDatabase : FunQL.UsedDatabase) (view : CompiledViewExpr) : CompiledViewExpr =
+    let (arguments, access) = compileRoleViewExpr layout role usedDatabase view.Query.Arguments
     let applier = PermissionsApplier (layout, access)
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
     let newQuery =

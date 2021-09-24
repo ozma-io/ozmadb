@@ -37,7 +37,8 @@ let private makeSourceTriggersDatabase (schema : Schema) : SourceTriggersDatabas
             |> Seq.groupBy (fun attrs -> FunQLName attrs.TriggerEntity.Name)
             |> Seq.map makeTriggers
             |> Map.ofSeq
-        (schemaName, { Entities = entities })
+        let schema = { Entities = entities } : SourceTriggersSchema
+        (schemaName, schema)
     let schemas =
         schema.Triggers
         |> Seq.groupBy (fun attrs -> FunQLName attrs.TriggerEntity.Schema.Name)

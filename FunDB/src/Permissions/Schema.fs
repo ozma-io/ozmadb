@@ -38,7 +38,7 @@ let private makeSourceAllowedDatabase (role : Role) : SourceAllowedDatabase =
         role.Entities |>
         Seq.map (fun entity -> (FunQLName entity.Entity.Schema.Name, makeSourceAllowedEntities entity)) |>
         Map.ofSeqWith (fun name -> Map.unionUnique) |>
-        Map.map (fun name entities -> { Entities = entities })
+        Map.map (fun name entities -> { Entities = entities } : SourceAllowedSchema)
     { Schemas = schemas
     }
 

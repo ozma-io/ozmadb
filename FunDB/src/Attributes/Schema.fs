@@ -29,7 +29,9 @@ let private makeSourceAttributesDatabase (schema : Schema) : SourceAttributesDat
             |> Seq.groupBy (fun attrs -> FunQLName attrs.FieldEntity.Name)
             |> Seq.map makeFields
             |> Map.ofSeq
-        (schemaName, { Entities = entities })
+        let schema : SourceAttributesSchema =
+            { Entities = entities }
+        (schemaName, schema)
     let schemas =
         schema.FieldsAttributes
         |> Seq.groupBy (fun attrs -> FunQLName attrs.FieldEntity.Schema.Name)

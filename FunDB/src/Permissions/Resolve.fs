@@ -100,7 +100,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let (exprInfo, usedReferences) = fieldExprUsedReferences layout expr
         if exprInfo.HasAggregates then
             raisef ResolvePermissionsException "Forbidden aggregate function in a restriction"
-        if not allowIds && isFieldUsed { Entity = entityRef; Name = funId } usedReferences.UsedSchemas then
+        if not allowIds && Option.isSome (usedReferences.UsedDatabase.FindField entityRef funId) then
             raisef ResolvePermissionsException "Cannot use id in this restriction"
         optimizeFieldExpr expr
 

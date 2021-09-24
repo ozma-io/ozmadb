@@ -68,7 +68,7 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
             | None -> domain.Query
             | Some r ->
                 try
-                    applyRoleQueryExpr layout r domain.UsedSchemas domain.Query
+                    applyRoleQueryExpr layout r domain.UsedDatabase domain.Query
                 with
                 | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
         let resolvedChunk = genericResolveChunk layout domainColumns chunk
@@ -95,7 +95,7 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
             | None -> domain.Query
             | Some r ->
                 try
-                    applyRoleQueryExpr layout r domain.UsedSchemas domain.Query
+                    applyRoleQueryExpr layout r domain.UsedDatabase domain.Query
                 with
                 | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
         let resolvedChunk = genericResolveChunk layout domainColumns chunk

@@ -24,12 +24,12 @@ type FilteredAllowedDatabase = Map<ResolvedEntityRef, FilteredAllowedEntity>
 let unionFilteredAllowedDatabase = Map.unionWith (fun name -> Map.unionUnique)
 
 type private FieldsAccessAggregator (accessor : AllowedField -> ResolvedOptimizedFieldExpr, layout : Layout, role : ResolvedRole) =
-    let filterDerivedEntity (ref : ResolvedEntityRef) (entity : ResolvedEntity) (usedFields : UsedFields) : ResolvedOptimizedFieldExpr =
+    let filterDerivedEntity (ref : ResolvedEntityRef) (entity : ResolvedEntity) (usedEntity : UsedEntity) : ResolvedOptimizedFieldExpr =
         let flattened =
             match Map.tryFind entity.Root role.Flattened.Entities with
             | Some f -> f
             | None -> raisef PermissionsApplyException "Access denied to entity %O" ref
-        let addRestriction restriction name =
+        let addRestriction restriction (name, field) =
             if name = funId || name = funSubEntity then
                 restriction
             else
@@ -38,42 +38,42 @@ type private FieldsAccessAggregator (accessor : AllowedField -> ResolvedOptimize
                 match Map.tryFind ({ Entity = parentEntity; Name = name } : ResolvedFieldRef) flattened.Fields with
                 | Some r -> andFieldExpr restriction (accessor r)
                 | _ -> raisef PermissionsApplyException "Access denied to select field %O" name
-        let fieldsRestriction = usedFields |> Set.toSeq |> Seq.fold addRestriction OFETrue
+        let fieldsRestriction = usedEntity.Fields |> Map.toSeq |> Seq.fold addRestriction OFETrue
 
         match fieldsRestriction with
         | OFEFalse -> raisef PermissionsApplyException "Access denied to select"
         | _ -> fieldsRestriction
 
-    let filterUsedEntities (schemaName : SchemaName) (schema : ResolvedSchema) (usedEntities : UsedEntities) =
-        let mapEntity (name : EntityName, usedFields : UsedFields) : FilteredAllowedDatabase =
+    let filterUsedSchema (schemaName : SchemaName) (schema : ResolvedSchema) (usedSchema : UsedSchema) =
+        let mapEntity (name : EntityName, usedEntity : UsedEntity) : FilteredAllowedDatabase =
             let entity = Map.find name schema.Entities
             let ref = { Schema = schemaName; Name = name } : ResolvedEntityRef
 
             let child =
                 try
-                    filterDerivedEntity ref entity usedFields
+                    filterDerivedEntity ref entity usedEntity
                 with
                 | e -> raisefWithInner PermissionsApplyException e "Access denied for entity %O" name
 
             Map.singleton entity.Root (Map.singleton ref child)
 
-        usedEntities |> Map.toSeq |> Seq.map mapEntity |> Seq.fold unionFilteredAllowedDatabase Map.empty
+        usedSchema.Entities |> Map.toSeq |> Seq.map mapEntity |> Seq.fold unionFilteredAllowedDatabase Map.empty
 
-    let filterUsedSchemas (usedSchemas : UsedSchemas) : FilteredAllowedDatabase =
-        let mapSchema (name : SchemaName, usedEntities : UsedEntities) =
+    let filterUsedDatabase (usedSchemas : UsedDatabase) : FilteredAllowedDatabase =
+        let mapSchema (name : SchemaName, usedSchema : UsedSchema) =
             let schema = Map.find name layout.Schemas
             try
-                filterUsedEntities name schema usedEntities
+                filterUsedSchema name schema usedSchema
             with
             | e -> raisefWithInner PermissionsApplyException e "Access denied for schema %O" name
 
-        usedSchemas |> Map.toSeq |> Seq.map mapSchema |> Seq.fold unionFilteredAllowedDatabase Map.empty
+        usedSchemas.Schemas |> Map.toSeq |> Seq.map mapSchema |> Seq.fold unionFilteredAllowedDatabase Map.empty
 
-    member this.FilterUsedSchemas usedSchemas = filterUsedSchemas usedSchemas
+    member this.FilterUsedDatabase usedSchemas = filterUsedDatabase usedSchemas
 
-let filterAccessForUsedSchemas (accessor : AllowedField -> ResolvedOptimizedFieldExpr) (layout : Layout) (role : ResolvedRole) (usedSchemas : UsedSchemas) : FilteredAllowedDatabase =
+let filterAccessForUsedDatabase (accessor : AllowedField -> ResolvedOptimizedFieldExpr) (layout : Layout) (role : ResolvedRole) (usedSchemas : UsedDatabase) : FilteredAllowedDatabase =
     let aggregator = FieldsAccessAggregator (accessor, layout, role)
-    aggregator.FilterUsedSchemas usedSchemas
+    aggregator.FilterUsedDatabase usedSchemas
 
 // Rename top-level entities in a restriction expression
 let private renameRestriction (entityRef : EntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =

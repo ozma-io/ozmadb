@@ -22,7 +22,7 @@ type LayoutDomainException (message : string, innerException : Exception, isUser
 // Right now all domains are SQL expressions with `value` and `pun` columns. This may change in future.
 type DomainExpr =
     { Query : Query<SQL.SelectExpr>
-      UsedSchemas : UsedSchemas
+      UsedDatabase : UsedDatabase
       Hash : string
     }
 
@@ -61,10 +61,10 @@ let findDomainForField (layout : Layout) (fieldRef : ResolvedFieldRef) (domains 
             | Some entity -> Map.tryFind fieldRef.Name entity.Fields
 
 // If domain depends on values in local row (that is, will be different for different rows).
-let private hasLocalDependencies (ref : ResolvedFieldRef) (usedSchemas : UsedSchemas) : bool =
-    let localEntity = usedSchemas |> Map.find ref.Entity.Schema |> Map.find ref.Entity.Name
+let private hasLocalDependencies (ref : ResolvedFieldRef) (usedDatabase : UsedDatabase) : bool =
+    let localEntity = usedDatabase.FindEntity ref.Entity |> Option.get
     // We always have at least one field in used local fields: the reference itself. Hence we just check that size is larger than 1.
-    Set.count localEntity > 1
+    Map.count localEntity.Fields > 1
 
 let private makeResultColumn (name : FieldName option) (expr : ResolvedFieldExpr) : ResolvedQueryResult =
     let col =
@@ -147,7 +147,7 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
 let private queryHash (expr : SQL.SelectExpr) : string =
     expr |> string |> Hash.sha1OfString |> String.hexBytes
 
-let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : UsedSchemas * Query<SQL.SelectExpr> =
+let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
     let idExpr = makeSingleFieldExpr refEntityRef { Entity = Some referencedEntityRef; Name = funId }
     let mainExpr = makeSingleFieldExpr refEntityRef { Entity = Some referencedEntityRef; Name = funMain }
     let mainSortColumn =
@@ -182,9 +182,9 @@ let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : 
         { Expression = expr
           Arguments = info.Arguments
         }
-    (info.UsedSchemas, query)
+    (info.UsedDatabase, query)
 
-let private compileGenericReferenceOptionsSelect (layout : Layout) (refEntityRef : ResolvedEntityRef) (where : ResolvedFieldExpr option) : UsedSchemas * Query<SQL.SelectExpr> =
+let private compileGenericReferenceOptionsSelect (layout : Layout) (refEntityRef : ResolvedEntityRef) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
     let fromEntity =
         { Alias = Some referencedName
           Ref = relaxEntityRef refEntityRef
@@ -193,7 +193,7 @@ let private compileGenericReferenceOptionsSelect (layout : Layout) (refEntityRef
     let from = FEntity fromEntity
     compileReferenceOptionsSelectFrom layout refEntityRef emptyArguments from where
 
-let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRef : ResolvedEntityRef) (refEntityRef : ResolvedEntityRef) (extraWhere : ResolvedFieldExpr option) : UsedSchemas * Query<SQL.SelectExpr> =
+let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRef : ResolvedEntityRef) (refEntityRef : ResolvedEntityRef) (extraWhere : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
     let rowFromEntity =
         { Alias = Some rowName
           Ref = relaxEntityRef entityRef
@@ -247,10 +247,10 @@ type private DomainsBuilder (layout : Layout) =
         match Map.tryFind refEntityRef fullSelectsCache with
         | Some cached -> cached
         | None ->
-            let (usedSchemas, query) = compileGenericReferenceOptionsSelect layout refEntityRef None
+            let (usedDatabase, query) = compileGenericReferenceOptionsSelect layout refEntityRef None
             let ret =
                 { Query = query
-                  UsedSchemas = usedSchemas
+                  UsedDatabase = usedDatabase
                   Hash = queryHash query.Expression
                 }
             fullSelectsCache <- Map.add refEntityRef ret fullSelectsCache
@@ -260,12 +260,12 @@ type private DomainsBuilder (layout : Layout) =
         let (rowSpecificChecks, genericChecks) =
             entity.CheckConstraints
             |> Map.values
-            |> Seq.filter (fun constr -> isFieldUsed fieldRef constr.UsedSchemas)
-            |> Seq.partition (fun constr -> hasLocalDependencies fieldRef constr.UsedSchemas)
+            |> Seq.filter (fun constr -> constr.UsedDatabase.FindField fieldRef.Entity fieldRef.Name |> Option.isSome)
+            |> Seq.partition (fun constr -> hasLocalDependencies fieldRef constr.UsedDatabase)
 
-        let mergeChecks (usedSchemas1 : UsedSchemas, check1 : ResolvedFieldExpr) (usedSchemas2 : UsedSchemas, check2 : ResolvedFieldExpr) = (mergeUsedSchemas usedSchemas1 usedSchemas2, FEAnd (check1, check2))
-        let buildCheck (checks : ResolvedCheckConstraint seq) : UsedSchemas * ResolvedFieldExpr =
-            checks |> Seq.map (fun constr -> (constr.UsedSchemas, renameDomainCheck refEntityRef fieldRef.Name constr.Expression)) |> Seq.fold1 mergeChecks
+        let mergeChecks (usedDatabase1 : UsedDatabase, check1 : ResolvedFieldExpr) (usedDatabase2 : UsedDatabase, check2 : ResolvedFieldExpr) = (unionUsedDatabases usedDatabase1 usedDatabase2, FEAnd (check1, check2))
+        let buildCheck (checks : ResolvedCheckConstraint seq) : UsedDatabase * ResolvedFieldExpr =
+            checks |> Seq.map (fun constr -> (constr.UsedDatabase, renameDomainCheck refEntityRef fieldRef.Name constr.Expression)) |> Seq.fold1 mergeChecks
 
         let genericCheck =
             if Seq.isEmpty genericChecks then
@@ -275,10 +275,10 @@ type private DomainsBuilder (layout : Layout) =
         let genericExpr =
             match genericCheck with
             | None -> buildFullSelect refEntityRef
-            | Some (usedSchemas, check) ->
-                let (selectUsedSchemas, query) = compileGenericReferenceOptionsSelect layout refEntityRef (Some check)
+            | Some (usedDatabase, check) ->
+                let (selectUsedDatabase, query) = compileGenericReferenceOptionsSelect layout refEntityRef (Some check)
                 { Query = query
-                  UsedSchemas = mergeUsedSchemas usedSchemas selectUsedSchemas
+                  UsedDatabase = unionUsedDatabases usedDatabase selectUsedDatabase
                   Hash = queryHash query.Expression
                 }
         let rowSpecificExpr =
@@ -286,14 +286,14 @@ type private DomainsBuilder (layout : Layout) =
                 None
             else
                 let rowSpecificPair = buildCheck rowSpecificChecks
-                let (usedSchemas, fullCheck) =
+                let (usedDatabase, fullCheck) =
                     match genericCheck with
                     | None -> rowSpecificPair
                     | Some pair -> mergeChecks rowSpecificPair pair
-                let (selectUsedSchemas, query) = compileRowSpecificReferenceOptionsSelect layout fieldRef.Entity refEntityRef (Some fullCheck)
+                let (selectUsedDatabase, query) = compileRowSpecificReferenceOptionsSelect layout fieldRef.Entity refEntityRef (Some fullCheck)
                 Some
                     { Query = query
-                      UsedSchemas = mergeUsedSchemas usedSchemas selectUsedSchemas
+                      UsedDatabase = unionUsedDatabases usedDatabase selectUsedDatabase
                       Hash = queryHash query.Expression
                     }
 

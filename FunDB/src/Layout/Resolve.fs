@@ -551,7 +551,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           Type = exprType
           InheritedFrom = None
           IsLocal = expr.Info.IsLocal
-          UsedSchemas = expr.References.UsedSchemas
+          UsedDatabase = expr.References.UsedDatabase
           AllowBroken = comp.Source.AllowBroken
           HashName = comp.HashName
           ColumnName = comp.ColumnName
@@ -598,7 +598,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         if not <| Set.isEmpty expr.References.UsedArguments then
             raisef ResolveLayoutException "Arguments are not allowed here"
         { Expression = expr.Expr
-          UsedSchemas = expr.References.UsedSchemas
+          UsedDatabase = expr.References.UsedDatabase
           IsLocal = expr.Info.IsLocal
           HashName = makeHashName constrName
         }
@@ -819,14 +819,14 @@ type private Phase3Resolver (layout : Layout) =
             comp
         else
             let mutable isLocal = true
-            let mutable usedSchemas = Map.empty
+            let mutable usedDatabase = emptyUsedDatabase
 
             let getCaseType (case : VirtualFieldCase, currComp : ResolvedComputedField) =
                 if currComp.IsMaterialized <> comp.IsMaterialized then
                   raisef ResolveLayoutException "Virtual computed fields cannot be partially materialized: %O" fieldRef
                 if not currComp.IsLocal then
                     isLocal <- false
-                usedSchemas <- mergeUsedSchemas currComp.UsedSchemas usedSchemas
+                usedDatabase <- unionUsedDatabases currComp.UsedDatabase usedDatabase
                 comp.Type
             let caseTypes = computedFieldCases layout ObjectMap.empty fieldRef comp |> Seq.map getCaseType
 
@@ -835,7 +835,7 @@ type private Phase3Resolver (layout : Layout) =
             | Some typ ->
                 let root =
                     { IsLocal = isLocal
-                      UsedSchemas = usedSchemas
+                      UsedDatabase = usedDatabase
                       Type = typ
                     }
                 { comp with Root = Some root }

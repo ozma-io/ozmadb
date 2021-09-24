@@ -16,11 +16,6 @@ let ofSeqWith (resolve : 'k -> 'v -> 'v -> 'v) (items : seq<'k * 'v>) : Map<'k, 
 let ofSeqUnique (items : seq<'k * 'v>) : Map<'k, 'v> =
     ofSeqWith (fun k v1 v2 -> failwithf "Key '%O' already exists" k) items
 
-let getWithDefault (k : 'k) (def : 'v) (m : Map<'k, 'v>) : 'v =
-    match Map.tryFind k m with
-    | Some v -> v
-    | None -> def
-
 let mapTask (f : 'k -> 'a -> Task<'b>) (m : Map<'k, 'a>) : Task<Map<'k, 'b>> =
     m |> Map.toSeq |> Seq.mapTask (fun (k, v) -> Task.map (fun nv -> (k, nv)) (f k v)) |> Task.map Map.ofSeq
 
@@ -107,7 +102,12 @@ let traverseResult (func : 'k -> 'a -> Result<'b, 'e>) (vals : Map<'k, 'a>) : Re
     | Some (_, err) -> Error <| Result.getError err
     | None -> Ok <| Map.map (fun key -> Result.get) res
 
-let findWithDefault (k : 'k) (def : unit -> 'v) (vals : Map<'k, 'v>) : 'v =
+let findWithDefault (k : 'k) (def : 'v) (vals : Map<'k, 'v>) : 'v =
+    match Map.tryFind k vals with
+    | None -> def
+    | Some v -> v
+
+let findWithDefaultThunk (k : 'k) (def : unit -> 'v) (vals : Map<'k, 'v>) : 'v =
     match Map.tryFind k vals with
     | None -> def ()
     | Some v -> v

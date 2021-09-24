@@ -45,7 +45,7 @@ type ResolvedUniqueConstraint =
 type ResolvedCheckConstraint =
     { Expression : ResolvedFieldExpr
       IsLocal : bool
-      UsedSchemas : UsedSchemas // Needed for domains.
+      UsedDatabase : UsedDatabase // Needed for domains.
       HashName : HashName // Guaranteed to be unique in an entity.
     }
 
@@ -92,7 +92,7 @@ type IComputedFieldBits =
 [<NoEquality; NoComparison>]
 type RootComputedField =
     { Type : ResolvedFieldType
-      UsedSchemas : UsedSchemas
+      UsedDatabase : UsedDatabase
       IsLocal : bool
     }
 
@@ -107,7 +107,7 @@ type ResolvedComputedField =
       IsMaterialized : bool
       // These don't take virtual field cases into account.
       Type : ResolvedFieldType option // `None` means unknown type.
-      UsedSchemas : UsedSchemas
+      UsedDatabase : UsedDatabase
       IsLocal : bool
       // But this one does.
       Root : RootComputedField option

@@ -10,7 +10,7 @@ module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type UsedReferences =
-    { UsedSchemas : UsedSchemas
+    { UsedDatabase : UsedDatabase
       UsedArguments : UsedArguments
       HasRestrictedEntities : bool
     }
@@ -35,7 +35,7 @@ let private unionExprInfo (a : ExprInfo) (b : ExprInfo) =
 
 type private UsedReferencesBuilder (layout : ILayoutBits) =
     let mutable usedArguments : UsedArguments = Set.empty
-    let mutable usedSchemas : UsedSchemas = Map.empty
+    let mutable usedDatabase : UsedDatabase = emptyUsedDatabase
     let mutable hasRestrictedEntities = false
 
     let rec addField (extra : ObjectMap) (ref : ResolvedFieldRef) (field : ResolvedFieldInfo) : ExprInfo =
@@ -50,7 +50,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             else
                 info
         | _ ->
-            usedSchemas <- addUsedFieldRef ref usedSchemas
+            usedDatabase <- addUsedFieldRef ref selectUsedField usedDatabase
             emptyExprInfo
 
     and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) (asRoot : bool) : (ResolvedEntityRef * PathArrow) list -> ExprInfo = function
@@ -59,7 +59,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             let field = entity.FindField ref.Name |> Option.get
             addField extra ref field
         | (entityRef, arrow) :: paths ->
-            usedSchemas <- addUsedFieldRef ref usedSchemas
+            usedDatabase <- addUsedFieldRef ref selectUsedField usedDatabase
             if not asRoot then
                 hasRestrictedEntities <- true
             let info = buildForPath extra { Entity = entityRef; Name = arrow.Name } arrow.AsRoot paths
@@ -170,14 +170,14 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
     member this.BuildForSelectExpr expr = buildForSelectExpr expr
     member this.BuildForFieldExpr expr = buildForFieldExpr expr
 
-    member this.UsedSchemas = usedSchemas
+    member this.UsedDatabase = usedDatabase
     member this.UsedArguments = usedArguments
     member this.HasRestrictedEntities = hasRestrictedEntities
 
 let selectExprUsedReferences (layout : ILayoutBits) (expr : ResolvedSelectExpr) : UsedReferences =
     let builder = UsedReferencesBuilder (layout)
     builder.BuildForSelectExpr expr
-    { UsedSchemas = builder.UsedSchemas
+    { UsedDatabase = builder.UsedDatabase
       UsedArguments = builder.UsedArguments
       HasRestrictedEntities = builder.HasRestrictedEntities
     }
@@ -186,7 +186,7 @@ let fieldExprUsedReferences (layout : ILayoutBits) (expr : ResolvedFieldExpr) : 
     let builder = UsedReferencesBuilder (layout)
     let info = builder.BuildForFieldExpr expr
     let ret =
-        { UsedSchemas = builder.UsedSchemas
+        { UsedDatabase = builder.UsedDatabase
           UsedArguments = builder.UsedArguments
           HasRestrictedEntities = builder.HasRestrictedEntities
         }

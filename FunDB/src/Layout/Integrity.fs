@@ -1016,12 +1016,11 @@ let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : Resolve
     let updateId = { Table = Some tableRef; Name = sqlFunId } : SQL.ColumnRef
     let joinedUpdateId = { Table = Some <| compileRenamedResolvedEntityRef fieldRef.Entity; Name = sqlFunId } : SQL.ColumnRef
     let joinSame = SQL.VEBinaryOp (SQL.VEColumn updateId, SQL.BOEq, SQL.VEColumn joinedUpdateId)
-    { Table = compileResolvedEntityRef entity.Root
-      Columns = Map.singleton comp.ColumnName (null, compiledResult)
-      From = Some compiledFrom
-      Where = Some joinSame
-      Extra = null
-    } : SQL.UpdateExpr
+    { SQL.updateExpr (compileResolvedEntityRef entity.Root) with
+          Columns = Map.singleton comp.ColumnName (null, compiledResult)
+          From = Some compiledFrom
+          Where = Some joinSame
+    }
 
 let private compileMaterializedFieldBulkStore (layout : Layout) (fieldRef : ResolvedFieldRef) (expr : ResolvedFieldExpr) : SQL.UpdateExpr =
     let entity = layout.FindEntity fieldRef.Entity |> Option.get
