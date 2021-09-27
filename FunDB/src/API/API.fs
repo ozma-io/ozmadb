@@ -9,28 +9,28 @@ open FunWithFlags.FunDB.API.Permissions
 open FunWithFlags.FunDB.API.Domains
 
 type FunDBAPI (rctx : IRequestContext) as this =
-    let uv = UserViewsAPI this
-    let entities = EntitiesAPI this
-    let saveRestore = SaveRestoreAPI this
-    let actions = ActionsAPI this
-    let permissions = PermissionsAPI this
-    let domains = DomainsAPI this
+    let uv = lazy (UserViewsAPI this)
+    let entities = lazy (EntitiesAPI this)
+    let saveRestore = lazy (SaveRestoreAPI this)
+    let actions = lazy (ActionsAPI this)
+    let permissions = lazy (PermissionsAPI this)
+    let domains = lazy (DomainsAPI this)
 
     do
         rctx.Context.SetAPI this
 
-    member this.UserViews = uv
-    member this.Entities = entities
-    member this.SaveRestore = saveRestore
-    member this.Actions = actions
-    member this.Permissions = permissions
-    member this.Domains = domains
+    member this.UserViews = uv.Value
+    member this.Entities = entities.Value
+    member this.SaveRestore = saveRestore.Value
+    member this.Actions = actions.Value
+    member this.Permissions = permissions.Value
+    member this.Domains = domains.Value
 
     interface IFunDBAPI with
         member this.Request = rctx
-        member this.UserViews = uv :> IUserViewsAPI
-        member this.Entities = entities :> IEntitiesAPI
-        member this.SaveRestore = saveRestore :> ISaveRestoreAPI
-        member this.Actions = actions :> IActionsAPI
-        member this.Permissions = permissions :> IPermissionsAPI
-        member this.Domains = domains :> IDomainsAPI
+        member this.UserViews = uv.Value :> IUserViewsAPI
+        member this.Entities = entities.Value :> IEntitiesAPI
+        member this.SaveRestore = saveRestore.Value :> ISaveRestoreAPI
+        member this.Actions = actions.Value :> IActionsAPI
+        member this.Permissions = permissions.Value :> IPermissionsAPI
+        member this.Domains = domains.Value :> IDomainsAPI

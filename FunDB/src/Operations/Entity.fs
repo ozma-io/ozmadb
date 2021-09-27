@@ -105,6 +105,13 @@ type private ValueColumn =
 
 let private fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.DefaultValue || field.IsNullable
 
+let private realEntityAnnotation (entityRef : ResolvedEntityRef) : RealEntityAnnotation =
+    { RealEntity = entityRef
+      FromPath = false
+      IsInner = true
+      AsRoot = false
+    }
+
 let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (comments : string option) (rawArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<int> =
     task {
         let getValue (fieldName : FieldName, field : ResolvedColumnField) =
@@ -117,7 +124,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                     { Placeholder = PLocal fieldName
                       Argument = { requiredArgument field.FieldType with Optional = isOptional }
                       Column = field.ColumnName
-                      Extra = ({ Name = fieldName } : RestrictedColumnInfo)
+                      Extra = ({ Name = fieldName } : RealFieldAnnotation)
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
@@ -149,7 +156,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let expr =
             { SQL.insertExpr opTable columns (SQL.ISValues [| valuesWithSys |]) with
                   Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
-                  Extra = ({ Ref = entityRef } : RestrictedTableInfo)
+                  Extra = realEntityAnnotation entityRef
             }
         let query =
             { Expression = expr
@@ -181,7 +188,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                     { Placeholder = PLocal fieldName
                       Argument = { requiredArgument field.FieldType with Optional = fieldIsOptional field }
                       Column = field.ColumnName
-                      Extra = ({ Name = fieldName } : RestrictedColumnInfo)
+                      Extra = ({ Name = fieldName } : RealFieldAnnotation)
                     }
 
         let entity = layout.FindEntity entityRef |> Option.get
@@ -207,7 +214,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             { SQL.updateExpr opTable with
                   Columns = columns
                   Where = Some whereExpr
-                  Extra = ({ Ref = entityRef } : RestrictedTableInfo)
+                  Extra = realEntityAnnotation entityRef
             }
         let query =
             { Expression = expr
@@ -251,7 +258,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
         let expr =
             { SQL.deleteExpr opTable with
                   Where = Some whereExpr
-                  Extra = ({ Ref = entityRef } : RestrictedTableInfo)
+                  Extra = realEntityAnnotation entityRef
             }
         let query =
             { Expression = expr

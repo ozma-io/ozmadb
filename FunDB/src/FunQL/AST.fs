@@ -1442,11 +1442,14 @@ let emptyUsedField : UsedField =
       Insert = false
     }
 
-let selectUsedField =
+let usedFieldSelect =
     { emptyUsedField with Select = true }
 
-let updateUsedField =
+let usedFieldUpdate =
     { emptyUsedField with Update = true }
+
+let usedFieldInsert =
+    { emptyUsedField with Insert = true }
 
 let unionUsedFields (a : UsedField) (b : UsedField) : UsedField =
     { Select = a.Select || b.Select
@@ -1456,21 +1459,27 @@ let unionUsedFields (a : UsedField) (b : UsedField) : UsedField =
 
 type UsedEntity =
     { Select : bool
+      Insert : bool
       Delete : bool
       Fields : Map<FieldName, UsedField>
     }
 
 let emptyUsedEntity : UsedEntity =
     { Select = false
+      Insert = false
       Delete = false
       Fields = Map.empty
     }
 
-let selectUsedEntity =
+let usedEntitySelect : UsedEntity =
     { emptyUsedEntity with Select = true }
+
+let usedEntityInsert =
+    { emptyUsedEntity with Insert = true }
 
 let unionUsedEntities (a : UsedEntity) (b : UsedEntity) : UsedEntity =
     { Select = a.Select || b.Select
+      Insert = a.Insert || b.Insert
       Delete = a.Delete || b.Delete
       Fields = Map.unionWith (fun name -> unionUsedFields) a.Fields b.Fields
     }
@@ -1482,6 +1491,7 @@ let addUsedEntityField (fieldName : FieldName) (usedField : UsedField) (usedEnti
         | Some oldField -> unionUsedFields oldField usedField
     { usedEntity with
           // Propagate field `SELECT` to entity.
+          Insert = usedEntity.Insert || usedField.Insert
           Select = usedEntity.Select || usedField.Select
           Fields = Map.add fieldName newField usedEntity.Fields
     }

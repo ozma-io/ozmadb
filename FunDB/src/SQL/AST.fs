@@ -927,6 +927,7 @@ and [<NoEquality; NoComparison>] UpdateExpr =
       Columns : Map<ColumnName, obj * ValueExpr> // obj is extra metadata
       From : FromExpr option
       Where : ValueExpr option
+      Returning : SelectedColumn[]
       Extra : obj
     } with
         override this.ToString () = this.ToSQLString()
@@ -944,8 +945,14 @@ and [<NoEquality; NoComparison>] UpdateExpr =
                 match this.Where with
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
+            let returningStr =
+                if Array.isEmpty this.Returning then
+                    ""
+                else
+                    let resultsStr = this.Returning |> Seq.map toSQLString |> String.concat ", "
+                    sprintf "RETURNING %s" resultsStr
             let updateStr = sprintf "UPDATE %s SET %s" (this.Table.ToSQLString()) valuesExpr
-            String.concatWithWhitespaces [ctesStr; updateStr; fromStr; condExpr]
+            String.concatWithWhitespaces [ctesStr; updateStr; fromStr; condExpr; returningStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -955,6 +962,7 @@ and [<NoEquality; NoComparison>] DeleteExpr =
       Table : OperationTable
       Using : FromExpr option
       Where : ValueExpr option
+      Returning : SelectedColumn[]
       Extra : obj
     } with
         override this.ToString () = this.ToSQLString()
@@ -969,8 +977,14 @@ and [<NoEquality; NoComparison>] DeleteExpr =
                 match this.Where with
                 | Some c -> sprintf "WHERE %s" (c.ToSQLString())
                 | None -> ""
+            let returningStr =
+                if Array.isEmpty this.Returning then
+                    ""
+                else
+                    let resultsStr = this.Returning |> Seq.map toSQLString |> String.concat ", "
+                    sprintf "RETURNING %s" resultsStr
             let deleteStr = sprintf "DELETE FROM %s" (this.Table.ToSQLString())
-            String.concatWithWhitespaces [ctesStr; deleteStr; usingStr; condExpr]
+            String.concatWithWhitespaces [ctesStr; deleteStr; usingStr; condExpr; returningStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -1153,6 +1167,7 @@ let updateExpr (table : OperationTable) : UpdateExpr =
       Columns = Map.empty
       From = None
       Where = None
+      Returning = [||]
       Extra = null
     }
 
@@ -1161,6 +1176,7 @@ let deleteExpr (table : OperationTable) : DeleteExpr =
       Table = table
       Using = None
       Where = None
+      Returning = [||]
       Extra = null
     }
 

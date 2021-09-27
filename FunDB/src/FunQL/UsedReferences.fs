@@ -50,7 +50,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             else
                 info
         | _ ->
-            usedDatabase <- addUsedFieldRef ref selectUsedField usedDatabase
+            usedDatabase <- addUsedFieldRef ref usedFieldSelect usedDatabase
             emptyExprInfo
 
     and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) (asRoot : bool) : (ResolvedEntityRef * PathArrow) list -> ExprInfo = function
@@ -59,7 +59,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             let field = entity.FindField ref.Name |> Option.get
             addField extra ref field
         | (entityRef, arrow) :: paths ->
-            usedDatabase <- addUsedFieldRef ref selectUsedField usedDatabase
+            usedDatabase <- addUsedFieldRef ref usedFieldSelect usedDatabase
             if not asRoot then
                 hasRestrictedEntities <- true
             let info = buildForPath extra { Entity = entityRef; Name = arrow.Name } arrow.AsRoot paths

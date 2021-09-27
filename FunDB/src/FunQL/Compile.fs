@@ -482,6 +482,10 @@ type RealEntityAnnotation =
       AsRoot : bool
     }
 
+type RealFieldAnnotation =
+    { Name : FieldName
+    }
+
 let private fromToEntitiesMap : FromMap -> FromEntitiesMap = Map.mapMaybe (fun name info -> info.Entity)
 
 type private CTEBindings = Map<SQL.TableName, SelectInfo>
@@ -892,7 +896,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
           MainSubEntity = mainSubEntity
         }
 
-    let compileOperationEntity (opEntity : ResolvedOperationEntity) : ResolvedEntity * FromMap * SQL.OperationTable =
+    let compileOperationEntity (opEntity : ResolvedOperationEntity) : SQL.TableName * FromInfo * SQL.OperationTable =
         let entityRef = tryResolveEntityRef opEntity.Ref |> Option.get
         let entity = getEntityByRef entityRef
 
@@ -950,9 +954,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               MainSubEntity = None
             }
 
-        usedDatabase <- addUsedEntityRef entityRef selectUsedEntity usedDatabase
+        usedDatabase <- addUsedEntityRef entityRef usedEntitySelect usedDatabase
 
-        (entity, Map.singleton newAlias fromInfo, fTable)
+        (newAlias, fromInfo, fTable)
 
     let rec compileRef (flags : ExprCompilationFlags) (ctx : ReferenceContext) (extra : ObjectMap) (paths0 : JoinPaths) (tableRef : SQL.TableRef option) (fieldRef : ResolvedFieldRef) (forcedName : SQL.ColumnName option) : JoinPaths * SQL.ValueExpr =
         let realColumn name : SQL.ColumnRef =
@@ -967,10 +971,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         match fieldInfo.Field with
         | RId ->
-            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name selectUsedField usedDatabase
+            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedFieldSelect usedDatabase
             (paths0, SQL.VEColumn <| realColumn sqlFunId)
         | RSubEntity ->
-            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name selectUsedField usedDatabase
+            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedFieldSelect usedDatabase
 
             match ctx with
             | RCExpr ->
@@ -985,7 +989,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | RCTypeExpr ->
                 (paths0, SQL.VEColumn <| realColumn sqlFunSubEntity)
         | RColumnField col ->
-            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name selectUsedField usedDatabase
+            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedFieldSelect usedDatabase
             (paths0, SQL.VEColumn <| realColumn col.ColumnName)
         | RComputedField comp when comp.IsMaterialized && not flags.ForceNoMaterialized ->
             let rootInfo =
@@ -1050,8 +1054,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     (fieldInfo, column)
                 | _ -> failwith "Impossible"
 
-            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name selectUsedField usedDatabase
-            usedDatabase <- addUsedEntityRef newEntityRef selectUsedEntity usedDatabase
+            usedDatabase <- addUsedField fieldRef.Entity.Schema fieldRef.Entity.Name fieldInfo.Name usedFieldSelect usedDatabase
+            usedDatabase <- addUsedEntityRef newEntityRef usedEntitySelect usedDatabase
 
             let columnName = Option.defaultValue column.ColumnName forcedName
             let pathKey =
@@ -1938,7 +1942,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   MainSubEntity = mainSubEntity
                 }
 
-            usedDatabase <- addUsedEntityRef entityRef selectUsedEntity usedDatabase
+            usedDatabase <- addUsedEntityRef entityRef usedEntitySelect usedDatabase
 
             (Map.singleton newAlias.Name fromInfo, fromExpr)
         | FEntity { Ref = { Schema = None; Name = name }; Alias = pun } ->
@@ -2011,30 +2015,39 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let fromInfo = subentityFromInfo mainEntity info
             (Map.singleton compiledAlias.Name fromInfo, ret)
 
-    let compileInsertValue (cteBindings : CTEBindings) : ResolvedInsertValue -> SQL.InsertValue = function
+    and compileInsertValue (cteBindings : CTEBindings) : ResolvedInsertValue -> SQL.InsertValue = function
         | IVDefault -> SQL.IVDefault
         | IVValue expr ->
             let (paths, newExpr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings emptyJoinPaths expr
             assert (Map.isEmpty paths.Map)
             SQL.IVValue newExpr
 
-    let compileInsertExpr (flags : SelectFlags) (cteBindings : CTEBindings) (expr : ResolvedInsertExpr) : SelectInfo * SQL.InsertExpr =
+    and compileInsertExpr (flags : SelectFlags) (cteBindings : CTEBindings) (insert : ResolvedInsertExpr) : SelectInfo * SQL.InsertExpr =
         let (cteBindings, ctes) =
-            match expr.CTEs with
+            match insert.CTEs with
             | None -> (cteBindings, None)
             | Some ctes ->
                 let (bindings, newCtes) = compileCommonTableExprs flags cteBindings ctes
                 (bindings, Some newCtes)
 
-        let (entity, fromMap, opTable) = compileOperationEntity expr.Entity
+        let entityRef = tryResolveEntityRef insert.Entity.Ref |> Option.get
+        let entity = getEntityByRef entityRef
+        let (opAlias, opInfo, opTable) = compileOperationEntity insert.Entity
+
+        let mutable usedFields = Map.empty
 
         let compileField fieldName =
             let field = Map.find fieldName entity.ColumnFields
-            (null, field.ColumnName)
-        let columns = Array.map compileField expr.Fields
+            let extra = { Name = fieldName } : RealFieldAnnotation
+            usedFields <- Map.add fieldName usedFieldUpdate usedFields
+            (extra :> obj, field.ColumnName)
+        let columns = Array.map compileField insert.Fields
+
+        let usedEntity = { emptyUsedEntity with Fields = usedFields }
+        usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
 
         let source =
-            match expr.Source with
+            match insert.Source with
             | ISDefaultValues -> SQL.ISDefaultValues
             | ISValues vals -> SQL.ISValues <| Array.map (Array.map (compileInsertValue cteBindings)) vals
             | ISSelect select ->
@@ -2049,6 +2062,68 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               Returning = [||]
               Extra = null
             } : SQL.InsertExpr
+        (emptySelectInfo, ret)
+
+    and compileUpdateExpr (flags : SelectFlags) (cteBindings : CTEBindings) (update : ResolvedUpdateExpr) : SelectInfo * SQL.UpdateExpr =
+        let (cteBindings, ctes) =
+            match update.CTEs with
+            | None -> (cteBindings, None)
+            | Some ctes ->
+                let (bindings, newCtes) = compileCommonTableExprs flags cteBindings ctes
+                (bindings, Some newCtes)
+
+        let entityRef = tryResolveEntityRef update.Entity.Ref |> Option.get
+        let entity = getEntityByRef entityRef
+        let (opAlias, opInfo, opTable) = compileOperationEntity update.Entity
+        let fromMap = Map.singleton opAlias opInfo
+
+        let (fromMap, from) =
+            match update.From with
+            | Some from ->
+                let (newFromMap, newFrom) = compileFromExpr cteBindings flags.MainEntity true from
+                let fromMap = Map.unionUnique fromMap newFromMap
+                (fromMap, Some newFrom)
+            | None -> (fromMap, None)
+
+        let mutable usedFields = Map.empty
+        let mutable paths = emptyJoinPaths
+
+        let compileField fieldName expr =
+            let field = Map.find fieldName entity.ColumnFields
+            let extra = { Name = fieldName } : RealFieldAnnotation
+            let (newPaths, newExpr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
+            paths <- newPaths
+            usedFields <- Map.add fieldName usedFieldUpdate usedFields
+            (field.ColumnName, (extra :> obj, newExpr))
+        let columns = Map.mapWithKeys compileField update.Fields
+
+        let usedEntity = { emptyUsedEntity with Fields = usedFields }
+        usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
+
+        let where =
+            match update.Where with
+            | None -> None
+            | Some where ->
+                let (newPaths, where) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths where
+                paths <- newPaths
+                Some where
+
+        // If there are any join paths, we need to do a self-join first, because there is no way to do a left join with modified table in UPDATEs.
+        let from =
+            if Map.isEmpty paths.Map then
+                from
+            else
+                from
+
+        let ret =
+            { CTEs = ctes
+              Table = opTable
+              Columns = columns
+              Where = where
+              From = from
+              Returning = [||]
+              Extra = null
+            } : SQL.UpdateExpr
         (emptySelectInfo, ret)
 
     member this.CompileSingleFromExpr (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : CompiledSingleFrom =
