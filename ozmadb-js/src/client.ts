@@ -19,7 +19,16 @@ export class FunDBError extends Error {
 }
 
 const fetchFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Response> => {
-  const response = await fetch(input, init);
+  let response: Response;
+  try {
+    response = await fetch(input, init);
+  } catch (e) {
+    if (e instanceof TypeError) {
+      throw new FunDBError({ error: "network_failure", message: e.message });
+    } else {
+      throw e;
+    }
+  }
   if (!response.ok) {
     const body = await response.json();
     throw new FunDBError(body);
