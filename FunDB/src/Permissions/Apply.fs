@@ -75,10 +75,11 @@ let filterAccessForUsedDatabase (accessor : AllowedField -> ResolvedOptimizedFie
     let aggregator = FieldsAccessAggregator (accessor, layout, role)
     aggregator.FilterUsedDatabase usedSchemas
 
-// Rename top-level entities in a restriction expression
+// Rename top-level entities in a restriction expression.
 let private renameRestriction (entityRef : EntityRef) (restr : ResolvedOptimizedFieldExpr) : ResolvedOptimizedFieldExpr =
     mapOptimizedFieldExpr (replaceTopLevelEntityRefInExpr (Some entityRef)) restr
 
+// Pairs of (subtype check, filter).
 type private TypeCheckedExprs = Map<string, ResolvedOptimizedFieldExpr * ResolvedOptimizedFieldExpr>
 
 let private optimizeTypeCheckedExprs merge vals =
