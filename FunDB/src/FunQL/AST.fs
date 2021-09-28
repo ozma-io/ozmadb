@@ -1666,7 +1666,7 @@ let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNulla
         try
             constrFunc <| tok.ToObject()
         with
-        | :? JsonReaderException -> None
+        | :? JsonException -> None
 
 let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> FieldValue option =
     let parseSingleValueStrict f = parseSingleValue (f >> Some)
