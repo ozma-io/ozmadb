@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Layout.Update
 
 open System
 open System.Linq
+open FSharpPlus
 open Microsoft.FSharp.Quotations
 open Z.EntityFramework.Plus
 open System.Threading

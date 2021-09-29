@@ -9,9 +9,12 @@ open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Types
+open FunWithFlags.FunDB.Permissions.Apply
+open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.Permissions.Entity
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
@@ -103,8 +106,6 @@ type private ValueColumn =
       Extra : obj
     }
 
-let private fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.DefaultValue || field.IsNullable
-
 let private realEntityAnnotation (entityRef : ResolvedEntityRef) : RealEntityAnnotation =
     { RealEntity = entityRef
       FromPath = false
@@ -120,12 +121,15 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             | None when isOptional -> None
             | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
             | Some arg ->
-                Some
+                let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
+                let fieldRef = { Entity = fieldEntity; Name = fieldName }
+                let column =
                     { Placeholder = PLocal fieldName
                       Argument = { requiredArgument field.FieldType with Optional = isOptional }
                       Column = field.ColumnName
                       Extra = ({ Name = fieldName } : RealFieldAnnotation)
                     }
+                Some (Some fieldRef, column)
 
         let entity = layout.FindEntity entityRef |> Option.get
 
@@ -133,23 +137,23 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             raisef EntityExecutionException "Entity %O is abstract" entityRef
         let (subEntityValue, rawArgs) =
             if hasSubType entity then
-                let value =
+                let column =
                     { Placeholder = PLocal funSubEntity
                       Argument = requiredArgument <| FTScalar SFTString
                       Column = sqlFunSubEntity
                       Extra = null
                     }
                 let newArgs = Map.add funSubEntity (FString entity.TypeName) rawArgs
-                (Seq.singleton value, newArgs)
+                (Seq.singleton (None, column), newArgs)
             else
                 (Seq.empty, rawArgs)
 
         let argumentTypes = Seq.append subEntityValue (entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue) |> Seq.cache
-        let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
+        let arguments = argumentTypes |> Seq.map (fun (fieldRef, value) -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
         // Id is needed so that we always have at least one column inserted.
-        let insertColumns = argumentTypes |> Seq.map (fun value -> (value.Extra, value.Column))
+        let insertColumns = argumentTypes |> Seq.map (fun (fieldRef, value) -> (value.Extra, value.Column))
         let columns = Seq.append (Seq.singleton (null, sqlFunId)) insertColumns |> Array.ofSeq
-        let values = argumentTypes |> Seq.map (fun value -> arguments.Types.[value.Placeholder].PlaceholderId |> SQL.VEPlaceholder |> SQL.IVValue)
+        let values = argumentTypes |> Seq.map (fun (fieldRef, value) -> arguments.Types.[value.Placeholder].PlaceholderId |> SQL.VEPlaceholder |> SQL.IVValue)
         let valuesWithSys = Seq.append (Seq.singleton SQL.IVDefault) values |> Array.ofSeq
 
         let opTable = SQL.operationTable <| compileResolvedEntityRef entity.Root
@@ -158,19 +162,25 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
                   Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
                   Extra = realEntityAnnotation entityRef
             }
+        match role with
+        | None -> ()
+        | Some role ->
+            // We circumvent full `flattenUsedDatabase` call for performance.
+            let usedFields =
+                argumentTypes
+                |> Seq.mapMaybe fst
+                |> Seq.map (fun ref -> (ref, usedFieldInsert))
+            let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityInsert usedFields
+            try
+                checkPermissions layout role usedDatabase
+            with
+            | :? PermissionsApplyException as e ->
+                raisefWithInner EntityDeniedException e ""
+    
         let query =
             { Expression = expr
               Arguments = arguments
             }
-        let query =
-            match role with
-            | None -> query
-            | Some role ->
-                try
-                    applyRoleInsert layout role query
-                with
-                | :? PermissionsEntityException as e ->
-                    raisefWithInner EntityDeniedException e ""
 
         return! runIntQuery connection globalArgs query comments rawArgs cancellationToken
     }
@@ -184,19 +194,22 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             | None -> None
             | Some arg when field.IsImmutable -> raisef EntityDeniedException "Field %O is immutable" { Entity = entityRef; Name = fieldName }
             | Some arg ->
-                Some
+                let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
+                let fieldRef = { Entity = fieldEntity; Name = fieldName }
+                let column =
                     { Placeholder = PLocal fieldName
                       Argument = { requiredArgument field.FieldType with Optional = fieldIsOptional field }
                       Column = field.ColumnName
                       Extra = ({ Name = fieldName } : RealFieldAnnotation)
                     }
+                Some (fieldRef, column)
 
         let entity = layout.FindEntity entityRef |> Option.get
         if entity.IsHidden then
             raisef EntityExecutionException "Entity %O is hidden" entityRef
         let argumentTypes = entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Seq.cache
-        let arguments = argumentTypes |> Seq.map (fun value -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
-        let columns = argumentTypes |> Seq.map (fun value -> (value.Column, (value.Extra, SQL.VEPlaceholder arguments.Types.[value.Placeholder].PlaceholderId))) |> Map.ofSeq
+        let arguments = argumentTypes |> Seq.map (fun (fieldRef, value) -> (value.Placeholder, value.Argument)) |> Map.ofSeq |> compileArguments
+        let columns = argumentTypes |> Seq.map (fun (fieldRef, value) -> (value.Column, (value.Extra, SQL.VEPlaceholder arguments.Types.[value.Placeholder].PlaceholderId))) |> Map.ofSeq
 
         let (idArg, arguments) = addArgument (PLocal funId) funIdArg arguments
 
@@ -220,17 +233,23 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             { Expression = expr
               Arguments = arguments
             }
-        let restricted =
+        let query =
             match role with
             | None -> query
             | Some role ->
-                try
-                    applyRoleUpdate layout role query
-                with
-                | :? PermissionsEntityException as e ->
-                    raisefWithInner EntityDeniedException e ""
+                let usedFields =
+                    argumentTypes
+                    |> Seq.map (fun (ref, value) -> (ref, { emptyUsedField with Select = true; Update = true }))
+                let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityUpdate usedFields
+                let appliedDb =
+                    try
+                        applyPermissions layout role usedDatabase
+                    with
+                    | :? PermissionsApplyException as e ->
+                        raisefWithInner EntityDeniedException e ""
+                applyRoleUpdateExpr layout appliedDb query
 
-        let! affected = runNonQuery connection globalArgs restricted comments (Map.add funId (FInt id) rawArgs) cancellationToken
+        let! affected = runNonQuery connection globalArgs query comments (Map.add funId (FInt id) rawArgs) cancellationToken
         if affected = 0 then
             do! countAndThrow connection tableRef whereExpr cancellationToken
     }
@@ -264,17 +283,29 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             { Expression = expr
               Arguments = arguments
             }
-        let restricted =
+        let query =
             match role with
             | None -> query
             | Some role ->
-                try
-                    applyRoleDelete layout role query
-                with
-                | :? PermissionsEntityException as e ->
-                    raisefWithInner EntityDeniedException e ""
+                let getUsedField (fieldName, field : ResolvedColumnField) =
+                    let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
+                    let fieldRef = { Entity = fieldEntity; Name = fieldName }
+                    (fieldRef, usedFieldSelect)
 
-        let! affected = runNonQuery connection globalArgs restricted comments (Map.singleton funId (FInt id)) cancellationToken
+                let usedFields =
+                    entity.ColumnFields
+                    |> Map.toSeq
+                    |> Seq.map getUsedField
+                let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityDelete usedFields
+                let appliedDb =
+                    try
+                        applyPermissions layout role usedDatabase
+                    with
+                    | :? PermissionsApplyException as e ->
+                        raisefWithInner EntityDeniedException e ""
+                applyRoleDeleteExpr layout appliedDb query
+
+        let! affected = runNonQuery connection globalArgs query comments (Map.singleton funId (FInt id)) cancellationToken
         if affected = 0 then
             do! countAndThrow connection tableRef whereExpr cancellationToken
     }

@@ -556,14 +556,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
             try
                 let mutable isDisposed = false
 
-                let mutable maybeIsolate = None
-                let getIsolate () =
-                    match maybeIsolate with
-                    | Some isolate -> isolate
-                    | None ->
-                        let isolate = jsIsolates.Get()
-                        maybeIsolate <- Some isolate
-                        isolate
+                let isolate = lazy ( jsIsolates.Get() )
 
                 let migrate () =
                     task {
@@ -618,8 +611,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                                 | :? ResolveModulesException as e -> raisefWithInner ContextException e "Failed to resolve modules"
 
                             let jsRuntime = makeRuntime (moduleFiles modules)
-                            let myIsolate = getIsolate ()
-                            let jsApi = jsRuntime.GetValue myIsolate
+                            let jsApi = jsRuntime.GetValue isolate.Value
 
                             let! sourceActions = buildSchemaActions transaction.System cancellationToken
                             if not <| preloadActionsAreUnchanged sourceActions preload then
@@ -786,37 +778,28 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                     | None ->
                         maybeApi <- Some api
 
-                let mutable maybeJSAPI = None
-                let getJSAPI () =
-                    match maybeJSAPI with
-                    | Some jsApi -> jsApi
-                    | None ->
-                        let jsApi = oldState.Context.JSRuntime.GetValue (getIsolate ())
+                let jsApi =
+                    lazy (
+                        let jsApi = oldState.Context.JSRuntime.GetValue isolate.Value
                         jsApi.API.SetAPI (Option.get maybeApi)
-                        maybeJSAPI <- Some jsApi
                         jsApi
+                    )
 
-                let mutable maybeActionScripts = None
-                let getActionScripts () =
-                    match maybeActionScripts with
-                    | Some actionScripts -> actionScripts
-                    | None ->
-                        let actionScripts = oldState.Context.ActionScripts.GetValue (getIsolate ())
+                let actionScripts =
+                    lazy (
+                        let actionScripts = oldState.Context.ActionScripts.GetValue isolate.Value
                         // Initialize JS API.
-                        ignore <| getJSAPI ()
-                        maybeActionScripts <- Some actionScripts
+                        ignore <| jsApi.Force()
                         actionScripts
+                    )
 
-                let mutable maybeTriggerScripts = None
-                let getTriggerScripts () =
-                    match maybeTriggerScripts with
-                    | Some triggerScripts -> triggerScripts
-                    | None ->
-                        let triggerScripts = oldState.Context.TriggerScripts.GetValue (getIsolate ())
+                let triggerScripts =
+                    lazy (
+                        let triggerScripts = oldState.Context.TriggerScripts.GetValue isolate.Value
                         // Initialize JS API.
-                        ignore <| getJSAPI ()
-                        maybeTriggerScripts <- Some triggerScripts
+                        ignore <| jsApi.Force()
                         triggerScripts
+                    )
 
                 let! systemInfo = transaction.Connection.Query.ExecuteValuesQuery "SELECT transaction_timestamp(), txid_current()" Map.empty cancellationToken
                 let (transactionTime, transactionId) =
@@ -832,7 +815,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           member this.LoggerFactory = loggerFactory
                           member this.CancellationToken = cancellationToken
                           member this.Preload = preload
-                          member this.Runtime = getJSAPI () :> IJSRuntime
+                          member this.Runtime = jsApi.Value :> IJSRuntime
 
                           member this.Layout = oldState.Context.Layout
                           member this.UserViews = oldState.Context.UserViews
@@ -850,35 +833,31 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           member this.WriteEvent event = eventLogger.WriteEvent(connectionString, event)
                           member this.SetAPI api = setAPI api
                           member this.FindAction ref =
-                            match (getActionScripts ()).FindAction ref with
+                            match actionScripts.Value.FindAction ref with
                             | Some script -> Some (Ok script)
                             | None ->
                                 match oldState.Context.Actions.FindAction ref with
                                 | Some (Ok script) -> failwith "Impossible"
                                 | Some (Error e) -> Some (Error e)
                                 | None -> None
-                          member this.FindTrigger ref = (getTriggerScripts ()).FindTrigger ref
+                          member this.FindTrigger ref = triggerScripts.Value.FindTrigger ref
 
                           member this.Dispose () =
                               if not isDisposed then
-                                  match maybeJSAPI with
-                                  | Some jsApi -> jsApi.API.ResetAPI ()
-                                  | None -> ()
-                                  match maybeIsolate with
-                                  | Some isolate -> jsIsolates.Return isolate
-                                  | None -> ()
+                                  if jsApi.IsValueCreated then
+                                      jsApi.Value.API.ResetAPI ()
+                                  if isolate.IsValueCreated then
+                                      jsIsolates.Return isolate.Value
                                   (transaction :> IDisposable).Dispose ()
                                   (transaction.Connection :> IDisposable).Dispose ()
                                   isDisposed <- true
                           member this.DisposeAsync () =
                               unitVtask {
                                   if not isDisposed then
-                                      match maybeJSAPI with
-                                      | Some jsApi -> jsApi.API.ResetAPI ()
-                                      | None -> ()
-                                      match maybeIsolate with
-                                      | Some isolate -> jsIsolates.Return isolate
-                                      | None -> ()
+                                      if jsApi.IsValueCreated then
+                                          jsApi.Value.API.ResetAPI ()
+                                      if isolate.IsValueCreated then
+                                          jsIsolates.Return isolate.Value
                                       do! (transaction :> IAsyncDisposable).DisposeAsync ()
                                       do! (transaction.Connection :> IAsyncDisposable).DisposeAsync ()
                                       isDisposed <- true

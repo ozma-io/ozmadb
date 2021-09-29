@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.FunQL.AST
 open System
 open System.ComponentModel
 open System.Threading.Tasks
+open FSharpPlus
 open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
@@ -997,7 +998,7 @@ and [<NoEquality; NoComparison>] DeleteExpr<'e, 'f> when 'e :> IFunQLName and 'f
       Entity : OperationEntity<'e>
       Using : FromExpr<'e, 'f> option
       Where : FieldExpr<'e, 'f> option
-      Extra : obj
+      Extra : ObjectMap
     } with
         override this.ToString () = this.ToFunQLString()
 
@@ -1388,6 +1389,7 @@ type ResolvedUpdateExpr = UpdateExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedDeleteExpr = DeleteExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedDataExpr = DataExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedOperationEntity = OperationEntity<EntityRef>
+type ResolvedInsertSource = InsertSource<EntityRef, LinkedBoundFieldRef>
 
 type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 
@@ -1459,6 +1461,7 @@ let unionUsedFields (a : UsedField) (b : UsedField) : UsedField =
 
 type UsedEntity =
     { Select : bool
+      Update : bool
       Insert : bool
       Delete : bool
       Fields : Map<FieldName, UsedField>
@@ -1466,6 +1469,7 @@ type UsedEntity =
 
 let emptyUsedEntity : UsedEntity =
     { Select = false
+      Update = false
       Insert = false
       Delete = false
       Fields = Map.empty
@@ -1477,9 +1481,16 @@ let usedEntitySelect : UsedEntity =
 let usedEntityInsert =
     { emptyUsedEntity with Insert = true }
 
+let usedEntityUpdate =
+    { emptyUsedEntity with Update = true }
+
+let usedEntityDelete =
+    { emptyUsedEntity with Delete = true }
+
 let unionUsedEntities (a : UsedEntity) (b : UsedEntity) : UsedEntity =
     { Select = a.Select || b.Select
       Insert = a.Insert || b.Insert
+      Update = a.Update || b.Update
       Delete = a.Delete || b.Delete
       Fields = Map.unionWith (fun name -> unionUsedFields) a.Fields b.Fields
     }
@@ -1490,9 +1501,10 @@ let addUsedEntityField (fieldName : FieldName) (usedField : UsedField) (usedEnti
         | None -> usedField
         | Some oldField -> unionUsedFields oldField usedField
     { usedEntity with
-          // Propagate field `SELECT` to entity.
+          // Propagate field access to entity.
           Insert = usedEntity.Insert || usedField.Insert
           Select = usedEntity.Select || usedField.Select
+          Update = usedEntity.Update || usedField.Update
           Fields = Map.add fieldName newField usedEntity.Fields
     }
 

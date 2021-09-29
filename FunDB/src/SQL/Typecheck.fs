@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.SQL.Typecheck
 
+open FSharpPlus
+
 open Microsoft.FSharp.Reflection
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunUtils
@@ -420,7 +422,7 @@ let unionTypes (args : (SimpleValueType option) seq) : SimpleValueType option =
                     Ok candidateTyp
 
         let firstTyp = notUnknownArgs.[0]
-        let candidateTyp = Seq.foldResult checkCandidateType firstTyp notUnknownArgs |> Result.result id id
+        let candidateTyp = Seq.foldResult checkCandidateType firstTyp notUnknownArgs |> Result.either id id
         if notUnknownArgs |> Seq.forall (fun typ -> canAcceptType candidateTyp typ) then
             Some candidateTyp
         else

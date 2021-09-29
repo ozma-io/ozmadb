@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Operations.Domain
 open System.Threading
 open System.Runtime.Serialization
 open System.Threading.Tasks
+open FSharpPlus
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
@@ -67,10 +68,12 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
             match role with
             | None -> domain.Query
             | Some r ->
-                try
-                    applyRoleQueryExpr layout r domain.UsedDatabase domain.Query
-                with
-                | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
+                let appliedDb =
+                    try
+                        applyPermissions layout r domain.UsedDatabase
+                    with
+                    | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
+                applyRoleSelectExpr layout appliedDb domain.Query
         let resolvedChunk = genericResolveChunk layout domainColumns chunk
         let (argValues, query) = queryExprChunk layout resolvedChunk query
 
@@ -94,10 +97,12 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
             match role with
             | None -> domain.Query
             | Some r ->
-                try
-                    applyRoleQueryExpr layout r domain.UsedDatabase domain.Query
-                with
-                | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
+                let appliedDb =
+                    try
+                        applyPermissions layout r domain.UsedDatabase
+                    with
+                    | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
+                applyRoleSelectExpr layout appliedDb domain.Query
         let resolvedChunk = genericResolveChunk layout domainColumns chunk
         let (argValues, query) = queryExprChunk layout resolvedChunk query
         let arguments = Option.defaultWith (fun () -> query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)) maybeArguments

@@ -40,19 +40,21 @@ type private HalfResolvedEntity =
       Error : exn option
     }
 
-let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEnt : FlatAllowedDerivedEntity option) (ent : AllowedEntity) : Map<ResolvedFieldRef,AllowedField> * FlatAllowedDerivedEntity =
-    let fields = ent.Fields |> Map.toSeq |> Seq.map (fun (name, field) -> ({ Entity = entityRef; Name = name }, field)) |> Map.ofSeq
+let private emptyHalfResolvedEntity : HalfResolvedEntity =
+    { Allowed = emptyAllowedEntity
+      Flattened = emptyFlatAllowedDerivedEntity
+      Error = None
+    }
 
-    let select =
-        match ent.Select with
-        | Some sel -> sel
-        | None -> parentEnt |> Option.map (fun pent -> pent.Select) |> Option.defaultValue OFEFalse
+let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEntity : FlatAllowedDerivedEntity) (entity : AllowedEntity) : Map<ResolvedFieldRef,AllowedField> * FlatAllowedDerivedEntity =
+    let fields = entity.Fields |> Map.toSeq |> Seq.map (fun (name, field) -> ({ Entity = entityRef; Name = name }, field)) |> Map.ofSeq
+
     let ret =
-        { Check = ent.Check
-          Insert = ent.Insert
-          Select = select
-          Update = andFieldExpr select ent.Update
-          Delete = andFieldExpr select ent.Delete
+        { Check = entity.Check
+          Insert = entity.Insert
+          Select = entity.Select
+          Update = entity.Update
+          Delete = entity.Delete
         }
 
     (fields, ret)
@@ -125,20 +127,19 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             with
             | e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
 
-        let resolveOne allowIds = Option.map (resolveRestriction entityRef entity allowIds)
+        let propagateFromParent accessor allowIds mexpr =
+            match mexpr with
+            | Some expr -> resolveRestriction entityRef entity allowIds expr
+            // Parent permissions will be multiplied by these, so just leave `true` here.
+            | None when Option.isSome entity.Parent -> OFETrue
+            | None -> OFEFalse
+
+        let check = propagateFromParent (fun pent -> pent.Check) false allowedEntity.Check
+        let select = propagateFromParent (fun pent -> pent.Select) true allowedEntity.Select
+        let update = propagateFromParent (fun pent -> pent.Update) true allowedEntity.Update
+        let delete = propagateFromParent (fun pent -> pent.Delete) true allowedEntity.Delete
+
         let fields = allowedEntity.Fields |> Map.map mapField
-
-        let check = resolveOne false allowedEntity.Check |> Option.defaultValue OFEFalse
-
-        let select = resolveOne true allowedEntity.Select
-
-        let resolveUpdate update = resolveRestriction entityRef entity true update
-
-        let update = Option.map resolveUpdate allowedEntity.Update |> Option.defaultValue OFEFalse
-
-        let resolveDelete delete = resolveRestriction entityRef entity true delete
-
-        let delete = Option.map resolveDelete allowedEntity.Delete |> Option.defaultValue OFEFalse
 
         let ret =
             { AllowBroken = allowedEntity.AllowBroken
@@ -229,7 +230,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         (error, allowedEntity)
 
     // Recursively resolve access rights for entity parents.
-    let rec resolveParentEntity (entity : ResolvedEntity) : FlatAllowedDerivedEntity option =
+    let rec resolveParentEntity (entity : ResolvedEntity) : HalfResolvedEntity option =
         match entity.Parent with
         | None -> None
         | Some parentRef ->
@@ -240,7 +241,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             match parentRights with
             | Some right ->
                 match resolveAllowedEntity parentRef right with
-                | Ok ret -> Some ret.Flattened
+                | Ok ret -> Some ret
                 | Error err -> raisefWithInner ResolvePermissionsParentException err.Error "In parent %O" parentRef
             | None ->
                 let parentEntity = layout.FindEntity parentRef |> Option.get
@@ -251,11 +252,11 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             match layout.FindEntity entityRef with
             | Some s when not s.IsHidden -> s
             | _ -> raisef ResolvePermissionsException "Undefined entity"
-        let parentEntity = resolveParentEntity entity
+        let parentEntity = resolveParentEntity entity |> Option.defaultValue emptyHalfResolvedEntity
 
         let (error1, resolved) = resolveSelfAllowedEntity entityRef entity source
         let (error2, resolved) = checkEntity entity resolved
-        let (fields, myFlat) = flattenAllowedEntity entityRef parentEntity resolved
+        let (fields, myFlat) = flattenAllowedEntity entityRef parentEntity.Flattened resolved
 
         let (myFlat, flatEntity) =
             match Map.tryFind entity.Root flattened with

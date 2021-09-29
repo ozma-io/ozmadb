@@ -1,5 +1,8 @@
 module FunWithFlags.FunDB.FunQL.Optimize
 
+open System
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
@@ -9,7 +12,7 @@ type ExpressionKey = string
 
 type HashedFieldExprs<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<ExpressionKey, OptimizedFieldExpr<'e, 'f>>
 
-and [<NoEquality; NoComparison>] OptimizedFieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<CustomEquality; NoComparison>] OptimizedFieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | OFEOr of HashedFieldExprs<'e, 'f>
     | OFEAnd of HashedFieldExprs<'e, 'f>
     | OFEExpr of StringComparable<FieldExpr<'e, 'f>>
@@ -39,6 +42,17 @@ and [<NoEquality; NoComparison>] OptimizedFieldExpr<'e, 'f> when 'e :> IFunQLNam
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
+        
+        interface IEquatable<OptimizedFieldExpr<'e, 'f>> with
+            member this.Equals other =
+                match (this, other) with
+                | (OFEOr ors1, OFEOr ors2) -> Map.keys ors1 = Map.keys ors2
+                | (OFEAnd ands1, OFEAnd ands2) -> Map.keys ands1 = Map.keys ands2
+                | (OFEExpr expr1, OFEExpr expr2) -> expr1 = expr2
+                | (OFENot e1, OFENot e2) -> e1 = e2
+                | (OFETrue, OFETrue)
+                | (OFEFalse, OFEFalse) -> true
+                | _ -> false
 
 type ResolvedOptimizedFieldExpr = OptimizedFieldExpr<EntityRef, LinkedBoundFieldRef>
 
@@ -50,7 +64,15 @@ let orFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f>
     | (expr, OFEFalse)
     | (OFEFalse, expr) -> expr
     | (OFEOr ors, expr)
-    | (expr, OFEOr ors) -> OFEOr (Map.add (expr.ToString()) expr ors)
+    | (expr, OFEOr ors) -> OFEOr (Map.add (string expr) expr ors)
+    | ((OFEAnd ands as andsExpr), expr)
+    | (expr, (OFEAnd ands as andsExpr)) ->
+        let andsStr = string andsExpr
+        let exprStr = string expr
+        if Map.containsKey exprStr ands then
+            expr
+        else
+            Map.singleton andsStr andsExpr |> Map.add exprStr expr |> OFEOr
     | (expr1, expr2) ->
         let expr1Str = string expr1
         let expr2Str = string expr2
@@ -67,7 +89,15 @@ let andFieldExpr (a : OptimizedFieldExpr<'e, 'f>) (b : OptimizedFieldExpr<'e, 'f
     | (expr, OFEFalse)
     | (OFEFalse, expr) -> OFEFalse
     | (OFEAnd ands, expr)
-    | (expr, OFEAnd ands) -> OFEAnd (Map.add (expr.ToString()) expr ands)
+    | (expr, OFEAnd ands) -> OFEAnd (Map.add (string expr) expr ands)
+    | ((OFEOr ors as orsExpr), expr)
+    | (expr, (OFEOr ors as orsExpr)) ->
+        let orsStr = string orsExpr
+        let exprStr = string expr
+        if Map.containsKey exprStr ors then
+            orsExpr
+        else
+            Map.singleton orsStr orsExpr |> Map.add exprStr expr |> OFEAnd
     | (expr1, expr2) ->
         let expr1Str = string expr1
         let expr2Str = string expr2
@@ -110,8 +140,44 @@ let rec optimizeFieldExpr : FieldExpr<'e, 'f> -> OptimizedFieldExpr<'e, 'f> = fu
 let rec mapOptimizedFieldExpr (f : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) (e : OptimizedFieldExpr<'e1, 'f1>) : OptimizedFieldExpr<'e2, 'f2> =
     match e with
     | OFEOr ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 orFieldExpr
-    | OFEAnd ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 andFieldExpr
+    | OFEAnd ands -> ands |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 andFieldExpr
     | OFENot expr -> notFieldExpr (mapOptimizedFieldExpr f expr)
     | OFETrue -> optimizeFieldExpr (f (FEValue (FBool true)))
     | OFEFalse -> optimizeFieldExpr (f (FEValue (FBool false)))
     | OFEExpr expr -> optimizeFieldExpr (f expr.Value)
+
+let fieldExprToAndTerms : OptimizedFieldExpr<'e, 'f> -> HashedFieldExprs<'e, 'f> = function
+    | OFEAnd ands -> ands
+    | expr -> Map.singleton (string expr) expr
+
+let fieldExprToOrTerms : OptimizedFieldExpr<'e, 'f> -> HashedFieldExprs<'e, 'f> = function
+    | OFEOr ors -> ors
+    | expr -> Map.singleton (string expr) expr
+
+let orFieldExprsWithFactor (exprs : OptimizedFieldExpr<'e, 'f> seq) : OptimizedFieldExpr<'e, 'f> * OptimizedFieldExpr<'e, 'f> seq =
+    if Seq.isEmpty exprs then
+        (OFETrue, exprs)
+    else
+        let andTerms = exprs |> Seq.map fieldExprToAndTerms
+        let commonFactors = andTerms |> Seq.fold1 Map.intersect
+        if Map.isEmpty commonFactors then
+            (OFETrue, exprs)
+        else
+            let andOrTrue exprs =
+                if Map.isEmpty exprs then OFETrue else OFEAnd exprs
+            let cleanedFactors = andTerms |> Seq.map (Map.difference commonFactors >> andOrTrue)
+            (OFEAnd commonFactors, cleanedFactors)
+
+let andFieldExprsWithFactor (exprs : OptimizedFieldExpr<'e, 'f> seq) : OptimizedFieldExpr<'e, 'f> * OptimizedFieldExpr<'e, 'f> seq =
+    if Seq.isEmpty exprs then
+        (OFEFalse, exprs)
+    else
+        let orTerms = exprs |> Seq.map fieldExprToOrTerms
+        let commonFactors = orTerms |> Seq.fold1 Map.intersect
+        if Map.isEmpty commonFactors then
+            (OFEFalse, exprs)
+        else
+            let orOrFalse exprs =
+                if Map.isEmpty exprs then OFEFalse else OFEOr exprs
+            let cleanedFactors = orTerms |> Seq.map (Map.difference commonFactors >> orOrFalse)
+            (OFEOr commonFactors, cleanedFactors)

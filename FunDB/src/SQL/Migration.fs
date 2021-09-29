@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.SQL.Migration
 
 open System.Threading
 open System.Threading.Tasks
+open FSharpPlus
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils

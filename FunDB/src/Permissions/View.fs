@@ -1,60 +1,57 @@
 module FunWithFlags.FunDB.Permissions.View
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.Compile
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 
-type private FieldAccess = CompiledRestriction option
-type private EntityAccess = Map<FunQL.EntityName, FieldAccess>
-type private SchemaAccess = Map<FunQL.SchemaName, EntityAccess>
-
-type private AccessCompiler (layout : Layout, role : ResolvedRole, fieldAccesses : FilteredAllowedDatabase, initialArguments : QueryArguments) =
+type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllowedDatabase, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
 
-    let compileRestriction (ref : FunQL.ResolvedEntityRef) (entity : ResolvedEntity) : FieldAccess =
-        let childrenFieldAccesses = Map.find entity.Root fieldAccesses
-        let entityAccesses = Map.find entity.Root role.Flattened.Entities
-        let applied = applyRestrictionExpression (fun access -> access.Select) layout entityAccesses childrenFieldAccesses ref
-        match applied with
+    let compileSingleRestriction (ref : FunQL.ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> CompiledRestriction option = function
         | OFETrue -> None
-        | _ ->
-            let (newArguments, restriction) = compileRestriction layout ref arguments applied
+        | expr ->
+            let (newArguments, restr) = compileRestriction layout ref arguments expr
             arguments <- newArguments
-            Some restriction
+            Some restr
 
-    let compileEntityAccess (schemaName : FunQL.SchemaName) (schema : ResolvedSchema) (usedSchema : FunQL.UsedSchema) : EntityAccess =
-        let mapEntity (name : FunQL.EntityName) (usedEntity : FunQL.UsedEntity) =
-            let entity = Map.find name schema.Entities
-            let ref = { Schema = schemaName; Name = name } : FunQL.ResolvedEntityRef
-            compileRestriction ref entity
+    let rec buildSelectUpdateRestriction entityRef =
+        let filter = Map.find entityRef allowedDatabase
+        compileSingleRestriction entityRef (Option.get filter.SelectUpdate) 
+    and getSelectUpdateRestriction = memoizeN buildSelectUpdateRestriction
 
-        Map.map mapEntity usedSchema.Entities
+    let rec buildSelectRestriction entityRef =
+        buildSelectUpdateRestriction entityRef |> Option.map (restrictionToSelect entityRef)
+    and getSelectRestriction = memoizeN buildSelectRestriction
 
-    let compileSchemaAccess (usedDatabase : FunQL.UsedDatabase) : SchemaAccess =
-        let mapSchema (name : FunQL.SchemaName) (usedSchema : FunQL.UsedSchema) =
-            let schema = Map.find name layout.Schemas
-            compileEntityAccess name schema usedSchema
+    let rec buildUpdateRestriction entityRef =
+        buildSelectUpdateRestriction entityRef |> Option.map (restrictionToValueExpr layout entityRef)
+    and getUpdateRestriction = memoizeN buildUpdateRestriction
 
-        Map.map mapSchema usedDatabase.Schemas
+    let rec buildDeleteValueRestriction entityRef =
+        let filter = Map.find entityRef allowedDatabase
+        compileSingleRestriction entityRef (Option.get filter.Delete)
+            |> Option.map (restrictionToValueExpr layout entityRef)
+    
+    and getDeleteRestriction = memoizeN buildDeleteValueRestriction
 
-    member this.Arguments = arguments
-    member this.CompileSchemaAccess usedDatabase = compileSchemaAccess usedDatabase
+    let renameValueRestriction (entityRef : FunQL.ResolvedEntityRef) (from : OperationTable) (restr : ValueExpr) =
+        let entity = layout.FindEntity entityRef |> Option.get
+        let oldTableName = renameResolvedEntityRef entity.Root
+        let newTableName =
+            match from.Alias with
+            | None -> from.Table.Name
+            | Some alias -> alias
+        let renamesMap = Map.singleton oldTableName newTableName
+        renameAllValueExprTables renamesMap restr
 
-// Can throw PermissionsApplyException.
-let private compileRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedDatabase : FunQL.UsedDatabase) (arguments : QueryArguments) : QueryArguments * SchemaAccess =
-    let filteredAccess = filterAccessForUsedDatabase (fun field -> field.Select) layout role usedDatabase
-    let accessCompiler = AccessCompiler (layout, role, filteredAccess, arguments)
-    let access = accessCompiler.CompileSchemaAccess usedDatabase
-    (accessCompiler.Arguments, access)
-
-type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
     let rec applyToSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
         | SSelect query -> SSelect <| applyToSingleSelectExpr query
         | SSetOp setOp ->
@@ -88,11 +85,9 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
         match select.Extra with
         // Special case -- subentity select which gets generated when someone uses subentity in FROM.
         | :? RealEntityAnnotation as ann when not ann.AsRoot ->
-            let accessSchema = Map.find ann.RealEntity.Schema access
-            let accessEntity = Map.find ann.RealEntity.Name accessSchema
-            match accessEntity with
+            match getSelectRestriction ann.RealEntity with
             | None -> select
-            | Some restr -> restrictionToSelect ann.RealEntity restr
+            | Some newSelect -> select
         | _ ->
             { CTEs = Option.map applyToCommonTableExprs select.CTEs
               Tree = applyToSelectTreeExpr select.Tree
@@ -113,13 +108,12 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
                         // We restrict them in FROM expression.
                         (from, where, joins)
                     else
-                        let accessSchema = Map.find entityInfo.Ref.Schema access
-                        let accessEntity = Map.find entityInfo.Ref.Name accessSchema
-                        match accessEntity with
+                        match buildSelectUpdateRestriction entityInfo.Ref with
                         | None -> (from, where, joins)
                         | Some restr ->
                             // Rename old table reference in restriction joins and expression.
-                            let oldTableName = renameResolvedEntityRef entityInfo.Ref
+                            let entity = layout.FindEntity entityInfo.Ref |> Option.get
+                            let oldTableName = renameResolvedEntityRef entity.Root
                             let renameJoinKey (key : JoinKey) =
                                 if key.Table = oldTableName then
                                     { key with Table = tableName }
@@ -172,13 +166,11 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
 
     and applyToFromExpr : FromExpr -> FromExpr = function
         | FTable ({ Extra = :? RealEntityAnnotation as ann } as fTable) when not ann.IsInner && not ann.AsRoot ->
-            let accessSchema = Map.find ann.RealEntity.Schema access
-            let accessEntity = Map.find ann.RealEntity.Name accessSchema
-            match accessEntity with
+            match getSelectRestriction ann.RealEntity with
             | None -> FTable fTable
-            | Some restr ->
+            | Some newSelect ->
                 // `Alias` is guaranteed to be there for all table queries.
-                let subsel = subSelectExpr (Option.get fTable.Alias) (restrictionToSelect ann.RealEntity restr)
+                let subsel = subSelectExpr (Option.get fTable.Alias) newSelect
                 FSubExpr subsel
         | FTable fTable -> FTable fTable
         | FJoin join ->
@@ -191,28 +183,93 @@ type private PermissionsApplier (layout : Layout, access : SchemaAccess) =
         | FSubExpr subsel ->
             FSubExpr { subsel with Select = applyToSelectExpr subsel.Select }
 
-    member this.ApplyToSelectExpr = applyToSelectExpr
-    member this.ApplyToValueExpr = applyToValueExpr
+    and applyToInsertValue = function
+        | IVDefault -> IVDefault
+        | IVValue expr -> IVValue <| applyToValueExpr expr
 
-let applyRoleQueryExpr (layout : Layout) (role : ResolvedRole) (usedDatabase : FunQL.UsedDatabase) (query : Query<SelectExpr>) : Query<SelectExpr> =
-    let (arguments, access) = compileRoleViewExpr layout role usedDatabase query.Arguments
-    let applier = PermissionsApplier (layout, access)
-    let expression = applier.ApplyToSelectExpr query.Expression
+    and applyToInsertExpr (query : InsertExpr) : InsertExpr =
+        let source =
+            match query.Source with
+            | ISDefaultValues -> ISDefaultValues
+            | ISSelect expr -> ISSelect <| applyToSelectExpr expr
+            | ISValues vals -> ISValues <| Array.map (Array.map applyToInsertValue) vals
+        // INSERT permissions are checked when permissions are applied; no need to add any checks here.
+        { CTEs = Option.map applyToCommonTableExprs query.CTEs
+          Table = query.Table
+          Columns = query.Columns
+          Source = source
+          Returning = query.Returning
+          Extra = query.Extra
+        }
+
+    and applyToUpdateExpr (query : UpdateExpr) : UpdateExpr =
+        let newWhere =
+            match query.Extra with
+            | :? RealEntityAnnotation as tableInfo ->
+                let newWhere = getUpdateRestriction tableInfo.RealEntity
+                Option.map (renameValueRestriction tableInfo.RealEntity query.Table) newWhere
+            | _ -> None
+        let oldWhere = Option.map applyToValueExpr query.Where
+        let where = Option.unionWith (curry VEAnd) oldWhere newWhere
+        { CTEs = Option.map applyToCommonTableExprs query.CTEs
+          Table = query.Table
+          Columns = query.Columns
+          From = Option.map applyToFromExpr query.From
+          Where = where
+          Returning = query.Returning
+          Extra = query.Extra
+        }
+
+    and applyToDeleteExpr (query : DeleteExpr) : DeleteExpr =
+        let newWhere =
+            match query.Extra with
+            | :? RealEntityAnnotation as tableInfo ->
+                let newWhere = getDeleteRestriction tableInfo.RealEntity
+                Option.map (renameValueRestriction tableInfo.RealEntity query.Table) newWhere
+            | _ -> None
+        let oldWhere = Option.map applyToValueExpr query.Where
+        let where = Option.unionWith (curry VEAnd) oldWhere newWhere
+        { CTEs = Option.map applyToCommonTableExprs query.CTEs
+          Table = query.Table
+          Using = Option.map applyToFromExpr query.Using
+          Where = where
+          Returning = query.Returning
+          Extra = query.Extra
+        }
+
+    and applyToDataExpr = function
+        | DESelect expr -> DESelect <| applyToSelectExpr expr
+        | DEInsert expr -> DEInsert <| applyToInsertExpr expr
+        | DEUpdate expr -> DEUpdate <| applyToUpdateExpr expr
+        | DEDelete expr -> DEDelete <| applyToDeleteExpr expr
+
+    member this.ApplyToSelectExpr expr = applyToSelectExpr expr
+    member this.ApplyToValueExpr expr = applyToValueExpr expr
+    member this.ApplyToInsertExpr expr = applyToInsertExpr expr
+    member this.ApplyToUpdateExpr expr = applyToUpdateExpr expr
+    member this.ApplyToDeleteExpr expr = applyToDeleteExpr expr
+    member this.ApplyToDataExpr expr = applyToDataExpr expr
+
+    member this.Arguments = arguments
+
+let private applyRoleQueryExpr (apply : PermissionsApplier -> 'expr -> 'expr) (layout : Layout) (allowedDatabase : AppliedAllowedDatabase) (query : Query<'expr>) : Query<'expr> =
+    let applier = PermissionsApplier (layout, allowedDatabase, query.Arguments)
+    let expression = apply applier query.Expression
     { Expression = expression
-      Arguments = arguments
+      Arguments = applier.Arguments
     }
 
-let checkRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedDatabase : FunQL.UsedDatabase) : unit =
-    let filteredAccess = filterAccessForUsedDatabase (fun field -> field.Select) layout role usedDatabase
-    ()
+let applyRoleSelectExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToSelectExpr)
+// let applyRoleInsertExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToInsertExpr)
+let applyRoleUpdateExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToUpdateExpr)
+let applyRoleDeleteExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToDeleteExpr)
 
-let applyRoleViewExpr (layout : Layout) (role : ResolvedRole) (usedDatabase : FunQL.UsedDatabase) (view : CompiledViewExpr) : CompiledViewExpr =
-    let (arguments, access) = compileRoleViewExpr layout role usedDatabase view.Query.Arguments
-    let applier = PermissionsApplier (layout, access)
+let applyRoleViewExpr (layout : Layout) (allowedDatabase : AppliedAllowedDatabase) (view : CompiledViewExpr) : CompiledViewExpr =
+    let applier = PermissionsApplier (layout, allowedDatabase, view.Query.Arguments)
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
     let newQuery =
         { Expression = queryExpression
-          Arguments = arguments
+          Arguments = applier.Arguments
         }
     let mapAttributeColumn (typ, name, expr) =
         let expr = applier.ApplyToValueExpr expr

@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Layout.Resolve
 
 open System.Security.Cryptography
 open System.Text
+open FSharpPlus
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
@@ -118,6 +119,7 @@ type private HalfResolvedEntity =
                         Seq.empty
                 let columns = this.ColumnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
                 Seq.concat [id; subentity; columns]
+            member this.ColumnFields = Map.toSeq this.ColumnFields
             member this.MainField = this.Source.MainField
             member this.TypeName = this.TypeName
             member this.IsAbstract = this.Source.IsAbstract
@@ -185,7 +187,7 @@ type private Phase1Resolver (layout : SourceLayout) =
     let resolveColumnField (ref : ResolvedEntityRef) (entity : SourceEntity) (fieldName : FieldName) (col : SourceColumnField) : ResolvedColumnField =
         let fieldType =
             match parse tokenizeFunQL fieldType col.Type with
-            | Ok r -> r
+            | Ok r -> resolveFieldType r
             | Error msg -> raisef ResolveLayoutException "Error parsing column field type %s: %s" col.Type msg
         let defaultValue =
             match col.DefaultValue with
@@ -195,10 +197,16 @@ type private Phase1Resolver (layout : SourceLayout) =
                 | Ok r ->
                     match reduceDefaultExpr r with
                     | Some FNull -> raisef ResolveLayoutException "Default expression cannot be NULL"
-                    | Some v -> Some v
+                    | Some v ->
+                        // DEPRECATED: we allow integers as defaults for references.
+                        match (fieldType, v) with
+                        | (FTScalar (SFTReference _), FInt _) -> ()
+                        | (FTArray (SFTReference _), FIntArray _) -> ()
+                        | _ when (isValueOfSubtype fieldType v) -> ()
+                        | _ -> raisef ResolveLayoutException "Default value %O is not of type %O" v fieldType
+                        Some v
                     | None -> raisef ResolveLayoutException "Default expression is not trivial: %s" def
                 | Error msg -> raisef ResolveLayoutException "Error parsing column field default expression: %s" msg
-        let fieldType = resolveFieldType fieldType
 
         { FieldType = fieldType
           ValueType = compileFieldType fieldType
@@ -436,6 +444,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     let colFields = currEnt.ColumnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
                     let compFields = currEnt.ComputedFields |> Map.toSeq |> Seq.map (fun (name, comp) -> (name, RComputedField (comp :> IComputedFieldBits)))
                     Seq.concat [id; subentity; colFields; compFields]
+                member this.ColumnFields = Map.toSeq currEnt.ColumnFields
                 member this.MainField = currEnt.Source.MainField
                 member this.TypeName = currEnt.TypeName
                 member this.IsAbstract = currEnt.Source.IsAbstract

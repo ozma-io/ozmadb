@@ -27,7 +27,7 @@ let emptyExprInfo =
       HasAggregates = false
     }
 
-let private unionExprInfo (a : ExprInfo) (b : ExprInfo) =
+let unionExprInfo (a : ExprInfo) (b : ExprInfo) =
     { IsLocal = a.IsLocal && b.IsLocal
       HasQuery = a.HasQuery || b.HasQuery
       HasAggregates = a.HasAggregates || b.HasAggregates
@@ -49,9 +49,10 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
                 emptyExprInfo
             else
                 info
-        | _ ->
+        | RColumnField col ->
             usedDatabase <- addUsedFieldRef ref usedFieldSelect usedDatabase
             emptyExprInfo
+        | _ -> emptyExprInfo
 
     and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) (asRoot : bool) : (ResolvedEntityRef * PathArrow) list -> ExprInfo = function
         | [] ->
@@ -167,6 +168,37 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             ignore <| buildForFieldExpr join.Condition
         | FSubExpr subsel -> buildForSelectExpr subsel.Select
 
+    and buildForInsertValue : ResolvedInsertValue -> unit = function
+        | IVDefault -> ()
+        | IVValue expr -> ignore <| buildForFieldExpr expr
+
+    and buildForInsertExpr (insert : ResolvedInsertExpr) =
+        Option.iter buildForCommonTableExprs insert.CTEs
+        let entityRef = tryResolveEntityRef insert.Entity.Ref |> Option.get
+        let usedFields = insert.Fields |> Seq.map (fun fieldName -> (fieldName, usedFieldInsert)) |> Map.ofSeq
+        let usedEntity = { usedEntityInsert with Fields = usedFields }
+        usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
+        match insert.Source with
+        | ISDefaultValues -> ()
+        | ISValues vals -> Array.iter (Array.iter buildForInsertValue) vals
+        | ISSelect select -> buildForSelectExpr select
+
+    and buildForUpdateExpr (update : ResolvedUpdateExpr) =
+        Option.iter buildForCommonTableExprs update.CTEs
+        let entityRef = tryResolveEntityRef update.Entity.Ref |> Option.get
+        let usedFields = update.Fields |> Map.map (fun fieldName expr -> usedFieldUpdate)
+        let usedEntity = { emptyUsedEntity with Fields = usedFields }
+        usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
+        Option.iter buildForFromExpr update.From
+        Option.iter (ignore << buildForFieldExpr) update.Where
+
+    and buildForDeleteExpr (delete : ResolvedDeleteExpr) =
+        Option.iter buildForCommonTableExprs delete.CTEs
+        let entityRef = tryResolveEntityRef delete.Entity.Ref |> Option.get
+        usedDatabase <- addUsedEntityRef entityRef usedEntityDelete usedDatabase
+        Option.iter buildForFromExpr delete.Using
+        Option.iter (ignore << buildForFieldExpr) delete.Where
+
     member this.BuildForSelectExpr expr = buildForSelectExpr expr
     member this.BuildForFieldExpr expr = buildForFieldExpr expr
 
@@ -191,3 +223,96 @@ let fieldExprUsedReferences (layout : ILayoutBits) (expr : ResolvedFieldExpr) : 
           HasRestrictedEntities = builder.HasRestrictedEntities
         }
     (info, ret)
+
+type FlatUsedEntity =
+    { Children : Map<ResolvedEntityRef, UsedEntity>
+      EntryPoints : Set<ResolvedEntityRef>
+    }
+
+let emptyFlatUsedEntity : FlatUsedEntity =
+    { Children = Map.empty
+      EntryPoints = Set.empty
+    }
+
+let unionFlatUsedChildren = Map.unionWith (fun name -> unionUsedEntities)
+
+let unionFlatUsedEntities (a : FlatUsedEntity) (b : FlatUsedEntity) : FlatUsedEntity =
+    { Children = unionFlatUsedChildren a.Children b.Children
+      EntryPoints = Set.union a.EntryPoints b.EntryPoints
+    }
+
+type FlatUsedDatabase = Map<ResolvedEntityRef, FlatUsedEntity>
+
+// After flattening, field and entity access flags change meaning.
+// Before, if a field is SELECTed the entity is also SELECTed, and so it is with UPDATEs and INSERTs.
+// After, flags set in entity signify that it is encountered in a FROM clause.
+// A flattened used entity with all access flags reset and used fields mean it is a parent entity,
+// which is not used directly in the query.
+// We also set all propagated flags for fields: for example, we use implicitly SELECT all fields when we delete a row.
+// We do not propagate flags for entities.
+type private UsedDatabaseFlattener (layout : Layout) =
+    let mutable flattenedRoots : FlatUsedDatabase = Map.empty
+
+    let flattenUsedEntity (entityRef : ResolvedEntityRef) (usedEntity : UsedEntity) =
+        let entity = layout.FindEntity entityRef |> Option.get
+
+        let makeFlatField (fieldName, usedField : UsedField) =
+            let newUsedField =
+                { usedField with
+                      Select = usedField.Select || usedField.Update
+                }
+            let field = Map.find fieldName entity.ColumnFields
+            let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
+            (fieldEntity, { emptyUsedEntity with Fields = Map.singleton fieldName newUsedField })
+
+        let makeFlatDeleteField (fieldName, field : ResolvedColumnField) =
+            let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
+            (fieldEntity, { emptyUsedEntity with Fields = Map.singleton fieldName usedFieldSelect })
+
+        let fieldChildren = usedEntity.Fields |> Map.toSeq |> Seq.map makeFlatField |> Map.ofSeqWith (fun name -> unionUsedEntities)
+        let deleteChildren =
+            if not usedEntity.Delete then
+                Map.empty
+            else
+                entity.ColumnFields |> Map.toSeq |> Seq.map makeFlatDeleteField |> Map.ofSeqWith (fun name -> unionUsedEntities)
+        let thisEntity = { usedEntity with Fields = Map.empty }
+        let entryPoints =
+            if usedEntity.Select || usedEntity.Insert || usedEntity.Update || usedEntity.Delete then
+                Set.singleton entityRef
+            else
+                Set.empty
+        let thisChildren = Map.singleton entityRef thisEntity
+        let children = unionFlatUsedChildren (unionFlatUsedChildren thisChildren fieldChildren) deleteChildren
+        let flatEntity =
+            { Children = children
+              EntryPoints = entryPoints
+            }
+        flattenedRoots <- Map.addWith unionFlatUsedEntities entity.Root flatEntity flattenedRoots
+
+    let flattenUsedSchema (schemaName : SchemaName) (usedSchema : UsedSchema) =
+        let iterOne entityName usedEntity =
+            let ref = { Schema = schemaName; Name = entityName }
+            flattenUsedEntity ref usedEntity
+        Map.iter iterOne usedSchema.Entities
+
+    let flattenUsedDatabase (usedDatabase : UsedDatabase) =
+        Map.iter flattenUsedSchema usedDatabase.Schemas
+    
+    member this.FlattenUsedDatabase usedDatabase = flattenUsedDatabase usedDatabase
+    member this.FlattenedRoots = flattenedRoots
+
+let flattenUsedDatabase (layout : Layout) (usedDatabase : UsedDatabase) : FlatUsedDatabase =
+    let flattener = UsedDatabaseFlattener layout
+    flattener.FlattenUsedDatabase usedDatabase
+    flattener.FlattenedRoots
+
+let singleKnownFlatEntity (rootRef : ResolvedEntityRef) (entityRef : ResolvedEntityRef) (usedEntity : UsedEntity) (fields : (ResolvedFieldRef * UsedField) seq) : FlatUsedDatabase =
+    let flatFieldEntities =
+        fields
+        |> Seq.map (fun (ref, usedField) -> (ref.Entity, { emptyUsedEntity with Fields = Map.singleton ref.Name usedField }))
+        |> Map.ofSeqWith (fun name -> unionUsedEntities)
+    let usedEntity =
+        { Children = Map.addWith unionUsedEntities entityRef usedEntity flatFieldEntities
+          EntryPoints = Set.singleton entityRef
+        } : FlatUsedEntity
+    Map.singleton rootRef usedEntity

@@ -6,6 +6,7 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
+open FSharpPlus
 open FSharp.Control.Tasks.Affine
 open Npgsql
 open System.Security.Cryptography

@@ -20,7 +20,7 @@ type AllowedEntityRef =
 type AllowedField =
     { // Are you allowed to change (UPDATE/INSERT) this field?
       Change : bool
-      // Are you allowed to select this field? If yes, what _additional_ restrictions are in place, on top of entity-wide?
+      // Are you allowed to select this field? If yes, what _additional_ restrictions are in place, added to this entity SELECT filter?
       Select : ResolvedOptimizedFieldExpr
     }
 
@@ -30,6 +30,7 @@ type AllowedOperationError =
       Error : exn
     }
 
+// Each filter and check expression here is later multiplied (ANDed) by corresponding parent entity expressions (or empty allowed entity if parent entity is not in allowed, effectively rendering all filters FALSE).
 [<NoEquality; NoComparison>]
 type AllowedEntity =
     { AllowBroken : bool
@@ -37,13 +38,23 @@ type AllowedEntity =
       Check : ResolvedOptimizedFieldExpr
       // Are you allowed to INSERT?
       Insert : bool
-      // Which entries are you allowed to SELECT, on top of parent entities?
-      Select : ResolvedOptimizedFieldExpr option
-      // Which entries are you allowed to UPDATE (on top of SELECT, but only for this entity' fields)?
+      // Which entries are you allowed to SELECT?
+      Select : ResolvedOptimizedFieldExpr
+      // Which entries are you allowed to UPDATE? This is multiplied with SELECT later.
       Update : ResolvedOptimizedFieldExpr
-      // Which entries are you allowed to DELETE (on top of SELECT, but only for this entity' fields)?
+      // Which entries are you allowed to DELETE? This is multiplied with SELECT later.
       Delete : ResolvedOptimizedFieldExpr
       Fields : Map<FieldName, AllowedField>
+    }
+
+let emptyAllowedEntity : AllowedEntity =
+    { AllowBroken = false
+      Check = OFEFalse
+      Insert = false
+      Select = OFEFalse
+      Update = OFEFalse
+      Delete = OFEFalse
+      Fields = Map.empty
     }
 
 [<NoEquality; NoComparison>]
@@ -70,6 +81,8 @@ let emptyAllowedDatabase : AllowedDatabase =
     { Schemas = Map.empty
     }
 
+// These are entity permissions combined with all parent roles.
+// Same-role checks are _not_ combined (with parents or, say, UPDATEs with SELECTs).
 [<NoEquality; NoComparison>]
 type FlatAllowedDerivedEntity =
     { Insert : bool
@@ -77,6 +90,14 @@ type FlatAllowedDerivedEntity =
       Select : ResolvedOptimizedFieldExpr
       Update : ResolvedOptimizedFieldExpr
       Delete : ResolvedOptimizedFieldExpr
+    }
+
+let emptyFlatAllowedDerivedEntity : FlatAllowedDerivedEntity =
+    { Insert = false
+      Check = OFEFalse
+      Select = OFEFalse
+      Update = OFEFalse
+      Delete = OFEFalse
     }
 
 [<NoEquality; NoComparison>]

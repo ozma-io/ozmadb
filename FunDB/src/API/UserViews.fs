@@ -131,7 +131,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                     match rctx.User.Effective.Type with
                     | RTRoot -> ()
                     | RTRole role when role.CanRead -> ()
-                    | RTRole role -> checkRoleViewExpr ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedDatabase
+                    | RTRole role -> ignore <| applyPermissions ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedDatabase
                     return Ok { Info = uv.Info
                                 PureAttributes = uv.PureAttributes.Attributes
                                 PureColumnAttributes = uv.PureAttributes.ColumnAttributes
@@ -160,36 +160,48 @@ type UserViewsAPI (api : IFunDBAPI) =
                 match! resolveSource source flags with
                 | Error e -> return Error e
                 | Ok uv ->
-                    let compiled =
-                        match getReadRole rctx.User.Effective.Type with
-                        | None -> uv.UserView.Compiled
-                        | Some role -> applyRoleViewExpr ctx.Layout role uv.UserView.Compiled.UsedDatabase uv.UserView.Compiled
-                    let maybeResolvedChunk =
-                        try
-                            Ok <| resolveViewExprChunk ctx.Layout compiled chunk
-                        with
-                        | :? ChunkException as e ->
-                            Error <| UVEArguments (exceptionString e)
-
-                    match maybeResolvedChunk with
-                    | Error e -> return Error e
-                    | Ok resolvedChunk ->
-                        let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
-                        let extraArgValues = Map.mapKeys PLocal extraLocalArgs
-                        let compiled = { compiled with Query = query }
-                        match Option.map (fun args -> convertViewArguments extraArgValues args compiled) maybeRawArguments with
-                        | Some (Error msg) ->
-                            return Error <| UVEArguments msg
-                        | maybeRetArgs ->
-                            let maybeArgs = Option.map Result.get maybeRetArgs
+                    try
+                        let compiled =
+                            match getReadRole rctx.User.Effective.Type with
+                            | None -> uv.UserView.Compiled
+                            | Some role ->
+                                let appliedDb = applyPermissions ctx.Layout role uv.UserView.Compiled.UsedDatabase 
+                                applyRoleViewExpr ctx.Layout appliedDb uv.UserView.Compiled
+                        let maybeResolvedChunk =
                             try
-                                let! res = explainViewExpr ctx.Transaction.Connection.Query compiled maybeArgs explainOpts ctx.CancellationToken
-                                return Ok res
+                                Ok <| resolveViewExprChunk ctx.Layout compiled chunk
                             with
-                            | :? UserViewExecutionException as ex ->
-                                logger.LogError(ex, "Failed to execute user view")
-                                let str = exceptionString ex
-                                return Error (UVEExecution str)
+                            | :? ChunkException as e ->
+                                Error <| UVEArguments (exceptionString e)
+
+                        match maybeResolvedChunk with
+                        | Error e -> return Error e
+                        | Ok resolvedChunk ->
+                            let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
+                            let extraArgValues = Map.mapKeys PLocal extraLocalArgs
+                            let compiled = { compiled with Query = query }
+                            match Option.map (fun args -> convertViewArguments extraArgValues args compiled) maybeRawArguments with
+                            | Some (Error msg) ->
+                                return Error <| UVEArguments msg
+                            | maybeRetArgs ->
+                                let maybeArgs = Option.map Result.get maybeRetArgs
+                                try
+                                    let! res = explainViewExpr ctx.Transaction.Connection.Query compiled maybeArgs explainOpts ctx.CancellationToken
+                                    return Ok res
+                                with
+                                | :? UserViewExecutionException as ex ->
+                                    logger.LogError(ex, "Failed to execute user view")
+                                    let str = exceptionString ex
+                                    return Error (UVEExecution str)
+                    with
+                    | :? PermissionsApplyException as err ->
+                        logger.LogError(err, "Access denied to user view")
+                        rctx.WriteEvent (fun event ->
+                            event.Type <- "getUserView"
+                            event.Error <- "access_denied"
+                            event.Details <- exceptionString err
+                        )
+                        return Error UVEAccessDenied
         }
 
     member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
@@ -201,8 +213,9 @@ type UserViewsAPI (api : IFunDBAPI) =
                     let compiled =
                         match getReadRole rctx.User.Effective.Type with
                         | None -> uv.UserView.Compiled
-                        | Some role -> applyRoleViewExpr ctx.Layout role uv.UserView.Compiled.UsedDatabase uv.UserView.Compiled
-
+                        | Some role ->
+                            let appliedDb = applyPermissions ctx.Layout role uv.UserView.Compiled.UsedDatabase 
+                            applyRoleViewExpr ctx.Layout appliedDb uv.UserView.Compiled
                     let maybeResolvedChunk =
                         try
                             Ok <| resolveViewExprChunk ctx.Layout compiled chunk

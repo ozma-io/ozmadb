@@ -137,6 +137,51 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
                 }
         | FSubExpr subsel -> FSubExpr { subsel with Select = resolveSelectExpr subsel.Select }
 
+    and resolveInsertValue : ResolvedInsertValue -> ResolvedInsertValue = function
+        | IVDefault -> IVDefault
+        | IVValue expr -> IVValue <| resolveFieldExpr expr
+
+    and resolveInsertSource : ResolvedInsertSource -> ResolvedInsertSource = function
+        | ISDefaultValues -> ISDefaultValues
+        | ISSelect select -> ISSelect <| resolveSelectExpr select
+        | ISValues vals -> ISValues <| Array.map (Array.map resolveInsertValue) vals
+
+    and resolveInsertExpr (insert : ResolvedInsertExpr) : ResolvedInsertExpr =
+        let ctes = Option.map resolveCommonTableExprs insert.CTEs
+        let source = resolveInsertSource insert.Source
+        { CTEs = ctes
+          Entity = insert.Entity
+          Fields = insert.Fields
+          Source = source
+          Extra = insert.Extra
+        }
+
+    and resolveUpdateExpr (update : ResolvedUpdateExpr) : ResolvedUpdateExpr =
+        let ctes = Option.map resolveCommonTableExprs update.CTEs
+        let fields = Map.map (fun name -> resolveFieldExpr) update.Fields
+        { CTEs = ctes
+          Entity = update.Entity
+          Fields = fields
+          From = Option.map resolveFromExpr update.From
+          Where = Option.map resolveFieldExpr update.Where
+          Extra = update.Extra
+        }
+
+    and resolveDeleteExpr (delete : ResolvedDeleteExpr) : ResolvedDeleteExpr =
+        let ctes = Option.map resolveCommonTableExprs delete.CTEs
+        { CTEs = ctes
+          Entity = delete.Entity
+          Using = Option.map resolveFromExpr delete.Using
+          Where = Option.map resolveFieldExpr delete.Where
+          Extra = delete.Extra
+        }
+
+    and resolveDataExpr : ResolvedDataExpr -> ResolvedDataExpr = function
+        | DESelect select -> DESelect <| resolveSelectExpr select
+        | DEInsert insert -> DEInsert <| resolveInsertExpr insert
+        | DEUpdate update -> DEUpdate <| resolveUpdateExpr update
+        | DEDelete delete -> DEDelete <| resolveDeleteExpr delete
+
     let resolveArgument (arg : ResolvedArgument) : ResolvedArgument =
         { arg with Attributes = resolveAttributes arg.Attributes }
 

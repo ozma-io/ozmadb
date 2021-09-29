@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.Layout.Types
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
@@ -70,6 +72,8 @@ type ResolvedColumnField =
       ColumnName : SQL.ColumnName
       HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity.
     }
+
+let fieldIsOptional (field : ResolvedColumnField) = Option.isSome field.DefaultValue || field.IsNullable
 
 [<NoEquality; NoComparison>]
 type VirtualFieldCase =
@@ -162,6 +166,7 @@ type IEntityBits =
     abstract member FindField : FieldName ->  ResolvedFieldInfo option
     abstract member FindFieldBits : FieldName ->  ResolvedFieldBitsInfo option
     abstract member Fields : (FieldName * ResolvedFieldBits) seq
+    abstract member ColumnFields : (FieldName * ResolvedColumnField) seq
     abstract member MainField : FieldName
     abstract member TypeName : string
     abstract member Parent : ResolvedEntityRef option
@@ -237,6 +242,7 @@ type ResolvedEntity =
                 | (name, Ok comp) -> Some (name, RComputedField (comp :> IComputedFieldBits))
                 let computed = this.ComputedFields |> Map.toSeq |> Seq.mapMaybe getComputed
                 Seq.concat [id; subentity; columns; computed]
+            member this.ColumnFields = Map.toSeq this.ColumnFields
             member this.MainField = this.MainField
             member this.TypeName = this.TypeName
             member this.Parent = this.Parent

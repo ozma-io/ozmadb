@@ -165,6 +165,7 @@
     <ProjectReference Include="../FunDBSchema/FunDBSchema.csproj" />
     <ProjectReference Include="../FunUtils/FunUtils.fsproj" />
 
+    <PackageReference Include="FSharpPlus" Version="1.2.*" />
     <PackageReference Include="Npgsql" Version="5.0.*" />
     <PackageReference Include="Npgsql.Json.NET" Version="5.0.*" />
     <PackageReference Include="FsLexYacc" Version="10.2.*" />

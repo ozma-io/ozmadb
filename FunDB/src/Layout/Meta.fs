@@ -1,9 +1,10 @@
 module FunWithFlags.FunDB.Layout.Meta
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
-open FunWithFlags.FunDB.FunQL.Typecheck
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST

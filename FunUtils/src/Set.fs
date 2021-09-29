@@ -6,8 +6,14 @@ let toMap (f : 'k -> 'v) (s : Set<'k>) : Map<'k, 'v> =
 
 let getSingle (s : Set<'k>) : 'k = s |> Set.toSeq |> Seq.exactlyOne
 
+let addUnique (x : 'k) (s : Set<'k>) : Set<'k> =
+    if Set.contains x s then
+        failwithf "Item '%O' already exists" x
+    else
+        Set.add x s
+
 let ofSeqUnique (items : seq<'a>) : Set<'a> =
-    Seq.fold (fun s x -> if Set.contains x s then failwithf "Item '%O' already exists" x else Set.add x s) Set.empty items
+    Seq.fold (flip addUnique) Set.empty items
 
 let unionUnique (a : Set<'k>) (b : Set<'k>) : Set<'k> =
-    ofSeqUnique (Seq.append (Set.toSeq a) (Set.toSeq b))
+    Seq.fold (flip addUnique) a b

@@ -112,10 +112,10 @@ type private Typechecker (layout : ILayoutBits) =
 
     and typecheckBinaryLogical (a : ResolvedFieldExpr) (b : ResolvedFieldExpr) : ResolvedFieldType =
         let ta = typecheckFieldExpr a
-        if not <| isSubtype layout scalarBool ta then
+        if not <| isMaybeSubtype layout scalarBool ta then
             raisef ViewTypecheckException "Boolean expected, %O found" ta
         let tb = typecheckFieldExpr b
-        if not <| isSubtype layout scalarBool tb then
+        if not <| isMaybeSubtype layout scalarBool tb then
             raisef ViewTypecheckException "Boolean expected, %O found" tb
         scalarBool
 
@@ -152,7 +152,7 @@ type private Typechecker (layout : ILayoutBits) =
     and typecheckCase (es : (ResolvedFieldExpr * ResolvedFieldExpr)[]) (els : ResolvedFieldExpr option) : ResolvedFieldType =
         for (check, expr) in es do
             let checkt = typecheckFieldExpr check
-            if not <| isSubtype layout scalarBool checkt then
+            if not <| isMaybeSubtype layout scalarBool checkt then
                 raisef ViewTypecheckException "Boolean expected, %O found" checkt
 
         let allVals = Seq.append (Seq.map snd es) (Option.toSeq els) |> Seq.map typecheckFieldExpr

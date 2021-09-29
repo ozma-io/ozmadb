@@ -3,6 +3,7 @@ module FunWithFlags.FunUtils.Option
 
 open System.Threading.Tasks
 open FSharp.Control.Tasks.NonAffine
+open FSharpPlus
 
 let getOrFailWith (errorFunc : unit -> string) : 'a option -> 'a = function
     | Some r -> r
@@ -14,11 +15,9 @@ let toSeq (a : 'a option) :'a seq =
     | None -> Seq.empty
 
 let mapTask (f : 'a -> Task<'b>) (opt : 'a option) : Task<'b option> =
-    task {
-        match opt with
-        | None -> return None
-        | Some a -> return! Task.map Some (f a)
-    }
+    match opt with
+    | None -> Task.result None
+    | Some a -> Task.map Some (f a)
 
 let addWith (f : 'a -> 'a -> 'a) (a : 'a) (b : 'a option) : 'a =
     match b with

@@ -14,9 +14,12 @@ type CompiledRestriction =
       Where : SQL.ValueExpr
     }
 
+let private defaultWhere : SQL.ValueExpr = SQL.VEValue (SQL.VBool true)
+
 let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedOptimizedFieldExpr) : QueryArguments * CompiledRestriction =
+    let entity = layout.FindEntity ref |> Option.get
     let fromEntity =
-        { Ref = relaxEntityRef ref
+        { Ref = relaxEntityRef entity.Root
           Alias = None
           AsRoot = false
         }
@@ -24,7 +27,7 @@ let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : 
     let ret =
         { From = from.From
           Joins = from.Joins
-          Where = Option.get from.Where
+          Where = Option.defaultValue defaultWhere from.Where
         }
     (info.Arguments, ret)
 
@@ -40,33 +43,24 @@ let restrictionToSelect (ref : ResolvedEntityRef) (restr : CompiledRestriction) 
       Extra = null
     }
 
-let compileValueRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedOptimizedFieldExpr) : QueryArguments * SQL.ValueExpr =
-    let fromEntity =
-        { Ref = relaxEntityRef ref
-          Alias = None
-          AsRoot = false
-        }
-    let (info, from) = compileSingleFromExpr layout arguments (FEntity fromEntity) (Some <| restr.ToFieldExpr())
-    let ret =
-        match from.From with
-        | SQL.FTable _ ->
-            // We can make expression simpler in this case, just using `WHERE`.
-            // Drop the table names beforehand, as we are in an `UPDATE` or `DELETE` with only one table name bound.
-            // For example, "schema__table"."foo" becomes just "foo", because we already do an update on "schema"."table".
-            let expr = Option.get from.Where
-            let mapper =
-                { SQL.idValueExprMapper with
-                      ColumnReference = fun col -> { col with Table = None }
-                }
-            SQL.mapValueExpr mapper expr
-        | _ ->
-            let select =
-                { SQL.emptySingleSelectExpr with
-                      Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = Some <| compileRenamedResolvedEntityRef ref; Name = sqlFunId }) |]
-                      From = Some from.From
-                      Where = from.Where
-                }
-            let subexpr = { CTEs = None; Extra = null; Tree = SQL.SSelect select } : SQL.SelectExpr
-            let idColumn = SQL.VEColumn { Table = None; Name = sqlFunId }
-            SQL.VEInQuery (idColumn, subexpr)
-    (info.Arguments, ret)
+let restrictionToValueExpr (layout : Layout) (ref : ResolvedEntityRef) (restr : CompiledRestriction) : SQL.ValueExpr =
+    match restr.From with
+    | SQL.FTable _ ->
+        // We can make expression simpler in this case, just using `WHERE`.
+        // Drop the table names beforehand, as we are in an `UPDATE` or `DELETE` with only one table name bound.
+        // For example, "schema__table"."foo" becomes just "foo", because we already do an update on "schema"."table".
+        let mapper =
+            { SQL.idValueExprMapper with
+                  ColumnReference = fun col -> { col with Table = None }
+            }
+        SQL.mapValueExpr mapper restr.Where
+    | _ ->
+        let select =
+            { SQL.emptySingleSelectExpr with
+                  Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = Some <| compileRenamedResolvedEntityRef ref; Name = sqlFunId }) |]
+                  From = Some restr.From
+                  Where = Some restr.Where
+            }
+        let subexpr = { CTEs = None; Extra = null; Tree = SQL.SSelect select } : SQL.SelectExpr
+        let idColumn = SQL.VEColumn { Table = None; Name = sqlFunId }
+        SQL.VEInQuery (idColumn, subexpr)

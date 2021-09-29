@@ -1,10 +1,13 @@
 module FunWithFlags.FunDB.Layout.Domain
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Resolve
+open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -22,7 +25,7 @@ type LayoutDomainException (message : string, innerException : Exception, isUser
 // Right now all domains are SQL expressions with `value` and `pun` columns. This may change in future.
 type DomainExpr =
     { Query : Query<SQL.SelectExpr>
-      UsedDatabase : UsedDatabase
+      UsedDatabase : FlatUsedDatabase
       Hash : string
     }
 
@@ -250,7 +253,7 @@ type private DomainsBuilder (layout : Layout) =
             let (usedDatabase, query) = compileGenericReferenceOptionsSelect layout refEntityRef None
             let ret =
                 { Query = query
-                  UsedDatabase = usedDatabase
+                  UsedDatabase = flattenUsedDatabase layout usedDatabase
                   Hash = queryHash query.Expression
                 }
             fullSelectsCache <- Map.add refEntityRef ret fullSelectsCache
@@ -278,7 +281,7 @@ type private DomainsBuilder (layout : Layout) =
             | Some (usedDatabase, check) ->
                 let (selectUsedDatabase, query) = compileGenericReferenceOptionsSelect layout refEntityRef (Some check)
                 { Query = query
-                  UsedDatabase = unionUsedDatabases usedDatabase selectUsedDatabase
+                  UsedDatabase = flattenUsedDatabase layout <| unionUsedDatabases usedDatabase selectUsedDatabase
                   Hash = queryHash query.Expression
                 }
         let rowSpecificExpr =
@@ -293,7 +296,7 @@ type private DomainsBuilder (layout : Layout) =
                 let (selectUsedDatabase, query) = compileRowSpecificReferenceOptionsSelect layout fieldRef.Entity refEntityRef (Some fullCheck)
                 Some
                     { Query = query
-                      UsedDatabase = unionUsedDatabases usedDatabase selectUsedDatabase
+                      UsedDatabase = flattenUsedDatabase layout <| unionUsedDatabases usedDatabase selectUsedDatabase
                       Hash = queryHash query.Expression
                     }
 

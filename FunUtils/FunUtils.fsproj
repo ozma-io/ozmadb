@@ -35,6 +35,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="12.0.*" />
     <PackageReference Include="YamlDotNet" Version="8.1.*" />
     <PackageReference Include="Ply" Version="0.3.*" />
+    <PackageReference Include="FSharpPlus" Version="1.2.*" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.FunQL.Resolve
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.Utils
@@ -1654,16 +1656,34 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 let (resolveCte, newCtes) = resolveCommonTableExprs ctx flags ctes
                 let ctx = { ctx with ResolveCTE = resolveCte }
                 (ctx, Some newCtes)
+
         let entityRef = resolveEntityRef insert.Entity.Ref
         let entity = findEntityByRef entityRef false
+        if entity.IsAbstract then
+            raisef ViewResolveException "Entity %O is abstract" entityRef
+
+        let fields =
+            try
+                Set.ofSeqUnique insert.Fields
+            with
+            | Failure err -> raisef ViewResolveException "Clashing insert field: %s" err
         for fieldName in insert.Fields do
             match entity.FindField fieldName with
             | Some { ForceRename = false; Field = RColumnField field } -> ()
             | _ -> raisef ViewResolveException "Field not found: %O" { Entity = entityRef; Name = fieldName }
+        for (fieldName, field) in entity.ColumnFields do
+            if not (fieldIsOptional field) && not (Set.contains fieldName fields) then
+                raisef ViewResolveException "Required field not provided: %O" fieldName
+
+        let resolveInsertValues vals =
+            if Array.length vals <> Array.length insert.Fields then
+                raisef ViewResolveException "Number of values is not consistent"
+            Array.map (resolveInsertValue ctx) vals
+
         let source =
             match insert.Source with
             | ISDefaultValues -> ISDefaultValues
-            | ISValues vals -> ISValues <| Array.map (Array.map (resolveInsertValue ctx)) vals
+            | ISValues allVals -> ISValues <| Array.map resolveInsertValues allVals
             | ISSelect select ->
                 let (fields, resSelect) = resolveSelectExpr ctx subExprSelectFlags select
                 if Array.length fields <> Array.length insert.Fields then
@@ -1687,8 +1707,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 let ctx = { ctx with ResolveCTE = resolveCte }
                 (ctx, Some newCtes)
         let (fieldMapping, mappingRef) = fromEntityMapping emptyContext update.Entity
+
         let entityRef = resolveEntityRef update.Entity.Ref
         let entity = findEntityByRef entityRef false
+
         let (fieldMapping, from) =
             match update.From with
             | None -> (fieldMapping, None)
@@ -1696,15 +1718,17 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 let (fieldMapping, mappingRef, newFrom) = resolveFromExpr ctx fieldMapping flags from
                 (fieldMapping, Some newFrom)
         let ctx = { ctx with FieldMaps = fieldMapping :: ctx.FieldMaps }
-        
+
         let resolveFieldUpdate fieldName expr =
             match entity.FindField fieldName with
-            | Some { ForceRename = false; Field = RColumnField field } -> ()
+            | Some { ForceRename = false; Field = RColumnField field } ->
+                if field.IsImmutable then
+                    raisef ViewResolveException "Field %O is immutable" fieldName
             | _ -> raisef ViewResolveException "Field not found: %O" { Entity = entityRef; Name = fieldName }
             let (info, newExpr) = resolveFieldExpr ctx expr
             newExpr
         let fields = Map.map resolveFieldUpdate update.Fields
-        
+
         let where =
             match update.Where with
             | None -> None
@@ -1904,22 +1928,28 @@ let isScalarValueSubtype (layout : ILayoutBits) (wanted : ResolvedScalarFieldTyp
     | (a, b) -> SQL.tryImplicitCasts (compileScalarType a) (compileScalarType b)
     | _ -> false
 
-let isValueSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (given : ResolvedFieldType) : bool =
+let isSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (given : ResolvedFieldType) : bool =
     match (wanted, given) with
     | (FTScalar wantedTyp, FTScalar givenTyp)
     | (FTArray wantedTyp, FTArray givenTyp) -> isScalarValueSubtype layout wantedTyp givenTyp
     | _ -> false
 
-let isSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (maybeGiven : ResolvedFieldType option) : bool =
+let isMaybeSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (maybeGiven : ResolvedFieldType option) : bool =
     match maybeGiven with
     | None -> true
-    | Some given -> isValueSubtype layout wanted given
+    | Some given -> isSubtype layout wanted given
 
-let isValueOfSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (value : FieldValue) : bool =
+let private emptyLayoutBits =
+    { new ILayoutBits with
+          member this.FindEntity ent = None
+          member this.HasVisibleEntity ent = false
+    }
+
+let isValueOfSubtype (wanted : ResolvedFieldType) (value : FieldValue) : bool =
     match (wanted, value) with
     | (FTScalar (SFTEnum wantedVals), FString str) -> Set.contains str wantedVals
     | (FTArray (SFTEnum wantedVals), FStringArray strs) -> Seq.forall (fun str -> Set.contains str wantedVals) wantedVals
-    | _ -> isSubtype layout wanted (fieldValueType value)
+    | _ -> isMaybeSubtype emptyLayoutBits wanted (fieldValueType value)
 
 let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : ResolvedArgument =
     let argType = resolveFieldType layout arg.ArgType
@@ -1930,7 +1960,7 @@ let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : Reso
         | FNull when not arg.Optional ->
             raisef ViewResolveException "Invalid default value, expected %O" argType
         | _ -> ()
-        if not (isValueOfSubtype layout argType def) then
+        if not (isValueOfSubtype argType def) then
             raisef ViewResolveException "Invalid default value, expected %O" argType
     let attrsQualifier = QueryResolver (layout, Map.empty, emptyExprResolutionFlags)
     { ArgType = argType

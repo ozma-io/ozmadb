@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.FunQL.Query
 open System.Threading
 open System.Threading.Tasks
 open System.Runtime.Serialization
+open FSharpPlus
 open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json.Linq
 

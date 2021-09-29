@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.API.Entities
 
 open System
 open System.Threading.Tasks
+open FSharpPlus
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
