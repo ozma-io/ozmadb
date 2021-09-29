@@ -389,10 +389,11 @@ Values:
     | VALUES ValuesEntryList { SValues (List.toArray $2) }
 
 SelectTreeExpr:
-    | SingleSelectExpr                               { SSelect $1 }
-    | Values                                         { $1 }
-    | SelectVal SetOp SetOpExpr OrderLimitClause     { SSetOp { Operation = $2; AllowDuplicates = false; A = $1; B = $3; OrderLimit = $4 } }
-    | SelectVal SetOp ALL SetOpExpr OrderLimitClause { SSetOp { Operation = $2; AllowDuplicates = true; A = $1; B = $4; OrderLimit = $5 } }
+    | SingleSelectExpr                                    { SSelect $1 }
+    | Values                                              { $1 }
+    | SelectVal SetOp SetOpExpr OrderLimitClause          { SSetOp { Operation = $2; AllowDuplicates = false; A = $1; B = $3; OrderLimit = $4 } }
+    | SelectVal SetOp DISTINCT SetOpExpr OrderLimitClause { SSetOp { Operation = $2; AllowDuplicates = false; A = $1; B = $4; OrderLimit = $5 } }
+    | SelectVal SetOp ALL SetOpExpr OrderLimitClause      { SSetOp { Operation = $2; AllowDuplicates = true; A = $1; B = $4; OrderLimit = $5 } }
 
 SubSelectExpr:
     | LEFT_PAREN SelectExpr RIGHT_PAREN { $2 }
@@ -403,10 +404,15 @@ SetOp:
     | EXCEPT    { Except }
 
 SetOpExpr:
-    | SelectVal                     { $1 }
-    | SelectVal SetOp SetOpExpr     {
+    | SelectVal { $1 }
+    | SelectVal SetOp SetOpExpr {
         { CTEs = None
           Tree = SSetOp { Operation = $2; AllowDuplicates = false; A = $1; B = $3; OrderLimit = emptyOrderLimitClause }
+          Extra = ObjectMap.empty }
+    }
+    | SelectVal SetOp DISTINCT SetOpExpr {
+        { CTEs = None
+          Tree = SSetOp { Operation = $2; AllowDuplicates = false; A = $1; B = $4; OrderLimit = emptyOrderLimitClause }
           Extra = ObjectMap.empty }
     }
     | SelectVal SetOp ALL SetOpExpr {
