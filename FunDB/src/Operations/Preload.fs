@@ -264,12 +264,14 @@ let buildUserDatabaseMeta (transaction : NpgsqlTransaction) (preload : Preload) 
         return SQL.filterDatabaseMeta (fun (SQL.SQLName name) -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta
     }
 
-let private checkBrokenLayout (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenLayout : ErroredLayout) (cancellationToken : CancellationToken) =
+let private checkBrokenLayout (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenLayout : ErroredLayout) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
         for KeyValue(schemaName, schema) in brokenLayout do
             for KeyValue(entityName, entity) in schema do
                 let isSystem = Map.containsKey schemaName preload.Schemas
+                if isSystem || not allowAutoMark then
+                    critical <- true
                 for KeyValue(compName, err) in entity.ComputedFields do
                         if isSystem then
                             logger.LogWarning(err, "System computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
@@ -277,17 +279,17 @@ let private checkBrokenLayout (logger :ILogger) (preload : Preload) (conn : Data
                             logger.LogWarning(err, "Marking computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
 
             if critical then
-                failwith "Broken system layout"
+                failwith "Cannot mark some layout as broken"
             do! markBrokenLayout conn.System brokenLayout cancellationToken
     }
 
 
-let checkBrokenAttributes (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenAttrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) =
+let checkBrokenAttributes (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenAttrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
         for KeyValue(schemaName, schema) in brokenAttrs do
             let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem then
+            if isSystem || not allowAutoMark then
                 critical <- true
             for KeyValue(attrsSchemaName, attrsSchema) in schema do
                 for KeyValue(attrsEntityName, attrsEntity) in attrsSchema do
@@ -299,16 +301,16 @@ let checkBrokenAttributes (logger :ILogger) (preload : Preload) (conn : Database
                         else
                             logger.LogWarning(err, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
         if critical then
-            failwith "Broken system default attributes"
+            failwith "Cannot mark some default attributes as broken"
         do! markBrokenAttributes conn.System brokenAttrs cancellationToken
     }
 
-let checkBrokenActions (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenActions : ErroredActions) (cancellationToken : CancellationToken) =
+let checkBrokenActions (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenActions : ErroredActions) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
         for KeyValue(schemaName, schema) in brokenActions do
             let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem then
+            if isSystem || not allowAutoMark then
                 critical <- true
             for KeyValue(actionName, err) in schema do
                 let schemaStr = schemaName.ToString()
@@ -318,16 +320,16 @@ let checkBrokenActions (logger :ILogger) (preload : Preload) (conn : DatabaseTra
                 else
                     logger.LogWarning(err, "Marking action {name} from {schema} as broken", actionNameStr, schemaStr)
         if critical then
-            failwith "Broken system actions"
+            failwith "Cannot mark some system actions as broken"
         do! markBrokenActions conn.System brokenActions cancellationToken
     }
 
-let checkBrokenTriggers (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenTriggers : ErroredTriggers) (cancellationToken : CancellationToken) =
+let checkBrokenTriggers (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenTriggers : ErroredTriggers) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
         for KeyValue(schemaName, schema) in brokenTriggers do
             let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem then
+            if isSystem || not allowAutoMark then
                 critical <- true
             for KeyValue(triggerSchemaName, triggersSchema) in schema do
                 for KeyValue(triggerEntityName, triggersEntity) in triggersSchema do
@@ -339,16 +341,16 @@ let checkBrokenTriggers (logger :ILogger) (preload : Preload) (conn : DatabaseTr
                         else
                             logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerNameStr, schemaStr)
         if critical then
-            failwith "Broken system triggers"
+            failwith "Cannot mark some triggers as broken"
         do! markBrokenTriggers conn.System brokenTriggers cancellationToken
     }
 
-let checkBrokenUserViews (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenViews : ErroredUserViews) (cancellationToken : CancellationToken) =
+let checkBrokenUserViews (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenViews : ErroredUserViews) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
         for KeyValue(schemaName, mschema) in brokenViews do
             let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem then
+            if isSystem || not allowAutoMark then
                 critical <- true
             match mschema with
             | UEUserViews schema ->
@@ -364,16 +366,16 @@ let checkBrokenUserViews (logger :ILogger) (preload : Preload) (conn : DatabaseT
                 else
                     logger.LogWarning(err, "Marking view generator for schema {schema} as broken", schemaName)
         if critical then
-            failwith "Broken system user views"
+            failwith "Cannot mark some user views as broken"
         do! markBrokenUserViews conn.System brokenViews cancellationToken
     }
 
-let checkBrokenPermissions (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (brokenPerms : ErroredPermissions) (cancellationToken : CancellationToken) =
+let checkBrokenPermissions (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenPerms : ErroredPermissions) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
         for KeyValue(schemaName, schema) in brokenPerms do
             let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem then
+            if isSystem || not allowAutoMark then
                 critical <- true
             for KeyValue(roleName, role) in schema do
                 match role with
@@ -392,12 +394,12 @@ let checkBrokenPermissions (logger :ILogger) (preload : Preload) (conn : Databas
                             else
                                 logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
         if critical then
-            failwith "Broken system roles"
+            failwith "Cannot mark some roles as broken"
         do! markBrokenPermissions conn.System brokenPerms cancellationToken
     }
 
 // Returns only user meta
-let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<bool * Layout * SQL.DatabaseMeta> =
+let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<bool * Layout * SQL.DatabaseMeta> =
     task {
         logger.LogInformation("Migrating system entities to the current version")
         let sourcePreloadLayout = preloadLayout preload
@@ -492,7 +494,7 @@ let initialMigratePreload (logger :ILogger) (preload : Preload) (conn : Database
         let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout
         let (brokenLayout, layout) = resolveLayout sourceLayout true
 
-        do! checkBrokenLayout logger preload conn brokenLayout cancellationToken
+        do! checkBrokenLayout logger allowAutoMark preload conn brokenLayout cancellationToken
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
         let userLayout = filterLayout (fun name -> not <| Map.containsKey name preloadLayout.Schemas) layout

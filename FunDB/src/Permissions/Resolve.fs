@@ -34,19 +34,13 @@ let private checkName (FunQLName name) : unit =
     if not <| goodName name then
         raisef ResolvePermissionsException "Invalid role name"
 
-type private HalfResolvedEntity =
+type private HalfAllowedEntity =
     { Allowed : AllowedEntity
       Flattened : FlatAllowedDerivedEntity
       Error : exn option
     }
 
-let private emptyHalfResolvedEntity : HalfResolvedEntity =
-    { Allowed = emptyAllowedEntity
-      Flattened = emptyFlatAllowedDerivedEntity
-      Error = None
-    }
-
-let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEntity : FlatAllowedDerivedEntity) (entity : AllowedEntity) : Map<ResolvedFieldRef,AllowedField> * FlatAllowedDerivedEntity =
+let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (entity : AllowedEntity) : Map<ResolvedFieldRef,AllowedField> * FlatAllowedDerivedEntity =
     let fields = entity.Fields |> Map.toSeq |> Seq.map (fun (name, field) -> ({ Entity = entityRef; Name = name }, field)) |> Map.ofSeq
 
     let ret =
@@ -59,33 +53,20 @@ let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEntity :
 
     (fields, ret)
 
-let private mergeField (a : AllowedField) (b : AllowedField) : AllowedField =
-    { Change = a.Change || b.Change
-      Select = orFieldExpr a.Select b.Select
+let private unionFlatEntities (a : FlatAllowedEntity) (b : FlatAllowedEntity) : FlatAllowedEntity =
+    { // Allowed entities for all roles are expected to be fully built when merging flat entities.
+      Roles = Map.union a.Roles b.Roles
     }
 
-let private mergeFlatDerivedEntity (a : FlatAllowedDerivedEntity) (b : FlatAllowedDerivedEntity) : FlatAllowedDerivedEntity =
-    { Check = orFieldExpr a.Check b.Check
-      Insert = a.Insert || b.Insert
-      Select = orFieldExpr a.Select b.Select
-      Update = orFieldExpr a.Update b.Update
-      Delete = orFieldExpr a.Delete b.Delete
-    }
+let private unionFlatAllowedDatabases : FlatAllowedDatabase -> FlatAllowedDatabase -> FlatAllowedDatabase = Map.unionWith (fun name -> unionFlatEntities)
 
-let private mergeFlatEntity (a : FlatAllowedEntity) (b : FlatAllowedEntity) : FlatAllowedEntity =
-    { Children = Map.unionWith (fun name -> mergeFlatDerivedEntity) a.Children b.Children
-      Fields = Map.unionWith (fun name -> mergeField) a.Fields b.Fields
-    }
-
-let private mergeFlatAllowedDatabase = Map.unionWith (fun name -> mergeFlatEntity)
-
-let private mergeFlatRole (a : FlatRole) (b: FlatRole) =
-    { Entities = mergeFlatAllowedDatabase a.Entities b.Entities
+let private unionFlatRoles (a : FlatRole) (b: FlatRole) =
+    { Entities = unionFlatAllowedDatabases a.Entities b.Entities
     }
 
 type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb : SourceAllowedDatabase) =
-    let mutable resolved : Map<ResolvedEntityRef, Result<HalfResolvedEntity, AllowedEntityError>> = Map.empty
-    let mutable flattened = Map.empty
+    let mutable resolved : Map<ResolvedEntityRef, Result<HalfAllowedEntity, AllowedEntityError>> = Map.empty
+    let mutable flattened : Map<ResolvedEntityRef, FlatAllowedRoleEntity> = Map.empty
 
     let resolveRestriction (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowIds : bool) (where : string) : ResolvedOptimizedFieldExpr =
         let whereExpr =
@@ -118,7 +99,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
           Select = resolveOne allowedField.Select
         }
 
-    let resolveSelfAllowedEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowedEntity : SourceAllowedEntity) : (exn option * AllowedEntity) =
+    let resolveSelfAllowedEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (parentEntity : HalfAllowedEntity option) (allowedEntity : SourceAllowedEntity) : (exn option * AllowedEntity) =
         let mutable error = None
 
         let mapField name (allowedField : SourceAllowedField) =
@@ -130,9 +111,14 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let propagateFromParent accessor allowIds mexpr =
             match mexpr with
             | Some expr -> resolveRestriction entityRef entity allowIds expr
-            // Parent permissions will be multiplied by these, so just leave `true` here.
-            | None when Option.isSome entity.Parent -> OFETrue
-            | None -> OFEFalse
+            | None ->
+                match parentEntity with
+                | None -> OFEFalse
+                | Some parent ->
+                    match accessor parent.Allowed with
+                    | OFEFalse -> OFEFalse
+                    // Parent permissions will be multiplied by these, so just leave `true` here.
+                    | _ -> OFETrue
 
         let check = propagateFromParent (fun pent -> pent.Check) false allowedEntity.Check
         let select = propagateFromParent (fun pent -> pent.Select) true allowedEntity.Select
@@ -230,7 +216,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         (error, allowedEntity)
 
     // Recursively resolve access rights for entity parents.
-    let rec resolveParentEntity (entity : ResolvedEntity) : HalfResolvedEntity option =
+    let rec resolveParentEntity (entity : ResolvedEntity) : HalfAllowedEntity option =
         match entity.Parent with
         | None -> None
         | Some parentRef ->
@@ -247,16 +233,16 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                 let parentEntity = layout.FindEntity parentRef |> Option.get
                 resolveParentEntity parentEntity
 
-    and resolveOneAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : HalfResolvedEntity =
+    and resolveOneAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : HalfAllowedEntity =
         let entity =
             match layout.FindEntity entityRef with
             | Some s when not s.IsHidden -> s
             | _ -> raisef ResolvePermissionsException "Undefined entity"
-        let parentEntity = resolveParentEntity entity |> Option.defaultValue emptyHalfResolvedEntity
+        let parentEntity = resolveParentEntity entity
 
-        let (error1, resolved) = resolveSelfAllowedEntity entityRef entity source
+        let (error1, resolved) = resolveSelfAllowedEntity entityRef entity parentEntity source
         let (error2, resolved) = checkEntity entity resolved
-        let (fields, myFlat) = flattenAllowedEntity entityRef parentEntity.Flattened resolved
+        let (fields, myFlat) = flattenAllowedEntity entityRef resolved
 
         let (myFlat, flatEntity) =
             match Map.tryFind entity.Root flattened with
@@ -277,11 +263,11 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             { Allowed = resolved
               Flattened = myFlat
               Error = error
-            } : HalfResolvedEntity
+            } : HalfAllowedEntity
         flattened <- Map.add entity.Root flatEntity flattened
         ret
 
-    and resolveAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : Result<HalfResolvedEntity, AllowedEntityError> =
+    and resolveAllowedEntity (entityRef : ResolvedEntityRef) (source : SourceAllowedEntity) : Result<HalfAllowedEntity, AllowedEntityError> =
         match Map.tryFind entityRef resolved with
         | Some ret -> ret
         | None ->
@@ -368,16 +354,16 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             | Ok (errors, role) -> role.Flattened
             | Error e -> raisefWithInner ResolvePermissionsParentException e "Error in parent %O" parentRef
         let resolver = RoleResolver (layout, forceAllowBroken, role.Permissions)
-        let flattenedParents = role.Parents |> Set.toSeq |> Seq.map resolveParent |> Seq.fold mergeFlatRole emptyFlatRole
+        let flattenedParents = role.Parents |> Set.toSeq |> Seq.map resolveParent |> Seq.fold unionFlatRoles emptyFlatRole
         let (errors, resolved) = resolver.ResolveAllowedDatabase ()
         let flattened =
-            { Entities = resolver.Flattened
+            { Entities = Map.map (fun name roleEntity -> { Roles = Map.singleton ref roleEntity }) resolver.Flattened
             }
 
         let ret =
             { Parents = role.Parents
               Permissions = resolved
-              Flattened = mergeFlatRole flattenedParents flattened
+              Flattened = unionFlatRoles flattenedParents flattened
               AllowBroken = role.AllowBroken
             }
         (errors, ret)

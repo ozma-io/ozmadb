@@ -101,10 +101,15 @@ let emptyFlatAllowedDerivedEntity : FlatAllowedDerivedEntity =
     }
 
 [<NoEquality; NoComparison>]
-type FlatAllowedEntity =
+type FlatAllowedRoleEntity =
     { Children : Map<ResolvedEntityRef, FlatAllowedDerivedEntity>
       Fields : Map<ResolvedFieldRef, AllowedField>
     }
+
+[<NoEquality; NoComparison>]
+type FlatAllowedEntity =
+  { Roles : Map<ResolvedRoleRef, FlatAllowedRoleEntity>
+  }
 
 type FlatAllowedDatabase = Map<ResolvedEntityRef, FlatAllowedEntity>
 

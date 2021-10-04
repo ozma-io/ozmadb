@@ -22,15 +22,17 @@ let serializeEntityRestricted (layout : Layout) (role : ResolvedRole) (entityRef
         match Map.tryFind entity.Root role.Flattened.Entities with
         | None -> raisef PermissionsEntityException "Access denied"
         | Some access -> access
-    match Map.tryFind entityRef flattened.Children with
-    | Some _ -> ()
-    | _ -> raisef PermissionsEntityException "Access denied to get info"
+    if not (flattened.Roles |> Map.toSeq |> Seq.exists (fun (roleRef, allowedEntity) -> Map.containsKey entityRef allowedEntity.Children)) then
+        raisef PermissionsEntityException "Access denied to get info"
 
     let serialized = serializeEntity layout entity
 
     let filterField name (field : SerializedColumnField) =
         let parentEntity = Option.defaultValue entityRef field.InheritedFrom
-        Map.containsKey { Entity = parentEntity; Name = name } flattened.Fields
+        let fieldRef = { Entity = parentEntity; Name = name }
+        flattened.Roles
+            |> Map.toSeq
+            |> Seq.exists (fun (roleRef, allowedEntity) -> Map.containsKey fieldRef allowedEntity.Fields)
 
     let columnFields = serialized.ColumnFields |> Map.filter filterField
 

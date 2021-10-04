@@ -5,6 +5,9 @@ open Printf
 
 // Exceptions which can be marked as "user exceptions" -- messages in them can be safely
 // sent back to client.
+type IUserException =
+    abstract member IsUserException : bool
+
 type UserException (message : string, innerException : Exception, isUserException : bool) =
     inherit Exception(message, innerException)
 
@@ -15,12 +18,15 @@ type UserException (message : string, innerException : Exception, isUserExceptio
     new (message : string) = UserException (message, null, true)
 
     static member internal IsThatUserException (e : Exception) =
-        match e with
+        match box e with
         | null -> true
-        | :? UserException as e -> e.IsUserException
+        | :? IUserException as e -> e.IsUserException
         | _ -> false
 
     member this.IsUserException = isUserException
+
+    interface IUserException with
+        member this.IsUserException = isUserException
 
 let isUserException e = UserException.IsThatUserException e
 

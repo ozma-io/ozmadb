@@ -119,14 +119,24 @@ let instanceIsInitialized (conn : DatabaseTransaction) =
         return stateCount > 0
     }
 
-type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPreload, connectionString : string, eventLogger : EventLogger) =
-    let preload = hashedPreload.Preload
-    let logger = loggerFactory.CreateLogger<ContextCacheStore>()
+[<NoEquality; NoComparison>]
+type ContextCacheParams =
+    { LoggerFactory : ILoggerFactory
+      // Whether to allow automatically marking objects as broken.
+      AllowAutoMark : bool
+      Preload : HashedPreload
+      ConnectionString : string
+      EventLogger : EventLogger
+    }
+
+type ContextCacheStore (cacheParams : ContextCacheParams) =
+    let preload = cacheParams.Preload.Preload
+    let logger = cacheParams.LoggerFactory.CreateLogger<ContextCacheStore>()
     // FIXME: random values
     let anonymousViewsCache = FluidCache<AnonymousUserView>(64, TimeSpan.FromSeconds(0.0), TimeSpan.FromSeconds(600.0), fun () -> DateTime.Now)
     let anonymousViewsIndex = anonymousViewsCache.AddIndex("byQuery", fun uv -> uv.Query)
 
-    let currentDatabaseVersion = sprintf "%s %s" (assemblyHash.Force()) hashedPreload.Hash
+    let currentDatabaseVersion = sprintf "%s %s" (assemblyHash.Force()) cacheParams.Preload.Hash
 
     let jsIsolates =
         let policy =
@@ -151,7 +161,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
     let openAndGetCurrentVersion (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
         task {
             let! (transaction, versionEntry) =
-                openAndCheckTransaction loggerFactory connectionString IsolationLevel.Serializable cancellationToken <| fun transaction ->
+                openAndCheckTransaction cacheParams.LoggerFactory cacheParams.ConnectionString IsolationLevel.Serializable cancellationToken <| fun transaction ->
                     task {
                         try
                             let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
@@ -283,27 +293,27 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 return! finishColdRebuild transaction layout userMeta false cancellationToken
             else
                 try
-                    do! checkBrokenAttributes logger preload transaction brokenAttrs cancellationToken
+                    do! checkBrokenAttributes logger cacheParams.AllowAutoMark preload transaction brokenAttrs cancellationToken
                     let jsApi = jsRuntime.GetValue isolate
 
                     let! sourceActions = buildSchemaActions transaction.System cancellationToken
                     let (brokenActions, actions) = resolveActions layout true sourceActions
                     let (newBrokenActions, actions) = testEvalActions jsApi true actions
                     let brokenActions = unionErroredActions brokenActions newBrokenActions
-                    do! checkBrokenActions logger preload transaction brokenActions cancellationToken
+                    do! checkBrokenActions logger cacheParams.AllowAutoMark preload transaction brokenActions cancellationToken
 
                     let! sourceTriggers = buildSchemaTriggers transaction.System cancellationToken
                     let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
                     let (newBrokenTriggers, triggers) = testEvalTriggers jsApi true triggers
                     let brokenTriggers = unionErroredTriggers brokenTriggers newBrokenTriggers
                     let mergedTriggers = mergeTriggers layout triggers
-                    do! checkBrokenTriggers logger preload transaction brokenTriggers cancellationToken
+                    do! checkBrokenTriggers logger cacheParams.AllowAutoMark preload transaction brokenTriggers cancellationToken
 
-                    do! checkBrokenUserViews logger preload transaction brokenViews cancellationToken
+                    do! checkBrokenUserViews logger cacheParams.AllowAutoMark preload transaction brokenViews cancellationToken
 
                     let! sourcePermissions = buildSchemaPermissions transaction.System cancellationToken
                     let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
-                    do! checkBrokenPermissions logger preload transaction brokenPerms cancellationToken
+                    do! checkBrokenPermissions logger cacheParams.AllowAutoMark preload transaction brokenPerms cancellationToken
 
                     let! _ = transaction.Commit (cancellationToken)
 
@@ -368,7 +378,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 let! (userMeta, layout, isChanged) =
                     task {
                         try
-                            let! (isChanged, layout, userMeta) = initialMigratePreload logger preload transaction cancellationToken
+                            let! (isChanged, layout, userMeta) = initialMigratePreload logger cacheParams.AllowAutoMark preload transaction cancellationToken
                             do! ensureDatabaseVersion transaction cancellationToken
                             return (userMeta, layout, isChanged)
                         with
@@ -545,10 +555,10 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                 return! getCachedState cancellationToken
         }
 
-    member this.LoggerFactory = loggerFactory
+    member this.LoggerFactory = cacheParams.LoggerFactory
     member this.Preload = preload
-    member this.EventLogger = eventLogger
-    member this.ConnectionString = connectionString
+    member this.EventLogger = cacheParams.EventLogger
+    member this.ConnectionString = cacheParams.ConnectionString
 
     member this.GetCache (cancellationToken : CancellationToken) =
         task {
@@ -812,7 +822,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           member this.Transaction = transaction
                           member this.TransactionId = transactionId
                           member this.TransactionTime = transactionTime
-                          member this.LoggerFactory = loggerFactory
+                          member this.LoggerFactory = cacheParams.LoggerFactory
                           member this.CancellationToken = cancellationToken
                           member this.Preload = preload
                           member this.Runtime = jsApi.Value :> IJSRuntime
@@ -830,7 +840,7 @@ type ContextCacheStore (loggerFactory : ILoggerFactory, hashedPreload : HashedPr
                           member this.CheckIntegrity () = checkIntegrity ()
                           member this.GetAnonymousView query = getAnonymousView query
                           member this.ResolveAnonymousView homeSchema query = resolveAnonymousView homeSchema query
-                          member this.WriteEvent event = eventLogger.WriteEvent(connectionString, event)
+                          member this.WriteEvent event = cacheParams.EventLogger.WriteEvent(cacheParams.ConnectionString, event)
                           member this.SetAPI api = setAPI api
                           member this.FindAction ref =
                             match actionScripts.Value.FindAction ref with

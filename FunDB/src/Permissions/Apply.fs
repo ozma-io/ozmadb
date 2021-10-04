@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Permissions.Apply
 // Allow delayed 
 #nowarn "40"
 
+open System
 open FSharpPlus
 
 open FunWithFlags.FunUtils
@@ -15,13 +16,16 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type PermissionsApplyException (message : string, innerException : Exception, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+type PermissionsApplyException (message : string, innerExceptions : Exception seq, isUserException : bool) =
+    inherit AggregateException(message, innerExceptions)
 
     new (message : string, innerException : Exception) =
-        PermissionsApplyException (message, innerException, isUserException innerException)
+        PermissionsApplyException (message, Seq.singleton innerException, isUserException innerException)
 
     new (message : string) = PermissionsApplyException (message, null, true)
+
+    interface IUserException with
+        member this.IsUserException = isUserException
 
 // Out aim is to build a database view that is:
 // * Restricted (according to current user role);
@@ -31,6 +35,17 @@ type PermissionsApplyException (message : string, innerException : Exception, is
 type AppliedAllowedEntity =
     { SelectUpdate : ResolvedOptimizedFieldExpr option // Filters out this entity and all its children.
       Delete : ResolvedOptimizedFieldExpr option // Filters out only this entity, not propagated to children.
+    }
+
+let private unionOptionalExprs (ma : ResolvedOptimizedFieldExpr option) (mb : ResolvedOptimizedFieldExpr option) : ResolvedOptimizedFieldExpr option =
+    match (ma, mb) with
+    | (Some a, Some b) -> Some (orFieldExpr a b)
+    | (None, None) -> None
+    | _ -> failwith "Impossible"
+
+let private unionAppliedAllowedEntities (a : AppliedAllowedEntity) (b : AppliedAllowedEntity) : AppliedAllowedEntity =
+    { SelectUpdate = unionOptionalExprs a.SelectUpdate b.SelectUpdate
+      Delete = unionOptionalExprs a.Delete b.Delete
     }
 
 type AppliedAllowedDatabase = Map<ResolvedEntityRef, AppliedAllowedEntity>
@@ -54,10 +69,18 @@ let private emptyEntityAccessFilter : EntityAccessFilter =
 type private FiltersMap = Map<ResolvedEntityRef, EntityAccessFilter>
 type private CachedFilterExprsMap = Map<ResolvedEntityRef, ResolvedOptimizedFieldExpr>
 
-let inline getAccessFilter
+let private inheritedFlatAllowedDerivedEntity : FlatAllowedDerivedEntity =
+    { Check = OFETrue
+      Select = OFETrue
+      Update = OFETrue
+      Delete = OFETrue
+      Insert = false
+    }
+
+let inline private getAccessFilter
         (getParent : ResolvedEntityRef -> ResolvedOptimizedFieldExpr)
         (accessor : ResolvedEntityRef -> FlatAllowedDerivedEntity -> ResolvedOptimizedFieldExpr)
-        (layout : Layout) (flatAllowedEntity : FlatAllowedEntity)
+        (layout : Layout) (flatAllowedEntity : FlatAllowedRoleEntity)
         (entityRef : ResolvedEntityRef)
         : ResolvedOptimizedFieldExpr =
     let entity = layout.FindEntity entityRef |> Option.get
@@ -65,12 +88,17 @@ let inline getAccessFilter
         match entity.Parent with
         | None -> OFETrue
         | Some parentRef -> getParent parentRef
-    let allowedEntity = Map.findWithDefault entityRef emptyFlatAllowedDerivedEntity flatAllowedEntity.Children
+    let defaultParentAllowedEntity =
+        if Option.isNone entity.Parent then
+            emptyFlatAllowedDerivedEntity
+        else
+            inheritedFlatAllowedDerivedEntity
+    let allowedEntity = Map.findWithDefault entityRef defaultParentAllowedEntity flatAllowedEntity.Children
     match accessor entityRef allowedEntity with
     | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
     | thisFilter -> andFieldExpr parentFilter thisFilter
 
-type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : FlatAllowedEntity, flatUsedEntity : FlatUsedEntity) =
+type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : FlatAllowedRoleEntity, flatUsedEntity : FlatUsedEntity) =
     let addSelectFilter (usedEntity : UsedEntity) (entityRef : ResolvedEntityRef) (allowedEntity : FlatAllowedDerivedEntity) =
         let addFieldRestriction (name : FieldName, usedField : UsedField) : ResolvedOptimizedFieldExpr =
             let ref = { Entity = entityRef; Name = name }
@@ -106,7 +134,12 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
             | Some parentRef -> getFilter parentRef
 
         let usedEntity = Map.findWithDefault entityRef emptyUsedEntity flatUsedEntity.Children
-        let allowedEntity = Map.findWithDefault entityRef emptyFlatAllowedDerivedEntity flatAllowedEntity.Children
+        let defaultParentAllowedEntity =
+            if Option.isNone entity.Parent then
+                emptyFlatAllowedDerivedEntity
+            else
+                inheritedFlatAllowedDerivedEntity
+        let allowedEntity = Map.findWithDefault entityRef defaultParentAllowedEntity flatAllowedEntity.Children
 
         if usedEntity.Insert then
             if not allowedEntity.Insert then
@@ -223,7 +256,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
             OFETrue
         else
             let subEntityRef : SubEntityRef =
-                { Ref = relaxEntityRef entityRef
+                { Ref = relaxEntityRef entityRef    
                   Extra = ObjectMap.empty
                 }
             optimizeFieldExpr <| FEInheritedFrom (boundFieldRef, subEntityRef)
@@ -308,29 +341,65 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
     
     member this.GetAppliedEntity entityRef = getAppliedEntity entityRef
 
-let private applyPermissionsForEntity (layout : Layout) (rootRef : ResolvedEntityRef) (allowedEntity : FlatAllowedEntity) (usedEntity : FlatUsedEntity) : AppliedAllowedDatabase =
+let private applyPermissionsForEntity (layout : Layout) (rootRef : ResolvedEntityRef) (allowedEntity : FlatAllowedRoleEntity) (usedEntity : FlatUsedEntity) : AppliedAllowedDatabase =
     let treeBuilder = EntityAccessFilterBuilder (layout, allowedEntity, usedEntity)
     let filterBuilder = EntityFiltersCombiner (layout, rootRef, treeBuilder.GetFilter)
     usedEntity.EntryPoints |> Seq.map (fun ref -> (ref, filterBuilder.GetAppliedEntity ref)) |> Map.ofSeq
 
+let inline private throwRoleExceptions (rootRef : ResolvedRoleRef) (exceptions : (ResolvedRoleRef * PermissionsApplyException) list) =
+    let postfix = exceptions |> Seq.map (fun (roleRef, e) -> sprintf "for role %O: %O" roleRef e) |> String.concat ", "
+    let msg = sprintf "Access denied to root entity %O: %s" rootRef postfix
+    raise <| PermissionsApplyException(msg, List.map (fun (roleRef, e) -> upcast e) exceptions, true)
+
 let applyPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : FlatUsedDatabase) : AppliedAllowedDatabase =
     let applyToOne (rootRef, usedEntity) =
-        let allowedEntity =
+        let rolesAllowedEntity =
             match Map.tryFind rootRef role.Flattened.Entities with
             | None -> raisef PermissionsApplyException "Access denied to entity %O" rootRef
             | Some allowed -> allowed
-        applyPermissionsForEntity layout rootRef allowedEntity usedEntity
+
+        // FIXME: better implement it in a different way, exceptions are slow!
+        let mutable exceptions = []
+        let tryRole maybeAppliedDb (roleRef, allowedEntity) =
+            try
+                let newAppliedDb = applyPermissionsForEntity layout rootRef allowedEntity usedEntity
+                match maybeAppliedDb with
+                | None -> Some newAppliedDb
+                | Some oldAppliedDb -> Some <| Map.unionWith (fun name -> unionAppliedAllowedEntities) oldAppliedDb newAppliedDb
+            with
+            | :? PermissionsApplyException as e ->
+                exceptions <- (roleRef, e) :: exceptions
+                maybeAppliedDb
+        
+        match rolesAllowedEntity.Roles |> Map.toSeq |> Seq.fold tryRole None with
+        | None -> throwRoleExceptions rootRef exceptions
+        | Some appliedDb -> appliedDb
+
     usedDatabase |> Map.toSeq |> Seq.map applyToOne |> Seq.fold Map.unionUnique Map.empty
 
-let private checkPermissionsForEntity (layout : Layout) (allowedEntity : FlatAllowedEntity) (usedEntity : FlatUsedEntity) : unit =
+let private checkPermissionsForEntity (layout : Layout) (allowedEntity : FlatAllowedRoleEntity) (usedEntity : FlatUsedEntity) : unit =
     let treeBuilder = EntityAccessFilterBuilder (layout, allowedEntity, usedEntity)
     for entryPoint in usedEntity.EntryPoints do
         ignore <| treeBuilder.GetFilter entryPoint
 
 let checkPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : FlatUsedDatabase) : unit =
     for KeyValue(rootRef, usedEntity) in usedDatabase do
-        let allowedEntity =
+        let rolesAllowedEntity =
             match Map.tryFind rootRef role.Flattened.Entities with
             | None -> raisef PermissionsApplyException "Access denied to entity %O" rootRef
             | Some allowed -> allowed
-        checkPermissionsForEntity layout allowedEntity usedEntity
+
+        let mutable exceptions = []
+        let tryRole _ (roleRef, allowedEntity) =
+            try
+                checkPermissionsForEntity layout allowedEntity usedEntity
+                None
+            with
+            | :? PermissionsApplyException as e -> 
+                exceptions <- (roleRef, e) :: exceptions
+                Some ()
+        
+        // Counter-intuitively we use `Some ()` here to signal failed check, and `None` to early drop when found at least one matching role.
+        match rolesAllowedEntity.Roles |> Map.toSeq |> Seq.foldOption tryRole () with
+        | None -> ()
+        | Some () -> throwRoleExceptions rootRef exceptions

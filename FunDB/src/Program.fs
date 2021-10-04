@@ -208,10 +208,15 @@ type Startup (config : IConfiguration) =
         // https://stackoverflow.com/a/59089881
         ignore <| services.AddSingleton<EventLogger>(getEventLogger)
         ignore <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
+        let allowAutoMark = fundbSection.GetValue("AllowAutoMark", false)
         let makeInstancesStore (sp : IServiceProvider) =
-            let eventLogger = sp.GetRequiredService<EventLogger>()
-            let logFactory = sp.GetRequiredService<ILoggerFactory>()
-            InstancesCacheStore(logFactory, preload, eventLogger)
+            let cacheParams =
+                { Preload = preload
+                  LoggerFactory = sp.GetRequiredService<ILoggerFactory>()
+                  EventLogger = sp.GetRequiredService<EventLogger>()
+                  AllowAutoMark = allowAutoMark
+                }
+            InstancesCacheStore cacheParams
         ignore <| services.AddSingleton<InstancesCacheStore>(makeInstancesStore)
         let getInstancesSource (sp : IServiceProvider) : IInstancesSource =
             match fundbSection.["InstancesSource"] with
