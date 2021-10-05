@@ -13,6 +13,9 @@ open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.FunQL.Chunk
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.Actions.Types
@@ -28,12 +31,9 @@ open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.Operations.Domain
-open FunWithFlags.FunDB.FunQL.Chunk
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 module SQL = FunWithFlags.FunDB.SQL.Query
-
-type RawArguments = Map<string, JToken>
 
 type ArgsTriggerResult =
     | ATTouched of RawArguments
@@ -71,8 +71,9 @@ type IContext =
     abstract member ScheduleMigration : unit -> unit
     abstract member Commit : unit -> Task
     abstract member CheckIntegrity : unit -> Task
-    abstract member GetAnonymousView : string -> Task<PrefetchedUserView>
-    abstract member ResolveAnonymousView : SchemaName option -> string -> Task<PrefetchedUserView>
+    abstract member GetAnonymousView : bool -> string -> Task<PrefetchedUserView>
+    abstract member GetAnonymousCommand : bool -> string -> Task<CompiledCommandExpr>
+    abstract member ResolveAnonymousView : bool -> SchemaName option -> string -> Task<PrefetchedUserView>
     abstract member WriteEvent : EventEntry -> unit
     abstract member SetAPI : IFunDBAPI -> unit
     abstract member FindAction : ActionRef -> Result<ActionScript, exn> option
@@ -133,6 +134,7 @@ type IRequestContext =
     abstract member PretendRole : ResolvedRoleRef -> (unit -> Task<'a>) -> Task<'a>
     abstract member PretendRoot : (unit -> Task<'a>) -> Task<'a>
     abstract member PretendUser : UserName -> (unit -> Task<'a>) -> Task<'a>
+    abstract member IsPrivileged : bool
 
 type IAPIError =
     abstract member Message : string
@@ -200,6 +202,7 @@ type EntityErrorInfo =
     | [<CaseName("frozen")>] EEFrozen
     | [<CaseName("access_denied")>] EEAccessDenied
     | [<CaseName("arguments")>] EEArguments of Details : string
+    | [<CaseName("compilation")>] EECompilation of Details : string
     | [<CaseName("execution")>] EEExecution of Details : string
     | [<CaseName("exception")>] EEException of Details : string
     | [<CaseName("trigger")>] EETrigger of Schema : SchemaName * Name : TriggerName * Inner : EntityErrorInfo
@@ -210,6 +213,7 @@ type EntityErrorInfo =
             | EENotFound -> "Entity not found"
             | EEFrozen -> "Entity is frozen"
             | EEAccessDenied -> "Entity access denied"
+            | EECompilation msg -> sprintf "Command compilation failed: %s" msg
             | EEArguments msg -> sprintf "Invalid operation arguments: %s" msg
             | EEExecution msg -> sprintf "Operation execution failed: %s" msg
             | EEException msg -> msg
@@ -224,12 +228,14 @@ type TransactionOp =
     | [<CaseName("insert")>] TInsertEntity of Entity : ResolvedEntityRef * Entries : RawArguments
     | [<CaseName("update")>] TUpdateEntity of Entity : ResolvedEntityRef * Id : int * Entries : RawArguments
     | [<CaseName("delete")>] TDeleteEntity of Entity : ResolvedEntityRef * Id : int
+    | [<CaseName("command")>] TCommand of Command : string * Arguments : RawArguments
 
 [<SerializeAsObject("type")>]
 type TransactionOpResult =
     | [<CaseName("insert")>] TRInsertEntity of Id : int option
     | [<CaseName("update")>] TRUpdateEntity
     | [<CaseName("delete")>] TRDeleteEntity
+    | [<CaseName("command")>] TRCommand
 
 [<NoEquality; NoComparison>]
 type Transaction =
@@ -259,6 +265,7 @@ type TransactionResult =
     abstract member InsertEntity : ResolvedEntityRef -> RawArguments -> Task<Result<int option, EntityErrorInfo>>
     abstract member UpdateEntity : ResolvedEntityRef -> int -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member DeleteEntity : ResolvedEntityRef -> int -> Task<Result<unit, EntityErrorInfo>>
+    abstract member RunCommand : string -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member RunTransaction : Transaction -> Task<Result<TransactionResult, TransactionError>>
     abstract member ConstraintsDeferred : bool
     abstract member DeferConstraints : (unit -> Task<'a>) -> Task<Result<'a, EntityErrorInfo>>

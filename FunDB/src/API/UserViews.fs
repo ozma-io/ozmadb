@@ -56,6 +56,7 @@ let private applyFlags (flags : UserViewFlags) (view : PrefetchedUserView) =
                       RowAttributeTypes = Map.empty
                       Columns = Array.map removeColumnAttributes view.Info.Columns
                 }
+            // FIXME: implement!
             view
     view
 
@@ -66,61 +67,36 @@ type UserViewsAPI (api : IFunDBAPI) =
 
     let resolveSource (source : UserViewSource) (flags : UserViewFlags) : Task<Result<PrefetchedUserView, UserViewErrorInfo>> =
         task {
-            let! maybeUv =
-                task {
-                    match source with
-                    | UVAnonymous query ->
-                        try
-                            let! anon =
-                                if flags.ForceRecompile then
-                                    ctx.ResolveAnonymousView None query
-                                else
-                                    ctx.GetAnonymousView query
-                            return Ok anon
-                        with
-                        | :? UserViewResolveException as err ->
-                            logger.LogError(err, "Failed to resolve anonymous user view: {uv}", query)
-                            return Error <| UVECompilation (exceptionString err)
-                    | UVNamed ref ->
+            try
+                match source with
+                | UVAnonymous query ->
+                    let! anon =
                         if flags.ForceRecompile then
-                            let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.Schema && uv.Name = string ref.Name).FirstOrDefaultAsync(ctx.CancellationToken)
-                            if isNull uv then
-                                return Error UVENotFound
-                            else
-                                try
-                                    let! anon = ctx.ResolveAnonymousView (Some ref.Schema) uv.Query
-                                    return Ok anon
-                                with
-                                | :? UserViewResolveException as err when err.IsUserException ->
-                                    logger.LogError(err, "Failed to recompile user view {uv}", ref.ToString())
-                                    return Error <| UVECompilation (exceptionString err)
+                            ctx.ResolveAnonymousView rctx.IsPrivileged None query
                         else
-                            match ctx.UserViews.Find ref with
-                            | None -> return Error UVENotFound
-                            | Some (Error e) ->
-                                logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
-                                return Error <| UVECompilation (exceptionString e)
-                            | Some (Ok cached) -> return Ok cached
-                }
-            return Result.map (applyFlags flags) maybeUv
+                            ctx.GetAnonymousView rctx.IsPrivileged query
+                    return Ok anon
+                | UVNamed ref ->
+                    if flags.ForceRecompile then
+                        let! uv = ctx.Transaction.System.UserViews.AsQueryable().Where(fun uv -> uv.Schema.Name = string ref.Schema && uv.Name = string ref.Name).FirstOrDefaultAsync(ctx.CancellationToken)
+                        if isNull uv then
+                            return Error UVENotFound
+                        else
+                            let! anon = ctx.ResolveAnonymousView rctx.IsPrivileged (Some ref.Schema) uv.Query
+                            return Ok <| applyFlags flags anon
+                    else
+                        match ctx.UserViews.Find ref with
+                        | None -> return Error UVENotFound
+                        | Some (Error e) ->
+                            logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
+                            return Error <| UVECompilation (exceptionString e)
+                        | Some (Ok cached) ->
+                            return Ok <| applyFlags flags cached
+            with
+            | :? UserViewResolveException as ex when ex.IsUserException ->
+                logger.LogError(ex, "Failed to compile user view: {uv}", source)
+                return Error <| UVECompilation (exceptionString ex)
         }
-
-    let convertViewArguments (extraArguments : ArgumentValuesMap) (rawArgs : RawArguments) (compiled : CompiledViewExpr) : Result<ArgumentValuesMap, string> =
-        let findArgument (name, arg : CompiledArgument) =
-            match Map.tryFind name extraArguments with
-            | Some arg -> Ok (Some (name, arg))
-            | None ->
-                match name with
-                | PLocal (FunQLName lname) ->
-                    match Map.tryFind lname rawArgs with
-                    | Some argStr ->
-                        match parseValueFromJson arg.FieldType arg.Optional argStr with
-                        | None -> Error <| sprintf "Cannot convert argument %O to type %O" name arg.FieldType
-                        | Some FNull -> Ok None
-                        | Some arg -> Ok (Some (name, arg))
-                    | _ -> Ok None
-                | PGlobal gname -> Ok (Some (name, Map.find gname rctx.GlobalArguments))
-        compiled.Query.Arguments.Types |> Map.toSeq |> Seq.traverseResult findArgument |> Result.map (Seq.catMaybes >> Map.ofSeq)
 
     member this.GetUserViewInfo (source : UserViewSource) (flags : UserViewFlags) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
         task {
@@ -137,12 +113,12 @@ type UserViewsAPI (api : IFunDBAPI) =
                                 PureColumnAttributes = uv.PureAttributes.ColumnAttributes
                               }
                 with
-                | :? PermissionsApplyException as err ->
-                    logger.LogError(err, "Access denied to user view info")
+                | :? PermissionsApplyException as ex when ex.IsUserException ->
+                    logger.LogError(ex, "Access denied to user view info")
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getUserViewInfo"
                         event.Error <- "access_denied"
-                        event.Details <- exceptionString err
+                        event.Details <- exceptionString ex
                     )
                     return Error UVEAccessDenied
         }
@@ -167,41 +143,30 @@ type UserViewsAPI (api : IFunDBAPI) =
                             | Some role ->
                                 let appliedDb = applyPermissions ctx.Layout role uv.UserView.Compiled.UsedDatabase 
                                 applyRoleViewExpr ctx.Layout appliedDb uv.UserView.Compiled
-                        let maybeResolvedChunk =
-                            try
-                                Ok <| resolveViewExprChunk ctx.Layout compiled chunk
-                            with
-                            | :? ChunkException as e ->
-                                Error <| UVEArguments (exceptionString e)
-
-                        match maybeResolvedChunk with
-                        | Error e -> return Error e
-                        | Ok resolvedChunk ->
-                            let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
-                            let extraArgValues = Map.mapKeys PLocal extraLocalArgs
-                            let compiled = { compiled with Query = query }
-                            match Option.map (fun args -> convertViewArguments extraArgValues args compiled) maybeRawArguments with
-                            | Some (Error msg) ->
-                                return Error <| UVEArguments msg
-                            | maybeRetArgs ->
-                                let maybeArgs = Option.map Result.get maybeRetArgs
-                                try
-                                    let! res = explainViewExpr ctx.Transaction.Connection.Query compiled maybeArgs explainOpts ctx.CancellationToken
-                                    return Ok res
-                                with
-                                | :? UserViewExecutionException as ex ->
-                                    logger.LogError(ex, "Failed to execute user view")
-                                    let str = exceptionString ex
-                                    return Error (UVEExecution str)
+                        let resolvedChunk = resolveViewExprChunk ctx.Layout compiled chunk
+                        let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
+                        let extraArgValues = Map.mapKeys PLocal extraLocalArgs
+                        let compiled = { compiled with Query = query }
+                        let maybeArgs = Option.map (fun args -> convertQueryArguments rctx.GlobalArguments extraArgValues args compiled.Query.Arguments) maybeRawArguments
+                        let! res = explainViewExpr ctx.Transaction.Connection.Query compiled maybeArgs explainOpts ctx.CancellationToken
+                        return Ok res
                     with
-                    | :? PermissionsApplyException as err ->
-                        logger.LogError(err, "Access denied to user view")
+                    | :? ChunkException as ex when ex.IsUserException ->
+                        return Error <| UVEArguments (exceptionString ex)
+                    | :? ArgumentCheckException as ex when ex.IsUserException ->
+                        return Error <| UVEArguments (exceptionString ex)
+                    | :? PermissionsApplyException as ex when ex.IsUserException ->
+                        logger.LogError(ex, "Access denied to user view")
                         rctx.WriteEvent (fun event ->
                             event.Type <- "getUserView"
                             event.Error <- "access_denied"
-                            event.Details <- exceptionString err
+                            event.Details <- exceptionString ex
                         )
                         return Error UVEAccessDenied
+                    | :? UserViewExecutionException as ex when ex.IsUserException ->
+                        logger.LogError(ex, "Failed to execute user view")
+                        let str = exceptionString ex
+                        return Error (UVEExecution str)
         }
 
     member this.GetUserView (source : UserViewSource) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) : Task<Result<UserViewEntriesResult, UserViewErrorInfo>> =
@@ -216,48 +181,39 @@ type UserViewsAPI (api : IFunDBAPI) =
                         | Some role ->
                             let appliedDb = applyPermissions ctx.Layout role uv.UserView.Compiled.UsedDatabase 
                             applyRoleViewExpr ctx.Layout appliedDb uv.UserView.Compiled
-                    let maybeResolvedChunk =
-                        try
-                            Ok <| resolveViewExprChunk ctx.Layout compiled chunk
-                        with
-                        | :? ChunkException as e ->
-                            Error <| UVEArguments (exceptionString e)
-
-                    match maybeResolvedChunk with
-                    | Error e -> return Error e
-                    | Ok resolvedChunk ->
-                        let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
-                        let extraArgValues = Map.mapKeys PLocal extraLocalArgs
-                        let compiled = { compiled with Query = query }
-
-                        match convertViewArguments extraArgValues rawArgs compiled with
-                        | Error msg ->
-                            return Error <| UVEArguments msg
-                        | Ok arguments ->
-                            let getResult info (res : ExecutedViewExpr) =
-                                let res =
-                                    { res with
-                                          Attributes = Map.union uv.PureAttributes.Attributes res.Attributes
-                                          ColumnAttributes = Array.map2 Map.union uv.PureAttributes.ColumnAttributes res.ColumnAttributes
-                                          Rows = Array.ofSeq res.Rows
-                                    }
-                                Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
-                            let comments = userViewComments source rctx.User.Effective.Type arguments chunk
-                            let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled (Some comments) arguments ctx.CancellationToken getResult
-                            return Ok { Info = puv.Info
-                                        Result = res
-                                      }
+                    let resolvedChunk = resolveViewExprChunk ctx.Layout compiled chunk
+                    let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
+                    let extraArgValues = Map.mapKeys PLocal extraLocalArgs
+                    let compiled = { compiled with Query = query }
+                    let arguments = convertQueryArguments rctx.GlobalArguments extraArgValues rawArgs compiled.Query.Arguments
+                    let getResult info (res : ExecutedViewExpr) =
+                        let res =
+                            { res with
+                                  Attributes = Map.union uv.PureAttributes.Attributes res.Attributes
+                                  ColumnAttributes = Array.map2 Map.union uv.PureAttributes.ColumnAttributes res.ColumnAttributes
+                                  Rows = Array.ofSeq res.Rows
+                            }
+                        Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
+                    let comments = userViewComments source rctx.User.Effective.Type arguments chunk
+                    let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled (Some comments) arguments ctx.CancellationToken getResult
+                    return Ok { Info = puv.Info
+                                Result = res
+                              }
                 with
-                | :? UserViewExecutionException as ex ->
+                | :? ChunkException as ex when ex.IsUserException ->
+                    return Error <| UVEArguments (exceptionString ex)
+                | :? ArgumentCheckException as ex when ex.IsUserException ->
+                    return Error <| UVEArguments (exceptionString ex)
+                | :? UserViewExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to execute user view")
                     let str = exceptionString ex
                     return Error (UVEExecution str)
-                | :? PermissionsApplyException as err ->
-                    logger.LogError(err, "Access denied to user view")
+                | :? PermissionsApplyException as ex when ex.IsUserException ->
+                    logger.LogError(ex, "Access denied to user view")
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getUserView"
                         event.Error <- "access_denied"
-                        event.Details <- exceptionString err
+                        event.Details <- exceptionString ex
                     )
                     return Error UVEAccessDenied
         }

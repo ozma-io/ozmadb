@@ -214,8 +214,8 @@ let resolveUserViews (layout : Layout) (defaultAttrs : MergedDefaultAttributes) 
     let (errors, ret) = phase2.ResolveUserViews ()
     (errors, ret)
 
-let resolveAnonymousUserView (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (findExistingView : FindExistingView) (homeSchema : SchemaName option) (q: string) : ResolvedUserView =
-    let phase1 = Phase1Resolver(layout, false, emptyExprResolutionFlags)
+let resolveAnonymousUserView (layout : Layout) (isPrivileged : bool) (defaultAttrs : MergedDefaultAttributes) (findExistingView : FindExistingView) (homeSchema : SchemaName option) (q: string) : ResolvedUserView =
+    let phase1 = Phase1Resolver(layout, false, { emptyExprResolutionFlags with Privileged = isPrivileged })
     let resolvedView = phase1.ResolveUserView { Query = q; AllowBroken = false }
     let phase2 = Phase2Resolver(layout, defaultAttrs, findExistingView, Map.empty, false)
     phase2.ResolveAnonymousUserView homeSchema resolvedView

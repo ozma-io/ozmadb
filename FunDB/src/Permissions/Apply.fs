@@ -24,6 +24,8 @@ type PermissionsApplyException (message : string, innerExceptions : Exception se
 
     new (message : string) = PermissionsApplyException (message, null, true)
 
+    member this.IsUserException = isUserException
+
     interface IUserException with
         member this.IsUserException = isUserException
 

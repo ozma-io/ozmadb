@@ -27,6 +27,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
 open FunWithFlags.FunDB.Layout.Resolve
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Schema
 open FunWithFlags.FunDB.Permissions.Resolve
@@ -60,6 +61,7 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Operations.Preload
+open FunWithFlags.FunDB.Operations.Command
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.JavaScript
 open FunWithFlags.FunDB.API.Triggers
@@ -76,6 +78,13 @@ type ContextException (message : string, innerException : Exception, isUserExcep
 type private AnonymousUserView =
     { Query : string
       UserView : PrefetchedUserView
+    }
+
+[<NoEquality; NoComparison>]
+type private AnonymousCommand =
+    { Query : string
+      Privileged : bool
+      Command : CompiledCommandExpr
     }
 
 let private databaseField = "DatabaseVersion"
@@ -132,9 +141,16 @@ type ContextCacheParams =
 type ContextCacheStore (cacheParams : ContextCacheParams) =
     let preload = cacheParams.Preload.Preload
     let logger = cacheParams.LoggerFactory.CreateLogger<ContextCacheStore>()
-    // FIXME: random values
+    // FIXME: random values. Also we want to move these somewhere else, too much logic in this class.
     let anonymousViewsCache = FluidCache<AnonymousUserView>(64, TimeSpan.FromSeconds(0.0), TimeSpan.FromSeconds(600.0), fun () -> DateTime.Now)
     let anonymousViewsIndex = anonymousViewsCache.AddIndex("byQuery", fun uv -> uv.Query)
+
+    let anonymousCommandsCache = FluidCache<AnonymousCommand>(64, TimeSpan.FromSeconds(0.0), TimeSpan.FromSeconds(600.0), fun () -> DateTime.Now)
+    let anonymousCommandsIndex = anonymousCommandsCache.AddIndex("byQuery", fun uv -> uv.Query)
+
+    let clearCaches () =
+        anonymousViewsCache.Clear()
+        anonymousCommandsCache.Clear()
 
     let currentDatabaseVersion = sprintf "%s %s" (assemblyHash.Force()) cacheParams.Preload.Hash
 
@@ -535,7 +551,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         unitTask {
                             transaction.Connection.Connection.UnprepareAll()
                             let! newState = rebuildFromDatabase transaction ver cancellationToken
-                            anonymousViewsCache.Clear()
+                            clearCaches ()
                             cachedState <- Some newState
                         }
                     return! getCachedState cancellationToken
@@ -549,7 +565,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         match! coldRebuildFromDatabase transaction cancellationToken with
                         | None -> ()
                         | Some newState ->
-                            anonymousViewsCache.Clear()
+                            clearCaches ()
                             cachedState <- Some newState
                     }
                 return! getCachedState cancellationToken
@@ -725,7 +741,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                   UserMeta = wantedUserMeta
                                 }
 
-                            anonymousViewsCache.Clear()
+                            clearCaches ()
                             if not <| Array.isEmpty migration then
                                 // There is no way to force-clear prepared statements for all connections in the pool, so we clear the pool itself instead.
                                 NpgsqlConnection.ClearPool(transaction.Connection.Connection)
@@ -734,30 +750,52 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             ignore <| cachedStateLock.Release()
                 }
 
-                let resolveAnonymousView homeSchema query =
+                let resolveAnonymousView (isPrivileged : bool) (homeSchema : SchemaName option) (query : string) =
                     task {
                         let findExistingView =
                             oldState.Context.UserViews.Find >> Option.map (Result.map (fun pref -> pref.UserView))
-                        let uv = resolveAnonymousUserView oldState.Context.Layout oldState.Context.DefaultAttrs findExistingView homeSchema query
+                        let uv = resolveAnonymousUserView oldState.Context.Layout isPrivileged oldState.Context.DefaultAttrs findExistingView homeSchema query
                         return! dryRunAnonymousUserView transaction.Connection.Query oldState.Context.Layout uv cancellationToken
                     }
 
-                let createNewAnonymousView query =
+                let getAnonymousView (isPrivileged : bool) (query : string) : Task<PrefetchedUserView> =
                     task {
-                        let! uv = resolveAnonymousView None query
-                        let ret =
-                            { UserView = uv
-                              Query = query
+                        let createNew query =
+                            task {
+                                let! uv = resolveAnonymousView isPrivileged None query
+                                let ret =
+                                    { UserView = uv
+                                      Query = query
+                                    }
+                                return ret
                             }
-                        return ret
-                    }
-                let newAnonymousViewCreator = ItemCreator(createNewAnonymousView)
-
-                let getAnonymousView (query : string) : Task<PrefetchedUserView> =
-                    task {
-                        let! ret = anonymousViewsIndex.GetItem(query, newAnonymousViewCreator)
+                        let! ret = anonymousViewsIndex.GetItem(query, ItemCreator(createNew))
+                        if not isPrivileged && ret.UserView.UserView.Resolved.Privileged then
+                            // Just to throw the exception properly.
+                            createNew query |> ignore
                         return ret.UserView
                     }
+
+                let getAnonymousCommand (isPrivileged : bool) (query : string) : Task<CompiledCommandExpr> =
+                    task {
+                        let createNew query =
+                            task {
+                                let resolved = resolveCommand oldState.Context.Layout isPrivileged query
+                                let compiled = compileCommandExpr oldState.Context.Layout resolved
+                                let ret =
+                                    { Command = compiled
+                                      Privileged = resolved.Privileged
+                                      Query = query
+                                    }
+                                return ret
+                            }
+                        let! ret = anonymousCommandsIndex.GetItem(query, ItemCreator(createNew))
+                        if not isPrivileged && ret.Privileged then
+                            // Just to throw the exception properly.
+                            createNew query |> ignore
+                        return ret.Command
+                    }
+
 
                 let mutable needMigration = false
                 let commit () =
@@ -838,8 +876,9 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                           member this.ScheduleMigration () =
                             needMigration <- true
                           member this.CheckIntegrity () = checkIntegrity ()
-                          member this.GetAnonymousView query = getAnonymousView query
-                          member this.ResolveAnonymousView homeSchema query = resolveAnonymousView homeSchema query
+                          member this.GetAnonymousView isPrivileged query = getAnonymousView isPrivileged query
+                          member this.GetAnonymousCommand isPrivileged query = getAnonymousCommand isPrivileged query
+                          member this.ResolveAnonymousView isPrivileged homeSchema query = resolveAnonymousView isPrivileged homeSchema query
                           member this.WriteEvent event = cacheParams.EventLogger.WriteEvent(cacheParams.ConnectionString, event)
                           member this.SetAPI api = setAPI api
                           member this.FindAction ref =

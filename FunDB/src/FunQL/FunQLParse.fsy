@@ -41,6 +41,13 @@ type ParsedViewExpr =
       MainEntity : ParsedMainEntity option
     }
 
+[<NoEquality; NoComparison>]
+type ParsedCommandExpr =
+    { Pragmas : PragmasMap
+      Arguments : ParsedArgumentsMap
+      Command : ParsedDataExpr
+    }
+
 type ParsedIndexColumn = IndexColumn<EntityRef, LinkedFieldRef>
 
 [<NoEquality; NoComparison>]
@@ -287,8 +294,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %start indexColumn
 %type <ParsedIndexColumn> indexColumn
 
-%start dataExpr
-%type <ParsedDataExpr> dataExpr
+%start commandExpr
+%type <ParsedCommandExpr> commandExpr
 
 %type <ParsedSelectExpr> SelectExpr
 %type <ParsedInsertExpr> InsertExpr
@@ -300,11 +307,11 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 
 // Entry points
 viewExpr : ViewExpr EOF { $1 }
-dataExpr : DataExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
 attributeMap : AttributeMap EOF { $1 }
 indexColumn : IndexColumn EOF { $1 }
+commandExpr : CommandExpr EOF { $1 }
 
 // Expressions
 
@@ -914,3 +921,6 @@ DataExpr:
     | InsertExpr { DEInsert $1 }
     | UpdateExpr { DEUpdate $1 }
     | DeleteExpr { DEDelete $1 }
+
+CommandExpr:
+    | MaybeArguments MaybePragmas DataExpr { { Pragmas = $2; Arguments = $1; Command = $3 } }

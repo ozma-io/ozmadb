@@ -20,6 +20,14 @@ open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
+type EntityArgumentsException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        EntityArgumentsException (message, innerException, isUserException innerException)
+
+    new (message : string) = EntityArgumentsException (message, null, true)
+
 type EntityExecutionException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
@@ -119,7 +127,7 @@ let insertEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             let isOptional = fieldIsOptional field
             match Map.tryFind fieldName rawArgs with
             | None when isOptional -> None
-            | None -> raisef EntityExecutionException "Required field not provided: %O" fieldName
+            | None -> raisef EntityArgumentsException "Required field not provided: %O" fieldName
             | Some arg ->
                 let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
                 let fieldRef = { Entity = fieldEntity; Name = fieldName }

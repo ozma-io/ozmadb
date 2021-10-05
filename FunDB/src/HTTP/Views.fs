@@ -8,7 +8,7 @@ open FSharp.Control.Tasks.Affine
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
-open FunWithFlags.FunDB.FunQL.Query
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.HTTP.Utils

@@ -340,6 +340,13 @@ type CompiledViewExpr =
       FlattenedDomains : FlattenedDomains
     }
 
+[<NoEquality; NoComparison>]
+type CompiledCommandExpr =
+    { Pragmas : CompiledPragmasMap
+      Command : Query<SQL.DataExpr>
+      UsedDatabase : FlatUsedDatabase
+    }
+
 let compileOrder : SortOrder -> SQL.SortOrder = function
     | Asc -> SQL.Asc
     | Desc -> SQL.Desc
@@ -2282,6 +2289,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             }
         compileSelectExpr flags Map.empty None select
 
+    member this.CompileDataExpr (mainEntity : ResolvedEntityRef option) (metaColumns : bool) (dataExpr : ResolvedDataExpr) =
+        let flags =
+            { MainEntity = mainEntity
+              IsTopLevel = true
+              MetaColumns = metaColumns
+            }
+        compileDataExpr flags Map.empty dataExpr
+
     member this.CompileArgumentAttributes (args : ResolvedArgumentsMap) : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[] =
         let compileArgAttr argName (name, expr) =
             let (newPaths, col) = compileLinkedFieldExpr emptyExprCompilationFlags Map.empty emptyJoinPaths expr
@@ -2434,7 +2449,6 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let compiler = QueryCompiler (layout, defaultAttrs, arguments)
     let (info, expr) = compiler.CompileSelectExpr mainEntityRef true viewExpr.Select
     let argAttrs = compiler.CompileArgumentAttributes viewExpr.Arguments
-    let arguments = compiler.Arguments
     let columns = Array.map (mapColumnType getFinalName) info.Columns
 
     let allPureAttrs = findPureExprAttributes columns expr
@@ -2470,10 +2484,24 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
 
     { Pragmas = Map.mapWithKeys compilePragma viewExpr.Pragmas
       AttributesQuery = attrQuery
-      Query = { Expression = expr; Arguments = arguments }
+      Query = { Expression = expr; Arguments = compiler.Arguments }
       UsedDatabase = flattenUsedDatabase layout compiler.UsedDatabase
       Columns = columnsWithNames
       Domains = domains
       FlattenedDomains = flattenedDomains
       MainEntity = mainEntityRef
+    }
+
+let compileCommandExpr (layout : Layout) (cmdExpr : ResolvedCommandExpr) : CompiledCommandExpr =
+    let arguments = compileArguments cmdExpr.Arguments
+    let compiler = QueryCompiler (layout, emptyMergedDefaultAttributes, arguments)
+    let (info, expr) = compiler.CompileDataExpr None false cmdExpr.Command
+    let argAttrs = compiler.CompileArgumentAttributes cmdExpr.Arguments
+    let arguments = compiler.Arguments
+
+    let compilePragma name v = (compileName name, compileFieldValue v)
+
+    { Pragmas = Map.mapWithKeys compilePragma cmdExpr.Pragmas
+      Command = { Expression = expr; Arguments = arguments }
+      UsedDatabase = flattenUsedDatabase layout compiler.UsedDatabase
     }

@@ -261,6 +261,12 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                 raise <| RequestException RENoRole
         let newUser = { currentUser.Effective with Type = effectiveRole }
         setCurrentUser newUser func
+    
+    member this.IsPrivileged =
+        match source with
+        | ESAPI -> false
+        | ESTrigger _ -> true
+        | ESAction _ -> true
 
     interface IRequestContext with
         member this.User = currentUser
@@ -274,3 +280,4 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         member this.PretendRoot func = this.PretendRoot func
         member this.PretendRole newRole func = this.PretendRole newRole func
         member this.PretendUser newUserName func = this.PretendUser newUserName func
+        member this.IsPrivileged = this.IsPrivileged

@@ -4,6 +4,7 @@ open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
+open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.SQL.Query
@@ -23,6 +24,8 @@ type CompiledArgument =
       Optional : bool
       DefaultValue : FieldValue option
     }
+
+type RawArguments = Map<string, JToken>
 
 type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
 type CompiledArgumentsMap = Map<Placeholder, CompiledArgument>
@@ -178,3 +181,31 @@ let modifyArgumentsInNamespace (changeNames : Placeholder -> Placeholder option)
 
     let newArguments = { newNsArguments with Types = newArgumentTypes }
     (newArguments, ret)
+
+let convertQueryArguments (globalArgValues : LocalArgumentsMap) (extraArgValues : ArgumentValuesMap) (rawArgValues : RawArguments) (arguments : QueryArguments) : ArgumentValuesMap =
+    let findArgument (name, arg : CompiledArgument) =
+        match Map.tryFind name extraArgValues with
+        | Some arg -> Some (name, arg)
+        | None ->
+            match name with
+            | PLocal (FunQLName lname) ->
+                match Map.tryFind lname rawArgValues with
+                | Some argStr ->
+                    match parseValueFromJson arg.FieldType arg.Optional argStr with
+                    | None ->  raisef ArgumentCheckException "Cannot convert argument %O to type %O" name arg.FieldType
+                    | Some FNull -> None
+                    | Some arg -> Some (name, arg)
+                | _ -> None
+            | PGlobal gname -> Some (name, Map.find gname globalArgValues)
+    arguments.Types |> Map.toSeq |> Seq.mapMaybe findArgument |> Map.ofSeq
+
+let convertEntityArguments (entity : ResolvedEntity) (rawArgs : RawArguments) : LocalArgumentsMap =
+    let getValue (fieldName : FieldName, field : ResolvedColumnField) =
+        match Map.tryFind (string fieldName) rawArgs with
+        | None -> None
+        | Some value ->
+            match parseValueFromJson field.FieldType field.IsNullable value with
+            | None -> raisef ArgumentCheckException "Cannot convert argument %O to type %O" fieldName field.FieldType
+            | Some FNull -> None
+            | Some arg -> Some (fieldName, arg)
+    entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Map.ofSeq

@@ -13,6 +13,7 @@ let private errorHandler = function
     | EEFrozen -> RequestErrors.forbidden
     | EEAccessDenied -> RequestErrors.forbidden
     | EEArguments _ -> RequestErrors.notFound
+    | EECompilation _ -> RequestErrors.badRequest
     | EEExecution _ -> RequestErrors.unprocessableEntity
     | EEException _ -> ServerErrors.internalError
     | EETrigger _ -> ServerErrors.internalError

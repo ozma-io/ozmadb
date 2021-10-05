@@ -198,6 +198,12 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         usedDatabase <- addUsedEntityRef entityRef usedEntityDelete usedDatabase
         Option.iter buildForFromExpr delete.Using
         Option.iter (ignore << buildForFieldExpr) delete.Where
+    
+    and buildForDataExpr = function
+        | DESelect select -> buildForSelectExpr select
+        | DEInsert insert -> buildForInsertExpr insert
+        | DEUpdate update -> buildForUpdateExpr update
+        | DEDelete delete -> buildForDeleteExpr delete
 
     member this.BuildForSelectExpr expr = buildForSelectExpr expr
     member this.BuildForFieldExpr expr = buildForFieldExpr expr

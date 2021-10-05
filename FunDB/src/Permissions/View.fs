@@ -263,6 +263,7 @@ let applyRoleSelectExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToSele
 // let applyRoleInsertExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToInsertExpr)
 let applyRoleUpdateExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToUpdateExpr)
 let applyRoleDeleteExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToDeleteExpr)
+let applyRoleDataExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToDataExpr)
 
 let applyRoleViewExpr (layout : Layout) (allowedDatabase : AppliedAllowedDatabase) (view : CompiledViewExpr) : CompiledViewExpr =
     let applier = PermissionsApplier (layout, allowedDatabase, view.Query.Arguments)

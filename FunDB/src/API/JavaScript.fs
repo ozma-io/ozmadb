@@ -16,6 +16,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.API.Types
@@ -185,6 +186,7 @@ type APITemplate (isolate : Isolate) =
             let run = runResultApiCall handle context <| fun () -> handle.API.UserViews.GetUserView source uvArgs chunk emptyUserViewFlags
             runtime.EventLoop.NewPromise(context, run).Value
         ))
+
         fundbTemplate.Set("getUserViewInfo", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then
@@ -204,6 +206,7 @@ type APITemplate (isolate : Isolate) =
             let run = runResultApiCall handle context <| fun () -> handle.API.Entities.GetEntityInfo ref
             runtime.EventLoop.NewPromise(context, run).Value
         ))
+
         fundbTemplate.Set("insertEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 2 then
@@ -214,6 +217,7 @@ type APITemplate (isolate : Isolate) =
             let run = runResultApiCall handle context <| fun () -> handle.API.Entities.InsertEntity ref rawArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
+
         fundbTemplate.Set("updateEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 3 then
@@ -225,6 +229,7 @@ type APITemplate (isolate : Isolate) =
             let run = runResultApiCall handle context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
+
         fundbTemplate.Set("deleteEntity", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 2 then
@@ -233,6 +238,21 @@ type APITemplate (isolate : Isolate) =
             let id = jsInt context args.[1]
             let handle = Option.get currentHandle
             let run = runResultApiCall handle context <| fun () -> handle.API.Entities.DeleteEntity ref id
+            runtime.EventLoop.NewPromise(context, run).Value
+        ))
+
+        fundbTemplate.Set("runCommand", FunctionTemplate.New(isolate, fun args ->
+            let context = isolate.CurrentContext
+            if args.Length < 1 || args.Length > 2 then
+                throwCallError context "Number of arguments must be between 1 and 2"
+            let cmd = jsString context args.[0]
+            let cmdArgs =
+                if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
+                    jsDeserialize context args.[1] : RawArguments
+                else
+                    Map.empty
+            let handle = Option.get currentHandle
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.RunCommand cmd cmdArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 

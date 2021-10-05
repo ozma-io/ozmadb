@@ -127,6 +127,7 @@
     <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/Entity.fs" />
     <Compile Include="src/Operations/Domain.fs" />
+    <Compile Include="src/Operations/Command.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
 
     <Compile Include="src/API/Types.fs" />

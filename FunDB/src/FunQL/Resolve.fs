@@ -257,9 +257,26 @@ type ResolvedMainEntity =
     { Entity : ResolvedEntityRef
       ColumnsToFields : Map<FieldName, FieldName>
       FieldsToColumns : Map<FieldName, FieldName>
-    }
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            sprintf "FOR INSERT INTO %s" (this.Entity.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString ()
 
 type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
+
+let private renderFunQLArguments (arguments : ResolvedArgumentsMap) =
+    if Map.isEmpty arguments then
+        ""
+    else
+        let printArgument (name : Placeholder, arg : ResolvedArgument) =
+            match name with
+            | PGlobal _ -> None
+            | PLocal _ -> Some <| sprintf "%s %s" (name.ToFunQLString()) (arg.ToFunQLString())
+        arguments |> Map.toSeq |> Seq.mapMaybe printArgument |> String.concat ", " |> sprintf "(%s):"
 
 [<NoEquality; NoComparison>]
 type ResolvedViewExpr =
@@ -267,20 +284,34 @@ type ResolvedViewExpr =
       Arguments : ResolvedArgumentsMap
       Select : ResolvedSelectExpr
       MainEntity : ResolvedMainEntity option
+      Privileged : bool
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            let selectStr = this.Select.ToFunQLString()
-            if Map.isEmpty this.Arguments
-            then selectStr
-            else
-                let printArgument (name : Placeholder, arg : ResolvedArgument) =
-                    match name with
-                    | PGlobal _ -> None
-                    | PLocal _ -> Some <| sprintf "%s %s" (name.ToFunQLString()) (arg.ToFunQLString())
-                let argStr = this.Arguments |> Map.toSeq |> Seq.mapMaybe printArgument |> String.concat ", "
-                sprintf "(%s): %s" argStr selectStr
+            String.concatWithWhitespaces
+                [ renderFunQLArguments this.Arguments
+                  this.Select.ToFunQLString()
+                  optionToFunQLString this.MainEntity
+                ]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString ()
+
+[<NoEquality; NoComparison>]
+type ResolvedCommandExpr =
+    { Pragmas : PragmasMap
+      Arguments : ResolvedArgumentsMap
+      Command : ResolvedDataExpr
+      Privileged : bool
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            String.concatWithWhitespaces
+                [ renderFunQLArguments this.Arguments
+                  this.Command.ToFunQLString()
+                ]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
@@ -812,6 +843,8 @@ let emptyExprResolutionFlags =
     }
 
 type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsMap, resolveFlags : ExprResolutionFlags) =
+    let mutable isPrivileged = false
+
     let mutable lastFromEntityId = 0
     let nextFromEntityId () =
         let ret = lastFromEntityId
@@ -943,8 +976,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         let rec traverse (boundField : BoundField) : PathArrow list -> BoundField list = function
             | [] -> [boundField]
             | (ref :: refs) ->
-                if ref.AsRoot && not resolveFlags.Privileged then
-                    raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                if ref.AsRoot then
+                    if not resolveFlags.Privileged then
+                        raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                    isPrivileged <- true
                 match boundField.Field with
                 | RColumnField { FieldType = FTScalar (SFTReference entityRef) } ->
                     let refKey =
@@ -965,8 +1000,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         traverse (getBoundField firstOldBoundField) fullPath
 
     let resolveReference (mappings : FieldMapping list) (typeCtxs : TypeContextsMap) (f : LinkedFieldRef) : ReferenceInfo =
-        if f.AsRoot && not resolveFlags.Privileged then
-            raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+        if f.AsRoot then
+            if not resolveFlags.Privileged then
+                raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+            isPrivileged <- true
         match f.Ref with
         | VRColumn ref ->
             let rec findInMappings = function
@@ -1117,8 +1154,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
     let fromEntityMapping (ctx : Context) (entity : ParsedFromEntity) : FieldMapping * EntityRef =
         match entity.Ref with
         | { Schema = Some schemaName; Name = entityName } ->
-            if entity.AsRoot && not resolveFlags.Privileged then
-                raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+            if entity.AsRoot then
+                if not resolveFlags.Privileged then
+                    raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                isPrivileged <- true
             let resRef = { Schema = schemaName; Name = entityName }
             let fromEntityId = nextFromEntityId ()
             let punRef =
@@ -1794,7 +1833,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
 
     member this.ResolveSelectExpr flags select = resolveSelectExpr emptyContext flags select
 
-    member this.ResolveDataExpr flags dataExpr = resolveInsertExpr emptyContext flags dataExpr
+    member this.ResolveDataExpr flags dataExpr = resolveDataExpr emptyContext flags dataExpr
 
     member this.ResolveSingleFieldExpr (fromEntityId : FromEntityId) (fromMapping : SingleFromMapping) expr =
         let mapping =
@@ -1818,12 +1857,54 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
 
         Map.map resolveOne attrsMap
 
+    member this.Privileged = isPrivileged
+
 // Remove and replace unneeded Extra fields.
 let rec private relabelSelectExpr (select : ResolvedSelectExpr) : ResolvedSelectExpr =
     { CTEs = Option.map relabelCommonTableExprs select.CTEs
       Tree = relabelSelectTreeExpr select.Tree
       Extra = select.Extra
     }
+
+and private relabelInsertValue = function
+    | IVDefault -> IVDefault
+    | IVValue expr -> IVValue <| relabelFieldExpr expr
+
+and private relabelInsertExpr (insert : ResolvedInsertExpr) : ResolvedInsertExpr =
+    let source =
+        match insert.Source with
+        | ISDefaultValues -> ISDefaultValues
+        | ISValues allVals -> ISValues <| Array.map (Array.map relabelInsertValue) allVals
+        | ISSelect select -> ISSelect <| relabelSelectExpr select
+    { CTEs = Option.map relabelCommonTableExprs insert.CTEs
+      Entity = insert.Entity
+      Fields = insert.Fields
+      Source = source
+      Extra = insert.Extra
+    }
+
+and private relabelUpdateExpr (update : ResolvedUpdateExpr) : ResolvedUpdateExpr =
+    { CTEs = Option.map relabelCommonTableExprs update.CTEs
+      Entity = update.Entity
+      Fields = update.Fields
+      From = Option.map relabelFromExpr update.From
+      Where = Option.map relabelFieldExpr update.Where
+      Extra = update.Extra
+    }
+
+and private relabelDeleteExpr (delete : ResolvedDeleteExpr) : ResolvedDeleteExpr =
+    { CTEs = Option.map relabelCommonTableExprs delete.CTEs
+      Entity = delete.Entity
+      Using = Option.map relabelFromExpr delete.Using
+      Where = Option.map relabelFieldExpr delete.Where
+      Extra = delete.Extra
+    }
+
+and private relabelDataExpr = function
+    | DESelect select -> DESelect <| relabelSelectExpr select
+    | DEInsert insert -> DEInsert <| relabelInsertExpr insert
+    | DEUpdate update -> DEUpdate <| relabelUpdateExpr update
+    | DEDelete delete -> DEDelete <| relabelDeleteExpr delete
 
 and private relabelCommonTableExprs (ctes : ResolvedCommonTableExprs) : ResolvedCommonTableExprs =
     { Recursive = ctes.Recursive
@@ -1998,6 +2079,17 @@ let resolveViewExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (viewEx
       Arguments = localArguments
       Select = relabelSelectExpr qQuery
       MainEntity = mainEntity
+      Privileged = qualifier.Privileged
+    }
+
+let resolveCommandExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (cmdExpr : ParsedCommandExpr) : ResolvedCommandExpr =
+    let (localArguments, allArguments) = resolveArgumentsMap layout cmdExpr.Arguments
+    let qualifier = QueryResolver (layout, allArguments, flags)
+    let (results, qCommand) = qualifier.ResolveDataExpr viewExprSelectFlags cmdExpr.Command
+    { Pragmas = Map.filter (fun name v -> Set.contains name allowedPragmas) cmdExpr.Pragmas
+      Arguments = localArguments
+      Command = relabelDataExpr qCommand
+      Privileged = qualifier.Privileged
     }
 
 let makeSingleFieldExpr (boundEntityRef : ResolvedEntityRef) (fieldRef : FieldRef) : ResolvedFieldExpr =

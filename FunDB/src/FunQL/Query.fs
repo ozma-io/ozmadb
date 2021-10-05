@@ -90,7 +90,7 @@ type private ExecutedAttributes =
     }
 
 // TODO: we could improve performance with pipelining (we could also pipeline attributes query).
-let private setPragmas (connection : QueryConnection) (pragmas : CompiledPragmasMap) (cancellationToken : CancellationToken) : Task =
+let setPragmas (connection : QueryConnection) (pragmas : CompiledPragmasMap) (cancellationToken : CancellationToken) : Task =
     unitTask {
         for KeyValue(name, v) in pragmas do
             let q =
@@ -102,7 +102,7 @@ let private setPragmas (connection : QueryConnection) (pragmas : CompiledPragmas
             ()
     }
 
-let private unsetPragmas (connection : QueryConnection) (pragmas : CompiledPragmasMap) (cancellationToken : CancellationToken) : Task =
+let unsetPragmas (connection : QueryConnection) (pragmas : CompiledPragmasMap) (cancellationToken : CancellationToken) : Task =
     unitTask {
         for KeyValue(name, v) in pragmas do
             let q =

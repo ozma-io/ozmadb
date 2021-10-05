@@ -39,7 +39,11 @@ type MergedTriggersSchema =
 [<NoEquality; NoComparison>]
 type MergedTriggers =
     { Schemas : Map<SchemaName, MergedTriggersSchema>
-    }
+    } with
+        member this.FindEntity (entity : ResolvedEntityRef) =
+            match Map.tryFind entity.Schema this.Schemas with
+            | None -> None
+            | Some schema -> Map.tryFind entity.Name schema.Entities        
 
 let private findTriggersTime (entity : ResolvedEntityRef) (time : TriggerTime) (triggers : MergedTriggers) : MergedTriggersTime option =
     Map.tryFind entity.Schema triggers.Schemas
