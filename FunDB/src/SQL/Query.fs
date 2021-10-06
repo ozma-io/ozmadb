@@ -186,7 +186,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             return result
         }
 
-    member this.ExecuteValuesQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<Value array> =
+    member this.ExecuteRowValuesQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<Value[]> =
         withCommand queryStr pars cancellationToken <| fun command -> task {
             use! reader = command.ExecuteReaderAsync(cancellationToken)
             let getColumn i = parseType (reader.GetDataTypeName(i))
@@ -202,6 +202,28 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 let secondResult = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toList
                 raisef QueryException "Has a second row: %O" secondResult
             return result
+        }
+
+    member this.ExecuteColumnValuesQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) (queryFunc : Value seq -> Task<'a>) : Task<'a> =
+        withCommand queryStr pars cancellationToken <| fun command -> task {
+            use! reader = command.ExecuteReaderAsync(cancellationToken)
+            if reader.FieldCount <> 1 then
+                raisef QueryException "Not one column"
+            let typ = parseType (reader.GetDataTypeName(0))
+            let getRow () =
+                reader.GetProviderSpecificValue(0) |> convertValue typ
+        
+            let rows = List()
+            let mutable hasRow = false
+            let! hasRow0 = reader.ReadAsync(cancellationToken)
+            hasRow <- hasRow0
+            while hasRow do
+                let result = reader.[0] |> convertValue typ
+                rows.Add(result)
+                let! hasRow1 = reader.ReadAsync(cancellationToken)
+                hasRow <- hasRow1
+
+            return! queryFunc rows
         }
 
     member this.ExecuteQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) (queryFunc : QueryResult -> Task<'a>) : Task<'a> =

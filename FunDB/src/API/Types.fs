@@ -262,7 +262,7 @@ type TransactionResult =
 
  type IEntitiesAPI =
     abstract member GetEntityInfo : ResolvedEntityRef -> Task<Result<SerializedEntity, EntityErrorInfo>>
-    abstract member InsertEntity : ResolvedEntityRef -> RawArguments -> Task<Result<int option, EntityErrorInfo>>
+    abstract member InsertEntities : ResolvedEntityRef -> RawArguments seq -> Task<Result<(int option)[], TransactionError>>
     abstract member UpdateEntity : ResolvedEntityRef -> int -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member DeleteEntity : ResolvedEntityRef -> int -> Task<Result<unit, EntityErrorInfo>>
     abstract member RunCommand : string -> RawArguments -> Task<Result<unit, EntityErrorInfo>>

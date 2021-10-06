@@ -198,8 +198,8 @@ type private Phase1Resolver (layout : SourceLayout) =
                     match reduceDefaultExpr r with
                     | Some FNull -> raisef ResolveLayoutException "Default expression cannot be NULL"
                     | Some v ->
-                        // DEPRECATED: we allow integers as defaults for references.
                         match (fieldType, v) with
+                        // DEPRECATED: we allow integers as defaults for references.
                         | (FTScalar (SFTReference _), FInt _) -> ()
                         | (FTArray (SFTReference _), FIntArray _) -> ()
                         | _ when (isValueOfSubtype fieldType v) -> ()
@@ -742,7 +742,13 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         // Check that main field is valid.
         wrappedEntity.FindField funMain |> Option.get |> ignore
 
-        let ret =
+        let requiredFields =
+            entity.ColumnFields
+            |> Map.toSeq
+            |> Seq.mapMaybe (fun (fieldName, field) -> if fieldIsOptional field then None else Some fieldName)
+            |> Set.ofSeq
+
+        let ret : ResolvedEntity =
             { ColumnFields = entity.ColumnFields
               ComputedFields = computedFields
               UniqueConstraints = uniqueConstraints
@@ -760,7 +766,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               IsAbstract = entity.Source.IsAbstract
               IsFrozen = entity.Source.IsFrozen
               HashName = makeHashName entityRef.Name
-            } : ResolvedEntity
+              RequiredFields = requiredFields
+            }
         let errors =
             { ComputedFields = computedErrors
             }

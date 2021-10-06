@@ -220,8 +220,8 @@ type ResolvedEntity =
       HashName : HashName // Guaranteed to be unique for any entity in a schema
       IsAbstract : bool
       IsFrozen : bool
-      // Hierarchy root
-      Root : ResolvedEntityRef
+      Root : ResolvedEntityRef // Hierarchy root
+      RequiredFields : Set<FieldName>
     } with
         member this.FindField (name : FieldName) =
             genericFindField (fun name -> Map.tryFind name this.ColumnFields) (fun name -> Map.tryFind name this.ComputedFields |> Option.bind Result.getOption) this name

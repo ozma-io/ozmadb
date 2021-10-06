@@ -849,7 +849,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         triggerScripts
                     )
 
-                let! systemInfo = transaction.Connection.Query.ExecuteValuesQuery "SELECT transaction_timestamp(), txid_current()" Map.empty cancellationToken
+                let! systemInfo = transaction.Connection.Query.ExecuteRowValuesQuery "SELECT transaction_timestamp(), txid_current()" Map.empty cancellationToken
                 let (transactionTime, transactionId) =
                     match systemInfo with
                     | [|SQL.VDateTime ts; SQL.VBigInt txid|] -> (ts, int txid)

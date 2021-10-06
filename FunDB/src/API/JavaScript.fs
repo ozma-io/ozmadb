@@ -207,14 +207,14 @@ type APITemplate (isolate : Isolate) =
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
-        fundbTemplate.Set("insertEntity", FunctionTemplate.New(isolate, fun args ->
+        fundbTemplate.Set("insertEntities", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 2 then
                 throwCallError context "Number of arguments must be 2"
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let rawArgs = jsDeserialize context args.[1] : RawArguments
+            let rowsArgs = jsDeserialize context args.[1] : RawArguments[]
             let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.InsertEntity ref rawArgs
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.InsertEntities ref rowsArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
@@ -348,12 +348,23 @@ class FunDBError extends Error {
     super(body.message);
     this.body = body;
   }
-}
+};
 global.FunDBError = FunDBError;
 
 global.renderDate = (date) => date.toISOString().split('T')[0];
-// DEPRECATED
-global.asDateArgument = global.renderDate;
+
+global.insertEntity = async (entityRef, rowArgs) => {
+    try {
+        const retIds = await insertEntities(entityRef, [rowArgs]);
+        return retIds[0];
+    } catch (e) {
+        if (e.body.error === \"transaction\") {
+            throw new FunDBError(e.body.details);
+        } else {
+            throw e;
+        }
+    }
+};
     "
     let preludeScript = UnboundScript.Compile(Value.String.New(isolate, preludeScriptSource.Trim()), ScriptOrigin("prelude.js"))
 
