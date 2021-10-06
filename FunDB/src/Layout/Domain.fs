@@ -187,7 +187,7 @@ let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : 
         }
     (info.UsedDatabase, query)
 
-let private compileGenericReferenceOptionsSelect (layout : Layout) (refEntityRef : ResolvedEntityRef) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
+let private compileGenericReferenceOptionsSelect (layout : Layout) (fieldRef : ResolvedFieldRef) (refEntityRef : ResolvedEntityRef) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
     let fromEntity =
         { Alias = Some referencedName
           Ref = relaxEntityRef refEntityRef
@@ -196,7 +196,7 @@ let private compileGenericReferenceOptionsSelect (layout : Layout) (refEntityRef
     let from = FEntity fromEntity
     compileReferenceOptionsSelectFrom layout refEntityRef emptyArguments from where
 
-let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRef : ResolvedEntityRef) (refEntityRef : ResolvedEntityRef) (extraWhere : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
+let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRef : ResolvedEntityRef) (fieldName : FieldName) (refEntityRef : ResolvedEntityRef) (extraWhere : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
     let rowFromEntity =
         { Alias = Some rowName
           Ref = relaxEntityRef entityRef
@@ -233,10 +233,7 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
         } : LinkedFieldRef
     let argRef : ResolvedFieldExpr = FERef { Ref = linkedPlaceholder; Extra = ObjectMap.empty }
     let where = FEBinaryOp (idCol, BOEq, argRef)
-    let where =
-        match extraWhere with
-        | None -> where
-        | Some extra -> FEAnd (where, extra)
+    let where = Option.addWith (curry FEAnd) where extraWhere
     compileReferenceOptionsSelectFrom layout refEntityRef arguments (FJoin join) (Some where)
 
 // For now, we only build domains based on immediate check constraints.
@@ -250,7 +247,7 @@ type private DomainsBuilder (layout : Layout) =
         match Map.tryFind refEntityRef fullSelectsCache with
         | Some cached -> cached
         | None ->
-            let (usedDatabase, query) = compileGenericReferenceOptionsSelect layout refEntityRef None
+            let (usedDatabase, query) = compileGenericReferenceOptionsSelect layout { Entity = { Schema = FunQLName "foo"; Name = FunQLName "bar" }; Name = funId } refEntityRef None
             let ret =
                 { Query = query
                   UsedDatabase = flattenUsedDatabase layout usedDatabase
@@ -279,7 +276,7 @@ type private DomainsBuilder (layout : Layout) =
             match genericCheck with
             | None -> buildFullSelect refEntityRef
             | Some (usedDatabase, check) ->
-                let (selectUsedDatabase, query) = compileGenericReferenceOptionsSelect layout refEntityRef (Some check)
+                let (selectUsedDatabase, query) = compileGenericReferenceOptionsSelect layout fieldRef refEntityRef (Some check)
                 { Query = query
                   UsedDatabase = flattenUsedDatabase layout <| unionUsedDatabases usedDatabase selectUsedDatabase
                   Hash = queryHash query.Expression
@@ -293,7 +290,7 @@ type private DomainsBuilder (layout : Layout) =
                     match genericCheck with
                     | None -> rowSpecificPair
                     | Some pair -> mergeChecks rowSpecificPair pair
-                let (selectUsedDatabase, query) = compileRowSpecificReferenceOptionsSelect layout fieldRef.Entity refEntityRef (Some fullCheck)
+                let (selectUsedDatabase, query) = compileRowSpecificReferenceOptionsSelect layout fieldRef.Entity fieldRef.Name refEntityRef (Some fullCheck)
                 Some
                     { Query = query
                       UsedDatabase = flattenUsedDatabase layout <| unionUsedDatabases usedDatabase selectUsedDatabase

@@ -40,6 +40,11 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
 
     let rec addField (extra : ObjectMap) (ref : ResolvedFieldRef) (field : ResolvedFieldInfo) : ExprInfo =
         match field.Field with
+        | RId
+        | RSubEntity
+        | RColumnField _ ->
+            usedDatabase <- addUsedFieldRef ref usedFieldSelect usedDatabase
+            emptyExprInfo
         | RComputedField comp ->
             let info =
                 computedFieldCases layout extra { ref with Name = field.Name } comp
@@ -49,10 +54,6 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
                 emptyExprInfo
             else
                 info
-        | RColumnField col ->
-            usedDatabase <- addUsedFieldRef ref usedFieldSelect usedDatabase
-            emptyExprInfo
-        | _ -> emptyExprInfo
 
     and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) (asRoot : bool) : (ResolvedEntityRef * PathArrow) list -> ExprInfo = function
         | [] ->
@@ -255,6 +256,7 @@ type FlatUsedDatabase = Map<ResolvedEntityRef, FlatUsedEntity>
 // A flattened used entity with all access flags reset and used fields mean it is a parent entity,
 // which is not used directly in the query.
 // We also set all propagated flags for fields: for example, we use implicitly SELECT all fields when we delete a row.
+// Finally we drop system fields like "id" and "sub_entity".
 // We do not propagate flags for entities.
 type private UsedDatabaseFlattener (layout : Layout) =
     let mutable flattenedRoots : FlatUsedDatabase = Map.empty
@@ -263,19 +265,25 @@ type private UsedDatabaseFlattener (layout : Layout) =
         let entity = layout.FindEntity entityRef |> Option.get
 
         let makeFlatField (fieldName, usedField : UsedField) =
-            let newUsedField =
-                { usedField with
-                      Select = usedField.Select || usedField.Update
-                }
-            let field = Map.find fieldName entity.ColumnFields
-            let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
-            (fieldEntity, { emptyUsedEntity with Fields = Map.singleton fieldName newUsedField })
+            let field = entity.FindField fieldName |> Option.get
+            match field.Field with
+            | RId
+            | RSubEntity -> None
+            | RColumnField col ->
+                let newUsedField =
+                    { usedField with
+                          Select = usedField.Select || usedField.Update
+                    }
+                let field = Map.find fieldName entity.ColumnFields
+                let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
+                Some (fieldEntity, { emptyUsedEntity with Fields = Map.singleton fieldName newUsedField })
+            | _ -> failwith "Impossible"
 
         let makeFlatDeleteField (fieldName, field : ResolvedColumnField) =
             let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
             (fieldEntity, { emptyUsedEntity with Fields = Map.singleton fieldName usedFieldSelect })
 
-        let fieldChildren = usedEntity.Fields |> Map.toSeq |> Seq.map makeFlatField |> Map.ofSeqWith (fun name -> unionUsedEntities)
+        let fieldChildren = usedEntity.Fields |> Map.toSeq |> Seq.mapMaybe makeFlatField |> Map.ofSeqWith (fun name -> unionUsedEntities)
         let deleteChildren =
             if not usedEntity.Delete then
                 Map.empty

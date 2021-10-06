@@ -109,7 +109,16 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                             let (entitiesMap, from) = buildJoins layout info.Entities from addedJoins
                             let renamesMap = Map.add oldTableName tableName renamesMap
                             let check = renameAllValueExprTables renamesMap restr.Where
-                            let newWhere = Option.addWith (curry VEAnd) check where
+                            // We flip here so that check is added to the right. It is important to put user conditions first,
+                            // so that we won't slow down the query when PostgreSQL can't find out priority by itself.
+                            // For example:
+                            // > foo IN (SELECT small_select UNION SELECT 1) AND (slow permissions check)
+                            // Works better than when they are flipped, because PostgreSQL can't always determine which one of
+                            // those SELECTs are faster.
+                            // Case:
+                            // http://localhost:8080/views/pm/actions_for_contact_table_conn?id=3072692
+                            // user.Manager
+                            let newWhere = Option.addWith (flip (curry VEAnd)) check where
                             (from, Some newWhere, joins)
 
                 let where = Option.map applyToValueExpr info.WhereWithoutSubentities

@@ -1001,8 +1001,11 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | Some f -> f
 
         match fieldInfo.Field with
-        | RId -> (paths0, SQL.VEColumn <| realColumn sqlFunId)
+        | RId ->
+            usedDatabase <- addUsedFieldRef fieldRef usedFieldSelect usedDatabase
+            (paths0, SQL.VEColumn <| realColumn sqlFunId)
         | RSubEntity ->
+            usedDatabase <- addUsedFieldRef fieldRef usedFieldSelect usedDatabase
             match ctx with
             | RCExpr ->
                 let newColumn = SQL.VEColumn <| realColumn sqlFunSubEntity
