@@ -5,7 +5,6 @@ open FSharpPlus
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
-open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Apply
@@ -15,42 +14,30 @@ module FunQL = FunWithFlags.FunDB.FunQL.AST
 type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllowedDatabase, initialArguments : QueryArguments) =
     let mutable arguments = initialArguments
 
-    let compileSingleRestriction (ref : FunQL.ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> CompiledRestriction option = function
-        | OFETrue -> None
-        | expr ->
-            let (newArguments, restr) = compileRestriction layout ref arguments expr
-            arguments <- newArguments
-            Some restr
+    let compileSingleRestriction (ref : FunQL.ResolvedEntityRef) (expr : FunQL.ResolvedFieldExpr) : CompiledRestriction =
+        let (newArguments, restr) = compileRestriction layout ref arguments expr
+        arguments <- newArguments
+        restr
 
     let rec buildSelectUpdateRestriction entityRef =
         let filter = Map.find entityRef allowedDatabase
-        compileSingleRestriction entityRef (Option.get filter.SelectUpdate) 
+        filter.SelectUpdate |> Option.get |> Option.map (compileSingleRestriction entityRef)
     and getSelectUpdateRestriction = memoizeN buildSelectUpdateRestriction
 
     let rec buildSelectRestriction entityRef =
         buildSelectUpdateRestriction entityRef |> Option.map (restrictionToSelect entityRef)
     and getSelectRestriction = memoizeN buildSelectRestriction
 
-    let rec buildUpdateRestriction entityRef =
-        buildSelectUpdateRestriction entityRef |> Option.map (restrictionToValueExpr layout entityRef)
-    and getUpdateRestriction = memoizeN buildUpdateRestriction
+    let getUpdateValueRestriction entityRef newTableName =
+        buildSelectUpdateRestriction entityRef |> Option.map (restrictionToValueExpr entityRef newTableName)
 
-    let rec buildDeleteValueRestriction entityRef =
+    let rec buildDeleteRestriction entityRef =
         let filter = Map.find entityRef allowedDatabase
-        compileSingleRestriction entityRef (Option.get filter.Delete)
-            |> Option.map (restrictionToValueExpr layout entityRef)
-    
-    and getDeleteRestriction = memoizeN buildDeleteValueRestriction
+        filter.Delete |> Option.get |> Option.map (compileSingleRestriction entityRef)
+    and getDeleteRestriction = memoizeN buildDeleteRestriction
 
-    let renameValueRestriction (entityRef : FunQL.ResolvedEntityRef) (from : OperationTable) (restr : ValueExpr) =
-        let entity = layout.FindEntity entityRef |> Option.get
-        let oldTableName = renameResolvedEntityRef entity.Root
-        let newTableName =
-            match from.Alias with
-            | None -> from.Table.Name
-            | Some alias -> alias
-        let renamesMap = Map.singleton oldTableName newTableName
-        renameAllValueExprTables renamesMap restr
+    let getDeleteValueRestriction entityRef newTableName =
+        getDeleteRestriction entityRef |> Option.map (restrictionToValueExpr entityRef newTableName)
 
     let rec applyToSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
         | SSelect query -> SSelect <| applyToSingleSelectExpr query
@@ -63,12 +50,6 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                   OrderLimit = applyToOrderLimitClause setOp.OrderLimit
                 }
         | SValues values -> SValues values
-
-    and applyToDataExpr : DataExpr -> DataExpr = function
-        | DESelect expr -> DESelect (applyToSelectExpr expr)
-        | DEInsert expr -> failwith "Not implemented"
-        | DEUpdate expr -> failwith "Not implemented"
-        | DEDelete expr -> failwith "Not implemented"
 
     and applyToCommonTableExpr (cte : CommonTableExpr) =
         { Fields = cte.Fields
@@ -96,24 +77,28 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
 
     and applyToSingleSelectExpr (query : SingleSelectExpr) : SingleSelectExpr =
         let from = Option.map applyToFromExpr query.From
-        let where = Option.map applyToValueExpr query.Where
 
         let (from, where) =
             match query.Extra with
             | :? SelectFromInfo as info ->
                 let fromVal = Option.get from
 
-                let restrictOne (from, where, joins) (tableName : TableName, entityInfo : FromEntityInfo) =
-                    if not entityInfo.IsInner || entityInfo.AsRoot then
+                let restrictOne (from, where : ValueExpr option, joins) (tableName : TableName, entityInfo : FromEntityInfo) =
+                    if entityInfo.AsRoot then
+                        let newWhere = Option.unionWith (curry VEAnd) where entityInfo.Check
+                        (from, newWhere, joins)
+                    else if not entityInfo.IsInner then
                         // We restrict them in FROM expression.
-                        (from, where, joins)
+                        let newWhere = Option.unionWith (curry VEAnd) where entityInfo.Check
+                        (from, newWhere, joins)
                     else
                         match buildSelectUpdateRestriction entityInfo.Ref with
-                        | None -> (from, where, joins)
+                        | None ->
+                            let newWhere = Option.unionWith (curry VEAnd) where entityInfo.Check
+                            (from, newWhere, joins)
                         | Some restr ->
                             // Rename old table reference in restriction joins and expression.
-                            let entity = layout.FindEntity entityInfo.Ref |> Option.get
-                            let oldTableName = renameResolvedEntityRef entity.Root
+                            let oldTableName = renameResolvedEntityRef entityInfo.Ref
                             let renameJoinKey (key : JoinKey) =
                                 if key.Table = oldTableName then
                                     { key with Table = tableName }
@@ -124,16 +109,15 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                             let (entitiesMap, from) = buildJoins layout info.Entities from addedJoins
                             let renamesMap = Map.add oldTableName tableName renamesMap
                             let check = renameAllValueExprTables renamesMap restr.Where
-
-                            let newWhere =
-                                match where with
-                                | None -> check
-                                | Some oldWhere -> VEAnd (oldWhere, check)
+                            let newWhere = Option.addWith (curry VEAnd) check where
                             (from, Some newWhere, joins)
 
+                let where = Option.map applyToValueExpr info.WhereWithoutSubentities
                 let (fromVal, where, joins) = info.Entities |> Map.toSeq |> Seq.fold restrictOne (fromVal, where, info.Joins)
                 (Some fromVal, where)
-            | _ -> (from, where)
+            | _ ->
+                let where = Option.map applyToValueExpr query.Where
+                (from, where)
 
         { Columns = Array.map applyToSelectedColumn query.Columns
           From = from
@@ -204,10 +188,11 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
 
     and applyToUpdateExpr (query : UpdateExpr) : UpdateExpr =
         let newWhere =
-            match query.Extra with
+            match query.Table.Extra with
             | :? RealEntityAnnotation as tableInfo ->
-                let newWhere = getUpdateRestriction tableInfo.RealEntity
-                Option.map (renameValueRestriction tableInfo.RealEntity query.Table) newWhere
+                // All compiled tables always get an alias.
+                let newTableName = Option.get query.Table.Alias
+                getUpdateValueRestriction tableInfo.RealEntity newTableName
             | _ -> None
         let oldWhere = Option.map applyToValueExpr query.Where
         let where = Option.unionWith (curry VEAnd) oldWhere newWhere
@@ -222,10 +207,10 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
 
     and applyToDeleteExpr (query : DeleteExpr) : DeleteExpr =
         let newWhere =
-            match query.Extra with
+            match query.Table.Extra with
             | :? RealEntityAnnotation as tableInfo ->
-                let newWhere = getDeleteRestriction tableInfo.RealEntity
-                Option.map (renameValueRestriction tableInfo.RealEntity query.Table) newWhere
+                let newTableName = Option.get query.Table.Alias
+                getDeleteValueRestriction tableInfo.RealEntity newTableName
             | _ -> None
         let oldWhere = Option.map applyToValueExpr query.Where
         let where = Option.unionWith (curry VEAnd) oldWhere newWhere

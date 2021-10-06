@@ -142,8 +142,8 @@ let rec mapOptimizedFieldExpr (f : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) (
     | OFEOr ors -> ors |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 orFieldExpr
     | OFEAnd ands -> ands |> Map.values |> Seq.map (mapOptimizedFieldExpr f) |> Seq.fold1 andFieldExpr
     | OFENot expr -> notFieldExpr (mapOptimizedFieldExpr f expr)
-    | OFETrue -> optimizeFieldExpr (f (FEValue (FBool true)))
-    | OFEFalse -> optimizeFieldExpr (f (FEValue (FBool false)))
+    | OFETrue -> OFETrue
+    | OFEFalse -> OFEFalse
     | OFEExpr expr -> optimizeFieldExpr (f expr.Value)
 
 let fieldExprToAndTerms : OptimizedFieldExpr<'e, 'f> -> HashedFieldExprs<'e, 'f> = function

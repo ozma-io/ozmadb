@@ -3,7 +3,6 @@ module FunWithFlags.FunDB.Permissions.Compile
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
-open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -16,14 +15,16 @@ type CompiledRestriction =
 
 let private defaultWhere : SQL.ValueExpr = SQL.VEValue (SQL.VBool true)
 
-let compileRestriction (layout : Layout) (ref : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedOptimizedFieldExpr) : QueryArguments * CompiledRestriction =
-    let entity = layout.FindEntity ref |> Option.get
+let compileRestriction (layout : Layout) (entityRef : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedFieldExpr) : QueryArguments * CompiledRestriction =
+    let entity = layout.FindEntity entityRef |> Option.get
+    // We don't want compiler to add type check to the result, because our own typecheck is built into the restriction.
+    // Hence, a hack: we pretend to use root entity instead, but add an alias so that expression properly binds.
     let fromEntity =
         { Ref = relaxEntityRef entity.Root
-          Alias = None
+          Alias = renameResolvedEntityRef entityRef |> decompileName |> Some
           AsRoot = false
         }
-    let (info, from) = compileSingleFromExpr layout arguments (FEntity fromEntity) (Some <| restr.ToFieldExpr())
+    let (info, from) = compileSingleFromExpr layout arguments (FEntity fromEntity) (Some restr)
     let ret =
         { From = from.From
           Joins = from.Joins
@@ -43,24 +44,22 @@ let restrictionToSelect (ref : ResolvedEntityRef) (restr : CompiledRestriction) 
       Extra = null
     }
 
-let restrictionToValueExpr (layout : Layout) (ref : ResolvedEntityRef) (restr : CompiledRestriction) : SQL.ValueExpr =
+// TODO: This can be improved: instead of sub-SELECT we could merge the restriction and add FROM entries to UPDATE or DELETE,
+// just like we already do with `IsInner` SELECTs.
+let restrictionToValueExpr (entityRef : ResolvedEntityRef) (newTableName : SQL.TableName) (restr : CompiledRestriction) : SQL.ValueExpr =
     match restr.From with
-    | SQL.FTable _ ->
+    | SQL.FTable table ->
+        assert ((table.Extra :?> RealEntityAnnotation).RealEntity = entityRef)
         // We can make expression simpler in this case, just using `WHERE`.
-        // Drop the table names beforehand, as we are in an `UPDATE` or `DELETE` with only one table name bound.
-        // For example, "schema__table"."foo" becomes just "foo", because we already do an update on "schema"."table".
-        let mapper =
-            { SQL.idValueExprMapper with
-                  ColumnReference = fun col -> { col with Table = None }
-            }
-        SQL.mapValueExpr mapper restr.Where
+        let renamesMap = Map.singleton (fromTableName table) newTableName
+        renameAllValueExprTables renamesMap restr.Where
     | _ ->
         let select =
             { SQL.emptySingleSelectExpr with
-                  Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = Some <| compileRenamedResolvedEntityRef ref; Name = sqlFunId }) |]
+                  Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = Some <| compileRenamedResolvedEntityRef entityRef; Name = sqlFunId }) |]
                   From = Some restr.From
                   Where = Some restr.Where
             }
         let subexpr = { CTEs = None; Extra = null; Tree = SQL.SSelect select } : SQL.SelectExpr
-        let idColumn = SQL.VEColumn { Table = None; Name = sqlFunId }
+        let idColumn = SQL.VEColumn { Table = Some { Schema = None; Name = newTableName }; Name = sqlFunId }
         SQL.VEInQuery (idColumn, subexpr)

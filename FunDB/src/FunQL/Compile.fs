@@ -566,6 +566,9 @@ let private makeJoinNode (layout : Layout) (joinKey : JoinKey) (join : JoinPath)
     let subquery = SQL.FTable fTable
     SQL.FJoin { Type = SQL.Left; A = from; B = subquery; Condition = joinExpr }
 
+let fromTableName (table : SQL.FromTable) =
+    table.Alias |> Option.map (fun a -> a.Name) |> Option.defaultValue table.Table.Name
+
 let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : SQL.FromExpr) : SQL.FromExpr =
     // TODO: this is implemented as such to insert JOINs at proper places considering LATERAL JOINs.
     // However, we don't support outer join paths inside sub-selects anyway, so JOINs are always appended
@@ -590,8 +593,7 @@ let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : 
         | from ->
             let realName =
                 match from with
-                | SQL.FTable fTable ->
-                    fTable.Alias |> Option.map (fun a -> a.Name) |> Option.defaultValue fTable.Table.Name
+                | SQL.FTable fTable -> fromTableName fTable
                 | SQL.FSubExpr subsel -> subsel.Alias.Name
                 | _ -> failwith "Impossible"
             if realName = joinKey.Table then
