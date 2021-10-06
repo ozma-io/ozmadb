@@ -353,9 +353,9 @@ global.FunDBError = FunDBError;
 
 global.renderDate = (date) => date.toISOString().split('T')[0];
 
-global.insertEntity = async (entityRef, rowArgs) => {
+global.FunDB.insertEntity = async (entityRef, rowArgs) => {
     try {
-        const retIds = await insertEntities(entityRef, [rowArgs]);
+        const retIds = await FunDB.insertEntities(entityRef, [rowArgs]);
         return retIds[0];
     } catch (e) {
         if (e.body.error === \"transaction\") {
