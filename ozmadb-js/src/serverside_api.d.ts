@@ -11,7 +11,8 @@ export interface IFunDBAPI {
   getUserView: (source: UserViewSource, args?: Record<string, unknown>, chunk?: IQueryChunk) => Promise<IViewExprResult>;
   getUserViewInfo: (source: UserViewSource) => Promise<IViewInfoResult>;
   getEntityInfo: (ref: IEntityRef) => Promise<IEntity>;
-  insertEntity: (ref: IEntityRef, args: Record<string, unknown>) => Promise<number | undefined>;
+  insertEntity: (ref: IEntityRef, args: Record<string, unknown>) => Promise<number | null>;
+  insertEntities: (ref: IEntityRef, args: Record<string, unknown>[]) => Promise<(number | null)[]>;
   updateEntity: (ref: IEntityRef, id: number, args: Record<string, unknown>) => Promise<void>;
   deleteEntity: (ref: IEntityRef, id: number) => Promise<void>;
   deferConstraints: <T>(inner: () => Promise<T>) => Promise<T>;
