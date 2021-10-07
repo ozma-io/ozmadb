@@ -78,6 +78,8 @@ let rec private mergeDomains (doms1 : GenericDomains<'e>) (doms2 : GenericDomain
     match (doms1, doms2) with
     | (DSingle (oldId, dom), doms)
     | (doms, DSingle (oldId, dom)) -> appendDomain dom doms
+    | (DMulti (ns1, subdoms1), (DMulti (ns2, subdoms2))) when ns1 = ns2 ->
+        DMulti (ns1,  Map.unionWith (fun nsId -> mergeDomains) subdoms1 subdoms2)
     | (DMulti (ns1, subdoms1), (DMulti _ as doms2)) ->
         DMulti (ns1, Map.map (fun name doms1 -> mergeDomains doms1 doms2) subdoms1)
 
@@ -1841,7 +1843,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             ret
 
         assert (Map.isEmpty paths.Map || Option.isSome from)
-        let (fromInfo, newFrom) =
+        let (fromInfo, from) =
             match from with
             | None -> (None, None)
             | Some from ->
@@ -1862,7 +1864,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let query =
             { Columns = [||] // We fill columns after processing UNIONs, so that ordering and number of columns and meta-columns is the same everywhere.
-              From = newFrom
+              From = from
               Where = where
               GroupBy = groupBy
               OrderLimit = orderLimit
