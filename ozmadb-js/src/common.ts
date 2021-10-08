@@ -289,7 +289,13 @@ export interface IDeleteEntityOp {
   id: number;
 }
 
-export type TransactionOp = IInsertEntityOp | IUpdateEntityOp | IDeleteEntityOp;
+export interface ICommandOp {
+  type: "command";
+  command: string;
+  arguments?: Record<ArgumentName, any>;
+}
+
+export type TransactionOp = IInsertEntityOp | IUpdateEntityOp | IDeleteEntityOp | ICommandOp;
 
 export interface ITransaction {
   operations: TransactionOp[];
