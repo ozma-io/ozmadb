@@ -22,7 +22,7 @@ type PermissionsApplyException (message : string, innerExceptions : Exception se
     new (message : string, innerException : Exception) =
         PermissionsApplyException (message, Seq.singleton innerException, isUserException innerException)
 
-    new (message : string) = PermissionsApplyException (message, null, true)
+    new (message : string) = PermissionsApplyException (message, Seq.empty, true)
 
     member this.IsUserException = isUserException
 
@@ -353,31 +353,23 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
     
     member this.GetAppliedEntity entityRef = getAppliedEntity entityRef
 
-type private RenamesMap = Map<EntityRef, EntityRef>
-
-let private genericRenameFieldExprEntities (failOnNoFind : bool) (renamesMap : RenamesMap) : ResolvedFieldExpr -> ResolvedFieldExpr =
+let private renameAllFieldExprEntities (toEntityRef : EntityRef) : ResolvedFieldExpr -> ResolvedFieldExpr =
     let mapReference : LinkedBoundFieldRef -> LinkedBoundFieldRef = function
         | { Ref = { Ref = VRColumn { Entity = Some entityRef; Name = fieldName } } } as ref ->
-            match Map.tryFind entityRef renamesMap with
-            | None when failOnNoFind -> failwithf "Unknown entity ref during rename: %O" entityRef
-            | None -> ref
-            | Some newEntityRef -> { ref with Ref = { ref.Ref with Ref = VRColumn { Entity = Some newEntityRef; Name = fieldName } } }
+            { ref with Ref = { ref.Ref with Ref = VRColumn { Entity = Some toEntityRef; Name = fieldName } } }
         | { Ref = { Ref = VRColumn ({ Entity = None; Name = name } as fieldRef) } } ->
             failwithf "Unexpected column ref during rename: %O" fieldRef
         | { Ref = { Ref = VRPlaceholder _ } } as ref -> ref
     mapFieldExpr { idFieldExprMapper with FieldReference = mapReference }
 
-let private renameAllFieldExprEntities = genericRenameFieldExprEntities true
-
-let private buildFinalRestriction (rootRef : ResolvedEntityRef) (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> ResolvedFieldExpr option = function
+let private buildFinalRestriction (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> ResolvedFieldExpr option = function
     | OFETrue -> None
     | expr ->
-        let renamesMap = Map.singleton (relaxEntityRef rootRef) (relaxEntityRef entityRef)
-        expr.ToFieldExpr() |> renameAllFieldExprEntities renamesMap |> Some
+        expr.ToFieldExpr() |> renameAllFieldExprEntities (relaxEntityRef entityRef) |> Some
 
-let private buildFinalAllowedEntity (rootRef : ResolvedEntityRef) (entityRef : ResolvedEntityRef) (allowedEntity : HalfAppliedAllowedEntity) : AppliedAllowedEntity =
-    { SelectUpdate = Option.map (buildFinalRestriction rootRef entityRef) allowedEntity.SelectUpdate
-      Delete = Option.map (buildFinalRestriction rootRef entityRef) allowedEntity.Delete
+let private buildFinalAllowedEntity (entityRef : ResolvedEntityRef) (allowedEntity : HalfAppliedAllowedEntity) : AppliedAllowedEntity =
+    { SelectUpdate = Option.map (buildFinalRestriction entityRef) allowedEntity.SelectUpdate
+      Delete = Option.map (buildFinalRestriction entityRef) allowedEntity.Delete
     }
 
 let private applyPermissionsForEntity (layout : Layout) (rootRef : ResolvedEntityRef) (allowedEntity : FlatAllowedRoleEntity) (usedEntity : FlatUsedEntity) : HalfAppliedAllowedDatabase =
@@ -413,7 +405,7 @@ let applyPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : Fla
         
         match rolesAllowedEntity.Roles |> Map.toSeq |> Seq.fold tryRole None with
         | None -> throwRoleExceptions rootRef exceptions
-        | Some appliedDb -> Map.map (buildFinalAllowedEntity rootRef) appliedDb
+        | Some appliedDb -> Map.map buildFinalAllowedEntity appliedDb
 
     usedDatabase |> Map.toSeq |> Seq.map applyToOne |> Seq.fold Map.unionUnique Map.empty
 

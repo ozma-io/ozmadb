@@ -49,8 +49,8 @@ let restrictionToSelect (ref : ResolvedEntityRef) (restr : CompiledRestriction) 
 let restrictionToValueExpr (entityRef : ResolvedEntityRef) (newTableName : SQL.TableName) (restr : CompiledRestriction) : SQL.ValueExpr =
     match restr.From with
     | SQL.FTable table ->
-        assert ((table.Extra :?> RealEntityAnnotation).RealEntity = entityRef)
         // We can make expression simpler in this case, just using `WHERE`.
+        // `(table.Extra :?> RealEntityAnnotation).RealEntity` is always `rootRef` here, see above.
         let renamesMap = Map.singleton (fromTableName table) newTableName
         renameAllValueExprTables renamesMap restr.Where
     | _ ->

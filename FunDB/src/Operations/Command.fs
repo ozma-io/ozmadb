@@ -76,14 +76,14 @@ type private TriggerType =
 let private getTriggeredEntity = function
     | SQL.DESelect sel -> None
     | SQL.DEInsert insert ->
-        let tableInfo = insert.Extra :?> RealEntityAnnotation
+        let tableInfo = insert.Table.Extra :?> RealEntityAnnotation
         Some (TTInsert, tableInfo.RealEntity)
     | SQL.DEUpdate update ->
-        let tableInfo = update.Extra :?> RealEntityAnnotation
+        let tableInfo = update.Table.Extra :?> RealEntityAnnotation
         let fields = update.Columns |> Map.values |> Seq.map (fun (extra, col) -> (extra :?> RealFieldAnnotation).Name) |> Set.ofSeq
         Some (TTUpdate fields, tableInfo.RealEntity)
     | SQL.DEDelete delete ->
-        let tableInfo = delete.Extra :?> RealEntityAnnotation
+        let tableInfo = delete.Table.Extra :?> RealEntityAnnotation
         Some (TTDelete, tableInfo.RealEntity)
 
 let private hasTriggers (typ : TriggerType) (triggers : MergedTriggersTime) =
