@@ -478,7 +478,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 return Ok rets
                             | Error e -> return Error e
                     | TUpdateEntity (ref, id, entries) -> return! checkAndRun TRUpdateEntity (fun () -> this.UpdateEntity ref id entries)
-                    | TDeleteEntity (ref, id) -> return! checkAndRun TRUpdateEntity (fun () -> this.DeleteEntity ref id)
+                    | TDeleteEntity (ref, id) -> return! checkAndRun TRDeleteEntity (fun () -> this.DeleteEntity ref id)
                     | TCommand (rawCmd, rawArgs) -> return! checkAndRun TRCommand (fun () -> this.RunCommand rawCmd rawArgs)
                 }
 
