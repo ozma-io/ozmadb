@@ -206,6 +206,5 @@ let convertEntityArguments (entity : ResolvedEntity) (rawArgs : RawArguments) : 
         | Some value ->
             match parseValueFromJson field.FieldType field.IsNullable value with
             | None -> raisef ArgumentCheckException "Cannot convert argument %O to type %O" fieldName field.FieldType
-            | Some FNull -> None
             | Some arg -> Some (fieldName, arg)
     entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Map.ofSeq
