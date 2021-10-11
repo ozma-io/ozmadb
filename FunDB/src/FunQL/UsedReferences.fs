@@ -231,6 +231,8 @@ let fieldExprUsedReferences (layout : ILayoutBits) (expr : ResolvedFieldExpr) : 
         }
     (info, ret)
 
+// Used entities grouped by root entity.
+// All fields in entities belong to that entities.
 type FlatUsedEntity =
     { Children : Map<ResolvedEntityRef, UsedEntity>
       EntryPoints : Set<ResolvedEntityRef>

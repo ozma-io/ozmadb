@@ -262,14 +262,19 @@ let applyRoleDataExpr = applyRoleQueryExpr (fun applier -> applier.ApplyToDataEx
 let applyRoleViewExpr (layout : Layout) (allowedDatabase : AppliedAllowedDatabase) (view : CompiledViewExpr) : CompiledViewExpr =
     let applier = PermissionsApplier (layout, allowedDatabase, view.Query.Arguments)
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
+
+    let mapAttributeColumn (typ, name, expr) =
+        let expr = applier.ApplyToValueExpr expr
+        (typ, name, expr)
+
+    let attributesQuery = { view.AttributesQuery with AttributeColumns = Array.map mapAttributeColumn view.AttributesQuery.AttributeColumns }
+
     let newQuery =
         { Expression = queryExpression
           Arguments = applier.Arguments
         }
-    let mapAttributeColumn (typ, name, expr) =
-        let expr = applier.ApplyToValueExpr expr
-        (typ, name, expr)
+
     { view with
-          AttributesQuery = { view.AttributesQuery with AttributeColumns = Array.map mapAttributeColumn view.AttributesQuery.AttributeColumns }
+          AttributesQuery = attributesQuery
           Query = newQuery
     }
