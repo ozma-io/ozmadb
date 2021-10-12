@@ -224,7 +224,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     let beforeTriggers = findMergedTriggersInsert entityRef TTBefore ctx.Triggers
                     let afterTriggers = findMergedTriggersInsert entityRef TTAfter ctx.Triggers
 
-                    let runOne (i, rowArgs : LocalArgumentsMap) =
+                    let runSingleId (i, rowArgs : LocalArgumentsMap) =
                         task {
                             match! Seq.foldResultTask (applyInsertTriggerBefore entityRef entity) rowArgs beforeTriggers with
                             | Error (BEError e) -> return Error { Details = e; Operation = i }
@@ -260,7 +260,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     | Error e -> return Error e
                     | Ok rowsArgs ->
                         if not (Seq.isEmpty beforeTriggers && Seq.isEmpty afterTriggers) then
-                            let! ret = Seq.traverseResultTask runOne (Seq.indexed rowsArgs)
+                            let! ret = Seq.traverseResultTask runSingleId (Seq.indexed rowsArgs)
                             return Result.map Seq.toArray ret
                         else
                             let comments = massInsertEntityComments entityRef rctx.User.Effective.Type
@@ -274,6 +274,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 event.EntityId <- Nullable()
                                 event.Details <- JsonConvert.SerializeObject details
                             )
+                            if entity.TriggersMigration then
+                                ctx.ScheduleMigration ()
                             return Ok (Array.map Some newIds)
                 with
                 | :? EntityArgumentsException as ex when ex.IsUserException ->
