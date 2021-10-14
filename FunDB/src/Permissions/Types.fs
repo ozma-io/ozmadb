@@ -16,6 +16,7 @@ type AllowedEntityRef =
     Entity : ResolvedEntityRef
   }
 
+
 [<NoEquality; NoComparison>]
 type AllowedField =
     { // Are you allowed to change (UPDATE/INSERT) this field?
@@ -81,8 +82,6 @@ let emptyAllowedDatabase : AllowedDatabase =
     { Schemas = Map.empty
     }
 
-// These are entity permissions combined with all parent roles.
-// Same-role checks are _not_ combined (with parents or, say, UPDATEs with SELECTs).
 [<NoEquality; NoComparison>]
 type FlatAllowedDerivedEntity =
     { Insert : bool
@@ -90,6 +89,10 @@ type FlatAllowedDerivedEntity =
       Select : ResolvedOptimizedFieldExpr
       Update : ResolvedOptimizedFieldExpr
       Delete : ResolvedOptimizedFieldExpr
+      // Needed for entity info.
+      CombinedSelect : bool
+      CombinedInsert : bool
+      CombinedDelete : bool
     }
 
 let emptyFlatAllowedDerivedEntity : FlatAllowedDerivedEntity =
@@ -98,6 +101,20 @@ let emptyFlatAllowedDerivedEntity : FlatAllowedDerivedEntity =
       Select = OFEFalse
       Update = OFEFalse
       Delete = OFEFalse
+      CombinedSelect = false
+      CombinedInsert = false
+      CombinedDelete = false
+    }
+
+let fullFlatAllowedDerivedEntity : FlatAllowedDerivedEntity =
+    { Insert = true
+      Check = OFETrue
+      Select = OFETrue
+      Update = OFETrue
+      Delete = OFETrue
+      CombinedSelect = true
+      CombinedInsert = true
+      CombinedDelete = true
     }
 
 [<NoEquality; NoComparison>]

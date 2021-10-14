@@ -87,6 +87,9 @@ let private inheritedFlatAllowedDerivedEntity : FlatAllowedDerivedEntity =
       Update = OFETrue
       Delete = OFETrue
       Insert = false
+      CombinedSelect = true
+      CombinedInsert = false
+      CombinedDelete = true
     }
 
 let inline private getAccessFilter

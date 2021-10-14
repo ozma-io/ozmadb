@@ -261,6 +261,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                     | Ok rowsArgs ->
                         if not (Seq.isEmpty beforeTriggers && Seq.isEmpty afterTriggers) then
                             let! ret = Seq.traverseResultTask runSingleId (Seq.indexed rowsArgs)
+                            if Result.isOk ret && entity.TriggersMigration then
+                                ctx.ScheduleMigration ()
                             return Result.map Seq.toArray ret
                         else
                             let comments = massInsertEntityComments entityRef rctx.User.Effective.Type

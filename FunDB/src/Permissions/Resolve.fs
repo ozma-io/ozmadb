@@ -40,8 +40,17 @@ type private HalfAllowedEntity =
       Error : exn option
     }
 
-let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (entity : AllowedEntity) : Map<ResolvedFieldRef,AllowedField> * FlatAllowedDerivedEntity =
+let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEntity : HalfAllowedEntity option) (entity : AllowedEntity) : Map<ResolvedFieldRef,AllowedField> * FlatAllowedDerivedEntity =
+    let parentAllowed =
+        match parentEntity with
+        | None ->
+            // Current entity is root.
+            fullFlatAllowedDerivedEntity
+        | Some ent -> ent.Flattened
+
     let fields = entity.Fields |> Map.toSeq |> Seq.map (fun (name, field) -> ({ Entity = entityRef; Name = name }, field)) |> Map.ofSeq
+
+    let select = parentAllowed.CombinedSelect && not (optimizedIsFalse entity.Select)
 
     let ret =
         { Check = entity.Check
@@ -49,6 +58,9 @@ let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (entity : Allow
           Select = entity.Select
           Update = entity.Update
           Delete = entity.Delete
+          CombinedInsert = parentAllowed.Insert && entity.Insert
+          CombinedDelete = select && not (optimizedIsFalse entity.Delete)
+          CombinedSelect = select
         }
 
     (fields, ret)
@@ -242,7 +254,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
 
         let (error1, resolved) = resolveSelfAllowedEntity entityRef entity parentEntity source
         let (error2, resolved) = checkEntity entity resolved
-        let (fields, myFlat) = flattenAllowedEntity entityRef resolved
+        let (fields, myFlat) = flattenAllowedEntity entityRef parentEntity resolved
 
         let (myFlat, flatEntity) =
             match Map.tryFind entity.Root flattened with

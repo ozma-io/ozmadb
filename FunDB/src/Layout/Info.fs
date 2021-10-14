@@ -7,6 +7,19 @@ open FunWithFlags.FunDB.Layout.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 [<NoEquality; NoComparison>]
+type SerializedFieldAccess =
+    { Select : bool
+      Insert : bool
+      Update : bool
+    }
+
+let fullSerializedFieldAccess : SerializedFieldAccess =
+    { Select = true
+      Insert = true
+      Update = true
+    }
+
+[<NoEquality; NoComparison>]
 type SerializedColumnField =
     { FieldType : ResolvedFieldType
       ValueType : SQL.SimpleValueType
@@ -14,6 +27,7 @@ type SerializedColumnField =
       IsNullable : bool
       IsImmutable : bool
       InheritedFrom : ResolvedEntityRef option
+      Access : SerializedFieldAccess
     }
 
 [<NoEquality; NoComparison>]
@@ -48,19 +62,30 @@ type SerializedIndex =
     }
 
 [<NoEquality; NoComparison>]
+type SerializedEntityAccess =
+    { Select : bool
+      Delete : bool
+      Insert : bool
+    }
+
+let fullSerializedEntityAccess : SerializedEntityAccess =
+    { Select = true
+      Delete = true
+      Insert = true
+    }
+
+[<NoEquality; NoComparison>]
 type SerializedEntity =
     { ColumnFields : Map<FieldName, SerializedColumnField>
       ComputedFields : Map<FieldName, SerializedComputedField>
-      UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
-      CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
-      Indexes : Map<IndexName, SerializedIndex>
       MainField : FieldName
       ForbidExternalReferences : bool
-      Parents : ResolvedEntityRef array
-      Children : SerializedChildEntity seq
+      Parents : ResolvedEntityRef[]
+      Children : SerializedChildEntity[]
       IsAbstract : bool
       IsFrozen : bool
       Root : ResolvedEntityRef
+      Access : SerializedEntityAccess
     }
 
 [<NoEquality; NoComparison>]
@@ -88,6 +113,7 @@ let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField 
       IsImmutable = column.IsImmutable
       DefaultValue = column.DefaultValue
       InheritedFrom = column.InheritedFrom
+      Access = fullSerializedFieldAccess
     }
 
 let serializeUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUniqueConstraint =
@@ -125,16 +151,14 @@ let rec private inheritanceChain (layout : Layout) (entity : ResolvedEntity) : R
 let serializeEntity (layout : Layout) (entity : ResolvedEntity) : SerializedEntity =
     { ColumnFields = Map.map (fun name col -> serializeColumnField col) entity.ColumnFields
       ComputedFields =  Map.mapMaybe (fun name col -> col |> Result.getOption |> Option.map serializeComputedField) entity.ComputedFields
-      UniqueConstraints = Map.map (fun name constr -> serializeUniqueConstraint constr) entity.UniqueConstraints
-      CheckConstraints = Map.map (fun name constr -> serializeCheckConstraint constr) entity.CheckConstraints
-      Indexes = Map.map (fun name index -> serializeIndex index) entity.Indexes
       MainField = entity.MainField
       ForbidExternalReferences = entity.ForbidExternalReferences
       Parents = inheritanceChain layout entity |> Seq.toArray
       IsAbstract = entity.IsAbstract
       IsFrozen = entity.IsFrozen
-      Children = entity.Children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.Direct })
+      Children = entity.Children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.Direct }) |> Seq.toArray
       Root = entity.Root
+      Access = fullSerializedEntityAccess
     }
 
 let serializeSchema (layout : Layout) (schema : ResolvedSchema) : SerializedSchema =

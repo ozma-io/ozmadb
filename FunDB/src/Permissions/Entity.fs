@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Permissions.Entity
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Types
@@ -22,24 +23,55 @@ let serializeEntityRestricted (layout : Layout) (role : ResolvedRole) (entityRef
         match Map.tryFind entity.Root role.Flattened.Entities with
         | None -> raisef PermissionsEntityException "Access denied"
         | Some access -> access
-    if not (flattened.Roles |> Map.toSeq |> Seq.exists (fun (roleRef, allowedEntity) -> Map.containsKey entityRef allowedEntity.Children)) then
+
+    let checkRoles (f : FlatAllowedDerivedEntity -> bool) : bool =
+        let checkRole roleRef (flatAllowedEntity : FlatAllowedRoleEntity) =
+            match Map.tryFind entityRef flatAllowedEntity.Children with
+            | None -> false
+            | Some child -> f child
+        Map.exists checkRole flattened.Roles
+
+    if not (checkRoles (fun _ -> true)) then
         raisef PermissionsEntityException "Access denied to get info"
 
     let serialized = serializeEntity layout entity
 
-    let filterField name (field : SerializedColumnField) =
+    let entityAccess : SerializedEntityAccess =
+        { Select = checkRoles (fun entity -> entity.CombinedSelect)
+          Insert = checkRoles (fun entity -> entity.CombinedInsert)
+          Delete = checkRoles (fun entity -> entity.CombinedDelete)
+        }
+
+    let applyToField name (field : SerializedColumnField) : SerializedColumnField option =
         let parentEntity = Option.defaultValue entityRef field.InheritedFrom
         let fieldRef = { Entity = parentEntity; Name = name }
-        flattened.Roles
-            |> Map.toSeq
-            |> Seq.exists (fun (roleRef, allowedEntity) -> Map.containsKey fieldRef allowedEntity.Fields)
 
-    let columnFields = serialized.ColumnFields |> Map.filter filterField
+        let checkRoleFields (f : AllowedField -> bool) : bool =
+            let checkOne roleRef (flatAllowedEntity : FlatAllowedRoleEntity) =
+                match Map.tryFind fieldRef flatAllowedEntity.Fields with
+                | None -> false
+                | Some child -> f child
+            Map.exists checkOne flattened.Roles
+        
+        if not (checkRoleFields (fun _ -> true)) then
+            None
+        else
+            let access : SerializedFieldAccess =
+                let select = entityAccess.Select && checkRoleFields (fun field -> not (optimizedIsFalse field.Select))
+                let change = checkRoleFields (fun field -> field.Change)
+                { Select = select
+                  Insert = entityAccess.Insert && change
+                  Update = select && change
+                }
+            let field =
+                { field with
+                      Access = access
+                }
+            Some field
+
+    let columnFields = serialized.ColumnFields |> Map.mapMaybe applyToField
 
     { serialized with
           ColumnFields = columnFields
-          // FIXME!
-          ComputedFields = Map.empty
-          UniqueConstraints = Map.empty
-          CheckConstraints = Map.empty
+          Access = entityAccess
     }
