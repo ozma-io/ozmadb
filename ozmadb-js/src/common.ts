@@ -102,6 +102,12 @@ export type FieldType = ScalarFieldType | IArrayFieldType;
  * Database entity definition.
  */
 
+export interface IFieldAccess {
+  select: boolean;
+  update: boolean;
+  insert: boolean;
+}
+
 export interface IColumnField {
   fieldType: FieldType;
   valueType: ValueType;
@@ -109,6 +115,7 @@ export interface IColumnField {
   isNullable: boolean;
   isImmutable: boolean;
   inheritedFrom?: IEntityRef;
+  access: IFieldAccess;
 }
 
 export type UsedFields = FieldName[];
@@ -137,11 +144,15 @@ export interface IChildEntity {
   direct: boolean;
 }
 
+export interface IEntityAccess {
+  select: boolean;
+  delete: boolean;
+  insert: boolean;
+}
+
 export interface IEntity {
   columnFields: Record<FieldName, IColumnField>;
   computedFields: Record<FieldName, IComputedField>;
-  uniqueConstraints: Record<ConstraintName, IUniqueConstraint>;
-  checkConstraints: Record<ConstraintName, ICheckConstraint>;
   mainField: FieldName;
   forbidExternalReferences: boolean;
   parents: IEntityRef[];
@@ -149,6 +160,7 @@ export interface IEntity {
   isAbstract: boolean;
   isFrozen: boolean;
   root: IEntityRef;
+  access: IEntityAccess;
 }
 
 export interface ISchema {
