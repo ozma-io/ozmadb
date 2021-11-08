@@ -126,7 +126,7 @@ let insertEntities
         (connection : QueryConnection)
         (globalArgs : LocalArgumentsMap)
         (layout : Layout)
-        (role : ResolvedRole option)
+        (applyRole : ResolvedRole option)
         (entityRef : ResolvedEntityRef)
         (comments : string option)
         (entitiesArgs : LocalArgumentsMap seq)
@@ -190,7 +190,7 @@ let insertEntities
                   Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
                   Extra = realEntityAnnotation entityRef
             }
-        match role with
+        match applyRole with
         | None -> ()
         | Some role ->
             // We circumvent full `flattenUsedDatabase` call for performance.
@@ -217,7 +217,16 @@ let insertEntities
 
 let private funIdArg = requiredArgument <| FTScalar SFTInt
 
-let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (comments : string option) (updateArgs : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
+let updateEntity
+        (connection : QueryConnection)
+        (globalArgs : LocalArgumentsMap)
+        (layout : Layout)
+        (applyRole : ResolvedRole option)
+        (entityRef : ResolvedEntityRef)
+        (id : EntityId)
+        (comments : string option)
+        (updateArgs : LocalArgumentsMap)
+        (cancellationToken : CancellationToken) : Task =
     unitTask {
         let entity = layout.FindEntity entityRef |> Option.get
 
@@ -260,7 +269,7 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
               Arguments = arguments
             }
         let query =
-            match role with
+            match applyRole with
             | None -> query
             | Some role ->
                 let getUsedField fieldName =
@@ -284,7 +293,15 @@ let updateEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
             do! countAndThrow connection tableRef whereExpr initialArguments initialArgumentValues cancellationToken
     }
 
-let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap) (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (id : EntityId) (comments : string option) (cancellationToken : CancellationToken) : Task =
+let deleteEntity
+        (connection : QueryConnection)
+        (globalArgs : LocalArgumentsMap)
+        (layout : Layout)
+        (applyRole : ResolvedRole option)
+        (entityRef : ResolvedEntityRef)
+        (id : EntityId)
+        (comments : string option)
+        (cancellationToken : CancellationToken) : Task =
     unitTask {
         let entity = layout.FindEntity entityRef |> Option.get
 
@@ -315,7 +332,7 @@ let deleteEntity (connection : QueryConnection) (globalArgs : LocalArgumentsMap)
               Arguments = initialArguments
             }
         let query =
-            match role with
+            match applyRole with
             | None -> query
             | Some role ->
                 let getUsedField (fieldName, field : ResolvedColumnField) =
