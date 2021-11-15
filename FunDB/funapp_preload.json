@@ -34,7 +34,7 @@
           "mainField": "name"
         },
 
-        "help_markups": {
+        "embedded_pages": {
           "columnFields": {
             "name": {
               "type": "string"

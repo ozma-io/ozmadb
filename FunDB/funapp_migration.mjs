@@ -24,12 +24,12 @@ FROM
   "funapp"."iframe_markups"
 WHERE
   name = $name`,
-    "help_markup_by_name": `
+    "embedded_page_by_name": `
 { $name string }:
 SELECT
   markup
 FROM
-  "funapp"."help_markups"
+  "funapp"."embedded_pages"
 WHERE
   name = $name`,
     // Public APIs
