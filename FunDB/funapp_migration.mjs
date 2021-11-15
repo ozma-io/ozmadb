@@ -24,6 +24,14 @@ FROM
   "funapp"."iframe_markups"
 WHERE
   name = $name`,
+    "help_markup_by_name": `
+{ $name string }:
+SELECT
+  markup
+FROM
+  "funapp"."help_markups"
+WHERE
+  name = $name`,
     // Public APIs
     "system_menu": `
 SELECT
