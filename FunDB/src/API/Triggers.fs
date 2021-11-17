@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.API.Triggers
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
+open NetJs
 open NetJs.Json
 open Newtonsoft.Json
 
@@ -52,22 +53,25 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                 }
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
             let oldArgs = V8JsonWriter.Serialize(runtime.Context, args)
-            try
-                let! newArgs = runFunctionInRuntime runtime func cancellationToken [|eventValue; oldArgs|]
-                match newArgs.Data with
-                | :? bool as ret -> return (if ret then ATUntouched else ATCancelled)
-                | _ ->
-                    let ret =
-                        try
-                            V8JsonReader.Deserialize(newArgs)
-                        with
-                        | :? JsonReaderException as e -> raisefWithInner TriggerRunException e "Failed to parse value"
-                    if isRefNull ret then
-                        raisef TriggerRunException "Value must not be null"
-                    return ATTouched ret
-            with
-            | :? JavaScriptRuntimeException as e ->
-                return raisefWithInner TriggerRunException e "Failed to run trigger"
+            let! newArgs =
+                task {
+                    try
+                        return! runFunctionInRuntime runtime func cancellationToken [|eventValue; oldArgs|]
+                    with
+                    | :? JavaScriptRuntimeException as e ->
+                        return raisefWithInner TriggerRunException e "Failed to run trigger"
+                }
+            match newArgs.Data with
+            | :? bool as ret -> return (if ret then ATUntouched else ATCancelled)
+            | _ ->
+                let ret =
+                    try
+                        V8JsonReader.Deserialize(newArgs)
+                    with
+                    | :? JsonReaderException as e -> raisefUserWithInner TriggerRunException e "Failed to parse return value"
+                if isRefNull ret then
+                    raisef TriggerRunException "Return value must not be null"
+                return ATTouched ret
         }
 
     let runAfterTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : LocalArgumentsMap option) (cancellationToken : CancellationToken) : Task =
@@ -106,12 +110,19 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                   Source = TSDelete (Some id)
                 }
             let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
+            let! maybeContinue =
+                task {
+                    try
+                        return! runFunctionInRuntime runtime func cancellationToken [|eventValue|]
+                    with
+                    | :? JavaScriptRuntimeException as e ->
+                        return raisefWithInner TriggerRunException e "Failed to run trigger"
+                }
             try
-                let! maybeContinue = runFunctionInRuntime runtime func cancellationToken [|eventValue|]
                 return maybeContinue.GetBoolean ()
             with
-            | :? JavaScriptRuntimeException as e ->
-                return raisefWithInner TriggerRunException e "Failed to run trigger"
+            | :? NetJsException as e ->
+                return raisefUserWithInner TriggerRunException e "Invalid return value for trigger"
         }
 
     member this.RunInsertTriggerAfter (entity : ResolvedEntityRef) (newId : int) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
