@@ -137,13 +137,16 @@ let private toCharSignatures : FunctionSignaturesMap =
 
 let sqlKnownFunctions : Map<FunctionName, FunctionSignaturesMap> =
     Map.ofList
-        [ // Numbers
+        [ // Common
+          (SQLName "to_char", toCharSignatures)
+          // Numbers
           (SQLName "abs", funScalarIdSignatures [STInt; STDecimal])
           (SQLName "round", funScalarIdSignatures [STInt; STDecimal])
           // Strings
-          (SQLName "to_char", toCharSignatures)
           (SQLName "upper", funScalarIdSignatures [STString])
           (SQLName "lower", funScalarIdSignatures [STString])
+          (SQLName "length", funScalarsToSignatures [([STString], STInt)])
+          (SQLName "substr", funScalarsToSignatures [([STString; STInt], STString); ([STString; STInt; STInt], STString)])
           // Dates
           (SQLName "age", funScalarsToSignatures [([STDateTime; STDateTime], STInterval); ([STDateTime], STInterval)])
           (SQLName "date_part", funScalarsToSignatures [([STString; STDateTime], STDecimal); ([STString; STInterval], STDecimal)])

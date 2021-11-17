@@ -1622,13 +1622,16 @@ type FunctionRepr =
 
 let allowedFunctions : Map<FunctionName, FunctionRepr> =
     Map.ofList
-        [ // Numbers
+        [ // Common
+          (FunQLName "to_char", FRFunction <| SQL.SQLName "to_char")
+          // Numbers
           (FunQLName "abs", FRFunction <| SQL.SQLName "abs")
           (FunQLName "round", FRFunction <| SQL.SQLName "round")
           // Strings
-          (FunQLName "to_char", FRFunction <| SQL.SQLName "to_char")
           (FunQLName "upper", FRFunction <| SQL.SQLName "upper")
           (FunQLName "lower", FRFunction <| SQL.SQLName "lower")
+          (FunQLName "length", FRFunction <| SQL.SQLName "length")
+          (FunQLName "substr", FRFunction <| SQL.SQLName "substr")
           // Dates
           (FunQLName "age", FRFunction <| SQL.SQLName "age")
           (FunQLName "date_part", FRFunction <| SQL.SQLName "date_part")
