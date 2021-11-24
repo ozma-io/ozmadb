@@ -1632,6 +1632,9 @@ let allowedFunctions : Map<FunctionName, FunctionRepr> =
           (FunQLName "lower", FRFunction <| SQL.SQLName "lower")
           (FunQLName "length", FRFunction <| SQL.SQLName "length")
           (FunQLName "substr", FRFunction <| SQL.SQLName "substr")
+          (FunQLName "ltrim", FRFunction <| SQL.SQLName "ltrim")
+          (FunQLName "rtrim", FRFunction <| SQL.SQLName "rtrim")
+          (FunQLName "btrim", FRFunction <| SQL.SQLName "btrim")
           // Dates
           (FunQLName "age", FRFunction <| SQL.SQLName "age")
           (FunQLName "date_part", FRFunction <| SQL.SQLName "date_part")

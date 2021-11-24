@@ -147,6 +147,9 @@ let sqlKnownFunctions : Map<FunctionName, FunctionSignaturesMap> =
           (SQLName "lower", funScalarIdSignatures [STString])
           (SQLName "length", funScalarsToSignatures [([STString], STInt)])
           (SQLName "substr", funScalarsToSignatures [([STString; STInt], STString); ([STString; STInt; STInt], STString)])
+          (SQLName "ltrim", funScalarsToSignatures [([STString], STString); ([STString; STString], STString)])
+          (SQLName "rtrim", funScalarsToSignatures [([STString], STString); ([STString; STString], STString)])
+          (SQLName "btrim", funScalarsToSignatures [([STString], STString); ([STString; STString], STString)])
           // Dates
           (SQLName "age", funScalarsToSignatures [([STDateTime; STDateTime], STInterval); ([STDateTime], STInterval)])
           (SQLName "date_part", funScalarsToSignatures [([STString; STDateTime], STDecimal); ([STString; STInterval], STDecimal)])
