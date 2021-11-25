@@ -17,18 +17,21 @@ type UsedReferences =
 
 type ExprInfo =
     { IsLocal : bool
+      HasArrows : bool
       HasQuery : bool
       HasAggregates : bool
     }
 
 let emptyExprInfo =
     { IsLocal = true
+      HasArrows = false
       HasQuery = false
       HasAggregates = false
     }
 
 let unionExprInfo (a : ExprInfo) (b : ExprInfo) =
     { IsLocal = a.IsLocal && b.IsLocal
+      HasArrows = a.HasArrows || b.HasArrows
       HasQuery = a.HasQuery || b.HasQuery
       HasAggregates = a.HasAggregates || b.HasAggregates
     }
@@ -65,7 +68,10 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             if not asRoot then
                 hasRestrictedEntities <- true
             let info = buildForPath extra { Entity = entityRef; Name = arrow.Name } arrow.AsRoot paths
-            { info with IsLocal = false }
+            { info with
+                IsLocal = false
+                HasArrows = true
+            }
 
     and buildForReference (ref : LinkedBoundFieldRef) : ExprInfo =
         match ref.Ref.Ref with

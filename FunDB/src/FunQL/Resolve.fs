@@ -401,8 +401,10 @@ let getGlobalArgument = function
     | PGlobal arg -> Some arg
     | PLocal _ -> None
 
+// We partially compute these flags at this step, even though a proper way to get them publicly is `UsedReferences`.
 type private ResolvedExprInfo =
     { IsLocal : bool
+      HasArrows : bool
       HasAggregates : bool
     }
 
@@ -1244,6 +1246,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
 
     and resolveFieldExpr (ctx : Context) (expr : ParsedFieldExpr) : ResolvedExprInfo * ResolvedFieldExpr =
         let mutable isLocal = true
+        let mutable hasArrows = false
         let mutable hasAggregates = false
 
         let resolveExprReference typeCtxs col =
@@ -1251,6 +1254,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
 
             if not <| Array.isEmpty col.Path then
                 isLocal <- false
+                hasArrows <- true
             else
                 match ref.OuterField with
                 | Some ({ Field = RComputedField _; Ref = fieldRef } as outer) ->
@@ -1390,18 +1394,19 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         let (_, ret) = traverse emptyTypeContexts expr
         let info =
             { IsLocal = isLocal
+              HasArrows = hasArrows
               HasAggregates = hasAggregates
             }
         (info, ret)
 
     and resolveOrderLimitClause (ctx : Context) (limits : ParsedOrderLimitClause) : bool * ResolvedOrderLimitClause =
-        let mutable isLocal = true
+        let mutable hasArrows = false
         let resolveOrderBy (ord : ParsedOrderColumn) =
             let (info, ret) = resolveFieldExpr ctx ord.Expr
             if info.HasAggregates then
                 raisef ViewResolveException "Aggregates are not allowed here"
-            if not info.IsLocal then
-                isLocal <- false
+            if not info.HasArrows then
+                hasArrows <- false
             { Expr = ret
               Order = ord.Order
               Nulls = ord.Nulls
@@ -1411,7 +1416,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
               Limit = Option.map resolveLimitFieldExpr limits.Limit
               Offset = Option.map resolveLimitFieldExpr limits.Offset
             }
-        (isLocal, ret)
+        (hasArrows, ret)
 
     and resolveCommonTableExpr (ctx : Context) (flags : SelectFlags) (allowRecursive : bool) (name : EntityName) (cte : ParsedCommonTableExpr) : QSubqueryFieldsMap * ResolvedCommonTableExpr =
         let (ctx, newCtes) =
@@ -1565,8 +1570,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             |> Seq.map mapField
             |> Map.ofSeq
         let orderLimitCtx = { ctx with FieldMaps = orderLimitMapping :: ctx.FieldMaps }
-        let (limitsAreLocal, resolvedLimits) = resolveOrderLimitClause orderLimitCtx setOp.OrderLimit
-        if not limitsAreLocal then
+        let (limitsHaveArrows, resolvedLimits) = resolveOrderLimitClause orderLimitCtx setOp.OrderLimit
+        if limitsHaveArrows then
             raisef ViewResolveException "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.OrderBy
         let ret =
             { Operation = setOp.Operation
@@ -1654,7 +1659,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             let newCtx = { ctx with FieldMaps = fieldMapping :: ctx.FieldMaps }
 
             let (info, newFieldExpr) = resolveFieldExpr newCtx join.Condition
-            if not info.IsLocal then
+            if info.HasArrows then
                 raisef ViewResolveException "Cannot use dereferences in join expressions: %O" join.Condition
             if info.HasAggregates then
                 raisef ViewResolveException "Cannot use aggregate functions in join expression"
@@ -1849,7 +1854,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
     member this.ResolveArgumentAttributes attrsMap =
         let resolveOne name (expr : ParsedFieldExpr) : ResolvedFieldExpr =
             let (info, res) = resolveFieldExpr emptyContext expr
-            if not info.IsLocal then
+            if info.HasArrows then
                 raisef ViewResolveException "Non-local expressions are not supported in argument attributes"
             if info.HasAggregates then
                 raisef ViewResolveException "Aggregate functions are not allowed here"
