@@ -153,6 +153,18 @@
                     }
                   },
 
+                  "embedded_pages": {
+                    "select": "true",
+                    "fields": {
+                      "name": {
+                        "select": "true"
+                      },
+                      "markup": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
                   "color_themes": {
                     "select": "true",
                     "fields": {
