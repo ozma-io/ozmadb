@@ -56,6 +56,14 @@ let private deleteEntityComments (ref : ResolvedEntityRef) (role : RoleType) (id
         | RTRole role -> sprintf ", role %O" role.Ref
     String.concat "" [refStr; roleStr]
 
+let private getRelatedEntitiesComments (ref : ResolvedEntityRef) (role : RoleType) (id : int) =
+    let refStr = sprintf "getting related for %O, id %i" ref id
+    let roleStr =
+        match role with
+        | RTRoot -> ""
+        | RTRole role -> sprintf ", role %O" role.Ref
+    String.concat "" [refStr; roleStr]
+
 let private commandComments (source : string) (role : RoleType) (arguments : RawArguments) =
     let argumentsStr = sprintf ", arguments %s" (JsonConvert.SerializeObject arguments)
     let roleStr =
@@ -79,6 +87,11 @@ type PendingMassInsert =
       Rows : List<RawArguments>
       StartIndex : int
     }
+
+type private EarlyStopException<'a> (value : 'a) =
+    inherit Exception()
+
+    member this.Value = value
 
 type EntitiesAPI (api : IFunDBAPI) =
     let rctx = api.Request
@@ -403,6 +416,55 @@ type EntitiesAPI (api : IFunDBAPI) =
                             return Error EEAccessDenied
         }
 
+    member this.GetRelatedEntities (entityRef : ResolvedEntityRef) (id : int) : Task<Result<ReferencesTree, EntityErrorInfo>> =
+        task {
+            match ctx.Layout.FindEntity(entityRef) with
+            | None -> return Error EENotFound
+            | Some entity when entity.IsHidden -> return Error EENotFound
+            | Some entity ->
+                try
+                    let comments = getRelatedEntitiesComments entityRef rctx.User.Effective.Type id
+                    let! ret = getRelatedEntities query rctx.GlobalArguments ctx.Layout (getReadRole rctx.User.Effective.Type) entityRef id (Some comments) ctx.CancellationToken
+                    return Ok ret
+                with
+                    | :? EntityExecutionException as ex when ex.IsUserException ->
+                        logger.LogError(ex, "Failed to get related entities")
+                        let str = exceptionString ex
+                        return Error (EEExecution str)
+                    | :? EntityNotFoundException as ex when ex.IsUserException ->
+                        logger.LogError(ex, "Not found")
+                        return Error EENotFound
+                    | :? EntityDeniedException as ex when ex.IsUserException ->
+                        logger.LogError(ex, "Access denied")
+                        rctx.WriteEvent (fun event ->
+                            event.Type <- "getRelatedEntities"
+                            event.SchemaName <- entityRef.Schema.ToString()
+                            event.EntityName <- entityRef.Name.ToString()
+                            event.EntityId <- Nullable id
+                            event.Error <- "access_denied"
+                            event.Details <- exceptionString ex
+                        )
+                        return Error EEAccessDenied
+        }
+
+    member this.RecursiveDeleteEntity (entityRef : ResolvedEntityRef) (id : int) : Task<Result<ReferencesTree, EntityErrorInfo>> =
+        task {
+            match! this.GetRelatedEntities entityRef id with
+            | Error e -> return Error e
+            | Ok tree ->
+                let deleteOne entityRef id =
+                    unitTask {
+                        match! this.DeleteEntity entityRef id with
+                        | Error e -> return raise <| EarlyStopException(e)
+                        | Ok () -> ()
+                    }
+                try
+                    do! iterReferencesUpwardsTask deleteOne tree
+                    return Ok tree
+                with
+                | :? EarlyStopException<EntityErrorInfo> as e -> return Error e.Value
+        }
+
     member this.RunCommand (rawCommand : string) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> =
         task {
             try
@@ -455,15 +517,17 @@ type EntitiesAPI (api : IFunDBAPI) =
                 }
 
             let handleOne (i, op) =
-                let inline checkAndRun result (op : unit -> Task<Result<unit, EntityErrorInfo>>) =
+                let inline checkAndRun (resultFn : 'a -> TransactionOpResult) (opFn : unit -> Task<Result<'a, EntityErrorInfo>>) =
                     task {
                         match! checkPendingInsert () with
                         | Error e -> return Error e
                         | Ok prevRet ->
-                            match! op () with
-                            | Ok () -> return Ok (Seq.append prevRet (Seq.singleton result))
+                            match! opFn () with
+                            | Ok ret -> return Ok (Seq.append prevRet (Seq.singleton (resultFn ret)))
                             | Error e -> return Error { Operation = i; Details = e }
                     }
+
+                let inline checkAndRunConst result = checkAndRun (fun _ -> result)
 
                 task {
                     match op with
@@ -481,9 +545,10 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 pendingInsert <- Some { Entity = ref; Rows = List(seq { entries }); StartIndex = i }
                                 return Ok rets
                             | Error e -> return Error e
-                    | TUpdateEntity (ref, id, entries) -> return! checkAndRun TRUpdateEntity (fun () -> this.UpdateEntity ref id entries)
-                    | TDeleteEntity (ref, id) -> return! checkAndRun TRDeleteEntity (fun () -> this.DeleteEntity ref id)
-                    | TCommand (rawCmd, rawArgs) -> return! checkAndRun TRCommand (fun () -> this.RunCommand rawCmd rawArgs)
+                    | TUpdateEntity (ref, id, entries) -> return! checkAndRunConst TRUpdateEntity (fun () -> this.UpdateEntity ref id entries)
+                    | TDeleteEntity (ref, id) -> return! checkAndRunConst TRDeleteEntity (fun () -> this.DeleteEntity ref id)
+                    | TRecursiveDeleteEntity (ref, id) -> return! checkAndRun TRRecursiveDeleteEntity (fun () -> this.RecursiveDeleteEntity ref id)
+                    | TCommand (rawCmd, rawArgs) -> return! checkAndRunConst TRCommand (fun () -> this.RunCommand rawCmd rawArgs)
                 }
 
             match! transaction.Operations |> Seq.indexed |> Seq.traverseResultTask handleOne with
@@ -542,6 +607,8 @@ type EntitiesAPI (api : IFunDBAPI) =
         member this.InsertEntities entityRef entityRowArgs = this.InsertEntities entityRef entityRowArgs
         member this.UpdateEntity entityRef id rawArgs = this.UpdateEntity entityRef id rawArgs
         member this.DeleteEntity entityRef id = this.DeleteEntity entityRef id
+        member this.GetRelatedEntities entityRef id = this.GetRelatedEntities entityRef id
+        member this.RecursiveDeleteEntity entityRef id = this.RecursiveDeleteEntity entityRef id
         member this.RunCommand rawCommand rawArgs = this.RunCommand rawCommand rawArgs
         member this.RunTransaction transaction = this.RunTransaction transaction
         member this.ConstraintsDeferred = deferConstraintsDepth > 0

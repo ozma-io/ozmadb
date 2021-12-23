@@ -103,6 +103,18 @@ let inline private runResultApiCall<'a, 'e when 'e :> IAPIError> (handle : APIHa
             }
     Func<_>(run)
 
+let inline private runVoidResultApiCall<'e when 'e :> IAPIError> (handle : APIHandle) (context : Context) (f : unit -> Task<Result<unit, 'e>>) : Func<Task<Value.Value>> =
+    let run () =
+        Task.unmaskableLock handle.Lock <| fun unmask ->
+            task {
+                let! res = handle.StackLock f
+                unmask ()
+                match res with
+                | Ok r -> return Value.Undefined.New(context.Isolate)
+                | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
+            }
+    Func<_>(run)
+
 type APITemplate (isolate : Isolate) =
     let mutable currentHandle = None : APIHandle option
     let mutable errorConstructor = None : Value.Function option
@@ -226,7 +238,7 @@ type APITemplate (isolate : Isolate) =
             let id = jsInt context args.[1]
             let rawArgs = jsDeserialize context args.[2] : RawArguments
             let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
+            let run = runVoidResultApiCall handle context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
@@ -237,7 +249,29 @@ type APITemplate (isolate : Isolate) =
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
             let id = jsInt context args.[1]
             let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.DeleteEntity ref id
+            let run = runVoidResultApiCall handle context <| fun () -> handle.API.Entities.DeleteEntity ref id
+            runtime.EventLoop.NewPromise(context, run).Value
+        ))
+
+        fundbTemplate.Set("getRelatedEntities", FunctionTemplate.New(isolate, fun args ->
+            let context = isolate.CurrentContext
+            if args.Length <> 2 then
+                throwCallError context "Number of arguments must be 2"
+            let ref = jsDeserialize context args.[0] : ResolvedEntityRef
+            let id = jsInt context args.[1]
+            let handle = Option.get currentHandle
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.GetRelatedEntities ref id
+            runtime.EventLoop.NewPromise(context, run).Value
+        ))
+
+        fundbTemplate.Set("recursiveDeleteEntity", FunctionTemplate.New(isolate, fun args ->
+            let context = isolate.CurrentContext
+            if args.Length <> 2 then
+                throwCallError context "Number of arguments must be 2"
+            let ref = jsDeserialize context args.[0] : ResolvedEntityRef
+            let id = jsInt context args.[1]
+            let handle = Option.get currentHandle
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.RecursiveDeleteEntity ref id
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
@@ -252,7 +286,7 @@ type APITemplate (isolate : Isolate) =
                 else
                     Map.empty
             let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.RunCommand cmd cmdArgs
+            let run = runVoidResultApiCall handle context <| fun () -> handle.API.Entities.RunCommand cmd cmdArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 

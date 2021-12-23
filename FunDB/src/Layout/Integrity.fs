@@ -77,7 +77,7 @@ let private expandMaterializedField (layout : Layout) (fieldRef : ResolvedFieldR
         let subEntityPlainRef = { Entity = Some <| relaxEntityRef fieldRef.Entity; Name = funSubEntity } : FieldRef
         let subEntityRef = { Ref = { Ref = VRColumn subEntityPlainRef; Path = [||]; AsRoot = false }; Extra = ObjectMap.singleton subEntityInfo } : LinkedBoundFieldRef
         let buildCase (case : VirtualFieldCase, comp : ResolvedComputedField) =
-            let info = { CheckForTypes = Some case.PossibleEntities } : SubEntityMeta
+            let info = { PossibleEntities = PEList case.PossibleEntities } : SubEntityMeta
             let extra = ObjectMap.singleton info
             let subEntity = { Ref = relaxEntityRef case.Ref; Extra = extra } : SubEntityRef
             let check = FEInheritedFrom (subEntityRef, subEntity)
@@ -542,26 +542,14 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
 
     let fixedCheck = replaceTopLevelEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
 
-    let result =
-        { Attributes = Map.empty
-          Result = fixedCheck
-          Alias = None
-        }
-    let fromEntity =
-        { Ref = relaxEntityRef entity.Root
-          Alias = None
-          AsRoot = false
-        }
+    let result = queryColumnResult fixedCheck
+    let myFromEntity = fromEntity (relaxEntityRef entity.Root)
     let singleSelect =
-        { Attributes = Map.empty
-          Results = [|  QRExpr result |]
-          From = Some (FEntity fromEntity)
-          Where = None
-          GroupBy = [||]
-          OrderLimit = emptyOrderLimitClause
-          Extra = ObjectMap.empty
-        } : ResolvedSingleSelectExpr
-    let select = { CTEs = None; Tree = SSelect singleSelect; Extra = ObjectMap.empty }
+        { emptySingleSelectExpr with
+            Results = [|  QRExpr result |]
+            From = Some (FEntity myFromEntity)
+        }
+    let select = selectExpr (SSelect singleSelect)
     let (arguments, compiled) = compileSelectExpr layout emptyArguments select
 
     let replacer = ConstraintUseNewConverter(entity.Root)
@@ -765,26 +753,14 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
     let fixedCheck = replaceTopLevelEntityRefInExpr (Some <| relaxEntityRef entity.Root) check
     let aggExpr = FEAggFunc (FunQLName "bool_and", AEAll [| fixedCheck |])
 
-    let result =
-        { Attributes = Map.empty
-          Result = aggExpr
-          Alias = None
-        }
-    let fromEntity =
-        { Ref = relaxEntityRef entity.Root
-          Alias = None
-          AsRoot = false
-        }
+    let result = queryColumnResult aggExpr
+    let myFromEntity = fromEntity <| relaxEntityRef entity.Root
     let singleSelect =
-        { Attributes = Map.empty
-          Results = [| QRExpr result |]
-          From = Some (FEntity fromEntity)
-          Where = None
-          GroupBy = [||]
-          OrderLimit = emptyOrderLimitClause
-          Extra = ObjectMap.empty
-        } : ResolvedSingleSelectExpr
-    let select = { CTEs = None; Tree = SSelect singleSelect; Extra = ObjectMap.empty }
+        { emptySingleSelectExpr with
+            Results = [| QRExpr result |]
+            From = Some (FEntity myFromEntity)
+        }
+    let select = selectExpr (SSelect singleSelect)
     let (arguments, ret) = compileSelectExpr layout emptyArguments select
     ret
 
@@ -989,26 +965,14 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
 let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) (expr : ResolvedFieldExpr) : SQL.UpdateExpr =
     let entity = layout.FindEntity fieldRef.Entity |> Option.get
     let fixedExpr = replaceTopLevelEntityRefInExpr (Some <| relaxEntityRef entity.Root) expr
-    let result =
-        { Attributes = Map.empty
-          Result = fixedExpr
-          Alias = None
-        }
-    let fromEntity =
-        { Ref = relaxEntityRef entity.Root
-          Alias = None
-          AsRoot = false
-        }
+    let result = queryColumnResult fixedExpr
+    let myFromEntity = fromEntity <| relaxEntityRef entity.Root
     let singleSelect =
-        { Attributes = Map.empty
-          Results = [|  QRExpr result |]
-          From = Some (FEntity fromEntity)
-          Where = None
-          GroupBy = [||]
-          OrderLimit = emptyOrderLimitClause
-          Extra = ObjectMap.empty
-        } : ResolvedSingleSelectExpr
-    let select = { CTEs = None; Tree = SSelect singleSelect; Extra = ObjectMap.empty }
+        { emptySingleSelectExpr with
+            Results = [| QRExpr result |]
+            From = Some (FEntity myFromEntity)
+        }
+    let select = selectExpr (SSelect singleSelect)
     let (compiledResult, compiledFrom) =
         match compileSelectExpr layout emptyArguments select with
         | (_, { Tree = SQL.SSelect { Columns = [| SQL.SCExpr (alias, result) |]; From = Some from } }) -> (result, from)
@@ -1100,7 +1064,8 @@ let private compileReferenceOfTypeCheck (layout : Layout) (fromFieldRef : Resolv
 let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) (cancellationToken : CancellationToken) : Task =
     unitTask {
         try
-            match! conn.ExecuteValueQuery (query.ToSQLString()) Map.empty cancellationToken with
+            let! (name, typ, ret) = conn.ExecuteValueQuery (query.ToSQLString()) Map.empty cancellationToken
+            match ret with
             | SQL.VBool true -> ()
             | SQL.VNull -> () // No rows found
             | ret -> raisef LayoutIntegrityException "Expected `true`, got %O" ret

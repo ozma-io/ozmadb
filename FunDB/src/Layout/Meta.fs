@@ -67,12 +67,11 @@ type private MetaBuilder (layout : Layout) =
 
     let makeIndexMeta (ref : ResolvedEntityRef) (entity : ResolvedEntity) (index : ResolvedIndex) : SQL.IndexMeta =
         let predicate = Option.map compileRelatedExpr index.Predicate
-        let possibleEntities = allPossibleEntities layout ref |> Seq.map snd |> Array.ofSeq
         let predicate =
-            match entity.Parent with
-            | None -> predicate
-            | Some parent ->
-                let check = makeCheckExprFor subEntityColumn possibleEntities
+            match allPossibleEntities layout ref with
+            | PEAny -> predicate
+            | PEList possibleEntities ->
+                let check = makeCheckExprFor subEntityColumn (Seq.map snd possibleEntities)
                 Option.unionWith (curry SQL.VEAnd) (Some check) predicate
 
         let columns = Array.map (makeIndexColumnMeta entity index) index.Expressions

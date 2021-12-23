@@ -103,8 +103,8 @@ let saveRestoreApi : HttpHandler =
 
     let massSaveRestoreApi =
         choose
-            [ GET >=> withContext saveSchemas
-              PUT >=> withContext (fun api -> getDropOthers (restoreSchemas api))
+            [ route "" >=> GET >=> withContext saveSchemas
+              route "" >=> PUT >=> withContext (fun api -> getDropOthers (restoreSchemas api))
             ]
 
     choose

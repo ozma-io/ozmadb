@@ -483,12 +483,13 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                     return reraise' e
             }
 
-        let! changed1 = layoutUpdater ()
-        let! changed2 = permissionsUpdater ()
-        let! changed3 = attributesUpdater ()
-        let! changed4 = actionsUpdater ()
-        let! changed5 = triggersUpdater ()
+        // Remove rows in reverse order, so that dependent rows are removed last.
         let! changed6 = modulesUpdater ()
+        let! changed5 = triggersUpdater ()
+        let! changed4 = actionsUpdater ()
+        let! changed3 = attributesUpdater ()
+        let! changed2 = permissionsUpdater ()
+        let! changed1 = layoutUpdater ()
 
         let! sourceUserLayout = buildSchemaLayout conn.System (Map.keys preload.Schemas) cancellationToken
         let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout

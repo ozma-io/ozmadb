@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Operations.Domain
 
+open System.Linq
 open System.Threading
 open System.Runtime.Serialization
 open System.Threading.Tasks
@@ -79,14 +80,16 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
 
         try
             let arguments = Map.union arguments (Map.mapKeys PLocal argValues)
-            return! connection.ExecuteQuery (convertComments comments + query.Expression.ToSQLString()) (prepareArguments query.Arguments arguments) cancellationToken <| fun result ->
-                let values = result.Rows |> Seq.map convertDomainValue |> Seq.toArray
-                let (_, punType) = result.Columns.[1]
-                let ret =
-                    { Values = values
-                      PunType = punType
-                    }
-                Task.result ret
+            return! connection.ExecuteQuery (convertComments comments + query.Expression.ToSQLString()) (prepareArguments query.Arguments arguments) cancellationToken <| fun columns result ->
+                task {
+                    let! values = result.Select(convertDomainValue).ToArrayAsync()
+                    let (_, punType) = columns.[1]
+                    let ret =
+                        { Values = values
+                          PunType = punType
+                        }
+                    return ret
+                }
         with
             | :? QueryException as e -> return raisefUserWithInner DomainExecutionException e ""
     }

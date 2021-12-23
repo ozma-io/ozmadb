@@ -31,6 +31,7 @@ open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.Operations.Domain
+open FunWithFlags.FunDB.Operations.Entity
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 module SQL = FunWithFlags.FunDB.SQL.Query
@@ -165,6 +166,14 @@ type UserViewSource =
     | [<CaseName("named")>] UVNamed of Ref : ResolvedUserViewRef
 
 [<NoEquality; NoComparison>]
+type ExecutedViewExpr =
+    { Attributes : ExecutedAttributeMap
+      ColumnAttributes : ExecutedAttributeMap[]
+      ArgumentAttributes : Map<ArgumentName, ExecutedAttributeMap>
+      Rows : ExecutedRow[]
+    }
+
+[<NoEquality; NoComparison>]
 type UserViewEntriesResult =
     { Info : UserViewInfo
       Result : ExecutedViewExpr
@@ -228,6 +237,7 @@ type TransactionOp =
     | [<CaseName("insert")>] TInsertEntity of Entity : ResolvedEntityRef * Entries : RawArguments
     | [<CaseName("update")>] TUpdateEntity of Entity : ResolvedEntityRef * Id : int * Entries : RawArguments
     | [<CaseName("delete")>] TDeleteEntity of Entity : ResolvedEntityRef * Id : int
+    | [<CaseName("recursive_delete")>] TRecursiveDeleteEntity of Entity : ResolvedEntityRef * Id : int
     | [<CaseName("command")>] TCommand of Command : string * Arguments : RawArguments
 
 [<SerializeAsObject("type")>]
@@ -235,6 +245,7 @@ type TransactionOpResult =
     | [<CaseName("insert")>] TRInsertEntity of Id : int option
     | [<CaseName("update")>] TRUpdateEntity
     | [<CaseName("delete")>] TRDeleteEntity
+    | [<CaseName("recursive_delete")>] TRRecursiveDeleteEntity of Deleted : ReferencesTree
     | [<CaseName("command")>] TRCommand
 
 [<NoEquality; NoComparison>]
@@ -265,6 +276,8 @@ type TransactionResult =
     abstract member InsertEntities : ResolvedEntityRef -> RawArguments seq -> Task<Result<(int option)[], TransactionError>>
     abstract member UpdateEntity : ResolvedEntityRef -> int -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member DeleteEntity : ResolvedEntityRef -> int -> Task<Result<unit, EntityErrorInfo>>
+    abstract member GetRelatedEntities : ResolvedEntityRef -> int -> Task<Result<ReferencesTree, EntityErrorInfo>>
+    abstract member RecursiveDeleteEntity : ResolvedEntityRef -> int -> Task<Result<ReferencesTree, EntityErrorInfo>>
     abstract member RunCommand : string -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member RunTransaction : Transaction -> Task<Result<TransactionResult, TransactionError>>
     abstract member ConstraintsDeferred : bool

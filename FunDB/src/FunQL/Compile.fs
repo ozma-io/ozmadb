@@ -39,6 +39,8 @@ type CompileException (message : string, innerException : Exception, isUserExcep
 [<NoEquality; NoComparison>]
 type DomainField =
     { Ref : ResolvedFieldRef
+      // Needed for fast parsing of subentity names.
+      RootEntity : ResolvedEntityRef
       // A field with assigned idColumn of 42 will use id column "__id__42" and sub-entity column "__sub_entity__42"
       IdColumn : DomainIdColumn
       // If this field is not filtered according to user role.
@@ -338,7 +340,7 @@ type CompiledViewExpr =
       UsedDatabase : FlatUsedDatabase
       Columns : (ColumnType * SQL.ColumnName)[]
       Domains : Domains
-      MainEntity : ResolvedEntityRef option
+      MainRootEntity : ResolvedEntityRef option
       FlattenedDomains : FlattenedDomains
     }
 
@@ -442,7 +444,10 @@ let makeCheckExprFor (subEntityColumn : SQL.ValueExpr) (entities : IEntityBits s
     else
         SQL.VEIn (subEntityColumn, options)
 
-let makeCheckExpr (subEntityColumn : SQL.ValueExpr) (layout : ILayoutBits) (entityRef : ResolvedEntityRef) = makeCheckExprFor subEntityColumn (allPossibleEntities layout entityRef |> Seq.map snd)
+let makeCheckExpr (subEntityColumn : SQL.ValueExpr) (layout : ILayoutBits) (entityRef : ResolvedEntityRef) =
+    match allPossibleEntities layout entityRef with
+    | PEAny -> SQL.VEValue (SQL.VBool true)
+    | PEList entities -> makeCheckExprFor subEntityColumn (Seq.map snd entities)
 
 let private compileEntityTag (subEntityColumn : SQL.ValueExpr) (entity : IEntityBits) =
     SQL.VEBinaryOp (subEntityColumn, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
@@ -740,6 +745,7 @@ let emptyExprCompilationFlags =
 type CompiledSingleFrom =
     { From : SQL.FromExpr
       Where : SQL.ValueExpr option
+      WhereWithoutSubentities : SQL.ValueExpr option
       Entities : FromEntitiesMap
       Joins : JoinPaths
     }
@@ -935,12 +941,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let makeDomainEntry name field =
             { Ref = { Entity = entityRef; Name = name }
+              RootEntity = entity.Root
               IdColumn = idDefault
               AsRoot = false
             }
         let domain = mapAllFields makeDomainEntry entity |> Map.mapKeys TName
         let mainEntry =
             { Ref = { Entity = entityRef; Name = entity.MainField }
+              RootEntity = entity.Root
               IdColumn = idDefault
               AsRoot = false
             }
@@ -1221,23 +1229,23 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let compileTypeCheck includeChildren c (subEntityRef : SubEntityRef) =
             let checkForTypes =
                 match ObjectMap.tryFindType<SubEntityMeta> subEntityRef.Extra with
-                | Some info -> info.CheckForTypes
+                | Some info -> info.PossibleEntities
                 | None ->
                     // Check for everything.
                     let entityRef = tryResolveEntityRef subEntityRef.Ref |> Option.get
                     if includeChildren then
-                        allPossibleEntities layout entityRef |> Seq.map fst |> Set.ofSeq |> Some
+                        allPossibleEntities layout entityRef |> mapPossibleEntities (Seq.map fst >> Set.ofSeq)
                     else
                         let entity = layout.FindEntity entityRef |> Option.get
                         if entity.IsAbstract then
-                            Set.empty |> Some
+                            PEList Set.empty
                         else
-                            Set.singleton entityRef |> Some
+                            PEList <| Set.singleton entityRef
 
             match checkForTypes with
-            | None ->
+            | PEAny ->
                 SQL.VEValue (SQL.VBool true)
-            | Some types ->
+            | PEList types ->
                 let col = compileLinkedRef RCTypeExpr c
                 let entities = types |> Seq.map (fun typ -> getEntityByRef typ :> IEntityBits)
                 makeCheckExprFor col entities
@@ -1566,7 +1574,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     let idColumn = (CMId idCol, makeSystemColumn CMId funId)
                     let subEntityColumns =
                         // We don't need to select entity if there are no possible children.
-                        if Seq.length (allPossibleEntities layout finalEntityRef) <= 1 then
+                        if Seq.length (allPossibleEntitiesList layout finalEntityRef) <= 1 then
                             Seq.empty
                         else
                             Seq.singleton (CMSubEntity idCol, makeSystemColumn CMSubEntity funSubEntity)
@@ -1576,6 +1584,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let newDomains =
                 let newInfo =
                     { Ref = finalRef
+                      RootEntity = finalEntity.Root
                       IdColumn = systemName
                       AsRoot = finalArrow.AsRoot
                     }
@@ -1667,7 +1676,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         (idCol, Seq.empty)
                     else
                         let needsSubEntity (ref : ResolvedFieldRef) =
-                            Seq.length (allPossibleEntities layout ref.Entity) > 1
+                            Seq.length (allPossibleEntitiesList layout ref.Entity) > 1
 
                         let maybeIdCol = Option.map (fun x -> (CMId idCol, x)) <| makeMaybeSystemColumn (fun _ -> true) CMId funId
                         let maybeSubEntityCol = Option.map (fun x -> (CMSubEntity idCol, x)) <|makeMaybeSystemColumn needsSubEntity CMSubEntity funSubEntity
@@ -1911,12 +1920,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
             let makeDomainEntry name field =
                 { Ref = { Entity = entityRef; Name = name }
+                  RootEntity = entity.Root
                   IdColumn = idDefault
                   AsRoot = false
                 }
             let domain = mapAllFields makeDomainEntry entity |> Map.mapKeys TName
             let mainEntry =
                 { Ref = { Entity = entityRef; Name = entity.MainField }
+                  RootEntity = entity.Root
                   IdColumn = idDefault
                   AsRoot = false
                 }
@@ -2269,15 +2280,17 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     member this.CompileSingleFromExpr (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : CompiledSingleFrom =
         let (fromMap, compiledFrom) = compileFromExpr Map.empty None true from
-        let (newPaths, where) =
+        let (newPaths, whereWithoutSubentities) =
             match where with
             | None -> (emptyJoinPaths, None)
             | Some where ->
                 let (newPaths, ret) = compileLinkedFieldExpr emptyExprCompilationFlags Map.empty emptyJoinPaths where
                 (newPaths, Some ret)
         let (entitiesMap, compiledFrom) = buildJoins layout (fromToEntitiesMap fromMap) compiledFrom (joinsToSeq newPaths.Map)
+        let finalWhere = addEntityChecks entitiesMap whereWithoutSubentities
         { From = compiledFrom
-          Where = where
+          WhereWithoutSubentities = whereWithoutSubentities
+          Where = finalWhere
           Entities = entitiesMap
           Joins = newPaths
         }
@@ -2489,6 +2502,13 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
 
     let compilePragma name v = (compileName name, compileFieldValue v)
 
+    let mainRootEntity =
+        match mainEntityRef with
+        | None -> None
+        | Some mainRef ->
+            let mainEntity = layout.FindEntity mainRef |> Option.get
+            Some mainEntity.Root
+
     { Pragmas = Map.mapWithKeys compilePragma viewExpr.Pragmas
       AttributesQuery = attrQuery
       Query = { Expression = expr; Arguments = compiler.Arguments }
@@ -2496,7 +2516,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
       Columns = columnsWithNames
       Domains = domains
       FlattenedDomains = flattenedDomains
-      MainEntity = mainEntityRef
+      MainRootEntity = mainEntityRef
     }
 
 let compileCommandExpr (layout : Layout) (cmdExpr : ResolvedCommandExpr) : CompiledCommandExpr =

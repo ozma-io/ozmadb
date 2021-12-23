@@ -150,12 +150,15 @@ let private sqlColumnName (ref : ResolvedEntityRef) (entity : SourceEntity) (fie
         | Some p -> sprintf "%O__%O__%O" ref.Schema ref.Name fieldName
     SQL.SQLName (makeHashNameFor SQL.sqlIdentifierLength str)
 
+type private ReferencingEntitiesMap = Map<ResolvedEntityRef, Set<ResolvedFieldRef>>
+
 //
 // PHASE 1: Building column fields.
 //
 
 type private Phase1Resolver (layout : SourceLayout) =
     let mutable cachedEntities : HalfResolvedEntitiesMap = Map.empty
+    let mutable referencingFields : ReferencingEntitiesMap = Map.empty
     let mutable rootEntities : Set<ResolvedEntityRef> = Set.empty
 
     let unionComputedField (name : FieldName) (parent : HalfResolvedComputedField) (child : HalfResolvedComputedField) =
@@ -175,19 +178,26 @@ type private Phase1Resolver (layout : SourceLayout) =
         else
             raisef ResolveLayoutException "Computed field names clash: %O" name
 
-    let resolveFieldType (ft : ParsedFieldType) : ResolvedFieldType =
+    let resolveFieldType (fieldRef : ResolvedFieldRef) (ft : ParsedFieldType) : ResolvedFieldType =
         try
             match resolveFieldType layout ft with
             | FTArray (SFTReference _) -> raisef ResolveLayoutException "Arrays of references are not supported"
             | FTArray (SFTEnum _) -> raisef ResolveLayoutException "Arrays of enums are not supported"
+            | FTScalar (SFTReference refEntityRef) as t ->
+                let refEntity = layout.FindEntity refEntityRef |> Option.get
+                if refEntity.ForbidExternalReferences && fieldRef.Entity.Schema <> refEntityRef.Schema then
+                    raisef ResolveLayoutException "External references to this entity are forbidden"
+                referencingFields <- Map.addWith Set.union refEntityRef (Set.singleton fieldRef) referencingFields
+                t
             | t -> t
         with
         | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
 
-    let resolveColumnField (ref : ResolvedEntityRef) (entity : SourceEntity) (fieldName : FieldName) (col : SourceColumnField) : ResolvedColumnField =
+    let resolveColumnField (entityRef : ResolvedEntityRef) (entity : SourceEntity) (fieldName : FieldName) (col : SourceColumnField) : ResolvedColumnField =
+        let fieldRef = { Entity = entityRef; Name = fieldName }
         let fieldType =
             match parse tokenizeFunQL fieldType col.Type with
-            | Ok r -> resolveFieldType r
+            | Ok r -> resolveFieldType fieldRef r
             | Error msg -> raisef ResolveLayoutException "Error parsing column field type %s: %s" col.Type msg
         let defaultValue =
             match col.DefaultValue with
@@ -214,7 +224,7 @@ type private Phase1Resolver (layout : SourceLayout) =
           IsNullable = col.IsNullable
           IsImmutable = col.IsImmutable
           InheritedFrom = None
-          ColumnName = sqlColumnName ref entity fieldName
+          ColumnName = sqlColumnName entityRef entity fieldName
           HashName = makeHashName fieldName
         }
 
@@ -386,12 +396,25 @@ type private Phase1Resolver (layout : SourceLayout) =
         with
         | Failure msg -> raisef ResolveLayoutException "Column names clash: %s" msg
 
+    let rec fillReferencingFields (prevReferences : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) =
+        let entity = Map.find entityRef cachedEntities
+        let thisReferences = Map.findWithDefault entityRef Set.empty referencingFields
+        let references = Set.union prevReferences thisReferences
+        referencingFields <- Map.add entityRef references referencingFields
+        for KeyValue(childRef, child) in entity.Children do
+            if child.Direct then
+                fillReferencingFields references childRef
+
     member this.ResolveLayout () =
         resolveLayout ()
         for root in rootEntities do
             let entity = Map.find root cachedEntities
             checkEntityColumnNames root entity
+        for root in rootEntities do
+            fillReferencingFields Set.empty root
         cachedEntities
+    
+    member this.ReferencingFields = referencingFields
 
 let private parseRelatedExpr (rawExpr : string) =
     match parse tokenizeFunQL fieldExpr rawExpr with
@@ -410,7 +433,7 @@ type private RelatedExpr =
       Expr : ResolvedFieldExpr
     }
 
-type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntitiesMap, forceAllowBroken : bool) =
+type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntitiesMap, referencingFields : ReferencingEntitiesMap, forceAllowBroken : bool) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, Result<ResolvedComputedField, exn>> = Map.empty
     let mutable cachedCaseExpressions : Map<ResolvedFieldRef, VirtualFieldCase array> = Map.empty
 
@@ -767,6 +790,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               IsFrozen = entity.Source.IsFrozen
               HashName = makeHashName entityRef.Name
               RequiredFields = requiredFields
+              ReferencingFields = Map.findWithDefault entityRef Set.empty referencingFields
             }
         let errors =
             { ComputedFields = computedErrors
@@ -892,7 +916,7 @@ type private Phase3Resolver (layout : Layout) =
 let resolveLayout (layout : SourceLayout) (forceAllowBroken : bool) : ErroredLayout * Layout =
     let phase1 = Phase1Resolver layout
     let entities = phase1.ResolveLayout ()
-    let phase2 = Phase2Resolver (layout, entities, forceAllowBroken)
+    let phase2 = Phase2Resolver (layout, entities, phase1.ReferencingFields, forceAllowBroken)
     let (errors, layout2) = phase2.ResolveLayout ()
     let phase3 = Phase3Resolver layout2
     let layout3 = phase3.ResolveLayout ()

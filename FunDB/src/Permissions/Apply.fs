@@ -240,12 +240,8 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
               FromEntityId = localExprFromEntityId
               ForceSQLName = None
             } : FieldMeta
-        let linkedFieldRef =
-            { Ref = VRColumn { Entity = Some <| relaxEntityRef rootRef; Name = funSubEntity }
-              Path = [||]
-              AsRoot = false
-            } : LinkedFieldRef
-        { Ref = linkedFieldRef
+        let lref = linkedRef <| VRColumn { Entity = Some <| relaxEntityRef rootRef; Name = funSubEntity } : LinkedFieldRef
+        { Ref = lref
           Extra = ObjectMap.singleton fieldInfo
         }
             

@@ -1713,3 +1713,40 @@ let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> Field
     | FTScalar SFTUuid -> parseSingleValueStrict FUuid
     | FTScalar (SFTReference _) -> parseSingleValueStrict FInt
     | FTScalar (SFTEnum vals) -> parseSingleValue (fun x -> if Set.contains x vals then Some (FString x) else None)
+
+let fromEntity (entityRef : 'e) : FromEntity<'e> =
+    { Ref = entityRef
+      Alias = None
+      AsRoot = false
+    }
+
+let linkedRef (ref : 'f) : LinkedRef<'f> =
+    { Ref = ref
+      Path = [||]
+      AsRoot = false
+    }
+
+let resolvedRefFieldExpr (ref : 'f) : FieldExpr<'e, BoundRef<LinkedRef<'f>>> =
+    FERef { Ref = linkedRef ref; Extra = ObjectMap.empty }
+
+let emptySingleSelectExpr : SingleSelectExpr<'e, 'f> =
+    { Attributes = Map.empty
+      Results = [||]
+      From = None
+      Where = None
+      GroupBy = [||]
+      OrderLimit = emptyOrderLimitClause
+      Extra = ObjectMap.empty
+    }
+
+let selectExpr (tree : SelectTreeExpr<'e, 'f>) : SelectExpr<'e, 'f> =
+    { CTEs = None
+      Tree = tree
+      Extra = ObjectMap.empty
+    }
+
+let queryColumnResult (expr : FieldExpr<'e, 'f>) : QueryColumnResult<'e, 'f> =
+    { Alias = None
+      Attributes = Map.empty
+      Result = expr
+    }

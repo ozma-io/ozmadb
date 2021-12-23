@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.FunQL.Query
 
+open System.Linq
+open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open System.Runtime.Serialization
@@ -44,7 +46,7 @@ type [<NoEquality; NoComparison>] ExecutedEntityId =
     }
 
 type [<NoEquality; NoComparison>] ExecutedRow =
-    { Values : ExecutedValue array
+    { Values : ExecutedValue[]
       DomainId : GlobalDomainId option
       [<DataMember(EmitDefaultValue = false)>]
       Attributes : ExecutedAttributeMap
@@ -69,16 +71,16 @@ type ExecutedColumnInfo =
 type ExecutedViewInfo =
     { AttributeTypes : ExecutedAttributeTypes
       RowAttributeTypes : ExecutedAttributeTypes
-      Columns : ExecutedColumnInfo array
+      Columns : ExecutedColumnInfo[]
       ArgumentAttributeTypes : Map<ArgumentName, ExecutedAttributeTypes>
     }
 
 [<NoEquality; NoComparison>]
-type ExecutedViewExpr =
+type ExecutingViewExpr =
     { Attributes : ExecutedAttributeMap
-      ColumnAttributes : ExecutedAttributeMap array
+      ColumnAttributes : ExecutedAttributeMap[]
       ArgumentAttributes : Map<ArgumentName, ExecutedAttributeMap>
-      Rows : ExecutedRow seq
+      Rows : IAsyncEnumerable<ExecutedRow>
     }
 
 [<NoEquality; NoComparison>]
@@ -119,31 +121,42 @@ let private splitPairsMap pairsMap =
     let snds = Map.map (fun name -> snd) pairsMap
     (fsts, snds)
 
-let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult) : ExecutedAttributes =
-    let values = Seq.exactlyOne result.Rows
+let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SelectExpr) option =
+    let allColumns =  Seq.append viewExpr.AttributesQuery.PureColumns viewExpr.AttributesQuery.AttributeColumns
+    let colTypes = allColumns |> Seq.map (fun (typ, name, col) -> typ) |> Seq.toArray
+    if Array.isEmpty colTypes then
+        None
+    else
+        let query =
+            { SQL.emptySingleSelectExpr with
+                  Columns = allColumns |> Seq.map (fun (typ, name, col) -> SQL.SCExpr (Some name, col)) |> Seq.toArray
+            }
+        let select = SQL.selectExpr (SQL.SSelect query)
+        Some (colTypes, select)
 
-    let takeViewAttribute colType (_, valType) v =
+let private parseAttributesResult (columns : ColumnType[]) (values : (SQL.SQLName * SQL.SimpleValueType * SQL.Value)[]) : ExecutedAttributes =
+    let takeViewAttribute colType (_, valType, v) =
         match colType with
         | CTMeta (CMRowAttribute name) -> Some (name, (valType, v))
         | _ -> None
-    let viewAttributes = Seq.map3Maybe takeViewAttribute columns result.Columns values |> Map.ofSeq
+    let viewAttributes = Seq.map2Maybe takeViewAttribute columns values |> Map.ofSeq
 
-    let takeColumnAttribute colType (_, valType) v =
+    let takeColumnAttribute colType (_, valType, v) =
         match colType with
         | CTColumnMeta (fieldName, CCCellAttribute name) -> Some (fieldName, Map.singleton name (valType, v))
         | _ -> None
 
     let colAttributes =
-        Seq.map3Maybe takeColumnAttribute columns result.Columns values
+        Seq.map2Maybe takeColumnAttribute columns values
         |> Map.ofSeqWith (fun name -> Map.union)
         |> Map.map (fun fieldName -> splitPairsMap)
 
-    let takeArgAttribute colType (_, valType) v =
+    let takeArgAttribute colType (_, valType, v) =
         match colType with
         | CTMeta (CMArgAttribute (argName, name)) -> Some (argName, Map.singleton name (valType, v))
         | _ -> None
     let argAttributes =
-        Seq.map3Maybe takeArgAttribute columns result.Columns values
+        Seq.map2Maybe takeArgAttribute columns values
         |> Map.ofSeqWith (fun name -> Map.union)
         |> Map.map (fun fieldName -> splitPairsMap)
 
@@ -153,19 +166,25 @@ let private parseAttributesResult (columns : ColumnType[]) (result : QueryResult
       ArgumentAttributes = argAttributes
     }
 
-let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domains) (columns : (ColumnType * SQL.ColumnName)[]) (result : QueryResult) : ExecutedViewInfo * ExecutedRow seq =
+let private parseResult
+        (mainRootEntity : ResolvedEntityRef option)
+        (domains : Domains)
+        (columns : (ColumnType * SQL.ColumnName)[])
+        (resultColumns : (SQL.SQLName * SQL.SimpleValueType)[])
+        (rows : IAsyncEnumerable<SQL.Value[]>)
+        (processFunc : ExecutedViewInfo -> IAsyncEnumerable<ExecutedRow> -> Task<'a>) : Task<'a> =
     let takeRowAttribute i (colType, _) (_, valType) =
         match colType with
         | CTMeta (CMRowAttribute name) -> Some (name, (valType, i))
         | _ -> None
-    let rowAttributes = Seq.mapi2Maybe takeRowAttribute columns result.Columns |> Map.ofSeq
+    let rowAttributes = Seq.mapi2Maybe takeRowAttribute columns resultColumns |> Map.ofSeq
 
     let takeCellAttribute i (colType, _) (_, valType) =
         match colType with
             | CTColumnMeta (fieldName, CCCellAttribute name) -> Some (fieldName, (name, (valType, i)))
             | _ -> None
     let allCellAttributes =
-        Seq.mapi2Maybe takeCellAttribute columns result.Columns
+        Seq.mapi2Maybe takeCellAttribute columns resultColumns
         |> Seq.groupBy fst
         |> Seq.map (fun (fieldName, attrs) -> (fieldName, attrs |> Seq.map snd |> Map.ofSeq))
         |> Map.ofSeq
@@ -174,7 +193,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         match colType with
         | CTColumnMeta (name, CCPun) -> Some (name, (valType, i))
         | _ -> None
-    let punAttributes = Seq.mapi2Maybe takePunAttribute columns result.Columns |> Map.ofSeq
+    let punAttributes = Seq.mapi2Maybe takePunAttribute columns resultColumns |> Map.ofSeq
 
     let takeDomainColumn i (colType, _) =
         match colType with
@@ -222,10 +241,10 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
                       PunType = punType
                     }
                 Some (cellAttributes, i, columnInfo)
-            | _ -> None
-    let columnsMeta = Seq.mapi2Maybe takeColumn columns result.Columns |> Seq.toArray
+            | m_ -> None
+    let columnsMeta = Seq.mapi2Maybe takeColumn columns resultColumns |> Seq.toArray
 
-    let parseRow (values : SQL.Value array) =
+    let parseRow (values : SQL.Value[]) =
         let getCell (cellAttributes, i, column) =
             let attrs = Map.map (fun name (valType, i) -> values.[i]) cellAttributes
             let pun = Map.tryFind column.Name punAttributes |> Option.map (fun (valType, i) -> values.[i])
@@ -255,7 +274,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         let getMainSubEntity i =
             match values.[i] with
             | SQL.VString subEntityString ->
-                parseTypeName (Option.get mainEntity) subEntityString
+                parseTypeName (Option.get mainRootEntity) subEntityString
             | _ -> failwith "Main subentity is not a string"
 
         let domainIds = Map.mapMaybe (fun ns i -> getDomainId i) domainColumns
@@ -284,7 +303,7 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
             // ID can be NULL, for example, in case of JOINs.
             | None -> None
             | Some id ->
-                let subEntity = Option.bind (getSubEntity info.Ref.Entity) (Map.tryFind info.IdColumn subEntityColumns)
+                let subEntity = Option.bind (getSubEntity info.RootEntity) (Map.tryFind info.IdColumn subEntityColumns)
                 let ret =
                     { Id = id
                       SubEntity = subEntity
@@ -310,30 +329,18 @@ let private parseResult (mainEntity : ResolvedEntityRef option) (domains : Domai
         }
 
     let columns = Array.map (fun (attributes, i, column) -> column) columnsMeta
-    let rows = Seq.map parseRow result.Rows
 
-    let viewInfo =
+    let info : ExecutedViewInfo =
         { Columns = columns
           AttributeTypes = Map.empty
           RowAttributeTypes = Map.map (fun name (valType, i) -> valType) rowAttributes
           ArgumentAttributeTypes = Map.empty
         }
-    (viewInfo, rows)
 
-let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SelectExpr) option =
-    let allColumns =  Seq.append viewExpr.AttributesQuery.PureColumns viewExpr.AttributesQuery.AttributeColumns
-    let colTypes = allColumns |> Seq.map (fun (typ, name, col) -> typ) |> Seq.toArray
-    if Array.isEmpty colTypes then
-        None
-    else
-        let query =
-            { SQL.emptySingleSelectExpr with
-                  Columns = allColumns |> Seq.map (fun (typ, name, col) -> SQL.SCExpr (Some name, col)) |> Seq.toArray
-            }
-        let select = SQL.selectExpr (SQL.SSelect query)
-        Some (colTypes, select)
+    let rows' = rows.Select(parseRow)
+    processFunc info rows'
 
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (comments : string option) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (resultFunc : ExecutedViewInfo -> ExecutedViewExpr -> Task<'a>) : Task<'a> =
+let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (comments : string option) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (processFunc : ExecutedViewInfo -> ExecutingViewExpr -> Task<'a>) : Task<'a> =
     task {
         try
             let parameters = prepareArguments viewExpr.Query.Arguments arguments
@@ -352,7 +359,8 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
                               ArgumentAttributes = Map.empty
                             }
                     | Some (colTypes, query) ->
-                        return! connection.ExecuteQuery (prefix + string query) parameters cancellationToken (parseAttributesResult colTypes >> Task.FromResult)
+                        let! row = connection.ExecuteRowValuesQuery (prefix + string query) parameters cancellationToken
+                        return parseAttributesResult colTypes row
                 }
 
             let getColumnInfo (col : ExecutedColumnInfo) =
@@ -367,22 +375,21 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
                 | None -> Map.empty
                 | Some (attrTypes, attrs) -> attrs
 
-            let! ret = connection.ExecuteQuery (prefix + viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun rawResult ->
-                let (info, rows) = parseResult viewExpr.MainEntity viewExpr.Domains viewExpr.Columns rawResult
-
-                let mergedInfo =
-                    { info with
-                          ArgumentAttributeTypes = Map.map (fun name -> fst) attrsResult.ArgumentAttributes
-                          AttributeTypes = attrsResult.AttributeTypes
-                          Columns = Array.map getColumnInfo info.Columns
-                    }
-                let result =
-                    { Attributes = attrsResult.Attributes
-                      ColumnAttributes = Array.map getColumnAttributes info.Columns
-                      ArgumentAttributes = Map.map (fun name -> snd) attrsResult.ArgumentAttributes
-                      Rows = rows
-                    }
-                resultFunc mergedInfo result
+            let! ret = connection.ExecuteQuery (prefix + viewExpr.Query.Expression.ToSQLString()) parameters cancellationToken <| fun resultColumns rawRows ->
+                parseResult viewExpr.MainRootEntity viewExpr.Domains viewExpr.Columns resultColumns rawRows <| fun info rows ->
+                    let mergedInfo =
+                        { info with
+                                ArgumentAttributeTypes = Map.map (fun name -> fst) attrsResult.ArgumentAttributes
+                                AttributeTypes = attrsResult.AttributeTypes
+                                Columns = Array.map getColumnInfo info.Columns
+                        }
+                    let result =
+                        { Attributes = attrsResult.Attributes
+                          ColumnAttributes = Array.map getColumnAttributes info.Columns
+                          ArgumentAttributes = Map.map (fun name -> snd) attrsResult.ArgumentAttributes
+                          Rows = rows
+                        }
+                    processFunc mergedInfo result
 
             do! unsetPragmas connection viewExpr.Pragmas cancellationToken
             return ret

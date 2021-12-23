@@ -33,13 +33,27 @@ let entitiesApi : HttpHandler =
             | Error err -> return! errorHandler err (json err) next ctx
         }
 
+    let getRelatedEntities (entityRef : ResolvedEntityRef) (id : int) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+        task {
+            match! api.Entities.GetRelatedEntities entityRef id with
+            | Ok info ->
+                return! Successful.ok (json info) next ctx
+            | Error err -> return! errorHandler err (json err) next ctx
+        }
+
+    let rowApi (entityRef : ResolvedEntityRef) (id : int) =
+        choose
+            [ route "/related" >=> GET >=> withContext (getRelatedEntities entityRef id)
+            ]
+
     let entityApi (schema : string, name : string) =
         let entityRef =
             { Schema = FunQLName schema
               Name = FunQLName name
             }
         choose
-            [ GET >=> withContext (getEntityInfo entityRef)
+            [ subRoutef "/%i" (rowApi entityRef)
+              route "" >=> GET >=> withContext (getEntityInfo entityRef)
             ]
 
     let runTransaction (api : IFunDBAPI) =
@@ -61,10 +75,7 @@ let entitiesApi : HttpHandler =
                         return! RequestErrors.badRequest (json err) next ctx
             }
 
-    let transactionApi =
-        POST >=> withContext runTransaction
-
     choose
         [ subRoutef "/entities/%s/%s" entityApi
-          subRoute "/transaction" transactionApi
+          route "/transaction" >=> POST >=> withContext runTransaction
         ]

@@ -422,9 +422,8 @@ type PossibleSubtypesMeta =
     { PossibleSubtypes : Set<ResolvedEntityRef>
     }
 
-// `None` means "don't check at all".
 type SubEntityMeta =
-    { CheckForTypes : Set<ResolvedEntityRef> option
+    { PossibleEntities : PossibleEntities<Set<ResolvedEntityRef>>
     }
 
 type ReferencePlaceholderMeta =
@@ -539,6 +538,7 @@ type private TypeContext =
       Type : ResolvedEntityRef
     }
 
+// Fields that are not listed in `TypeContextsMap` are assumed to be unrestricted.
 type private TypeContextsMap = Map<FromFieldKey, TypeContext>
 
 type private TypeContexts =
@@ -697,45 +697,45 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
         match ctx with
         | SECInheritedFrom ->
             if checkInheritance layout subEntityRef fieldRef.Entity then
-                None
+                PEAny
             else if checkInheritance layout fieldRef.Entity subEntityRef then
-                allPossibleEntities layout subEntityRef |> Seq.map fst |> Set.ofSeq |> Some
+                allPossibleEntities layout subEntityRef |> mapPossibleEntities (Seq.map fst >> Set.ofSeq)
             else
                 raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
         | SECOfType ->
             if subEntity.IsAbstract then
                 raisef ViewResolveException "Instances of abstract entity %O do not exist" subEntityRef
             if subEntityRef = fieldRef.Entity then
-                None
+                PEAny
             else if checkInheritance layout fieldRef.Entity subEntityRef then
-                Set.singleton subEntityRef |> Some
+                PEList (Set.singleton subEntityRef)
             else
                 raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
 
     let checkForTypes =
         match neededTypes with
-        | None -> None
-        | Some needed ->
+        | PEAny -> PEAny
+        | PEList needed ->
             match Map.tryFind typeCtxKey outerTypeCtxs with
-            | None -> Some needed
+            | None -> PEList needed
             | Some ctx ->
                 let otherTypes = Set.difference ctx.AllowedSubtypes needed
                 if Set.isEmpty otherTypes then
-                    None
+                    PEAny
                 else
                     let possibleTypes = Set.intersect ctx.AllowedSubtypes needed
-                    Some possibleTypes
+                    PEList possibleTypes
 
     let innerTypeCtxs =
         match neededTypes with
-        | None -> Map.empty
-        | Some needed ->
+        | PEAny -> Map.empty
+        | PEList needed ->
             let ctx =
                 { Type = fieldRef.Entity
                   AllowedSubtypes = needed
                 }
             Map.singleton typeCtxKey ctx
-    let info = { CheckForTypes = checkForTypes } : SubEntityMeta
+    let info = { PossibleEntities = checkForTypes } : SubEntityMeta
     let ret = { Ref = relaxEntityRef subEntityRef; Extra = ObjectMap.singleton info } : SubEntityRef
     (innerTypeCtxs, ret)
 
@@ -753,7 +753,7 @@ let private filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCas
     match ObjectMap.tryFindType<PossibleSubtypesMeta> extra with
     | None -> cases
     | Some meta ->
-        let filterCase case =
+        let filterCase (case : VirtualFieldCase) =
             let possibleCases = Set.intersect meta.PossibleSubtypes case.PossibleEntities
             if Set.isEmpty possibleCases then
                 None
@@ -853,13 +853,13 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         lastFromEntityId <- lastFromEntityId + 1
         ret
 
-    let notTypeContext (ctx : TypeContext) : TypeContext option =
-        let allEntities = allPossibleEntities layout ctx.Type |> Seq.map fst |> Set.ofSeq
-        let newAllowed = Set.difference allEntities ctx.AllowedSubtypes
-        if Set.count newAllowed = Set.count allEntities then
-            None
+    let notTypeContext (ctx : TypeContext) : PossibleEntities<TypeContext> =
+        if Set.isEmpty ctx.AllowedSubtypes then
+            PEAny
         else
-            Some
+            let allEntities = allPossibleEntitiesList layout ctx.Type |> Seq.map fst |> Set.ofSeq
+            let newAllowed = Set.difference allEntities ctx.AllowedSubtypes
+            PEList
                 { AllowedSubtypes = newAllowed
                   Type = ctx.Type
                 }
@@ -868,13 +868,17 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         if ctx.ExtraConditionals then
             emptyTypeContexts
         else
-            { Map = Map.mapMaybe (fun name -> notTypeContext) ctx.Map
+            let mapOne name ctx =
+                match notTypeContext ctx with
+                | PEAny -> None
+                | PEList list -> Some list
+            { Map = Map.mapMaybe mapOne ctx.Map
               ExtraConditionals = false
             }
 
     let orTypeContext (ctxA : TypeContext) (ctxB : TypeContext) : TypeContext option =
         assert (ctxA.Type = ctxB.Type)
-        let allEntities = allPossibleEntities layout ctxA.Type |> Seq.map fst |> Set.ofSeq
+        let allEntities = allPossibleEntitiesList layout ctxA.Type |> Seq.map fst |> Set.ofSeq
         let newAllowed = Set.union ctxA.AllowedSubtypes ctxB.AllowedSubtypes
         if Set.count newAllowed = Set.count allEntities then
             None

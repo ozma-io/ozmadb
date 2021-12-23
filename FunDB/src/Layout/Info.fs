@@ -86,6 +86,7 @@ type SerializedEntity =
       IsFrozen : bool
       Root : ResolvedEntityRef
       Access : SerializedEntityAccess
+      ReferencingFields : Set<ResolvedFieldRef>
     }
 
 [<NoEquality; NoComparison>]
@@ -159,6 +160,7 @@ let serializeEntity (layout : Layout) (entity : ResolvedEntity) : SerializedEnti
       Children = entity.Children |> Map.toSeq |> Seq.map (fun (ref, info) -> { Ref = ref; Direct = info.Direct }) |> Seq.toArray
       Root = entity.Root
       Access = fullSerializedEntityAccess
+      ReferencingFields = entity.ReferencingFields
     }
 
 let serializeSchema (layout : Layout) (schema : ResolvedSchema) : SerializedSchema =

@@ -221,6 +221,7 @@ type ResolvedEntity =
       IsAbstract : bool
       IsFrozen : bool
       Root : ResolvedEntityRef // Hierarchy root
+      ReferencingFields : Set<ResolvedFieldRef>
       RequiredFields : Set<FieldName>
     } with
         member this.FindField (name : FieldName) =
@@ -312,7 +313,19 @@ type ErroredEntity =
 type ErroredSchema = Map<EntityName, ErroredEntity>
 type ErroredLayout = Map<SchemaName, ErroredSchema>
 
-let allPossibleEntities (layout : ILayoutBits) (parentRef : ResolvedEntityRef) : (ResolvedEntityRef * IEntityBits) seq =
+type PossibleEntities<'a> =
+    | PEList of 'a
+    | PEAny
+
+let getPossibleEntitiesList = function
+    | PEList a -> Some a
+    | PEAny -> None
+
+let mapPossibleEntities (f : 'a -> 'b) = function
+    | PEList a -> PEList (f a)
+    | PEAny -> PEAny
+
+let private allPossibleEntitiesList' (layout : ILayoutBits) (parentRef : ResolvedEntityRef) (parentEntity : IEntityBits) : (ResolvedEntityRef * IEntityBits) seq =
     let getEntity ref =
         let entity = layout.FindEntity ref |> Option.get
         if entity.IsAbstract then
@@ -320,7 +333,6 @@ let allPossibleEntities (layout : ILayoutBits) (parentRef : ResolvedEntityRef) :
         else
             Some (ref, entity)
 
-    let parentEntity = layout.FindEntity parentRef |> Option.get
     let childrenEntities = parentEntity.Children |> Map.keys |> Seq.mapMaybe getEntity
     let realEntity =
         if parentEntity.IsAbstract then
@@ -328,6 +340,17 @@ let allPossibleEntities (layout : ILayoutBits) (parentRef : ResolvedEntityRef) :
         else
             Seq.singleton (parentRef, parentEntity)
     Seq.append realEntity childrenEntities
+
+let allPossibleEntitiesList (layout : ILayoutBits) (parentRef : ResolvedEntityRef) : (ResolvedEntityRef * IEntityBits) seq =
+    let parentEntity = layout.FindEntity parentRef |> Option.get
+    allPossibleEntitiesList' layout parentRef parentEntity
+
+let allPossibleEntities (layout : ILayoutBits) (parentRef : ResolvedEntityRef) : PossibleEntities<(ResolvedEntityRef * IEntityBits) seq> =
+    let parentEntity = layout.FindEntity parentRef |> Option.get
+    if Option.isNone parentEntity.Parent then
+        PEAny
+    else
+        PEList <| allPossibleEntitiesList' layout parentRef parentEntity
 
 let localExprFromEntityId = 0
 

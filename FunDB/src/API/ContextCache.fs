@@ -364,14 +364,15 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
         task {
             // Try to get a lock. If we fail, wait till someone else releases it and then _restart the transaction and try again_.
             // This is because otherwise transaction gets to see older state of the database.
-            let! ret = task {
-                try
-                    return! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken
-                with
-                | ex ->
-                    do! transaction.Rollback ()
-                    return reraise' ex
-            }
+            let! (name, typ, ret) =
+                task {
+                    try
+                        return! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken
+                    with
+                    | ex ->
+                        do! transaction.Rollback ()
+                        return reraise' ex
+                }
             match ret with
             | SQL.VBool true -> return true
             | _ ->
@@ -592,7 +593,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                         try
                             match! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken with
-                            | SQL.VBool true -> ()
+                            | (lockName, lockRet, SQL.VBool true) -> ()
                             | _ -> raisef ContextException "Another migration is in progress"
 
                             logger.LogInformation("Starting migration")
@@ -852,7 +853,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                 let! systemInfo = transaction.Connection.Query.ExecuteRowValuesQuery "SELECT transaction_timestamp(), txid_current()" Map.empty cancellationToken
                 let (transactionTime, transactionId) =
                     match systemInfo with
-                    | [|SQL.VDateTime ts; SQL.VBigInt txid|] -> (ts, int txid)
+                    | [|(tsName, tsTyp, SQL.VDateTime ts); (idName, idTyp, SQL.VBigInt txid)|] -> (ts, int txid)
                     | _ -> failwith "Impossible"
 
                 return

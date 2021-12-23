@@ -1,6 +1,8 @@
 ﻿module FunWithFlags.FunDB.Operations.Entity
 
 open FSharpPlus
+open System.Collections.Generic
+open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
@@ -53,7 +55,7 @@ type EntityDeniedException (message : string, innerException : Exception, isUser
 
     new (message : string) = EntityDeniedException (message, null, true)
 
-type EntityId = int
+type RowId = int
 
 let private subEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
 
@@ -77,14 +79,29 @@ let private parseIntValue = function
 
 let private runIntQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     task {
-        let! ret = runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken
+        let! (name, typ, ret) = runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken
         return parseIntValue ret
     }
 
 let private runIntsQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     let execute query args cancellationToken =
-        connection.ExecuteColumnValuesQuery query args cancellationToken (Seq.map parseIntValue >> Seq.toArray >> Task.result)
+        connection.ExecuteColumnValuesQuery query args cancellationToken <| fun name typ rows -> task { return! rows.Select(parseIntValue).ToArrayAsync() }
     runQuery execute query comments placeholders cancellationToken
+
+let private parseStringValue = function
+    | SQL.VString s -> s
+    | ret -> failwithf "Non-string result: %O" ret
+
+let private parseOptionalStringValue = function
+    | SQL.VString s -> Some s
+    | SQL.VNull -> None
+    | ret -> failwithf "Non-string result: %O" ret
+
+let private runOptionalStringQuery (connection : QueryConnection) query comments placeholders cancellationToken =
+    task {
+        let! (name, typ, ret) = runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken
+        return parseOptionalStringValue ret
+    }
 
 let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
     match role with
@@ -96,23 +113,33 @@ let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : Re
         | :? PermissionsEntityException as e ->
             raisefWithInner EntityDeniedException e ""
 
-let private countAndThrow (connection : QueryConnection) (tableRef : SQL.TableRef) (whereExpr : SQL.ValueExpr) (arguments : QueryArguments) (argumentValues : ArgumentValuesMap) (cancellationToken : CancellationToken) =
+let private countAndThrow
+        (connection : QueryConnection)
+        (applyRole : ResolvedRole option)
+        (tableRef : SQL.TableRef)
+        (whereExpr : SQL.ValueExpr)
+        (arguments : QueryArguments)
+        (argumentValues : ArgumentValuesMap)
+        (cancellationToken : CancellationToken) =
     unitTask {
-        let testExpr =
-            { SQL.emptySingleSelectExpr with
-                  Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
-                  From = Some <| SQL.FTable (SQL.fromTable tableRef)
-                  Where = Some whereExpr
-            }
-        let testQuery =
-            { Expression = SQL.SSelect testExpr
-              Arguments = arguments
-            }
-        let! count = runIntQuery connection testQuery None argumentValues cancellationToken
-        if count > 0 then
-            raisef EntityDeniedException "Access denied"
-        else
+        if Option.isNone applyRole then
             raisef EntityNotFoundException "Entry not found"
+        else
+            let testExpr =
+                { SQL.emptySingleSelectExpr with
+                    Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
+                    From = Some <| SQL.FTable (SQL.fromTable tableRef)
+                    Where = Some whereExpr
+                }
+            let testQuery =
+                { Expression = SQL.SSelect testExpr
+                  Arguments = arguments
+                }
+            let! count = runIntQuery connection testQuery None argumentValues cancellationToken
+            if count > 0 then
+                raisef EntityDeniedException "Access denied"
+            else
+                raisef EntityNotFoundException "Entry not found"
     }
 
 let private realEntityAnnotation (entityRef : ResolvedEntityRef) : RealEntityAnnotation =
@@ -223,7 +250,7 @@ let updateEntity
         (layout : Layout)
         (applyRole : ResolvedRole option)
         (entityRef : ResolvedEntityRef)
-        (id : EntityId)
+        (id : RowId)
         (comments : string option)
         (updateArgs : LocalArgumentsMap)
         (cancellationToken : CancellationToken) : Task =
@@ -290,7 +317,8 @@ let updateEntity
 
         let! affected = runNonQuery connection query comments argumentValues cancellationToken
         if affected = 0 then
-            do! countAndThrow connection tableRef whereExpr initialArguments initialArgumentValues cancellationToken
+            // Notice we don't pass `Where` with applied role -- our aim here is to check if the row exists at all.
+            do! countAndThrow connection applyRole tableRef whereExpr initialArguments initialArgumentValues cancellationToken
     }
 
 let deleteEntity
@@ -299,7 +327,7 @@ let deleteEntity
         (layout : Layout)
         (applyRole : ResolvedRole option)
         (entityRef : ResolvedEntityRef)
-        (id : EntityId)
+        (id : RowId)
         (comments : string option)
         (cancellationToken : CancellationToken) : Task =
     unitTask {
@@ -315,7 +343,8 @@ let deleteEntity
         let whereExpr = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
         let whereExpr =
             if hasSubType entity then
-                let subEntityCheck = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
+                let subEntityCheck =
+                    SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
                 SQL.VEAnd (subEntityCheck, whereExpr)
             else
                 whereExpr
@@ -355,5 +384,252 @@ let deleteEntity
 
         let! affected = runNonQuery connection query comments argumentValues cancellationToken
         if affected = 0 then
-            do! countAndThrow connection tableRef whereExpr initialArguments initialArgumentValues cancellationToken
+            do! countAndThrow connection applyRole tableRef whereExpr initialArguments initialArgumentValues cancellationToken
+    }
+
+let private getSubEntity
+        (connection : QueryConnection)
+        (globalArgs : LocalArgumentsMap)
+        (layout : Layout)
+        (applyRole : ResolvedRole option)
+        (entityRef : ResolvedEntityRef)
+        (id : RowId)
+        (comments : string option)
+        (cancellationToken : CancellationToken) : Task<ResolvedEntityRef> =
+    task {
+        let possibleTypes = allPossibleEntitiesList layout entityRef |> Seq.toArray
+        match possibleTypes with
+        | [||] -> return raisef EntityNotFoundException "Entry not found"
+        | [|(realRef, bits)|] -> return realRef
+        | _ ->
+            let entity = layout.FindEntity entityRef |> Option.get
+
+            let (idArg, initialArguments) = addArgument (PLocal funId) funIdArg emptyArguments
+            let initialArgumentValues = Map.singleton (PLocal funId) (FInt id)
+            let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) initialArgumentValues
+
+            let fromExpr = FEntity (fromEntity <| relaxEntityRef entityRef)
+            let entityId = resolvedRefFieldExpr <| VRColumn { Entity = Some (relaxEntityRef entityRef); Name = funId } : ResolvedFieldExpr
+            let argId = resolvedRefFieldExpr <| VRPlaceholder (PLocal funId)
+            let whereExpr = FEBinaryOp (entityId, BOEq, argId)
+            let entitySubEntity = resolvedRefFieldExpr <| VRColumn { Entity = Some (relaxEntityRef entityRef); Name = funSubEntity } : ResolvedFieldExpr
+            let result = queryColumnResult entitySubEntity
+            let single =
+                { emptySingleSelectExpr with
+                    Results = [| QRExpr result |]
+                    From = Some fromExpr
+                    Where = Some whereExpr
+                }
+            let select = selectExpr (SSelect single)
+            let (exprInfo, compiled) = compileSelectExpr layout initialArguments select
+
+            let query =
+                { Expression = compiled
+                  Arguments = initialArguments
+                }
+
+            let query =
+                match applyRole with
+                | None -> query
+                | Some role ->
+                    let usedFields = seq { ({ Entity = entity.Root; Name = funSubEntity }, usedFieldSelect) }
+                    let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntitySelect usedFields
+                    let appliedDb =
+                        try
+                            applyPermissions layout role usedDatabase
+                        with
+                        | :? PermissionsApplyException as e ->
+                            raisefWithInner EntityDeniedException e ""
+                    applyRoleSelectExpr layout appliedDb query
+
+            match! runOptionalStringQuery connection query comments argumentValues cancellationToken with
+            | None ->
+                let whereExpr = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
+                let tableRef = compileResolvedEntityRef entity.Root
+                do! countAndThrow connection applyRole tableRef whereExpr initialArguments initialArgumentValues cancellationToken
+                return failwith "Impossible"
+            | Some rawSubEntity -> return parseTypeName entity.Root rawSubEntity
+    }
+
+let private funRelatedId = FunQLName "related_id"
+
+let private getRelatedRowIds
+        (connection : QueryConnection)
+        (globalArgs : LocalArgumentsMap)
+        (layout : Layout)
+        (applyRole : ResolvedRole option)
+        (fieldRef : ResolvedFieldRef)
+        (relatedId : RowId)
+        (comments : string option)
+        (cancellationToken : CancellationToken) : Task<(ResolvedEntityRef * int)[]> =
+    task {
+        let entity = layout.FindEntity fieldRef.Entity |> Option.get
+        let possibleTypes = allPossibleEntitiesList layout fieldRef.Entity |> Seq.toArray
+        let singleSubEntity =
+            match possibleTypes with
+            | [||] -> raisef EntityNotFoundException "Entry not found"
+            | [|(realRef, bits)|] -> Some realRef
+            | _ -> None
+
+        let (idArg, initialArguments) = addArgument (PLocal funRelatedId) funIdArg emptyArguments
+        let initialArgumentValues = Map.singleton (PLocal funRelatedId) (FInt relatedId)
+        let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) initialArgumentValues
+
+        let fromExpr = FEntity (fromEntity <| relaxEntityRef fieldRef.Entity)
+        let entityRelatedField = resolvedRefFieldExpr <| VRColumn (relaxFieldRef fieldRef)
+        let argField = resolvedRefFieldExpr <| VRPlaceholder (PLocal funRelatedId)
+        let whereExpr = FEBinaryOp (entityRelatedField, BOEq, argField)
+        let entityId = resolvedRefFieldExpr <| VRColumn { Entity = Some (relaxEntityRef fieldRef.Entity); Name = funId } : ResolvedFieldExpr
+        let resultId = queryColumnResult entityId
+
+        let results =
+            if Option.isSome singleSubEntity then
+                [| QRExpr resultId |]
+            else
+                let entitySubEntity = resolvedRefFieldExpr <| VRColumn { Entity = Some (relaxEntityRef fieldRef.Entity); Name = funSubEntity } : ResolvedFieldExpr
+                let resultSubEntity = queryColumnResult entitySubEntity
+                [| QRExpr resultId; QRExpr resultSubEntity |]
+
+        let single =
+            { emptySingleSelectExpr with
+                Results = results
+                From = Some fromExpr
+                Where = Some whereExpr
+            }
+        let select = selectExpr (SSelect single)
+        let (exprInfo, compiled) = compileSelectExpr layout initialArguments select
+
+        let query =
+            { Expression = compiled
+              Arguments = initialArguments
+            }
+
+        let query =
+            match applyRole with
+            | None -> query
+            | Some role ->
+                let usedFields = seq {
+                    (fieldRef, usedFieldSelect)
+                    ({ Entity = entity.Root; Name = funId }, usedFieldSelect)
+                }
+                let usedFields =
+                    if Option.isSome singleSubEntity then
+                        Seq.append usedFields (Seq.singleton ({ Entity = entity.Root; Name = funSubEntity }, usedFieldSelect))
+                    else
+                        usedFields
+                let usedDatabase = singleKnownFlatEntity entity.Root fieldRef.Entity usedEntitySelect usedFields
+                let appliedDb =
+                    try
+                        applyPermissions layout role usedDatabase
+                    with
+                    | :? PermissionsApplyException as e ->
+                        raisefWithInner EntityDeniedException e ""
+                applyRoleSelectExpr layout appliedDb query
+
+        let processOne =
+            match singleSubEntity with
+            | None -> function
+                | [|subEntityValue; value|] ->
+                    let rawSubEntity = parseStringValue subEntityValue
+                    let subEntity = parseTypeName entity.Root rawSubEntity
+                    (subEntity, parseIntValue value)
+                | _ -> failwith "Impossible"
+            | Some subEntity -> function
+                | [|value|] -> (subEntity, parseIntValue value)
+                | _ -> failwith "Impossible"
+
+        let execute query args cancellationToken = connection.ExecuteQuery query args cancellationToken <| fun columns rows -> task { return! rows.Select(processOne).ToArrayAsync() }
+        return! runQuery execute query comments argumentValues cancellationToken
+    }
+
+type private ProcessedMap = Map<ResolvedEntityRef * RowId, int>
+
+type ReferencesRowIndex = int
+
+type ReferencesChild =
+    { Field : FieldName
+      Row : ReferencesRowIndex
+    }
+
+and ReferencesNode =
+    { Entity : ResolvedEntityRef
+      Id : RowId
+      References : ReferencesChild[]
+    }
+
+type ReferencesTree =
+    { Nodes : ReferencesNode[]
+      Root : ReferencesRowIndex
+    }
+
+let iterReferencesUpwardsTask (f : ResolvedEntityRef -> RowId -> Task) (tree : ReferencesTree) : Task =
+    let mutable visited = Set.empty
+    let rec go i =
+        unitTask {
+            visited <- Set.add i visited
+            let node = tree.Nodes.[i]
+            for child in node.References do
+                if not <| Set.contains child.Row visited then
+                    do! go child.Row
+            do! f node.Entity node.Id
+        }
+    go tree.Root
+
+let getRelatedEntities
+        (connection : QueryConnection)
+        (globalArgs : LocalArgumentsMap)
+        (layout : Layout)
+        (applyRole : ResolvedRole option)
+        (entityRef : ResolvedEntityRef)
+        (id : RowId)
+        (comments : string option)
+        (cancellationToken : CancellationToken) : Task<ReferencesTree> =
+    task {
+        let mutable processed = Map.empty
+        let mutable nodes = Map.empty
+        let mutable lastId = 0
+
+        let rec findOne (id : RowId) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : Task<int> =
+            task {
+                let idx = lastId
+                processed <- Map.add (entity.Root, id) idx processed
+                lastId <- lastId + 1
+                let! referenceLists = Seq.mapTask (findRelated id) entity.ReferencingFields
+                let node =
+                    { Entity = entityRef
+                      Id = id
+                      References =  referenceLists |> Seq.concat |> Seq.toArray
+                    }
+                nodes <- Map.add idx node nodes
+                return idx
+            }
+
+        and findRelated (relatedId : RowId) (refFieldRef : ResolvedFieldRef) : Task<ReferencesChild seq> =
+            task {
+                let! related = getRelatedRowIds connection globalArgs layout applyRole refFieldRef relatedId comments cancellationToken
+                let go (subEntityRef, id) =
+                    task {
+                        let entity = layout.FindEntity subEntityRef |> Option.get
+                        let! idx =
+                            task {
+                                match Map.tryFind (entity.Root, id) processed with
+                                | Some idx -> return idx
+                                | None -> return! findOne id subEntityRef entity
+                            }
+                        return
+                            { Field = refFieldRef.Name
+                              Row = idx
+                            }
+                    }
+                return! Seq.mapTask go related
+            }
+
+        let! subEntityRef = getSubEntity connection globalArgs layout applyRole entityRef id comments cancellationToken
+        let subEntity = layout.FindEntity subEntityRef |> Option.get
+        let! root = findOne id subEntityRef subEntity
+        let nodes = seq {0..lastId - 1} |> Seq.map (fun idx -> nodes.[idx]) |> Seq.toArray
+        return
+            { Nodes = nodes
+              Root = root
+            }
     }

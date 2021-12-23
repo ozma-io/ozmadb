@@ -114,7 +114,7 @@ let private getColumn : (ColumnType * SQL.ColumnName) -> FunQLName option = func
     | (CTColumn c, _) -> Some c
     | _ -> None
 
-let private getPureAttributes (compiled : CompiledViewExpr) (res : ExecutedViewExpr) : PureAttributes =
+let private getPureAttributes (compiled : CompiledViewExpr) (res : ExecutingViewExpr) : PureAttributes =
     let getPureAttr = function
     | (CTMeta (CMRowAttribute attrName), name, attr) -> Some attrName
     | _ -> None
@@ -167,7 +167,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         | None -> true
         | Some b -> b = allowBroken
 
-    let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) (results : ExecutedViewExpr) : UserViewInfo =
+    let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) (results : ExecutingViewExpr) : UserViewInfo =
         let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.Entity |> Option.get, main)) viewExpr.MainEntity
         let getResultColumn name (column : ExecutedColumnInfo) : UserViewColumn =
             let mainField =

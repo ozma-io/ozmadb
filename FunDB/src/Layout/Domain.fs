@@ -112,12 +112,8 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                           FromEntityId = fieldInfo.FromEntityId
                           ForceSQLName = None
                         } : FieldMeta
-                    let linkedRef =
-                        { Ref = VRColumn { Entity = Some referencedEntityRef; Name = funId }
-                          Path = [||]
-                          AsRoot = false
-                        } : LinkedFieldRef
-                    { Ref = linkedRef; Extra = ObjectMap.add newFieldInfo extra }
+                    let lref = linkedRef <| VRColumn { Entity = Some referencedEntityRef; Name = funId } : LinkedFieldRef
+                    { Ref = lref; Extra = ObjectMap.add newFieldInfo extra }
                 else
                     let firstArrow = path.[0]
                     let firstEntityRef = boundInfo.Path.[0]
@@ -131,19 +127,15 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                           FromEntityId = fieldInfo.FromEntityId
                           ForceSQLName = None
                         } : FieldMeta
-                    let linkedRef =
+                    let lref =
                         { Ref = VRColumn { Entity = Some referencedEntityRef; Name = firstArrow.Name }
                           Path = Array.skip 1 path
                           AsRoot = false
                         } : LinkedFieldRef
-                    { Ref = linkedRef; Extra = ObjectMap.add newFieldInfo extra }
+                    { Ref = lref; Extra = ObjectMap.add newFieldInfo extra }
             else
-                let linkedRef =
-                    { Ref = VRColumn { Entity = Some rowEntityRef; Name = fieldName }
-                      Path = path
-                      AsRoot = false
-                    } : LinkedFieldRef
-                { Ref = linkedRef; Extra = extra }
+                let lref = linkedRef <| VRColumn { Entity = Some rowEntityRef; Name = fieldName } : LinkedFieldRef
+                { Ref = lref; Extra = extra }
         | ref -> failwithf "Impossible reference: %O" ref
     mapFieldExpr (onlyFieldExprMapper convertRef) expr
 
@@ -163,19 +155,13 @@ let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : 
               OrderBy = [| mainSortColumn |]
         }
     let single =
-        { Attributes = Map.empty
-          Results = [| makeResultColumn (Some domainValueName) idExpr; makeResultColumn (Some domainPunName) mainExpr |]
-          From = Some from
-          Where = where
-          GroupBy = [||]
-          OrderLimit = orderByMain
-          Extra = ObjectMap.empty
+        { emptySingleSelectExpr with
+            Results = [| makeResultColumn (Some domainValueName) idExpr; makeResultColumn (Some domainPunName) mainExpr |]
+            From = Some from
+            Where = where
+            OrderLimit = orderByMain
         }
-    let select =
-        { CTEs = None
-          Tree = SSelect single
-          Extra = ObjectMap.empty
-        }
+    let select = selectExpr (SSelect single)
     let (info, expr) =
         try
             compileSelectExpr layout arguments select
@@ -220,18 +206,8 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
     let placeholder = PLocal funId
     let (argId, arguments) = addArgument placeholder argumentInfo emptyArguments
 
-    let linkedId =
-        { Ref = VRColumn { Entity = Some rowEntityRef; Name = funId }
-          Path = [||]
-          AsRoot = false
-        } : LinkedFieldRef
-    let idCol : ResolvedFieldExpr = FERef { Ref = linkedId; Extra = ObjectMap.empty }
-    let linkedPlaceholder =
-        { Ref = VRPlaceholder placeholder
-          Path = [||]
-          AsRoot = false
-        } : LinkedFieldRef
-    let argRef : ResolvedFieldExpr = FERef { Ref = linkedPlaceholder; Extra = ObjectMap.empty }
+    let idCol = resolvedRefFieldExpr <| VRColumn { Entity = Some rowEntityRef; Name = funId } : ResolvedFieldExpr
+    let argRef = resolvedRefFieldExpr <| VRPlaceholder placeholder
     let where = FEBinaryOp (idCol, BOEq, argRef)
     let where = Option.addWith (curry FEAnd) where extraWhere
     compileReferenceOptionsSelectFrom layout refEntityRef arguments (FJoin join) (Some where)

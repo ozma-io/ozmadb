@@ -186,17 +186,21 @@ type UserViewsAPI (api : IFunDBAPI) =
                     let extraArgValues = Map.mapKeys PLocal extraLocalArgs
                     let compiled = { compiled with Query = query }
                     let arguments = convertQueryArguments rctx.GlobalArguments extraArgValues rawArgs compiled.Query.Arguments
-                    let getResult info (res : ExecutedViewExpr) =
-                        let res =
-                            { res with
+
+                    let getResult info (res : ExecutingViewExpr) =
+                        task {
+                            let! rows = res.Rows.ToArrayAsync()
+                            return
+                                { ArgumentAttributes = res.ArgumentAttributes
                                   Attributes = Map.union uv.PureAttributes.Attributes res.Attributes
                                   ColumnAttributes = Array.map2 Map.union uv.PureAttributes.ColumnAttributes res.ColumnAttributes
-                                  Rows = Array.ofSeq res.Rows
-                            }
-                        Task.result (uv, { res with Rows = Array.ofSeq res.Rows })
+                                  Rows = rows
+                                }
+                        }
+
                     let comments = userViewComments source rctx.User.Effective.Type arguments chunk
-                    let! (puv, res) = runViewExpr ctx.Transaction.Connection.Query compiled (Some comments) arguments ctx.CancellationToken getResult
-                    return Ok { Info = puv.Info
+                    let! res = runViewExpr ctx.Transaction.Connection.Query compiled (Some comments) arguments ctx.CancellationToken getResult
+                    return Ok { Info = uv.Info
                                 Result = res
                               }
                 with
