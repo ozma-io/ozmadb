@@ -9,7 +9,7 @@ open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.SQL.Query
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
@@ -98,9 +98,6 @@ type EntitiesAPI (api : IFunDBAPI) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<EntitiesAPI>()
     let query = ctx.Transaction.Connection.Query
-    // When this is greater than zero, constraints should remain deferred.
-    // Increased with nested requests for deferring.
-    let mutable deferConstraintsDepth = 0
 
     let runArgsTrigger (run : ITriggerScript -> Task<ArgsTriggerResult>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : LocalArgumentsMap) (trigger : MergedTrigger) : Task<Result<LocalArgumentsMap, BeforeTriggerError>> =
         let ref =
@@ -564,42 +561,19 @@ type EntitiesAPI (api : IFunDBAPI) =
 
     member this.DeferConstraints (func : unit -> Task<'a>) : Task<Result<'a, EntityErrorInfo>> =
         task {
-            if deferConstraintsDepth = 0 then
-                let! _ = query.ExecuteNonQuery "SET CONSTRAINTS ALL DEFERRED" Map.empty ctx.CancellationToken
-                ()
-            deferConstraintsDepth <- deferConstraintsDepth + 1
-            let! ret =
-                task {
-                    try
-                        return! func ()
-                    with
-                    | ex ->
-                        logger.LogError(ex, "Error while having constraints deferred")
-                        deferConstraintsDepth <- deferConstraintsDepth - 1
-                        try
-                            let! _ = query.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty ctx.CancellationToken
-                            ()
-                        with
-                        | ex  -> logger.LogError(ex, "Error while setting constraints immediate when throwing")
-                        return reraise' ex
-                }
-            deferConstraintsDepth <- deferConstraintsDepth - 1
-            if deferConstraintsDepth = 0 then
-                try
-                    let! _ = query.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty ctx.CancellationToken
-                    return Ok ret
-                with
-                | :? QueryException as ex ->
-                    logger.LogError(ex, "Deferred error")
-                    let str = exceptionString ex
-                    rctx.WriteEvent (fun event ->
-                        event.Type <- "deferConstraints"
-                        event.Error <- "execution"
-                        event.Details <- str
-                    )
-                    return Error (EEExecution str)
-            else
+            try
+                let! ret = ctx.Transaction.DeferConstraints ctx.CancellationToken func
                 return Ok ret
+            with
+            | :? DeferredConstraintsException as ex ->
+                logger.LogError(ex, "Deferred error")
+                let str = exceptionString ex
+                rctx.WriteEvent (fun event ->
+                    event.Type <- "deferConstraints"
+                    event.Error <- "execution"
+                    event.Details <- str
+                )
+                return Error (EEExecution str)
         }
 
     interface IEntitiesAPI with
@@ -611,5 +585,4 @@ type EntitiesAPI (api : IFunDBAPI) =
         member this.RecursiveDeleteEntity entityRef id = this.RecursiveDeleteEntity entityRef id
         member this.RunCommand rawCommand rawArgs = this.RunCommand rawCommand rawArgs
         member this.RunTransaction transaction = this.RunTransaction transaction
-        member this.ConstraintsDeferred = deferConstraintsDepth > 0
         member this.DeferConstraints func = this.DeferConstraints func

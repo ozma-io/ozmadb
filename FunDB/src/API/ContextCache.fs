@@ -277,7 +277,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let jsApi = jsRuntime.GetValue isolate
                         let (brokenViews, sourceViews) = generateViews jsApi layout sourceViews cancellationToken true
                         let! userViewsUpdate = updateUserViews transaction.System sourceViews cancellationToken
-                        do! deleteDeferredFromUpdate layout transaction.Connection.Query userViewsUpdate cancellationToken
+                        do! deleteDeferredFromUpdate layout transaction userViewsUpdate cancellationToken
 
                         let (newBrokenViews, userViews) = resolveUserViews layout mergedAttrs true sourceViews
                         let brokenViews = unionErroredUserViews brokenViews newBrokenViews
@@ -697,7 +697,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 with
                                 | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
                             let! userViewsUpdate = updateUserViews transaction.System generatedUserViews cancellationToken
-                            do! deleteDeferredFromUpdate layout transaction.Connection.Query userViewsUpdate cancellationToken
+                            do! deleteDeferredFromUpdate layout transaction userViewsUpdate cancellationToken
                             let sourceUserViews = { Schemas = Map.union sourceUserViews.Schemas generatedUserViews.Schemas } : SourceUserViews
 
                             let (_, userViews) =

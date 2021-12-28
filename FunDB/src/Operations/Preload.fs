@@ -497,7 +497,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                 triggersUpdate
                 modulesUpdate
             } |> Seq.fold1 unionUpdateResult
-        do! deleteDeferredFromUpdate layout conn.Connection.Query fullUpdate cancellationToken
+        do! deleteDeferredFromUpdate layout conn fullUpdate cancellationToken
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
         let userLayout = filterLayout (fun name -> not <| Map.containsKey name preloadLayout.Schemas) layout

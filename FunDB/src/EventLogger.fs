@@ -10,7 +10,6 @@ open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.Affine
 
-open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Connection
 

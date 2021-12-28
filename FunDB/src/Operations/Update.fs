@@ -75,7 +75,7 @@ let getSystemEntityRef (typ : Type) =
     | (true, ref) -> Some ref
     | (false, _) -> None
 
-let private cascadeDeleteDeferred (filterEntities : ResolvedEntityRef -> bool) (layout : Layout) (connection : QueryConnection) (deferredSet : DeferredDeleteSet) (cancellationToken : CancellationToken) =
+let private cascadeDeleteDeferred (filterEntities : ResolvedEntityRef -> bool) (layout : Layout) (connection : DatabaseTransaction) (deferredSet : DeferredDeleteSet) (cancellationToken : CancellationToken) =
     unitTask {
         let rec go (deferredSet : DeferredDeleteSet) =
             unitTask {
@@ -83,20 +83,17 @@ let private cascadeDeleteDeferred (filterEntities : ResolvedEntityRef -> bool) (
 
                 let deleteOne (entityRef : ResolvedEntityRef) (id : RowId) =
                     deferredSet <- Set.remove (entityRef, id) deferredSet
-                    deleteEntity connection Map.empty layout None entityRef id None cancellationToken
+                    deleteEntity connection.Connection.Query Map.empty layout None entityRef id None cancellationToken
 
                 let (entityRef, id) = deferredSet |> Seq.first |> Option.get
-                let! tree = getRelatedEntities connection Map.empty layout None (fun entityRef rowId refFieldRef -> filterEntities refFieldRef.Entity) entityRef id None cancellationToken
+                let! tree = getRelatedEntities connection.Connection.Query Map.empty layout None (fun entityRef rowId refFieldRef -> filterEntities refFieldRef.Entity) entityRef id None cancellationToken
                 do! iterReferencesUpwardsTask deleteOne tree
                 if not <| Set.isEmpty deferredSet then
                     do! go deferredSet
             }
 
         if not <| Set.isEmpty deferredSet then
-            let! _ = connection.ExecuteNonQuery "SET CONSTRAINTS ALL DEFERRED" Map.empty cancellationToken
-            do! go deferredSet
-            let! _ = connection.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty cancellationToken
-            ()
+            do! connection.DeferConstraints cancellationToken <| fun () -> task { do! go deferredSet }
     }
 
 type SystemUpdater(db : SystemContext) =
@@ -134,7 +131,7 @@ let unionUpdateResult (a : UpdateResult) (b : UpdateResult) =
       Changed = a.Changed || b.Changed
     }
 
-let deleteDeferredFromUpdate (layout : Layout) (connection : QueryConnection) (result : UpdateResult) (cancellationToken : CancellationToken) =
+let deleteDeferredFromUpdate (layout : Layout) (connection : DatabaseTransaction) (result : UpdateResult) (cancellationToken : CancellationToken) =
     cascadeDeleteDeferred (fun entityRef -> entityRef.Schema <> funSchema) layout connection result.DeferredDeletes cancellationToken
 
 let private schemaEntityRef : ResolvedEntityRef = { Schema = funSchema; Name = FunQLName "schemas" }
@@ -148,7 +145,7 @@ let deleteSchemas (layout : Layout) (connection : DatabaseTransaction) (schemas 
                 .Select(fun schema -> schema.Id)
                 .ToListAsync()
         let deletes = schemaIds |> Seq.map (fun id -> (schemaEntityRef, id)) |> Set.ofSeq
-        do! cascadeDeleteDeferred (fun _ -> true) layout connection.Connection.Query deletes cancellationToken
+        do! cascadeDeleteDeferred (fun _ -> true) layout connection deletes cancellationToken
     }
 
 // We first load existing rows and update/create new ones, then delay the second stage when we remove old rows.

@@ -280,7 +280,6 @@ type TransactionResult =
     abstract member RecursiveDeleteEntity : ResolvedEntityRef -> int -> Task<Result<ReferencesTree, EntityErrorInfo>>
     abstract member RunCommand : string -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member RunTransaction : Transaction -> Task<Result<TransactionResult, TransactionError>>
-    abstract member ConstraintsDeferred : bool
     abstract member DeferConstraints : (unit -> Task<'a>) -> Task<Result<'a, EntityErrorInfo>>
 
 [<SerializeAsObject("error")>]

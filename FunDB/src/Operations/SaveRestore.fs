@@ -247,7 +247,7 @@ let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Ma
                 triggersUpdate
                 modulesUpdate
             } |> Seq.fold1 unionUpdateResult
-        do! deleteDeferredFromUpdate oldLayout conn.Connection.Query fullUpdate cancellationToken
+        do! deleteDeferredFromUpdate oldLayout conn fullUpdate cancellationToken
 
         return not <| updateResultIsEmpty fullUpdate
     }

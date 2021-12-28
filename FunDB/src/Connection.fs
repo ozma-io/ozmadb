@@ -11,7 +11,16 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.SQL.Query
+
+type DeferredConstraintsException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        DeferredConstraintsException (message, innerException, isUserException innerException)
+
+    new (message : string) = DeferredConstraintsException (message, null, true)
 
 type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
@@ -58,6 +67,7 @@ let serializedSaveChangesAsync (db : DbContext) (cancellationToken : Cancellatio
 
 type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationLevel) =
     let transaction = conn.Connection.BeginTransaction(isolationLevel)
+    let logger = conn.LoggerFactory.CreateLogger<DatabaseTransaction>()
 
     let system =
         let systemOptions =
@@ -72,6 +82,17 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
         system.ChangeTracker.QueryTrackingBehavior <- QueryTrackingBehavior.NoTracking
         ignore <| system.Database.UseTransaction(transaction)
 
+    let mutable constraintsDeferred = false
+
+    let setConstraintsImmediate (cancellationToken : CancellationToken) =
+        unitTask {
+            try
+                let! _ = conn.Query.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty cancellationToken
+                constraintsDeferred <- false
+            with
+            | :? QueryException as ex -> raisefUserWithInner DeferredConstraintsException ex ""
+        }
+
     new (conn : DatabaseConnection) =
         // FIXME: Maybe introduce more granular locking?
         new DatabaseTransaction(conn, IsolationLevel.Serializable)
@@ -83,15 +104,38 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
         }
 
     // Consumers should use this method instead of `System.SaveChangesAsync` to properly handle serialization errors.
-    member this.SystemSaveChangesAsync (cancellationToken : CancellationToken) =
+    member this.SystemSaveChangesAsync (cancellationToken : CancellationToken) : Task<bool> =
         serializedSaveChangesAsync system cancellationToken
 
-    member this.Commit (cancellationToken : CancellationToken) =
+    member this.Commit (cancellationToken : CancellationToken) : Task<int> =
         tryEFUpdateQuery <| fun () -> task {
             let! changed = system.SaveChangesAsync (cancellationToken)
             do! transaction.CommitAsync (cancellationToken)
             do! this.Rollback ()
             return changed
+        }
+
+    member this.DeferConstraints (cancellationToken : CancellationToken) (f : unit -> Task<'a>) : Task<'a> =
+        task {
+            let prevState = constraintsDeferred
+            if not prevState then
+                let! _ = conn.Query.ExecuteNonQuery "SET CONSTRAINTS ALL DEFERRED" Map.empty cancellationToken
+                constraintsDeferred <- true
+            let! ret =
+                task {
+                    try
+                        return! f ()
+                    with
+                    | e when not prevState ->
+                        try
+                            do! setConstraintsImmediate cancellationToken
+                        with
+                        | ce -> logger.LogError(ce, "Error when setting constraints immediate during handling of another exception")
+                        return reraise' e
+                }
+            if not prevState then
+                do! setConstraintsImmediate cancellationToken
+            return ret
         }
 
     interface IDisposable with
@@ -105,6 +149,7 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
     member this.System = system
     member this.Transaction = transaction
     member this.Connection = conn
+    member this.ConstraintsDeferred = constraintsDeferred
 
 // Create a connection and run the first request to the database for a given transaction, expecting it to maybe fail because of stale connections.
 // If failed, we retry.
