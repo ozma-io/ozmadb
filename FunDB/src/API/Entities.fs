@@ -259,7 +259,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 | Error e -> return Error { Details = e; Operation = i }
                                 | Ok () -> return Ok (Some newId)
                         }
-                    
+
                     let convertOne (i, rowArgs) =
                         try
                             Ok <| convertEntityArguments entity rowArgs
@@ -424,7 +424,7 @@ type EntitiesAPI (api : IFunDBAPI) =
             | Some entity ->
                 try
                     let comments = getRelatedEntitiesComments entityRef rctx.User.Effective.Type id
-                    let! ret = getRelatedEntities query rctx.GlobalArguments ctx.Layout (getReadRole rctx.User.Effective.Type) entityRef id (Some comments) ctx.CancellationToken
+                    let! ret = getRelatedEntities query rctx.GlobalArguments ctx.Layout (getReadRole rctx.User.Effective.Type) (fun _ _ _ -> true) entityRef id (Some comments) ctx.CancellationToken
                     return Ok ret
                 with
                     | :? EntityExecutionException as ex when ex.IsUserException ->
@@ -505,7 +505,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     | Error e -> return Error { e with Operation = pending.StartIndex + e.Operation }
                     | Ok ids -> return ids |> Seq.map TRInsertEntity |> Ok
                 }
-            
+
             let inline checkPendingInsert () =
                 task {
                     match pendingInsert with

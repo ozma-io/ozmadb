@@ -7,7 +7,7 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Modules.Source
 open FunWithFlags.FunDBSchema.System
@@ -40,7 +40,7 @@ type private ModulesUpdater (db : SystemContext) as this =
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
-let updateModules (db : SystemContext) (modules : SourceModules) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
+let updateModules (db : SystemContext) (modules : SourceModules) (cancellationToken : CancellationToken) : Task<UpdateResult> =
     genericSystemUpdate db cancellationToken <| fun () ->
         task {
             let currentSchemas = db.GetModulesObjects ()

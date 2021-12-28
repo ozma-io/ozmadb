@@ -22,8 +22,12 @@ let private checkName (FunQLName name) : unit =
 
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let resolveTrigger (entity : ResolvedEntity) (trigger : SourceTrigger) : ResolvedTrigger =
-        if entity.ForbidTriggers then
-            raisef ResolveTriggersException "Triggers are disabled for this entity"
+        if entity.InsertedInternally && trigger.OnInsert then
+            raisef ResolveTriggersException "INSERT triggers are disabled for this entity"
+        if entity.UpdatedInternally && not (Array.isEmpty trigger.OnUpdateFields) then
+            raisef ResolveTriggersException "UPDATE triggers are disabled for this entity"
+        if entity.DeletedInternally && trigger.OnDelete then
+            raisef ResolveTriggersException "DELETE triggers are disabled for this entity"
 
         let updateFields =
             match trigger.OnUpdateFields with

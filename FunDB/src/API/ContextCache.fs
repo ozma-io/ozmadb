@@ -54,6 +54,7 @@ open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.UserViews.Generate
 open FunWithFlags.FunDB.Layout.Domain
 open FunWithFlags.FunDB.Layout.Integrity
+open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
@@ -258,41 +259,42 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
         let isolate = jsIsolates.Get()
         try
-            let! (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews) = task {
-                try
-                    let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
-                    let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
-                    let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+            let! (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews) =
+                task {
+                    try
+                        let! sourceAttrs = buildSchemaAttributes transaction.System cancellationToken
+                        let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
+                        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
-                    let systemViews = preloadUserViews preload
-                    let! sourceViews = buildSchemaUserViews transaction.System cancellationToken
-                    let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
+                        let systemViews = preloadUserViews preload
+                        let! sourceViews = buildSchemaUserViews transaction.System cancellationToken
+                        let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
 
-                    let! sourceModules = buildSchemaModules transaction.System cancellationToken
-                    let modules = resolveModules layout sourceModules
+                        let! sourceModules = buildSchemaModules transaction.System cancellationToken
+                        let modules = resolveModules layout sourceModules
 
-                    let jsRuntime = makeRuntime (moduleFiles modules)
-                    let jsApi = jsRuntime.GetValue isolate
-                    let (brokenViews, sourceViews) = generateViews jsApi layout sourceViews cancellationToken true
-                    let! userViewsUpdater = updateUserViews transaction.System sourceViews cancellationToken
-                    let! isChanged2 = userViewsUpdater ()
+                        let jsRuntime = makeRuntime (moduleFiles modules)
+                        let jsApi = jsRuntime.GetValue isolate
+                        let (brokenViews, sourceViews) = generateViews jsApi layout sourceViews cancellationToken true
+                        let! userViewsUpdate = updateUserViews transaction.System sourceViews cancellationToken
+                        do! deleteDeferredFromUpdate layout transaction.Connection.Query userViewsUpdate cancellationToken
 
-                    let (newBrokenViews, userViews) = resolveUserViews layout mergedAttrs true sourceViews
-                    let brokenViews = unionErroredUserViews brokenViews newBrokenViews
+                        let (newBrokenViews, userViews) = resolveUserViews layout mergedAttrs true sourceViews
+                        let brokenViews = unionErroredUserViews brokenViews newBrokenViews
 
-                    let! currentVersion = ensureCurrentVersion transaction (isChanged || isChanged2) cancellationToken
+                        let! currentVersion = ensureCurrentVersion transaction (isChanged || not (updateResultIsEmpty userViewsUpdate)) cancellationToken
 
-                    // To dry-run user views we need to stop the transaction.
-                    let! _ = transaction.Commit (cancellationToken)
-                    let! (newBrokenViews, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
-                    let brokenViews = unionErroredUserViews brokenViews newBrokenViews
-                    let transaction = new DatabaseTransaction (transaction.Connection)
-                    return (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews)
-                with
-                | ex ->
-                    do! transaction.Rollback ()
-                    return reraise' ex
-            }
+                        // To dry-run user views we need to stop the transaction.
+                        let! _ = transaction.Commit (cancellationToken)
+                        let! (newBrokenViews, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
+                        let brokenViews = unionErroredUserViews brokenViews newBrokenViews
+                        let transaction = new DatabaseTransaction (transaction.Connection)
+                        return (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews)
+                    with
+                    | ex ->
+                        do! transaction.Rollback ()
+                        return reraise' ex
+                }
             let! currentVersion2 =
                 task {
                     try
@@ -694,8 +696,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                     generateViews jsApi layout sourceUserViews cancellationToken false
                                 with
                                 | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
-                            let! userViewsUpdater = updateUserViews transaction.System generatedUserViews cancellationToken
-                            let! _ = userViewsUpdater ()
+                            let! userViewsUpdate = updateUserViews transaction.System generatedUserViews cancellationToken
+                            do! deleteDeferredFromUpdate layout transaction.Connection.Query userViewsUpdate cancellationToken
                             let sourceUserViews = { Schemas = Map.union sourceUserViews.Schemas generatedUserViews.Schemas } : SourceUserViews
 
                             let (_, userViews) =
@@ -810,7 +812,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             with
                             | :? DbUpdateException as e -> return raisefUserWithInner ContextException e "Failed to commit"
                     }
-                
+
                 let checkIntegrity () =
                     unitTask {
                         let assertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)

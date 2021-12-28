@@ -16,7 +16,6 @@
   <ItemGroup>
     <Compile Include="src/Exception.fs" />
     <Compile Include="src/Parsing.fs" />
-    <Compile Include="src/Schema.fs" />
 
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/Parsing.fs" />
@@ -68,7 +67,6 @@
     <Compile Include="src/FunQL/Query.fs" />
 
     <Compile Include="src/Layout/Schema.fs" />
-    <Compile Include="src/Layout/Update.fs" />
     <Compile Include="src/Layout/Info.fs" />
     <Compile Include="src/Layout/Resolve.fs" />
     <Compile Include="src/Layout/System.fs" />
@@ -79,13 +77,11 @@
 
     <Compile Include="src/Attributes/Resolve.fs" />
     <Compile Include="src/Attributes/Schema.fs" />
-    <Compile Include="src/Attributes/Update.fs" />
 
     <Compile Include="src/Permissions/Source.fs" />
     <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Resolve.fs" />
     <Compile Include="src/Permissions/Schema.fs" />
-    <Compile Include="src/Permissions/Update.fs" />
     <Compile Include="src/Permissions/Apply.fs" />
     <Compile Include="src/Permissions/Compile.fs" />
     <Compile Include="src/Permissions/View.fs" />
@@ -100,20 +96,17 @@
     <Compile Include="src/Modules/Types.fs" />
     <Compile Include="src/Modules/Resolve.fs" />
     <Compile Include="src/Modules/Schema.fs" />
-    <Compile Include="src/Modules/Update.fs" />
 
     <Compile Include="src/Actions/Source.fs" />
     <Compile Include="src/Actions/Types.fs" />
     <Compile Include="src/Actions/Resolve.fs" />
     <Compile Include="src/Actions/Schema.fs" />
-    <Compile Include="src/Actions/Update.fs" />
     <Compile Include="src/Actions/Run.fs" />
 
     <Compile Include="src/Triggers/Source.fs" />
     <Compile Include="src/Triggers/Types.fs" />
     <Compile Include="src/Triggers/Resolve.fs" />
     <Compile Include="src/Triggers/Schema.fs" />
-    <Compile Include="src/Triggers/Update.fs" />
     <Compile Include="src/Triggers/Merge.fs" />
 
     <Compile Include="src/UserViews/Source.fs" />
@@ -121,13 +114,22 @@
     <Compile Include="src/UserViews/Resolve.fs" />
     <Compile Include="src/UserViews/Schema.fs" />
     <Compile Include="src/UserViews/Generate.fs" />
-    <Compile Include="src/UserViews/Update.fs" />
     <Compile Include="src/UserViews/DryRun.fs" />
 
-    <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/Entity.fs" />
     <Compile Include="src/Operations/Domain.fs" />
     <Compile Include="src/Operations/Command.fs" />
+    <Compile Include="src/Operations/Update.fs" />
+
+    <Compile Include="src/Layout/Update.fs" />
+    <Compile Include="src/Attributes/Update.fs" />
+    <Compile Include="src/Permissions/Update.fs" />
+    <Compile Include="src/Modules/Update.fs" />
+    <Compile Include="src/Actions/Update.fs" />
+    <Compile Include="src/Triggers/Update.fs" />
+    <Compile Include="src/UserViews/Update.fs" />
+
+    <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
 
     <Compile Include="src/API/Types.fs" />

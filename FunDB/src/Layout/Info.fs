@@ -79,7 +79,9 @@ type SerializedEntity =
     { ColumnFields : Map<FieldName, SerializedColumnField>
       ComputedFields : Map<FieldName, SerializedComputedField>
       MainField : FieldName
-      ForbidExternalReferences : bool
+      InsertedInternally : bool
+      UpdatedInternally : bool
+      DeletedInternally : bool
       Parents : ResolvedEntityRef[]
       Children : SerializedChildEntity[]
       IsAbstract : bool
@@ -153,7 +155,9 @@ let serializeEntity (layout : Layout) (entity : ResolvedEntity) : SerializedEnti
     { ColumnFields = Map.map (fun name col -> serializeColumnField col) entity.ColumnFields
       ComputedFields =  Map.mapMaybe (fun name col -> col |> Result.getOption |> Option.map serializeComputedField) entity.ComputedFields
       MainField = entity.MainField
-      ForbidExternalReferences = entity.ForbidExternalReferences
+      InsertedInternally = entity.InsertedInternally
+      UpdatedInternally = entity.UpdatedInternally
+      DeletedInternally = entity.DeletedInternally
       Parents = inheritanceChain layout entity |> Seq.toArray
       IsAbstract = entity.IsAbstract
       IsFrozen = entity.IsFrozen

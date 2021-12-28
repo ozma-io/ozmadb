@@ -52,7 +52,7 @@ let serializeEntityRestricted (layout : Layout) (role : ResolvedRole) (entityRef
                 | None -> false
                 | Some child -> f child
             Map.exists checkOne flattened.Roles
-        
+
         if not (checkRoleFields (fun _ -> true)) then
             None
         else

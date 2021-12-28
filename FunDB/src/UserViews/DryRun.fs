@@ -234,7 +234,7 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
 
             try
                 return! runViewExpr conn limited comment arguments cancellationToken <| fun info res ->
-                    let nonpureCompiled = 
+                    let nonpureCompiled =
                         { uv.Compiled with
                               AttributesQuery = { uv.Compiled.AttributesQuery with PureColumns = [||] }
                         }

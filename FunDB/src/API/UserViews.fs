@@ -141,7 +141,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                             match getReadRole rctx.User.Effective.Type with
                             | None -> uv.UserView.Compiled
                             | Some role ->
-                                let appliedDb = applyPermissions ctx.Layout role uv.UserView.Compiled.UsedDatabase 
+                                let appliedDb = applyPermissions ctx.Layout role uv.UserView.Compiled.UsedDatabase
                                 applyRoleViewExpr ctx.Layout appliedDb uv.UserView.Compiled
                         let resolvedChunk = resolveViewExprChunk ctx.Layout compiled chunk
                         let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
@@ -179,7 +179,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                         match getReadRole rctx.User.Effective.Type with
                         | None -> uv.UserView.Compiled
                         | Some role ->
-                            let appliedDb = applyPermissions ctx.Layout role uv.UserView.Compiled.UsedDatabase 
+                            let appliedDb = applyPermissions ctx.Layout role uv.UserView.Compiled.UsedDatabase
                             applyRoleViewExpr ctx.Layout appliedDb uv.UserView.Compiled
                     let resolvedChunk = resolveViewExprChunk ctx.Layout compiled chunk
                     let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query

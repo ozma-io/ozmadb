@@ -210,8 +210,9 @@ type ResolvedEntity =
       CheckConstraints : Map<ConstraintName, ResolvedCheckConstraint>
       Indexes : Map<IndexName, ResolvedIndex>
       MainField : FieldName
-      ForbidExternalReferences : bool
-      ForbidTriggers : bool
+      InsertedInternally : bool
+      UpdatedInternally : bool
+      DeletedInternally : bool
       TriggersMigration : bool
       IsHidden : bool
       Parent : ResolvedEntityRef option

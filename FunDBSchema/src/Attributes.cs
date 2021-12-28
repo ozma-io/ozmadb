@@ -6,8 +6,9 @@ namespace FunWithFlags.FunDBSchema.Attributes
     public class EntityAttribute : Attribute
     {
         public string MainField { get; }
-        public bool ForbidExternalReferences { get; set; }
-        public bool ForbidTriggers { get; set; }
+        public bool InsertedInternally { get; set; }
+        public bool UpdatedInternally { get; set; }
+        public bool DeletedInternally { get; set; }
         public bool IsHidden { get; set; }
         public bool IsFrozen { get; set; }
         public bool TriggersMigration { get; set; }

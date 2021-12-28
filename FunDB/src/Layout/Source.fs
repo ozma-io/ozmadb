@@ -65,9 +65,12 @@ type SourceEntity =
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       Indexes : Map<IndexName, SourceIndex>
       MainField : FieldName
-      ForbidExternalReferences : bool
       [<JsonIgnore>]
-      ForbidTriggers : bool
+      InsertedInternally : bool
+      [<JsonIgnore>]
+      UpdatedInternally : bool
+      [<JsonIgnore>]
+      DeletedInternally : bool
       [<JsonIgnore>]
       TriggersMigration : bool
       [<JsonIgnore>]

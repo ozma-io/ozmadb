@@ -465,7 +465,7 @@ type [<NoEquality; NoComparison>] LockStrength =
             | LSNoKeyShare -> "NO KEY SHARE"
 
         interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString ()    
+            member this.ToSQLString () = this.ToSQLString ()
 
 type [<NoEquality; NoComparison>] LockWait =
     | LWNoWait
@@ -479,7 +479,7 @@ type [<NoEquality; NoComparison>] LockWait =
             | LWSkipLocked -> "SKIP LOCKED"
 
         interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString ()    
+            member this.ToSQLString () = this.ToSQLString ()
 
 type [<NoEquality; NoComparison>] LockClause =
     { Strength : LockStrength
@@ -497,7 +497,7 @@ type [<NoEquality; NoComparison>] LockClause =
             String.concatWithWhitespaces [this.Strength.ToSQLString(); tableStr; optionToSQLString this.Waiting]
 
         interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString ()    
+            member this.ToSQLString () = this.ToSQLString ()
 
 type [<NoEquality; NoComparison>] OperationTable =
     { Table : TableRef
@@ -514,7 +514,7 @@ type [<NoEquality; NoComparison>] OperationTable =
             String.concatWithWhitespaces [toSQLString this.Table; aliasStr]
 
         interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString () 
+            member this.ToSQLString () = this.ToSQLString ()
 
 type [<NoEquality; NoComparison>] FromTable =
     { Table : TableRef
@@ -527,7 +527,7 @@ type [<NoEquality; NoComparison>] FromTable =
             String.concatWithWhitespaces [toSQLString this.Table; optionToSQLString this.Alias]
 
         interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString () 
+            member this.ToSQLString () = this.ToSQLString ()
 
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
 type [<NoEquality; NoComparison>] ValueExpr =

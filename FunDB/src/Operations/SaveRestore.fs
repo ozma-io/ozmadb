@@ -16,8 +16,10 @@ open FunWithFlags.FunUtils.Parsing
 open FunWithFlags.FunUtils.Serialization.Yaml
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
+open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDB.Permissions.Source
@@ -85,7 +87,6 @@ type PrettyEntity =
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       Indexes : Map<IndexName, SourceIndex>
       MainField : FieldName
-      ForbidExternalReferences : bool
       IsAbstract : bool
       IsFrozen : bool
       Parent : ResolvedEntityRef option
@@ -122,6 +123,8 @@ type PrettyUserViewsGeneratorScriptMeta =
 
 let private emptyPrettyUserViewsGeneratorScriptMeta =
     { AllowBroken = false } : PrettyUserViewsGeneratorScriptMeta
+
+type PrettySchemaMeta = { Dummy : bool }
 
 type SchemaDump =
     { Entities : Map<EntityName, SourceEntity>
@@ -189,7 +192,7 @@ let saveSchema (db : SystemContext) (name : SchemaName) (cancellationToken : Can
             }
     }
 
-let restoreSchemas (db : SystemContext) (dumps : Map<SchemaName, SchemaDump>) (cancellationToken : CancellationToken) : Task<bool> =
+let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Map<SchemaName, SchemaDump>) (cancellationToken : CancellationToken) : Task<bool> =
     task {
         let newLayout = { Schemas = Map.map (fun name dump -> { Entities = dump.Entities }) dumps } : SourceLayout
         let newPerms = { Schemas = Map.map (fun name dump -> { Roles = dump.Roles }) dumps } : SourcePermissions
@@ -203,51 +206,50 @@ let restoreSchemas (db : SystemContext) (dumps : Map<SchemaName, SchemaDump>) (c
         let newActions = { Schemas = Map.map (fun name dump -> { Actions = dump.Actions }) dumps } : SourceActions
         let newTriggers = { Schemas = Map.map (fun name dump -> { Schemas = dump.Triggers }) dumps } : SourceTriggers
 
-        let! _ = db.Database.ExecuteSqlRawAsync("SET CONSTRAINTS ALL DEFERRED")
-
-        let! layoutUpdater = updateLayout db newLayout cancellationToken
-        let! permissionsUpdater =
+        let! layoutUpdate = updateLayout conn.System newLayout cancellationToken
+        let! permissionsUpdate =
             try
-                updatePermissions db newPerms cancellationToken
+                updatePermissions conn.System newPerms cancellationToken
             with
             | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore permissions"
-        let! userViewsUpdater =
+        let! userViewsUpdate =
             try
-                updateUserViews db newUserViews cancellationToken
+                updateUserViews conn.System newUserViews cancellationToken
             with
             | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore user views"
-        let! attributesUpdater =
+        let! attributesUpdate =
             try
-                updateAttributes db newAttributes cancellationToken
+                updateAttributes conn.System newAttributes cancellationToken
             with
             | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore attributes"
-        let! modulesUpdater =
+        let! modulesUpdate =
             try
-                updateModules db newModules cancellationToken
+                updateModules conn.System newModules cancellationToken
             with
             | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore modules"
-        let! actionsUpdater =
+        let! actionsUpdate =
             try
-                updateActions db newActions cancellationToken
+                updateActions conn.System newActions cancellationToken
             with
             | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore actions"
-        let! triggersUpdater =
+        let! triggersUpdate =
             try
-                updateTriggers db newTriggers cancellationToken
+                updateTriggers conn.System newTriggers cancellationToken
             with
             | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore triggers"
 
-        let! updated1 = layoutUpdater ()
-        let! updated2 = permissionsUpdater ()
-        let! updated3 = userViewsUpdater ()
-        let! updated4 = attributesUpdater ()
-        let! updated5 = modulesUpdater ()
-        let! updated6 = actionsUpdater ()
-        let! updated7 = triggersUpdater ()
+        let fullUpdate =
+            seq {
+                layoutUpdate
+                permissionsUpdate
+                attributesUpdate
+                actionsUpdate
+                triggersUpdate
+                modulesUpdate
+            } |> Seq.fold1 unionUpdateResult
+        do! deleteDeferredFromUpdate oldLayout conn.Connection.Query fullUpdate cancellationToken
 
-        let! _ = db.Database.ExecuteSqlRawAsync("SET CONSTRAINTS ALL IMMEDIATE")
-
-        return updated1 || updated2 || updated3 || updated4 || updated5 || updated6 || updated7
+        return not <| updateResultIsEmpty fullUpdate
     }
 
 let private prettifyTriggerMeta (trigger : SourceTrigger) : PrettyTriggerMeta =
@@ -311,7 +313,6 @@ let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : Sou
       CheckConstraints = entity.CheckConstraints
       Indexes = entity.Indexes
       MainField = entity.MainField
-      ForbidExternalReferences = entity.ForbidExternalReferences
       IsAbstract = entity.IsAbstract
       IsFrozen = entity.IsFrozen
       Parent = entity.Parent
@@ -336,8 +337,9 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
           CheckConstraints = entity.CheckConstraints
           Indexes = entity.Indexes
           MainField = entity.MainField
-          ForbidExternalReferences = entity.ForbidExternalReferences
-          ForbidTriggers = false
+          InsertedInternally = false
+          UpdatedInternally = false
+          DeletedInternally = false
           IsHidden = false
           TriggersMigration = false
           IsAbstract = entity.IsAbstract
@@ -348,6 +350,8 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
     (attrsRet, ret)
 
 let private extraDefaultAttributesEntry = "extra_default_attributes.yaml"
+
+let private keepEntry = ".keep"
 
 let private userViewsGeneratorMetaEntry = "user_views_generator.yaml"
 let private userViewsGeneratorEntry = "user_views_generator.mjs"
@@ -363,62 +367,66 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
     let mutable totalSize = 0L
 
     for KeyValue(schemaName, dump) in schemas do
-        ignore <| zip.CreateEntry(sprintf "%O/" schemaName)
+        if dump = emptySchemaDump then
+            // Leave an empty file so that empty schemas are properly dumped.
+            let rootEntry = zip.CreateEntry(sprintf "%O/%s" schemaName keepEntry)
+            use writer = rootEntry.Open()
+            ()
+        else
+            let useEntry (path : string) (fn : StreamWriter -> unit) =
+                let entry = zip.CreateEntry(sprintf "%O/%s" schemaName path)
+                // https://superuser.com/questions/603068/unzipping-file-whilst-getting-correct-permissions
+                entry.ExternalAttributes <- 0o644 <<< 16
+                use writer = new StreamWriter(entry.Open())
+                fn writer
+                totalSize <- totalSize + writer.BaseStream.Position
 
-        let useEntry (path : string) (fn : StreamWriter -> unit) =
-            let entry = zip.CreateEntry(sprintf "%O/%s" schemaName path)
-            // https://superuser.com/questions/603068/unzipping-file-whilst-getting-correct-permissions
-            entry.ExternalAttributes <- 0o644 <<< 16
-            use writer = new StreamWriter(entry.Open())
-            fn writer
-            totalSize <- totalSize + writer.BaseStream.Position
+            let dumpToEntry (path : string) (document : 'a) =
+                useEntry path <| fun writer ->
+                    myYamlSerializer.Serialize(writer, document)
 
-        let dumpToEntry (path : string) (document : 'a) =
-            useEntry path <| fun writer ->
-                myYamlSerializer.Serialize(writer, document)
+            for KeyValue(name, entity) in dump.Entities do
+                let defaultAttrs = dump.DefaultAttributes |> Map.tryFind schemaName |> Option.bind (fun schema -> Map.tryFind name schema.Entities) |> Option.defaultValue emptySourceAttributesEntity
+                let prettyEntity = prettifyEntity defaultAttrs entity
+                dumpToEntry (sprintf "entities/%O.yaml" name) prettyEntity
 
-        for KeyValue(name, entity) in dump.Entities do
-            let defaultAttrs = dump.DefaultAttributes |> Map.tryFind schemaName |> Option.bind (fun schema -> Map.tryFind name schema.Entities) |> Option.defaultValue emptySourceAttributesEntity
-            let prettyEntity = prettifyEntity defaultAttrs entity
-            dumpToEntry (sprintf "entities/%O.yaml" name) prettyEntity
+            for KeyValue(name, role) in dump.Roles do
+                dumpToEntry (sprintf "roles/%O.yaml" name) role
 
-        for KeyValue(name, role) in dump.Roles do
-            dumpToEntry (sprintf "roles/%O.yaml" name) role
+            for KeyValue(name, uv) in dump.UserViews do
+                useEntry (sprintf "user_views/%O.funql" name) <| fun writer -> writer.Write(uv.Query)
+                if uv.AllowBroken then
+                    let uvMeta = { AllowBroken = true } : PrettyUserViewMeta
+                    dumpToEntry (sprintf "user_views/%O.yaml" name) uvMeta
 
-        for KeyValue(name, uv) in dump.UserViews do
-            useEntry (sprintf "user_views/%O.funql" name) <| fun writer -> writer.Write(uv.Query)
-            if uv.AllowBroken then
-                let uvMeta = { AllowBroken = true } : PrettyUserViewMeta
-                dumpToEntry (sprintf "user_views/%O.yaml" name) uvMeta
+            for KeyValue(modulePath, modul) in dump.Modules do
+                useEntry (sprintf "modules/%s" modulePath) <| fun writer -> writer.Write(modul.Source)
 
-        for KeyValue(modulePath, modul) in dump.Modules do
-            useEntry (sprintf "modules/%s" modulePath) <| fun writer -> writer.Write(modul.Source)
+            for KeyValue(actionName, action) in dump.Actions do
+                useEntry (sprintf "actions/%O.mjs" actionName) <| fun writer -> writer.Write(action.Function)
+                if action.AllowBroken then
+                    let actionMeta = { AllowBroken = true } : PrettyUserViewsGeneratorScriptMeta
+                    dumpToEntry (sprintf "actions/%O.yaml" actionName) actionMeta
 
-        for KeyValue(actionName, action) in dump.Actions do
-            useEntry (sprintf "actions/%O.mjs" actionName) <| fun writer -> writer.Write(action.Function)
-            if action.AllowBroken then
-                let actionMeta = { AllowBroken = true } : PrettyUserViewsGeneratorScriptMeta
-                dumpToEntry (sprintf "actions/%O.yaml" actionName) actionMeta
+            for KeyValue(schemaName, schemaTriggers) in dump.Triggers do
+                for KeyValue(entityName, entityTriggers) in schemaTriggers.Entities do
+                    for KeyValue(triggerName, trigger) in entityTriggers.Triggers do
+                        let prettyMeta = prettifyTriggerMeta trigger
+                        dumpToEntry (sprintf "triggers/%O/%O/%O.yaml" schemaName entityName triggerName) prettyMeta
+                        useEntry (sprintf "triggers/%O/%O/%O.mjs" schemaName entityName triggerName) <| fun writer ->
+                            writer.Write(trigger.Procedure)
 
-        for KeyValue(schemaName, schemaTriggers) in dump.Triggers do
-            for KeyValue(entityName, entityTriggers) in schemaTriggers.Entities do
-                for KeyValue(triggerName, trigger) in entityTriggers.Triggers do
-                    let prettyMeta = prettifyTriggerMeta trigger
-                    dumpToEntry (sprintf "triggers/%O/%O/%O.yaml" schemaName entityName triggerName) prettyMeta
-                    useEntry (sprintf "triggers/%O/%O/%O.mjs" schemaName entityName triggerName) <| fun writer ->
-                        writer.Write(trigger.Procedure)
+            let extraAttributes = dump.DefaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
+            if not <| Map.isEmpty extraAttributes then
+                dumpToEntry extraDefaultAttributesEntry extraAttributes
 
-        let extraAttributes = dump.DefaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
-        if not <| Map.isEmpty extraAttributes then
-            dumpToEntry extraDefaultAttributesEntry extraAttributes
-
-        match dump.UserViewsGeneratorScript with
-        | None -> ()
-        | Some script ->
-            useEntry userViewsGeneratorEntry <| fun writer -> writer.Write(script)
-            if script.AllowBroken then
-                let genMeta = { AllowBroken = true } : PrettyUserViewsGeneratorScriptMeta
-                dumpToEntry userViewsGeneratorMetaEntry genMeta
+            match dump.UserViewsGeneratorScript with
+            | None -> ()
+            | Some script ->
+                useEntry userViewsGeneratorEntry <| fun writer -> writer.Write(script)
+                if script.AllowBroken then
+                    let genMeta = { AllowBroken = true } : PrettyUserViewsGeneratorScriptMeta
+                    dumpToEntry userViewsGeneratorMetaEntry genMeta
 
     if totalSize > maxFilesSize then
         failwithf "Total files size in archive is %i, which is too large" totalSize
@@ -522,6 +530,8 @@ let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
                     let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
                     let (prevMeta, prevUv) = Map.findWithDefaultThunk ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
                     encounteredUserViews <- Map.add ref (prevMeta, rawUv) encounteredUserViews
+                    emptySchemaDump
+                | fileName when fileName = keepEntry ->
                     emptySchemaDump
                 | fileName when fileName = extraDefaultAttributesEntry ->
                     let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry

@@ -27,9 +27,17 @@ let addDelimiter (path : Path) : Path =
     else
         path + "/"
 
-let private dirNameRegex = Regex(@"/[^/]*$")
+let private baseNameRegex = Regex(@"[^/]+$")
+
+let baseName (path : Path) : Path =
+    let res = baseNameRegex.Match(path)
+    if res.Success then
+        res.Value
+    else
+        ""
+
 let dirName (path : Path) : Path =
-    dirNameRegex.Replace(path, "")
+    baseNameRegex.Replace(path, "")
 
 let rec private shortenReplaceContinuously' (regex : Regex) (replace : Match -> string) (s : string) =
     let r = regex.Replace(s, MatchEvaluator replace)

@@ -7,7 +7,7 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Types
@@ -61,7 +61,7 @@ type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) as 
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
-let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
+let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (cancellationToken : CancellationToken) : Task<UpdateResult> =
     genericSystemUpdate db cancellationToken <| fun () ->
         task {
             let currentSchemas = db.GetAttributesObjects ()

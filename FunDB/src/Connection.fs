@@ -11,7 +11,6 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
-open FunWithFlags.FunDB.Schema
 open FunWithFlags.FunDB.SQL.Query
 
 type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : string) =
@@ -133,47 +132,3 @@ let openAndCheckTransaction (loggerFactory : ILoggerFactory) (connectionString :
                 return reraise' e
         }
     tryOne ()
-
-type SystemUpdaterException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
-
-    new (message : string) = SystemUpdaterException (message, null)
-
-type SystemUpdater(db : SystemContext) =
-    let mutable deletedObjects = []
-
-    member this.DeleteObject row =
-        deletedObjects <- (row :> obj) :: deletedObjects
-
-    member this.DeleteOldObjects () =
-        for row in deletedObjects do
-            let entry = db.Entry(row)
-            // This is to prevent double deletes; first cascaded and second explicit.
-            if entry.State <> EntityState.Detached then
-                ignore <| db.Remove(row)
-
-    member this.UpdateDifference (updateFunc : 'k -> 'nobj -> 'eobj -> unit) (createFunc : 'k -> 'eobj) (newObjects : Map<'k, 'nobj>) (existingObjects : Map<'k, 'eobj>) : Map<'k, 'eobj> =
-        updateDifference db updateFunc createFunc (fun _ -> this.DeleteObject) newObjects existingObjects
-
-    member this.UpdateRelatedDifference (updateFunc : 'k -> 'nobj -> 'eobj -> unit) (newObjects : Map<'k, 'nobj>) (existingObjects : Map<'k, 'eobj>) : Map<'k, 'eobj> =
-        let createFunc name = raisef SystemUpdaterException "Object %O doesn't exist" name
-        let deleteFunc name obj = raisef SystemUpdaterException "Refusing to delete object %O" name
-        updateDifference db updateFunc createFunc deleteFunc newObjects existingObjects
-
-// We first load existing rows and update/create new ones, then delay the second stage when we remove old rows.
-// Otherwise an issue with removing a row without removing related rows may happen:
-// 1. A different `update` function deletes a referenced row;
-// 2. Now this `update` function will miss all rows which reference deleted row because EF Core uses `INNER JOIN`, and the deleted row, well, doesn't exist.
-// For example: an entity is removed and we don't remove all default attributes with `field_entity` referencing this one.
-let genericSystemUpdate<'updater when 'updater :> SystemUpdater> (db : SystemContext) (cancellationToken : CancellationToken) (getUpdater : unit -> Task<'updater>) : Task<unit -> Task<bool>> =
-    task {
-        let! _ = serializedSaveChangesAsync db cancellationToken
-        let! updater = getUpdater ()
-        let! changed1 = serializedSaveChangesAsync db cancellationToken
-        return fun () ->
-            task {
-                updater.DeleteOldObjects ()
-                let! changed2 = serializedSaveChangesAsync db cancellationToken
-                return changed1 || changed2
-            }
-    }

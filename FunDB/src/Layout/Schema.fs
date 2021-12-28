@@ -59,8 +59,9 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         if isNull entity.MainField
         then funId
         else FunQLName entity.MainField
-      ForbidExternalReferences = entity.ForbidExternalReferences
-      ForbidTriggers = false
+      InsertedInternally = false
+      UpdatedInternally = false
+      DeletedInternally = false
       TriggersMigration = false
       IsHidden = false
       IsFrozen = entity.IsFrozen
@@ -90,7 +91,9 @@ let buildSchemaLayout (db : SystemContext) (withoutSchemas : SchemaName seq) (ca
 let private applyHiddenLayoutSchemaData (sourceSchema : SourceSchema) (systemSchema : SourceSchema) : SourceSchema =
     let mergeOne entity systemEntity =
         { entity with
-              ForbidTriggers = systemEntity.ForbidTriggers
+              InsertedInternally = systemEntity.InsertedInternally
+              UpdatedInternally = systemEntity.UpdatedInternally
+              DeletedInternally = systemEntity.DeletedInternally
               TriggersMigration = systemEntity.TriggersMigration
               IsHidden = systemEntity.IsHidden
         }

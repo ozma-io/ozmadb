@@ -48,6 +48,7 @@ open FunWithFlags.FunDB.Triggers.Update
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.Operations.Update
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDBSchema.System
@@ -283,7 +284,6 @@ let private checkBrokenLayout (logger :ILogger) (allowAutoMark : bool) (preload 
             do! markBrokenLayout conn.System brokenLayout cancellationToken
     }
 
-
 let checkBrokenAttributes (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenAttrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
@@ -425,9 +425,14 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
             }
         assert (Task.awaitSync <| sanityCheck ())
 
+        let! sourceUserLayout = buildSchemaLayout conn.System (Map.keys preload.Schemas) cancellationToken
+        let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout
+        let (brokenLayout, layout) = resolveLayout sourceLayout true
+        do! checkBrokenLayout logger allowAutoMark preload conn brokenLayout cancellationToken
+
         // We migrate layout first so that permissions and attributes have schemas in the table.
-        let! layoutUpdater = updateLayout conn.System sourcePreloadLayout cancellationToken
-        let! permissionsUpdater =
+        let! layoutUpdate = updateLayout conn.System sourcePreloadLayout cancellationToken
+        let! permissionsUpdate =
             task {
                 let permissions = preloadPermissions preload
                 try
@@ -438,7 +443,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                     let (errors, perms) = resolvePermissions preloadLayout false permissions
                     return reraise' e
             }
-        let! attributesUpdater =
+        let! attributesUpdate =
             task {
                 let defaultAttributes = preloadDefaultAttributes preload
                 try
@@ -449,7 +454,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                     let (errors, attrs) = resolveAttributes preloadLayout false defaultAttributes
                     return reraise' e
             }
-        let! actionsUpdater =
+        let! actionsUpdate =
             task {
                 let actions = preloadActions preload
                 try
@@ -460,7 +465,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                     let (errors, actions) = resolveActions preloadLayout false actions
                     return reraise' e
             }
-        let! triggersUpdater =
+        let! triggersUpdate =
             task {
                 let triggers = preloadTriggers preload
                 try
@@ -471,7 +476,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                     let (errors, triggers) = resolveTriggers preloadLayout false triggers
                     return reraise' e
             }
-        let! modulesUpdater =
+        let! modulesUpdate =
             task {
                 let modules = preloadModules preload
                 try
@@ -483,19 +488,16 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                     return reraise' e
             }
 
-        // Remove rows in reverse order, so that dependent rows are removed last.
-        let! changed6 = modulesUpdater ()
-        let! changed5 = triggersUpdater ()
-        let! changed4 = actionsUpdater ()
-        let! changed3 = attributesUpdater ()
-        let! changed2 = permissionsUpdater ()
-        let! changed1 = layoutUpdater ()
-
-        let! sourceUserLayout = buildSchemaLayout conn.System (Map.keys preload.Schemas) cancellationToken
-        let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout
-        let (brokenLayout, layout) = resolveLayout sourceLayout true
-
-        do! checkBrokenLayout logger allowAutoMark preload conn brokenLayout cancellationToken
+        let fullUpdate =
+            seq {
+                layoutUpdate
+                permissionsUpdate
+                attributesUpdate
+                actionsUpdate
+                triggersUpdate
+                modulesUpdate
+            } |> Seq.fold1 unionUpdateResult
+        do! deleteDeferredFromUpdate layout conn.Connection.Query fullUpdate cancellationToken
 
         logger.LogInformation("Phase 2: Migrating all remaining entities")
         let userLayout = filterLayout (fun name -> not <| Map.containsKey name preloadLayout.Schemas) layout
@@ -521,5 +523,5 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
         }
         assert (Task.awaitSync <| sanityCheck ())
 
-        return (changed1 || changed2 || changed3 || changed4 || changed5 || changed6, layout, newUserMeta)
+        return (not <| updateResultIsEmpty fullUpdate, layout, newUserMeta)
     }

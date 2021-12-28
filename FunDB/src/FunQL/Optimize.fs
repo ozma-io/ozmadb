@@ -42,7 +42,7 @@ and [<CustomEquality; NoComparison>] OptimizedFieldExpr<'e, 'f> when 'e :> IFunQ
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
-        
+
         interface IEquatable<OptimizedFieldExpr<'e, 'f>> with
             member this.Equals other =
                 match (this, other) with

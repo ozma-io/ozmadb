@@ -205,7 +205,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         usedDatabase <- addUsedEntityRef entityRef usedEntityDelete usedDatabase
         Option.iter buildForFromExpr delete.Using
         Option.iter (ignore << buildForFieldExpr) delete.Where
-    
+
     and buildForDataExpr = function
         | DESelect select -> buildForSelectExpr select
         | DEInsert insert -> buildForInsertExpr insert
@@ -319,7 +319,7 @@ type private UsedDatabaseFlattener (layout : Layout) =
 
     let flattenUsedDatabase (usedDatabase : UsedDatabase) =
         Map.iter flattenUsedSchema usedDatabase.Schemas
-    
+
     member this.FlattenUsedDatabase usedDatabase = flattenUsedDatabase usedDatabase
     member this.FlattenedRoots = flattenedRoots
 

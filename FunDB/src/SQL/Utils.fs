@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.SQL.Utils
 open System
 open System.Text
 open System.Globalization
+open Npgsql.NameTranslation
 open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
@@ -95,3 +96,5 @@ let optionToSQLString<'a when 'a :> ISQLString> : 'a option -> string = function
 let convertComments : string option -> string = function
     | None -> ""
     | Some comments -> sprintf "-- %s\n" (comments.Replace("\n", "\n-- "))
+
+let snakeCaseName = NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase

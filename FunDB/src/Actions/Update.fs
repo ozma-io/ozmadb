@@ -8,7 +8,7 @@ open FSharp.Control.Tasks.Affine
 open Microsoft.FSharp.Quotations
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDB.Actions.Source
@@ -44,7 +44,7 @@ type private ActionsUpdater (db : SystemContext) as this =
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
-let updateActions (db : SystemContext) (actions : SourceActions) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
+let updateActions (db : SystemContext) (actions : SourceActions) (cancellationToken : CancellationToken) : Task<UpdateResult> =
     genericSystemUpdate db cancellationToken <| fun () ->
         task {
             let currentSchemas = db.GetActionsObjects ()

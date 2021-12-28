@@ -11,7 +11,7 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
@@ -107,7 +107,6 @@ type private LayoutUpdater (db : SystemContext) as this =
             existingEntity.MainField <- null
         else
             existingEntity.MainField <-entity.MainField.ToString()
-        existingEntity.ForbidExternalReferences <- entity.ForbidExternalReferences
         existingEntity.IsAbstract <- entity.IsAbstract
         existingEntity.IsFrozen <- entity.IsFrozen
 
@@ -150,7 +149,7 @@ type private LayoutUpdater (db : SystemContext) as this =
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
-let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
+let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken : CancellationToken) : Task<UpdateResult> =
     genericSystemUpdate db cancellationToken <| fun () ->
         task {
             let currentSchemas = db.GetLayoutObjects ()

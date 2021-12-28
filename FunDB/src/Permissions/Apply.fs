@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.Permissions.Apply
 
-// Allow delayed 
+// Allow delayed
 #nowarn "40"
 
 open System
@@ -210,7 +210,7 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                 | deleteFilter -> andFieldExpr filterExpr deleteFilter
             else
                 filterExpr
-        
+
         { Filter = filterExpr
           UsedEntity = usedEntity
           PropagatedSelect = parentFilter.PropagatedSelect || isSelect
@@ -244,7 +244,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
         { Ref = lref
           Extra = ObjectMap.singleton fieldInfo
         }
-            
+
     let rec buildOfTypeCheck (entityRef : ResolvedEntityRef) =
         let entity = layout.FindEntity entityRef |> Option.get
         if not (hasSubType entity) then
@@ -267,7 +267,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
             OFETrue
         else
             let subEntityRef : SubEntityRef =
-                { Ref = relaxEntityRef entityRef    
+                { Ref = relaxEntityRef entityRef
                   Extra = ObjectMap.empty
                 }
             optimizeFieldExpr <| FEInheritedFrom (boundFieldRef, subEntityRef)
@@ -293,7 +293,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
 
     let rec buildChildrenCheck (entityRef : ResolvedEntityRef) : ChildrenCheck =
         let entity = layout.FindEntity entityRef |> Option.get
-        
+
         let getChild (childRef, child) =
             if not child.Direct then
                 None
@@ -309,7 +309,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
             |> Map.toSeq
             |> Seq.mapMaybe getChild
             |> Seq.cache
-        
+
         let singleExpr =
             match Seq.trySnoc children with
             | None -> Some OFETrue
@@ -318,7 +318,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
                    && Seq.forall (fun (childRef, check) -> check.Check = firstExpr) tailChildren ->
                 Some firstExpr
             | _ -> None
-    
+
         match singleExpr with
         | Some expr -> { Check = expr; IncludingChildren = true }
         | None ->
@@ -345,11 +345,11 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
                 match andFieldExpr (getParentCheck entityRef) (getOfTypeCheck entityRef) with
                 | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
                 | entityCheck -> Some entityCheck
-        
+
         { SelectUpdate = selectUpdateCheck
           Delete = deleteCheck
         }
-    
+
     member this.GetAppliedEntity entityRef = getAppliedEntity entityRef
 
 let private renameAllFieldExprEntities (toEntityRef : EntityRef) : ResolvedFieldExpr -> ResolvedFieldExpr =
@@ -401,7 +401,7 @@ let applyPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : Fla
             | :? PermissionsApplyException as e ->
                 exceptions <- (roleRef, e) :: exceptions
                 maybeAppliedDb
-        
+
         match rolesAllowedEntity.Roles |> Map.toSeq |> Seq.fold tryRole None with
         | None -> throwRoleExceptions rootRef exceptions
         | Some appliedDb -> Map.map buildFinalAllowedEntity appliedDb
@@ -426,10 +426,10 @@ let checkPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : Fla
                 checkPermissionsForEntity layout allowedEntity usedEntity
                 None
             with
-            | :? PermissionsApplyException as e -> 
+            | :? PermissionsApplyException as e ->
                 exceptions <- (roleRef, e) :: exceptions
                 Some ()
-        
+
         // Counter-intuitively we use `Some ()` here to signal failed check, and `None` to early drop when found at least one matching role.
         match rolesAllowedEntity.Roles |> Map.toSeq |> Seq.foldOption tryRole () with
         | None -> ()

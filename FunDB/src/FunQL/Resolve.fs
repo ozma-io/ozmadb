@@ -1809,7 +1809,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 let (fieldMapping, mappingRef, newFrom) = resolveFromExpr ctx fieldMapping flags from
                 (fieldMapping, Some newFrom)
         let ctx = { ctx with FieldMaps = fieldMapping :: ctx.FieldMaps }
-        
+
         let where =
             match delete.Where with
             | None -> None

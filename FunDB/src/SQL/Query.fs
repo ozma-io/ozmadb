@@ -232,7 +232,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                                       }
                               }
                 }
-            
+
             let! ret = processFunc columns enumerable
             return ret
         }

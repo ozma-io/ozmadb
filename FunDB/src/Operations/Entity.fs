@@ -201,11 +201,11 @@ let insertEntities
                     arguments <- newArguments
                     argumentValues <- Map.add (PLocal argName) arg argumentValues
                     SQL.IVValue (SQL.VEPlaceholder argInfo.PlaceholderId)
-            
+
             for requiredName in entity.RequiredFields do
                 if not <| Map.containsKey requiredName rowArgs then
                     raisef EntityArgumentsException "Required field not provided: %O" requiredName
-            
+
             let rowValues = dataFields |> Seq.map getValue
             Seq.append prefixValues rowValues |> Seq.toArray
 
@@ -233,7 +233,7 @@ let insertEntities
             with
             | :? PermissionsApplyException as e ->
                 raisefWithInner EntityDeniedException e ""
-    
+
         let query =
             { Expression = expr
               Arguments = arguments
@@ -304,7 +304,7 @@ let updateEntity
                     let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
                     let fieldRef = { Entity = fieldEntity; Name = fieldName }
                     (fieldRef, usedFieldInsert)
-            
+
                 let usedFields = updateArgs |> Map.keys |> Seq.map getUsedField
                 let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityUpdate usedFields
                 let appliedDb =
@@ -580,6 +580,7 @@ let getRelatedEntities
         (globalArgs : LocalArgumentsMap)
         (layout : Layout)
         (applyRole : ResolvedRole option)
+        (filterFields : ResolvedEntityRef -> RowId -> ResolvedFieldRef -> bool)
         (entityRef : ResolvedEntityRef)
         (id : RowId)
         (comments : string option)
@@ -594,7 +595,7 @@ let getRelatedEntities
                 let idx = lastId
                 processed <- Map.add (entity.Root, id) idx processed
                 lastId <- lastId + 1
-                let! referenceLists = Seq.mapTask (findRelated id) entity.ReferencingFields
+                let! referenceLists = Seq.mapTask (findRelated entityRef id) entity.ReferencingFields
                 let node =
                     { Entity = entityRef
                       Id = id
@@ -604,24 +605,27 @@ let getRelatedEntities
                 return idx
             }
 
-        and findRelated (relatedId : RowId) (refFieldRef : ResolvedFieldRef) : Task<ReferencesChild seq> =
+        and findRelated (entityRef : ResolvedEntityRef) (relatedId : RowId) (refFieldRef : ResolvedFieldRef) : Task<ReferencesChild seq> =
             task {
-                let! related = getRelatedRowIds connection globalArgs layout applyRole refFieldRef relatedId comments cancellationToken
-                let go (subEntityRef, id) =
-                    task {
-                        let entity = layout.FindEntity subEntityRef |> Option.get
-                        let! idx =
-                            task {
-                                match Map.tryFind (entity.Root, id) processed with
-                                | Some idx -> return idx
-                                | None -> return! findOne id subEntityRef entity
-                            }
-                        return
-                            { Field = refFieldRef.Name
-                              Row = idx
-                            }
-                    }
-                return! Seq.mapTask go related
+                if not <| filterFields entityRef relatedId refFieldRef then
+                    return Seq.empty
+                else
+                    let! related = getRelatedRowIds connection globalArgs layout applyRole refFieldRef relatedId comments cancellationToken
+                    let go (subEntityRef, id) =
+                        task {
+                            let entity = layout.FindEntity subEntityRef |> Option.get
+                            let! idx =
+                                task {
+                                    match Map.tryFind (entity.Root, id) processed with
+                                    | Some idx -> return idx
+                                    | None -> return! findOne id subEntityRef entity
+                                }
+                            return
+                                { Field = refFieldRef.Name
+                                  Row = idx
+                                }
+                        }
+                    return! Seq.mapTask go related
             }
 
         let! subEntityRef = getSubEntity connection globalArgs layout applyRole entityRef id comments cancellationToken

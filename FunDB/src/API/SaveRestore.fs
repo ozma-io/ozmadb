@@ -12,6 +12,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.API.Types
 
@@ -110,11 +111,8 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                         let dumps =
                             let emptyDumps = droppedSchemas |> Seq.map (fun name -> (name, emptySchemaDump)) |> Map.ofSeq
                             Map.union emptyDumps dumps
-                        let! modified = restoreSchemas ctx.Transaction.System dumps ctx.CancellationToken
-                        if not (Set.isEmpty droppedSchemas) then
-                            let droppedSchemasArr = droppedSchemas |> Seq.map string |> Array.ofSeq
-                            let! _ = ctx.Transaction.System.Schemas.AsQueryable().Where(fun entity -> droppedSchemasArr.Contains(entity.Name)).DeleteFromQueryAsync()
-                            ()
+                        let! modified = restoreSchemas ctx.Transaction ctx.Layout dumps ctx.CancellationToken
+                        do! deleteSchemas ctx.Layout ctx.Transaction droppedSchemas ctx.CancellationToken
                         if modified || not (Set.isEmpty droppedSchemas) then
                             ctx.ScheduleMigration ()
                         do! rctx.WriteEventSync (fun event ->
@@ -123,7 +121,9 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                         )
                         return Ok ()
                     with
-                    | :? RestoreSchemaException as e when e.IsUserException -> return Error <| RREConsistency (exceptionString e)
+                    | :? RestoreSchemaException as ex when ex.IsUserException ->
+                        logger.LogError(ex, "Failed to restore schemas")
+                        return Error <| RREConsistency (exceptionString ex)
         }
 
     member this.RestoreZipSchemas (stream : Stream) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =

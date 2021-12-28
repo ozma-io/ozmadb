@@ -1004,7 +1004,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let finalName = Option.defaultValue name forcedName
             { Table = tableRef; Name = finalName } : SQL.ColumnRef
 
-        let entity = getEntityByRef fieldRef.Entity            
+        let entity = getEntityByRef fieldRef.Entity
         let fieldInfo =
             match entity.FindField fieldRef.Name with
             | None -> raisef CompileException "Failed to find field of %O" fieldRef
@@ -2213,7 +2213,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                               Condition = joinSame
                             } : SQL.JoinExpr
                         (where, SQL.FJoin joinExpr)
-                
+
                 let remapJoin (joinKey : JoinKey, joinTree : JoinTree) =
                     let newJoinKey = { joinKey with Table = selfTableName }
                     Seq.append (Seq.singleton (newJoinKey, joinTree.Path)) (joinsToSeq joinTree.Nested)

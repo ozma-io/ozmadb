@@ -5,7 +5,7 @@ open System.Reflection
 open System.ComponentModel.DataAnnotations
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Schema
+open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDBSchema.Attributes
@@ -79,8 +79,9 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               CheckConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
               Indexes = indexes |> Seq.map makeSourceIndex |> Map.ofSeq
               MainField = FunQLName entityAttr.MainField
-              ForbidExternalReferences = entityAttr.ForbidExternalReferences
-              ForbidTriggers = entityAttr.ForbidTriggers
+              InsertedInternally = entityAttr.InsertedInternally
+              UpdatedInternally = entityAttr.UpdatedInternally
+              DeletedInternally = entityAttr.DeletedInternally
               TriggersMigration = entityAttr.TriggersMigration
               IsHidden = entityAttr.IsHidden
               IsFrozen = entityAttr.IsFrozen

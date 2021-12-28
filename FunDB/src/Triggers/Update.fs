@@ -7,7 +7,7 @@ open Microsoft.FSharp.Quotations
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Connection
+open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types
@@ -65,7 +65,7 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) as th
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
-let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellationToken : CancellationToken) : Task<unit -> Task<bool>> =
+let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellationToken : CancellationToken) : Task<UpdateResult> =
     genericSystemUpdate db cancellationToken <| fun () ->
         task {
             let currentSchemas = db.GetTriggersObjects ()
