@@ -17,6 +17,7 @@ open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
+open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.API.Types
@@ -235,10 +236,10 @@ type APITemplate (isolate : Isolate) =
             if args.Length <> 3 then
                 throwCallError context "Number of arguments must be 3"
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let id = jsInt context args.[1]
+            let id = jsDeserialize context args.[1] : RawRowKey
             let rawArgs = jsDeserialize context args.[2] : RawArguments
             let handle = Option.get currentHandle
-            let run = runVoidResultApiCall handle context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
+            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
@@ -247,7 +248,7 @@ type APITemplate (isolate : Isolate) =
             if args.Length <> 2 then
                 throwCallError context "Number of arguments must be 2"
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let id = jsInt context args.[1]
+            let id = jsDeserialize context args.[1] : RawRowKey
             let handle = Option.get currentHandle
             let run = runVoidResultApiCall handle context <| fun () -> handle.API.Entities.DeleteEntity ref id
             runtime.EventLoop.NewPromise(context, run).Value
@@ -258,7 +259,7 @@ type APITemplate (isolate : Isolate) =
             if args.Length <> 2 then
                 throwCallError context "Number of arguments must be 2"
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let id = jsInt context args.[1]
+            let id = jsDeserialize context args.[1] : RawRowKey
             let handle = Option.get currentHandle
             let run = runResultApiCall handle context <| fun () -> handle.API.Entities.GetRelatedEntities ref id
             runtime.EventLoop.NewPromise(context, run).Value
@@ -269,7 +270,7 @@ type APITemplate (isolate : Isolate) =
             if args.Length <> 2 then
                 throwCallError context "Number of arguments must be 2"
             let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let id = jsInt context args.[1]
+            let id = jsDeserialize context args.[1] : RawRowKey
             let handle = Option.get currentHandle
             let run = runResultApiCall handle context <| fun () -> handle.API.Entities.RecursiveDeleteEntity ref id
             runtime.EventLoop.NewPromise(context, run).Value

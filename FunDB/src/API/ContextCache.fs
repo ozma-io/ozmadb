@@ -366,7 +366,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
         task {
             // Try to get a lock. If we fail, wait till someone else releases it and then _restart the transaction and try again_.
             // This is because otherwise transaction gets to see older state of the database.
-            let! (name, typ, ret) =
+            let! ret =
                 task {
                     try
                         return! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken
@@ -376,7 +376,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         return reraise' ex
                 }
             match ret with
-            | SQL.VBool true -> return true
+            | None -> return failwith "Impossible"
+            | Some (_, _, SQL.VBool true) -> return true
             | _ ->
                 try
                     let! _ = transaction.Connection.Query.ExecuteNonQuery "SELECT pg_advisory_xact_lock(@0)" migrationLockParams cancellationToken
@@ -595,7 +596,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                         try
                             match! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken with
-                            | (lockName, lockRet, SQL.VBool true) -> ()
+                            | None -> failwith "Impossible"
+                            | Some (lockName, lockRet, SQL.VBool true) -> ()
                             | _ -> raisef ContextException "Another migration is in progress"
 
                             logger.LogInformation("Starting migration")
@@ -855,7 +857,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                 let! systemInfo = transaction.Connection.Query.ExecuteRowValuesQuery "SELECT transaction_timestamp(), txid_current()" Map.empty cancellationToken
                 let (transactionTime, transactionId) =
                     match systemInfo with
-                    | [|(tsName, tsTyp, SQL.VDateTime ts); (idName, idTyp, SQL.VBigInt txid)|] -> (ts, int txid)
+                    | Some [|(tsName, tsTyp, SQL.VDateTime ts); (idName, idTyp, SQL.VBigInt txid)|] -> (ts, int txid)
                     | _ -> failwith "Impossible"
 
                 return

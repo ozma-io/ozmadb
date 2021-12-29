@@ -39,7 +39,10 @@ let private makeSourceComputedField (field : ComputedFieldAttribute) : FunQLName
     (FunQLName field.Name, res)
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraintAttribute) : FunQLName * SourceUniqueConstraint =
-    let res = { Columns = Array.map FunQLName constr.Columns }
+    let res =
+        { Columns = Array.map FunQLName constr.Columns
+          IsAlternateKey = constr.IsAlternateKey
+        }
     (FunQLName constr.Name, res)
 
 let private makeSourceCheckConstraint (constr : CheckConstraintAttribute) : FunQLName * SourceCheckConstraint =

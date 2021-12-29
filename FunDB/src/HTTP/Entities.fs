@@ -24,6 +24,10 @@ type TopLevelTransaction =
       DeferConstraints : bool
     }
 
+type RelatedEntitiesRequest =
+    { Id : RawRowKey
+    }
+
 let entitiesApi : HttpHandler =
     let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
@@ -33,18 +37,13 @@ let entitiesApi : HttpHandler =
             | Error err -> return! errorHandler err (json err) next ctx
         }
 
-    let getRelatedEntities (entityRef : ResolvedEntityRef) (id : int) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let getRelatedEntities (entityRef : ResolvedEntityRef) (api : IFunDBAPI) (req : RelatedEntitiesRequest) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
-            match! api.Entities.GetRelatedEntities entityRef id with
+            match! api.Entities.GetRelatedEntities entityRef req.Id with
             | Ok info ->
                 return! Successful.ok (json info) next ctx
             | Error err -> return! errorHandler err (json err) next ctx
         }
-
-    let rowApi (entityRef : ResolvedEntityRef) (id : int) =
-        choose
-            [ route "/related" >=> GET >=> withContext (getRelatedEntities entityRef id)
-            ]
 
     let entityApi (schema : string, name : string) =
         let entityRef =
@@ -52,8 +51,8 @@ let entitiesApi : HttpHandler =
               Name = FunQLName name
             }
         choose
-            [ subRoutef "/%i" (rowApi entityRef)
-              route "" >=> GET >=> withContext (getEntityInfo entityRef)
+            [ route "/related" >=> POST >=> withContext (fun api -> safeBindJson (getRelatedEntities entityRef api))
+              route "/info" >=> GET >=> withContext (getEntityInfo entityRef)
             ]
 
     let runTransaction (api : IFunDBAPI) =

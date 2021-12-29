@@ -40,6 +40,13 @@ type SerializedComputedField =
     }
 
 [<NoEquality; NoComparison>]
+type SerializedUniqueConstraint =
+    { Columns : FieldName[]
+      IsAlternateKey : bool
+      InheritedFrom : ResolvedEntityRef option
+    }
+
+[<NoEquality; NoComparison>]
 type SerializedChildEntity =
     { Ref : ResolvedEntityRef
       Direct : bool
@@ -78,6 +85,7 @@ let fullSerializedEntityAccess : SerializedEntityAccess =
 type SerializedEntity =
     { ColumnFields : Map<FieldName, SerializedColumnField>
       ComputedFields : Map<FieldName, SerializedComputedField>
+      UniqueConstraints : Map<ConstraintName, SerializedUniqueConstraint>
       MainField : FieldName
       InsertedInternally : bool
       UpdatedInternally : bool
@@ -119,8 +127,10 @@ let serializeColumnField (column : ResolvedColumnField) : SerializedColumnField 
       Access = fullSerializedFieldAccess
     }
 
-let serializeUniqueConstraint (constr : ResolvedUniqueConstraint) : SourceUniqueConstraint =
+let serializeUniqueConstraint (constr : ResolvedUniqueConstraint) : SerializedUniqueConstraint =
     { Columns = constr.Columns
+      IsAlternateKey = constr.IsAlternateKey
+      InheritedFrom = constr.InheritedFrom
     }
 
 let serializeCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckConstraint =
@@ -154,6 +164,7 @@ let rec private inheritanceChain (layout : Layout) (entity : ResolvedEntity) : R
 let serializeEntity (layout : Layout) (entity : ResolvedEntity) : SerializedEntity =
     { ColumnFields = Map.map (fun name col -> serializeColumnField col) entity.ColumnFields
       ComputedFields =  Map.mapMaybe (fun name col -> col |> Result.getOption |> Option.map serializeComputedField) entity.ComputedFields
+      UniqueConstraints = Map.map (fun name constr -> serializeUniqueConstraint constr) entity.UniqueConstraints
       MainField = entity.MainField
       InsertedInternally = entity.InsertedInternally
       UpdatedInternally = entity.UpdatedInternally

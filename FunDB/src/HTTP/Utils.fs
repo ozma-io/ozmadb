@@ -350,3 +350,8 @@ let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHa
 
 let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler = withContextGeneric true f
 let withContextHidden (f : IFunDBAPI -> HttpHandler) : HttpHandler = withContextGeneric false f
+
+let deprecated (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let logger = ctx.GetLogger("deprecated")
+    logger.LogWarning("Deprecated route used: {}", ctx.Request.Path)
+    next ctx

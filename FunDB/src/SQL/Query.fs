@@ -163,30 +163,32 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
     member this.ExecuteNonQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<int> =
         withCommand queryStr pars cancellationToken <| fun command -> command.ExecuteNonQueryAsync(cancellationToken)
 
-    member this.ExecuteValueQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<SQLName * SimpleValueType * Value> =
+    member this.ExecuteValueQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<(SQLName * SimpleValueType * Value) option> =
         task {
             match! this.ExecuteRowValuesQuery queryStr pars cancellationToken with
-            | [|ret|] -> return ret
+            | None -> return None
+            | Some [|ret|] -> return Some ret
             | _ -> return raisef QueryException "Not a single column"
         }
 
-    member this.ExecuteRowValuesQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<(SQLName * SimpleValueType * Value)[]> =
+    member this.ExecuteRowValuesQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<(SQLName * SimpleValueType * Value)[] option> =
         withCommand queryStr pars cancellationToken <| fun command -> task {
             use! reader = command.ExecuteReaderAsync(cancellationToken)
             let! hasRow0 = reader.ReadAsync(cancellationToken)
             if not hasRow0 then
-                raisef QueryException "No first row"
-            let getRow i =
-                let name = reader.GetName(i)
-                let typ = parseType (reader.GetDataTypeName(i))
-                let value = reader.GetProviderSpecificValue(i) |> convertValue typ
-                (SQLName name, typ, value)
-            let result = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
-            let! hasRow1 = reader.ReadAsync(cancellationToken)
-            if hasRow1 then
-                let secondResult = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toList
-                raisef QueryException "Has a second row: %O" secondResult
-            return result
+                return None
+            else
+                let getRow i =
+                    let name = reader.GetName(i)
+                    let typ = parseType (reader.GetDataTypeName(i))
+                    let value = reader.GetProviderSpecificValue(i) |> convertValue typ
+                    (SQLName name, typ, value)
+                let result = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
+                let! hasRow1 = reader.ReadAsync(cancellationToken)
+                if hasRow1 then
+                    let secondResult = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toList
+                    raisef QueryException "Has a second row: %O" secondResult
+                return Some result
         }
 
     member this.ExecuteColumnValuesQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) (processFunc : SQLName -> SimpleValueType -> IAsyncEnumerable<Value> -> Task<'a>) : Task<'a> =
@@ -260,6 +262,6 @@ let runExplainQuery<'a when 'a :> ISQLString> (connection : QueryConnection) (qu
             } : ExplainExpr<'a>
         let queryStr = explainQuery.ToSQLString()
         match! connection.ExecuteValueQuery queryStr parameters cancellationToken with
-        | (_, _, VJson j) -> return j
+        | Some (_, _, VJson j) -> return j
         | ret -> return failwithf "Unexpected EXPLAIN return value: %O" ret
     }

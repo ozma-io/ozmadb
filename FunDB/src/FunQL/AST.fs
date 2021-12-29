@@ -296,7 +296,7 @@ type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarField
 
 [<StructuralEquality; NoComparison; SerializeAsObject("type", AllowUnknownType=true)>]
 type FieldType<'e> when 'e :> IFunQLName =
-    | [<CaseName(null, InnerObject=true)>] FTScalar of Type : ScalarFieldType<'e>
+    | [<CaseName(null, Type=CaseSerialization.InnerObject)>] FTScalar of Type : ScalarFieldType<'e>
     | [<CaseName("array")>] FTArray of Subtype : ScalarFieldType<'e>
     with
         override this.ToString () = this.ToFunQLString()

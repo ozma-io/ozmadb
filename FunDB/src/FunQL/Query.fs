@@ -359,8 +359,9 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
                               ArgumentAttributes = Map.empty
                             }
                     | Some (colTypes, query) ->
-                        let! row = connection.ExecuteRowValuesQuery (prefix + string query) parameters cancellationToken
-                        return parseAttributesResult colTypes row
+                        match! connection.ExecuteRowValuesQuery (prefix + string query) parameters cancellationToken with
+                        | None -> return failwith "Unexpected empty query result"
+                        | Some row -> return parseAttributesResult colTypes row
                 }
 
             let getColumnInfo (col : ExecutedColumnInfo) =

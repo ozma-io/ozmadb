@@ -12,7 +12,7 @@ type TriggerTime =
     | [<CaseName("BEFORE")>] TTBefore
     | [<CaseName("AFTER")>] TTAfter
     with
-        static member private Fields = unionNames (unionCases typeof<TriggerTime>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
+        static member private Fields = caseNames (unionCases typeof<TriggerTime>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
 
         override this.ToString () = this.ToFunQLString()
 

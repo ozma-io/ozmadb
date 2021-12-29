@@ -31,7 +31,10 @@ let actionsApi : HttpHandler =
 
     let actionApi (schema, name) =
         let ref = { Schema = FunQLName schema; Name = FunQLName name }
-        route "" >=> POST >=> withContext (runAction ref)
+        choose
+            [ route "" >=> POST >=> deprecated >=> withContext (runAction ref)
+              route "/run" >=> POST >=> withContext (runAction ref)
+            ]
 
     choose
         [ subRoutef "/actions/%s/%s" actionApi

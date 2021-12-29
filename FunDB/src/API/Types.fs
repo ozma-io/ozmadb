@@ -114,8 +114,8 @@ type RequestUserInfo =
 [<SerializeAsObject("type")>]
 type EventSource =
     | [<CaseName("api")>] ESAPI
-    | [<CaseName("trigger", InnerObject=true)>] ESTrigger of TriggerRef
-    | [<CaseName("action", InnerObject=true)>] ESAction of ActionRef
+    | [<CaseName("trigger", Type=CaseSerialization.InnerObject)>] ESTrigger of TriggerRef
+    | [<CaseName("action", Type=CaseSerialization.InnerObject)>] ESAction of ActionRef
     with
         override this.ToString () =
             match this with
@@ -232,18 +232,23 @@ type EntityErrorInfo =
             member this.Message = this.Message
 
 [<SerializeAsObject("type")>]
+type RawRowKey =
+    | [<CaseName("id", Type=CaseSerialization.InnerValue)>] RRKId of RowId
+    | [<CaseName(null)>] RRKAlt of Name : ConstraintName * Keys : RawArguments
+
+[<SerializeAsObject("type")>]
 [<NoEquality; NoComparison>]
 type TransactionOp =
     | [<CaseName("insert")>] TInsertEntity of Entity : ResolvedEntityRef * Entries : RawArguments
-    | [<CaseName("update")>] TUpdateEntity of Entity : ResolvedEntityRef * Id : int * Entries : RawArguments
-    | [<CaseName("delete")>] TDeleteEntity of Entity : ResolvedEntityRef * Id : int
-    | [<CaseName("recursive_delete")>] TRecursiveDeleteEntity of Entity : ResolvedEntityRef * Id : int
+    | [<CaseName("update")>] TUpdateEntity of Entity : ResolvedEntityRef * Id : RawRowKey * Entries : RawArguments
+    | [<CaseName("delete")>] TDeleteEntity of Entity : ResolvedEntityRef * Id : RawRowKey
+    | [<CaseName("recursive_delete")>] TRecursiveDeleteEntity of Entity : ResolvedEntityRef * Id : RawRowKey
     | [<CaseName("command")>] TCommand of Command : string * Arguments : RawArguments
 
 [<SerializeAsObject("type")>]
 type TransactionOpResult =
-    | [<CaseName("insert")>] TRInsertEntity of Id : int option
-    | [<CaseName("update")>] TRUpdateEntity
+    | [<CaseName("insert")>] TRInsertEntity of Id : RowId option
+    | [<CaseName("update")>] TRUpdateEntity of Id : RowId
     | [<CaseName("delete")>] TRDeleteEntity
     | [<CaseName("recursive_delete")>] TRRecursiveDeleteEntity of Deleted : ReferencesTree
     | [<CaseName("command")>] TRCommand
@@ -273,11 +278,11 @@ type TransactionResult =
 
  type IEntitiesAPI =
     abstract member GetEntityInfo : ResolvedEntityRef -> Task<Result<SerializedEntity, EntityErrorInfo>>
-    abstract member InsertEntities : ResolvedEntityRef -> RawArguments seq -> Task<Result<(int option)[], TransactionError>>
-    abstract member UpdateEntity : ResolvedEntityRef -> int -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
-    abstract member DeleteEntity : ResolvedEntityRef -> int -> Task<Result<unit, EntityErrorInfo>>
-    abstract member GetRelatedEntities : ResolvedEntityRef -> int -> Task<Result<ReferencesTree, EntityErrorInfo>>
-    abstract member RecursiveDeleteEntity : ResolvedEntityRef -> int -> Task<Result<ReferencesTree, EntityErrorInfo>>
+    abstract member InsertEntities : ResolvedEntityRef -> RawArguments seq -> Task<Result<(RowId option)[], TransactionError>>
+    abstract member UpdateEntity : ResolvedEntityRef -> RawRowKey -> RawArguments -> Task<Result<RowId, EntityErrorInfo>>
+    abstract member DeleteEntity : ResolvedEntityRef -> RawRowKey -> Task<Result<unit, EntityErrorInfo>>
+    abstract member GetRelatedEntities : ResolvedEntityRef -> RawRowKey -> Task<Result<ReferencesTree, EntityErrorInfo>>
+    abstract member RecursiveDeleteEntity : ResolvedEntityRef -> RawRowKey -> Task<Result<ReferencesTree, EntityErrorInfo>>
     abstract member RunCommand : string -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
     abstract member RunTransaction : Transaction -> Task<Result<TransactionResult, TransactionError>>
     abstract member DeferConstraints : (unit -> Task<'a>) -> Task<Result<'a, EntityErrorInfo>>

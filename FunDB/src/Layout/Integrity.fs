@@ -1064,11 +1064,11 @@ let private compileReferenceOfTypeCheck (layout : Layout) (fromFieldRef : Resolv
 let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) (cancellationToken : CancellationToken) : Task =
     unitTask {
         try
-            let! (name, typ, ret) = conn.ExecuteValueQuery (query.ToSQLString()) Map.empty cancellationToken
-            match ret with
-            | SQL.VBool true -> ()
-            | SQL.VNull -> () // No rows found
-            | ret -> raisef LayoutIntegrityException "Expected `true`, got %O" ret
+            match! conn.ExecuteValueQuery (query.ToSQLString()) Map.empty cancellationToken with
+            | None -> ()
+            | Some (name, typ, SQL.VNull) -> ()
+            | Some (name, typ, SQL.VBool true) -> ()
+            | Some (name, typ, ret) -> raisef LayoutIntegrityException "Expected `true`, got %O" ret
         with
         | :? QueryException as e -> raisefUserWithInner LayoutIntegrityException e "Query exception"
     }

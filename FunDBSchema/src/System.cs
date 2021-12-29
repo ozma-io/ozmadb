@@ -15,54 +15,54 @@ namespace FunWithFlags.FunDBSchema.System
     public class SystemContext : PostgresContext
     {
         [Entity("name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, IsHidden=true)]
-        [UniqueConstraint("name", new [] {"name"})]
+        [UniqueConstraint("name", new [] {"name"}, IsAlternateKey=true)]
         [CheckConstraint("not_empty", "name <> ''")]
         public DbSet<StateValue> State { get; set; } = null!;
 
         [Entity("name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
-        [UniqueConstraint("name", new [] {"name"})]
+        [UniqueConstraint("name", new [] {"name"}, IsAlternateKey=true)]
         public DbSet<Schema> Schemas { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"schema_id", "name"})]
+        [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
         public DbSet<Entity> Entities { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> '' AND name <> 'id' AND name <> 'sub_entity'")]
         public DbSet<ColumnField> ColumnFields { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> '' AND name <> 'id' AND name <> 'sub_entity'")]
         public DbSet<ComputedField> ComputedFields { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         [CheckConstraint("not_empty", "columns <> (array[] :: array(string))")]
         public DbSet<UniqueConstraint> UniqueConstraints { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         public DbSet<CheckConstraint> CheckConstraints { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"})]
+        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         [CheckConstraint("not_empty", "expressions <> (array[] :: array(string))")]
         public DbSet<Index> Indexes { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"schema_id", "name"})]
+        [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<UserView> UserViews { get; set; } = null!;
 
@@ -73,42 +73,42 @@ namespace FunWithFlags.FunDBSchema.System
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"schema_id", "name"})]
+        [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<Role> Roles { get; set; } = null!;
 
         [Entity("id", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
-        [UniqueConstraint("role", new [] {"role_id", "parent_id"})]
+        [UniqueConstraint("role", new [] {"role_id", "parent_id"}, IsAlternateKey=true)]
         public DbSet<RoleParent> RoleParents { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "role_id=>__main || '.' || entity_id=>__main")]
-        [UniqueConstraint("entry", new [] {"role_id", "entity_id"})]
+        [UniqueConstraint("entry", new [] {"role_id", "entity_id"}, IsAlternateKey=true)]
         public DbSet<RoleEntity> RoleEntities { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "role_entity_id=>__main || '.' || column_name")]
-        [UniqueConstraint("entry", new [] {"role_entity_id", "column_name"})]
+        [UniqueConstraint("entry", new [] {"role_entity_id", "column_name"}, IsAlternateKey=true)]
         public DbSet<RoleColumnField> RoleColumnFields { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || field_entity_id=>__main || '.' || field_name")]
-        [UniqueConstraint("entry", new [] {"schema_id", "field_entity_id", "field_name"})]
+        [UniqueConstraint("entry", new [] {"schema_id", "field_entity_id", "field_name"}, IsAlternateKey=true)]
         public DbSet<FieldAttributes> FieldsAttributes { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || path")]
-        [UniqueConstraint("entry", new [] {"schema_id", "path"})]
+        [UniqueConstraint("entry", new [] {"schema_id", "path"}, IsAlternateKey=true)]
         public DbSet<Module> Modules { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
-        [UniqueConstraint("entry", new [] {"schema_id", "name"})]
+        [UniqueConstraint("entry", new [] {"schema_id", "name"}, IsAlternateKey=true)]
         public DbSet<Action> Actions { get; set; } = null!;
 
         [Entity("full_name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || trigger_entity_id=>__main || '.' || name")]
-        [UniqueConstraint("entry", new [] {"schema_id", "trigger_entity_id", "name"})]
+        [UniqueConstraint("entry", new [] {"schema_id", "trigger_entity_id", "name"}, IsAlternateKey=true)]
         public DbSet<Trigger> Triggers { get; set; } = null!;
 
         [Entity("id", InsertedInternally=true, IsFrozen=true)]
@@ -313,6 +313,8 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("reference(public.entities)")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
+        [ColumnField("bool", Default="false")]
+        public bool IsAlternateKey { get; set; }
         // Order is important here.
         [ColumnField("array(string)")]
         [Required]

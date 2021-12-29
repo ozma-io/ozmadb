@@ -24,6 +24,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
     {
         public string Name { get; }
         public string[] Columns { get; }
+        public bool IsAlternateKey { get; set; }
 
         public UniqueConstraintAttribute(string name, string[] columns)
         {

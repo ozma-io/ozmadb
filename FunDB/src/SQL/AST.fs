@@ -279,7 +279,7 @@ let findSimpleType (str : TypeName) : SimpleType option =
 
 [<SerializeAsObject("type", AllowUnknownType=true)>]
 type ValueType<'t> when 't :> ISQLString =
-    | [<CaseName(null, InnerObject=true)>] VTScalar of Type : 't
+    | [<CaseName(null, Type=CaseSerialization.InnerObject)>] VTScalar of Type : 't
     | [<CaseName("array")>] VTArray of Subtype : 't
     with
         override this.ToString () = this.ToSQLString()

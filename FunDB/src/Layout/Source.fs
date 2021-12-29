@@ -12,6 +12,7 @@ open FunWithFlags.FunDB.FunQL.AST
 
 type SourceUniqueConstraint =
     { Columns : FieldName[]
+      IsAlternateKey : bool
     }
 
 type SourceCheckConstraint =
@@ -23,7 +24,7 @@ type IndexType =
     | [<CaseName("gist")>] ITGIST
     | [<CaseName("gin")>] ITGIN
     with
-        static member private Fields = unionNames (unionCases typeof<IndexType>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
+        static member private Fields = caseNames (unionCases typeof<IndexType>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
 
         override this.ToString () = this.ToFunQLString()
 
@@ -34,7 +35,7 @@ type IndexType =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-let indexTypesMap = unionNames (unionCases typeof<IndexType>) |> Map.mapWithKeys (fun name case -> (Option.get name, FSharpValue.MakeUnion(case.Info, [||]) :?> IndexType))
+let indexTypesMap = caseNames (unionCases typeof<IndexType>) |> Map.mapWithKeys (fun name case -> (Option.get name, FSharpValue.MakeUnion(case.Info, [||]) :?> IndexType))
 
 type SourceIndex =
     { Expressions : string[]

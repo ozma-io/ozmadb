@@ -40,6 +40,8 @@ type ResolvedReferenceFieldExpr = FieldExpr<ResolvedEntityRef, ReferenceRef>
 [<NoEquality; NoComparison>]
 type ResolvedUniqueConstraint =
     { Columns : FieldName[]
+      IsAlternateKey : bool
+      InheritedFrom : ResolvedEntityRef option
       HashName : HashName // Guaranteed to be unique in an entity.
     }
 

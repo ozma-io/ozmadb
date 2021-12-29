@@ -95,6 +95,7 @@ type private HalfResolvedComputedField =
 type private HalfResolvedEntity =
     { ColumnFields : Map<FieldName, ResolvedColumnField>
       ComputedFields : Map<FieldName, HalfResolvedComputedField>
+      UniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
       Children : Map<ResolvedEntityRef, ChildEntity>
       InsertedInternally : bool
       UpdatedInternally : bool
@@ -133,15 +134,26 @@ type private HalfResolvedEntity =
 
 type private HalfResolvedEntitiesMap = Map<ResolvedEntityRef, HalfResolvedEntity>
 
-let private resolveUniqueConstraint (entity : HalfResolvedEntity) (constrName : ConstraintName) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
+let private resolveUniqueConstraint (columnFields : Map<FieldName, ResolvedColumnField>) (constrName : ConstraintName) (constr : SourceUniqueConstraint) : ResolvedUniqueConstraint =
     if Array.isEmpty constr.Columns then
         raise <| ResolveLayoutException "Empty unique constraint"
 
+    try
+        Set.ofSeqUnique constr.Columns |> ignore
+    with
+    | Failure msg -> raisef ResolveLayoutException "Unique constraint field names clash: %s" msg
+
     for name in constr.Columns do
-        if not <| Map.containsKey name entity.ColumnFields then
+        match Map.tryFind name columnFields with
+        | None ->
             raisef ResolveLayoutException "Unknown column %O in unique constraint" name
+        | Some col ->
+            if constr.IsAlternateKey && col.IsNullable then
+                raisef ResolveLayoutException "Column %O in alternate key can't be nullable" name
 
     { Columns = constr.Columns
+      IsAlternateKey = constr.IsAlternateKey
+      InheritedFrom = None
       HashName = makeHashName constrName
     }
 
@@ -293,6 +305,35 @@ type private Phase1Resolver (layout : SourceLayout) =
         with
         | Failure msg -> raisef ResolveLayoutException "Field names hash clash: %s" msg
 
+        let mapUniqueConstraint name constr =
+            try
+                checkName name
+                resolveUniqueConstraint columnFields name constr
+            with
+            | e -> raisefWithInner ResolveLayoutException e "In unique constraint %O" name
+        let selfUniqueConstraints = Map.map mapUniqueConstraint entity.UniqueConstraints
+
+        let uniqueConstraints =
+            match parent with
+            | None -> selfUniqueConstraints
+            | Some p ->
+                let parentRef = Option.get entity.Parent
+                let addParent (constr : ResolvedUniqueConstraint) =
+                    if Option.isNone constr.InheritedFrom then
+                        { constr with InheritedFrom = Some parentRef }
+                    else
+                        constr
+                let inheritedConstrs = Map.map (fun name field -> addParent field) p.UniqueConstraints
+                try
+                    Map.unionUnique inheritedConstrs selfUniqueConstraints
+                with
+                | Failure msg -> raisef ResolveLayoutException "Column field names clash: %s" msg
+
+        try
+            selfUniqueConstraints |> Map.values |> Seq.map (fun c -> c.HashName) |> Set.ofSeqUnique |> ignore
+        with
+        | Failure msg -> raisef ResolveLayoutException "Unique constraint names clash (first %i characters): %s" hashNameLength msg
+
         let root =
             match parent with
             | None ->
@@ -311,6 +352,7 @@ type private Phase1Resolver (layout : SourceLayout) =
         let ret =
             { ColumnFields = columnFields
               ComputedFields = computedFields
+              UniqueConstraints = uniqueConstraints
               InsertedInternally = getFlag (fun parent -> parent.InsertedInternally) || entity.InsertedInternally
               UpdatedInternally = getFlag (fun parent -> parent.UpdatedInternally) || entity.UpdatedInternally
               DeletedInternally = getFlag (fun parent -> parent.DeletedInternally) || entity.DeletedInternally
@@ -759,19 +801,6 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         with
         | Failure msg -> raisef ResolveLayoutException "Check constraint names clash (first %i characters): %s" hashNameLength msg
 
-        let mapUniqueConstraint name constr =
-            try
-                checkName name
-                resolveUniqueConstraint entity name constr
-            with
-            | e -> raisefWithInner ResolveLayoutException e "In unique constraint %O" name
-        let uniqueConstraints = Map.map mapUniqueConstraint entity.Source.UniqueConstraints
-
-        try
-            uniqueConstraints |> Map.values |> Seq.map (fun c -> c.HashName) |> Set.ofSeqUnique |> ignore
-        with
-        | Failure msg -> raisef ResolveLayoutException "Unique constraint names clash (first %i characters): %s" hashNameLength msg
-
         let mapIndex name index =
             try
                 checkName name
@@ -798,7 +827,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let ret : ResolvedEntity =
             { ColumnFields = entity.ColumnFields
               ComputedFields = computedFields
-              UniqueConstraints = uniqueConstraints
+              UniqueConstraints = entity.UniqueConstraints
               CheckConstraints = checkConstraints
               Indexes = indexes
               MainField = entity.Source.MainField

@@ -12,7 +12,7 @@ open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDBSchema.System
 
-let private timeCasesMap = unionNames (unionCases typeof<TriggerTime>) |> Map.mapWithKeys (fun name case -> (Option.get name, FSharpValue.MakeUnion(case.Info, [||]) :?> TriggerTime))
+let private timeCasesMap = caseNames (unionCases typeof<TriggerTime>) |> Map.mapWithKeys (fun name case -> (Option.get name, FSharpValue.MakeUnion(case.Info, [||]) :?> TriggerTime))
 
 let private makeSourceAttributeField (trig : Trigger) : SourceTrigger =
     { AllowBroken = trig.AllowBroken

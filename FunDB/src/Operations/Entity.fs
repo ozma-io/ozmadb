@@ -1,13 +1,14 @@
 ﻿module FunWithFlags.FunDB.Operations.Entity
 
 open FSharpPlus
-open System.Collections.Generic
 open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
@@ -57,6 +58,10 @@ type EntityDeniedException (message : string, innerException : Exception, isUser
 
 type RowId = int
 
+type RowKey =
+    | RKId of RowId
+    | RKAlt of Name : ConstraintName * Keys : LocalArgumentsMap
+
 let private subEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
 
 let private runQuery (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>) (query : Query<'q>) (comments : string option) (placeholders : ArgumentValuesMap) (cancellationToken : CancellationToken) : Task<'a> =
@@ -79,8 +84,16 @@ let private parseIntValue = function
 
 let private runIntQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     task {
-        let! (name, typ, ret) = runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken
-        return parseIntValue ret
+        match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
+        | None -> return failwith "Unexpected empty result"
+        | Some (name, typ, ret) -> return parseIntValue ret
+    }
+
+let private runOptionalIntQuery (connection : QueryConnection) query comments placeholders cancellationToken =
+    task {
+        match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
+        | None -> return None
+        | Some (name, typ, ret) -> return Some (parseIntValue ret)
     }
 
 let private runIntsQuery (connection : QueryConnection) query comments placeholders cancellationToken =
@@ -92,15 +105,11 @@ let private parseStringValue = function
     | SQL.VString s -> s
     | ret -> failwithf "Non-string result: %O" ret
 
-let private parseOptionalStringValue = function
-    | SQL.VString s -> Some s
-    | SQL.VNull -> None
-    | ret -> failwithf "Non-string result: %O" ret
-
 let private runOptionalStringQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     task {
-        let! (name, typ, ret) = runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken
-        return parseOptionalStringValue ret
+        match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
+        | None -> return None
+        | Some (name, typ, ret) -> return Some (parseStringValue ret)
     }
 
 let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
@@ -142,11 +151,233 @@ let private countAndThrow
                 raisef EntityNotFoundException "Entry not found"
     }
 
+let private runQueryAndGetId
+        (connection : QueryConnection)
+        (applyRole : ResolvedRole option)
+        (tableRef : SQL.TableRef)
+        (query : Query<'a>)
+        (comments : string option)
+        (argumentValues : ArgumentValuesMap)
+        (whereExprWithoutRole : SQL.ValueExpr)
+        (argumentsWithoutRole : QueryArguments)
+        (key : RowKey)
+        (cancellationToken : CancellationToken) : Task<RowId> =
+    task {
+        let! rowId =
+            task {
+                match key with
+                | RKId id ->
+                    match! runNonQuery connection query comments argumentValues cancellationToken with
+                    | 0 -> return None
+                    | 1 -> return Some id
+                    | _ -> return failwith "Impossible"
+                | RKAlt (name, keys) -> return! runOptionalIntQuery connection query comments argumentValues cancellationToken
+            }
+        match rowId with
+        | None ->
+            // Notice we don't pass `Where` with applied role -- our aim here is to check if the row exists at all.
+            do! countAndThrow connection applyRole tableRef whereExprWithoutRole argumentsWithoutRole argumentValues cancellationToken
+            return failwith "Impossible"
+        | Some id -> return id
+    }
+
 let private realEntityAnnotation (entityRef : ResolvedEntityRef) : RealEntityAnnotation =
     { RealEntity = entityRef
       FromPath = false
       IsInner = true
       AsRoot = false
+    }
+
+type private AltKeyResult =
+    { Arguments : QueryArguments
+      ArgumentValues : ArgumentValuesMap
+      Where : SQL.ValueExpr
+      UsedFields : (ResolvedFieldRef * UsedField) seq
+    }
+
+let private altKeyCheck
+        (layout : Layout)
+        (entityRef : ResolvedEntityRef)
+        (keyName : ConstraintName)
+        (keyArgs : LocalArgumentsMap)
+        (aliasRef : SQL.TableRef) : AltKeyResult =
+    let entity = layout.FindEntity entityRef |> Option.get
+    let constr =
+        match Map.tryFind keyName entity.UniqueConstraints with
+        | None -> raisef EntityArgumentsException "Unique constraint %O does not exist" keyName
+        | Some constr when not constr.IsAlternateKey -> raisef EntityArgumentsException "Unique constraint %O is not an alternate key" keyName
+        | Some constr -> constr
+
+    let mutable arguments = emptyArguments
+    let mutable argumentValues = Map.empty
+    let mutable usedFields = []
+
+    let getCheck (fieldName : FieldName) =
+        match Map.tryFind fieldName keyArgs with
+        | None -> raisef EntityArgumentsException "Key column %O is not specified" fieldName
+        | Some arg ->
+            let field = Map.find fieldName entity.ColumnFields
+            let argName = PLocal fieldName
+            let (argInfo, newArguments) = addArgument argName (requiredArgument field.FieldType) arguments
+            arguments <- newArguments
+            argumentValues <- Map.add argName arg argumentValues
+            let usedField = { Entity = Option.defaultValue entityRef field.InheritedFrom; Name = fieldName }
+            usedFields <- (usedField, usedFieldSelect) :: usedFields
+            SQL.VEBinaryOp (SQL.VEColumn { Table = Some aliasRef; Name = field.ColumnName }, SQL.BOEq, SQL.VEPlaceholder argInfo.PlaceholderId)
+
+    let check = constr.Columns |> Seq.map getCheck |> Seq.fold1 (curry SQL.VEAnd)
+    { Arguments = arguments
+      ArgumentValues = argumentValues
+      Where = check
+      UsedFields = usedFields
+    }
+
+let private funIdArg = requiredArgument <| FTScalar SFTInt
+
+let private rowKeyCheck
+        (layout : Layout)
+        (entityRef : ResolvedEntityRef)
+        (key : RowKey)
+        (aliasRef : SQL.TableRef) : AltKeyResult =
+    match key with
+    | RKId id ->
+        let entity = layout.FindEntity entityRef |> Option.get
+        let (idArg, arguments) = addArgument (PLocal funId) funIdArg emptyArguments
+        let argumentValues = Map.singleton (PLocal funId) (FInt id)
+
+        let tableRef = compileResolvedEntityRef entity.Root
+        let aliasRef = { Schema = None; Name = tableRef.Name } : SQL.TableRef
+        let whereId = SQL.VEBinaryOp (SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
+        let usedFields = seq { ({ Entity = entity.Root; Name = funId }, usedFieldSelect) }
+        { Arguments = arguments
+          ArgumentValues = argumentValues
+          Where = whereId
+          UsedFields = usedFields
+        }
+    | RKAlt (name, keys) -> altKeyCheck layout entityRef name keys aliasRef
+
+type private SelectOperationBits =
+    { Arguments : QueryArguments
+      Where : SQL.ValueExpr
+      Columns : SQL.ValueExpr seq
+      UsedFields : (ResolvedFieldRef * UsedField) seq
+    }
+
+type private SelectOperationQuery =
+    { Query : Query<SQL.SelectExpr>
+      ArgumentsWithoutRole : QueryArguments
+      Table : SQL.TableRef
+      WhereWithoutRole : SQL.ValueExpr
+    }
+
+let private buildSelectOperation
+        (layout : Layout)
+        (applyRole : ResolvedRole option)
+        (entityRef : ResolvedEntityRef)
+        (getBits : SQL.TableRef -> SelectOperationBits) =
+    let entity = layout.FindEntity entityRef |> Option.get
+
+    let tableRef = compileResolvedEntityRef entity.Root
+    let aliasRef = { Schema = None; Name = tableRef.Name } : SQL.TableRef
+    let bits = getBits aliasRef
+
+    let checkExpr =
+        if Option.isSome entity.Parent then
+            Some <| makeCheckExpr subEntityColumn layout entityRef
+        else
+            None
+    let whereExpr = Option.addWith (curry SQL.VEAnd) bits.Where checkExpr
+    let fromExpr = SQL.FTable { Table = compileResolvedEntityRef entity.Root; Alias = None; Extra = ObjectMap.empty }
+    let entityInfo =
+        { Ref = entityRef
+          IsInner = true
+          AsRoot = false
+          Check = checkExpr
+        }
+    let selectInfo =
+        { Entities = Map.singleton aliasRef.Name entityInfo
+          Joins = emptyJoinPaths
+          WhereWithoutSubentities = Some bits.Where
+        } : SelectFromInfo
+    let results = bits.Columns |> Seq.map (fun expr -> SQL.SCExpr (None, expr)) |> Seq.toArray
+    let single =
+        { SQL.emptySingleSelectExpr with
+            Columns = results
+            From = Some fromExpr
+            Where = Some whereExpr
+            Extra = ObjectMap.singleton selectInfo
+        }
+    let compiled = SQL.selectExpr (SQL.SSelect single)
+
+    let query =
+        { Expression = compiled
+          Arguments = bits.Arguments
+        }
+
+    let query =
+        match applyRole with
+        | None -> query
+        | Some role ->
+            let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntitySelect bits.UsedFields
+            let appliedDb =
+                try
+                    applyPermissions layout role usedDatabase
+                with
+                | :? PermissionsApplyException as e ->
+                    raisefWithInner EntityDeniedException e ""
+            applyRoleSelectExpr layout appliedDb query
+
+    { Query = query
+      Table = tableRef
+      WhereWithoutRole = whereExpr
+      ArgumentsWithoutRole = bits.Arguments
+    }
+
+let resolveAltKey
+        (connection : QueryConnection)
+        (globalArgs : LocalArgumentsMap)
+        (layout : Layout)
+        (applyRole : ResolvedRole option)
+        (entityRef : ResolvedEntityRef)
+        (comments : string option)
+        (keyName : ConstraintName)
+        (keyArgs : LocalArgumentsMap)
+        (cancellationToken : CancellationToken) : Task<RowId> =
+    task {
+        let mutable argumentValues = Map.mapKeys PGlobal globalArgs
+
+        let entity = layout.FindEntity entityRef |> Option.get
+
+        let opQuery = buildSelectOperation layout applyRole entityRef <| fun aliasRef ->
+            let alt = altKeyCheck layout entityRef keyName keyArgs aliasRef
+            argumentValues <- Map.union argumentValues alt.ArgumentValues
+            let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
+            { Where = alt.Where
+              Columns = seq { entityId }
+              UsedFields = Seq.append alt.UsedFields (Seq.singleton ({ Entity = entity.Root; Name = funId }, usedFieldSelect))
+              Arguments = alt.Arguments
+            }
+
+        match! runOptionalIntQuery connection opQuery.Query comments argumentValues cancellationToken with
+        | None ->
+            do! countAndThrow connection applyRole opQuery.Table opQuery.WhereWithoutRole opQuery.ArgumentsWithoutRole argumentValues cancellationToken
+            return failwith "Impossible"
+        | Some rawId -> return rawId
+    }
+
+let resolveKey
+        (connection : QueryConnection)
+        (globalArgs : LocalArgumentsMap)
+        (layout : Layout)
+        (applyRole : ResolvedRole option)
+        (entityRef : ResolvedEntityRef)
+        (comments : string option)
+        (key : RowKey)
+        (cancellationToken : CancellationToken) : ValueTask<RowId> =
+    vtask {
+        match key with
+        | RKId id -> return id
+        | RKAlt (name, args) -> return! resolveAltKey connection globalArgs layout applyRole entityRef comments name args cancellationToken
     }
 
 let insertEntities
@@ -242,25 +473,25 @@ let insertEntities
         return! runIntsQuery connection query comments argumentValues cancellationToken
     }
 
-let private funIdArg = requiredArgument <| FTScalar SFTInt
-
 let updateEntity
         (connection : QueryConnection)
         (globalArgs : LocalArgumentsMap)
         (layout : Layout)
         (applyRole : ResolvedRole option)
         (entityRef : ResolvedEntityRef)
-        (id : RowId)
+        (key : RowKey)
         (comments : string option)
         (updateArgs : LocalArgumentsMap)
-        (cancellationToken : CancellationToken) : Task =
-    unitTask {
+        (cancellationToken : CancellationToken) : Task<RowId> =
+    task {
         let entity = layout.FindEntity entityRef |> Option.get
 
-        let (idArg, initialArguments) = addArgument (PLocal funId) funIdArg emptyArguments
-        let mutable arguments = initialArguments
-        let initialArgumentValues = Map.singleton (PLocal funId) (FInt id)
-        let mutable argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) initialArgumentValues
+        let tableRef = compileResolvedEntityRef entity.Root
+        let aliasRef = { Schema = None; Name = tableRef.Name } : SQL.TableRef
+        let keyCheck = rowKeyCheck layout entityRef key aliasRef
+
+        let mutable arguments = keyCheck.Arguments
+        let mutable argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) keyCheck.ArgumentValues
 
         let getValue (fieldName : FieldName) (fieldValue : FieldValue) =
             let field = Map.find fieldName entity.ColumnFields
@@ -275,20 +506,26 @@ let updateEntity
 
         let columns = Map.mapWithKeys getValue updateArgs
 
-        let tableRef = compileResolvedEntityRef entity.Root
-        let whereId = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
         let whereExpr =
             if Option.isSome entity.Parent then
                 let checkExpr = makeCheckExpr subEntityColumn layout entityRef
-                SQL.VEAnd (checkExpr, whereId)
+                SQL.VEAnd (checkExpr, keyCheck.Where)
             else
-                whereId
+                keyCheck.Where
 
         let opTable = SQL.operationTable tableRef
+        let returning =
+            match key with
+            | RKId id -> [||]
+            | RKAlt (name, keys) ->
+                let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
+                [| SQL.SCExpr (None, entityId) |]
+
         let expr =
             { SQL.updateExpr opTable with
                   Columns = columns
                   Where = Some whereExpr
+                  Returning = returning
                   Extra = realEntityAnnotation entityRef
             }
         let query =
@@ -303,9 +540,19 @@ let updateEntity
                     let field = Map.find fieldName entity.ColumnFields
                     let fieldEntity = Option.defaultValue entityRef field.InheritedFrom
                     let fieldRef = { Entity = fieldEntity; Name = fieldName }
-                    (fieldRef, usedFieldInsert)
+                    (fieldRef, usedFieldUpdate)
 
-                let usedFields = updateArgs |> Map.keys |> Seq.map getUsedField
+                let usedFields =
+                    updateArgs
+                    |> Map.keys
+                    |> Seq.map getUsedField
+                    |> Seq.append keyCheck.UsedFields
+                let usedFields =
+                    match key with
+                    | RKId id -> usedFields
+                    | RKAlt (name, keys) ->
+                        let fieldRef = { Entity = entity.Root; Name = funId }
+                        Seq.append usedFields (Seq.singleton (fieldRef, usedFieldInsert))
                 let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityUpdate usedFields
                 let appliedDb =
                     try
@@ -315,10 +562,7 @@ let updateEntity
                         raisefWithInner EntityDeniedException e ""
                 applyRoleUpdateExpr layout appliedDb query
 
-        let! affected = runNonQuery connection query comments argumentValues cancellationToken
-        if affected = 0 then
-            // Notice we don't pass `Where` with applied role -- our aim here is to check if the row exists at all.
-            do! countAndThrow connection applyRole tableRef whereExpr initialArguments initialArgumentValues cancellationToken
+        return! runQueryAndGetId connection applyRole tableRef query comments argumentValues whereExpr arguments key cancellationToken
     }
 
 let deleteEntity
@@ -327,38 +571,45 @@ let deleteEntity
         (layout : Layout)
         (applyRole : ResolvedRole option)
         (entityRef : ResolvedEntityRef)
-        (id : RowId)
+        (key : RowKey)
         (comments : string option)
-        (cancellationToken : CancellationToken) : Task =
-    unitTask {
+        (cancellationToken : CancellationToken) : Task<RowId> =
+    task {
         let entity = layout.FindEntity entityRef |> Option.get
+
+        let tableRef = compileResolvedEntityRef entity.Root
+        let aliasRef = { Schema = None; Name = tableRef.Name } : SQL.TableRef
+        let keyCheck = rowKeyCheck layout entityRef key aliasRef
+        let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) keyCheck.ArgumentValues
 
         if entity.IsAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
 
-        let (idArg, initialArguments) = addArgument (PLocal funId) funIdArg emptyArguments
-        let initialArgumentValues = Map.singleton (PLocal funId) (FInt id)
-        let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) initialArgumentValues
-
-        let whereExpr = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
         let whereExpr =
             if hasSubType entity then
                 let subEntityCheck =
-                    SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
-                SQL.VEAnd (subEntityCheck, whereExpr)
+                    SQL.VEBinaryOp (SQL.VEColumn { Table = Some aliasRef; Name = sqlFunSubEntity }, SQL.BOEq, SQL.VEValue (SQL.VString entity.TypeName))
+                SQL.VEAnd (subEntityCheck, keyCheck.Where)
             else
-                whereExpr
-        let tableRef = compileResolvedEntityRef entity.Root
+                keyCheck.Where
 
         let opTable = SQL.operationTable tableRef
+        let returning =
+            match key with
+            | RKId id -> [||]
+            | RKAlt (name, keys) ->
+                let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
+                [| SQL.SCExpr (None, entityId) |]
+
         let expr =
             { SQL.deleteExpr opTable with
                   Where = Some whereExpr
+                  Returning = returning
                   Extra = realEntityAnnotation entityRef
             }
         let query =
             { Expression = expr
-              Arguments = initialArguments
+              Arguments = keyCheck.Arguments
             }
         let query =
             match applyRole with
@@ -373,6 +624,13 @@ let deleteEntity
                     entity.ColumnFields
                     |> Map.toSeq
                     |> Seq.map getUsedField
+                    |> Seq.append keyCheck.UsedFields
+                let usedFields =
+                    match key with
+                    | RKId id -> usedFields
+                    | RKAlt (name, keys) ->
+                        let fieldRef = { Entity = entity.Root; Name = funId }
+                        Seq.append usedFields (Seq.singleton (fieldRef, usedFieldInsert))
                 let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityDelete usedFields
                 let appliedDb =
                     try
@@ -382,9 +640,7 @@ let deleteEntity
                         raisefWithInner EntityDeniedException e ""
                 applyRoleDeleteExpr layout appliedDb query
 
-        let! affected = runNonQuery connection query comments argumentValues cancellationToken
-        if affected = 0 then
-            do! countAndThrow connection applyRole tableRef whereExpr initialArguments initialArgumentValues cancellationToken
+        return! runQueryAndGetId connection applyRole tableRef query comments argumentValues whereExpr keyCheck.Arguments key cancellationToken
     }
 
 let private getSubEntity
@@ -393,62 +649,69 @@ let private getSubEntity
         (layout : Layout)
         (applyRole : ResolvedRole option)
         (entityRef : ResolvedEntityRef)
-        (id : RowId)
+        (key : RowKey)
         (comments : string option)
-        (cancellationToken : CancellationToken) : Task<ResolvedEntityRef> =
+        (cancellationToken : CancellationToken) : Task<RowId * ResolvedEntityRef> =
     task {
         let possibleTypes = allPossibleEntitiesList layout entityRef |> Seq.toArray
         match possibleTypes with
         | [||] -> return raisef EntityNotFoundException "Entry not found"
-        | [|(realRef, bits)|] -> return realRef
+        | [|(realRef, bits)|] ->
+            let! id = resolveKey connection globalArgs layout applyRole entityRef comments key cancellationToken
+            return (id, realRef)
         | _ ->
             let entity = layout.FindEntity entityRef |> Option.get
 
-            let (idArg, initialArguments) = addArgument (PLocal funId) funIdArg emptyArguments
-            let initialArgumentValues = Map.singleton (PLocal funId) (FInt id)
-            let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) initialArgumentValues
+            let mutable argumentValues = Map.mapKeys PGlobal globalArgs
 
-            let fromExpr = FEntity (fromEntity <| relaxEntityRef entityRef)
-            let entityId = resolvedRefFieldExpr <| VRColumn { Entity = Some (relaxEntityRef entityRef); Name = funId } : ResolvedFieldExpr
-            let argId = resolvedRefFieldExpr <| VRPlaceholder (PLocal funId)
-            let whereExpr = FEBinaryOp (entityId, BOEq, argId)
-            let entitySubEntity = resolvedRefFieldExpr <| VRColumn { Entity = Some (relaxEntityRef entityRef); Name = funSubEntity } : ResolvedFieldExpr
-            let result = queryColumnResult entitySubEntity
-            let single =
-                { emptySingleSelectExpr with
-                    Results = [| QRExpr result |]
-                    From = Some fromExpr
-                    Where = Some whereExpr
+            let opQuery = buildSelectOperation layout applyRole entityRef <| fun aliasRef ->
+                let keyCheck = rowKeyCheck layout entityRef key aliasRef
+                argumentValues <- Map.union argumentValues keyCheck.ArgumentValues
+                let entitySubEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunSubEntity }
+
+                let commonUsedFields =
+                    Seq.append
+                        keyCheck.UsedFields
+                        (Seq.singleton ({ Entity = entity.Root; Name = funSubEntity }, usedFieldSelect))
+
+                let (results, usedFields) =
+                    match key with
+                    | RKId id ->
+                        let results = seq { entitySubEntity }
+                        (results, commonUsedFields)
+                    | RKAlt (name, args) ->
+                        let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
+                        let usedFields = Seq.append commonUsedFields (Seq.singleton ({ Entity = entity.Root; Name = funId }, usedFieldSelect))
+                        let results = seq { entityId; entitySubEntity }
+                        (results, usedFields)
+
+                { Where = keyCheck.Where
+                  Columns = results
+                  UsedFields = usedFields
+                  Arguments = keyCheck.Arguments
                 }
-            let select = selectExpr (SSelect single)
-            let (exprInfo, compiled) = compileSelectExpr layout initialArguments select
 
-            let query =
-                { Expression = compiled
-                  Arguments = initialArguments
-                }
-
-            let query =
-                match applyRole with
-                | None -> query
-                | Some role ->
-                    let usedFields = seq { ({ Entity = entity.Root; Name = funSubEntity }, usedFieldSelect) }
-                    let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntitySelect usedFields
-                    let appliedDb =
-                        try
-                            applyPermissions layout role usedDatabase
-                        with
-                        | :? PermissionsApplyException as e ->
-                            raisefWithInner EntityDeniedException e ""
-                    applyRoleSelectExpr layout appliedDb query
-
-            match! runOptionalStringQuery connection query comments argumentValues cancellationToken with
+            let execute query args cancellationToken = connection.ExecuteRowValuesQuery query args cancellationToken
+            match! runQuery execute opQuery.Query comments argumentValues cancellationToken with
             | None ->
-                let whereExpr = SQL.VEBinaryOp (SQL.VEColumn { Table = None; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
-                let tableRef = compileResolvedEntityRef entity.Root
-                do! countAndThrow connection applyRole tableRef whereExpr initialArguments initialArgumentValues cancellationToken
+                do! countAndThrow connection applyRole opQuery.Table opQuery.WhereWithoutRole opQuery.ArgumentsWithoutRole argumentValues cancellationToken
                 return failwith "Impossible"
-            | Some rawSubEntity -> return parseTypeName entity.Root rawSubEntity
+            | Some row ->
+                match key with
+                | RKId id ->
+                    match row with
+                    | [|(_, _, subEntityValue)|] ->
+                        let rawSubEntity = parseStringValue subEntityValue
+                        let subEntity = parseTypeName entity.Root rawSubEntity
+                        return (id, subEntity)
+                    | _ -> return failwith "Impossible"
+                | RKAlt (name, args) ->
+                    match row with
+                    | [|(_, _, idValue); (_, _, subEntityValue)|] ->
+                        let rawSubEntity = parseStringValue subEntityValue
+                        let subEntity = parseTypeName entity.Root rawSubEntity
+                        return (parseIntValue idValue, subEntity)
+                    | _ -> return failwith "Impossible"
     }
 
 let private funRelatedId = FunQLName "related_id"
@@ -461,9 +724,10 @@ let private getRelatedRowIds
         (fieldRef : ResolvedFieldRef)
         (relatedId : RowId)
         (comments : string option)
-        (cancellationToken : CancellationToken) : Task<(ResolvedEntityRef * int)[]> =
+        (cancellationToken : CancellationToken) : Task<(RowId * ResolvedEntityRef)[]> =
     task {
         let entity = layout.FindEntity fieldRef.Entity |> Option.get
+        let field = Map.find fieldRef.Name entity.ColumnFields
         let possibleTypes = allPossibleEntitiesList layout fieldRef.Entity |> Seq.toArray
         let singleSubEntity =
             match possibleTypes with
@@ -471,75 +735,49 @@ let private getRelatedRowIds
             | [|(realRef, bits)|] -> Some realRef
             | _ -> None
 
-        let (idArg, initialArguments) = addArgument (PLocal funRelatedId) funIdArg emptyArguments
         let initialArgumentValues = Map.singleton (PLocal funRelatedId) (FInt relatedId)
         let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) initialArgumentValues
 
-        let fromExpr = FEntity (fromEntity <| relaxEntityRef fieldRef.Entity)
-        let entityRelatedField = resolvedRefFieldExpr <| VRColumn (relaxFieldRef fieldRef)
-        let argField = resolvedRefFieldExpr <| VRPlaceholder (PLocal funRelatedId)
-        let whereExpr = FEBinaryOp (entityRelatedField, BOEq, argField)
-        let entityId = resolvedRefFieldExpr <| VRColumn { Entity = Some (relaxEntityRef fieldRef.Entity); Name = funId } : ResolvedFieldExpr
-        let resultId = queryColumnResult entityId
-
-        let results =
-            if Option.isSome singleSubEntity then
-                [| QRExpr resultId |]
-            else
-                let entitySubEntity = resolvedRefFieldExpr <| VRColumn { Entity = Some (relaxEntityRef fieldRef.Entity); Name = funSubEntity } : ResolvedFieldExpr
-                let resultSubEntity = queryColumnResult entitySubEntity
-                [| QRExpr resultId; QRExpr resultSubEntity |]
-
-        let single =
-            { emptySingleSelectExpr with
-                Results = results
-                From = Some fromExpr
-                Where = Some whereExpr
-            }
-        let select = selectExpr (SSelect single)
-        let (exprInfo, compiled) = compileSelectExpr layout initialArguments select
-
-        let query =
-            { Expression = compiled
-              Arguments = initialArguments
-            }
-
-        let query =
-            match applyRole with
-            | None -> query
-            | Some role ->
-                let usedFields = seq {
-                    (fieldRef, usedFieldSelect)
-                    ({ Entity = entity.Root; Name = funId }, usedFieldSelect)
+        let opQuery = buildSelectOperation layout applyRole fieldRef.Entity <| fun aliasRef ->
+            let (idArg, arguments) = addArgument (PLocal funRelatedId) funIdArg emptyArguments
+            let whereRelated = SQL.VEBinaryOp (SQL.VEColumn { Table = Some aliasRef; Name = field.ColumnName }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
+            let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
+            let commonUsedFields =
+                seq {
+                    { Entity = entity.Root; Name = funId }
+                    { Entity = Option.defaultValue fieldRef.Entity field.InheritedFrom; Name = fieldRef.Name }
                 }
-                let usedFields =
-                    if Option.isSome singleSubEntity then
-                        Seq.append usedFields (Seq.singleton ({ Entity = entity.Root; Name = funSubEntity }, usedFieldSelect))
-                    else
-                        usedFields
-                let usedDatabase = singleKnownFlatEntity entity.Root fieldRef.Entity usedEntitySelect usedFields
-                let appliedDb =
-                    try
-                        applyPermissions layout role usedDatabase
-                    with
-                    | :? PermissionsApplyException as e ->
-                        raisefWithInner EntityDeniedException e ""
-                applyRoleSelectExpr layout appliedDb query
+
+            let (results, usedFields) =
+                if Option.isSome singleSubEntity then
+                    let results = seq { entityId }
+                    (results, commonUsedFields)
+                else
+                    let entitySubEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunSubEntity }
+                    let usedFields = Seq.append commonUsedFields (Seq.singleton { Entity = entity.Root; Name = funSubEntity })
+                    let results = seq { entityId; entitySubEntity }
+                    (results, usedFields)
+
+            { Where = whereRelated
+              Columns = results
+              UsedFields = Seq.map (fun ref -> (ref, usedFieldSelect)) usedFields
+              Arguments = arguments
+            }
 
         let processOne =
             match singleSubEntity with
             | None -> function
-                | [|subEntityValue; value|] ->
+                | [|idValue; subEntityValue|] ->
                     let rawSubEntity = parseStringValue subEntityValue
                     let subEntity = parseTypeName entity.Root rawSubEntity
-                    (subEntity, parseIntValue value)
+                    (parseIntValue idValue, subEntity)
                 | _ -> failwith "Impossible"
             | Some subEntity -> function
-                | [|value|] -> (subEntity, parseIntValue value)
+                | [|value|] -> (parseIntValue value, subEntity)
                 | _ -> failwith "Impossible"
 
         let execute query args cancellationToken = connection.ExecuteQuery query args cancellationToken <| fun columns rows -> task { return! rows.Select(processOne).ToArrayAsync() }
-        return! runQuery execute query comments argumentValues cancellationToken
+        return! runQuery execute opQuery.Query comments argumentValues cancellationToken
     }
 
 type private ProcessedMap = Map<ResolvedEntityRef * RowId, int>
@@ -582,7 +820,7 @@ let getRelatedEntities
         (applyRole : ResolvedRole option)
         (filterFields : ResolvedEntityRef -> RowId -> ResolvedFieldRef -> bool)
         (entityRef : ResolvedEntityRef)
-        (id : RowId)
+        (key : RowKey)
         (comments : string option)
         (cancellationToken : CancellationToken) : Task<ReferencesTree> =
     task {
@@ -611,7 +849,7 @@ let getRelatedEntities
                     return Seq.empty
                 else
                     let! related = getRelatedRowIds connection globalArgs layout applyRole refFieldRef relatedId comments cancellationToken
-                    let go (subEntityRef, id) =
+                    let go (id, subEntityRef) =
                         task {
                             let entity = layout.FindEntity subEntityRef |> Option.get
                             let! idx =
@@ -628,7 +866,7 @@ let getRelatedEntities
                     return! Seq.mapTask go related
             }
 
-        let! subEntityRef = getSubEntity connection globalArgs layout applyRole entityRef id comments cancellationToken
+        let! (id, subEntityRef) = getSubEntity connection globalArgs layout applyRole entityRef key comments cancellationToken
         let subEntity = layout.FindEntity subEntityRef |> Option.get
         let! root = findOne id subEntityRef subEntity
         let nodes = seq {0..lastId - 1} |> Seq.map (fun idx -> nodes.[idx]) |> Seq.toArray

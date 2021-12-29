@@ -82,11 +82,14 @@ let private cascadeDeleteDeferred (filterEntities : ResolvedEntityRef -> bool) (
                 let mutable deferredSet = deferredSet
 
                 let deleteOne (entityRef : ResolvedEntityRef) (id : RowId) =
-                    deferredSet <- Set.remove (entityRef, id) deferredSet
-                    deleteEntity connection.Connection.Query Map.empty layout None entityRef id None cancellationToken
+                    unitTask {
+                        deferredSet <- Set.remove (entityRef, id) deferredSet
+                        let! _ = deleteEntity connection.Connection.Query Map.empty layout None entityRef (RKId id) None cancellationToken
+                        ()
+                    }
 
                 let (entityRef, id) = deferredSet |> Seq.first |> Option.get
-                let! tree = getRelatedEntities connection.Connection.Query Map.empty layout None (fun entityRef rowId refFieldRef -> filterEntities refFieldRef.Entity) entityRef id None cancellationToken
+                let! tree = getRelatedEntities connection.Connection.Query Map.empty layout None (fun entityRef rowId refFieldRef -> filterEntities refFieldRef.Entity) entityRef (RKId id) None cancellationToken
                 do! iterReferencesUpwardsTask deleteOne tree
                 if not <| Set.isEmpty deferredSet then
                     do! go deferredSet

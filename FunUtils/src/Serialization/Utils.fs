@@ -22,17 +22,24 @@ type SerializeAsObjectAttribute (caseFieldName : string) =
     member this.CaseFieldName = caseFieldName
     member val AllowUnknownType = false with get, set
 
+type CaseSerialization =
+    | Normal = 0
+    | InnerObject = 1
+    | InnerValue = 2
+
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Method)>]
 type CaseNameAttribute (caseName : string) =
     inherit Attribute ()
     member this.CaseName = caseName
-    member val InnerObject = false with get, set
+    member val Type = CaseSerialization.Normal with get, set
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Method)>]
 type DefaultCaseAttribute () =
     inherit Attribute ()
+
+type CaseName = string option
 
 let memberInnerType (memberInfo : MemberInfo) =
     match memberInfo.MemberType with
@@ -67,14 +74,17 @@ let unionCases (objectType : Type) : UnionCase[] =
 
     cases |> Array.map unionCase
 
-let unionName (case : UnionCaseInfo) : string option =
-    match case.GetCustomAttributes typeof<CaseNameAttribute> |> Seq.cast |> Seq.first with
+let parseCaseName (case : UnionCaseInfo) (attribute : CaseNameAttribute option) : CaseName =
+    match attribute with
     | None -> Some case.Name
     | Some (nameAttr : CaseNameAttribute) when isNull nameAttr.CaseName -> None
     | Some nameAttr -> Some nameAttr.CaseName
 
-let unionNames (cases : UnionCase seq) : Map<string option, UnionCase> =
-    cases |> Seq.map (fun case -> (unionName case.Info, case)) |> Map.ofSeqUnique
+let caseName (case : UnionCaseInfo) : CaseName =
+    case.GetCustomAttributes typeof<CaseNameAttribute> |> Seq.cast |> Seq.first |> parseCaseName case
+
+let caseNames (cases : UnionCase seq) : Map<CaseName, UnionCase> =
+    cases |> Seq.map (fun case -> (caseName case.Info, case)) |> Map.ofSeqUnique
 
 let defaultUnionCase (cases : UnionCase seq) : obj option =
     let getDefaultCase case =
@@ -84,10 +94,10 @@ let defaultUnionCase (cases : UnionCase seq) : obj option =
         | Some defaultAttr -> Some <| FSharpValue.MakeUnion(case.Info, [||])
     cases |> Seq.mapMaybe getDefaultCase |> Seq.first
 
-let isUnionEnum (cases : UnionCase seq) : Map<string option, UnionCaseInfo * obj> option =
+let isUnionEnum (cases : UnionCase seq) : Map<CaseName, UnionCaseInfo * obj> option =
     let enumCase case =
         if Array.isEmpty case.Fields then
-            Some (unionName case.Info, (case.Info, FSharpValue.MakeUnion(case.Info, [||])))
+            Some (caseName case.Info, (case.Info, FSharpValue.MakeUnion(case.Info, [||])))
         else
             None
     cases |> Seq.traverseOption enumCase |> Option.map Map.ofSeq
@@ -210,46 +220,64 @@ let serializableField (prop : PropertyInfo) =
           EmitDefaultValue = Some attr.EmitDefaultValue
         }
 
+type CaseSerializationType =
+    | CSTNormal
+    | CSTInnerObject
+    | CSTInnerValue
+
 type CaseAsObjectInfo =
     { Info : UnionCaseInfo
       Fields : SerializableField[]
-      InnerObject : bool
+      Type : CaseSerializationType
     }
 
 type UnionAsObjectInfo =
     { CaseField : string
       AllowUnknownType : bool
-      Cases : Map<string option, CaseAsObjectInfo>
+      ValueCase : CaseName option
+      Cases : Map<CaseName, CaseAsObjectInfo>
     }
 
 let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
     match Attribute.GetCustomAttribute(objectType, typeof<SerializeAsObjectAttribute>) with
     | null -> None
     | :? SerializeAsObjectAttribute as asObject ->
+        let mutable valueCase = None
+
         let caseInfo (case : UnionCase) =
-            let name = unionName case.Info
-            let innerObject =
-                match case.Info.GetCustomAttributes(typeof<CaseNameAttribute>) |> Seq.cast |> Seq.first with
-                | Some (caseName : CaseNameAttribute) when caseName.InnerObject ->
+            let attr = case.Info.GetCustomAttributes(typeof<CaseNameAttribute>) |> Seq.cast |> Seq.first
+            let name = parseCaseName case.Info attr
+            let serType =
+                match attr with
+                | Some caseName when caseName.Type = CaseSerialization.InnerValue ->
+                    if Option.isSome valueCase then
+                        failwithf "Only one case can be declared as inner value case: %O" case.Info.Name
                     if Array.length case.Fields > 1 then
                         failwithf "Serialization as inner object requires no more than one field in a union case %s" case.Info.Name
-                    true
+                    valueCase <- Some name
+                    CSTInnerValue
+                | Some caseName when caseName.Type = CaseSerialization.InnerObject ->
+                    if Array.length case.Fields > 1 then
+                        failwithf "Serialization as inner object requires no more than one field in a union case %s" case.Info.Name
+                    CSTInnerObject
                 | _ ->
                     if Option.isSome name then
                         for field in case.Fields do
                             if field.Name = asObject.CaseFieldName then
                                 failwithf "Field name %s of case %s clashes with case field name" field.Name case.Info.Name
-                    false
+                    CSTNormal
             let ret =
                 { Info = case.Info
                   Fields = case.Fields |> Array.map serializableField
-                  InnerObject = innerObject
+                  Type = serType
                 }
             (name, ret)
+
         let cases = unionCases objectType |> Seq.map caseInfo |> Map.ofSeq
         let ret =
             { CaseField = asObject.CaseFieldName
               AllowUnknownType = asObject.AllowUnknownType
+              ValueCase = valueCase
               Cases = cases
             }
         Some ret

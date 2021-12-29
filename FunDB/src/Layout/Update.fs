@@ -59,6 +59,7 @@ type private LayoutUpdater (db : SystemContext) as this =
         let updateUniqueFunc _ (newUnique : SourceUniqueConstraint) (oldUnique : UniqueConstraint) =
             let columnNames = Array.map (fun x -> x.ToString()) newUnique.Columns
             oldUnique.Columns <- columnNames
+            oldUnique.IsAlternateKey <- newUnique.IsAlternateKey
         let createUniqueFunc (FunQLName name) =
             UniqueConstraint (
                 Name = name,
