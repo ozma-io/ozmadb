@@ -248,7 +248,7 @@ let private rowKeyCheck
         let tableRef = compileResolvedEntityRef entity.Root
         let aliasRef = { Schema = None; Name = tableRef.Name } : SQL.TableRef
         let whereId = SQL.VEBinaryOp (SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
-        let usedFields = seq { ({ Entity = entity.Root; Name = funId }, usedFieldSelect) }
+        let usedFields = seq { ({ Entity = entityRef; Name = funId }, usedFieldSelect) }
         { Arguments = arguments
           ArgumentValues = argumentValues
           Where = whereId
@@ -354,7 +354,7 @@ let resolveAltKey
             let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
             { Where = alt.Where
               Columns = seq { entityId }
-              UsedFields = Seq.append alt.UsedFields (Seq.singleton ({ Entity = entity.Root; Name = funId }, usedFieldSelect))
+              UsedFields = Seq.append alt.UsedFields (Seq.singleton ({ Entity = entityRef; Name = funId }, usedFieldSelect))
               Arguments = alt.Arguments
             }
 
@@ -551,7 +551,7 @@ let updateEntity
                     match key with
                     | RKId id -> usedFields
                     | RKAlt (name, keys) ->
-                        let fieldRef = { Entity = entity.Root; Name = funId }
+                        let fieldRef = { Entity = entityRef; Name = funId }
                         Seq.append usedFields (Seq.singleton (fieldRef, usedFieldInsert))
                 let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityUpdate usedFields
                 let appliedDb =
@@ -629,7 +629,7 @@ let deleteEntity
                     match key with
                     | RKId id -> usedFields
                     | RKAlt (name, keys) ->
-                        let fieldRef = { Entity = entity.Root; Name = funId }
+                        let fieldRef = { Entity = entityRef; Name = funId }
                         Seq.append usedFields (Seq.singleton (fieldRef, usedFieldInsert))
                 let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityDelete usedFields
                 let appliedDb =
@@ -672,7 +672,7 @@ let private getSubEntity
                 let commonUsedFields =
                     Seq.append
                         keyCheck.UsedFields
-                        (Seq.singleton ({ Entity = entity.Root; Name = funSubEntity }, usedFieldSelect))
+                        (Seq.singleton ({ Entity = entityRef; Name = funSubEntity }, usedFieldSelect))
 
                 let (results, usedFields) =
                     match key with
@@ -681,7 +681,7 @@ let private getSubEntity
                         (results, commonUsedFields)
                     | RKAlt (name, args) ->
                         let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
-                        let usedFields = Seq.append commonUsedFields (Seq.singleton ({ Entity = entity.Root; Name = funId }, usedFieldSelect))
+                        let usedFields = Seq.append commonUsedFields (Seq.singleton ({ Entity = entityRef; Name = funId }, usedFieldSelect))
                         let results = seq { entityId; entitySubEntity }
                         (results, usedFields)
 
@@ -744,7 +744,7 @@ let private getRelatedRowIds
             let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
             let commonUsedFields =
                 seq {
-                    { Entity = entity.Root; Name = funId }
+                    { Entity = fieldRef.Entity; Name = funId }
                     { Entity = Option.defaultValue fieldRef.Entity field.InheritedFrom; Name = fieldRef.Name }
                 }
 
@@ -754,7 +754,7 @@ let private getRelatedRowIds
                     (results, commonUsedFields)
                 else
                     let entitySubEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunSubEntity }
-                    let usedFields = Seq.append commonUsedFields (Seq.singleton { Entity = entity.Root; Name = funSubEntity })
+                    let usedFields = Seq.append commonUsedFields (Seq.singleton { Entity = fieldRef.Entity; Name = funSubEntity })
                     let results = seq { entityId; entitySubEntity }
                     (results, usedFields)
 
