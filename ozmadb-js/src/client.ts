@@ -140,21 +140,21 @@ export default class FunDBAPI {
 
   getAnonymousUserView = async (token: string | null, query: string, args?: Record<string, unknown>, opts?: IEntriesRequestOpts): Promise<IViewExprResult> => {
     const req: IAnonymousUserViewEntriesRequest = {
-        query,
-        args,
-        ...opts?.chunk,
-        pretendUser: opts?.pretendUser,
-        pretendRole: opts?.pretendRole,
+      query,
+      args,
+      ...opts?.chunk,
+      pretendUser: opts?.pretendUser,
+      pretendRole: opts?.pretendRole,
     };
     return this.getUserView("anonymous", token, req);
   };
 
   getNamedUserView = async (token: string | null, ref: IUserViewRef, args?: Record<string, unknown>, opts?: IEntriesRequestOpts): Promise<IViewExprResult> => {
     const req: IUserViewEntriesRequest = {
-        args,
-        ...opts?.chunk,
-        pretendUser: opts?.pretendUser,
-        pretendRole: opts?.pretendRole,
+      args,
+      ...opts?.chunk,
+      pretendUser: opts?.pretendUser,
+      pretendRole: opts?.pretendRole,
     };
     return this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, req);
   };
@@ -191,7 +191,7 @@ export default class FunDBAPI {
   };
 
   getEntityInfo = async (token: string | null, ref: IEntityRef): Promise<IEntity> => {
-    return this.fetchJsonApi(`entities/${ref.schema}/${ref.name}`, token, "GET") as Promise<IEntity>;
+    return this.fetchJsonApi(`entities/${ref.schema}/${ref.name}/info`, token, "GET") as Promise<IEntity>;
   };
 
   runTransaction = async (token: string | null, action: ITransaction): Promise<ITransactionResult> => {
@@ -199,7 +199,7 @@ export default class FunDBAPI {
   };
 
   runAction = async (token: string | null, ref: IActionRef, args?: Record<string, unknown>): Promise<IActionResult> => {
-    return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}`, token, "POST", args ?? {}) as Promise<IActionResult>;
+    return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}/run`, token, "POST", args ?? {}) as Promise<IActionResult>;
   };
 
   getDomainValues = async (token: string | null, ref: IFieldRef, rowId?: number, opts?: IEntriesRequestOpts): Promise<IDomainValuesResult> => {

@@ -1,6 +1,6 @@
 import {
   IEntityRef, IRoleRef, IEntity, UserViewSource, IViewExprResult, IViewInfoResult, IQueryChunk, ILayout, UserViewName,
-  IFieldRef, IDomainValuesResult, IApiError,
+  IFieldRef, IDomainValuesResult, IApiError, RowId, RowKey, IReferencesTree,
 } from "./common";
 
 export declare const renderDate: (date : Date) => string;
@@ -11,10 +11,12 @@ export interface IFunDBAPI {
   getUserView: (source: UserViewSource, args?: Record<string, unknown>, chunk?: IQueryChunk) => Promise<IViewExprResult>;
   getUserViewInfo: (source: UserViewSource) => Promise<IViewInfoResult>;
   getEntityInfo: (ref: IEntityRef) => Promise<IEntity>;
-  insertEntity: (ref: IEntityRef, args: Record<string, unknown>) => Promise<number | null>;
-  insertEntities: (ref: IEntityRef, args: Record<string, unknown>[]) => Promise<(number | null)[]>;
-  updateEntity: (ref: IEntityRef, id: number, args: Record<string, unknown>) => Promise<void>;
-  deleteEntity: (ref: IEntityRef, id: number) => Promise<void>;
+  insertEntity: (ref: IEntityRef, args: Record<string, unknown>) => Promise<RowId | null>;
+  insertEntities: (ref: IEntityRef, args: Record<string, unknown>[]) => Promise<(RowId | null)[]>;
+  updateEntity: (ref: IEntityRef, id: RowKey, args: Record<string, unknown>) => Promise<RowId>;
+  deleteEntity: (ref: IEntityRef, id: RowKey) => Promise<void>;
+  getRelatedEntities: (ref: IEntityRef, id: RowKey) => Promise<IReferencesTree>;
+  recursiveDeleteEntity: (ref: IEntityRef, id: RowKey) => Promise<IReferencesTree>;
   runCommand: (commandString: string, args?: Record<string, unknown>) => Promise<void>;
   deferConstraints: <T>(inner: () => Promise<T>) => Promise<T>;
   pretendRole: <T>(ref: "root" | IRoleRef, inner: () => Promise<T>) => Promise<T>;

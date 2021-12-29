@@ -282,6 +282,31 @@ export interface IViewExplainResult {
  * Transaction operations.
  */
 
+export interface IAltRowKey {
+  name: ConstraintName;
+  keys: Record<ArgumentName, any>;
+}
+
+export type RowKey = RowId | IAltRowKey;
+
+export type ReferencesRowIndex = number;
+
+export interface IReferencesChild {
+  field: FieldName;
+  row: ReferencesRowIndex;
+}
+
+export interface IReferencesNode {
+  entity: IEntityRef;
+  id: RowId;
+  references: IReferencesChild[];
+}
+
+export interface IReferencesTree {
+  nodes: IReferencesNode[];
+  root: ReferencesRowIndex;
+}
+
 export interface IInsertEntityOp {
   type: "insert";
   entity: IEntityRef;
@@ -291,14 +316,14 @@ export interface IInsertEntityOp {
 export interface IUpdateEntityOp {
   type: "update";
   entity: IEntityRef;
-  id: number;
+  id: RowKey;
   entries: Record<FieldName, unknown>;
 }
 
 export interface IDeleteEntityOp {
   type: "delete";
   entity: IEntityRef;
-  id: number;
+  id: RowKey;
 }
 
 export interface ICommandOp {
@@ -320,11 +345,12 @@ export interface ITransaction {
 
 export interface IInsertEntityResult {
   type: "insert";
-  id: number | null;
+  id: RowId | null;
 }
 
 export interface IUpdateEntityResult {
   type: "update";
+  id: RowId;
 }
 
 export interface IDeleteEntityResult {
