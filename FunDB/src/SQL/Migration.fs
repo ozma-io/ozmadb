@@ -290,7 +290,11 @@ let private migrateBuildSchema (schemaName : SchemaName) (fromObjects : SchemaOb
         match objectMeta with
         | OMTable tableMeta ->
             seq {
-                yield (SOCreateTable objRef, 0)
+                let opts =
+                    { Table = objRef
+                      Temporary = None
+                    }
+                yield (SOCreateTable opts, 0)
                 yield! migrateAlterTable objRef emptyTableMeta tableMeta
             }
         | OMSequence -> Seq.singleton <| (SOCreateSequence objRef, 0)

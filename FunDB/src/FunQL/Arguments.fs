@@ -182,10 +182,11 @@ let modifyArgumentsInNamespace (changeNames : Placeholder -> Placeholder option)
     let newArguments = { newNsArguments with Types = newArgumentTypes }
     (newArguments, ret)
 
+// We don't check that all required arguments are provided; it happens later.
 let convertQueryArguments (globalArgValues : LocalArgumentsMap) (extraArgValues : ArgumentValuesMap) (rawArgValues : RawArguments) (arguments : QueryArguments) : ArgumentValuesMap =
-    let findArgument (name, arg : CompiledArgument) =
+    let findArgument (name : Placeholder) (arg : CompiledArgument) =
         match Map.tryFind name extraArgValues with
-        | Some arg -> Some (name, arg)
+        | Some arg -> Some arg
         | None ->
             match name with
             | PLocal (FunQLName lname) ->
@@ -193,18 +194,17 @@ let convertQueryArguments (globalArgValues : LocalArgumentsMap) (extraArgValues 
                 | Some argStr ->
                     match parseValueFromJson arg.FieldType arg.Optional argStr with
                     | None ->  raisef ArgumentCheckException "Cannot convert argument %O to type %O" name arg.FieldType
-                    | Some FNull -> None
-                    | Some arg -> Some (name, arg)
-                | _ -> None
-            | PGlobal gname -> Some (name, Map.find gname globalArgValues)
-    arguments.Types |> Map.toSeq |> Seq.mapMaybe findArgument |> Map.ofSeq
+                    | Some arg -> Some arg
+                | None -> None
+            | PGlobal gname -> Some <| Map.find gname globalArgValues
+    arguments.Types |> Map.mapMaybe findArgument
 
 let convertEntityArguments (entity : ResolvedEntity) (rawArgs : RawArguments) : LocalArgumentsMap =
-    let getValue (fieldName : FieldName, field : ResolvedColumnField) =
+    let getValue (fieldName : FieldName) (field : ResolvedColumnField) =
         match Map.tryFind (string fieldName) rawArgs with
         | None -> None
         | Some value ->
             match parseValueFromJson field.FieldType field.IsNullable value with
             | None -> raisef ArgumentCheckException "Cannot convert argument %O to type %O" fieldName field.FieldType
-            | Some arg -> Some (fieldName, arg)
-    entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getValue |> Map.ofSeq
+            | Some arg -> Some arg
+    entity.ColumnFields |> Map.mapMaybe getValue

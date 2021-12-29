@@ -180,6 +180,24 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
         | IVDefault -> IVDefault
         | IVValue expr -> IVValue <| applyToValueExpr expr
 
+    and applyToUpdateAssignExpr = function
+        | UAESet (name, expr) -> UAESet (name, applyToInsertValue expr)
+        | UAESelect (cols, select) -> UAESelect (cols, applyToSelectExpr select)
+
+    and applyToUpdateConflictAction (update : UpdateConflictAction) : UpdateConflictAction =
+        { Assignments = Array.map applyToUpdateAssignExpr update.Assignments
+          Where = Option.map applyToValueExpr update.Where
+        }
+
+    and applyToConflictExpr (conflict : OnConflictExpr) : OnConflictExpr =
+        let action =
+            match conflict.Action with
+            | CANothing -> CANothing
+            | CAUpdate update -> CAUpdate <| applyToUpdateConflictAction update
+        { Target = conflict.Target
+          Action = action
+        }
+
     and applyToInsertExpr (query : InsertExpr) : InsertExpr =
         let source =
             match query.Source with
@@ -192,6 +210,7 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
           Columns = query.Columns
           Source = source
           Returning = query.Returning
+          OnConflict = Option.map applyToConflictExpr query.OnConflict
           Extra = query.Extra
         }
 
@@ -203,11 +222,15 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                 let newTableName = Option.get query.Table.Alias
                 getUpdateValueRestriction tableInfo.RealEntity newTableName
             | _ -> None
-        let oldWhere = Option.map applyToValueExpr query.Where
+        let oldWhere =
+            match query.Extra with
+            | :? UpdateFromInfo as tableInfo -> tableInfo.WhereWithoutSubentities
+            | _ -> query.Where
+        let oldWhere = Option.map applyToValueExpr oldWhere
         let where = Option.unionWith (curry VEAnd) oldWhere newWhere
         { CTEs = Option.map applyToCommonTableExprs query.CTEs
           Table = query.Table
-          Columns = query.Columns
+          Assignments = Array.map applyToUpdateAssignExpr query.Assignments
           From = Option.map applyToFromExpr query.From
           Where = where
           Returning = query.Returning
@@ -221,7 +244,11 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                 let newTableName = Option.get query.Table.Alias
                 getDeleteValueRestriction tableInfo.RealEntity newTableName
             | _ -> None
-        let oldWhere = Option.map applyToValueExpr query.Where
+        let oldWhere =
+            match query.Extra with
+            | :? UpdateFromInfo as tableInfo -> tableInfo.WhereWithoutSubentities
+            | _ -> query.Where
+        let oldWhere = Option.map applyToValueExpr oldWhere
         let where = Option.unionWith (curry VEAnd) oldWhere newWhere
         { CTEs = Option.map applyToCommonTableExprs query.CTEs
           Table = query.Table

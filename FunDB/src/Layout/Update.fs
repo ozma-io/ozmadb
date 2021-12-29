@@ -27,13 +27,9 @@ type private LayoutUpdater (db : SystemContext) as this =
 
     let updateColumnFields (entity : Entity) : Map<FieldName, SourceColumnField> -> Map<FieldName, ColumnField> -> Map<FieldName, ColumnField> =
         let updateColumnFunc _ (newColumn : SourceColumnField) (oldColumn : ColumnField) =
-            let def =
-                match newColumn.DefaultValue with
-                | None -> null
-                | Some def -> def
             oldColumn.IsNullable <- newColumn.IsNullable
             oldColumn.IsImmutable <- newColumn.IsImmutable
-            oldColumn.Default <- def
+            oldColumn.Default <- Option.toObj newColumn.DefaultValue
             oldColumn.Type <- newColumn.Type
         let createColumnFunc (FunQLName name) =
             ColumnField (
@@ -107,9 +103,14 @@ type private LayoutUpdater (db : SystemContext) as this =
         if entity.MainField = funId then
             existingEntity.MainField <- null
         else
-            existingEntity.MainField <-entity.MainField.ToString()
+            existingEntity.MainField <- string entity.MainField
         existingEntity.IsAbstract <- entity.IsAbstract
         existingEntity.IsFrozen <- entity.IsFrozen
+        match entity.SaveRestoreKey with
+        | None ->
+            existingEntity.SaveRestoreKey <- null
+        | Some key ->
+            existingEntity.SaveRestoreKey <- string key
 
     let updateSchema (schema : SourceSchema) (existingSchema : Schema) =
         let entitiesMap = existingSchema.Entities |> Seq.ofObj |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq

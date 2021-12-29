@@ -251,9 +251,6 @@ type ConverterContractResolver (converterConstructors : (Type -> JsonConverter o
     override this.CreateProperty (memberInfo : MemberInfo, serialization : MemberSerialization) : JsonProperty =
         let prop = base.CreateProperty (memberInfo, serialization)
 
-        if prop.Order.HasValue then
-            eprintfn "Order for %s.%s is %O" memberInfo.DeclaringType.Name memberInfo.Name prop.Order
-
         if FSharpType.IsRecord memberInfo.DeclaringType || FSharpType.IsUnion memberInfo.DeclaringType then
             let propInfo = memberInfo :?> PropertyInfo
             let fieldInfo = serializableField propInfo

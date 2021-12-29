@@ -156,12 +156,16 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
           Extra = insert.Extra
         }
 
+    and resolveUpdateAssignExpr = function
+        | UAESet (name, expr) -> UAESet (name, resolveInsertValue expr)
+        | UAESelect (cols, select) -> UAESelect (cols, resolveSelectExpr select)
+
     and resolveUpdateExpr (update : ResolvedUpdateExpr) : ResolvedUpdateExpr =
         let ctes = Option.map resolveCommonTableExprs update.CTEs
-        let fields = Map.map (fun name -> resolveFieldExpr) update.Fields
+        let assigns = Array.map resolveUpdateAssignExpr update.Assignments
         { CTEs = ctes
           Entity = update.Entity
-          Fields = fields
+          Assignments = assigns
           From = Option.map resolveFromExpr update.From
           Where = Option.map resolveFieldExpr update.Where
           Extra = update.Extra

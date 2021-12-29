@@ -44,6 +44,8 @@ type ColumnName = SQLName
 type TypeName = SQLRawString
 type FunctionName = SQLName
 type ParameterName = SQLName
+type ConstraintName = SQLName
+type OpClassName = SQLName
 
 // Values
 
@@ -529,6 +531,17 @@ type [<NoEquality; NoComparison>] FromTable =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
 
+type [<NoEquality; NoComparison>] UpdateColumnName =
+    { Name : ColumnName
+      Extra : obj
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () = this.Name.ToSQLString()
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 // Parameters go in same order they go in SQL commands (e.g. VECast (value, type) because "foo :: bar").
 type [<NoEquality; NoComparison>] ValueExpr =
     | VEValue of Value
@@ -898,6 +911,7 @@ and [<NoEquality; NoComparison>] InsertExpr =
       Table : OperationTable
       Columns : (obj * ColumnName)[] // obj is extra metadata
       Source : InsertSource
+      OnConflict : OnConflictExpr option
       Returning : SelectedColumn[]
       Extra : obj
     } with
@@ -921,10 +935,27 @@ and [<NoEquality; NoComparison>] InsertExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+and [<NoEquality; NoComparison>] UpdateAssignExpr =
+    | UAESet of UpdateColumnName * InsertValue
+    | UAESelect of UpdateColumnName[] * SelectExpr
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | UAESet (name, expr) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())
+            | UAESelect (cols, select) ->
+                assert (not <| Array.isEmpty cols)
+                let colsStr = cols |> Seq.map toSQLString |> String.concat ", "
+                sprintf "(%s) = (%O)" colsStr select
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 and [<NoEquality; NoComparison>] UpdateExpr =
     { CTEs : CommonTableExprs option
       Table : OperationTable
-      Columns : Map<ColumnName, obj * ValueExpr> // obj is extra metadata
+      Assignments : UpdateAssignExpr[] // obj is extra metadata
       From : FromExpr option
       Where : ValueExpr option
       Returning : SelectedColumn[]
@@ -933,10 +964,10 @@ and [<NoEquality; NoComparison>] UpdateExpr =
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
-            assert (not <| Map.isEmpty this.Columns)
+            assert (not <| Array.isEmpty this.Assignments)
 
             let ctesStr = optionToSQLString this.CTEs
-            let valuesExpr = this.Columns |> Map.toSeq |> Seq.map (fun (name, (extra, expr)) -> sprintf "%s = %s" (name.ToSQLString()) (expr.ToSQLString())) |> String.concat ", "
+            let assignsStr = this.Assignments |> Seq.map toSQLString |> String.concat ", "
             let fromStr =
                 match this.From with
                 | Some f -> sprintf "FROM %s" (f.ToSQLString())
@@ -951,7 +982,7 @@ and [<NoEquality; NoComparison>] UpdateExpr =
                 else
                     let resultsStr = this.Returning |> Seq.map toSQLString |> String.concat ", "
                     sprintf "RETURNING %s" resultsStr
-            let updateStr = sprintf "UPDATE %s SET %s" (this.Table.ToSQLString()) valuesExpr
+            let updateStr = sprintf "UPDATE %s SET %s" (this.Table.ToSQLString()) assignsStr
             String.concatWithWhitespaces [ctesStr; updateStr; fromStr; condExpr; returningStr]
 
         interface ISQLString with
@@ -1006,6 +1037,110 @@ and [<NoEquality; NoComparison>] DataExpr =
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
+
+and [<StructuralEquality; NoComparison>] IndexKey =
+    | IKColumn of ColumnName
+    | IKExpression of StringComparable<ValueExpr>
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | IKColumn col -> col.ToSQLString()
+            | IKExpression expr -> sprintf "(%O)" expr
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] OnConflictExpr =
+    { Target : ConflictTarget option
+      Action : ConflictAction
+    } with
+    override this.ToString () = this.ToSQLString()
+
+    member this.ToSQLString () =
+        String.concatWithWhitespaces ["ON CONFLICT"; optionToSQLString this.Target; this.Action.ToSQLString()]
+
+    interface ISQLString with
+        member this.ToSQLString () = this.ToSQLString()
+
+and [<StructuralEquality; NoComparison>] ConflictColumn =
+    { Key : IndexKey
+      OpClass : OpClassName option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let opClassStr = optionToSQLString this.OpClass
+            String.concatWithWhitespaces [this.Key.ToSQLString(); opClassStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] ConflictColumnsTarget =
+    { Columns : ConflictColumn[]
+      Predicate : ValueExpr option
+    } with
+    override this.ToString () = this.ToSQLString()
+
+    member this.ToSQLString () =
+        let columnsStr =
+            assert (not <| Array.isEmpty this.Columns)
+            this.Columns |> Seq.map toSQLString |> String.concat ", " |> sprintf "(%s)"
+        let predStr =
+            match this.Predicate with
+            | None -> ""
+            | Some pred -> sprintf "WHERE %O" pred
+        String.concatWithWhitespaces [columnsStr; predStr]
+
+    interface ISQLString with
+        member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] ConflictTarget =
+    | CTColumns of ConflictColumnsTarget
+    | CTConstraint of ConstraintName
+     with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | CTColumns cols -> cols.ToSQLString()
+            | CTConstraint constr -> sprintf "ON CONSTRAINT %s" (constr.ToSQLString())
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] ConflictAction =
+    | CANothing
+    | CAUpdate of UpdateConflictAction
+     with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | CANothing -> "DO NOTHING"
+            | CAUpdate update -> sprintf "DO UPDATE %O" update
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] UpdateConflictAction =
+    { Assignments : UpdateAssignExpr[]
+      Where : ValueExpr option
+    } with
+    override this.ToString () = this.ToSQLString()
+
+    member this.ToSQLString () =
+        let valuesExpr = this.Assignments |> Seq.map toSQLString |> String.concat ", "
+        let condExpr =
+            match this.Where with
+            | Some c -> sprintf "WHERE %s" (c.ToSQLString())
+            | None -> ""
+        let updateStr = sprintf "SET %s" valuesExpr
+        String.concatWithWhitespaces [updateStr; condExpr]
+
+    interface ISQLString with
+        member this.ToSQLString () = this.ToSQLString()
 
 type ValueExprGenericMapper =
     { Value : Value -> ValueExpr
@@ -1142,6 +1277,20 @@ let rec private normalizeArrayValue (constr : 'a -> Value) : ArrayValue<'a> -> V
 and normalizeArray (constr : 'a -> Value) (arr : ArrayValue<'a>[]) : ValueExpr =
     VEArray (Array.map (normalizeArrayValue constr) arr)
 
+let parseIntValue = function
+    | VInt i -> i
+    // FIXME FIXME: should use int64 everywhere instead!
+    | VBigInt i -> int i
+    | ret -> failwithf "Non-integer result: %O" ret
+
+let parseStringValue = function
+    | VString s -> s
+    | ret -> failwithf "Non-string result: %O" ret
+
+let parseBoolValue = function
+    | VBool b -> b
+    | ret -> failwithf "Non-boolean result: %O" ret
+
 let emptySingleSelectExpr : SingleSelectExpr =
     { Columns = [||]
       From = None
@@ -1152,19 +1301,20 @@ let emptySingleSelectExpr : SingleSelectExpr =
       Extra = null
     }
 
-let insertExpr (table : OperationTable) (columns : (obj * ColumnName)[]) (source : InsertSource) : InsertExpr =
+let insertExpr (table : OperationTable) (source : InsertSource) : InsertExpr =
     { CTEs = None
       Table = table
-      Columns = columns
+      Columns = [||]
       Source = source
       Returning = [||]
+      OnConflict = None
       Extra = null
     }
 
 let updateExpr (table : OperationTable) : UpdateExpr =
     { CTEs = None
       Table = table
-      Columns = Map.empty
+      Assignments = [||]
       From = None
       Where = None
       Returning = [||]
@@ -1202,4 +1352,20 @@ let operationTable (ref : TableRef) : OperationTable =
     { Extra = null
       Alias = None
       Table = ref
+    }
+
+let updateColumnName (name : ColumnName) : UpdateColumnName =
+    { Name = name
+      Extra = null
+    }
+
+let commonTableExprs (exprs : (TableName * CommonTableExpr)[]) : CommonTableExprs =
+    { Recursive = false
+      Exprs = exprs
+    }
+
+let commonTableExpr (expr : DataExpr) : CommonTableExpr =
+    { Fields = None
+      Materialized = None
+      Expr = expr
     }

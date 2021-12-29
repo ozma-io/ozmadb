@@ -219,11 +219,14 @@ type private MetaBuilder (layout : Layout) =
                             } : SQL.ColumnMeta
                         let columns = Seq.singleton (sqlFunSubEntity, (Set.empty, col))
 
-                        let checkExpr = makeCheckExpr subEntityColumn layout entityRef
+                        let constrs =
+                            match makeCheckExpr subEntityColumn layout entityRef with
+                            | None -> Seq.empty
+                            | Some checkExpr ->
+                                let typeCheckKey = sprintf "__type_check__%O" entity.Root.Name
+                                let typeCheckName = SQL.SQLName <| sprintf "__type_check__%s" entity.HashName
+                                Seq.singleton (typeCheckName, (Set.singleton typeCheckKey, SQL.CMCheck (String.comparable checkExpr)))
 
-                        let typeCheckKey = sprintf "__type_check__%O" entity.Root.Name
-                        let typeCheckName = SQL.SQLName <| sprintf "__type_check__%s" entity.HashName
-                        let constrs = Seq.singleton (typeCheckName, (Set.singleton typeCheckKey, SQL.CMCheck (String.comparable checkExpr)))
                         let typeIndexKey = sprintf "__type_index__%O" entity.Root.Name
                         let typeIndexName = SQL.SQLName <| sprintf "__type_index__%s" entity.HashName
                         let subEntityIndex =
@@ -268,26 +271,31 @@ type private MetaBuilder (layout : Layout) =
                     else
                         let fieldRef = { Entity = entityRef; Name = name }
                         let (meta, constrs) = makeColumnFieldMeta fieldRef entity field
-                        let extraConstrs =
-                            // We do not check that values are NULL if row is not of this entity subtype.
-                            // This is to optimize insertion and adding of new columns in case of `DefaultExpr` values set.
-                            // Say, one adds a new subtype column with `DEFAULT` set -- because we use native PostgreSQL DEFAULT and allow values to be whatever for non-subtypes,
-                            // PostgreSQL can instantly initialize the column with default values for all rows, even not of this subtype.
-                            if meta.IsNullable then
-                                Seq.empty
-                            else
+                        let (meta, extraConstrs) =
+                            match checkExpr with
+                            | None -> (meta, Seq.empty)
+                            | _ when meta.IsNullable -> (meta, Seq.empty)
+                            | Some check ->
+                                // We do not check that values are NULL if row is not of this entity subtype.
+                                // This is to optimize insertion and adding of new columns in case of `DefaultExpr` values set.
+                                // Say, one adds a new subtype column with `DEFAULT` set -- because we use native PostgreSQL DEFAULT and allow values to be whatever for non-subtypes,
+                                // PostgreSQL can instantly initialize the column with default values for all rows, even not of this subtype.
                                 let checkNull = SQL.VEIsNull (SQL.VEColumn { Table = None; Name = field.ColumnName })
-                                let expr = SQL.VENot (SQL.VEAnd (checkExpr, checkNull))
+                                let expr = SQL.VENot (SQL.VEAnd (check, checkNull))
                                 let notnullName = SQL.SQLName <| sprintf "__notnull__%s__%s" entity.HashName field.HashName
                                 let notnullKey = sprintf "__notnull__%O__%O__%O" entityRef.Schema entityRef.Name name
-                                Seq.singleton (notnullName, (Set.singleton notnullKey, SQL.CMCheck (String.comparable expr)))
-                        Some (field.ColumnName, Set.empty, { meta with IsNullable = true }, Seq.append constrs extraConstrs)
+                                let extraConstrs = Seq.singleton (notnullName, (Set.singleton notnullKey, SQL.CMCheck (String.comparable expr)))
+                                ({ meta with IsNullable = true }, extraConstrs)
+                        Some (field.ColumnName, Set.empty, meta, Seq.append constrs extraConstrs)
 
                 let columnObjects = entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe makeColumn |> Seq.cache
                 let userColumns = columnObjects |> Seq.map (fun (name, keys, column, constrs) -> (name, (keys, column)))
                 let columnConstraints = columnObjects |> Seq.collect (fun (name, keys, column, constrs) -> constrs)
 
-                let modify expr = SQL.VEOr (SQL.VENot checkExpr, expr)
+                let modify =
+                    match checkExpr with
+                    | Some check -> fun expr -> SQL.VEOr (SQL.VENot check, expr)
+                    | None -> id
                 let checkConstraintObjects = entity.CheckConstraints |> Map.toSeq |> Seq.collect (makeEntityCheckConstraint modify)
 
                 let table = { Columns = Seq.concat [userColumns; materializedFieldColumns] |> Map.ofSeq } : SQL.TableMeta

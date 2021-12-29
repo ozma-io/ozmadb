@@ -532,11 +532,14 @@ type [<NoEquality; NoComparison>] BinaryOperator =
 type [<NoEquality; NoComparison>] FromEntity<'e> when 'e :> IFunQLName =
     { Alias : EntityName option
       AsRoot : bool
+      Only : bool
       Ref : 'e
+      Extra : ObjectMap
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
+            let onlyStr = if this.Only then "ONLY" else ""
             let aliasStr =
                 match this.Alias with
                 | Some name -> sprintf "AS %s" (name.ToFunQLString())
@@ -546,7 +549,7 @@ type [<NoEquality; NoComparison>] FromEntity<'e> when 'e :> IFunQLName =
                     "WITH SUPERUSER ROLE"
                 else
                     ""
-            String.concatWithWhitespaces [this.Ref.ToFunQLString(); roleStr; aliasStr]
+            String.concatWithWhitespaces [onlyStr; this.Ref.ToFunQLString(); roleStr; aliasStr]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -987,10 +990,27 @@ and [<NoEquality; NoComparison>] InsertExpr<'e, 'f> when 'e :> IFunQLName and 'f
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+and [<NoEquality; NoComparison>] UpdateAssignExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | UAESet of FieldName * InsertValue<'e, 'f>
+    | UAESelect of FieldName[] * SelectExpr<'e, 'f>
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | UAESet (name, expr) -> sprintf "%s = %s" (name.ToFunQLString()) (expr.ToFunQLString())
+            | UAESelect (cols, select) ->
+                assert (not <| Array.isEmpty cols)
+                let colsStr = cols |> Seq.map toFunQLString |> String.concat ", "
+                sprintf "(%s) = (%O)" colsStr select
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 and [<NoEquality; NoComparison>] UpdateExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { CTEs : CommonTableExprs<'e, 'f> option
       Entity : OperationEntity<'e>
-      Fields : Map<FieldName, FieldExpr<'e, 'f>>
+      Assignments : UpdateAssignExpr<'e, 'f>[]
       From : FromExpr<'e, 'f> option
       Where : FieldExpr<'e, 'f> option
       Extra : ObjectMap
@@ -998,10 +1018,10 @@ and [<NoEquality; NoComparison>] UpdateExpr<'e, 'f> when 'e :> IFunQLName and 'f
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            assert (not <| Map.isEmpty this.Fields)
+            assert (not <| Array.isEmpty this.Assignments)
 
             let ctesStr = optionToFunQLString this.CTEs
-            let valuesExpr = this.Fields |> Map.toSeq |> Seq.map (fun (name, expr) -> sprintf "%s = %s" (name.ToFunQLString()) (expr.ToFunQLString())) |> String.concat ", "
+            let assignsStr = this.Assignments |> Seq.map toFunQLString |> String.concat ", "
             let fromStr =
                 match this.From with
                 | Some f -> sprintf "FROM %s" (f.ToFunQLString())
@@ -1010,7 +1030,7 @@ and [<NoEquality; NoComparison>] UpdateExpr<'e, 'f> when 'e :> IFunQLName and 'f
                 match this.Where with
                 | Some c -> sprintf "WHERE %s" (c.ToFunQLString())
                 | None -> ""
-            let updateStr = sprintf "UPDATE %s SET %s" (this.Entity.ToFunQLString()) valuesExpr
+            let updateStr = sprintf "UPDATE %s SET %s" (this.Entity.ToFunQLString()) assignsStr
             String.concatWithWhitespaces [ctesStr; updateStr; fromStr; condExpr]
 
         interface IFunQLString with
@@ -1413,6 +1433,7 @@ type ResolvedDeleteExpr = DeleteExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedDataExpr = DataExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedOperationEntity = OperationEntity<EntityRef>
 type ResolvedInsertSource = InsertSource<EntityRef, LinkedBoundFieldRef>
+type ResolvedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedBoundFieldRef>
 
 type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 
@@ -1752,7 +1773,9 @@ let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> Field
 let fromEntity (entityRef : 'e) : FromEntity<'e> =
     { Ref = entityRef
       Alias = None
+      Only = false
       AsRoot = false
+      Extra = ObjectMap.empty
     }
 
 let linkedRef (ref : 'f) : LinkedRef<'f> =
@@ -1780,8 +1803,58 @@ let selectExpr (tree : SelectTreeExpr<'e, 'f>) : SelectExpr<'e, 'f> =
       Extra = ObjectMap.empty
     }
 
+
+let insertExpr (entity : OperationEntity<'e>) (source : InsertSource<'e, 'f>) : InsertExpr<'e, 'f> =
+    { CTEs = None
+      Entity = entity
+      Fields = [||]
+      Source = source
+      Extra = ObjectMap.empty
+    }
+
+let updateExpr (entity : OperationEntity<'e>) : UpdateExpr<'e, 'f> =
+    { CTEs = None
+      Entity = entity
+      Assignments = [||]
+      From = None
+      Where = None
+      Extra = ObjectMap.empty
+    }
+
+let deleteExpr (entity : OperationEntity<'e>) : DeleteExpr<'e, 'f> =
+    { CTEs = None
+      Entity = entity
+      Using = None
+      Where = None
+      Extra = ObjectMap.empty
+    }
+
 let queryColumnResult (expr : FieldExpr<'e, 'f>) : QueryColumnResult<'e, 'f> =
     { Alias = None
       Attributes = Map.empty
       Result = expr
+    }
+
+let entityAlias (name : EntityName) : EntityAlias =
+    { Name = name
+      Fields = None
+    }
+
+let subSelectExpr (select : SelectExpr<'e, 'f>) (alias : EntityAlias) : SubSelectExpr<'e, 'f> =
+    { Select = select
+      Alias = alias
+      Lateral = false
+    }
+
+let commonTableExprs (exprs : (EntityName * CommonTableExpr<'e, 'f>)[]) : CommonTableExprs<'e, 'f> =
+    { Recursive = false
+      Exprs = exprs
+      Extra = ObjectMap.empty
+    }
+
+let commonTableExpr (expr : SelectExpr<'e, 'f>) : CommonTableExpr<'e, 'f> =
+    { Fields = None
+      Materialized = None
+      Expr = expr
+      Extra = ObjectMap.empty
     }

@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Operations.Preload
 
 open System.IO
+open System.Linq
 open System.Text
 open System.Threading
 open System.Threading.Tasks
@@ -253,9 +254,14 @@ let buildFullLayoutMeta (layout : Layout) (subLayout : Layout) : LayoutAssertion
     let meta = SQL.unionDatabaseMeta meta1 meta2
     (assertions, meta)
 
+let buildSchemaLayoutExceptPreload (systemContext : SystemContext) (preload : Preload) (cancellationToken : CancellationToken) : Task<SourceLayout> =
+    let neededSchemas = preload.Schemas |> Map.keys |> Seq.map string |> Seq.toArray
+    let schemaCheck = Expr.toExpressionFunc <@ fun (schema : Schema) -> not (neededSchemas.Contains(schema.Name)) @>
+    buildSchemaLayout systemContext (Some schemaCheck) cancellationToken
+
 let buildFullSchemaLayout (systemContext : SystemContext) (preload : Preload) (cancellationToken : CancellationToken) : Task<SourceLayout> =
     task {
-        let! sourceUserLayout = buildSchemaLayout systemContext (Map.keys preload.Schemas) cancellationToken
+        let! sourceUserLayout = buildSchemaLayoutExceptPreload systemContext preload cancellationToken
         return unionSourceLayout (preloadLayout preload) sourceUserLayout
     }
 
@@ -425,7 +431,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
             }
         assert (Task.awaitSync <| sanityCheck ())
 
-        let! sourceUserLayout = buildSchemaLayout conn.System (Map.keys preload.Schemas) cancellationToken
+        let! sourceUserLayout = buildSchemaLayoutExceptPreload conn.System preload cancellationToken
         let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout
         let (brokenLayout, layout) = resolveLayout sourceLayout true
         do! checkBrokenLayout logger allowAutoMark preload conn brokenLayout cancellationToken

@@ -11,7 +11,6 @@ open FSharp.Control.Tasks.Affine
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Operations.Entity
@@ -143,10 +142,11 @@ let deleteSchemas (layout : Layout) (connection : DatabaseTransaction) (schemas 
     unitTask {
         let schemasArray = schemas |> Seq.map string |> Seq.toArray
         let! schemaIds =
-            connection.System.Schemas
-                .Where(fun schema -> schemasArray.Contains(schema.Name))
-                .Select(fun schema -> schema.Id)
-                .ToListAsync()
+            (query {
+                for schema in connection.System.Schemas do
+                    where (schemasArray.Contains(schema.Name))
+                    select schema.Id
+            }).ToArrayAsync(cancellationToken)
         let deletes = schemaIds |> Seq.map (fun id -> (schemaEntityRef, id)) |> Set.ofSeq
         do! cascadeDeleteDeferred (fun _ -> true) layout connection deletes cancellationToken
     }

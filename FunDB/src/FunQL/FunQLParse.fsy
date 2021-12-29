@@ -28,6 +28,7 @@ type ParsedInsertExpr = InsertExpr<EntityRef, LinkedFieldRef>
 type ParsedUpdateExpr = UpdateExpr<EntityRef, LinkedFieldRef>
 type ParsedDeleteExpr = DeleteExpr<EntityRef, LinkedFieldRef>
 type ParsedDataExpr = DataExpr<EntityRef, LinkedFieldRef>
+type ParserUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedFieldRef>
 
 type ParsedMainEntity =
     { Entity : EntityRef
@@ -251,6 +252,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token CASCADE
 %token ACTION
 %token NO
+%token ONLY
 
 // Types
 %token INT_TYPE
@@ -529,8 +531,12 @@ FromEntityName:
     |         { None }
     | AS Name { Some $2 }
 
+OnlyEntity:
+    |      { false }
+    | ONLY { true }
+
 FromEntity:
-    | EntityRef FromEntityRole FromEntityName { { Ref = $1; AsRoot = $2; Alias = $3 } }
+    | OnlyEntity EntityRef FromEntityRole FromEntityName { { Ref = $2; Only = $1; AsRoot = $3; Alias = $4; Extra = ObjectMap.empty } }
 
 QuerySource:
     | SubSelectExpr SubSelectAlias         { FSubExpr { Lateral = false; Select = $1; Alias = $2; } }
@@ -907,10 +913,10 @@ InsertValue:
 // UPDATE
 
 UpdateExpr:
-    | MaybeWithExpr UPDATE FromEntity SET UpdateAssigns FromClause WhereClause { { CTEs = $1; Entity = $3; Fields = $5; From = $6; Where = $7; Extra = ObjectMap.empty } }
+    | MaybeWithExpr UPDATE FromEntity SET UpdateAssigns FromClause WhereClause { { CTEs = $1; Entity = $3; Assignments = $5; From = $6; Where = $7; Extra = ObjectMap.empty } }
 
 UpdateAssigns:
-    | UpdateAssignsList { parseMap "Clashing assignments" $1 }
+    | UpdateAssignsList { List.toArray $1 }
 
 UpdateAssignsList:
     | UpdateAssign                         { [$1] }
@@ -918,7 +924,8 @@ UpdateAssignsList:
     | UpdateAssign COMMA UpdateAssignsList { $1 :: $3 }
 
 UpdateAssign:
-    | Name EQ FieldExpr { ($1, $3) }
+    | Name EQ InsertValue            { UAESet ($1, $3) }
+    | ColumnAliases EQ SubSelectExpr { UAESelect ($1, $3) }
 
 // DELETE
 

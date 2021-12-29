@@ -76,40 +76,30 @@ let private runQuery (runFunc : string -> ExprParameters -> CancellationToken ->
 
 let private runNonQuery (connection : QueryConnection) = runQuery connection.ExecuteNonQuery
 
-let private parseIntValue = function
-    | SQL.VInt i -> i
-    // FIXME FIXME: should use int64 everywhere instead!
-    | SQL.VBigInt i -> int i
-    | ret -> failwithf "Non-integer result: %O" ret
-
 let private runIntQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     task {
         match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
         | None -> return failwith "Unexpected empty result"
-        | Some (name, typ, ret) -> return parseIntValue ret
+        | Some (name, typ, ret) -> return SQL.parseIntValue ret
     }
 
 let private runOptionalIntQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     task {
         match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
         | None -> return None
-        | Some (name, typ, ret) -> return Some (parseIntValue ret)
+        | Some (name, typ, ret) -> return Some (SQL.parseIntValue ret)
     }
 
 let private runIntsQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     let execute query args cancellationToken =
-        connection.ExecuteColumnValuesQuery query args cancellationToken <| fun name typ rows -> task { return! rows.Select(parseIntValue).ToArrayAsync() }
+        connection.ExecuteColumnValuesQuery query args cancellationToken <| fun name typ rows -> task { return! rows.Select(SQL.parseIntValue).ToArrayAsync(cancellationToken) }
     runQuery execute query comments placeholders cancellationToken
-
-let private parseStringValue = function
-    | SQL.VString s -> s
-    | ret -> failwithf "Non-string result: %O" ret
 
 let private runOptionalStringQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     task {
         match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
         | None -> return None
-        | Some (name, typ, ret) -> return Some (parseStringValue ret)
+        | Some (name, typ, ret) -> return Some (SQL.parseStringValue ret)
     }
 
 let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
@@ -280,11 +270,7 @@ let private buildSelectOperation
     let aliasRef = { Schema = None; Name = tableRef.Name } : SQL.TableRef
     let bits = getBits aliasRef
 
-    let checkExpr =
-        if Option.isSome entity.Parent then
-            Some <| makeCheckExpr subEntityColumn layout entityRef
-        else
-            None
+    let checkExpr = makeCheckExpr subEntityColumn layout entityRef
     let whereExpr = Option.addWith (curry SQL.VEAnd) bits.Where checkExpr
     let fromExpr = SQL.FTable { Table = compileResolvedEntityRef entity.Root; Alias = None; Extra = ObjectMap.empty }
     let entityInfo =
@@ -443,9 +429,10 @@ let insertEntities
 
         let opTable = SQL.operationTable <| compileResolvedEntityRef entity.Root
         let expr =
-            { SQL.insertExpr opTable insertColumns (SQL.ISValues insertValues) with
-                  Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
-                  Extra = realEntityAnnotation entityRef
+            { SQL.insertExpr opTable (SQL.ISValues insertValues) with
+                Columns = insertColumns
+                Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
+                Extra = realEntityAnnotation entityRef
             }
         match applyRole with
         | None -> ()
@@ -492,7 +479,7 @@ let updateEntity
         let mutable arguments = keyCheck.Arguments
         let mutable argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) keyCheck.ArgumentValues
 
-        let getValue (fieldName : FieldName) (fieldValue : FieldValue) =
+        let getValue (fieldName : FieldName, fieldValue : FieldValue) =
             let field = Map.find fieldName entity.ColumnFields
             if field.IsImmutable then
                 raisef EntityDeniedException "Field %O is immutable" fieldName
@@ -501,16 +488,16 @@ let updateEntity
             arguments <- newArguments
             argumentValues <- Map.add (PLocal fieldName) fieldValue argumentValues
             let extra = { Name = fieldName } : RealFieldAnnotation
-            (field.ColumnName, (extra :> obj, SQL.VEPlaceholder argInfo.PlaceholderId))
+            let colName =
+                { Name = field.ColumnName
+                  Extra = extra :> obj
+                } : SQL.UpdateColumnName
+            SQL.UAESet (colName, SQL.IVValue <| SQL.VEPlaceholder argInfo.PlaceholderId)
 
-        let columns = Map.mapWithKeys getValue updateArgs
+        let assigns = updateArgs |> Map.toSeq |> Seq.map getValue |> Seq.toArray
 
-        let whereExpr =
-            if Option.isSome entity.Parent then
-                let checkExpr = makeCheckExpr subEntityColumn layout entityRef
-                SQL.VEAnd (checkExpr, keyCheck.Where)
-            else
-                keyCheck.Where
+        let checkExpr = makeCheckExpr subEntityColumn layout entityRef
+        let whereExpr = Option.addWith (curry SQL.VEAnd) keyCheck.Where checkExpr
 
         let opTable = SQL.operationTable tableRef
         let returning =
@@ -522,7 +509,7 @@ let updateEntity
 
         let expr =
             { SQL.updateExpr opTable with
-                  Columns = columns
+                  Assignments = assigns
                   Where = Some whereExpr
                   Returning = returning
                   Extra = realEntityAnnotation entityRef
@@ -679,16 +666,16 @@ let private getSubEntity
                 | RKId id ->
                     match row with
                     | [|(_, _, subEntityValue)|] ->
-                        let rawSubEntity = parseStringValue subEntityValue
+                        let rawSubEntity = SQL.parseStringValue subEntityValue
                         let subEntity = parseTypeName entity.Root rawSubEntity
                         return (id, subEntity)
                     | _ -> return failwith "Impossible"
                 | RKAlt (name, args) ->
                     match row with
                     | [|(_, _, idValue); (_, _, subEntityValue)|] ->
-                        let rawSubEntity = parseStringValue subEntityValue
+                        let rawSubEntity = SQL.parseStringValue subEntityValue
                         let subEntity = parseTypeName entity.Root rawSubEntity
-                        return (parseIntValue idValue, subEntity)
+                        return (SQL.parseIntValue idValue, subEntity)
                     | _ -> return failwith "Impossible"
     }
 
@@ -739,15 +726,15 @@ let private getRelatedRowIds
             match singleSubEntity with
             | None -> function
                 | [|idValue; subEntityValue|] ->
-                    let rawSubEntity = parseStringValue subEntityValue
+                    let rawSubEntity = SQL.parseStringValue subEntityValue
                     let subEntity = parseTypeName entity.Root rawSubEntity
-                    (parseIntValue idValue, subEntity)
+                    (SQL.parseIntValue idValue, subEntity)
                 | _ -> failwith "Impossible"
             | Some subEntity -> function
-                | [|value|] -> (parseIntValue value, subEntity)
+                | [|value|] -> (SQL.parseIntValue value, subEntity)
                 | _ -> failwith "Impossible"
 
-        let execute query args cancellationToken = connection.ExecuteQuery query args cancellationToken <| fun columns rows -> task { return! rows.Select(processOne).ToArrayAsync() }
+        let execute query args cancellationToken = connection.ExecuteQuery query args cancellationToken <| fun columns rows -> task { return! rows.Select(processOne).ToArrayAsync(cancellationToken) }
         return! runQuery execute opQuery.Query comments argumentValues cancellationToken
     }
 
@@ -805,7 +792,7 @@ let getRelatedEntities
                 let idx = lastId
                 processed <- Map.add (entity.Root, id) idx processed
                 lastId <- lastId + 1
-                let! referenceLists = entity.ReferencingFields |> Map.toSeq |> Seq.mapTask (findRelated entityRef id) 
+                let! referenceLists = entity.ReferencingFields |> Map.toSeq |> Seq.mapTask (findRelated entityRef id)
                 let node =
                     { Entity = entityRef
                       Id = id

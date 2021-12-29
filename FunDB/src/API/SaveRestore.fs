@@ -59,13 +59,15 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                 )
                 return Error RSEAccessDenied
             else
-                try
-                    let! schemasSeq = names |> Seq.mapTask (fun name -> saveSchema ctx.Transaction.System name ctx.CancellationToken |> Task.map (fun x -> (name, x)))
-                    return Ok (Map.ofSeq schemasSeq)
-                with
-                | :? SaveSchemaException as ex when ex.IsUserException ->
-                    match ex.Info with
-                    | SENotFound -> return Error RSENotFound
+                let runOne results name =
+                    task {
+                        if not <| Map.containsKey name ctx.Layout.Schemas then
+                            return Error RSENotFound
+                        else
+                            let! schema = saveSchema ctx.Transaction ctx.Layout name ctx.CancellationToken
+                            return Ok <| Map.add name schema results
+                    }
+                return! names |> Seq.foldResultTask runOne Map.empty
         }
 
     member this.SaveZipSchemas (schemas : SaveSchemas) : Task<Result<Stream, SaveErrorInfo>> =
@@ -79,7 +81,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                 return Ok (stream :> Stream)
         }
 
-    member this.RestoreSchemas (dumps : Map<SchemaName, SchemaDump>) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
+    member this.RestoreSchemas (rawDumps : Map<SchemaName, SchemaDump>) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
         task {
             if not (canRestore rctx.User.Effective.Type) then
                 logger.LogError("Restore access denied")
@@ -89,7 +91,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                 )
                 return Error RREAccessDenied
             else
-                let restoredSchemas = Map.keysSet dumps
+                let restoredSchemas = Map.keysSet rawDumps
                 let preloadSchemas = Map.keysSet ctx.Preload.Schemas
                 if not <| Set.isEmpty (Set.intersect restoredSchemas preloadSchemas) then
                     logger.LogError("Cannot restore preloaded schemas")
@@ -108,11 +110,13 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                                 Set.difference emptySchemas restoredSchemas
                         let dumps =
                             let emptyDumps = droppedSchemas |> Seq.map (fun name -> (name, emptySchemaDump)) |> Map.ofSeq
-                            Map.union emptyDumps dumps
+                            Map.union emptyDumps rawDumps
                         let! modified = restoreSchemas ctx.Transaction ctx.Layout dumps ctx.CancellationToken
                         do! deleteSchemas ctx.Layout ctx.Transaction droppedSchemas ctx.CancellationToken
                         if modified || not (Set.isEmpty droppedSchemas) then
                             ctx.ScheduleMigration ()
+                        let newCustomEntities = dumps |> Map.map (fun name dump -> dump.CustomEntities)
+                        ctx.ScheduleUpdateCustomEntities(newCustomEntities)
                         do! rctx.WriteEventSync (fun event ->
                             event.Type <- "restoreSchemas"
                             event.Details <- sprintf "{\"dropOthers\":%b,\"dumps\":%s}" dropOthers (JsonConvert.SerializeObject dumps)

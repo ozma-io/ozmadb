@@ -7,7 +7,7 @@ type Path = string
 
 // We implement methods for handling paths by ourselves, because we use a virtual POSIX fs and System.IO.Path is platform-specific.
 
-let private extensionRegex = Regex(@"\.([^/.]+)$")
+let private extensionRegex = Regex(@"\.([^/.]+)$", RegexOptions.Compiled)
 let trimExtension (path : Path) : Path =
     extensionRegex.Replace(path, "")
 
@@ -27,7 +27,7 @@ let addDelimiter (path : Path) : Path =
     else
         path + "/"
 
-let private baseNameRegex = Regex(@"[^/]+$")
+let private baseNameRegex = Regex(@"[^/]+$", RegexOptions.Compiled)
 
 let baseName (path : Path) : Path =
     let res = baseNameRegex.Match(path)
@@ -53,11 +53,11 @@ let rec private shortenReplaceContinuously (regex : Regex) (replace : string) (s
     else
         shortenReplaceContinuously regex replace r
 
-let private removeDotsRegex = Regex(@"(^|/)\./")
+let private removeDotsRegex = Regex(@"(^|/)\./", RegexOptions.Compiled)
 let private removeDotsReplace (m : Match) = m.Groups.[1].Value
-let private removeRepeatingSlashesRegex = Regex(@"//+")
+let private removeRepeatingSlashesRegex = Regex(@"//+", RegexOptions.Compiled)
 let private removeRepeatingSlashesReplace  = "/"
-let private removeForwardBacksRegex = Regex(@"([^/]+)/\.\./")
+let private removeForwardBacksRegex = Regex(@"([^/]+)/\.\./", RegexOptions.Compiled)
 let private replaceForwardBacksReplace (m : Match) =
     if m.Groups.[1].Value = ".." then
         "../../"
@@ -69,7 +69,7 @@ let normalize (path : Path) : Path =
         |> shortenReplaceContinuously removeRepeatingSlashesRegex removeRepeatingSlashesReplace
         |> shortenReplaceContinuously' removeForwardBacksRegex replaceForwardBacksReplace
 
-let private startingBacksRegex = Regex(@"^/\.\./")
+let private startingBacksRegex = Regex(@"^/\.\./", RegexOptions.Compiled)
 let goesBack (path : Path) =
     startingBacksRegex.IsMatch path
 

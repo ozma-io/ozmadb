@@ -37,15 +37,15 @@
     <Compile Include="src/SQL/Meta.fs" />
     <Compile Include="src/SQL/Chunk.fs" />
 
-    <Compile Include="src/Connection.fs" />
-    <Compile Include="src/EventLogger.fs" />
-
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />
     <FsYacc Include="src/FunQL/FunQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParse.fs" />
     <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
+
+    <Compile Include="src/Connection.fs" />
+    <Compile Include="src/EventLogger.fs" />
 
     <!-- Needed early for various other parts -->
     <Compile Include="src/Layout/Source.fs" />

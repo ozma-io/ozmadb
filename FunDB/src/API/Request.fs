@@ -61,8 +61,7 @@ type private FetchedUser =
 
 let private fetchUser (system : SystemContext) (userName : UserName) (allowDisabled : bool) (cancellationToken : CancellationToken) : Task<FetchedUser option> =
     task {
-        // FIXME: No index for this.
-        let lowerUserName = userName.ToLower()
+        let lowerUserName = userName.ToLowerInvariant()
         let userQuery =
             system.Users
                 .Include("Role")

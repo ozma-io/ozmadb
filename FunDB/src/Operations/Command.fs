@@ -80,7 +80,16 @@ let private getTriggeredEntity = function
         Some (TTInsert, tableInfo.RealEntity)
     | SQL.DEUpdate update ->
         let tableInfo = update.Table.Extra :?> RealEntityAnnotation
-        let fields = update.Columns |> Map.values |> Seq.map (fun (extra, col) -> (extra :?> RealFieldAnnotation).Name) |> Set.ofSeq
+
+        let getField (name : SQL.UpdateColumnName) =
+            let ann = name.Extra :?> RealFieldAnnotation
+            ann.Name
+
+        let getFields = function
+            | SQL.UAESet (name, expr) -> Seq.singleton <| getField name
+            | SQL.UAESelect (cols, select) -> Seq.map getField cols
+
+        let fields = update.Assignments |> Seq.collect getFields |> Set.ofSeq
         Some (TTUpdate fields, tableInfo.RealEntity)
     | SQL.DEDelete delete ->
         let tableInfo = delete.Table.Extra :?> RealEntityAnnotation

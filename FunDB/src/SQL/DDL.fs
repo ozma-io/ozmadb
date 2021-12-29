@@ -4,12 +4,10 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
 
-type ConstraintName = SQLName
 type IndexName = SQLName
 type SequenceName = SQLName
 type TriggerName = SQLName
 type ExtensionName = SQLName
-type OpClassName = SQLName
 type AccessMethodName = SQLName
 type MigrationKey = string
 type MigrationKeysSet = Set<MigrationKey>
@@ -145,21 +143,6 @@ type ConstraintMeta =
             | CMForeignKey opts ->
                 sprintf "FOREIGN KEY %O" opts
             | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToString())
-
-        interface ISQLString with
-            member this.ToSQLString () = this.ToSQLString()
-
-[<StructuralEquality; NoComparison>]
-type IndexKey =
-    | IKColumn of ColumnName
-    | IKExpression of StringComparable<ValueExpr>
-    with
-        override this.ToString () = this.ToSQLString()
-
-        member this.ToSQLString () =
-            match this with
-            | IKColumn col -> col.ToSQLString()
-            | IKExpression expr -> sprintf "(%O)" expr
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
@@ -412,6 +395,78 @@ type TableOperation =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+[<StructuralEquality; NoComparison>]
+type CommitTableAction =
+    | CAPreserveRows
+    | CADeleteRows
+    | CADrop
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | CAPreserveRows -> "PRESERVE ROWS"
+            | CADeleteRows -> "DELETE ROWS"
+            | CADrop -> "DROP"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
+type TemporaryTableOpts =
+    { OnCommit : CommitTableAction option
+    }
+
+[<NoEquality; NoComparison>]
+type CreateTableOperation =
+    { Table : TableRef
+      Temporary : TemporaryTableOpts option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let (tmpStr, onCommitStr) =
+                match this.Temporary with
+                | None -> ("", "")
+                | Some tmp ->
+                    let onCommitStr =
+                        match tmp.OnCommit with
+                        | Some onCommit -> sprintf "ON COMMIT %O" onCommit
+                        | None -> ""
+                    ("TEMPORARY", onCommitStr)
+            String.concatWithWhitespaces ["CREATE"; tmpStr; sprintf "TABLE %s ()" (this.Table.ToSQLString()); onCommitStr]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<NoEquality; NoComparison>]
+type CreateTableAsOperation =
+    { Table : TableRef
+      Temporary : TemporaryTableOpts option
+      Columns : ColumnName[] option
+      Query : SelectExpr
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let (tmpStr, onCommitStr) =
+                match this.Temporary with
+                | None -> ("", "")
+                | Some tmp ->
+                    let onCommitStr =
+                        match tmp.OnCommit with
+                        | Some onCommit -> sprintf "ON COMMIT %O" onCommit
+                        | None -> ""
+                    ("TEMPORARY", onCommitStr)
+            let columnsStr =
+                match this.Columns with
+                | None -> ""
+                | Some cols -> cols |> Seq.map toSQLString |> String.concat ", " |> sprintf "(%s)"
+            String.concatWithWhitespaces ["CREATE"; tmpStr; sprintf "TABLE %s" (this.Table.ToSQLString()); columnsStr; onCommitStr; sprintf "AS %O" this.Query]
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 [<NoEquality; NoComparison>]
 type SchemaOperation =
     | SOCreateExtension of ExtensionName
@@ -419,7 +474,7 @@ type SchemaOperation =
     | SOCreateSchema of SchemaName
     | SORenameSchema of SchemaName * SchemaName
     | SODropSchema of SchemaName
-    | SOCreateTable of TableRef
+    | SOCreateTable of CreateTableOperation
     | SORenameTable of TableRef * TableName
     | SOAlterTable of TableRef * TableOperation[]
     | SORenameTableColumn of TableRef * ColumnName * ColumnName
@@ -450,7 +505,7 @@ type SchemaOperation =
             | SOCreateSchema schema -> sprintf "CREATE SCHEMA %s" (schema.ToSQLString())
             | SORenameSchema (schema, toName) -> sprintf "ALTER SCHEMA %s RENAME TO %s" (schema.ToSQLString()) (toName.ToSQLString())
             | SODropSchema schema -> sprintf "DROP SCHEMA %s" (schema.ToSQLString())
-            | SOCreateTable table -> sprintf "CREATE TABLE %s ()" (table.ToSQLString())
+            | SOCreateTable opts -> opts.ToSQLString()
             | SORenameTable (table, toName) -> sprintf "ALTER TABLE %s RENAME TO %s" (table.ToSQLString()) (toName.ToSQLString())
             | SOAlterTable (table, ops) -> sprintf "ALTER TABLE %s %s" (table.ToSQLString()) (ops |> Seq.map toSQLString |> String.concat ", ")
             | SORenameTableColumn (table, col, toCol) -> sprintf "ALTER TABLE %s RENAME COLUMN %s TO %s" (table.ToSQLString()) (col.ToSQLString()) (toCol.ToSQLString())

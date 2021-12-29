@@ -69,9 +69,9 @@ and tokenizeFunQL = parse
 
     // Argument IDs
     | "$$" escapedId   { Parse.GLOBAL_ARGUMENT_ID (escapedId 2 lexbuf) }
-    | "$$" unescapedId { Parse.GLOBAL_ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 2).ToLower()) }
+    | "$$" unescapedId { Parse.GLOBAL_ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 2).ToLowerInvariant()) }
     | "$" escapedId    { Parse.ARGUMENT_ID (escapedId 1 lexbuf) }
-    | "$" unescapedId  { Parse.ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 1).ToLower()) }
+    | "$" unescapedId  { Parse.ARGUMENT_ID ((String lexbuf.Lexeme).Remove(0, 1).ToLowerInvariant()) }
 
     // Symbols
     | "@{"   { Parse.AT_LEFT_BRACE }
@@ -180,6 +180,7 @@ and tokenizeFunQL = parse
     | a c t i o n             { Parse.ACTION }
     | c a s c a d e           { Parse.CASCADE }
     | n o                     { Parse.NO }
+    | o n l y                 { Parse.ONLY }
 
     // Types
     | i n t             { Parse.INT_TYPE }
@@ -196,7 +197,7 @@ and tokenizeFunQL = parse
     | u u i d           { Parse.UUID_TYPE }
 
     // Unescaped ids
-    | unescapedId { Parse.ID ((String lexbuf.Lexeme).ToLower()) }
+    | unescapedId { Parse.ID ((String lexbuf.Lexeme).ToLowerInvariant()) }
 
     // Comments
     | "--"       { lineCommentFunQL lexbuf }

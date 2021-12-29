@@ -1,5 +1,8 @@
 module FunWithFlags.FunDB.Modules.Schema
 
+open System
+open System.Linq
+open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -23,9 +26,13 @@ let private makeSourceModulesSchema (schema : Schema) : SourceModulesSchema =
         |> Map.ofSeq
     { Modules = modules }
 
-let buildSchemaModules (db : SystemContext) (cancellationToken : CancellationToken) : Task<SourceModules> =
+let buildSchemaModules (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceModules> =
     task {
-        let currentSchemas = db.GetModulesObjects ()
+        let currentSchemas = db.GetModulesObjects()
+        let currentSchemas =
+            match filter with
+            | None -> currentSchemas
+            | Some expr -> currentSchemas.Where(expr)
         let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceModulesSchema schema)) |> Map.ofSeqUnique
 

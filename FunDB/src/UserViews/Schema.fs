@@ -1,5 +1,8 @@
 module FunWithFlags.FunDB.UserViews.Schema
 
+open System
+open System.Linq
+open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -23,9 +26,13 @@ let private makeSourceSchema (schema : Schema) : SourceUserViewsSchema =
         | script -> Some { Script = script; AllowBroken = schema.UserViewGeneratorScriptAllowBroken }
     }
 
-let buildSchemaUserViews (db : SystemContext) (cancellationToken : CancellationToken) : Task<SourceUserViews> =
+let buildSchemaUserViews (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceUserViews> =
     task {
-        let currentSchemas = db.GetUserViewsObjects ()
+        let currentSchemas = db.GetUserViewsObjects()
+        let currentSchemas =
+            match filter with
+            | None -> currentSchemas
+            | Some expr -> currentSchemas.Where(expr)
         let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
 

@@ -1,10 +1,13 @@
 module FunWithFlags.FunDB.Layout.Schema
 
+open System
 open System.Linq
+open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
+open Microsoft.FSharp.Quotations
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Layout.Source
@@ -64,6 +67,10 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
       UpdatedInternally = false
       DeletedInternally = false
       TriggersMigration = false
+      SaveRestoreKey =
+        if isNull entity.SaveRestoreKey
+        then None
+        else Some <| FunQLName entity.SaveRestoreKey
       IsHidden = false
       IsFrozen = entity.IsFrozen
       Parent =
@@ -77,10 +84,13 @@ let private makeSourceSchema (schema : Schema) : SourceSchema =
     { Entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
     }
 
-let buildSchemaLayout (db : SystemContext) (withoutSchemas : SchemaName seq) (cancellationToken : CancellationToken) : Task<SourceLayout> =
+let buildSchemaLayout (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceLayout> =
     task {
-        let withoutSchemasArr = withoutSchemas |> Seq.map string |> Array.ofSeq
-        let currentSchemas = db.GetLayoutObjects().Where(fun schema -> not (withoutSchemasArr.Contains(schema.Name)))
+        let currentSchemas = db.GetLayoutObjects()
+        let currentSchemas =
+            match filter with
+            | None -> currentSchemas
+            | Some expr -> currentSchemas.Where(expr)
         let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceSchema schema)) |> Map.ofSeqUnique
 

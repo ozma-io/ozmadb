@@ -1,5 +1,8 @@
 module FunWithFlags.FunDB.Permissions.Schema
 
+open System
+open System.Linq
+open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -52,9 +55,13 @@ let private makeSourcePermissionsSchema (schema : Schema) : SourcePermissionsSch
     { Roles = schema.Roles |> Seq.map (fun role -> (FunQLName role.Name, makeSourceRole role)) |> Map.ofSeqUnique
     }
 
-let buildSchemaPermissions (db : SystemContext) (cancellationToken : CancellationToken) : Task<SourcePermissions> =
+let buildSchemaPermissions (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourcePermissions> =
     task {
-        let currentSchemas = db.GetRolesObjects ()
+        let currentSchemas = db.GetRolesObjects()
+        let currentSchemas =
+            match filter with
+            | None -> currentSchemas
+            | Some expr -> currentSchemas.Where(expr)
         let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourcePermissionsSchema schema)) |> Map.ofSeqUnique
 

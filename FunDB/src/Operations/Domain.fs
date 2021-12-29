@@ -82,7 +82,7 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
             let arguments = Map.union arguments (Map.mapKeys PLocal argValues)
             return! connection.ExecuteQuery (convertComments comments + query.Expression.ToSQLString()) (prepareArguments query.Arguments arguments) cancellationToken <| fun columns result ->
                 task {
-                    let! values = result.Select(convertDomainValue).ToArrayAsync()
+                    let! values = result.Select(convertDomainValue).ToArrayAsync(cancellationToken)
                     let (_, punType) = columns.[1]
                     let ret =
                         { Values = values

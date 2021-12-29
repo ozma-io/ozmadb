@@ -86,6 +86,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               UpdatedInternally = entityAttr.UpdatedInternally
               DeletedInternally = entityAttr.DeletedInternally
               TriggersMigration = entityAttr.TriggersMigration
+              SaveRestoreKey = entityAttr.SaveRestoreKey |> Option.ofObj |> Option.map FunQLName
               IsHidden = entityAttr.IsHidden
               IsFrozen = entityAttr.IsFrozen
               Parent = None

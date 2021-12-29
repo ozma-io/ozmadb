@@ -70,6 +70,7 @@ type IContext =
     abstract member Domains : LayoutDomains
 
     abstract member ScheduleMigration : unit -> unit
+    abstract member ScheduleUpdateCustomEntities : SchemaCustomEntities -> unit
     abstract member Commit : unit -> Task
     abstract member CheckIntegrity : unit -> Task
     abstract member GetAnonymousView : bool -> string -> Task<PrefetchedUserView>

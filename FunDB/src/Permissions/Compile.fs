@@ -19,12 +19,11 @@ let compileRestriction (layout : Layout) (entityRef : ResolvedEntityRef) (argume
     let entity = layout.FindEntity entityRef |> Option.get
     // We don't want compiler to add type check to the result, because our own typecheck is built into the restriction.
     // Hence, a hack: we pretend to use root entity instead, but add an alias so that expression properly binds.
-    let fromEntity =
-        { Ref = relaxEntityRef entity.Root
-          Alias = renameResolvedEntityRef entityRef |> decompileName |> Some
-          AsRoot = false
+    let fEntity =
+        { fromEntity (relaxEntityRef entity.Root) with
+              Alias = renameResolvedEntityRef entityRef |> decompileName |> Some
         }
-    let (info, from) = compileSingleFromExpr layout arguments (FEntity fromEntity) (Some restr)
+    let (info, from) = compileSingleFromExpr layout arguments (FEntity fEntity) (Some restr)
     let ret =
         { From = from.From
           Joins = from.Joins

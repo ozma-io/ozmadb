@@ -1,5 +1,8 @@
 module FunWithFlags.FunDB.Triggers.Schema
 
+open System
+open System.Linq
+open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -46,9 +49,13 @@ let private makeSourceTriggersDatabase (schema : Schema) : SourceTriggersDatabas
         |> Map.ofSeq
     { Schemas = schemas }
 
-let buildSchemaTriggers (db : SystemContext) (cancellationToken : CancellationToken) : Task<SourceTriggers> =
+let buildSchemaTriggers (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceTriggers> =
     task {
-        let currentSchemas = db.GetTriggersObjects ()
+        let currentSchemas = db.GetTriggersObjects()
+        let currentSchemas =
+            match filter with
+            | None -> currentSchemas
+            | Some expr -> currentSchemas.Where(expr)
         let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceTriggersDatabase schema)) |> Map.ofSeqUnique
 

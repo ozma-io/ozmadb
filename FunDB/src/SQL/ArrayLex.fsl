@@ -3,10 +3,13 @@
 module FunWithFlags.FunDB.SQL.Array.Lex
 
 open System
+open System.Text.RegularExpressions
 open FSharp.Text.Lexing
 
 open FunWithFlags.FunDB.SQL.Parsing
 open FunWithFlags.FunDB.SQL.Array
+
+let private nullRegex = Regex(@"^ *null *$", RegexOptions.Compiled ||| RegexOptions.CultureInvariant ||| RegexOptions.IgnoreCase)
 
 }
 
@@ -17,7 +20,7 @@ rule tokenizeArray = parse
     | ","              { Parse.COMMA }
     | [^ '"' '{' '}']* {
         let str = String lexbuf.Lexeme
-        if str.Trim(' ').ToLower() = "null" then Parse.NULL else Parse.STRING str
+        if nullRegex.IsMatch(str) then Parse.NULL else Parse.STRING str
     }
 
     // Misc

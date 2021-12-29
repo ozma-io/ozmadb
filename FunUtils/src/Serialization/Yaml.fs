@@ -1,7 +1,9 @@
 module FunWithFlags.FunUtils.Serialization.Yaml
 
 open System
+open System.Globalization
 open System.Collections.Generic
+open Newtonsoft.Json.Linq
 open YamlDotNet.Core
 open YamlDotNet.Core.Events
 open YamlDotNet.Serialization
@@ -12,6 +14,47 @@ open Microsoft.FSharp.Reflection
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
+
+type TypedScalar =
+    | TSString of string
+    | TSInt of int
+    | TSFloat of double
+    | TSBool of bool
+    | TSNull
+
+let parseScalar (scalar : Scalar) : TypedScalar =
+    match scalar.Style with
+    | ScalarStyle.Plain ->
+        // https://yaml.org/spec/1.2-old/spec.html#id2804356
+        match scalar.Value with
+        | ""
+        | "~"
+        | "null"
+        | "Null"
+        | "NULL" -> TSNull
+        | "true"
+        | "True"
+        | "TRUE" -> TSBool true
+        | "false"
+        | "False"
+        | "FALSE" -> TSBool false
+        | ".inf"
+        | ".Inf"
+        | ".INF" -> TSFloat Double.PositiveInfinity
+        | "-.inf"
+        | "-.Inf"
+        | "-.INF" -> TSFloat Double.NegativeInfinity
+        | ".nan"
+        | ".NaN"
+        | ".NAN" -> TSFloat Double.NaN
+        | value ->
+            match Int32.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture) with
+            | (true, ret) -> TSInt ret
+            | (false, _) ->
+                match Double.TryParse(value, NumberStyles.AllowLeadingSign ||| NumberStyles.AllowDecimalPoint ||| NumberStyles.AllowExponent, CultureInfo.InvariantCulture) with
+                | (true, ret) -> TSFloat ret
+                | (false, _) -> TSString scalar.Value
+    | _ -> TSString scalar.Value
 
 // https://github.com/aaubry/YamlDotNet/issues/459
 // We pass serializers to converters after instantiating them with mutation. Ugh.
@@ -40,8 +83,8 @@ type CrutchTypeConverter () =
         use state = new SerializerState()
         this.ValueDeserializer.DeserializeValue(parser, someType, state, this.ValueDeserializer)
 
-    member this.Deserialize<'A>(parser : IParser) : 'A =
-        downcast this.Deserialize(parser, typeof<'A>)
+    member this.Deserialize<'a>(parser : IParser) : 'a =
+        downcast this.Deserialize(parser, typeof<'a>)
 
     abstract member Accepts : Type -> bool
     abstract member ReadYaml : IParser -> Type -> obj
@@ -53,7 +96,7 @@ type CrutchTypeConverter () =
         override this.WriteYaml (emitter, value, someType) = this.WriteYaml emitter value someType
 
 [<AbstractClass>]
-type SpecializedTypeConverter () =
+type GenericTypeConverter () =
     inherit CrutchTypeConverter ()
     let convertersCache = Dictionary<Type, IYamlTypeConverter>()
 
@@ -78,14 +121,31 @@ type SpecializedTypeConverter () =
         converter.WriteYaml(emitter, value, someType)
 
 [<AbstractClass>]
-type SpecializedSingleTypeConverter<'A> () =
-    inherit SpecializedTypeConverter ()
+type SimpleTypeConverter<'a> () =
+    inherit CrutchTypeConverter ()
+
+    let myType = typeof<'a>
+
+    abstract member ReadTypedYaml : IParser -> 'a
+    abstract member WriteTypedYaml : IEmitter -> 'a -> unit
+
+    override this.Accepts (someType : Type) = someType = myType
+
+    override this.ReadYaml (parser : IParser) (someType : Type) : obj =
+        this.ReadTypedYaml parser :> obj
+
+    override this.WriteYaml (emitter : IEmitter) (value : obj) (someType : Type) : unit =
+        this.WriteTypedYaml emitter (value :?> 'a)
+
+[<AbstractClass>]
+type SpecializationTypeConverter<'a> () =
+    inherit GenericTypeConverter ()
 
     override this.GetConverterType (someType : Type) : Type =
-        typedefof<'A>.MakeGenericType([|someType|])
+        typedefof<'a>.MakeGenericType([|someType|])
 
-type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
-    let cases = unionCases typeof<'A>
+type SpecializedUnionConverter<'a> (converter : CrutchTypeConverter) =
+    let cases = unionCases typeof<'a>
 
     let (readYaml, writeYaml) =
         match isNewtype cases with
@@ -98,7 +158,7 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                     FSharpValue.MakeUnion(info.Case, [|arg|])
             let write =
                 fun value (writer : IEmitter) ->
-                    let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
+                    let (case, args) = FSharpValue.GetUnionFields(value, typeof<'a>)
                     converter.Serialize(writer, args.[0])
             (read, write)
         | None ->
@@ -120,7 +180,7 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                         if value = option.NoneValue then
                             writer.Emit(Scalar("null"))
                         else
-                            let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
+                            let (case, args) = FSharpValue.GetUnionFields(value, typeof<'a>)
                             assert (case = option.SomeCase)
                             assert (Array.length args = 1)
                             converter.Serialize(writer, args.[0])
@@ -137,7 +197,7 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                     let reverseOptions = options |> Map.mapWithKeys (fun name (case, v) -> (case.Name, name))
                     let write =
                         fun value (writer : IEmitter) ->
-                            let (case, args) = FSharpValue.GetUnionFields(value, typeof<'A>)
+                            let (case, args) = FSharpValue.GetUnionFields(value, typeof<'a>)
                             match Map.find case.Name reverseOptions with
                             | None -> writer.Emit(Scalar("null"))
                             | Some cn -> writer.Emit(Scalar(cn))
@@ -146,22 +206,22 @@ type SpecializedUnionConverter<'A> (converter : CrutchTypeConverter) =
                     failwith "(De)serialization for arbitrary unions is not implemented"
 
     interface IYamlTypeConverter with
-        override this.Accepts someType = someType = typeof<'A>
+        override this.Accepts someType = someType = typeof<'a>
         override this.ReadYaml (parser, someType) = readYaml parser
         override this.WriteYaml (emitter, value, someType) = writeYaml value emitter
 
 type UnionTypeConverter () =
-    inherit SpecializedSingleTypeConverter<SpecializedUnionConverter<obj>> ()
+    inherit SpecializationTypeConverter<SpecializedUnionConverter<obj>> ()
 
     override this.Accepts (someType : Type) : bool =
         FSharpType.IsUnion someType
 
-type SpecializedRecordConverter<'A> (converter : CrutchTypeConverter) =
+type SpecializedRecordConverter<'a> (converter : CrutchTypeConverter) =
     let getFieldInfo prop =
         let field = serializableField prop
         (converter.NamingConvention.Apply field.Name, field)
 
-    let fields = FSharpType.GetRecordFields(typeof<'A>) |> Array.map getFieldInfo
+    let fields = FSharpType.GetRecordFields(typeof<'a>) |> Array.map getFieldInfo
     let fieldsMap = Map.ofSeq fields
     let defaultValuesMap = fields |> Seq.mapMaybe (fun (name, field) -> Option.map (fun def -> (name, def)) field.DefaultValue) |> Map.ofSeq
 
@@ -195,7 +255,7 @@ type SpecializedRecordConverter<'A> (converter : CrutchTypeConverter) =
             | None -> raisef YamlException "Field \"%s\" not found" name
             | Some o -> o
         let values = fields |> Array.map lookupField
-        FSharpValue.MakeRecord(typeof<'A>, values)
+        FSharpValue.MakeRecord(typeof<'a>, values)
 
     let writeYaml (value : obj) (writer : IEmitter) : unit =
         writer.Emit(MappingStart())
@@ -210,29 +270,29 @@ type SpecializedRecordConverter<'A> (converter : CrutchTypeConverter) =
         writer.Emit(MappingEnd())
 
     interface IYamlTypeConverter with
-        override this.Accepts someType = someType = typeof<'A>
+        override this.Accepts someType = someType = typeof<'a>
         override this.ReadYaml (parser, someType) = readYaml parser
         override this.WriteYaml (emitter, value, someType) = writeYaml value emitter
 
 type RecordTypeConverter () =
-    inherit SpecializedSingleTypeConverter<SpecializedRecordConverter<obj>> ()
+    inherit SpecializationTypeConverter<SpecializedRecordConverter<obj>> ()
 
     override this.Accepts (someType : Type) : bool =
         FSharpType.IsRecord someType
 
-type SpecializedMapConverter<'K, 'V when 'K : comparison> (converter : CrutchTypeConverter) =
+type SpecializedMapConverter<'k, 'v when 'k : comparison> (converter : CrutchTypeConverter) =
     interface IYamlTypeConverter with
         override this.Accepts someType =
-            someType = typeof<Map<'K, 'V>>
+            someType = typeof<Map<'k, 'v>>
 
         override this.ReadYaml (parser : IParser, someType : Type) =
-            let seq = converter.Deserialize<Dictionary<'K, 'V>>(parser)
+            let seq = converter.Deserialize<Dictionary<'k, 'v>>(parser)
             seq |> Seq.map (function KeyValue(k, v) -> (k, v)) |> Map.ofSeq :> obj
 
         override this.WriteYaml (emitter, value, someType) = failwith "Not implemented"
 
 type MapTypeConverter () =
-    inherit SpecializedTypeConverter ()
+    inherit GenericTypeConverter ()
 
     override this.GetConverterType (someType : Type) : Type =
         typedefof<SpecializedMapConverter<_, _>>.MakeGenericType(someType.GetGenericArguments())
@@ -240,25 +300,72 @@ type MapTypeConverter () =
     override this.Accepts (someType : Type) : bool =
         someType.IsGenericType && someType.GetGenericTypeDefinition() = typedefof<Map<_, _>>
 
-type SpecializedSetConverter<'K when 'K : comparison> (converter : CrutchTypeConverter) =
+type SpecializedSetConverter<'k when 'k : comparison> (converter : CrutchTypeConverter) =
     interface IYamlTypeConverter with
         override this.Accepts someType =
-            someType = typeof<Set<'K>>
+            someType = typeof<Set<'k>>
 
         override this.ReadYaml (parser : IParser, someType : Type) =
-            let seq = converter.Deserialize<List<'K>>(parser)
+            let seq = converter.Deserialize<List<'k>>(parser)
             seq |> Set.ofSeq :> obj
 
         override this.WriteYaml (emitter, value, someType) = failwith "Not implemented"
 
 type SetTypeConverter () =
-    inherit SpecializedTypeConverter ()
+    inherit GenericTypeConverter ()
 
     override this.GetConverterType (someType : Type) : Type =
         typedefof<SpecializedSetConverter<_>>.MakeGenericType(someType.GetGenericArguments())
 
     override this.Accepts (someType : Type) : bool =
         someType.IsGenericType && someType.GetGenericTypeDefinition() = typedefof<Set<_>>
+
+let private readJsonValue (scalar : Scalar) =
+    match parseScalar scalar with
+    | TSInt i -> JValue(i)
+    | TSString s -> JValue(s)
+    | TSFloat f -> JValue(f)
+    | TSBool b -> JValue(b)
+    | TSNull -> JValue.CreateNull()
+
+type JValueConverter () =
+    inherit SimpleTypeConverter<JValue>()
+
+    override this.ReadTypedYaml (parser : IParser) =
+        match parser.TryConsume<Scalar>() with
+        | (true, scalar) -> readJsonValue scalar
+        | (false, _) -> raisef YamlException "Expected scalar"
+
+    override this.WriteTypedYaml (emitter : IEmitter) (value : JValue) =
+        this.Serialize(emitter, value.Value)
+
+type JTokenConverter () =
+    inherit SimpleTypeConverter<JToken>()
+
+    override this.ReadTypedYaml (parser : IParser) =
+        match parser.Current with
+        | :? Scalar as scalar ->
+            let ret = readJsonValue scalar :> JToken
+            ignore  <| parser.MoveNext()
+            ret
+        | :? SequenceStart -> this.Deserialize<JArray>(parser) :> JToken
+        | :? MappingStart -> this.Deserialize<JObject>(parser) :> JToken
+        | _ -> raisef YamlException "Expected scalar, sequence or a mapping"
+
+    override this.WriteTypedYaml (emitter : IEmitter) (value : JToken) =
+        failwith "Expected to use a specific class converter"
+
+type JCollectionConverter () =
+    inherit SimpleTypeConverter<JContainer>()
+
+    override this.ReadTypedYaml (parser : IParser) =
+        match parser.Current with
+        | :? SequenceStart -> this.Deserialize<JArray>(parser) :> JContainer
+        | :? MappingStart -> this.Deserialize<JObject>(parser) :> JContainer
+        | _ -> raisef YamlException "Expected sequence or a mapping"
+
+    override this.WriteTypedYaml (emitter : IEmitter) (value : JContainer) =
+        failwith "Expected to use a specific class converter"
 
 type YamlSerializerSettings =
     { NamingConvention : INamingConvention
@@ -271,10 +378,13 @@ let defaultYamlSerializerSettings =
     }
 
 let makeYamlSerializer (settings : YamlSerializerSettings) : ISerializer =
-    let myConverters = seq {
-        UnionTypeConverter() :> CrutchTypeConverter
-        RecordTypeConverter() :> CrutchTypeConverter
-    }
+    let myConverters =
+        seq {
+            UnionTypeConverter() :> CrutchTypeConverter
+            RecordTypeConverter() :> CrutchTypeConverter
+
+            JValueConverter() :> CrutchTypeConverter
+        }
     let converters = Seq.append myConverters (settings.CrutchTypeConverters ()) |> Seq.cache
     let builder =
         SerializerBuilder()
@@ -303,12 +413,17 @@ let defaultYamlDeserializerSettings =
     }
 
 let makeYamlDeserializer (settings : YamlDeserializerSettings) : IDeserializer =
-    let myConverters = seq {
-        UnionTypeConverter() :> CrutchTypeConverter
-        RecordTypeConverter() :> CrutchTypeConverter
-        MapTypeConverter() :> CrutchTypeConverter
-        SetTypeConverter() :> CrutchTypeConverter
-    }
+    let myConverters =
+        seq {
+            UnionTypeConverter() :> CrutchTypeConverter
+            RecordTypeConverter() :> CrutchTypeConverter
+            MapTypeConverter() :> CrutchTypeConverter
+            SetTypeConverter() :> CrutchTypeConverter
+
+            JValueConverter() :> CrutchTypeConverter
+            JTokenConverter() :> CrutchTypeConverter
+            JCollectionConverter() :> CrutchTypeConverter
+        }
     let converters = Seq.append myConverters (settings.CrutchTypeConverters ()) |> Seq.cache
     let builder = DeserializerBuilder()
     for conv in converters do

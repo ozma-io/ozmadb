@@ -174,27 +174,12 @@ let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : 
     (info.UsedDatabase, query)
 
 let private compileGenericReferenceOptionsSelect (layout : Layout) (fieldRef : ResolvedFieldRef) (refEntityRef : ResolvedEntityRef) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
-    let fromEntity =
-        { Alias = Some referencedName
-          Ref = relaxEntityRef refEntityRef
-          AsRoot = false
-        }
-    let from = FEntity fromEntity
+    let from = FEntity { fromEntity (relaxEntityRef refEntityRef) with Alias = Some referencedName }
     compileReferenceOptionsSelectFrom layout refEntityRef emptyArguments from where
 
 let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRef : ResolvedEntityRef) (fieldName : FieldName) (refEntityRef : ResolvedEntityRef) (extraWhere : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
-    let rowFromEntity =
-        { Alias = Some rowName
-          Ref = relaxEntityRef entityRef
-          AsRoot = false
-        }
-    let rowFrom = FEntity rowFromEntity
-    let refFromEntity =
-        { Alias = Some referencedName
-          Ref = relaxEntityRef refEntityRef
-          AsRoot = false
-        }
-    let refFrom = FEntity refFromEntity
+    let rowFrom = FEntity { fromEntity (relaxEntityRef entityRef) with Alias = Some rowName }
+    let refFrom = FEntity { fromEntity (relaxEntityRef refEntityRef) with Alias = Some referencedName }
     // This could be rewritten to use CROSS JOIN.
     let join =
         { Type = Outer

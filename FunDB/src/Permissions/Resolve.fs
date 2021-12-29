@@ -186,7 +186,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     if optimizedIsFalse allowedEntity.Check then
                         raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
                     for KeyValue(fieldName, field) in entity.ColumnFields do
-                        if Option.isNone field.InheritedFrom && Option.isNone field.DefaultValue && not field.IsNullable then
+                        if Option.isNone field.InheritedFrom && not (fieldIsOptional field) then
                             match Map.tryFind fieldName allowedEntity.Fields with
                             | Some { Change = true } -> ()
                             | _ -> raisef ResolvePermissionsException "Required field %O is not allowed for inserting" fieldName

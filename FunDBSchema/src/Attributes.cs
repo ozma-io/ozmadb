@@ -12,6 +12,7 @@ namespace FunWithFlags.FunDBSchema.Attributes
         public bool IsHidden { get; set; }
         public bool IsFrozen { get; set; }
         public bool TriggersMigration { get; set; }
+        public string? SaveRestoreKey { get; set; }
 
         public EntityAttribute(string mainField)
         {

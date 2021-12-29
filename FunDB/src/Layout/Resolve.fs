@@ -100,6 +100,7 @@ type private HalfResolvedEntity =
       InsertedInternally : bool
       UpdatedInternally : bool
       DeletedInternally : bool
+      SaveRestoreKey : ConstraintName option
       TypeName : string
       Root : ResolvedEntityRef
       Source : SourceEntity
@@ -198,8 +199,10 @@ type private Phase1Resolver (layout : SourceLayout) =
     let resolveFieldType (fieldRef : ResolvedFieldRef) (field : SourceColumnField) (ft : ParsedFieldType) : ResolvedFieldType =
         try
             match resolveFieldType layout true ft with
-            | FTArray (SFTReference (ref, opts)) -> raisef ResolveLayoutException "Arrays of references are not supported"
-            | FTArray (SFTEnum _) -> raisef ResolveLayoutException "Arrays of enums are not supported"
+            | FTScalar SFTUserViewRef
+            | FTArray SFTUserViewRef -> raisef ResolveLayoutException "User view references are not supported as field types"
+            | FTArray (SFTReference (ref, opts)) -> raisef ResolveLayoutException "Arrays of references are not supported as field types"
+            | FTArray (SFTEnum _) -> raisef ResolveLayoutException "Arrays of enums are not supported as field types"
             | FTScalar (SFTReference (refEntityRef, opts)) as t ->
                 let deleteAction = Option.defaultValue RDANoAction opts
                 match deleteAction with
@@ -349,6 +352,14 @@ type private Phase1Resolver (layout : SourceLayout) =
                 entityRef
             | Some p -> p.Root
 
+        let parentSaveRestoreKey =
+            match parent with
+            | None -> None
+            | Some p -> p.SaveRestoreKey
+
+        let failKey parentKey currKey = raisef ResolveLayoutException "Entity %O overrides save-restore key of parent entity %O, which is forbidden" entityRef (Option.get entity.Parent)
+        let saveRestoreKey = Option.unionWith failKey parentSaveRestoreKey entity.SaveRestoreKey
+
         let typeName =
             if root.Schema = entityRef.Schema then
                 entityRef.Name.ToString()
@@ -364,6 +375,7 @@ type private Phase1Resolver (layout : SourceLayout) =
               InsertedInternally = getFlag (fun parent -> parent.InsertedInternally) || entity.InsertedInternally
               UpdatedInternally = getFlag (fun parent -> parent.UpdatedInternally) || entity.UpdatedInternally
               DeletedInternally = getFlag (fun parent -> parent.DeletedInternally) || entity.DeletedInternally
+              SaveRestoreKey = saveRestoreKey
               Children = Map.empty
               Root = root
               TypeName = typeName
@@ -371,7 +383,6 @@ type private Phase1Resolver (layout : SourceLayout) =
             }
 
         if ret.DeletedInternally then
-            eprintfn "Entity %O is internally deleted, parent %O: %O %b" entityRef entity.Parent parent entity.DeletedInternally
             internallyDeletedEntities <- Set.add entityRef internallyDeletedEntities
 
         if not (entity.MainField = funId
@@ -512,9 +523,30 @@ type private RelatedExpr =
       Expr : ResolvedFieldExpr
     }
 
+let rec private sortSaveRestoredEntities' (visited : Set<ResolvedEntityRef>) (saveRestoredParents : (ResolvedEntityRef * ResolvedEntityRef) seq) =
+    if Seq.isEmpty saveRestoredParents then
+        Seq.empty
+    else
+        let (currentGen, nextGen) = Seq.partition (fun (ref, parentRef) -> Set.contains parentRef visited) saveRestoredParents
+        let currSet = Seq.map fst currentGen |> Set.ofSeq
+        assert (not <| Set.isEmpty currSet)
+        seq {
+            yield! currSet
+            yield! sortSaveRestoredEntities' (Set.union visited currSet) nextGen
+        }
+
+let private sortSaveRestoredEntities (saveRestoredParents : (ResolvedEntityRef * ResolvedEntityRef option) seq) =
+    let (rootGen, nextGen) = Seq.partition (fun (ref, maybeParentRef) -> Option.isNone maybeParentRef) saveRestoredParents
+    let rootSet = Seq.map fst rootGen |> Set.ofSeq
+    seq {
+        yield! rootSet
+        yield! sortSaveRestoredEntities' rootSet (Seq.map (fun (ref, parentRef) -> (ref, Option.get parentRef)) nextGen)
+    }
+
 type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntitiesMap, referencingFields : ReferencingEntitiesMap, cascadeDeletedEntities : Set<ResolvedEntityRef>, forceAllowBroken : bool) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, Result<ResolvedComputedField, exn>> = Map.empty
     let mutable cachedCaseExpressions : Map<ResolvedFieldRef, VirtualFieldCase array> = Map.empty
+    let mutable cachedSaveRestoredEntities : Map<ResolvedEntityRef, ResolvedEntityRef option> = Map.empty
 
     let rec makeWrappedLayout (stack : Set<ResolvedFieldRef>) : ILayoutBits =
         // We "lazily" instance wrapped entities, which in turn lazily instance computed fields.
@@ -783,6 +815,66 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           Type = index.Type
         }
 
+    let rec checkSaveRestoreKey (visited : Set<ResolvedEntityRef>) (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) (saveRestoreKey : ConstraintName) =
+        if Map.containsKey entityRef cachedSaveRestoredEntities then
+            ()
+        else
+            let visited = Set.add entityRef visited
+            let constr =
+                match Map.tryFind saveRestoreKey entity.UniqueConstraints with
+                | None -> raisef ResolveLayoutException "Alternate key %O specified as save-restore key not found" saveRestoreKey
+                | Some constr when not constr.IsAlternateKey -> raisef ResolveLayoutException "Unique constraint %O specified as save-restore key is not an alternate key" saveRestoreKey
+                | Some constr -> constr
+
+            // First field in save-restore key should either be:
+            // * `public.schemas.name` (schema name);
+            // * A reference to a saved-restored entity.
+            let firstColumn = constr.Columns.[0]
+            let parent =
+                if entityRef = schemasNameFieldRef.Entity && firstColumn = schemasNameFieldRef.Name then
+                    None
+                else
+                    let firstField = Map.find firstColumn entity.ColumnFields
+                    match firstField.FieldType with
+                    | FTScalar (SFTReference (refEntityRef, opts)) -> Some refEntityRef
+                    | _ -> raisef ResolveLayoutException "First column %O in a save-restore key %O should be a reference to a save-restored entity" firstColumn saveRestoreKey
+
+            for KeyValue(fieldName, field) in entity.ColumnFields do
+                let keyColumn = Array.contains fieldName constr.Columns
+                ignore <| checkSaveRestoreField keyColumn visited { Entity = entityRef; Name = fieldName } field
+
+            for KeyValue(childRef, child) in entity.Children do
+                let childEntity = Map.find childRef entities
+                if Option.isSome childEntity.SaveRestoreKey then
+                    raisef ResolveLayoutException "Child entity %O can't have save-restore key declared, as it conflicts with definition in parent entity %O" childRef entityRef
+                for KeyValue(fieldName, field) in childEntity.ColumnFields do
+                    if Option.isNone field.InheritedFrom then
+                        ignore <| checkSaveRestoreField true visited { Entity = childRef; Name = fieldName } field
+
+            cachedSaveRestoredEntities <- Map.add entityRef parent cachedSaveRestoredEntities
+
+    and checkSaveRestoreField (keyColumn : bool) (visited : Set<ResolvedEntityRef>) (fieldRef : ResolvedFieldRef) (field : ResolvedColumnField) =
+        match field.FieldType with
+        | FTScalar (SFTReference (refEntityRef, opts)) ->
+            if Set.contains refEntityRef visited then
+                if keyColumn then
+                    raisef ResolveLayoutException "Recursive reference to %O in save-restore key column %O is forbidden" refEntityRef fieldRef
+                // We don't support recursion in custom save-restored entity values for now.
+                else if fieldRef.Entity.Schema <> funSchema then
+                    raisef ResolveLayoutException "Recursive reference to %O in save-restored column %O is not yet supported" refEntityRef fieldRef
+            else
+                let refEntity = Map.find refEntityRef entities
+                match refEntity.SaveRestoreKey with
+                | None -> raisef ResolveLayoutException "Entity %O referenced in %O is not save-restored" refEntityRef fieldRef
+                | Some refKey -> checkSaveRestoreKey visited refEntityRef refEntity refKey
+        | FTScalar SFTInt
+        | FTScalar SFTString
+        | FTScalar SFTBool
+        | FTScalar SFTUuid
+        | FTScalar (SFTEnum _) -> ()
+        | typ when keyColumn -> raisef ResolveLayoutException "Type %O of field %O is not supported for key columns" typ fieldRef
+        | _ -> ()
+
     let resolveEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) : ErroredEntity * ResolvedEntity =
         let mutable computedErrors = Map.empty
 
@@ -837,6 +929,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             |> Seq.mapMaybe (fun (fieldName, field) -> if fieldIsOptional field then None else Some fieldName)
             |> Set.ofSeq
 
+        match entity.Source.SaveRestoreKey with
+        | None -> ()
+        | Some saveRestoreKey -> checkSaveRestoreKey Set.empty entityRef entity saveRestoreKey
+
         let ret : ResolvedEntity =
             { ColumnFields = entity.ColumnFields
               ComputedFields = computedFields
@@ -848,6 +944,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               UpdatedInternally = entity.UpdatedInternally
               DeletedInternally = false
               TriggersMigration = entity.Source.TriggersMigration
+              SaveRestoreKey = entity.Source.SaveRestoreKey
               IsHidden = entity.Source.IsHidden
               Parent = entity.Source.Parent
               Children = entity.Children
@@ -903,8 +1000,12 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             with
             | e -> raisefWithInner ResolveLayoutException e "In schema %O" name
 
+        let schemas = Map.map mapSchema layout.Schemas
+        let saveRestoredEntities = sortSaveRestoredEntities (Map.toSeq cachedSaveRestoredEntities) |> Seq.toArray
+
         let ret =
-            { Schemas = Map.map mapSchema layout.Schemas
+            { Schemas = schemas
+              SaveRestoredEntities = saveRestoredEntities
             } : Layout
         (errors, ret)
 
@@ -944,7 +1045,6 @@ let private fillInternallyDeletedEntities (layout : Layout) (referencesMap : Ref
                     |> Map.values
                     |> Seq.exists (fun check -> tryFindUsedFieldRef refFieldRef check.UsedDatabase |> Option.isSome)
             if addReference then
-                eprintfn "Marking entity %O as internally deleted, referenced from %O" refFieldRef entityRef
                 goChildren refFieldRef.Entity entity
 
     for ref in initialInternallyDeletedEntities do
@@ -1015,6 +1115,7 @@ type private Phase3Resolver (layout : Layout, internallyDeletedEntities : Set<Re
     let resolveLayout () : Layout =
         let schemas = Map.map resolveSchema layout.Schemas
         { Schemas = schemas
+          SaveRestoredEntities = layout.SaveRestoredEntities
         } : Layout
 
     member this.ResolveLayout () = resolveLayout ()

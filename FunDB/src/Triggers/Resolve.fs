@@ -46,7 +46,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     with
                     | Failure f -> raisef ResolveTriggersException "Repeated field: %s" f
                 (TUFSet fieldsSet, fieldsSet |> Set.toSeq)
-        
+
         for fieldName in updateFieldsSeq do
             let field = Map.find fieldName entity.ColumnFields
             match field.FieldType with

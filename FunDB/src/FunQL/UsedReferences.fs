@@ -190,12 +190,22 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         | ISValues vals -> Array.iter (Array.iter buildForInsertValue) vals
         | ISSelect select -> buildForSelectExpr select
 
+    and buildForUpdateAssignExpr (entityRef : ResolvedEntityRef) = function
+        | UAESet (name, expr) ->
+            buildForInsertValue expr
+            let usedEntity = { usedEntityUpdate with Fields = Map.singleton name usedFieldUpdate }
+            usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
+        | UAESelect (cols, expr) ->
+            buildForSelectExpr expr
+            let usedEntity = { usedEntityUpdate with Fields = cols |> Seq.map (fun name -> (name, usedFieldUpdate)) |> Map.ofSeq }
+            usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
+
     and buildForUpdateExpr (update : ResolvedUpdateExpr) =
         Option.iter buildForCommonTableExprs update.CTEs
         let entityRef = tryResolveEntityRef update.Entity.Ref |> Option.get
-        let usedFields = update.Fields |> Map.map (fun fieldName expr -> usedFieldUpdate)
-        let usedEntity = { emptyUsedEntity with Fields = usedFields }
-        usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
+        for assign in update.Assignments do
+            buildForUpdateAssignExpr entityRef assign
+        usedDatabase <- addUsedEntityRef entityRef usedEntityUpdate usedDatabase
         Option.iter buildForFromExpr update.From
         Option.iter (ignore << buildForFieldExpr) update.Where
 
@@ -213,6 +223,9 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         | DEDelete delete -> buildForDeleteExpr delete
 
     member this.BuildForSelectExpr expr = buildForSelectExpr expr
+    member this.BuildForInsertExpr expr = buildForInsertExpr expr
+    member this.BuildForUpdateExpr expr = buildForUpdateExpr expr
+    member this.BuildForDeleteExpr expr = buildForDeleteExpr expr
     member this.BuildForFieldExpr expr = buildForFieldExpr expr
 
     member this.UsedDatabase = usedDatabase

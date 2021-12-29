@@ -189,7 +189,7 @@ type UserViewsAPI (api : IFunDBAPI) =
 
                     let getResult info (res : ExecutingViewExpr) =
                         task {
-                            let! rows = res.Rows.ToArrayAsync()
+                            let! rows = res.Rows.ToArrayAsync(ctx.CancellationToken)
                             return
                                 { ArgumentAttributes = res.ArgumentAttributes
                                   Attributes = Map.union uv.PureAttributes.Attributes res.Attributes

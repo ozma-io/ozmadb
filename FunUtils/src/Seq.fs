@@ -86,8 +86,8 @@ let fold1 (func : 'a -> 'a -> 'a) (s : seq<'a>) : 'a =
 let areEqual (a : seq<'a>) (b : seq<'a>) : bool =
     Seq.compareWith (fun e1 e2 -> if e1 = e2 then 0 else -1) a b = 0
 
-let iterTask (f : 'a -> Task<unit>) (s : seq<'a>) : Task<unit> =
-    task {
+let iterTask (f : 'a -> Task) (s : seq<'a>) : Task =
+    unitTask {
         for a in s do
             do! f a
     }
@@ -98,6 +98,15 @@ let mapTask (f : 'a -> Task<'b>) (s : seq<'a>) : Task<seq<'b>> =
         for a in s do
             let! b = f a
             list.Add(b)
+        return list :> seq<'b>
+    }
+
+let collectTask (f : 'a -> Task<seq<'b>>) (s : seq<'a>) : Task<seq<'b>> =
+    task {
+        let list = List<'b>()
+        for a in s do
+            let! bs = f a
+            list.AddRange(bs)
         return list :> seq<'b>
     }
 

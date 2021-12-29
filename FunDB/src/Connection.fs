@@ -11,8 +11,10 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
+open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.SQL.Query
+module SQL = FunWithFlags.FunDB.SQL.AST
 
 type DeferredConstraintsException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
@@ -68,6 +70,7 @@ let serializedSaveChangesAsync (db : DbContext) (cancellationToken : Cancellatio
 type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationLevel) =
     let transaction = conn.Connection.BeginTransaction(isolationLevel)
     let logger = conn.LoggerFactory.CreateLogger<DatabaseTransaction>()
+    let mutable lastNameId = 0
 
     let system =
         let systemOptions =
@@ -137,6 +140,17 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
                 do! setConstraintsImmediate cancellationToken
             return ret
         }
+
+    member this.NewAnonymousName (prefix : string) =
+        let id = lastNameId
+        lastNameId <- lastNameId + 1
+        sprintf "%s_%i" prefix id
+
+    member this.NewAnonymousSQLName (prefix : string) =
+        SQL.SQLName (this.NewAnonymousName prefix)
+
+    member this.NewAnonymousFunQLName (prefix : string) =
+        FunQLName (this.NewAnonymousName prefix)
 
     interface IDisposable with
         member this.Dispose () =

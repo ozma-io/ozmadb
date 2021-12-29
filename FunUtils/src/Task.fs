@@ -32,8 +32,16 @@ type AsyncSemaphore (initialCount : int) =
         | None -> ()
         | Some toRelease -> toRelease.SetResult(null)
 
+let inline map (f : 'r1 -> 'r2) (t : ^a) : Task<'r2> =
+    task {
+        let! ret = t
+        return f ret
+    }
+
 let result (a : 'a) : Task<'a> =
     Task.FromResult a
+
+let empty = Task.CompletedTask
 
 let awaitSync (t : Task<'a>) : 'a =
     t.GetAwaiter().GetResult()

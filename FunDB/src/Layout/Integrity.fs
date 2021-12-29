@@ -170,103 +170,104 @@ type private CheckTriggerOptions =
     }
 
 let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.DatabaseMeta =
-    let entity = layout.FindEntity fromFieldRef.Entity |> Option.get
-    let field = Map.find fromFieldRef.Name entity.ColumnFields
-    let refEntity = layout.FindEntity toEntityRef |> Option.get
-    let checkExpr = makeCheckExpr plainSubEntityColumn layout toEntityRef
+    match makeCheckExpr plainSubEntityColumn layout toEntityRef with
+    | None -> SQL.emptyDatabaseMeta
+    | Some checkExpr ->
+        let entity = layout.FindEntity fromFieldRef.Entity |> Option.get
+        let field = Map.find fromFieldRef.Name entity.ColumnFields
+        let refEntity = layout.FindEntity toEntityRef |> Option.get
+        let toRef = compileResolvedEntityRef refEntity.Root
+        let fromSchema = compileName entity.Root.Schema
+        let fromTable = compileName entity.Root.Name
+        let fromColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
+        let toColumn = SQL.VEColumn { Table = Some toRef; Name = sqlFunId }
+        let whereExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
+        let fTable = SQL.fromTable toRef
+        let singleSelect =
+            { SQL.emptySingleSelectExpr with
+                  Columns = [| SQL.SCExpr (None, checkExpr) |]
+                  From = Some <| SQL.FTable fTable
+                  Where = Some whereExpr
+            }
+        let raiseCall =
+            { Level = PLPgSQL.RLException
+              Message =
+                Some
+                    { Format = sprintf "Value in %O is not of type %O" fromFieldRef toEntityRef
+                      Options = [||]
+                    }
+              Options =
+                Map.ofList
+                    [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "column_of_type_assertion"))
+                      (PLPgSQL.ROColumn, SQL.VEValue (SQL.VString <| fromFieldRef.Name.ToString()))
+                      (PLPgSQL.ROTable, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Name.ToString()))
+                      (PLPgSQL.ROSchema, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Schema.ToString()))
+                    ]
+            } : PLPgSQL.RaiseStatement
+        let selectExpr : SQL.SelectExpr =
+            { CTEs = None
+              Tree = SQL.SSelect singleSelect
+              Extra = null
+            }
+        let checkStmt = PLPgSQL.StIfThenElse ([| (SQL.VENot (SQL.VESubquery selectExpr), [| PLPgSQL.StRaise raiseCall |]) |], None)
 
-    let toRef = compileResolvedEntityRef refEntity.Root
-    let fromSchema = compileName entity.Root.Schema
-    let fromTable = compileName entity.Root.Name
-    let fromColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
-    let toColumn = SQL.VEColumn { Table = Some toRef; Name = sqlFunId }
-    let whereExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
-    let fTable = SQL.fromTable toRef
-    let singleSelect =
-        { SQL.emptySingleSelectExpr with
-              Columns = [| SQL.SCExpr (None, checkExpr) |]
-              From = Some <| SQL.FTable fTable
-              Where = Some whereExpr
+        let checkProgram =
+            { Declarations = [||]
+              Body = [| checkStmt; returnNullStatement |]
+            } : PLPgSQL.Program
+        let functionDefinition =
+            { Arguments = [||]
+              ReturnValue = SQL.FRValue (SQL.SQLRawString "trigger")
+              Behaviour = SQL.FBStable
+              Language = PLPgSQL.plPgSQLName
+              Definition = checkProgram.ToPLPgSQLString()
+            } : SQL.FunctionDefinition
+        let functionKey = sprintf "__ref_type_check__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+        let functionName = SQL.SQLName <| sprintf "__ref_type_check__%s__%s" entity.HashName field.HashName
+        let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
+
+        let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = field.ColumnName }
+        let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
+        let checkUpdateTriggerCondition =
+            if field.IsNullable then
+                SQL.VEAnd (SQL.VEIsNotNull (checkNewColumn), SQL.VEDistinct (checkOldColumn, checkNewColumn))
+            else
+                SQL.VEBinaryOp (checkOldColumn, SQL.BONotEq, checkNewColumn)
+        let updateTriggerDefinition =
+            { IsConstraint = Some <| SQL.DCDeferrable false
+              Order = SQL.TOAfter
+              Events = [| SQL.TEUpdate (Some [| field.ColumnName |]) |]
+              Mode = SQL.TMEachRow
+              Condition = Some <| String.comparable checkUpdateTriggerCondition
+              FunctionName = { Schema = Some fromSchema; Name = functionName }
+              FunctionArgs = [||]
+            } : SQL.TriggerDefinition
+        let updateTriggerKey = sprintf "__ref_type_update__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+        let updateTriggerName = SQL.SQLName <| sprintf "01_ref_type_update__%s__%s" entity.HashName field.HashName
+        let updateTriggerObject = SQL.OMTrigger (fromTable, updateTriggerDefinition)
+
+        let insertTriggerDefinition =
+            { IsConstraint = Some <| SQL.DCDeferrable false
+              Order = SQL.TOAfter
+              Events = [| SQL.TEInsert |]
+              Mode = SQL.TMEachRow
+              Condition = None
+              FunctionName = { Schema = Some fromSchema; Name = functionName }
+              FunctionArgs = [||]
+            } : SQL.TriggerDefinition
+        let checkInsertTriggerKey =sprintf "__ref_type_insert__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+        let checkInsertTriggerName = SQL.SQLName <| sprintf "01_ref_type_insert__%s__%s" entity.HashName field.HashName
+        let checkInsertTriggerObject = SQL.OMTrigger (fromTable, insertTriggerDefinition)
+
+        let objects =
+            [ (functionName, (Set.singleton functionKey, functionObject))
+              (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerObject))
+              (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
+            ]
+            |> Map.ofSeq
+        { Schemas = Map.singleton (fromSchema) (Set.empty, { Objects = objects })
+          Extensions = Set.empty
         }
-    let raiseCall =
-        { Level = PLPgSQL.RLException
-          Message =
-            Some
-                { Format = sprintf "Value in %O is not of type %O" fromFieldRef toEntityRef
-                  Options = [||]
-                }
-          Options =
-            Map.ofList
-                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "column_of_type_assertion"))
-                  (PLPgSQL.ROColumn, SQL.VEValue (SQL.VString <| fromFieldRef.Name.ToString()))
-                  (PLPgSQL.ROTable, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Name.ToString()))
-                  (PLPgSQL.ROSchema, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Schema.ToString()))
-                ]
-        } : PLPgSQL.RaiseStatement
-    let selectExpr : SQL.SelectExpr =
-        { CTEs = None
-          Tree = SQL.SSelect singleSelect
-          Extra = null
-        }
-    let checkStmt = PLPgSQL.StIfThenElse ([| (SQL.VENot (SQL.VESubquery selectExpr), [| PLPgSQL.StRaise raiseCall |]) |], None)
-
-    let checkProgram =
-        { Declarations = [||]
-          Body = [| checkStmt; returnNullStatement |]
-        } : PLPgSQL.Program
-    let functionDefinition =
-        { Arguments = [||]
-          ReturnValue = SQL.FRValue (SQL.SQLRawString "trigger")
-          Behaviour = SQL.FBStable
-          Language = PLPgSQL.plPgSQLName
-          Definition = checkProgram.ToPLPgSQLString()
-        } : SQL.FunctionDefinition
-    let functionKey = sprintf "__ref_type_check__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-    let functionName = SQL.SQLName <| sprintf "__ref_type_check__%s__%s" entity.HashName field.HashName
-    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
-
-    let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = field.ColumnName }
-    let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
-    let checkUpdateTriggerCondition =
-        if field.IsNullable then
-            SQL.VEAnd (SQL.VEIsNotNull (checkNewColumn), SQL.VEDistinct (checkOldColumn, checkNewColumn))
-        else
-            SQL.VEBinaryOp (checkOldColumn, SQL.BONotEq, checkNewColumn)
-    let updateTriggerDefinition =
-        { IsConstraint = Some <| SQL.DCDeferrable false
-          Order = SQL.TOAfter
-          Events = [| SQL.TEUpdate (Some [| field.ColumnName |]) |]
-          Mode = SQL.TMEachRow
-          Condition = Some <| String.comparable checkUpdateTriggerCondition
-          FunctionName = { Schema = Some fromSchema; Name = functionName }
-          FunctionArgs = [||]
-        } : SQL.TriggerDefinition
-    let updateTriggerKey = sprintf "__ref_type_update__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-    let updateTriggerName = SQL.SQLName <| sprintf "01_ref_type_update__%s__%s" entity.HashName field.HashName
-    let updateTriggerObject = SQL.OMTrigger (fromTable, updateTriggerDefinition)
-
-    let insertTriggerDefinition =
-        { IsConstraint = Some <| SQL.DCDeferrable false
-          Order = SQL.TOAfter
-          Events = [| SQL.TEInsert |]
-          Mode = SQL.TMEachRow
-          Condition = None
-          FunctionName = { Schema = Some fromSchema; Name = functionName }
-          FunctionArgs = [||]
-        } : SQL.TriggerDefinition
-    let checkInsertTriggerKey =sprintf "__ref_type_insert__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-    let checkInsertTriggerName = SQL.SQLName <| sprintf "01_ref_type_insert__%s__%s" entity.HashName field.HashName
-    let checkInsertTriggerObject = SQL.OMTrigger (fromTable, insertTriggerDefinition)
-
-    let objects =
-        [ (functionName, (Set.singleton functionKey, functionObject))
-          (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerObject))
-          (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
-        ]
-        |> Map.ofSeq
-    { Schemas = Map.singleton (fromSchema) (Set.empty, { Objects = objects })
-      Extensions = Set.empty
-    }
 
 // This is path without the last dereference; for example, triggers for foo=>bar and foo=>baz will be merged into trigger for entity E, which handles bar and baz.
 type PathTriggerKey = ResolvedFieldRef list
@@ -586,11 +587,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let functionName = SQL.SQLName <| sprintf "__out_chcon_check__%s__%s" entity.HashName constr.HashName
     let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
 
-    let checkExpr =
-        if Option.isNone entity.Parent then
-            None
-        else
-            Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
+    let checkExpr = makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
     let updateCheck = buildUpdateCheck layout (Map.toSeq outerFields)
     let updateCheck =
@@ -704,11 +701,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
 
     let affectedColumns = getPathTriggerAffected layout trigger
 
-    let checkExpr =
-        if Option.isNone entity.Parent then
-            None
-        else
-            Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
+    let checkExpr = makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
     let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEOr)
     let updateCheck =
@@ -772,11 +765,7 @@ let private compileCheckConstraintBulkCheck (layout : Layout) (constrRef : Resol
         | { CTEs = None; Tree = SQL.SSelect select } -> select
         | _ -> failwith "Impossible non-single check constraint select"
 
-    let checkExpr =
-        if Option.isNone entity.Parent then
-            None
-        else
-            Some <| makeCheckExpr plainSubEntityColumn layout constrRef.Entity
+    let checkExpr = makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
     let singleSelect = { singleSelect with Where = Option.unionWith (curry SQL.VEAnd) checkExpr singleSelect.Where }
     { CTEs = None; Tree = SQL.SSelect singleSelect; Extra = null }
@@ -826,11 +815,7 @@ let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedField
     let functionName = SQL.SQLName <| sprintf "__out_mat_store__%s__%s" entity.HashName comp.HashName
     let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
 
-    let checkExpr =
-        if Option.isNone entity.Parent then
-            None
-        else
-            Some <| makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
+    let checkExpr = makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
 
     let updateCheck = buildUpdateCheck layout (Map.toSeq outerFields)
     let updateCheck =
@@ -918,11 +903,7 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
 
     let affectedColumns = getPathTriggerAffected layout trigger
 
-    let checkExpr =
-        if Option.isNone entity.Parent then
-            None
-        else
-            Some <| makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
+    let checkExpr = makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
 
     let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEOr)
     let updateCheck =
@@ -983,8 +964,10 @@ let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : Resolve
     let joinedUpdateId = { Table = Some <| compileRenamedResolvedEntityRef fieldRef.Entity; Name = sqlFunId } : SQL.ColumnRef
     let joinSame = SQL.VEBinaryOp (SQL.VEColumn updateId, SQL.BOEq, SQL.VEColumn joinedUpdateId)
     let opTable = SQL.operationTable tableRef
+
+    let assign = SQL.UAESet (SQL.updateColumnName comp.ColumnName, SQL.IVValue compiledResult)
     { SQL.updateExpr opTable with
-          Columns = Map.singleton comp.ColumnName (null, compiledResult)
+          Assignments = [|assign|]
           From = Some compiledFrom
           Where = Some joinSame
     }
@@ -1030,36 +1013,38 @@ let buildAssertionsMeta (layout : Layout) (asserts : LayoutAssertions) : SQL.Dat
 
     Seq.concat [colOfTypes; checkConstrs; matStores] |> Seq.fold SQL.unionDatabaseMeta SQL.emptyDatabaseMeta
 
-let private compileReferenceOfTypeCheck (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.SelectExpr =
-    let entity = layout.FindEntity fromFieldRef.Entity |> Option.get
-    let field = Map.find fromFieldRef.Name entity.ColumnFields
-    let refEntity = layout.FindEntity toEntityRef |> Option.get
-
+let private compileReferenceOfTypeCheck (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.SelectExpr option =
     let joinName = SQL.SQLName "__joined"
     let joinAlias = { Name = joinName; Columns = None } : SQL.TableAlias
     let joinRef = { Schema = None; Name = joinName } : SQL.TableRef
-    let fromRef = compileResolvedEntityRef entity.Root
-    let toRef = compileResolvedEntityRef refEntity.Root
-    let fromColumn = SQL.VEColumn { Table = Some fromRef; Name = field.ColumnName }
-    let toColumn = SQL.VEColumn { Table = Some joinRef; Name = sqlFunId }
-    let joinExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
-    let fTableA = SQL.fromTable fromRef
-    let fTableB = { SQL.fromTable toRef with Alias = Some joinAlias }
-    let join =
-        SQL.FJoin
-            { Type = SQL.JoinType.Left
-              A = SQL.FTable fTableA
-              B = SQL.FTable fTableB
-              Condition = joinExpr
-            }
     let subEntityColumn = SQL.VEColumn { Table = Some joinRef; Name = sqlFunSubEntity }
-    let checkExpr = makeCheckExpr subEntityColumn layout toEntityRef
-    let singleSelect =
-        { SQL.emptySingleSelectExpr with
-              Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "bool_and", SQL.AEAll [| checkExpr |])) |]
-              From = Some join
-        }
-    SQL.selectExpr (SQL.SSelect singleSelect)
+    match makeCheckExpr subEntityColumn layout toEntityRef with
+    | None -> None
+    | Some checkExpr ->
+        let entity = layout.FindEntity fromFieldRef.Entity |> Option.get
+        let field = Map.find fromFieldRef.Name entity.ColumnFields
+        let refEntity = layout.FindEntity toEntityRef |> Option.get
+
+        let fromRef = compileResolvedEntityRef entity.Root
+        let toRef = compileResolvedEntityRef refEntity.Root
+        let fromColumn = SQL.VEColumn { Table = Some fromRef; Name = field.ColumnName }
+        let toColumn = SQL.VEColumn { Table = Some joinRef; Name = sqlFunId }
+        let joinExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
+        let fTableA = SQL.fromTable fromRef
+        let fTableB = { SQL.fromTable toRef with Alias = Some joinAlias }
+        let join =
+            SQL.FJoin
+                { Type = SQL.JoinType.Left
+                  A = SQL.FTable fTableA
+                  B = SQL.FTable fTableB
+                  Condition = joinExpr
+                }
+        let singleSelect =
+            { SQL.emptySingleSelectExpr with
+                  Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "bool_and", SQL.AEAll [| checkExpr |])) |]
+                  From = Some join
+            }
+        Some <| SQL.selectExpr (SQL.SSelect singleSelect)
 
 let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) (cancellationToken : CancellationToken) : Task =
     unitTask {
@@ -1076,11 +1061,13 @@ let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) 
 let checkAssertions (conn : QueryConnection) (layout : Layout) (assertions : LayoutAssertions) (cancellationToken : CancellationToken) : Task =
     unitTask {
         for columnOfType in assertions.ReferenceOfTypeAssertions do
-            let query = compileReferenceOfTypeCheck layout columnOfType.FromField columnOfType.ToEntity
-            try
-                do! runIntegrityCheck conn query cancellationToken
-            with
-            | e -> raisefWithInner LayoutIntegrityException e "Failed to check that all %O values point to %O entries" columnOfType.FromField columnOfType.ToEntity
+            match compileReferenceOfTypeCheck layout columnOfType.FromField columnOfType.ToEntity with
+            | None -> ()
+            | Some query ->
+                try
+                    do! runIntegrityCheck conn query cancellationToken
+                with
+                | e -> raisefWithInner LayoutIntegrityException e "Failed to check that all %O values point to %O entries" columnOfType.FromField columnOfType.ToEntity
 
         for KeyValue(constrRef, expr) in assertions.CheckConstraints do
             let query = compileCheckConstraintBulkCheck layout constrRef expr

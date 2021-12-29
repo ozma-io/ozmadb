@@ -1,5 +1,8 @@
 module FunWithFlags.FunDB.Attributes.Schema
 
+open System
+open System.Linq
+open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
@@ -39,9 +42,13 @@ let private makeSourceAttributesDatabase (schema : Schema) : SourceAttributesDat
         |> Map.ofSeq
     { Schemas = schemas }
 
-let buildSchemaAttributes (db : SystemContext) (cancellationToken : CancellationToken) : Task<SourceDefaultAttributes> =
+let buildSchemaAttributes (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceDefaultAttributes> =
     task {
-        let currentSchemas = db.GetAttributesObjects ()
+        let currentSchemas = db.GetAttributesObjects()
+        let currentSchemas =
+            match filter with
+            | None -> currentSchemas
+            | Some expr -> currentSchemas.Where(expr)
         let! schemas = currentSchemas.ToListAsync(cancellationToken)
         let sourceSchemas = schemas |> Seq.map (fun schema -> (FunQLName schema.Name, makeSourceAttributesDatabase schema)) |> Map.ofSeqUnique
 

@@ -217,6 +217,7 @@ type ResolvedEntity =
       DeletedInternally : bool
       TriggersMigration : bool
       IsHidden : bool
+      SaveRestoreKey : ConstraintName option
       Parent : ResolvedEntityRef option
       Children : Map<ResolvedEntityRef, ChildEntity>
       TypeName : string // SubEntity value for this entity
@@ -277,6 +278,8 @@ type ILayoutBits =
 [<NoEquality; NoComparison>]
 type Layout =
     { Schemas : Map<SchemaName, ResolvedSchema>
+      // Save/restored entities are sorted topologically by their dependencies.
+      SaveRestoredEntities : ResolvedEntityRef[]
     } with
         member this.FindEntity (ref : ResolvedEntityRef) =
             match Map.tryFind ref.Schema this.Schemas with
@@ -309,6 +312,7 @@ let rec checkInheritance (layout : ILayoutBits) (parentRef : ResolvedEntityRef) 
 
 let filterLayout (f : SchemaName -> bool) (layout : Layout) : Layout =
     { Schemas = layout.Schemas |> Map.filter (fun name schema -> f name)
+      SaveRestoredEntities = layout.SaveRestoredEntities
     }
 
 type ErroredEntity =
@@ -362,6 +366,8 @@ let allowedOpClasses =
     Map.ofSeq
         [ (FunQLName "trgm", Map.ofSeq [(ITGIST, SQL.SQLName "gist_trgm_ops"); (ITGIN, SQL.SQLName "gin_trgm_ops")])
         ]
+
+let schemasNameFieldRef : ResolvedFieldRef = { Entity = { Schema = funSchema; Name = FunQLName "schemas" }; Name = FunQLName "name" }
 
 type IndexTypeInfo =
     { CanOrder : bool
