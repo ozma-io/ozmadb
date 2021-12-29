@@ -329,9 +329,14 @@ let flattenUsedDatabase (layout : Layout) (usedDatabase : UsedDatabase) : FlatUs
     flattener.FlattenedRoots
 
 let singleKnownFlatEntity (rootRef : ResolvedEntityRef) (entityRef : ResolvedEntityRef) (usedEntity : UsedEntity) (fields : (ResolvedFieldRef * UsedField) seq) : FlatUsedDatabase =
+    let getField (ref : ResolvedFieldRef, usedField) =
+        if ref.Name = funId || ref.Name = funSubEntity then
+            None
+        else
+            Some (ref.Entity, { emptyUsedEntity with Fields = Map.singleton ref.Name usedField })
     let flatFieldEntities =
         fields
-        |> Seq.map (fun (ref, usedField) -> (ref.Entity, { emptyUsedEntity with Fields = Map.singleton ref.Name usedField }))
+        |> Seq.mapMaybe getField
         |> Map.ofSeqWith (fun name -> unionUsedEntities)
     let usedEntity =
         { Children = Map.addWith unionUsedEntities entityRef usedEntity flatFieldEntities

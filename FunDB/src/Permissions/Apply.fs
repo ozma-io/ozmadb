@@ -116,19 +116,17 @@ let inline private getAccessFilter
 type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : FlatAllowedRoleEntity, flatUsedEntity : FlatUsedEntity) =
     let addSelectFilter (usedEntity : UsedEntity) (entityRef : ResolvedEntityRef) (allowedEntity : FlatAllowedDerivedEntity) =
         let addFieldRestriction (name : FieldName, usedField : UsedField) : ResolvedOptimizedFieldExpr =
-            if name = funId || name = funSubEntity then
-                OFETrue
-            else
-                let ref = { Entity = entityRef; Name = name }
-                match Map.tryFind ref flatAllowedEntity.Fields with
-                | Some flatField ->
-                    if usedField.Select then
-                        match flatField.Select with
-                        | OFEFalse -> raisef PermissionsApplyException "Access denied to select field %O" ref
-                        | newSelectFilter -> newSelectFilter
-                    else
-                        OFETrue
-                | None -> raisef PermissionsApplyException "Access denied to field %O" ref
+            // We never expect `id` or `sub_entity` to be here -- they should be filtered out during used fields flattening.
+            let ref = { Entity = entityRef; Name = name }
+            match Map.tryFind ref flatAllowedEntity.Fields with
+            | Some flatField ->
+                if usedField.Select then
+                    match flatField.Select with
+                    | OFEFalse -> raisef PermissionsApplyException "Access denied to select field %O" ref
+                    | newSelectFilter -> newSelectFilter
+                else
+                    OFETrue
+            | None -> raisef PermissionsApplyException "Access denied to field %O" ref
 
         usedEntity.Fields |> Map.toSeq |> Seq.map addFieldRestriction |> Seq.fold andFieldExpr allowedEntity.Select
 

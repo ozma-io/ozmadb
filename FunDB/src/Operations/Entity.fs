@@ -248,11 +248,10 @@ let private rowKeyCheck
         let tableRef = compileResolvedEntityRef entity.Root
         let aliasRef = { Schema = None; Name = tableRef.Name } : SQL.TableRef
         let whereId = SQL.VEBinaryOp (SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
-        let usedFields = seq { ({ Entity = entityRef; Name = funId }, usedFieldSelect) }
         { Arguments = arguments
           ArgumentValues = argumentValues
           Where = whereId
-          UsedFields = usedFields
+          UsedFields = Seq.empty
         }
     | RKAlt (name, keys) -> altKeyCheck layout entityRef name keys aliasRef
 
@@ -547,12 +546,6 @@ let updateEntity
                     |> Map.keys
                     |> Seq.map getUsedField
                     |> Seq.append keyCheck.UsedFields
-                let usedFields =
-                    match key with
-                    | RKId id -> usedFields
-                    | RKAlt (name, keys) ->
-                        let fieldRef = { Entity = entityRef; Name = funId }
-                        Seq.append usedFields (Seq.singleton (fieldRef, usedFieldInsert))
                 let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityUpdate usedFields
                 let appliedDb =
                     try
@@ -625,12 +618,6 @@ let deleteEntity
                     |> Map.toSeq
                     |> Seq.map getUsedField
                     |> Seq.append keyCheck.UsedFields
-                let usedFields =
-                    match key with
-                    | RKId id -> usedFields
-                    | RKAlt (name, keys) ->
-                        let fieldRef = { Entity = entityRef; Name = funId }
-                        Seq.append usedFields (Seq.singleton (fieldRef, usedFieldInsert))
                 let usedDatabase = singleKnownFlatEntity entity.Root entityRef usedEntityDelete usedFields
                 let appliedDb =
                     try
@@ -669,25 +656,16 @@ let private getSubEntity
                 argumentValues <- Map.union argumentValues keyCheck.ArgumentValues
                 let entitySubEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunSubEntity }
 
-                let commonUsedFields =
-                    Seq.append
-                        keyCheck.UsedFields
-                        (Seq.singleton ({ Entity = entityRef; Name = funSubEntity }, usedFieldSelect))
-
-                let (results, usedFields) =
+                let results =
                     match key with
-                    | RKId id ->
-                        let results = seq { entitySubEntity }
-                        (results, commonUsedFields)
+                    | RKId id -> seq { entitySubEntity }
                     | RKAlt (name, args) ->
                         let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
-                        let usedFields = Seq.append commonUsedFields (Seq.singleton ({ Entity = entityRef; Name = funId }, usedFieldSelect))
-                        let results = seq { entityId; entitySubEntity }
-                        (results, usedFields)
+                        seq { entityId; entitySubEntity }
 
                 { Where = keyCheck.Where
                   Columns = results
-                  UsedFields = usedFields
+                  UsedFields = keyCheck.UsedFields
                   Arguments = keyCheck.Arguments
                 }
 
@@ -742,25 +720,18 @@ let private getRelatedRowIds
             let (idArg, arguments) = addArgument (PLocal funRelatedId) funIdArg emptyArguments
             let whereRelated = SQL.VEBinaryOp (SQL.VEColumn { Table = Some aliasRef; Name = field.ColumnName }, SQL.BOEq, SQL.VEPlaceholder idArg.PlaceholderId)
             let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
-            let commonUsedFields =
-                seq {
-                    { Entity = fieldRef.Entity; Name = funId }
-                    { Entity = Option.defaultValue fieldRef.Entity field.InheritedFrom; Name = fieldRef.Name }
-                }
+            let usedFields = Seq.singleton ({ Entity = Option.defaultValue fieldRef.Entity field.InheritedFrom; Name = fieldRef.Name }, usedFieldSelect)
 
-            let (results, usedFields) =
+            let results =
                 if Option.isSome singleSubEntity then
-                    let results = seq { entityId }
-                    (results, commonUsedFields)
+                    seq { entityId }
                 else
                     let entitySubEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunSubEntity }
-                    let usedFields = Seq.append commonUsedFields (Seq.singleton { Entity = fieldRef.Entity; Name = funSubEntity })
-                    let results = seq { entityId; entitySubEntity }
-                    (results, usedFields)
+                    seq { entityId; entitySubEntity }
 
             { Where = whereRelated
               Columns = results
-              UsedFields = Seq.map (fun ref -> (ref, usedFieldSelect)) usedFields
+              UsedFields = usedFields
               Arguments = arguments
             }
 
