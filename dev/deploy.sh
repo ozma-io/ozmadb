@@ -10,18 +10,19 @@ usage() {
 server_name="$1"
 shift
 
-network="$1"
+deployment_name="$1"
 shift
 
-if [ -z "$server_name" ] || [ -z "$network" ]; then
+network_path="$1"
+shift
+
+if [ -z "$server_name" ] || [ -z "$deployment_name" ] || [ -z "$network_path" ]; then
   usage
 fi
 
-build_dir="builds/$BITBUCKET_REPO_SLUG/$BITBUCKET_BUILD_NUMBER"
-
 set -x
 
-rsync -ravlL --delete FunDB/publish/ "$server_name:$network/FunDB"
-rsync -ravlL --delete FunApp/dist/ "$server_name:$network/FunApp"
+rsync -ravlL --delete FunDB/publish/ "$server_name:$deployment_name/FunDB"
+rsync -ravlL --delete FunApp/dist/ "$server_name:$deployment_name/FunApp"
 
-ssh "$server_name" -- nixops deploy --network "$network"
+ssh "$server_name" -- nixops deploy --network "$network_path"
