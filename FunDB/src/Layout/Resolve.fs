@@ -167,14 +167,6 @@ let private sqlColumnName (ref : ResolvedEntityRef) (entity : SourceEntity) (fie
 
 type private ReferencingEntitiesMap = Map<ResolvedEntityRef, Set<ResolvedFieldRef>>
 
-type private ComputedFieldFlags =
-    { DeletedInternally : bool
-    }
-
-let private emptyComputedFieldFlags : ComputedFieldFlags =
-    { DeletedInternally = true
-    }
-
 //
 // PHASE 1: Building column fields. Also collect several useful maps.
 //
