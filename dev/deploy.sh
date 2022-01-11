@@ -3,7 +3,7 @@
 set -e
 
 usage() {
-  echo "Usage: $0 server_name network" >&2
+  echo "Usage: $0 server_name deployment_name network_path" >&2
   exit 1
 }
 
