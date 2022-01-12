@@ -173,7 +173,11 @@ type APITemplate (isolate : Isolate) =
                     JToken.Load(reader)
                 with
                 | :? JsonReaderException as e -> throwCallError context "Failed to parse value: %s" e.Message
-            let ret = renderFunQLJson source
+            let ret =
+                try
+                    renderFunQLJson source
+                with
+                | Failure msg -> throwCallError context "%s" msg
             Value.String.New(template.Isolate, ret).Value
         ))
 
