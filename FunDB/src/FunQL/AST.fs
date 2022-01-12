@@ -260,6 +260,24 @@ type FieldValuePrettyConverter () =
         | FUuidArray vals -> serialize vals
         | FNull -> writer.WriteNull()
 
+type [<StructuralEquality; NoComparison>] ReferenceDeleteAction =
+    | [<CaseName("no_action")>] RDANoAction
+    | [<CaseName("cascade")>] RDACascade
+    | [<CaseName("set_null")>] RDASetNull
+    | [<CaseName("set_default")>] RDASetDefault
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | RDANoAction -> "NO ACTION"
+            | RDACascade -> "CASCADE"
+            | RDASetNull -> "SET NULL"
+            | RDASetDefault -> "SET DEFAULT"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarFieldType<'e> when 'e :> IFunQLName =
     | [<CaseName("int")>] SFTInt
     | [<CaseName("decimal")>] SFTDecimal
@@ -271,7 +289,7 @@ type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarField
     | [<CaseName("json")>] SFTJson
     | [<CaseName("uvref")>] SFTUserViewRef
     | [<CaseName("uuid")>] SFTUuid
-    | [<CaseName("reference")>] SFTReference of Entity : 'e
+    | [<CaseName("reference")>] SFTReference of Entity : 'e * OnDelete : ReferenceDeleteAction option
     | [<CaseName("enum")>] SFTEnum of Values : Set<string>
     with
         override this.ToString () = this.ToFunQLString()
@@ -288,7 +306,12 @@ type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarField
             | SFTJson -> "json"
             | SFTUserViewRef -> "uvref"
             | SFTUuid -> "uuid"
-            | SFTReference e -> sprintf "reference(%s)" (e.ToFunQLString())
+            | SFTReference (e, mopts) ->
+                let optsStr =
+                    match mopts with
+                    | None -> ""
+                    | Some opts -> sprintf "ON DELETE %s" (toFunQLString opts)
+                String.concatWithWhitespaces [sprintf "reference(%s)" (e.ToFunQLString()); optsStr]
             | SFTEnum vals -> sprintf "enum(%s)" (vals |> Seq.map renderFunQLString |> String.concat ", ")
 
         interface IFunQLString with
@@ -1110,7 +1133,7 @@ let mapScalarFieldType (func : 'e1 -> 'e2) : ScalarFieldType<'e1> -> ScalarField
     | SFTJson -> SFTJson
     | SFTUserViewRef -> SFTUserViewRef
     | SFTUuid -> SFTUuid
-    | SFTReference e -> SFTReference (func e)
+    | SFTReference (e, opts) -> SFTReference (func e, opts)
     | SFTEnum vals -> SFTEnum vals
 
 let mapFieldType (func : 'e1 -> 'e2) : FieldType<'e1> -> FieldType<'e2> = function
@@ -1195,7 +1218,7 @@ let mapTaskScalarFieldType (func : 'e1 -> Task<'e2>) : ScalarFieldType<'e1> -> T
     | SFTJson -> Task.result SFTJson
     | SFTUserViewRef -> Task.result SFTUserViewRef
     | SFTUuid -> Task.result SFTUuid
-    | SFTReference e -> Task.map SFTReference (func e)
+    | SFTReference (e, opts) -> Task.map (fun e -> SFTReference (e, opts)) (func e)
     | SFTEnum vals -> Task.result <| SFTEnum vals
 
 let mapTaskFieldType (func : 'e1 -> Task<'e2>) : FieldType<'e1> -> Task<FieldType<'e2>> = function
@@ -1283,7 +1306,7 @@ let iterScalarFieldType (func : 'e1 -> unit) : ScalarFieldType<'e1> -> unit = fu
     | SFTJson -> ()
     | SFTUserViewRef -> ()
     | SFTUuid -> ()
-    | SFTReference e -> func e
+    | SFTReference (e, opts) -> func e
     | SFTEnum vals -> ()
 
 let iterFieldType (func : 'e1 -> unit) : FieldType<'e1> -> unit = function
@@ -1572,6 +1595,18 @@ let addUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldName 
 let addUsedFieldRef (ref : ResolvedFieldRef) =
     addUsedField ref.Entity.Schema ref.Entity.Name ref.Name
 
+let tryFindUsedEntity (schemaName : SchemaName) (entityName : EntityName) (usedDatabase : UsedDatabase) : UsedEntity option =
+    let schema = Map.findWithDefault schemaName emptyUsedSchema usedDatabase.Schemas
+    Map.tryFind entityName schema.Entities
+
+let tryFindUsedEntityRef (ref : ResolvedEntityRef) = tryFindUsedEntity ref.Schema ref.Name
+
+let tryFindUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldName : FieldName) (usedDatabase : UsedDatabase) : UsedField option =
+    let entity = tryFindUsedEntity schemaName entityName usedDatabase |> Option.defaultValue emptyUsedEntity
+    Map.tryFind fieldName entity.Fields
+
+let tryFindUsedFieldRef (ref : ResolvedFieldRef) = tryFindUsedField ref.Entity.Schema ref.Entity.Name ref.Name
+
 type UsedArguments = Set<Placeholder>
 
 type LocalArgumentsMap = Map<ArgumentName, FieldValue>
@@ -1588,7 +1623,7 @@ let globalArgumentTypes : Map<ArgumentName, ResolvedArgument> =
     Map.ofSeq
         [ (FunQLName "lang", requiredArgument (FTScalar SFTString))
           (FunQLName "user", requiredArgument (FTScalar SFTString))
-          (FunQLName "user_id", requiredArgument (FTScalar (SFTReference { Schema = funSchema; Name = funUsers })))
+          (FunQLName "user_id", requiredArgument (FTScalar (SFTReference ({ Schema = funSchema; Name = funUsers }, None))))
           (FunQLName "transaction_time", requiredArgument (FTScalar SFTDateTime))
           (FunQLName "transaction_id", requiredArgument (FTScalar SFTInt))
         ]

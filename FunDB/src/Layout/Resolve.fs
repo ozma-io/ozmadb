@@ -165,7 +165,7 @@ let private sqlColumnName (ref : ResolvedEntityRef) (entity : SourceEntity) (fie
         | Some p -> sprintf "%O__%O__%O" ref.Schema ref.Name fieldName
     SQL.SQLName (makeHashNameFor SQL.sqlIdentifierLength str)
 
-type private ReferencingEntitiesMap = Map<ResolvedEntityRef, Set<ResolvedFieldRef>>
+type private ReferencingEntitiesMap = Map<ResolvedEntityRef, Map<ResolvedFieldRef, ReferenceDeleteAction>>
 
 //
 // PHASE 1: Building column fields. Also collect several useful maps.
@@ -176,6 +176,7 @@ type private Phase1Resolver (layout : SourceLayout) =
     let mutable referencingFields : ReferencingEntitiesMap = Map.empty
     let mutable rootEntities : Set<ResolvedEntityRef> = Set.empty
     let mutable internallyDeletedEntities : Set<ResolvedEntityRef> = Set.empty
+    let mutable cascadeDeletedEntities : Set<ResolvedEntityRef> = Set.empty
 
     let unionComputedField (name : FieldName) (parent : HalfResolvedComputedField) (child : HalfResolvedComputedField) =
         if parent.Source.IsVirtual && child.Source.IsVirtual then
@@ -194,13 +195,28 @@ type private Phase1Resolver (layout : SourceLayout) =
         else
             raisef ResolveLayoutException "Computed field names clash: %O" name
 
-    let resolveFieldType (fieldRef : ResolvedFieldRef) (ft : ParsedFieldType) : ResolvedFieldType =
+    let resolveFieldType (fieldRef : ResolvedFieldRef) (field : SourceColumnField) (ft : ParsedFieldType) : ResolvedFieldType =
         try
-            match resolveFieldType layout ft with
-            | FTArray (SFTReference _) -> raisef ResolveLayoutException "Arrays of references are not supported"
+            match resolveFieldType layout true ft with
+            | FTArray (SFTReference (ref, opts)) -> raisef ResolveLayoutException "Arrays of references are not supported"
             | FTArray (SFTEnum _) -> raisef ResolveLayoutException "Arrays of enums are not supported"
-            | FTScalar (SFTReference refEntityRef) as t ->
-                referencingFields <- Map.addWith Set.union refEntityRef (Set.singleton fieldRef) referencingFields
+            | FTScalar (SFTReference (refEntityRef, opts)) as t ->
+                let deleteAction = Option.defaultValue RDANoAction opts
+                match deleteAction with
+                | RDANoAction -> ()
+                | RDACascade ->
+                    cascadeDeletedEntities <- Set.add fieldRef.Entity cascadeDeletedEntities
+                | RDASetNull ->
+                    if not field.IsNullable then
+                        raisef ResolveLayoutException "Can't declare non-nullable reference field SET NULL"
+                    if field.IsImmutable then
+                        raisef ResolveLayoutException "Can't declare immutable reference field SET NULL"
+                | RDASetDefault ->
+                    if Option.isNone field.DefaultValue then
+                        raisef ResolveLayoutException "Can't declare reference field with no default value SET DEFAULT"
+                    if field.IsImmutable then
+                        raisef ResolveLayoutException "Can't declare immutable reference field SET DEFAULT"
+                referencingFields <- Map.addWith Map.union refEntityRef (Map.singleton fieldRef deleteAction) referencingFields
                 t
             | t -> t
         with
@@ -210,7 +226,7 @@ type private Phase1Resolver (layout : SourceLayout) =
         let fieldRef = { Entity = entityRef; Name = fieldName }
         let fieldType =
             match parse tokenizeFunQL fieldType col.Type with
-            | Ok r -> resolveFieldType fieldRef r
+            | Ok r -> resolveFieldType fieldRef col r
             | Error msg -> raisef ResolveLayoutException "Error parsing column field type %s: %s" col.Type msg
         let defaultValue =
             match col.DefaultValue with
@@ -223,8 +239,8 @@ type private Phase1Resolver (layout : SourceLayout) =
                     | Some v ->
                         match (fieldType, v) with
                         // DEPRECATED: we allow integers as defaults for references.
-                        | (FTScalar (SFTReference _), FInt _) -> ()
-                        | (FTArray (SFTReference _), FIntArray _) -> ()
+                        | (FTScalar (SFTReference (_, _)), FInt _) -> ()
+                        | (FTArray (SFTReference (_, _)), FIntArray _) -> ()
                         | _ when (isValueOfSubtype fieldType v) -> ()
                         | _ -> raisef ResolveLayoutException "Default value %O is not of type %O" v fieldType
                         Some v
@@ -355,6 +371,7 @@ type private Phase1Resolver (layout : SourceLayout) =
             }
 
         if ret.DeletedInternally then
+            eprintfn "Entity %O is internally deleted, parent %O: %O %b" entityRef entity.Parent parent entity.DeletedInternally
             internallyDeletedEntities <- Set.add entityRef internallyDeletedEntities
 
         if not (entity.MainField = funId
@@ -434,45 +451,49 @@ type private Phase1Resolver (layout : SourceLayout) =
     member this.RootEntities = rootEntities
     member this.ReferencingFields = referencingFields
     member this.InternallyDeletedEntities = internallyDeletedEntities
+    member this.CascadeDeletedEntities = cascadeDeletedEntities
 
 let private fillReferencingFields (rootEntities : ResolvedEntityRef seq) (entities : HalfResolvedEntitiesMap) (initialReferencesMap : ReferencingEntitiesMap) : ReferencingEntitiesMap =
     let mutable referencesMap = initialReferencesMap
 
-    let rec go (prevReferences : Set<ResolvedFieldRef>) (entityRef : ResolvedEntityRef) =
+    let rec go (prevReferences : Map<ResolvedFieldRef, ReferenceDeleteAction>) (entityRef : ResolvedEntityRef) =
         let entity = Map.find entityRef entities
-        let thisReferences = Map.findWithDefault entityRef Set.empty referencesMap
-        let references = Set.union prevReferences thisReferences
+        let thisReferences = Map.findWithDefault entityRef Map.empty referencesMap
+        let references = Map.union prevReferences thisReferences
         referencesMap <- Map.add entityRef references referencesMap
         for KeyValue(childRef, child) in entity.Children do
             if child.Direct then
                 go references childRef
 
     for root in rootEntities do
-        go Set.empty root
+        go Map.empty root
 
     referencesMap
 
-let private fillInternallyDeletedEntities (referencesMap : ReferencingEntitiesMap) (entities : HalfResolvedEntitiesMap) (initialInternallyDeletedEntities : Set<ResolvedEntityRef>) : Set<ResolvedEntityRef> =
-    let mutable internallyDeletedEntities = initialInternallyDeletedEntities
+let private fillCascadeDeletedEntities (entities : HalfResolvedEntitiesMap) (initialCascadeDeletedEntities : Set<ResolvedEntityRef>) : Set<ResolvedEntityRef> =
+    let mutable cascadeDeletedEntities = Set.empty
 
-    let rec goChildren (entityRef : ResolvedEntityRef) =
-        if not <| Set.contains entityRef internallyDeletedEntities then
-            internallyDeletedEntities <- Set.add entityRef internallyDeletedEntities
-            go entityRef
-            let entity = Map.find entityRef entities
-            for KeyValue(childRef, child) in entity.Children do
-                if child.Direct then
-                    goChildren childRef
+    let rec markEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) =
+        cascadeDeletedEntities <- Set.add entityRef cascadeDeletedEntities
+        match entity.Source.Parent with
+        | Some parentRef when not <| Set.contains parentRef cascadeDeletedEntities ->
+            let parent = Map.find parentRef entities
+            markEntity parentRef parent
+        | _ -> ()
 
-    and go (entityRef : ResolvedEntityRef) =
-        let references = Map.findWithDefault entityRef Set.empty referencesMap
-        for refFieldRef in references do
-            goChildren refFieldRef.Entity
+    let rec markChildren (entity : HalfResolvedEntity) =
+        for KeyValue(childRef, child) in entity.Children do
+            if child.Direct then
+                cascadeDeletedEntities <- Set.add childRef cascadeDeletedEntities
+                let childEntity = Map.find childRef entities
+                markChildren childEntity
 
-    for ref in initialInternallyDeletedEntities do
-        go ref
+    for entityRef in initialCascadeDeletedEntities do
+        let entity = Map.find entityRef entities
+        markEntity entityRef entity
+        markChildren entity
 
-    internallyDeletedEntities
+    cascadeDeletedEntities
 
 let private parseRelatedExpr (rawExpr : string) =
     match parse tokenizeFunQL fieldExpr rawExpr with
@@ -491,7 +512,7 @@ type private RelatedExpr =
       Expr : ResolvedFieldExpr
     }
 
-type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntitiesMap, referencingFields : ReferencingEntitiesMap, internallyDeletedEntities : Set<ResolvedEntityRef>, forceAllowBroken : bool) =
+type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntitiesMap, referencingFields : ReferencingEntitiesMap, cascadeDeletedEntities : Set<ResolvedEntityRef>, forceAllowBroken : bool) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, Result<ResolvedComputedField, exn>> = Map.empty
     let mutable cachedCaseExpressions : Map<ResolvedFieldRef, VirtualFieldCase array> = Map.empty
 
@@ -825,7 +846,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               MainField = entity.Source.MainField
               InsertedInternally = entity.InsertedInternally
               UpdatedInternally = entity.UpdatedInternally
-              DeletedInternally = Set.contains entityRef internallyDeletedEntities
+              DeletedInternally = false
               TriggersMigration = entity.Source.TriggersMigration
               IsHidden = entity.Source.IsHidden
               Parent = entity.Source.Parent
@@ -836,7 +857,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
               IsFrozen = entity.Source.IsFrozen
               HashName = makeHashName entityRef.Name
               RequiredFields = requiredFields
-              ReferencingFields = Map.findWithDefault entityRef Set.empty referencingFields
+              ReferencingFields = Map.findWithDefault entityRef Map.empty referencingFields
+              CascadeDeleted = Set.contains entityRef cascadeDeletedEntities
             }
         let errors =
             { ComputedFields = computedErrors
@@ -892,7 +914,45 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 // PHASE 3: Building cases for virtual computed fields.
 //
 
-type private Phase3Resolver (layout : Layout) =
+let private fillInternallyDeletedEntities (layout : Layout) (referencesMap : ReferencingEntitiesMap) (initialInternallyDeletedEntities : Set<ResolvedEntityRef>) : Set<ResolvedEntityRef> =
+    let mutable internallyDeletedEntities = initialInternallyDeletedEntities
+
+    let rec goChildren (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) =
+        if not <| Set.contains entityRef internallyDeletedEntities then
+            internallyDeletedEntities <- Set.add entityRef internallyDeletedEntities
+            go entityRef
+            for KeyValue(childRef, child) in entity.Children do
+                if child.Direct then
+                    let childEntity = layout.FindEntity childRef |> Option.get
+                    goChildren childRef childEntity
+
+    and go (entityRef : ResolvedEntityRef) =
+        let references = Map.findWithDefault entityRef Map.empty referencesMap
+        for KeyValue(refFieldRef, deleteAction) in references do
+            let entity = layout.FindEntity refFieldRef.Entity |> Option.get
+            // If:
+            // 1. Delete action is CASCADE, or;
+            // 2. Delete action is SET NULL or SET DEFAULT, and there are no check constraints using this field;
+            // we can avoid marking this field as internally deleted, as it will be handled automatically by usual mechanisms.
+            let addReference =
+                match deleteAction with
+                | RDANoAction -> true
+                | RDACascade -> false
+                | RDASetNull
+                | RDASetDefault ->
+                    entity.CheckConstraints
+                    |> Map.values
+                    |> Seq.exists (fun check -> tryFindUsedFieldRef refFieldRef check.UsedDatabase |> Option.isSome)
+            if addReference then
+                eprintfn "Marking entity %O as internally deleted, referenced from %O" refFieldRef entityRef
+                goChildren refFieldRef.Entity entity
+
+    for ref in initialInternallyDeletedEntities do
+        go ref
+
+    internallyDeletedEntities
+
+type private Phase3Resolver (layout : Layout, internallyDeletedEntities : Set<ResolvedEntityRef>) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, ResolvedComputedField> = Map.empty
 
     let resolveOneComputedField (fieldRef : ResolvedFieldRef) (comp : ResolvedComputedField) : ResolvedComputedField =
@@ -963,9 +1023,10 @@ let resolveLayout (layout : SourceLayout) (forceAllowBroken : bool) : ErroredLay
     let phase1 = Phase1Resolver layout
     let entities = phase1.ResolveLayout ()
     let referencingFields = fillReferencingFields phase1.RootEntities entities phase1.ReferencingFields
-    let internallyDeletedEntities = fillInternallyDeletedEntities referencingFields entities phase1.InternallyDeletedEntities
-    let phase2 = Phase2Resolver (layout, entities, referencingFields, internallyDeletedEntities, forceAllowBroken)
+    let cascadeDeletedEntities = fillCascadeDeletedEntities entities phase1.CascadeDeletedEntities
+    let phase2 = Phase2Resolver (layout, entities, referencingFields, cascadeDeletedEntities, forceAllowBroken)
     let (errors, layout2) = phase2.ResolveLayout ()
-    let phase3 = Phase3Resolver layout2
+    let internallyDeletedEntities = fillInternallyDeletedEntities layout2 referencingFields phase1.InternallyDeletedEntities
+    let phase3 = Phase3Resolver (layout2, internallyDeletedEntities)
     let layout3 = phase3.ResolveLayout ()
     (errors, layout3)

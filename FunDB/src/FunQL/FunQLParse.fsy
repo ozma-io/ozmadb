@@ -98,15 +98,15 @@ let private validJsonValue = function
     | FUserViewRefArray _ -> false // We need to first dereference them.
     | _ -> true
 
-let private coalesceJsonObject (exprs : (string * ParsedFieldExpr) list) : ParsedFieldExpr =
+let private coalesceJsonObject (exprs : (FunQLName * ParsedFieldExpr) list) : ParsedFieldExpr =
     let rec tryExtract = function
         | [] -> Some []
         | ((name, FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
         | _ -> None
 
     match tryExtract exprs with
-    | None -> FEJsonObject (exprs |> Seq.map (fun (name, e) -> (FunQLName name, e)) |> Map.ofSeq)
-    | Some vals -> FEValue (FJson (vals |> Seq.map (fun (name, v) -> (name, JToken.FromObject v)) |> jsonObject))
+    | None -> FEJsonObject (exprs |> Seq.map (fun (name, e) -> (name, e)) |> Map.ofSeq)
+    | Some vals -> FEValue (FJson (vals |> Seq.map (fun (name, v) -> (string name, JToken.FromObject v)) |> jsonObject))
 
 let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
     let rec tryExtract = function
@@ -248,6 +248,9 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token LATERAL
 %token DEFAULT
 %token USING
+%token CASCADE
+%token ACTION
+%token NO
 
 // Types
 %token INT_TYPE
@@ -811,7 +814,7 @@ JsonFields:
     | JsonField COMMA JsonFields { $1 :: $3 }
 
 JsonField:
-    | ID COLON FieldExpr { ($1, $3) }
+    | Name COLON FieldExpr { ($1, $3) }
 
 JsonArray:
     | LEFT_BRACKET JsonItems RIGHT_BRACKET { coalesceJsonArray $2 }
@@ -825,19 +828,28 @@ NonEmptyJsonItems:
     | FieldExpr COMMA                   { [$1] }
     | FieldExpr COMMA NonEmptyJsonItems { $1 :: $3 }
 
+DeleteAction:
+    | CASCADE     { RDACascade }
+    | SET NULL    { RDASetNull }
+    | SET DEFAULT { RDASetDefault }
+
+MaybeDeleteAction:
+    |                        { None }
+    | ON DELETE DeleteAction { Some $3 }
+
 ScalarType:
-    | INT_TYPE                                        { SFTInt }
-    | DECIMAL_TYPE                                    { SFTDecimal }
-    | STRING_TYPE                                     { SFTString }
-    | BOOL_TYPE                                       { SFTBool }
-    | DATETIME_TYPE                                   { SFTDateTime }
-    | DATE_TYPE                                       { SFTDate }
-    | INTERVAL_TYPE                                   { SFTInterval }
-    | JSON_TYPE                                       { SFTJson }
-    | UVREF_TYPE                                      { SFTUserViewRef }
-    | UUID_TYPE                                       { SFTUuid }
-    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { SFTReference $3 }
-    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN       { SFTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
+    | INT_TYPE                                                          { SFTInt }
+    | DECIMAL_TYPE                                                      { SFTDecimal }
+    | STRING_TYPE                                                       { SFTString }
+    | BOOL_TYPE                                                         { SFTBool }
+    | DATETIME_TYPE                                                     { SFTDateTime }
+    | DATE_TYPE                                                         { SFTDate }
+    | INTERVAL_TYPE                                                     { SFTInterval }
+    | JSON_TYPE                                                         { SFTJson }
+    | UVREF_TYPE                                                        { SFTUserViewRef }
+    | UUID_TYPE                                                         { SFTUuid }
+    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN MaybeDeleteAction { SFTReference ($3, $5) }
+    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                         { SFTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
 
 FieldType:
     | ScalarType                               { FTScalar $1 }
@@ -847,8 +859,11 @@ EnumList:
     | STRING                { [ $1 ] }
     | STRING COMMA EnumList { $1 :: $3 }
 
+// We allow some keywords that can't appear near a name as names.
 Name:
-    | ID { FunQLName $1 }
+    | ID        { FunQLName $1 }
+    | ACTION    { FunQLName "action" }
+    | CASCADE   { FunQLName "cascade" }
 
 IndexOpClass:
     |      { None }

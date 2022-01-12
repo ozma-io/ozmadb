@@ -340,6 +340,8 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
         public Int16[]? ConFKey { get; set; }
         public bool ConDeferrable { get; set; }
         public bool ConDeferred { get; set; }
+        public char? ConFUpdType { get; set; }
+        public char? ConFDelType { get; set; }
 
         [NotMapped]
         public string? Source { get; set; }

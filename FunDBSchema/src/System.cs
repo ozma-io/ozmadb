@@ -268,7 +268,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
-        [ColumnField("reference(public.entities)", IsImmutable=true)]
+        [ColumnField("reference(public.entities) on delete cascade", IsImmutable=true)]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
 
@@ -289,7 +289,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
-        [ColumnField("reference(public.entities)", IsImmutable=true)]
+        [ColumnField("reference(public.entities) on delete cascade", IsImmutable=true)]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
         [ColumnField("bool", Default="false")]
@@ -310,7 +310,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
-        [ColumnField("reference(public.entities)")]
+        [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
         [ColumnField("bool", Default="false")]
@@ -327,7 +327,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
-        [ColumnField("reference(public.entities)")]
+        [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
         [ColumnField("string")]
@@ -341,7 +341,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
-        [ColumnField("reference(public.entities)")]
+        [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
         // Order is important here.
@@ -384,7 +384,7 @@ namespace FunWithFlags.FunDBSchema.System
         public string Name { get; set; } = null!;
         [ColumnField("bool", Default="false")]
         public bool IsRoot { get; set; }
-        [ColumnField("reference(public.roles)")]
+        [ColumnField("reference(public.roles) on delete set null")]
         public int? RoleId { get; set; }
         public Role? Role { get; set; }
         [ColumnField("bool", Default="true")]
@@ -412,7 +412,7 @@ namespace FunWithFlags.FunDBSchema.System
     public class RoleParent
     {
         public int Id { get; set; }
-        [ColumnField("reference(public.roles)")]
+        [ColumnField("reference(public.roles) on delete cascade")]
         public int RoleId { get; set; }
         public Role? Role { get; set; }
         [ColumnField("reference(public.roles)")]
@@ -426,7 +426,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("reference(public.roles)")]
         public int RoleId { get; set; }
         public Role? Role { get; set; }
-        [ColumnField("reference(public.entities)")]
+        [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
         [ColumnField("bool", Default="false")]
@@ -448,7 +448,7 @@ namespace FunWithFlags.FunDBSchema.System
     public class RoleColumnField
     {
         public int Id { get; set; }
-        [ColumnField("reference(public.role_entities)")]
+        [ColumnField("reference(public.role_entities) on delete cascade")]
         public int RoleEntityId { get; set; }
         public RoleEntity? RoleEntity { get; set; }
         // FIXME: Make this ColumnField relation when we implement reference constraints.
@@ -467,7 +467,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
-        [ColumnField("reference(public.entities)")]
+        [ColumnField("reference(public.entities) on delete cascade")]
         public int FieldEntityId { get; set; }
         public Entity? FieldEntity { get; set; }
         [ColumnField("string")]
@@ -518,7 +518,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
-        [ColumnField("reference(public.entities)")]
+        [ColumnField("reference(public.entities) on delete cascade")]
         public int TriggerEntityId { get; set; }
         public Entity? TriggerEntity { get; set; }
         [ColumnField("string")]

@@ -224,8 +224,9 @@ type ResolvedEntity =
       IsAbstract : bool
       IsFrozen : bool
       Root : ResolvedEntityRef // Hierarchy root
-      ReferencingFields : Set<ResolvedFieldRef>
+      ReferencingFields : Map<ResolvedFieldRef, ReferenceDeleteAction>
       RequiredFields : Set<FieldName>
+      CascadeDeleted : bool // If an entity with this type or any child of it can be CASCADE DELETE'd
     } with
         member this.FindField (name : FieldName) =
             genericFindField (fun name -> Map.tryFind name this.ColumnFields) (fun name -> Map.tryFind name this.ComputedFields |> Option.bind Result.getOption) this name

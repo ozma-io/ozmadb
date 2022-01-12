@@ -90,7 +90,7 @@ let private cascadeDeleteDeferred (filterEntities : ResolvedEntityRef -> bool) (
 
                 let (entityRef, id) = deferredSet |> Seq.first |> Option.get
                 let! tree = getRelatedEntities connection.Connection.Query Map.empty layout None (fun entityRef rowId refFieldRef -> filterEntities refFieldRef.Entity) entityRef (RKId id) None cancellationToken
-                do! iterReferencesUpwardsTask deleteOne tree
+                do! iterReferencesUpwardsTask deleteOne (function | RDANoAction -> true | _ -> false) tree
                 if not <| Set.isEmpty deferredSet then
                     do! go deferredSet
             }

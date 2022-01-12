@@ -265,13 +265,14 @@ let private migrateBuildSchema (schemaName : SchemaName) (fromObjects : SchemaOb
         | (OMTable _, OMTable _) -> true
         | (OMSequence, OMSequence) -> true
         | (OMConstraint (oldTableName, oldConstraintType), OMConstraint (newTableName, newConstraintType)) when oldTableName = newTableName ->
+            // Compare everything except deferrable setting.
             match (oldConstraintType, newConstraintType) with
             | (CMCheck expr1, CMCheck expr2) ->
                 let expr1 = normalizeLocalExpr expr1.Value
                 let expr2 = normalizeLocalExpr expr2.Value
                 string expr1 = string expr2
-            | (CMForeignKey (ref1, f1, oldDefer), CMForeignKey (ref2, f2, newDefer)) ->
-                ref1 = ref2 && f1 = f2
+            | (CMForeignKey opts1, CMForeignKey opts2) ->
+                opts1.Columns = opts2.Columns && opts1.OnDelete = opts2.OnDelete && opts1.OnUpdate = opts2.OnUpdate && opts1.ToTable = opts2.ToTable
             | (CMPrimaryKey (p1, oldDefer), CMPrimaryKey (p2, newDefer)) ->
                 p1 = p2
             | (CMUnique (u1, oldDefer), CMUnique (u2, newDefer)) ->
@@ -322,8 +323,8 @@ let private migrateBuildSchema (schemaName : SchemaName) (fromObjects : SchemaOb
                 | OMConstraint (oldTableName, oldConstraintType) ->
                     match (oldConstraintType, newConstraintType) with
                     | (CMCheck expr1, CMCheck expr2) -> ()
-                    | (CMForeignKey (ref1, f1, oldDefer), CMForeignKey (ref2, f2, newDefer)) ->
-                        yield! migrateDeferrableConstraint objRef newTableName oldDefer newDefer
+                    | (CMForeignKey opts1, CMForeignKey opts2) ->
+                        yield! migrateDeferrableConstraint objRef newTableName opts1.Defer opts2.Defer
                     | (CMPrimaryKey (p1, oldDefer), CMPrimaryKey (p2, newDefer)) ->
                         yield! migrateDeferrableConstraint objRef newTableName oldDefer newDefer
                     | (CMUnique (u1, oldDefer), CMUnique (u2, newDefer)) ->

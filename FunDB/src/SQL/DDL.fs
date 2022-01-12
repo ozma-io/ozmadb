@@ -85,12 +85,50 @@ type DeferrableConstraint =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
+type DeleteAction =
+    | DANoAction
+    | DARestrict
+    | DACascade
+    | DASetNull
+    | DASetDefault
+    with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | DANoAction -> "NO ACTION"
+            | DARestrict -> "RESTRICT"
+            | DACascade -> "CASCADE"
+            | DASetNull -> "SET NULL"
+            | DASetDefault -> "SET DEFAULT"
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+[<StructuralEquality; NoComparison>]
+type ForeignKeyMeta =
+    { ToTable : TableRef
+      Columns : (ColumnName * ColumnName)[]
+      OnDelete : DeleteAction
+      OnUpdate : DeleteAction
+      Defer : DeferrableConstraint
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let myCols = this.Columns |> Seq.map (fun (name, refName) -> name.ToSQLString()) |> String.concat ", "
+            let refCols = this.Columns |> Seq.map (fun (name, refName) -> refName.ToSQLString()) |> String.concat ", "
+            sprintf "(%s) REFERENCES %s (%s) ON DELETE %O ON UPDATE %O %O" myCols (this.ToTable.ToSQLString()) refCols this.OnDelete this.OnUpdate this.Defer
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
 [<StructuralEquality; NoComparison>]
 type ConstraintMeta =
     | CMUnique of ColumnName[] * DeferrableConstraint
     | CMCheck of StringComparable<ValueExpr>
     | CMPrimaryKey of ColumnName[] * DeferrableConstraint
-    | CMForeignKey of TableRef * (ColumnName * ColumnName)[] * DeferrableConstraint
+    | CMForeignKey of ForeignKeyMeta
     with
         override this.ToString () = this.ToSQLString()
 
@@ -104,10 +142,8 @@ type ConstraintMeta =
                 assert (not <| Array.isEmpty cols)
                 let colsStr = cols |> Seq.map toSQLString |> String.concat ", "
                 sprintf "PRIMARY KEY (%s) %s" colsStr (defer.ToSQLString())
-            | CMForeignKey (ref, cols, defer) ->
-                let myCols = cols |> Seq.map (fun (name, refName) -> name.ToSQLString()) |> String.concat ", "
-                let refCols = cols |> Seq.map (fun (name, refName) -> refName.ToSQLString()) |> String.concat ", "
-                sprintf "FOREIGN KEY (%s) REFERENCES %s (%s) %s" myCols (ref.ToSQLString()) refCols (defer.ToSQLString())
+            | CMForeignKey opts ->
+                sprintf "FOREIGN KEY %O" opts
             | CMCheck expr -> sprintf "CHECK (%s)" (expr.ToString())
 
         interface ISQLString with

@@ -202,7 +202,7 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
           B = refFrom
           Condition = FEValue (FBool true)
         }
-    let argumentInfo = requiredArgument <| FTScalar (SFTReference entityRef)
+    let argumentInfo = requiredArgument <| FTScalar (SFTReference (entityRef, None))
     let placeholder = PLocal funId
     let (argId, arguments) = addArgument placeholder argumentInfo emptyArguments
 
@@ -279,7 +279,7 @@ type private DomainsBuilder (layout : Layout) =
 
     let buildFieldDomain (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (field : ResolvedColumnField) : FieldDomain option =
         match field.FieldType with
-        | FTScalar (SFTReference refEntityRef) -> Some <| buildReferenceFieldDomain entity fieldRef refEntityRef
+        | FTScalar (SFTReference (refEntityRef, opts)) -> Some <| buildReferenceFieldDomain entity fieldRef refEntityRef
         // We can also potentially make domains for enums and booleans.
         | _ -> None
 

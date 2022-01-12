@@ -135,6 +135,8 @@ let commitAndReturn (handler : HttpHandler) (api : IFunDBAPI) (next : HttpFunc) 
             return! Successful.ok handler next ctx
         with
         | :? ContextException as e ->
+            let logger = ctx.GetLogger("commitAndReturn")
+            logger.LogError(e, "Error during commit")
             return! requestError (RERequest (exceptionString e)) next ctx
     }
 

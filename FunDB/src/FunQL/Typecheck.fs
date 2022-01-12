@@ -105,7 +105,7 @@ type private Typechecker (layout : ILayoutBits) =
             let entity = layout.FindEntity fieldRef.Entity |> Option.get
             let field = entity.FindField fieldRef.Name |> Option.get
             match field.Field with
-            | RId -> Some (FTScalar <| SFTReference fieldRef.Entity)
+            | RId -> Some (FTScalar <| SFTReference (fieldRef.Entity, None))
             | RSubEntity -> Some scalarJson
             | RColumnField col -> Some col.FieldType
             | RComputedField comp -> comp.Type

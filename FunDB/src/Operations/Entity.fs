@@ -758,6 +758,7 @@ type ReferencesRowIndex = int
 type ReferencesChild =
     { Field : FieldName
       Row : ReferencesRowIndex
+      DeleteAction : ReferenceDeleteAction
     }
 
 and ReferencesNode =
@@ -771,14 +772,14 @@ type ReferencesTree =
       Root : ReferencesRowIndex
     }
 
-let iterReferencesUpwardsTask (f : ResolvedEntityRef -> RowId -> Task) (tree : ReferencesTree) : Task =
+let iterReferencesUpwardsTask (f : ResolvedEntityRef -> RowId -> Task) (filterAction : ReferenceDeleteAction -> bool) (tree : ReferencesTree) : Task =
     let mutable visited = Set.empty
     let rec go i =
         unitTask {
             visited <- Set.add i visited
             let node = tree.Nodes.[i]
             for child in node.References do
-                if not <| Set.contains child.Row visited then
+                if not <| Set.contains child.Row visited && filterAction child.DeleteAction then
                     do! go child.Row
             do! f node.Entity node.Id
         }
@@ -804,7 +805,7 @@ let getRelatedEntities
                 let idx = lastId
                 processed <- Map.add (entity.Root, id) idx processed
                 lastId <- lastId + 1
-                let! referenceLists = Seq.mapTask (findRelated entityRef id) entity.ReferencingFields
+                let! referenceLists = entity.ReferencingFields |> Map.toSeq |> Seq.mapTask (findRelated entityRef id) 
                 let node =
                     { Entity = entityRef
                       Id = id
@@ -814,7 +815,7 @@ let getRelatedEntities
                 return idx
             }
 
-        and findRelated (entityRef : ResolvedEntityRef) (relatedId : RowId) (refFieldRef : ResolvedFieldRef) : Task<ReferencesChild seq> =
+        and findRelated (entityRef : ResolvedEntityRef) (relatedId : RowId) (refFieldRef : ResolvedFieldRef, deleteAction : ReferenceDeleteAction) : Task<ReferencesChild seq> =
             task {
                 if not <| filterFields entityRef relatedId refFieldRef then
                     return Seq.empty
@@ -832,6 +833,7 @@ let getRelatedEntities
                             return
                                 { Field = refFieldRef.Name
                                   Row = idx
+                                  DeleteAction = deleteAction
                                 }
                         }
                     return! Seq.mapTask go related

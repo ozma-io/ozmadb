@@ -96,7 +96,8 @@ type SerializedEntity =
       IsFrozen : bool
       Root : ResolvedEntityRef
       Access : SerializedEntityAccess
-      ReferencingFields : Set<ResolvedFieldRef>
+      ReferencingFields : Map<ResolvedFieldRef, ReferenceDeleteAction>
+      CascadeDeleted : bool
     }
 
 [<NoEquality; NoComparison>]
@@ -176,6 +177,7 @@ let serializeEntity (layout : Layout) (entity : ResolvedEntity) : SerializedEnti
       Root = entity.Root
       Access = fullSerializedEntityAccess
       ReferencingFields = entity.ReferencingFields
+      CascadeDeleted = entity.CascadeDeleted
     }
 
 let serializeSchema (layout : Layout) (schema : ResolvedSchema) : SerializedSchema =

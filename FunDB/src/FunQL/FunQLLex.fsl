@@ -177,6 +177,9 @@ and tokenizeFunQL = parse
     | l a t e r a l           { Parse.LATERAL }
     | d e f a u l t           { Parse.DEFAULT }
     | u s i n g               { Parse.USING }
+    | a c t i o n             { Parse.ACTION }
+    | c a s c a d e           { Parse.CASCADE }
+    | n o                     { Parse.NO }
 
     // Types
     | i n t             { Parse.INT_TYPE }

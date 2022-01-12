@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.Triggers.Resolve
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
@@ -28,18 +30,32 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             raisef ResolveTriggersException "UPDATE triggers are disabled for this entity"
         if entity.DeletedInternally && trigger.OnDelete then
             raisef ResolveTriggersException "DELETE triggers are disabled for this entity"
+        if entity.CascadeDeleted && trigger.OnDelete then
+            raisef ResolveTriggersException "ON DELETE triggers are not implemented for entities containing ON DELETE CASCADE reference fields"
 
-        let updateFields =
+        let (updateFields, updateFieldsSeq) =
             match trigger.OnUpdateFields with
-            | [|f|] when f = updateFieldsAll -> TUFAll
+            | [|f|] when f = updateFieldsAll -> (TUFAll, Map.keys entity.ColumnFields)
             | fields ->
-                for field in fields do
-                    if not (Map.containsKey field entity.ColumnFields) then
-                        raisef ResolveTriggersException "Unknown update field name: %O" field
-                try
-                    TUFSet (Set.ofSeqUnique fields)
-                with
-                | Failure f -> raisef ResolveTriggersException "Repeated field: %s" f
+                for fieldName in fields do
+                    if not <| Map.containsKey fieldName entity.ColumnFields then
+                        raisef ResolveTriggersException "Unknown update field name: %O" fieldName
+                let fieldsSet =
+                    try
+                        Set.ofSeqUnique fields
+                    with
+                    | Failure f -> raisef ResolveTriggersException "Repeated field: %s" f
+                (TUFSet fieldsSet, fieldsSet |> Set.toSeq)
+        
+        for fieldName in updateFieldsSeq do
+            let field = Map.find fieldName entity.ColumnFields
+            match field.FieldType with
+            | FTScalar (SFTReference (refEntityRef, Some opt)) ->
+                match opt with
+                | RDASetDefault
+                | RDASetNull -> raisef ResolveTriggersException "ON UPDATE triggers are not implemented for ON DELETE SET NULL/DEFAULT reference fields"
+                | _ -> ()
+            | _ -> ()
 
         { AllowBroken = trigger.AllowBroken
           Priority = trigger.Priority

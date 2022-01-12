@@ -489,7 +489,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         | Ok () -> ()
                     }
                 try
-                    do! iterReferencesUpwardsTask deleteOne tree
+                    do! iterReferencesUpwardsTask deleteOne (function | RDANoAction -> true | _ -> false) tree
                     return Ok tree
                 with
                 | :? EarlyStopException<EntityErrorInfo> as e -> return Error e.Value

@@ -324,6 +324,35 @@ let private makeUnconstrainedSchemaMeta (ns : Namespace) : SchemaName * PgSchema
 
 // Two phases of resolution to resolve constraints which address columns ty their numbers.
 type private Phase2Resolver (schemaIds : PgSchemas) =
+    let makeForeignKeyMeta (columnIds : TableColumnIds) (constr : Constraint) : ForeignKeyMeta =
+        let refSchema = SQLName constr.FRelClass.Namespace.NspName
+        let refName = SQLName constr.FRelClass.RelName
+        let refTable = Map.find refName (Map.find refSchema schemaIds).Tables
+        let makeRefColumn (fromNum : ColumnNum) (toNum : ColumnNum) =
+            let fromName = Map.find fromNum columnIds
+            let toName = Map.find toNum refTable.Columns
+            (fromName, toName)
+
+        let tableRef = { Schema = Some refSchema; Name = refName }
+        let cols = Seq.map2 makeRefColumn constr.ConKey constr.ConFKey |> Seq.toArray
+
+        let parseAction (c : Nullable<char>) =
+            match c.GetValueOrDefault() with
+            | '\x00'
+            | 'a' -> DANoAction
+            | 'r' -> DARestrict
+            | 'c' -> DACascade
+            | 'n' -> DASetNull
+            | 'd' -> DASetDefault
+            | c -> failwithf "Unknown foreign key action code: %c" c
+
+        { ToTable = tableRef
+          Columns = cols
+          OnUpdate = parseAction constr.ConFUpdType
+          OnDelete = parseAction constr.ConFDelType
+          Defer = makeDeferrableConstraint constr
+        }
+
     let makeConstraintMeta (tableName : TableName) (columnIds : TableColumnIds) (constr : Constraint) : (ConstraintName * ConstraintMeta) option =
         let makeLocalColumn (num : ColumnNum) = Map.find num columnIds
         let ret =
@@ -331,17 +360,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
             | 'c' ->
                 parseLocalExpr constr.Source |> String.comparable |> CMCheck |> Some
             | 'f' ->
-                let refSchema = SQLName constr.FRelClass.Namespace.NspName
-                let refName = SQLName constr.FRelClass.RelName
-                let refTable = Map.find refName (Map.find refSchema schemaIds).Tables
-                let makeRefColumn (fromNum : ColumnNum) (toNum : ColumnNum) =
-                    let fromName = makeLocalColumn fromNum
-                    let toName = Map.find toNum refTable.Columns
-                    (fromName, toName)
-
-                let tableRef = { Schema = Some refSchema; Name = refName }
-                let cols = Seq.map2 makeRefColumn constr.ConKey constr.ConFKey |> Seq.toArray
-                Some <| CMForeignKey (tableRef, cols, makeDeferrableConstraint constr)
+                Some <| CMForeignKey (makeForeignKeyMeta columnIds constr)
             | 'p' ->
                 Some <| CMPrimaryKey (Array.map makeLocalColumn constr.ConKey, makeDeferrableConstraint constr)
             | 'u' ->

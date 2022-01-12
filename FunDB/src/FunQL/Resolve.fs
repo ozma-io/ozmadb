@@ -331,7 +331,7 @@ let private resolveEntityRef (name : EntityRef) : ResolvedEntityRef =
     | Some ref -> ref
     | None -> raisef ViewResolveException "Unspecified schema in name: %O" name
 
-let resolveScalarFieldType (layout : IEntitiesSet) : ParsedScalarFieldType -> ResolvedScalarFieldType = function
+let resolveScalarFieldType (layout : IEntitiesSet) (allowReferenceOptions : bool) : ParsedScalarFieldType -> ResolvedScalarFieldType = function
     | SFTInt -> SFTInt
     | SFTDecimal -> SFTDecimal
     | SFTString -> SFTString
@@ -342,19 +342,22 @@ let resolveScalarFieldType (layout : IEntitiesSet) : ParsedScalarFieldType -> Re
     | SFTJson -> SFTJson
     | SFTUserViewRef -> SFTUserViewRef
     | SFTUuid -> SFTUuid
-    | SFTReference entityRef ->
+    | SFTReference (entityRef, mopts) ->
+        match mopts with
+        | Some opts when not allowReferenceOptions -> raisef ViewResolveException "Reference delete options are not allowed here"
+        | _ -> ()
         let resolvedRef = resolveEntityRef entityRef
         if not <| layout.HasVisibleEntity resolvedRef then
             raisef ViewResolveException "Cannot find entity %O from reference type" resolvedRef
-        SFTReference resolvedRef
+        SFTReference (resolvedRef, mopts)
     | SFTEnum vals ->
         if Set.isEmpty vals then
             raisef ViewResolveException "Enums must not be empty"
         SFTEnum vals
 
-let resolveFieldType (layout : IEntitiesSet) : ParsedFieldType -> ResolvedFieldType = function
-    | FTArray typ -> FTArray <| resolveScalarFieldType layout typ
-    | FTScalar typ -> FTScalar <| resolveScalarFieldType layout typ
+let resolveFieldType (layout : IEntitiesSet) (allowReferenceOptions : bool) : ParsedFieldType -> ResolvedFieldType = function
+    | FTArray typ -> FTArray <| resolveScalarFieldType layout allowReferenceOptions typ
+    | FTScalar typ -> FTScalar <| resolveScalarFieldType layout allowReferenceOptions typ
 
 let resolveCastScalarFieldType : ScalarFieldType<_> -> ScalarFieldType<_> = function
     | SFTInt -> SFTInt
@@ -367,7 +370,7 @@ let resolveCastScalarFieldType : ScalarFieldType<_> -> ScalarFieldType<_> = func
     | SFTJson -> SFTJson
     | SFTUserViewRef -> SFTUserViewRef
     | SFTUuid -> SFTUuid
-    | SFTReference entityRef -> raisef ViewResolveException "Cannot cast to reference type"
+    | SFTReference (entityRef, opts) -> raisef ViewResolveException "Cannot cast to reference type"
     | SFTEnum vals -> raisef ViewResolveException "Cannot cast to enum type"
 
 let resolveCastFieldType : FieldType<_> -> FieldType<_> = function
@@ -987,7 +990,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                         raisef ViewResolveException "Cannot specify roles in non-privileged user views"
                     isPrivileged <- true
                 match boundField.Field with
-                | RColumnField { FieldType = FTScalar (SFTReference entityRef) } ->
+                | RColumnField { FieldType = FTScalar (SFTReference (entityRef, opts)) } ->
                     let refKey =
                         { FromId = boundField.Header.Key.FromId
                           Path = List.append boundField.Header.Key.Path [boundField.Ref.Name]
@@ -1082,7 +1085,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                     (None, ObjectMap.empty)
                 else
                     match argInfo.ArgType with
-                    | FTScalar (SFTReference parentEntity) ->
+                    | FTScalar (SFTReference (parentEntity, opts)) ->
                         let (firstArrow, remainingPath) =
                             match Array.toList f.Path with
                             | head :: tail -> (head, tail)
@@ -1999,7 +2002,7 @@ let compileScalarType : ScalarFieldType<_> -> SQL.SimpleType = function
     | SFTJson -> SQL.STJson
     | SFTUserViewRef -> SQL.STJson
     | SFTUuid -> SQL.STUuid
-    | SFTReference ent -> SQL.STInt
+    | SFTReference (ent, opts) -> SQL.STInt
     | SFTEnum vals -> SQL.STString
 
 let compileFieldType : FieldType<_> -> SQL.SimpleValueType = function
@@ -2009,7 +2012,7 @@ let compileFieldType : FieldType<_> -> SQL.SimpleValueType = function
 let isScalarValueSubtype (layout : ILayoutBits) (wanted : ResolvedScalarFieldType) (given : ResolvedScalarFieldType) : bool =
     match (wanted, given) with
     | (a, b) when a = b -> true
-    | (SFTReference wantedRef, SFTReference givenRef) ->
+    | (SFTReference (wantedRef, optsA), SFTReference (givenRef, optsB)) ->
         let wantedEntity = layout.FindEntity wantedRef |> Option.get
         Map.containsKey givenRef wantedEntity.Children
     | (SFTEnum wantedVals, SFTEnum givenVals) -> Set.isEmpty (Set.difference givenVals wantedVals)
@@ -2042,7 +2045,7 @@ let isValueOfSubtype (wanted : ResolvedFieldType) (value : FieldValue) : bool =
     | _ -> isMaybeSubtype emptyLayoutBits wanted (fieldValueType value)
 
 let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : ResolvedArgument =
-    let argType = resolveFieldType layout arg.ArgType
+    let argType = resolveFieldType layout false arg.ArgType
     match arg.DefaultValue with
     | None -> ()
     | Some def ->

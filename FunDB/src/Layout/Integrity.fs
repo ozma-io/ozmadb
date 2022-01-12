@@ -90,7 +90,7 @@ type private AssertionsBuilder (layout : Layout) =
     let columnFieldAssertions (fieldRef : ResolvedFieldRef) (field : ResolvedColumnField) : LayoutAssertions seq =
         seq {
             match field.FieldType with
-            | FTScalar (SFTReference toRef) ->
+            | FTScalar (SFTReference (toRef, opts)) ->
                 let refEntity = layout.FindEntity toRef |> Option.get
                 if Option.isSome refEntity.Parent then
                     let assertion =

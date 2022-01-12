@@ -295,7 +295,7 @@ let private defaultCompiledArgumentValue : FieldType<_> -> FieldValue = function
     | FTArray SFTJson -> FJsonArray [||]
     | FTArray SFTUserViewRef -> FUserViewRefArray [||]
     | FTArray SFTUuid -> FUuidArray [||]
-    | FTArray (SFTReference entityRef) -> FIntArray [||]
+    | FTArray (SFTReference (entityRef, opts)) -> FIntArray [||]
     | FTArray (SFTEnum vals) -> FStringArray [||]
     | FTScalar SFTString -> FString ""
     | FTScalar SFTInt -> FInt 0
@@ -307,7 +307,7 @@ let private defaultCompiledArgumentValue : FieldType<_> -> FieldValue = function
     | FTScalar SFTJson -> FJson (JObject ())
     | FTScalar SFTUserViewRef -> FUserViewRef { Schema = None; Name = FunQLName "" }
     | FTScalar SFTUuid -> FUuid Guid.Empty
-    | FTScalar (SFTReference entityRef) -> FInt 0
+    | FTScalar (SFTReference (entityRef, opts)) -> FInt 0
     | FTScalar (SFTEnum vals) -> vals |> Set.toSeq |> Seq.first |> Option.get |> FString
 
 let defaultCompiledArgument (arg : CompiledArgument) : FieldValue =
@@ -1595,7 +1595,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     Seq.empty
                 else
                     match finalField.Field with
-                    | RColumnField { FieldType = FTScalar (SFTReference newEntityRef) } ->
+                    | RColumnField { FieldType = FTScalar (SFTReference (newEntityRef, opts)) } ->
                         let mainArrow = { Name = funMain; AsRoot = false }
                         let punRef = replacePath (Array.append path [|mainArrow|]) (Array.append boundPath [|newEntityRef|])
                         let (newPaths, punExpr) = compileLinkedFieldRef emptyExprCompilationFlags RCExpr paths punRef
@@ -1724,7 +1724,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             | None -> SQL.VEValue SQL.VNull
                             | Some info ->
                                 match layout.FindField info.Ref.Entity info.Ref.Name |> Option.get with
-                                | { Field = RColumnField { FieldType = FTScalar (SFTReference newEntityRef) } } ->
+                                | { Field = RColumnField { FieldType = FTScalar (SFTReference (newEntityRef, opts)) } } ->
                                     let mainArrow =
                                         { Name = funMain
                                           AsRoot = false
@@ -1786,7 +1786,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     else
                         let argInfo = Map.find arg arguments.Types
                         match argInfo.FieldType with
-                        | FTScalar (SFTReference newEntityRef) ->
+                        | FTScalar (SFTReference (newEntityRef, opts)) ->
                             let mainArrow =
                                 { Name = funMain
                                   AsRoot = false

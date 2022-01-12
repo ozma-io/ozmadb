@@ -96,13 +96,27 @@ type private MetaBuilder (layout : Layout) =
             } : SQL.ColumnMeta
         let constr =
             match field.FieldType with
-                | FTScalar (SFTReference entityRef) ->
+                | FTScalar (SFTReference (entityRef, opts)) ->
                     // FIXME: support restrictions!
                     let refEntity = layout.FindEntity entityRef |> Option.get
                     let tableRef = compileResolvedEntityRef refEntity.Root
                     let constrKey = sprintf "__foreign__%O__%O__%O" ref.Entity.Schema ref.Entity.Name ref.Name
                     let constrName = SQL.SQLName <| sprintf "__foreign__%s__%s"  entity.HashName field.HashName
-                    Seq.singleton (constrName, (Set.singleton constrKey, SQL.CMForeignKey (tableRef, [| (field.ColumnName, sqlFunId) |], SQL.DCDeferrable false)))
+                    let deleteOpt =
+                        match opts with
+                        | None
+                        | Some RDANoAction -> SQL.DANoAction
+                        | Some RDACascade -> SQL.DACascade
+                        | Some RDASetDefault -> SQL.DASetDefault
+                        | Some RDASetNull -> SQL.DASetNull
+                    let opts =
+                        { Defer = SQL.DCDeferrable false
+                          OnDelete = deleteOpt
+                          OnUpdate = SQL.DANoAction
+                          ToTable = tableRef
+                          Columns = [| (field.ColumnName, sqlFunId) |]
+                        } : SQL.ForeignKeyMeta
+                    Seq.singleton (constrName, (Set.singleton constrKey, SQL.CMForeignKey opts))
                 | FTScalar (SFTEnum vals) ->
                     let expr =
                         let col = SQL.VEColumn { Table = None; Name = field.ColumnName }
@@ -298,7 +312,7 @@ type private MetaBuilder (layout : Layout) =
 
         let makeReferenceIndex (name, field : ResolvedColumnField) =
             match field with
-            | { InheritedFrom = None; FieldType = FTScalar (SFTReference refEntityRef) } ->
+            | { InheritedFrom = None; FieldType = FTScalar (SFTReference (refEntityRef, opts)) } ->
                 // We build indexes for all references to speed up non-local check constraint integrity lookups,
                 // and DELETE operations on related fields (PostgreSQL will make use of this index internally, that's why we don't set a predicate).
                 let key = sprintf "__refindex__%O__%O__%O" entityRef.Schema entityRef.Name name
