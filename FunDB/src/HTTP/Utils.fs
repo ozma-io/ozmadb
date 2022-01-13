@@ -30,39 +30,46 @@ open FunWithFlags.FunDB.API.API
 
 [<SerializeAsObject("error")>]
 type RequestErrorInfo =
-    | [<CaseName("internal")>] REInternal of Message : string
-    | [<CaseName("request")>] RERequest of Message : string
-    | [<CaseName("no_endpoint")>] RENoEndpoint
-    | [<CaseName("no_instance")>] RENoInstance
-    | [<CaseName("access_denied")>] REAccessDenied
-    | [<CaseName("concurrent_update")>] REConcurrentUpdate
+    | [<CaseName("internal")>] RIInternal of Message : string
+    | [<CaseName("request")>] RIRequest of Message : string
+    | [<CaseName("no_endpoint")>] RINoEndpoint
+    | [<CaseName("no_instance")>] RINoInstance
+    | [<CaseName("access_denied")>] RIAccessDenied
+    | [<CaseName("concurrent_update")>] RIConcurrentUpdate
+    | [<CaseName("stack_overflow")>] RIStackOverflow of Trace : EventSource list
     with
         [<DataMember>]
         member this.Message =
             match this with
-            | REInternal msg -> msg
-            | RERequest msg -> msg
-            | RENoEndpoint -> "API endpoint doesn't exist"
-            | RENoInstance -> "Instance not found"
-            | REAccessDenied -> "Database access denied"
-            | REConcurrentUpdate -> "Concurrent update detected; try again"
+            | RIInternal msg -> msg
+            | RIRequest msg -> msg
+            | RINoEndpoint -> "API endpoint doesn't exist"
+            | RINoInstance -> "Instance not found"
+            | RIAccessDenied -> "Database access denied"
+            | RIConcurrentUpdate -> "Concurrent update detected; try again"
+            | RIStackOverflow sources ->
+                sources
+                    |> Seq.map (sprintf "in %O")
+                    |> String.concat "\n"
+                    |> sprintf "Stack depth exceeded:\n%s"
 
 let requestError e =
     let handler =
         match e with
-        | REInternal _ -> ServerErrors.internalError
-        | RERequest _ -> RequestErrors.badRequest
-        | RENoEndpoint -> RequestErrors.notFound
-        | RENoInstance -> RequestErrors.notFound
-        | REAccessDenied _ -> RequestErrors.forbidden
-        | REConcurrentUpdate _ -> ServerErrors.serviceUnavailable
+        | RIInternal _ -> ServerErrors.internalError
+        | RIRequest _ -> RequestErrors.badRequest
+        | RINoEndpoint -> RequestErrors.notFound
+        | RINoInstance -> RequestErrors.notFound
+        | RIAccessDenied _ -> RequestErrors.forbidden
+        | RIConcurrentUpdate _ -> ServerErrors.serviceUnavailable
+        | RIStackOverflow _ -> ServerErrors.internalError
     handler (json e)
 
 let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
     logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
-    clearResponse >=> requestError (REInternal "Internal error")
+    clearResponse >=> requestError (RIInternal "Internal error")
 
-let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError RENoEndpoint
+let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError RINoEndpoint
 
 let tryBoolRequestArg (name : string) (ctx: HttpContext) : bool option =
     match ctx.Request.Query.TryGetValue name with
@@ -90,7 +97,7 @@ let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyV
         | Some r -> Ok (name, r)
 
     match Seq.traverseResult tryArg args1 with
-    | Error name -> sprintf "Invalid JSON value in argument %s" name |> RERequest |> requestError
+    | Error name -> sprintf "Invalid JSON value in argument %s" name |> RIRequest |> requestError
     | Ok args2 -> f <| Map.ofSeq args2
 
 let queryArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
@@ -123,8 +130,8 @@ let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) :
                 | :? JsonException as e -> return Error e
             }
         match model with
-        | Error e -> return! requestError (RERequest <| exceptionString e) next ctx
-        | Ok ret when isRefNull ret -> return! requestError (RERequest "Invalid JSON value") next ctx
+        | Error e -> return! requestError (RIRequest <| exceptionString e) next ctx
+        | Ok ret when isRefNull ret -> return! requestError (RIRequest "Invalid JSON value") next ctx
         | Ok ret -> return! f ret next ctx
     }
 
@@ -137,7 +144,7 @@ let commitAndReturn (handler : HttpHandler) (api : IFunDBAPI) (next : HttpFunc) 
         | :? ContextException as e ->
             let logger = ctx.GetLogger("commitAndReturn")
             logger.LogError(e, "Error during commit")
-            return! requestError (RERequest (exceptionString e)) next ctx
+            return! requestError (RIRequest (exceptionString e)) next ctx
     }
 
 let commitAndOk : IFunDBAPI -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
@@ -211,7 +218,7 @@ type UserTokenInfo =
 let resolveUser (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
     let clientClaim = ctx.User.FindFirst "azp"
     if isNull clientClaim then
-        requestError (RERequest "No azp claim in security token") next ctx
+        requestError (RIRequest "No azp claim in security token") next ctx
     else
         let client = clientClaim.Value
         let emailClaim = ctx.User.FindFirst ClaimTypes.Email
@@ -242,7 +249,7 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                 xInstance.[0]
         match! instancesSource.GetInstance instanceName ctx.RequestAborted with
         | None ->
-            return! requestError RENoInstance next ctx
+            return! requestError RINoInstance next ctx
         | Some instance ->
             let anonymousCtx =
                 { Source = instancesSource
@@ -341,11 +348,12 @@ let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHa
             with
             | :? ConcurrentUpdateException ->
                 // We may want to retry here in future.
-                return! requestError REConcurrentUpdate next ctx
+                return! requestError RIConcurrentUpdate next ctx
             | :? RequestException as e ->
                 match e.Info with
                 | REUserNotFound
-                | RENoRole -> return! requestError REAccessDenied next ctx
+                | RENoRole -> return! requestError RIAccessDenied next ctx
+                | REStackOverflow sources -> return! requestError (RIStackOverflow  sources) next ctx
         }
 
     lookupInstance makeContext

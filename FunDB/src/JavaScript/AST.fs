@@ -25,10 +25,10 @@ type JSValue =
 type JSExpr =
     | JSValue of JSValue
     | JSVar of string
-    | JSNew of JSExpr * JSExpr array
-    | JSCall of JSExpr * JSExpr array
+    | JSNew of JSExpr * JSExpr[]
+    | JSCall of JSExpr * JSExpr[]
     | JSObjectAccess of JSExpr * string
-    | JSArray of JSExpr array
+    | JSArray of JSExpr[]
     | JSArrayAccess of JSExpr * JSExpr
     | JSNot of JSExpr
     | JSAnd of JSExpr * JSExpr

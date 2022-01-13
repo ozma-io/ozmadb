@@ -32,7 +32,7 @@ let infoApi : HttpHandler =
 
     let clearInstancesCache (info : UserTokenInfo) (next : HttpFunc) (ctx : HttpContext) =
         if not info.IsRoot then
-            requestError REAccessDenied next ctx
+            requestError RIAccessDenied next ctx
         else
             let instancesCache = ctx.GetService<InstancesCacheStore>()
             instancesCache.Clear ()
@@ -45,7 +45,7 @@ let infoApi : HttpHandler =
             | RTRoot ->
                 do! api.Request.Context.CheckIntegrity ()
                 return! commitAndOk api next ctx
-            | RTRole _ -> return! requestError REAccessDenied next ctx
+            | RTRole _ -> return! requestError RIAccessDenied next ctx
         }
 
     choose
