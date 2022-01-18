@@ -22,6 +22,7 @@
 
         "iframe_markups": {
           "columnFields": {
+            "schema_id": { "type": "reference(\"public\".\"schemas\")", "isNullable": true },
             "name": { "type": "string" },
             "markup": { "type": "string" }
           },
@@ -36,6 +37,7 @@
 
         "embedded_pages": {
           "columnFields": {
+            "schema_id": { "type": "reference(\"public\".\"schemas\")", "isNullable": true },
             "name": {
               "type": "string"
             },
@@ -60,11 +62,12 @@
 
         "color_themes": {
           "columnFields": {
+            "schema_id": { "type": "reference(\"public\".\"schemas\")", "isNullable": true },
             "name": { "type": "string" },
-            "localized_name": { "type": "json", "isNullable": true }
+            "localized_name": { "type": "json", "defaultValue": "{}", "isNullable": true }
           },
           "uniqueConstraints": {
-            "unique_name": { "columns": [ "name" ] }
+            "name": { "columns": [ "schema_id", "name" ] }
           },
           "checkConstraints": {
             "non_empty_name": { "expression": "name <> ''" }
@@ -84,7 +87,7 @@
             "full_name": { "expression": "theme_id=>name || name" }
           },
           "uniqueConstraints": {
-            "unique_full_name": { "columns": [ "name", "theme_id" ] }
+            "name": { "columns": [ "theme_id", "name" ] }
           },
           "checkConstraints": {
             "non_empty_name": { "expression": "name <> ''" }
@@ -144,6 +147,9 @@
                   "iframe_markups": {
                     "select": "true",
                     "fields": {
+                      "schema_id": {
+                        "select": "true"
+                      },
                       "name": {
                         "select": "true"
                       },
@@ -156,6 +162,9 @@
                   "embedded_pages": {
                     "select": "true",
                     "fields": {
+                      "schema_id": {
+                        "select": "true"
+                      },
                       "name": {
                         "select": "true"
                       },
@@ -168,6 +177,9 @@
                   "color_themes": {
                     "select": "true",
                     "fields": {
+                      "schema_id": {
+                        "select": "true"
+                      },
                       "name": {
                         "select": "true"
                       },
