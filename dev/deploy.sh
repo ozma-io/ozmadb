@@ -8,18 +8,14 @@ usage() {
 }
 
 server_name="$1"
-shift
+shift || usage
 
 deployment_name="$1"
-shift
-
-if [ -z "$server_name" ] || [ -z "$deployment_name" ]; then
-  usage
-fi
+shift || usage
 
 set -x
 
 rsync -ravlL --delete FunDB/publish/ "$server_name:$deployment_name/FunDB"
 rsync -ravlL --delete FunApp/dist/ "$server_name:$deployment_name/FunApp"
 
-ssh "$server_name" -- nixops deploy --network "$deployment_name/machines"
+ssh "$server_name" -- nixops deploy --network "\$(readlink -f $deployment_name/machines)"
