@@ -51,6 +51,7 @@ let httpJsonSettings =
         OverrideSpecifiedNames = false
     )
     jsonSettings.NullValueHandling <- NullValueHandling.Ignore
+    jsonSettings.DateTimeZoneHandling <- DateTimeZoneHandling.Utc
     jsonSettings
 
 type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
