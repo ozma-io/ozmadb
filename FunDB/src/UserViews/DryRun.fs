@@ -12,6 +12,7 @@ open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
+open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Query
@@ -142,7 +143,7 @@ let private limitAttributeColumn (typ : ColumnType, name : SQL.ColumnName, expr 
     let expr = SQL.mapValueExpr mapper expr
     (typ, name, expr)
 
-type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
+type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
     let mutable serializedFields : Map<ResolvedFieldRef, SerializedColumnField> = Map.empty
 
     let getSerializedField (ref : ResolvedFieldRef) =
@@ -151,7 +152,8 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
         | None ->
             match layout.FindField ref.Entity ref.Name with
             | Some { Field = RColumnField src } ->
-                let res = serializeColumnField src
+                let triggersEntity = Option.defaultValue emptyMergedTriggersEntity (triggers.FindEntity ref.Entity)
+                let res = serializeColumnField triggersEntity ref.Name src
                 serializedFields <- Map.add ref res serializedFields
                 Some res
             | _ -> None
@@ -303,13 +305,13 @@ type private DryRunner (layout : Layout, conn : QueryConnection, forceAllowBroke
     member this.DryRunUserViews = resolveUserViews
 
 // Warning: this should be executed outside of any transactions because of test runs.
-let dryRunUserViews (conn : QueryConnection) (layout : Layout) (forceAllowBroken : bool) (onlyWithAllowBroken : bool option) (sourceViews : SourceUserViews) (userViews : UserViews) (cancellationToken : CancellationToken) : Task<ErroredUserViews * PrefetchedUserViews> =
+let dryRunUserViews (conn : QueryConnection) (layout : Layout) (triggers : MergedTriggers) (forceAllowBroken : bool) (onlyWithAllowBroken : bool option) (sourceViews : SourceUserViews) (userViews : UserViews) (cancellationToken : CancellationToken) : Task<ErroredUserViews * PrefetchedUserViews> =
     task {
-        let runner = DryRunner(layout, conn, forceAllowBroken, onlyWithAllowBroken, cancellationToken)
+        let runner = DryRunner(layout, triggers, conn, forceAllowBroken, onlyWithAllowBroken, cancellationToken)
         let! (errors, ret) = runner.DryRunUserViews sourceViews userViews
         return (errors, ret)
     }
 
-let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (q: ResolvedUserView) (cancellationToken : CancellationToken) : Task<PrefetchedUserView> =
-    let runner = DryRunner(layout, conn, false, None, cancellationToken)
+let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (triggers : MergedTriggers) (q: ResolvedUserView) (cancellationToken : CancellationToken) : Task<PrefetchedUserView> =
+    let runner = DryRunner(layout, triggers, conn, false, None, cancellationToken)
     runner.DryRunAnonymousUserView q None

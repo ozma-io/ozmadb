@@ -83,14 +83,18 @@ let emptyMergedTriggerTime =
       OnDelete = [||]
     }
 
-let emptyMergedTriggersEntity =
+let emptyMergedTriggersEntity : MergedTriggersEntity =
     { Before = emptyMergedTriggerTime
       After = emptyMergedTriggerTime
     }
 
-let emptyMergedTriggers =
+let emptyMergedTriggersSchema : MergedTriggersSchema =
+    { Entities = Map.empty
+    }
+
+let emptyMergedTriggers : MergedTriggers =
     { Schemas = Map.empty
-    } : MergedTriggers
+    }
 
 let private mergeSortedTriggers (a : MergedTrigger[]) (b : MergedTrigger[]) : MergedTrigger[] =
     Seq.mergeSortedBy (fun trig -> (trig.Priority, trig.Inherited, trig.Schema, trig.Name)) a b |> Array.ofSeq

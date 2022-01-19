@@ -51,6 +51,11 @@
     <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Types.fs" />
 
+    <!-- Needed early for layout info -->
+    <Compile Include="src/Triggers/Source.fs" />
+    <Compile Include="src/Triggers/Types.fs" />
+    <Compile Include="src/Triggers/Merge.fs" />
+
     <!-- Needed early for FunQL compilation -->
     <Compile Include="src/Attributes/Source.fs" />
     <Compile Include="src/Attributes/Types.fs" />
@@ -103,11 +108,8 @@
     <Compile Include="src/Actions/Schema.fs" />
     <Compile Include="src/Actions/Run.fs" />
 
-    <Compile Include="src/Triggers/Source.fs" />
-    <Compile Include="src/Triggers/Types.fs" />
     <Compile Include="src/Triggers/Resolve.fs" />
     <Compile Include="src/Triggers/Schema.fs" />
-    <Compile Include="src/Triggers/Merge.fs" />
 
     <Compile Include="src/UserViews/Source.fs" />
     <Compile Include="src/UserViews/Types.fs" />

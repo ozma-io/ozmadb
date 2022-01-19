@@ -218,7 +218,7 @@ type EntitiesAPI (api : IFunDBAPI) =
             match ctx.Layout.FindEntity(entityRef) with
             | Some entity ->
                 try
-                    let res = getEntityInfo ctx.Layout (getReadRole rctx.User.Effective.Type) entityRef entity
+                    let res = getEntityInfo ctx.Layout ctx.Triggers (getReadRole rctx.User.Effective.Type) entityRef
                     return Ok res
                 with
                     | :? EntityDeniedException as ex when ex.IsUserException ->

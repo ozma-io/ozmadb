@@ -11,6 +11,7 @@ open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.UserViews.Types
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
+open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.JavaScript.Runtime
 
 type UserViewGenerateException (message : string, innerException : Exception, isUserException : bool) =
@@ -63,9 +64,9 @@ type private PreparedUserViewSchema =
 
 type private UserViewsGenerators = Map<SchemaName, PreparedUserViewSchema>
 
-type private UserViewsGeneratorState (layout : Layout, cancellationToken : CancellationToken, forceAllowBroken : bool) =
+type private UserViewsGeneratorState (layout : Layout, triggers : MergedTriggers, cancellationToken : CancellationToken, forceAllowBroken : bool) =
     let generateUserViewsSchema (gen : UserViewGenerator) : Result<SourceUserViewsSchema, UserViewsSchemaError> =
-        let layout = V8JsonWriter.Serialize(gen.Generator.Runtime.Context, serializeLayout layout)
+        let layout = V8JsonWriter.Serialize(gen.Generator.Runtime.Context, serializeLayout triggers layout)
         try
             let uvs = gen.Generator.Generate layout cancellationToken
             Ok { UserViews = uvs
@@ -116,6 +117,6 @@ type UserViewsGenerator (runtime : IJSRuntime, userViews : SourceUserViews, crea
                 PUVError (script, { Source = schema; Error = e :> exn })
     let gens : UserViewsGenerators = Map.map prepareGenerator userViews.Schemas
 
-    member this.GenerateUserViews (layout : Layout) (cancellationToken : CancellationToken) (forceAllowBroken : bool) : ErroredUserViews * SourceUserViews =
-        let state = UserViewsGeneratorState(layout, cancellationToken, forceAllowBroken)
+    member this.GenerateUserViews (layout : Layout) (triggers : MergedTriggers) (cancellationToken : CancellationToken) (forceAllowBroken : bool) : ErroredUserViews * SourceUserViews =
+        let state = UserViewsGeneratorState(layout, triggers, cancellationToken, forceAllowBroken)
         state.GenerateUserViews gens

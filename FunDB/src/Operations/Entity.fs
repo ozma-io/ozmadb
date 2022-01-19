@@ -5,10 +5,8 @@ open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
-open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
@@ -20,6 +18,7 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Apply
 open FunWithFlags.FunDB.Permissions.View
 open FunWithFlags.FunDB.Permissions.Entity
+open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
@@ -102,12 +101,15 @@ let private runOptionalStringQuery (connection : QueryConnection) query comments
         | Some (name, typ, ret) -> return Some (SQL.parseStringValue ret)
     }
 
-let getEntityInfo (layout : Layout) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SerializedEntity =
+let getEntityInfo (layout : Layout) (triggers : MergedTriggers) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) : SerializedEntity =
     match role with
-    | None -> serializeEntity layout entity
+    | None ->
+        let entity = layout.FindEntity entityRef |> Option.get
+        let entityTriggers = Option.defaultValue emptyMergedTriggersEntity (triggers.FindEntity entityRef)
+        serializeEntity layout entityTriggers entity
     | Some role ->
         try
-            serializeEntityRestricted layout role entityRef
+            serializeEntityRestricted layout triggers role entityRef
         with
         | :? PermissionsEntityException as e ->
             raisefWithInner EntityDeniedException e ""

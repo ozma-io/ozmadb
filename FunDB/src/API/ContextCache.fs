@@ -248,9 +248,9 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
             | _ -> ()
         }
 
-    let generateViews runtime layout userViews cancellationToken forceAllowBroken =
+    let generateViews runtime layout triggers userViews cancellationToken forceAllowBroken =
         let generator = UserViewsGenerator(runtime, userViews, forceAllowBroken)
-        generator.GenerateUserViews layout cancellationToken forceAllowBroken
+        generator.GenerateUserViews layout triggers cancellationToken forceAllowBroken
 
     let makeRuntime files = IsolateLocal(fun isolate ->
         let env =
@@ -263,7 +263,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
         let isolate = jsIsolates.Get()
         try
-            let! (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews) =
+            let! (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, brokenViews, prefetchedViews, sourceViews) =
                 task {
                     try
                         let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
@@ -273,13 +273,20 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let systemViews = preloadUserViews preload
                         let! sourceViews = buildSchemaUserViews transaction.System None cancellationToken
                         let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
-
+    
                         let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                         let modules = resolveModules layout sourceModules
 
                         let jsRuntime = makeRuntime (moduleFiles modules)
                         let jsApi = jsRuntime.GetValue isolate
-                        let (brokenViews, sourceViews) = generateViews jsApi layout sourceViews cancellationToken true
+
+                        let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
+                        let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
+                        let (newBrokenTriggers, triggers) = testEvalTriggers jsApi true triggers
+                        let brokenTriggers = unionErroredTriggers brokenTriggers newBrokenTriggers
+                        let mergedTriggers = mergeTriggers layout triggers
+
+                        let (brokenViews, sourceViews) = generateViews jsApi layout mergedTriggers sourceViews cancellationToken true
                         let! userViewsUpdate = updateUserViews transaction.System sourceViews cancellationToken
                         do! deleteDeferredFromUpdate layout transaction userViewsUpdate cancellationToken
 
@@ -290,10 +297,10 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                         // To dry-run user views we need to stop the transaction.
                         let! _ = transaction.Commit (cancellationToken)
-                        let! (newBrokenViews, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout true None sourceViews userViews cancellationToken
+                        let! (newBrokenViews, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None sourceViews userViews cancellationToken
                         let brokenViews = unionErroredUserViews brokenViews newBrokenViews
                         let transaction = new DatabaseTransaction (transaction.Connection)
-                        return (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, brokenViews, prefetchedViews, sourceViews)
+                        return (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, brokenViews, prefetchedViews, sourceViews)
                     with
                     | ex ->
                         do! transaction.Rollback ()
@@ -324,13 +331,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     let brokenActions = unionErroredActions brokenActions newBrokenActions
                     do! checkBrokenActions logger cacheParams.AllowAutoMark preload transaction brokenActions cancellationToken
 
-                    let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
-                    let (brokenTriggers, triggers) = resolveTriggers layout true sourceTriggers
-                    let (newBrokenTriggers, triggers) = testEvalTriggers jsApi true triggers
-                    let brokenTriggers = unionErroredTriggers brokenTriggers newBrokenTriggers
-                    let mergedTriggers = mergeTriggers layout triggers
                     do! checkBrokenTriggers logger cacheParams.AllowAutoMark preload transaction brokenTriggers cancellationToken
-
                     do! checkBrokenUserViews logger cacheParams.AllowAutoMark preload transaction brokenViews cancellationToken
 
                     let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
@@ -417,7 +418,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
     // Called when state update by another instance is detected. More lightweight than full `coldRebuildFromDatabase`.
     let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState> =
         task {
-            let! (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews) =
+            let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews) =
                 task {
                     try
                         let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
@@ -427,15 +428,19 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let (_, defaultAttrs) = resolveAttributes layout false sourceAttrs
                         let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
+                        let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
+                        let (_, triggers) = resolveTriggers layout false sourceTriggers
+                        let mergedTriggers = mergeTriggers layout triggers
+
                         let! sourceUvs = buildSchemaUserViews transaction.System None cancellationToken
                         let (_, userViews) = resolveUserViews layout mergedAttrs false sourceUvs
 
                         // To dry-run user views we need to stop the transaction.
                         let! _ = transaction.Rollback ()
                         // We dry-run those views that _can_ be failed here, outside of a transaction.
-                        let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUvs userViews cancellationToken
+                        let! (_, prefetchedBadViews) = dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some true) sourceUvs userViews cancellationToken
                         let transaction = new DatabaseTransaction(transaction.Connection)
-                        return (transaction, layout, mergedAttrs, sourceUvs, userViews, prefetchedBadViews)
+                        return (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews)
                     with
                     | ex ->
                         do! transaction.Rollback ()
@@ -456,18 +461,16 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                 try
                     // Now dry-run those views that _cannot_ fail - we can get an exception here and stop, which is the point -
                     // views with `allowBroken = true` fail on first error and so can be dry-run inside a transaction.
-                    let! (_, prefetchedGoodViews) = dryRunUserViews transaction.Connection.Query layout false (Some false) sourceUvs userViews cancellationToken
+                    let! (_, prefetchedGoodViews) = dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some false) sourceUvs userViews cancellationToken
 
                     let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                     let! sourceActions = buildSchemaActions transaction.System None cancellationToken
-                    let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
                     let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
                     let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
 
                     do! transaction.Rollback ()
 
                     let (_, actions) = resolveActions layout false sourceActions
-                    let (_, triggers) = resolveTriggers layout false sourceTriggers
 
                     let modules = resolveModules layout sourceModules
                     let jsRuntime = makeRuntime (moduleFiles modules)
@@ -486,7 +489,6 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
                     // Another instance has already rebuilt them, so just load them from the database.
                     let systemViews = filterSystemViews sourceUvs
-                    let mergedTriggers = mergeTriggers layout triggers
                     let domains = buildLayoutDomains layout
 
                     let newState =
@@ -711,7 +713,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             logger.LogInformation("Updating generated user views")
                             let (_, generatedUserViews) =
                                 try
-                                    generateViews jsApi layout sourceUserViews cancellationToken false
+                                    generateViews jsApi layout mergedTriggers sourceUserViews cancellationToken false
                                 with
                                 | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
                             let! userViewsUpdate = updateUserViews transaction.System generatedUserViews cancellationToken
@@ -725,7 +727,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 | :? UserViewResolveException as err -> raisefWithInner ContextException err "Failed to resolve user views"
                             let! (_, badUserViews) = task {
                                 try
-                                    return! dryRunUserViews transaction.Connection.Query layout false (Some false) sourceUserViews userViews cancellationToken
+                                    return! dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some false) sourceUserViews userViews cancellationToken
                                 with
                                 | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                             }
@@ -745,7 +747,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             with
                             | :? DbUpdateException as e -> raisefUserWithInner ContextException e "State update error"
 
-                            let! (_, goodUserViews) = dryRunUserViews transaction.Connection.Query layout false (Some true) sourceUserViews userViews cancellationToken
+                            let! (_, goodUserViews) = dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some true) sourceUserViews userViews cancellationToken
 
                             let domains = buildLayoutDomains layout
 
@@ -778,7 +780,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let findExistingView =
                             oldState.Context.UserViews.Find >> Option.map (Result.map (fun pref -> pref.UserView))
                         let uv = resolveAnonymousUserView oldState.Context.Layout isPrivileged oldState.Context.DefaultAttrs findExistingView homeSchema query
-                        return! dryRunAnonymousUserView transaction.Connection.Query oldState.Context.Layout uv cancellationToken
+                        return! dryRunAnonymousUserView transaction.Connection.Query oldState.Context.Layout oldState.Context.Triggers uv cancellationToken
                     }
 
                 let getAnonymousView (isPrivileged : bool) (query : string) : Task<PrefetchedUserView> =

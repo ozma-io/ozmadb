@@ -6,6 +6,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
+open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.Permissions.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -17,7 +18,7 @@ type PermissionsEntityException (message : string, innerException : Exception, i
 
     new (message : string) = PermissionsEntityException (message, null, true)
 
-let serializeEntityRestricted (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) : SerializedEntity =
+let serializeEntityRestricted (layout : Layout) (triggers : MergedTriggers) (role : ResolvedRole) (entityRef : ResolvedEntityRef) : SerializedEntity =
     let entity = layout.FindEntity entityRef |> Option.get
     let flattened =
         match Map.tryFind entity.Root role.Flattened.Entities with
@@ -34,7 +35,8 @@ let serializeEntityRestricted (layout : Layout) (role : ResolvedRole) (entityRef
     if not (checkRoles (fun _ -> true)) then
         raisef PermissionsEntityException "Access denied to get info"
 
-    let serialized = serializeEntity layout entity
+    let triggersEntity = Option.defaultValue emptyMergedTriggersEntity (triggers.FindEntity entityRef)
+    let serialized = serializeEntity layout triggersEntity entity
 
     let entityAccess : SerializedEntityAccess =
         { Select = checkRoles (fun entity -> entity.CombinedSelect)
