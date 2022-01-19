@@ -24,21 +24,23 @@ FROM
   FROM
     funapp.color_variants`,
     "iframe_markup_by_name": `
-{ $name string }:
+{ $schema string, $name string }:
 SELECT
   markup
 FROM
   "funapp"."iframe_markups"
 WHERE
-  name = $name`,
+  schema_id=>name = $schema
+  AND name = $name`,
     "embedded_page_by_name": `
-{ $name string }:
+{ $schema string, $name string }:
 SELECT
   markup
 FROM
   "funapp"."embedded_pages"
 WHERE
-  name = $name`,
+  schema_id=>name = $schema
+  AND name = $name`,
     // Public APIs
     "system_menu": `
 SELECT
