@@ -116,6 +116,7 @@ export interface IColumnField {
   isImmutable: boolean;
   inheritedFrom?: IEntityRef;
   access: IFieldAccess;
+  hasUpdateTriggers: boolean;
 }
 
 export type UsedFields = FieldName[];
@@ -161,6 +162,8 @@ export interface IEntity {
   isFrozen: boolean;
   root: IEntityRef;
   access: IEntityAccess;
+  hasInsertTriggers: boolean;
+  hasDeleteTriggers: boolean;
 }
 
 export interface ISchema {
