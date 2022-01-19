@@ -8,12 +8,19 @@ FROM
   funapp.settings`,
     "color_themes": `
 SELECT
-  id, name, localized_name
+  id,
+  schema_id=>name as schema_name,
+  name,
+  localized_name
 FROM
   funapp.color_themes`,
   "color_variants": `
   SELECT
-    theme_id, name, foreground, border, background
+    theme_id,
+    name,
+    foreground,
+    border,
+    background
   FROM
     funapp.color_variants`,
     "iframe_markup_by_name": `
