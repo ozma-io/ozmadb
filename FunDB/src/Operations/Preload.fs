@@ -280,8 +280,8 @@ let private checkBrokenLayout (logger :ILogger) (allowAutoMark : bool) (preload 
                 if isSystem || not allowAutoMark then
                     critical <- true
                 for KeyValue(compName, err) in entity.ComputedFields do
-                        if isSystem then
-                            logger.LogWarning(err, "System computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
+                        if isSystem || not allowAutoMark then
+                            logger.LogWarning(err, "Computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
                         else
                             logger.LogWarning(err, "Marking computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
 
@@ -302,8 +302,8 @@ let checkBrokenAttributes (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                     for KeyValue(attrsFieldName, err) in attrsEntity do
                         let schemaStr = schemaName.ToString()
                         let defFieldName = ({ Entity = { Schema = attrsSchemaName; Name = attrsEntityName }; Name = attrsFieldName } : ResolvedFieldRef).ToString()
-                        if isSystem then
-                            logger.LogError(err, "System default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
+                        if isSystem || not allowAutoMark then
+                            logger.LogError(err, "Default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
                         else
                             logger.LogWarning(err, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
         if critical then
@@ -321,8 +321,8 @@ let checkBrokenActions (logger :ILogger) (allowAutoMark : bool) (preload : Prelo
             for KeyValue(actionName, err) in schema do
                 let schemaStr = schemaName.ToString()
                 let actionNameStr = ({ Schema = schemaName; Name = actionName } : ActionRef).ToString()
-                if isSystem then
-                    logger.LogError(err, "System action {name} from {schema} is broken", actionNameStr, schemaStr)
+                if isSystem || not allowAutoMark then
+                    logger.LogError(err, "Action {name} from {schema} is broken", actionNameStr, schemaStr)
                 else
                     logger.LogWarning(err, "Marking action {name} from {schema} as broken", actionNameStr, schemaStr)
         if critical then
@@ -342,8 +342,8 @@ let checkBrokenTriggers (logger :ILogger) (allowAutoMark : bool) (preload : Prel
                     for KeyValue(triggerName, err) in triggersEntity do
                         let schemaStr = schemaName.ToString()
                         let triggerNameStr = ({ Schema = schemaName; Entity = { Schema = triggerSchemaName; Name = triggerEntityName }; Name = triggerName } : TriggerRef).ToString()
-                        if isSystem then
-                            logger.LogError(err, "System trigger {name} from {schema} is broken", triggerNameStr, schemaStr)
+                        if isSystem || not allowAutoMark then
+                            logger.LogError(err, "Trigger {name} from {schema} is broken", triggerNameStr, schemaStr)
                         else
                             logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerNameStr, schemaStr)
         if critical then
@@ -362,13 +362,13 @@ let checkBrokenUserViews (logger :ILogger) (allowAutoMark : bool) (preload : Pre
             | UEUserViews schema ->
                 for KeyValue(uvName, err) in schema do
                     let uvName = ({ Schema = schemaName; Name = uvName } : ResolvedUserViewRef).ToString()
-                    if isSystem then
-                        logger.LogError(err, "System view {uv} is broken", uvName)
+                    if isSystem || not allowAutoMark then
+                        logger.LogError(err, "View {uv} is broken", uvName)
                     else
                         logger.LogWarning(err, "Marking {uv} as broken", uvName)
             | UEGenerator err ->
-                if isSystem then
-                    logger.LogError(err, "System view generator for schema {schema} is broken", schemaName)
+                if isSystem || not allowAutoMark then
+                    logger.LogError(err, "View generator for schema {schema} is broken", schemaName)
                 else
                     logger.LogWarning(err, "Marking view generator for schema {schema} as broken", schemaName)
         if critical then
@@ -386,8 +386,8 @@ let checkBrokenPermissions (logger :ILogger) (allowAutoMark : bool) (preload : P
             for KeyValue(roleName, role) in schema do
                 match role with
                 | ERFatal err ->
-                        if isSystem then
-                            logger.LogError(err, "System role {role} is broken", roleName)
+                        if isSystem || not allowAutoMark then
+                            logger.LogError(err, "Role {role} is broken", roleName)
                         else
                             logger.LogWarning(err, "Marking {role} as broken", roleName)
                 | ERDatabase errs ->
@@ -395,8 +395,8 @@ let checkBrokenPermissions (logger :ILogger) (allowAutoMark : bool) (preload : P
                         for KeyValue(allowedEntityName, err) in allowedSchema do
                             let roleName = ({ Schema = schemaName; Name = roleName } : ResolvedRoleRef).ToString()
                             let allowedName = ({ Schema = allowedSchemaName; Name = allowedEntityName } : ResolvedEntityRef).ToString()
-                            if isSystem then
-                                logger.LogError(err, "System role {role} is broken for entity {entity}", roleName, allowedName)
+                            if isSystem || not allowAutoMark then
+                                logger.LogError(err, "Role {role} is broken for entity {entity}", roleName, allowedName)
                             else
                                 logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
         if critical then

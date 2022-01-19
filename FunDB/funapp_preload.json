@@ -12,7 +12,7 @@
             "value": { "type": "string" }
           },
           "uniqueConstraints": {
-            "unique_name": { "columns": [ "name" ] }
+            "name": { "columns": [ "name" ], "isAlternateKey": true }
           },
           "checkConstraints": {
             "non_empty_name": { "expression": "name <> ''" }
@@ -22,22 +22,26 @@
 
         "iframe_markups": {
           "columnFields": {
-            "schema_id": { "type": "reference(\"public\".\"schemas\")", "isNullable": true },
+            "schema_id": { "type": "reference(\"public\".\"schemas\")" },
             "name": { "type": "string" },
             "markup": { "type": "string" }
           },
+          "computedFields": {
+            "full_name": { "expression": "schema_id=>__main || '.' || name" }
+	  },
           "uniqueConstraints": {
-            "unique_name": { "columns": [ "name" ] }
+            "name": { "columns": [ "schema_id", "name" ], "isAlternateKey": true }
           },
           "checkConstraints": {
             "non_empty_name": { "expression": "name <> ''" }
           },
-          "mainField": "name"
+          "mainField": "full_name",
+          "saveRestoreKey": "name"
         },
 
         "embedded_pages": {
           "columnFields": {
-            "schema_id": { "type": "reference(\"public\".\"schemas\")", "isNullable": true },
+            "schema_id": { "type": "reference(\"public\".\"schemas\")" },
             "name": {
               "type": "string"
             },
@@ -45,11 +49,14 @@
               "type": "string"
             }
           },
+          "computedFields": {
+            "full_name": { "expression": "schema_id=>__main || '.' || name" }
+	  },
           "uniqueConstraints": {
-            "unique_name": {
+            "name": {
               "columns": [
-                "name"
-              ]
+                "schema_id", "name"
+              ], "isAlternateKey": true
             }
           },
           "checkConstraints": {
@@ -57,22 +64,27 @@
               "expression": "name <> ''"
             }
           },
-          "mainField": "name"
+          "mainField": "full_name",
+          "saveRestoreKey": "name"
         },
 
         "color_themes": {
           "columnFields": {
-            "schema_id": { "type": "reference(\"public\".\"schemas\")", "isNullable": true },
+            "schema_id": { "type": "reference(\"public\".\"schemas\")" },
             "name": { "type": "string" },
-            "localized_name": { "type": "json", "defaultValue": "{}", "isNullable": true }
+            "localized_name": { "type": "json", "defaultValue": "{}" }
           },
+          "computedFields": {
+            "full_name": { "expression": "schema_id=>__main || '.' || name" }
+	  },
           "uniqueConstraints": {
-            "name": { "columns": [ "schema_id", "name" ] }
+            "name": { "columns": [ "schema_id", "name" ], "isAlternateKey": true }
           },
           "checkConstraints": {
             "non_empty_name": { "expression": "name <> ''" }
           },
-          "mainField": "name"
+          "mainField": "full_name",
+          "saveRestoreKey": "name"
         },
 
         "color_variants": {
@@ -84,15 +96,16 @@
             "border": { "type": "string", "isNullable": true }
           },
           "computedFields": {
-            "full_name": { "expression": "theme_id=>name || name" }
+            "full_name": { "expression": "theme_id=>__main || '.' || name" }
           },
           "uniqueConstraints": {
-            "name": { "columns": [ "theme_id", "name" ] }
+            "name": { "columns": [ "theme_id", "name" ], "isAlternateKey": true }
           },
           "checkConstraints": {
             "non_empty_name": { "expression": "name <> ''" }
           },
-          "mainField": "full_name"
+          "mainField": "full_name",
+          "saveRestoreKey": "name"
         }
 
       },
