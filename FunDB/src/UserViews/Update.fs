@@ -25,10 +25,14 @@ type private UserViewsUpdater (db : SystemContext) as this =
     let updateUserViewsSchema (schema : SourceUserViewsSchema) (existingSchema : Schema) : unit =
         match schema.GeneratorScript with
         | Some src ->
-            existingSchema.UserViewGeneratorScript <- src.Script
-            existingSchema.UserViewGeneratorScriptAllowBroken <- src.AllowBroken
+            if isNull existingSchema.UserViewGenerator then
+                existingSchema.UserViewGenerator <- UserViewGenerator()
+            existingSchema.UserViewGenerator.Script <- src.Script
+            existingSchema.UserViewGenerator.AllowBroken <- src.AllowBroken
         | None ->
-            existingSchema.UserViewGeneratorScript <- null
+            match existingSchema.UserViewGenerator with
+            | null -> ()
+            | gen -> this.DeleteObject gen
 
         let oldUserViewsMap =
             existingSchema.UserViews |> Seq.map (fun uv -> (FunQLName uv.Name, uv)) |> Map.ofSeq
@@ -89,11 +93,15 @@ let private checkUserViewName (ref : ResolvedUserViewRef) : Expr<UserView -> boo
     let uvName = string ref.Name
     <@ fun uv -> (%checkSchema) uv.Schema && uv.Name = uvName @>
 
+let private checkUserViewGeneratorSchema (schemaName : SchemaName) : Expr<UserViewGenerator -> bool> =
+    let rawSchemaName = string schemaName
+    <@ fun uvGen -> uvGen.Schema.Name = rawSchemaName @>
+
 let markBrokenUserViews (db : SystemContext) (uvs : ErroredUserViews) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let broken = findBrokenUserViews uvs
-        let schemaChecks = broken |> Seq.mapMaybe (function ERGenerator ref -> Some ref | _ -> None) |> Seq.map checkSchemaName
-        do! genericMarkBroken db.Schemas schemaChecks <@ fun x -> Schema(UserViewGeneratorScriptAllowBroken = true) @> cancellationToken
+        let genChecks = broken |> Seq.mapMaybe (function ERGenerator ref -> Some ref | _ -> None) |> Seq.map checkUserViewGeneratorSchema
+        do! genericMarkBroken db.UserViewGenerators genChecks <@ fun x -> UserViewGenerator(AllowBroken = true) @> cancellationToken
         let uvChecks = broken |> Seq.mapMaybe (function ERUserView ref -> Some ref | _ -> None) |> Seq.map checkUserViewName
         do! genericMarkBroken db.UserViews uvChecks <@ fun x -> UserView(AllowBroken = true) @> cancellationToken
     }

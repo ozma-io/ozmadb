@@ -21,9 +21,9 @@ let private makeSourceUserView (uv : UserView) : SourceUserView =
 let private makeSourceSchema (schema : Schema) : SourceUserViewsSchema =
     { UserViews = schema.UserViews |> Seq.map (fun uv -> (FunQLName uv.Name, makeSourceUserView uv)) |> Map.ofSeqUnique
       GeneratorScript =
-        match schema.UserViewGeneratorScript with
+        match schema.UserViewGenerator with
         | null -> None
-        | script -> Some { Script = script; AllowBroken = schema.UserViewGeneratorScriptAllowBroken }
+        | gen -> Some { Script = gen.Script; AllowBroken = gen.AllowBroken }
     }
 
 let buildSchemaUserViews (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceUserViews> =

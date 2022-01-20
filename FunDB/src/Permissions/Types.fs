@@ -19,8 +19,10 @@ type AllowedEntityRef =
 
 [<NoEquality; NoComparison>]
 type AllowedField =
-    { // Are you allowed to change (UPDATE/INSERT) this field?
-      Change : bool
+    { // Are you allowed to INSERT this field?
+      Insert : bool
+      // Are you allowed to UPDATE this field?
+      Update : bool
       // Are you allowed to select this field? If yes, what _additional_ restrictions are in place, added to this entity SELECT filter?
       Select : ResolvedOptimizedFieldExpr
     }

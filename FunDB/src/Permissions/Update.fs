@@ -20,7 +20,7 @@ type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
     let updateAllowedField (field : SourceAllowedField) (existingField : RoleColumnField) : unit =
-        existingField.Change <- field.Change
+        existingField.Change <- field.Insert || field.Update
         existingField.Select <- Option.toObj field.Select
 
     let updateAllowedFields (entityRef : ResolvedEntityRef) (entity : SourceAllowedEntity) (existingEntity : RoleEntity) =

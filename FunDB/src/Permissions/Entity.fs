@@ -60,10 +60,11 @@ let serializeEntityRestricted (layout : Layout) (triggers : MergedTriggers) (rol
         else
             let access : SerializedFieldAccess =
                 let select = entityAccess.Select && checkRoleFields (fun field -> not (optimizedIsFalse field.Select))
-                let change = checkRoleFields (fun field -> field.Change)
+                let insert = checkRoleFields (fun field -> field.Insert)
+                let update = checkRoleFields (fun field -> field.Update)
                 { Select = select
-                  Insert = entityAccess.Insert && change
-                  Update = select && change
+                  Insert = entityAccess.Insert && insert
+                  Update = select && update
                 }
             let field =
                 { field with

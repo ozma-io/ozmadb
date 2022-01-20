@@ -250,14 +250,6 @@
               }
             },
 
-            "schemas": {
-              "fields": {
-                "user_view_generator_script": {
-                  "attributes": "@{ text_type = 'codeeditor', language = 'javascript' }"
-                }
-              }
-            },
-
             "triggers": {
               "fields": {
                 "procedure": {
@@ -277,6 +269,14 @@
             "modules": {
               "fields": {
                 "source": {
+                  "attributes": "@{ text_type = 'codeeditor', language = 'javascript' }"
+                }
+              }
+            },
+
+            "user_view_generators": {
+              "fields": {
+                "script": {
                   "attributes": "@{ text_type = 'codeeditor', language = 'javascript' }"
                 }
               }

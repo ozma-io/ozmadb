@@ -6,7 +6,8 @@ open FunWithFlags.FunDB.FunQL.AST
 type ResolvedRoleRef = ResolvedEntityRef
 
 type SourceAllowedField =
-    { Change : bool
+    { Insert : bool
+      Update : bool
       Select : string option
     }
 

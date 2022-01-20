@@ -59,6 +59,11 @@ namespace FunWithFlags.FunDBSchema.System
         [CheckConstraint("not_empty", "expressions <> (array[] :: array(string))")]
         public DbSet<Index> Indexes { get; set; } = null!;
 
+        [Entity("name", SaveRestoreKey="schema", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [ComputedField("name", "schema_id=>__main")]
+        [UniqueConstraint("schema", new [] {"schema_id"}, IsAlternateKey=true)]
+        public DbSet<UserViewGenerator> UserViewGenerators { get; set; } = null!;
+
         [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
@@ -198,7 +203,8 @@ namespace FunWithFlags.FunDBSchema.System
         public IQueryable<Schema> GetUserViewsObjects()
         {
             return this.Schemas
-                .AsSingleQuery()
+                .AsSplitQuery()
+                .Include(sch => sch.UserViewGenerator)
                 .Include(sch => sch.UserViews);
         }
     }
@@ -220,10 +226,6 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
-        [ColumnField("string")]
-        public string? UserViewGeneratorScript { get; set; }
-        [ColumnField("bool", Default="false")]
-        public bool UserViewGeneratorScriptAllowBroken { get; set; }
 
         public List<Entity>? Entities { get; set; }
         public List<Role>? Roles { get; set; }
@@ -231,6 +233,7 @@ namespace FunWithFlags.FunDBSchema.System
         public List<Module>? Modules { get; set; }
         public List<Action>? Actions { get; set; }
         public List<Trigger>? Triggers { get; set; }
+        public UserViewGenerator? UserViewGenerator { get; set; }
         public List<UserView>? UserViews { get; set; }
     }
 
@@ -359,6 +362,19 @@ namespace FunWithFlags.FunDBSchema.System
        [ColumnField("enum('btree', 'gist', 'gin')", Default="'btree'")]
        [Required]
         public string Type { get; set; } = null!;
+    }
+
+    public class UserViewGenerator
+    {
+        public int Id { get; set; }
+        [ColumnField("reference(public.schemas)")]
+        public int SchemaId { get; set; }
+        public Schema? Schema { get; set; }
+        [ColumnField("string")]
+        [Required]
+        public string Script { get; set; } = null!;
+        [ColumnField("bool", Default="false")]
+        public bool AllowBroken { get; set; }
     }
 
     public class UserView

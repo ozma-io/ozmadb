@@ -162,11 +162,18 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                 raisef PermissionsApplyException "Access denied to insert entity %O" entityRef
 
         for KeyValue(name, usedField) in usedEntity.Fields do
-            if usedField.Insert || usedField.Update then
+            if usedField.Insert then
                 let ref = { Entity = entityRef; Name = name }
                 match Map.tryFind ref flatAllowedEntity.Fields with
-                | Some flatField when flatField.Change -> ()
-                | _ -> raisef PermissionsApplyException "Access denied to change field %O" ref
+                | Some flatField when flatField.Insert -> ()
+                | _ -> raisef PermissionsApplyException "Access denied to insert field %O" ref
+
+        for KeyValue(name, usedField) in usedEntity.Fields do
+            if usedField.Update then
+                let ref = { Entity = entityRef; Name = name }
+                match Map.tryFind ref flatAllowedEntity.Fields with
+                | Some flatField when flatField.Update -> ()
+                | _ -> raisef PermissionsApplyException "Access denied to update field %O" ref
 
         let isSelect = usedEntity.Select || usedEntity.Update || usedEntity.Delete
         let filterExpr =

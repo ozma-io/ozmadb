@@ -107,7 +107,8 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         if Option.isSome field.InheritedFrom then
             raisef ResolvePermissionsException "Cannot define restrictions on parent entity fields in children"
         let resolveOne = Option.map (resolveRestriction fieldRef.Entity entity true) >> Option.defaultValue OFEFalse
-        { Change = allowedField.Change
+        { Insert = allowedField.Insert
+          Update = allowedField.Update
           Select = resolveOne allowedField.Select
         }
 
@@ -167,8 +168,10 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
 
         let iterField (name : FieldName) (allowedField : AllowedField) =
             try
-                if allowedField.Change && optimizedIsFalse allowedEntity.Check then
-                    raisef ResolvePermissionsException "Cannot allow to change without providing check expression"
+                if allowedField.Insert && optimizedIsFalse allowedEntity.Check then
+                    raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
+                if allowedField.Update && optimizedIsFalse allowedEntity.Check then
+                    raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
             with
             | e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
 
@@ -188,7 +191,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
                     for KeyValue(fieldName, field) in entity.ColumnFields do
                         if Option.isNone field.InheritedFrom && not (fieldIsOptional field) then
                             match Map.tryFind fieldName allowedEntity.Fields with
-                            | Some { Change = true } -> ()
+                            | Some { Insert = true } -> ()
                             | _ -> raisef ResolvePermissionsException "Required field %O is not allowed for inserting" fieldName
                     allowedEntity
                 with
