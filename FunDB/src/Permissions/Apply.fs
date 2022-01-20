@@ -120,12 +120,21 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
             let ref = { Entity = entityRef; Name = name }
             match Map.tryFind ref flatAllowedEntity.Fields with
             | Some flatField ->
-                if usedField.Select then
-                    match flatField.Select with
-                    | OFEFalse -> raisef PermissionsApplyException "Access denied to select field %O" ref
-                    | newSelectFilter -> newSelectFilter
-                else
-                    OFETrue
+                let selectFilter =
+                    if usedField.Select then
+                        match flatField.Select with
+                        | OFEFalse -> raisef PermissionsApplyException "Access denied to select field %O" ref
+                        | newSelectFilter -> newSelectFilter
+                    else
+                        OFETrue
+                let updateFilter =
+                    if usedField.Update then
+                        match flatField.Update with
+                        | OFEFalse -> raisef PermissionsApplyException "Access denied to update field %O" ref
+                        | newSelectFilter -> newSelectFilter
+                    else
+                        OFETrue
+                andFieldExpr selectFilter updateFilter
             | None -> raisef PermissionsApplyException "Access denied to field %O" ref
 
         usedEntity.Fields |> Map.toSeq |> Seq.map addFieldRestriction |> Seq.fold andFieldExpr allowedEntity.Select
@@ -167,13 +176,6 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                 match Map.tryFind ref flatAllowedEntity.Fields with
                 | Some flatField when flatField.Insert -> ()
                 | _ -> raisef PermissionsApplyException "Access denied to insert field %O" ref
-
-        for KeyValue(name, usedField) in usedEntity.Fields do
-            if usedField.Update then
-                let ref = { Entity = entityRef; Name = name }
-                match Map.tryFind ref flatAllowedEntity.Fields with
-                | Some flatField when flatField.Update -> ()
-                | _ -> raisef PermissionsApplyException "Access denied to update field %O" ref
 
         let isSelect = usedEntity.Select || usedEntity.Update || usedEntity.Delete
         let filterExpr =

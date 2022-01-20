@@ -7,8 +7,9 @@ type ResolvedRoleRef = ResolvedEntityRef
 
 type SourceAllowedField =
     { Insert : bool
-      Update : bool
       Select : string option
+      Update : string option
+      Check : string option
     }
 
 type SourceAllowedEntity =

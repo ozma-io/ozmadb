@@ -106,10 +106,11 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             | Some f -> f
         if Option.isSome field.InheritedFrom then
             raisef ResolvePermissionsException "Cannot define restrictions on parent entity fields in children"
-        let resolveOne = Option.map (resolveRestriction fieldRef.Entity entity true) >> Option.defaultValue OFEFalse
+        let resolveOne allowIds = Option.map (resolveRestriction fieldRef.Entity entity allowIds) >> Option.defaultValue OFEFalse
         { Insert = allowedField.Insert
-          Update = allowedField.Update
-          Select = resolveOne allowedField.Select
+          Update = resolveOne true allowedField.Update
+          Select = resolveOne true allowedField.Select
+          Check = resolveOne false allowedField.Check
         }
 
     let resolveSelfAllowedEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (parentEntity : HalfAllowedEntity option) (allowedEntity : SourceAllowedEntity) : (exn option * AllowedEntity) =
@@ -173,10 +174,14 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
 
         let iterField (name : FieldName) (allowedField : AllowedField) =
             try
-                if allowedField.Insert && optimizedIsFalse allowedEntity.Check then
+                let noCheck = optimizedIsFalse allowedEntity.Check || optimizedIsFalse allowedField.Check
+                if allowedField.Insert && noCheck then
                     raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
-                if allowedField.Update && optimizedIsFalse allowedEntity.Check then
-                    raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
+                match allowedField.Update with
+                | OFEFalse -> ()
+                | expr ->
+                    if noCheck then
+                        raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
             with
             | e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
 

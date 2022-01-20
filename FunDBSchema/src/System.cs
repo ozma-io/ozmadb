@@ -471,10 +471,17 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string ColumnName { get; set; } = null!;
+        // FIXME: Drop when we transition completely to `Insert`/`Update`/`Check`.
         [ColumnField("bool", Default="false")]
         public bool Change { get; set; }
+        [ColumnField("bool", Default="false")]
+        public bool Insert { get; set; }
         [ColumnField("string")]
         public string? Select { get; set; }
+        [ColumnField("string")]
+        public string? Update { get; set; }
+        [ColumnField("string")]
+        public string? Check { get; set; }
     }
 
     public class FieldAttributes

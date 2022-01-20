@@ -21,10 +21,12 @@ type AllowedEntityRef =
 type AllowedField =
     { // Are you allowed to INSERT this field?
       Insert : bool
-      // Are you allowed to UPDATE this field?
-      Update : bool
+      // Are you allowed to UPDATE this field? If yes, what _additional_ restrictions are in place, added to this entity UPDATE filter?
+      Update : ResolvedOptimizedFieldExpr
       // Are you allowed to select this field? If yes, what _additional_ restrictions are in place, added to this entity SELECT filter?
       Select : ResolvedOptimizedFieldExpr
+      // Post-UPDATE/INSERT check expression, in addition to entity-wise check.
+      Check : ResolvedOptimizedFieldExpr
     }
 
 [<NoEquality; NoComparison>]
