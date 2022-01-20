@@ -140,6 +140,11 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
 
         let fields = allowedEntity.Fields |> Map.map mapField
 
+        match check with
+        | OFETrue
+        | OFEFalse -> ()
+        | expr -> raisef ResolvePermissionsException "Non-trivial check expressions are not currently supported"
+
         let ret =
             { AllowBroken = allowedEntity.AllowBroken
               Fields = fields
