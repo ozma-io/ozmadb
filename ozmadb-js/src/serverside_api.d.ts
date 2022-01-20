@@ -65,4 +65,6 @@ export type AfterInsertTrigger = (event: ITriggerEvent, args: Record<string, unk
 export type AfterUpdateTrigger = (event: ITriggerEvent, args: Record<string, unknown>) => Promise<void>;
 export type AfterDeleteTrigger = (event: ITriggerEvent) => Promise<void>;
 
+export type Action = (args: Record<string, unknown>) => Promise<unknown>;
+
 export type UserViewGenerator = (layout: ILayout) => Promise<Record<UserViewName, string>>;
