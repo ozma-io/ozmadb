@@ -224,7 +224,7 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
             } : SQL.FunctionDefinition
         let functionKey = sprintf "__ref_type_check__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
         let functionName = SQL.SQLName <| sprintf "__ref_type_check__%s__%s" entity.HashName field.HashName
-        let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
+        let functionOverloads = Map.singleton [||] functionDefinition
 
         let checkOldColumn = SQL.VEColumn { Table = Some sqlOldRow; Name = field.ColumnName }
         let checkNewColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = field.ColumnName }
@@ -243,8 +243,8 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
               FunctionArgs = [||]
             } : SQL.TriggerDefinition
         let updateTriggerKey = sprintf "__ref_type_update__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-        let updateTriggerName = SQL.SQLName <| sprintf "01_ref_type_update__%s__%s" entity.HashName field.HashName
-        let updateTriggerObject = SQL.OMTrigger (fromTable, updateTriggerDefinition)
+        let updateTriggerName = SQL.SQLName <| sprintf "01_ref_type_update__%s" field.HashName
+        let updateTriggers = Seq.singleton (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerDefinition))
 
         let insertTriggerDefinition =
             { IsConstraint = Some <| SQL.DCDeferrable false
@@ -255,18 +255,21 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
               FunctionName = { Schema = Some fromSchema; Name = functionName }
               FunctionArgs = [||]
             } : SQL.TriggerDefinition
-        let checkInsertTriggerKey =sprintf "__ref_type_insert__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-        let checkInsertTriggerName = SQL.SQLName <| sprintf "01_ref_type_insert__%s__%s" entity.HashName field.HashName
-        let checkInsertTriggerObject = SQL.OMTrigger (fromTable, insertTriggerDefinition)
+        let insertTriggerKey =sprintf "__ref_type_insert__%O" fromFieldRef.Name
+        let insertTriggerName = SQL.SQLName <| sprintf "01_ref_type_insert__%s" field.HashName
+        let insertTriggers = Seq.singleton (insertTriggerName, (Set.singleton insertTriggerKey, insertTriggerDefinition))
 
-        let objects =
-            [ (functionName, (Set.singleton functionKey, functionObject))
-              (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerObject))
-              (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
-            ]
-            |> Map.ofSeq
-        { Schemas = Map.singleton (fromSchema) (Set.empty, { Objects = objects })
-          Extensions = Set.empty
+        let tableObjects =
+            { SQL.emptyTableObjectsMeta with
+                  Triggers = Map.ofSeqUnique (Seq.concat [updateTriggers; insertTriggers])
+            } : SQL.TableObjectsMeta
+        let schema =
+            { SQL.emptySchemaMeta with
+                  Relations = Map.singleton fromTable (SQL.OMTable tableObjects)
+                  Functions = Map.singleton functionName (Set.singleton functionKey, functionOverloads)
+            } : SQL.SchemaMeta
+        { SQL.emptyDatabaseMeta with
+              Schemas = Map.singleton (fromSchema) (Set.empty, schema)
         }
 
 // This is path without the last dereference; for example, triggers for foo=>bar and foo=>baz will be merged into trigger for entity E, which handles bar and baz.
@@ -376,17 +379,19 @@ type private AffectedByExprBuilder (layout : Layout, constrEntityRef : ResolvedE
 
         let columnFieldTrigger () : (PathTriggerKey * PathTrigger) seq =
             let trigger =
-                { Fields = Map.singleton fieldRef.Entity (Set.singleton fieldRef.Name)
+                { Fields = Map.singleton fieldRef.Entity (Set.singleton refField.Name)
                   Root = refEntity.Root
                 }
             Seq.singleton ([], trigger)
 
         match refField.Field with
+        | RId -> Seq.empty
+        // We will allow to change subentities later.
+        | RSubEntity -> columnFieldTrigger ()
         | RColumnField col -> columnFieldTrigger ()
         | RComputedField comp when comp.IsMaterialized -> columnFieldTrigger ()
         | RComputedField comp ->
             computedFieldCases layout extra { fieldRef with Name = refField.Name } comp |> Seq.map (fun (case, comp) -> comp.Expression) |> Seq.collect buildExprTriggers
-        | _ -> Seq.empty
 
     and buildPathTriggers (extra : ObjectMap) (outerRef : ResolvedFieldRef) : (ResolvedEntityRef * PathArrow) list -> (PathTriggerKey * PathTrigger) seq = function
         | [] -> buildOuterPathTrigger extra outerRef
@@ -585,7 +590,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
         } : SQL.FunctionDefinition
     let functionKey = sprintf "__out_chcon_check__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
     let functionName = SQL.SQLName <| sprintf "__out_chcon_check__%s__%s" entity.HashName constr.HashName
-    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
+    let functionOverloads = Map.singleton [||] functionDefinition
 
     let checkExpr = makeCheckExpr plainSubEntityColumn layout constrRef.Entity
 
@@ -614,9 +619,9 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let updateTriggerKey = sprintf "__out_chcon_update__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
-    let updateTriggerName = SQL.SQLName <| sprintf "01_out_chcon_update__%s__%s" entity.HashName constr.HashName
-    let updateTriggerObject = SQL.OMTrigger (tableName, updateTriggerDefinition)
+    let updateTriggerKey = sprintf "__out_chcon_update__%O" constrRef.Name
+    let updateTriggerName = SQL.SQLName <| sprintf "01_out_chcon_update__%s" constr.HashName
+    let updateTriggers = Seq.singleton (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerDefinition))
 
     let insertTriggerDefinition =
         { IsConstraint = Some <| SQL.DCDeferrable false
@@ -627,18 +632,21 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkInsertTriggerKey = sprintf "__out_chcon_insert__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
-    let checkInsertTriggerName = SQL.SQLName <| sprintf "01_out_chcon_insert__%s__%s" entity.HashName constr.HashName
-    let checkInsertTriggerObject = SQL.OMTrigger (tableName, insertTriggerDefinition)
+    let insertTriggerKey = sprintf "__out_chcon_insert__%O" constrRef.Name
+    let insertTriggerName = SQL.SQLName <| sprintf "01_out_chcon_insert__%s" constr.HashName
+    let insertTriggers = Seq.singleton (insertTriggerName, (Set.singleton insertTriggerKey, insertTriggerDefinition))
 
-    let objects =
-        [ (functionName, (Set.singleton functionKey, functionObject))
-          (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerObject))
-          (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
-        ]
-        |> Map.ofSeq
-    { Schemas = Map.singleton schemaName (Set.empty, { Objects = objects })
-      Extensions = Set.empty
+    let tableObjects =
+        { SQL.emptyTableObjectsMeta with
+              Triggers = Map.ofSeqUnique (Seq.concat [updateTriggers; insertTriggers])
+        } : SQL.TableObjectsMeta
+    let schema =
+        { SQL.emptySchemaMeta with
+              Relations = Map.singleton tableName (SQL.OMTable tableObjects)
+              Functions = Map.singleton functionName (Set.singleton functionKey, functionOverloads)
+        } : SQL.SchemaMeta
+    { SQL.emptyDatabaseMeta with
+          Schemas = Map.singleton schemaName (Set.empty, schema)
     }
 
 let private getPathTriggerAffected (layout : Layout) (trigger : PathTrigger) : SQL.ColumnName[] =
@@ -647,8 +655,6 @@ let private getPathTriggerAffected (layout : Layout) (trigger : PathTrigger) : S
         Seq.map (getColumnName fieldEntity) fields
     trigger.Fields |> Map.toSeq |> Seq.collect getFieldInfo |> Seq.toArray
 
-// This check is built on assumption that we can collect affected rows after the operation. This is true in all cases except one: DELETE with SET NULL foreign key.
-// We don't support them right now, but beware of this!
 let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (aggCheck : SQL.SingleSelectExpr) (key : PathTriggerKey) (trigger : PathTrigger) : SQL.DatabaseMeta =
     let entity = layout.FindEntity constrRef.Entity |> Option.get
     let fullTriggerKey = { ConstraintRef = constrRef; Key = key }
@@ -697,7 +703,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
         } : SQL.FunctionDefinition
     let functionKey = sprintf "__in_chcon_check__%s" triggerKey
     let functionName = SQL.SQLName <| sprintf "__in_chcon_check__%s" triggerName
-    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
+    let functionOverloads = Map.singleton [||] functionDefinition
 
     let affectedColumns = getPathTriggerAffected layout trigger
 
@@ -726,17 +732,28 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
         } : SQL.TriggerDefinition
     let updateTriggerKey = sprintf "__in_chcon_update__%s" triggerKey
     let updateTriggerName = SQL.SQLName <| sprintf "01_in_chcon_update__%s" triggerName
-    let updateTriggerObject = SQL.OMTrigger (triggerTableName, updateTriggerDefinition)
+    let updateTriggers = Seq.singleton (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerDefinition))
 
-    let functionObjects = Map.singleton functionName (Set.singleton functionKey, functionObject)
-    let functionDbMeta : SQL.DatabaseMeta =
-        { Schemas = Map.singleton schemaName (Set.empty, { Objects = functionObjects })
-          Extensions = Set.empty
+    let triggerTableObjects =
+        { SQL.emptyTableObjectsMeta with
+              Triggers = Map.ofSeqUnique updateTriggers
+        } : SQL.TableObjectsMeta
+    let triggerSchema =
+        { SQL.emptySchemaMeta with
+              Relations = Map.singleton triggerTableName (SQL.OMTable triggerTableObjects)
+        } : SQL.SchemaMeta
+    let triggerDbMeta =
+        { SQL.emptyDatabaseMeta with
+              Schemas = Map.singleton triggerSchemaName (Set.empty, triggerSchema)
         }
-    let triggerObjects = Map.singleton updateTriggerName (Set.singleton updateTriggerKey, updateTriggerObject)
-    let triggerDbMeta : SQL.DatabaseMeta =
-        { Schemas = Map.singleton triggerSchemaName (Set.empty, { Objects = triggerObjects })
-          Extensions = Set.empty
+
+    let functionSchema =
+        { SQL.emptySchemaMeta with
+              Functions = Map.singleton functionName (Set.empty, functionOverloads)
+        } : SQL.SchemaMeta
+    let functionDbMeta =
+        { SQL.emptyDatabaseMeta with
+              Schemas = Map.singleton schemaName (Set.empty, functionSchema)
         }
 
     SQL.unionDatabaseMeta functionDbMeta triggerDbMeta
@@ -813,7 +830,7 @@ let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedField
         } : SQL.FunctionDefinition
     let functionKey = sprintf "__out_mat_store__%O__%O__%O" fieldRef.Entity.Schema fieldRef.Entity.Name fieldRef.Name
     let functionName = SQL.SQLName <| sprintf "__out_mat_store__%s__%s" entity.HashName comp.HashName
-    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
+    let functionOverloads = Map.singleton [||] functionDefinition
 
     let checkExpr = makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
 
@@ -842,9 +859,9 @@ let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedField
           FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let updateTriggerKey = sprintf "__out_mat_update__%O__%O__%O" fieldRef.Entity.Schema fieldRef.Entity.Name fieldRef.Name
-    let updateTriggerName = SQL.SQLName <| sprintf "00_out_mat_update__%s__%s" entity.HashName comp.HashName
-    let updateTriggerObject = SQL.OMTrigger (tableName, updateTriggerDefinition)
+    let updateTriggerKey = sprintf "__out_mat_update__%O" fieldRef.Name
+    let updateTriggerName = SQL.SQLName <| sprintf "00_out_mat_update__%s" comp.HashName
+    let updateTriggers = Seq.singleton (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerDefinition))
 
     let insertTriggerDefinition =
         { IsConstraint = None
@@ -855,18 +872,21 @@ let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedField
           FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let checkInsertTriggerKey = sprintf "__out_mat_insert__%O__%O__%O" fieldRef.Entity.Schema fieldRef.Entity.Name fieldRef.Name
-    let checkInsertTriggerName = SQL.SQLName <| sprintf "00_out_mat_insert__%s__%s" entity.HashName comp.HashName
-    let checkInsertTriggerObject = SQL.OMTrigger (tableName, insertTriggerDefinition)
+    let insertTriggerKey = sprintf "__out_mat_insert__%O" fieldRef.Name
+    let insertTriggerName = SQL.SQLName <| sprintf "00_out_mat_insert__%s" comp.HashName
+    let insertTriggers = Seq.singleton (insertTriggerName, (Set.singleton insertTriggerKey, insertTriggerDefinition))
 
-    let objects =
-        [ (functionName, (Set.singleton functionKey, functionObject))
-          (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerObject))
-          (checkInsertTriggerName, (Set.singleton checkInsertTriggerKey, checkInsertTriggerObject))
-        ]
-        |> Map.ofSeq
-    { Schemas = Map.singleton schemaName (Set.empty, { Objects = objects })
-      Extensions = Set.empty
+    let tableObjects =
+        { SQL.emptyTableObjectsMeta with
+              Triggers = Map.ofSeqUnique (Seq.concat [updateTriggers; insertTriggers])
+        } : SQL.TableObjectsMeta
+    let schema =
+        { SQL.emptySchemaMeta with
+              Relations = Map.singleton tableName (SQL.OMTable tableObjects)
+              Functions = Map.singleton functionName (Set.singleton functionKey, functionOverloads)
+        } : SQL.SchemaMeta
+    { SQL.emptyDatabaseMeta with
+          Schemas = Map.singleton schemaName (Set.empty, schema)
     }
 
 // This check is built on assumption that we can collect affected rows after the operation. This is true in all cases except one: DELETE with SET NULL foreign key.
@@ -899,7 +919,7 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
         } : SQL.FunctionDefinition
     let functionKey = sprintf "__in_mat_store__%s" triggerKey
     let functionName = SQL.SQLName <| sprintf "__in_mat_store__%s" triggerName
-    let functionObject = SQL.OMFunction <| Map.singleton [||] functionDefinition
+    let functionOverloads = Map.singleton [||] functionDefinition
 
     let affectedColumns = getPathTriggerAffected layout trigger
 
@@ -928,17 +948,28 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
         } : SQL.TriggerDefinition
     let updateTriggerKey = sprintf "__in_mat_update__%s" triggerKey
     let updateTriggerName = SQL.SQLName <| sprintf "00_in_mat_update__%s" triggerName
-    let updateTriggerObject = SQL.OMTrigger (triggerTableName, updateTriggerDefinition)
+    let updateTriggers = Seq.singleton (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerDefinition))
 
-    let functionObjects = Map.singleton functionName (Set.singleton functionKey, functionObject)
-    let functionDbMeta : SQL.DatabaseMeta =
-        { Schemas = Map.singleton schemaName (Set.empty, { Objects = functionObjects })
-          Extensions = Set.empty
+    let triggerTableObjects =
+        { SQL.emptyTableObjectsMeta with
+              Triggers = Map.ofSeqUnique updateTriggers
+        } : SQL.TableObjectsMeta
+    let triggerSchema =
+        { SQL.emptySchemaMeta with
+              Relations = Map.singleton triggerTableName (SQL.OMTable triggerTableObjects)
+        } : SQL.SchemaMeta
+    let triggerDbMeta =
+        { SQL.emptyDatabaseMeta with
+              Schemas = Map.singleton triggerSchemaName (Set.empty, triggerSchema)
         }
-    let triggerObjects = Map.singleton updateTriggerName (Set.singleton updateTriggerKey, updateTriggerObject)
-    let triggerDbMeta : SQL.DatabaseMeta =
-        { Schemas = Map.singleton triggerSchemaName (Set.empty, { Objects = triggerObjects })
-          Extensions = Set.empty
+
+    let functionSchema =
+        { SQL.emptySchemaMeta with
+              Functions = Map.singleton functionName (Set.empty, functionOverloads)
+        } : SQL.SchemaMeta
+    let functionDbMeta =
+        { SQL.emptyDatabaseMeta with
+              Schemas = Map.singleton schemaName (Set.empty, functionSchema)
         }
 
     SQL.unionDatabaseMeta functionDbMeta triggerDbMeta

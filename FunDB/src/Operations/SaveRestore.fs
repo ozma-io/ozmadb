@@ -826,12 +826,9 @@ let private deleteNonRestoredRows
         ()
     }
 
-// We restore entities in three stages:
-// 1. In forward order, Load restored data and match with existing records;
-// 2. In reverse order, remove all rows which haven't been matched;
-// 3. In forward order, insert new rows and update existing ones.
-// Swapping (2) and (3) would have been simpler, but then an insert could fail because
-// a record with a given save-restore key already exists, but of a different sub-entity.
+// We restore entities in two stages:
+// 1. In forward order, Load restored data and match with existing records. Then insert new rows and update existing ones;
+// 2. In reverse order, remove all rows which haven't been matched.
 let private restoreOneCustomEntity
         (layout : Layout)
         (connection : DatabaseTransaction)
@@ -839,29 +836,15 @@ let private restoreOneCustomEntity
         (key : PreparedSaveRestoreKey)
         (schemaId : int)
         (rows : JObject seq)
-        (cancellationToken : CancellationToken) : Task<unit -> Task<unit -> Task>> =
+        (cancellationToken : CancellationToken) : Task<unit -> Task> =
     task {
         if Seq.isEmpty rows then
-            return fun () ->
-                task {
-                    do! deleteNonRestoredRows layout connection entityRef key schemaId None cancellationToken
-                    return fun () -> Task.empty
-                }
+            return fun () -> deleteNonRestoredRows layout connection entityRef key schemaId None cancellationToken
         else
             let! (dataTableRef, availableColumns) = loadRestoredRows layout connection entityRef key schemaId rows cancellationToken
-            return fun () ->
-                task {
-                    do! deleteNonRestoredRows layout connection entityRef key schemaId (Some dataTableRef) cancellationToken
-                    return fun () ->
-                        unitTask {
-                            do! updateRestoredRows layout connection entityRef availableColumns dataTableRef cancellationToken
-                            do! insertRestoredRows layout connection entityRef key availableColumns dataTableRef cancellationToken
-
-                            let dropTable = SQL.SODropTable dataTableRef
-                            let! _ = connection.Connection.Query.ExecuteNonQuery (string dropTable) Map.empty cancellationToken
-                            ()
-                        }
-                }
+            do! updateRestoredRows layout connection entityRef availableColumns dataTableRef cancellationToken
+            do! insertRestoredRows layout connection entityRef key availableColumns dataTableRef cancellationToken
+            return fun () -> deleteNonRestoredRows layout connection entityRef key schemaId (Some dataTableRef) cancellationToken
     }
 
 let private restoreCustomEntity
@@ -870,7 +853,7 @@ let private restoreCustomEntity
         (entityRef : ResolvedEntityRef)
         (schemaId : int)
         (rows : JObject seq)
-        (cancellationToken : CancellationToken) : Task<(unit -> Task<unit -> Task>) seq> =
+        (cancellationToken : CancellationToken) : Task<(unit -> Task) seq> =
     let key = prepareSaveRestoreKey layout entityRef
 
     let getSubEntity (row : JObject) =
@@ -940,8 +923,7 @@ let restoreCustomEntities
             |> Seq.filter (fun entityRef -> entityRef.Schema <> funSchema)
             |> Seq.collectTask insertAndUpdate
 
-        let! addActions = deleteActions |> Seq.rev |> Seq.mapTask (fun action -> action ())
-        do! addActions |> Seq.rev |> Seq.iterTask (fun action -> action ())
+        do! deleteActions |> Seq.rev |> Seq.iterTask (fun action -> action ())
     }
 
 let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : SchemaName) (cancellationToken : CancellationToken) : Task<SchemaDump> =
