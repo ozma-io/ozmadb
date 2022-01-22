@@ -44,6 +44,8 @@ let private simplifyIndex : SQL.ValueExpr -> SQL.IndexKey = function
 
 let private defaultIndexType = SQL.SQLName "btree"
 
+let primaryConstraintKey = "__primary"
+
 type private MetaBuilder (layout : Layout) =
     let compileRelatedExpr (expr : ResolvedFieldExpr) : SQL.ValueExpr =
         let (arguments, ret) = compileSingleFieldExpr layout relatedCompilationFlags emptyArguments expr
@@ -97,7 +99,6 @@ type private MetaBuilder (layout : Layout) =
         let constr =
             match field.FieldType with
                 | FTScalar (SFTReference (entityRef, opts)) ->
-                    // FIXME: support restrictions!
                     let refEntity = layout.FindEntity entityRef |> Option.get
                     let tableRef = compileResolvedEntityRef refEntity.Root
                     let constrKey = sprintf "__foreign__%O__%O__%O" ref.Entity.Schema ref.Entity.Name ref.Name
@@ -195,11 +196,11 @@ type private MetaBuilder (layout : Layout) =
             | None ->
                 let idSeqName = SQL.SQLName <| sprintf "__idseq__%s" entity.HashName
                 let idConstraints =
-                    // Correlation step for raw meta should name primary constraints in the same way.
-                    let key = sprintf "__primary__%O__%O" entity.Root.Schema entity.Root.Name
+                    // We use entity hash name here because primary key, unique and exclusion constraints create underlying indexes,
+                    // which use the same name (but reside in the relations namespace).
                     let name = SQL.SQLName <| sprintf "__primary__%s" entity.HashName
                     let constr = SQL.CMPrimaryKey ([| sqlFunId |], SQL.DCNotDeferrable)
-                    Seq.singleton (name, (Set.singleton key, constr))
+                    Seq.singleton (name, (Set.singleton primaryConstraintKey, constr))
                 let idColumns =
                     let col =
                         { DataType = SQL.VTScalar (SQL.STInt.ToSQLRawString())
@@ -263,7 +264,7 @@ type private MetaBuilder (layout : Layout) =
                 let allIndexes = subEntityIndexes
                 let indexObjects = Seq.map (fun (name, (keys, index)) -> (name, (SQL.OMIndex (keys, tableName.Name, index)))) allIndexes
                 // Correlation step for raw meta should name primary sequences in the same way.
-                let idSeqKey = sprintf "__idseq__%O__%O" entity.Root.Schema entity.Root.Name
+                let idSeqKey = sprintf "__idseq__%O" entity.Root.Name
                 let idObject = Seq.singleton (idSeqName, (SQL.OMSequence (Set.singleton idSeqKey)))
                 let extraObjects = Seq.concat [idObject; indexObjects]
                 (tableObjects, extraObjects)

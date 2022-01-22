@@ -5,6 +5,7 @@ open FunWithFlags.FunUtils
 module FunQL = FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.SQL.DDL
+open FunWithFlags.FunDB.Layout.Meta
 
 let private correlateSchemaMeta (schemaName : SchemaName) (schemaKeys : MigrationKeysSet, schema : SchemaMeta) : MigrationKeysSet * SchemaMeta =
     let relations = schema.Relations
@@ -22,9 +23,8 @@ let private correlateSchemaMeta (schemaName : SchemaName) (schemaKeys : Migratio
                 let correlatePrimaryConstraint constrName (constrKeys, constr) =
                     match constr with
                     | CMPrimaryKey ([|idCol|], defer) ->
-                        let newKey = sprintf "__primary__%O" objectName
                         idColumn <- Some idCol
-                        (Set.add newKey constrKeys, constr)
+                        (Set.add primaryConstraintKey constrKeys, constr)
                     | _ -> (constrKeys, constr)
                 
                 let constraints = Map.map correlatePrimaryConstraint tableObjects.Constraints
