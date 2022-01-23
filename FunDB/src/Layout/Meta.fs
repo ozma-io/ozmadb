@@ -306,7 +306,7 @@ type private MetaBuilder (layout : Layout) =
 
                 let columns = Seq.concat [userColumns; materializedFieldColumns] |> Map.ofSeq
                 let tableObjects =
-                    { Table = Some Set.empty
+                    { Table = None
                       TableColumns = columns
                       Constraints = constraints
                       Triggers = Map.empty
