@@ -165,20 +165,20 @@ type private MetaBuilder (layout : Layout) =
             let relatedFields = Map.add { fieldRef with Name = fieldName } (entity, field) relatedFields
             getPathReferences { Entity = refEntityRef; Name = refName } relatedFields refs
 
-    let makeCheckConstraintMeta (modifyExpr : SQL.ValueExpr -> SQL.ValueExpr) (name : ConstraintName) (constr : ResolvedCheckConstraint) : (SQL.SQLName * (SQL.MigrationKeysSet * SQL.ConstraintMeta)) seq =
+    let makeCheckConstraintMeta (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (modifyExpr : SQL.ValueExpr -> SQL.ValueExpr) (name : ConstraintName) (constr : ResolvedCheckConstraint) : (SQL.SQLName * (SQL.MigrationKeysSet * SQL.ConstraintMeta)) seq =
         if not constr.IsLocal then
             Seq.empty
         else
             let expr = modifyExpr <| compileRelatedExpr constr.Expression
             let meta = SQL.CMCheck (String.comparable expr)
-            let sqlKey = sprintf "__check__%O" name
-            let sqlName = SQL.SQLName <| sprintf "__check__%s" constr.HashName
+            let sqlKey = sprintf "__check__%O__%O__%O" entityRef.Schema entityRef.Name name
+            let sqlName = SQL.SQLName <| sprintf "__check__%s__%s" entity.HashName constr.HashName
             Seq.singleton (sqlName, (Set.singleton sqlKey, meta))
 
     let makeEntityMeta (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SQL.TableObjectsMeta * (SQL.SQLName * SQL.RelationMeta) seq =
         let tableName = compileResolvedEntityRef entity.Root
 
-        let makeEntityCheckConstraint modifyExpr (name, constr) = makeCheckConstraintMeta modifyExpr name constr
+        let makeEntityCheckConstraint modifyExpr (name, constr) = makeCheckConstraintMeta entityRef entity modifyExpr name constr
 
         let makeMaterializedComputedField (name, maybeField) =
             match maybeField with
@@ -223,7 +223,7 @@ type private MetaBuilder (layout : Layout) =
                             match makeCheckExpr subEntityColumn layout entityRef with
                             | None -> Seq.empty
                             | Some checkExpr ->
-                                let typeCheckKey = sprintf "__type_check"
+                                let typeCheckKey = "__type_check"
                                 let typeCheckName = SQL.SQLName typeCheckKey
                                 Seq.singleton (typeCheckName, (Set.singleton typeCheckKey, SQL.CMCheck (String.comparable checkExpr)))
 
@@ -287,8 +287,8 @@ type private MetaBuilder (layout : Layout) =
                                 // PostgreSQL can instantly initialize the column with default values for all rows, even not of this subtype.
                                 let checkNull = SQL.VEIsNull (SQL.VEColumn { Table = None; Name = field.ColumnName })
                                 let expr = SQL.VENot (SQL.VEAnd (check, checkNull))
-                                let notnullName = SQL.SQLName <| sprintf "__notnull__%s" field.HashName
-                                let notnullKey = sprintf "__notnull__%O" name
+                                let notnullName = SQL.SQLName <| sprintf "__notnull__%s__%s" entity.HashName field.HashName
+                                let notnullKey = sprintf "__notnull__%O__%O__%O" entityRef.Schema entityRef.Name name
                                 let extraConstrs = Seq.singleton (notnullName, (Set.singleton notnullKey, SQL.CMCheck (String.comparable expr)))
                                 ({ meta with IsNullable = true }, extraConstrs)
                         Some (field.ColumnName, Set.empty, meta, Seq.append constrs extraConstrs)

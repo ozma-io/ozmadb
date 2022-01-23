@@ -243,7 +243,7 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
               FunctionArgs = [||]
             } : SQL.TriggerDefinition
         let updateTriggerKey = sprintf "__ref_type_update__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
-        let updateTriggerName = SQL.SQLName <| sprintf "01_ref_type_update__%s" field.HashName
+        let updateTriggerName = SQL.SQLName <| sprintf "01_ref_type_update__%s__%s" entity.HashName field.HashName
         let updateTriggers = Seq.singleton (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerDefinition))
 
         let insertTriggerDefinition =
@@ -255,8 +255,8 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
               FunctionName = { Schema = Some fromSchema; Name = functionName }
               FunctionArgs = [||]
             } : SQL.TriggerDefinition
-        let insertTriggerKey =sprintf "__ref_type_insert__%O" fromFieldRef.Name
-        let insertTriggerName = SQL.SQLName <| sprintf "01_ref_type_insert__%s" field.HashName
+        let insertTriggerKey =sprintf "__ref_type_insert__%O__%O__%O" fromFieldRef.Entity.Schema fromFieldRef.Entity.Name fromFieldRef.Name
+        let insertTriggerName = SQL.SQLName <| sprintf "01_ref_type_insert__%s__%s" entity.HashName field.HashName
         let insertTriggers = Seq.singleton (insertTriggerName, (Set.singleton insertTriggerKey, insertTriggerDefinition))
 
         let tableObjects =
@@ -619,8 +619,8 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let updateTriggerKey = sprintf "__out_chcon_update__%O" constrRef.Name
-    let updateTriggerName = SQL.SQLName <| sprintf "01_out_chcon_update__%s" constr.HashName
+    let updateTriggerKey = sprintf "__out_chcon_update__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
+    let updateTriggerName = SQL.SQLName <| sprintf "01_out_chcon_update__%s__%s" entity.HashName constr.HashName
     let updateTriggers = Seq.singleton (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerDefinition))
 
     let insertTriggerDefinition =
@@ -632,8 +632,8 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
           FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let insertTriggerKey = sprintf "__out_chcon_insert__%O" constrRef.Name
-    let insertTriggerName = SQL.SQLName <| sprintf "01_out_chcon_insert__%s" constr.HashName
+    let insertTriggerKey = sprintf "__out_chcon_insert__%O__%O__%O" constrRef.Entity.Schema constrRef.Entity.Name constrRef.Name
+    let insertTriggerName = SQL.SQLName <| sprintf "01_out_chcon_insert__%s__%s" entity.HashName constr.HashName
     let insertTriggers = Seq.singleton (insertTriggerName, (Set.singleton insertTriggerKey, insertTriggerDefinition))
 
     let tableObjects =
@@ -859,8 +859,8 @@ let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedField
           FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let updateTriggerKey = sprintf "__out_mat_update__%O" fieldRef.Name
-    let updateTriggerName = SQL.SQLName <| sprintf "00_out_mat_update__%s" comp.HashName
+    let updateTriggerKey = sprintf "__out_mat_update__%O__%O__%O" fieldRef.Entity.Schema fieldRef.Entity.Name fieldRef.Name
+    let updateTriggerName = SQL.SQLName <| sprintf "00_out_mat_update__%s__%s" entity.HashName comp.HashName
     let updateTriggers = Seq.singleton (updateTriggerName, (Set.singleton updateTriggerKey, updateTriggerDefinition))
 
     let insertTriggerDefinition =
@@ -872,8 +872,8 @@ let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedField
           FunctionName = { Schema = Some schemaName; Name = functionName }
           FunctionArgs = [||]
         } : SQL.TriggerDefinition
-    let insertTriggerKey = sprintf "__out_mat_insert__%O" fieldRef.Name
-    let insertTriggerName = SQL.SQLName <| sprintf "00_out_mat_insert__%s" comp.HashName
+    let insertTriggerKey = sprintf "__out_mat_insert__%O__%O__%O" fieldRef.Entity.Schema fieldRef.Entity.Name fieldRef.Name
+    let insertTriggerName = SQL.SQLName <| sprintf "00_out_mat_insert__%s__%s" entity.HashName comp.HashName
     let insertTriggers = Seq.singleton (insertTriggerName, (Set.singleton insertTriggerKey, insertTriggerDefinition))
 
     let tableObjects =
