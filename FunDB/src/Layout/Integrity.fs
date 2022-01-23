@@ -385,9 +385,9 @@ type private AffectedByExprBuilder (layout : Layout, constrEntityRef : ResolvedE
             Seq.singleton ([], trigger)
 
         match refField.Field with
-        | RId -> Seq.empty
-        // We will allow to change subentities later.
-        | RSubEntity -> columnFieldTrigger ()
+        | RId
+        // FIXME: We will allow to change subentities later.
+        | RSubEntity -> Seq.empty
         | RColumnField col -> columnFieldTrigger ()
         | RComputedField comp when comp.IsMaterialized -> columnFieldTrigger ()
         | RComputedField comp ->
