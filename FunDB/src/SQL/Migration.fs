@@ -75,9 +75,7 @@ let private deleteBuildTableObjects (tableRef : TableRef) (tableObjects : TableO
         for KeyValue(triggerName, (keys, trig)) in tableObjects.Triggers do
             yield (SODropTrigger (tableRef, triggerName), 0)
 
-        match tableObjects.Table with
-        | None -> ()
-        | Some (keys, table) -> yield (SODropTable tableRef, 0)
+        yield (SODropTable tableRef, 0)
     }
 
 let private deleteBuildSchema (schemaName : SchemaName) (schemaMeta : SchemaMeta) : OrderedSchemaOperation seq =
@@ -207,7 +205,7 @@ let private matchMigrationObjects (isSameObject : 'a -> 'a -> bool) (createNew :
             yield! dropOld oldObjectName oldObject
     }
 
-let private migrateBuildTable (fromMeta : TableMeta) (toMeta : TableMeta) : (ColumnName * ColumnName)[] * TableOperation[] =
+let private migrateBuildTable (fromMeta : TableObjectsMeta) (toMeta : TableObjectsMeta) : (ColumnName * ColumnName)[] * TableOperation[] =
     let mutable renames = []
 
     let createNew columnName columnMeta = Seq.singleton <| TOCreateColumn (columnName, columnMeta)
@@ -234,10 +232,10 @@ let private migrateBuildTable (fromMeta : TableMeta) (toMeta : TableMeta) : (Col
         }
     let dropOld columnName columnMeta = Seq.singleton <| TODropColumn columnName
 
-    let tableOps = matchMigrationObjects (fun _ _ -> true) createNew modifyOld dropOld fromMeta.Columns toMeta.Columns |> Seq.toArray
+    let tableOps = matchMigrationObjects (fun _ _ -> true) createNew modifyOld dropOld fromMeta.TableColumns toMeta.TableColumns |> Seq.toArray
     (Array.ofList renames, tableOps)
 
-let private migrateAlterTable (objRef : SchemaObject) (fromMeta : TableMeta) (toMeta : TableMeta) : OrderedSchemaOperation seq =
+let private migrateAlterTable (objRef : SchemaObject) (fromMeta : TableObjectsMeta) (toMeta : TableObjectsMeta) : OrderedSchemaOperation seq =
     seq {
         let (renames, tableOps) = migrateBuildTable fromMeta toMeta
         for (oldName, newName) in renames do
@@ -272,7 +270,7 @@ let private relationsToMigrationMap (schemaName : SchemaName) (relations : Map<S
                 let errorMessage () =
                     let ref = { Schema = Some schemaName; Name = name } : TableRef
                     sprintf "Table %O is not defined during migration" ref
-                let (keys, tableMeta) = Option.getOrFailWith errorMessage tableObjects.Table
+                let keys = Option.getOrFailWith errorMessage tableObjects.Table
                 keys
             | OMSequence keys -> keys
             | OMIndex (keys, tableName, index) -> keys
@@ -281,17 +279,7 @@ let private relationsToMigrationMap (schemaName : SchemaName) (relations : Map<S
 
 let private migrateTableObjects (tableRef : TableRef) (oldTableObjects : TableObjectsMeta) (newTableObjects : TableObjectsMeta) : OrderedSchemaOperation seq =
     seq {
-        match (oldTableObjects.Table, newTableObjects.Table) with
-        | (None, None) -> ()
-        | (None, Some (newKeys, newTableMeta)) ->
-            let opts =
-                { Table = tableRef
-                  Temporary = None
-                }
-            yield (SOCreateTable opts, 0)
-            yield! migrateAlterTable tableRef emptyTableMeta newTableMeta
-        | (Some (oldKeys, oldTableMeta), None) -> yield (SODropTable tableRef, 0)
-        | (Some (oldKeys, oldTableMeta), Some (newKeys, newTableMeta)) -> yield! migrateAlterTable tableRef oldTableMeta newTableMeta
+        yield! migrateAlterTable tableRef oldTableObjects newTableObjects
 
         let isSameConstraint oldCostr newConstr =
             // Compare everything except deferrable setting.
@@ -367,11 +355,19 @@ let private migrateRelations (schemaName : SchemaName) (fromRelations : Map<SQLN
         | _ -> false
 
     let createNew objectName objectMeta =
-        let objRef = { Schema = Some schemaName; Name = objectName }
-        match objectMeta with
-        | OMTable tableObjects -> migrateTableObjects objRef emptyTableObjectsMeta tableObjects
-        | OMSequence keys -> Seq.singleton <| (SOCreateSequence objRef, 0)
-        | OMIndex (keys, tableName, index) -> Seq.singleton (SOCreateIndex (objRef, tableName, index), 0)
+        seq {
+            let objRef = { Schema = Some schemaName; Name = objectName }
+            match objectMeta with
+            | OMTable tableObjects ->
+                let opts =
+                    { Table = objRef
+                      Temporary = None
+                    }
+                yield (SOCreateTable opts, 0)
+                yield! migrateTableObjects objRef emptyTableObjectsMeta tableObjects
+            | OMSequence keys -> yield (SOCreateSequence objRef, 0)
+            | OMIndex (keys, tableName, index) -> yield (SOCreateIndex (objRef, tableName, index), 0)
+        }
 
     let modifyOld oldObjectName (oldObjectMeta : RelationMeta) newObjectName (newObjectMeta : RelationMeta) =
         seq {

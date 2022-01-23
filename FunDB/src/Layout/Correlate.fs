@@ -15,48 +15,41 @@ let private correlateSchemaMeta (schemaName : SchemaName) (schemaKeys : Migratio
     let correlateTableObjects objectName object =
         match object with
         | OMTable tableObjects ->
-            match tableObjects.Table with
-            | None -> object
-            | Some (tableKeys, table) ->
-                let mutable idColumn = None
+            let mutable idColumn = None
 
-                let correlatePrimaryConstraint constrName (constrKeys, constr) =
-                    match constr with
-                    | CMPrimaryKey ([|idCol|], defer) ->
-                        idColumn <- Some idCol
-                        (Set.add primaryConstraintKey constrKeys, constr)
-                    | _ -> (constrKeys, constr)
-                
-                let constraints = Map.map correlatePrimaryConstraint tableObjects.Constraints
+            let correlatePrimaryConstraint constrName (constrKeys, constr) =
+                match constr with
+                | CMPrimaryKey ([|idCol|], defer) ->
+                    idColumn <- Some idCol
+                    (Set.add primaryConstraintKey constrKeys, constr)
+                | _ -> (constrKeys, constr)
+            
+            let constraints = Map.map correlatePrimaryConstraint tableObjects.Constraints
 
-                let tableColumns = table.Columns
-                let tableColumns =
-                    match idColumn with
-                    | None -> tableColumns
-                    | Some idName ->
-                        let correlateIdColumn name (keys, column : ColumnMeta) =
-                            if name = idName then
-                                match column.ColumnType with
-                                | CTPlain { DefaultExpr = Some (VEFunc (SQLName "nextval", [| VEValue (VRegclass { Schema = idSeqSchema; Name = idSeqName }) |])) }
-                                  when idSeqSchema = Some schemaName || (schemaName = SQLName "public" && idSeqSchema = None) ->
-                                    idSequences <- Map.add idSeqName objectName idSequences
-                                | _ -> ()
-                                (Set.add "id" keys, column)
-                            else
-                                (keys, column)
+            let tableColumns = tableObjects.TableColumns
+            let tableColumns =
+                match idColumn with
+                | None -> tableColumns
+                | Some idName ->
+                    let correlateIdColumn name (keys, column : ColumnMeta) =
+                        if name = idName then
+                            match column.ColumnType with
+                            | CTPlain { DefaultExpr = Some (VEFunc (SQLName "nextval", [| VEValue (VRegclass { Schema = idSeqSchema; Name = idSeqName }) |])) }
+                              when idSeqSchema = Some schemaName || (schemaName = SQLName "public" && idSeqSchema = None) ->
+                                idSequences <- Map.add idSeqName objectName idSequences
+                            | _ -> ()
+                            (Set.add "id" keys, column)
+                        else
+                            (keys, column)
 
-                        tableColumns |> Map.map correlateIdColumn
+                    tableColumns |> Map.map correlateIdColumn
 
-                let table =
-                    { table with
-                        Columns = table.Columns
-                    }
-                let tableObjects =
-                    { tableObjects with
-                        Table = Some (tableKeys, table)
-                        Constraints = constraints
-                    }
-                OMTable tableObjects
+            let tableObjects =
+                { tableObjects with
+                    TableColumns = tableColumns
+                    Constraints = constraints
+                }
+            OMTable tableObjects
         | _ -> object
 
     let relations = relations |> Map.map correlateTableObjects

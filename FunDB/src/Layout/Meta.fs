@@ -252,11 +252,10 @@ type private MetaBuilder (layout : Layout) =
                 let checkConstraintObjects = entity.CheckConstraints |> Map.toSeq |> Seq.collect (makeEntityCheckConstraint id)
                 let constraints = Seq.concat [idConstraints; subEntityConstraints; columnConstraints; checkConstraintObjects] |> Map.ofSeqUnique
 
-                let table =
-                    { Columns = Seq.concat [idColumns; subEntityColumns; userColumns; materializedFieldColumns] |> Map.ofSeq
-                    } : SQL.TableMeta
+                let columns =  Seq.concat [idColumns; subEntityColumns; userColumns; materializedFieldColumns] |> Map.ofSeq
                 let tableObjects =
-                    { Table = Some (Set.empty, table)
+                    { Table = Some Set.empty
+                      TableColumns = columns
                       Constraints = constraints
                       Triggers = Map.empty
                     } : SQL.TableObjectsMeta
@@ -305,11 +304,10 @@ type private MetaBuilder (layout : Layout) =
                 let checkConstraintObjects = entity.CheckConstraints |> Map.toSeq |> Seq.collect (makeEntityCheckConstraint modify)
                 let constraints = Seq.concat [checkConstraintObjects; columnConstraints] |> Map.ofSeqUnique
 
-                let table =
-                    { Columns = Seq.concat [userColumns; materializedFieldColumns] |> Map.ofSeq
-                    } : SQL.TableMeta
+                let columns = Seq.concat [userColumns; materializedFieldColumns] |> Map.ofSeq
                 let tableObjects =
-                    { Table = Some (Set.empty, table)
+                    { Table = Some Set.empty
+                      TableColumns = columns
                       Constraints = constraints
                       Triggers = Map.empty
                     } : SQL.TableObjectsMeta

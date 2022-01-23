@@ -453,12 +453,10 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                 |> Seq.mapMaybe (makeConstraintMeta tableName table.ColumnIds)
                 |> Seq.map (fun (constrName, constr) -> (constrName, (Set.empty, constr)))
                 |> Map.ofSeqUnique
-            
-            let ret =
-                { Columns = table.Columns
-                } : TableMeta
+
             let tableObjects =
-                { Table = Some (Set.empty, ret)
+                { Table = Some Set.empty
+                  TableColumns = table.Columns
                   Constraints = constraints
                   Triggers = table.Triggers
                 } : TableObjectsMeta

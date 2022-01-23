@@ -318,39 +318,23 @@ type TriggerDefinition =
     }
 
 [<NoEquality; NoComparison>]
-type TableMeta =
-    { Columns : MigrationObjectsMap<ColumnMeta>
-    }
-
-let emptyTableMeta = 
-    { Columns = Map.empty
-    } : TableMeta
-
-let unionTableMeta (a : TableMeta) (b : TableMeta) : TableMeta =
-    { Columns = Map.unionUnique a.Columns b.Columns
-    }
-
-[<NoEquality; NoComparison>]
 type TableObjectsMeta =
-    { Table : (MigrationKeysSet * TableMeta) option // it's `option` to allow for merging meta with added constraints and triggers.
+    { Table : MigrationKeysSet option
+      TableColumns : MigrationObjectsMap<ColumnMeta> // Allow to define columns separately from defining a table.
       Constraints : MigrationObjectsMap<ConstraintMeta>
       Triggers : MigrationObjectsMap<TriggerDefinition>
     }
 
 let emptyTableObjectsMeta : TableObjectsMeta =
     { Table = None
+      TableColumns = Map.empty
       Constraints = Map.empty
       Triggers = Map.empty
     }
 
-let unionTableObjectsMetaWithKeys (a : TableObjectsMeta) (b : TableObjectsMeta) : TableObjectsMeta =
-    { Table = Option.unionWith (fun (keysA, tableA) (keysB, tableB) -> (Set.union keysA keysB, unionTableMeta tableA tableB)) a.Table b.Table
-      Constraints = Map.unionUnique a.Constraints b.Constraints
-      Triggers = Map.unionUnique a.Triggers b.Triggers
-    }
-
 let unionTableObjectsMeta (a : TableObjectsMeta) (b : TableObjectsMeta) : TableObjectsMeta =
     { Table = Option.unionUnique a.Table b.Table
+      TableColumns = Map.unionUnique a.TableColumns b.TableColumns
       Constraints = Map.unionUnique a.Constraints b.Constraints
       Triggers = Map.unionUnique a.Triggers b.Triggers
     }
