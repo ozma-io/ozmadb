@@ -583,7 +583,7 @@ let private loadRestoredRows
                     let buildKeyAttrCheck (subkeyName, subkeySource) =
                         let keyIdExpr = getValueColumn subkeySource
                         let referenceFieldExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some thisKeyRef; Name = subkeyName } : ResolvedFieldExpr
-                        FENotDistinct (keyIdExpr, referenceFieldExpr)
+                        FEBinaryOp (keyIdExpr, BOEq, referenceFieldExpr)
 
                     let joinCheck = attrs |> Map.toSeq |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
                     let join =
@@ -634,7 +634,7 @@ let private loadRestoredRows
             let (fieldExpr, columns) = Map.find fieldName dataColumnExprs
 
             let sourceFieldRef = resolvedRefFieldExpr <| VRColumn { Entity = Some sourceRef; Name = fieldName } : ResolvedFieldExpr
-            FENotDistinct (fieldExpr, sourceFieldRef)
+            FEBinaryOp (fieldExpr, BOEq, sourceFieldRef)
 
         let joinCheck = key.Fields |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
         let sourceFrom = FEntity { fromEntity sourceRef with Only = true }
@@ -758,7 +758,7 @@ let private updateRestoredRows
         let updatedRef = compileResolvedEntityRef entity.Root : SQL.TableRef
         let updatedIdExpr = SQL.VEColumn { Table = Some updatedRef; Name = sqlFunId }
         let sourceIdExpr = SQL.VEColumn { Table = Some dataTableRef; Name = sqlFunId }
-        let idCheck = SQL.VENotDistinct (sourceIdExpr, updatedIdExpr)
+        let idCheck = SQL.VEBinaryOp (sourceIdExpr, SQL.BOEq, updatedIdExpr)
 
         let update =
             { SQL.updateExpr (SQL.operationTable updatedRef) with
