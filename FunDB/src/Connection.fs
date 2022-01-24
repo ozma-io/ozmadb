@@ -144,7 +144,7 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
     member this.NewAnonymousName (prefix : string) =
         let id = lastNameId
         lastNameId <- lastNameId + 1
-        sprintf "%s_%i" prefix id
+        sprintf "__%s_%i" prefix id
 
     member this.NewAnonymousSQLName (prefix : string) =
         SQL.SQLName (this.NewAnonymousName prefix)

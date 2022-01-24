@@ -653,21 +653,21 @@ let private loadRestoredRows
         let select = selectExpr (SSelect singleSelect)
         let (selectInfo, compiled) = compileSelectExpr layout arguments select
 
-        let tempTableName = connection.NewAnonymousSQLName "restored"
-        let tempTableRef = { Schema = None; Name = tempTableName } : SQL.TableRef
-        let tempTable =
-            { Table = tempTableRef
+        let dataTableName = connection.NewAnonymousSQLName "restored_data"
+        let dataTableRef = { Schema = None; Name = dataTableName } : SQL.TableRef
+        let dataTable =
+            { Table = dataTableRef
               Query = compiled
               Columns = None
               Temporary = Some { OnCommit = Some SQL.CADrop }
             } : SQL.CreateTableAsOperation
-        let! _ = connection.Connection.Query.ExecuteNonQuery (string tempTable) argumentValues cancellationToken
+        let! _ = connection.Connection.Query.ExecuteNonQuery (string dataTable) argumentValues cancellationToken
 
         // Check that for all non-NULL values references have been found.
         if not <| List.isEmpty checkNotNull then
-            do! checkNotNullData connection checkNotNull tempTableRef cancellationToken
+            do! checkNotNullData connection checkNotNull dataTableRef cancellationToken
 
-        return (tempTableRef, Map.keysSet dataColumnSources)
+        return (dataTableRef, Map.keysSet dataColumnSources)
     }
 
 let private insertRestoredRows
@@ -676,7 +676,8 @@ let private insertRestoredRows
         (entityRef : ResolvedEntityRef)
         (key : PreparedSaveRestoreKey)
         (availableColumns : Set<FieldName>)
-        (dataTableRef : SQL.TableRef)
+        (dataTableRef : SQL.TableRef) 
+        (idsTableRef : SQL.TableRef)
         (cancellationToken : CancellationToken) : Task =
     unitTask {
         let allFields = Seq.append key.Fields availableColumns |> Seq.toArray
@@ -711,12 +712,30 @@ let private insertRestoredRows
 
         let fields = Seq.append subEntityFields dataFields |> Seq.map (fun col -> (null, col)) |> Seq.toArray
         let insertedRef = compileResolvedEntityRef entity.Root : SQL.TableRef
-        let insert =
+        let idExpr = SQL.VEColumn { Table = None; Name = sqlFunId }
+        let innerInsert =
             { SQL.insertExpr (SQL.operationTable insertedRef) (SQL.ISSelect select) with
                 Columns = fields
+                Returning = [|SQL.SCExpr (None, idExpr)|]
             }
 
-        let! _ = connection.Connection.Query.ExecuteNonQuery (string insert) Map.empty cancellationToken
+        // Place inserted ids into given temporary table.
+        let auxName = SQL.SQLName "aux"
+        let auxRef = { Schema = None; Name = auxName } : SQL.TableRef
+        let idsSingleSelect =
+            { SQL.emptySingleSelectExpr with
+                Columns = [|SQL.SCAll None|]
+                From = Some <| SQL.FTable (SQL.fromTable auxRef)
+            }
+        let idsSelect = SQL.selectExpr (SQL.SSelect idsSingleSelect)
+
+        let idsCTE = { SQL.commonTableExpr (SQL.DEInsert innerInsert) with Materialized = Some true }
+        let outerSelect =
+            { SQL.insertExpr (SQL.operationTable idsTableRef) (SQL.ISSelect idsSelect) with
+                CTEs = Some <| SQL.commonTableExprs [|(auxName, idsCTE)|]
+                Columns = [|(null, sqlFunId)|]
+            }
+        let! _ = connection.Connection.Query.ExecuteNonQuery (string outerSelect) Map.empty cancellationToken
         ()
     }
 
@@ -726,38 +745,53 @@ let private updateRestoredRows
         (entityRef : ResolvedEntityRef)
         (availableColumns : Set<FieldName>)
         (dataTableRef : SQL.TableRef)
-        (cancellationToken : CancellationToken) : Task =
-    unitTask {
-        let getSourceColumn (fieldName : FieldName) =
-            let resultExpr = SQL.VEColumn { Table = Some dataTableRef; Name = compileName fieldName }
-            SQL.SCExpr (None, resultExpr)
-        let dataColumns = Seq.map getSourceColumn availableColumns |> Seq.toArray
-        
+        (cancellationToken : CancellationToken) : Task<SQL.TableRef> =
+    task {
         let entity = layout.FindEntity entityRef |> Option.get
+
+        let getAssignment (fieldName : FieldName) =
+            let field = Map.tryFind fieldName entity.ColumnFields |> Option.get
+            let resultExpr = SQL.VEColumn { Table = Some dataTableRef; Name = compileName fieldName }
+            SQL.UAESet (SQL.updateColumnName field.ColumnName, SQL.IVValue resultExpr)
+        let assignments = Seq.map getAssignment availableColumns |> Seq.toArray
 
         let updatedRef = compileResolvedEntityRef entity.Root : SQL.TableRef
         let updatedIdExpr = SQL.VEColumn { Table = Some updatedRef; Name = sqlFunId }
         let sourceIdExpr = SQL.VEColumn { Table = Some dataTableRef; Name = sqlFunId }
         let idCheck = SQL.VENotDistinct (sourceIdExpr, updatedIdExpr)
-        let singleSelect =
-            { SQL.emptySingleSelectExpr with
-                Columns = dataColumns
-                From = Some <| SQL.FTable (SQL.fromTable dataTableRef)
-                Where = Some idCheck
-            }
-        let select = SQL.selectExpr (SQL.SSelect singleSelect)
-
-        let getDataField (fieldName : FieldName) =
-            let field = Map.tryFind fieldName entity.ColumnFields |> Option.get
-            SQL.updateColumnName field.ColumnName
-        let dataFields = Seq.map getDataField availableColumns |> Seq.toArray
 
         let update =
             { SQL.updateExpr (SQL.operationTable updatedRef) with
-                Assignments = [|SQL.UAESelect (dataFields, select)|]
+                Assignments = assignments
+                From = Some <| SQL.FTable (SQL.fromTable dataTableRef)
+                Returning = [|SQL.SCExpr (None, updatedIdExpr)|]
+                Where = Some idCheck
             }
-        let! _ = connection.Connection.Query.ExecuteNonQuery (string update) Map.empty cancellationToken
-        ()
+
+        // Place updated ids into a separate temporary table.
+        let auxName = SQL.SQLName "aux"
+        let auxRef = { Schema = None; Name = auxName } : SQL.TableRef
+        let idsSingleSelect =
+            { SQL.emptySingleSelectExpr with
+                Columns = [|SQL.SCAll None|]
+                From = Some <| SQL.FTable (SQL.fromTable auxRef)
+            }
+        let idsCTE = { SQL.commonTableExpr (SQL.DEUpdate update) with Materialized = Some true }
+        let idsSelect =
+            { SQL.selectExpr (SQL.SSelect idsSingleSelect) with
+                CTEs = Some <| SQL.commonTableExprs [|(auxName, idsCTE)|]
+            }
+        let idsTableName = connection.NewAnonymousSQLName "restored_ids"
+        let idsTableRef = { Schema = None; Name = idsTableName } : SQL.TableRef
+        let idsTable =
+            { Table = idsTableRef
+              Query = idsSelect
+              Columns = None
+              Temporary = Some { OnCommit = Some SQL.CADrop }
+            } : SQL.CreateTableAsOperation
+        let! _ = connection.Connection.Query.ExecuteNonQuery (string idsTable) Map.empty cancellationToken
+
+        return idsTableRef
     }
 
 let private deleteNonRestoredRows
@@ -766,7 +800,7 @@ let private deleteNonRestoredRows
         (entityRef : ResolvedEntityRef)
         (key : PreparedSaveRestoreKey)
         (schemaId : int)
-        (maybeDataTableRef : SQL.TableRef option)
+        (maybeIdsTableRef : SQL.TableRef option)
         (cancellationToken : CancellationToken) : Task =
     unitTask {
         let (compiledSchemaArg, arguments) = addArgument schemaArg schemaArgType emptyArguments
@@ -800,16 +834,15 @@ let private deleteNonRestoredRows
 
         let deletedRef = relaxEntityRef entityRef
         let check =
-            match maybeDataTableRef with
+            match maybeIdsTableRef with
             | None -> check
-            | Some dataTableRef ->
-                let dataEntityRef = decompileTableRef dataTableRef
-                let sourceIdExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some dataEntityRef; Name = funId } : ResolvedFieldExpr
+            | Some idsTableRef ->
+                let idsEntityRef = decompileTableRef idsTableRef
+                let sourceIdExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some idsEntityRef; Name = funId } : ResolvedFieldExpr
                 let singleSelect =
                     { emptySingleSelectExpr with
                         Results = [|QRExpr <| queryColumnResult sourceIdExpr|]
-                        From = Some <| FEntity (fromEntity dataEntityRef)
-                        Where = Some <| FEIsNotNull sourceIdExpr
+                        From = Some <| FEntity (fromEntity idsEntityRef)
                     }
                 let select = selectExpr (SSelect singleSelect)
                 let deletedIdExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some deletedRef; Name = funId } : ResolvedFieldExpr
@@ -842,9 +875,9 @@ let private restoreOneCustomEntity
             return fun () -> deleteNonRestoredRows layout connection entityRef key schemaId None cancellationToken
         else
             let! (dataTableRef, availableColumns) = loadRestoredRows layout connection entityRef key schemaId rows cancellationToken
-            do! updateRestoredRows layout connection entityRef availableColumns dataTableRef cancellationToken
-            do! insertRestoredRows layout connection entityRef key availableColumns dataTableRef cancellationToken
-            return fun () -> deleteNonRestoredRows layout connection entityRef key schemaId (Some dataTableRef) cancellationToken
+            let! idsTableRef = updateRestoredRows layout connection entityRef availableColumns dataTableRef cancellationToken
+            do! insertRestoredRows layout connection entityRef key availableColumns dataTableRef idsTableRef cancellationToken
+            return fun () -> deleteNonRestoredRows layout connection entityRef key schemaId (Some idsTableRef) cancellationToken
     }
 
 let private restoreCustomEntity
