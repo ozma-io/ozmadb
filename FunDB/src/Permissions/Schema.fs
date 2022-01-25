@@ -17,16 +17,10 @@ type SchemaRolesException (message : string) =
     inherit Exception(message)
 
 let private makeSourceAllowedField (field : RoleColumnField) : SourceAllowedField =
-    { Insert = field.Insert || field.Change
+    { Insert = field.Insert
       Select = Option.ofObj field.Select
-      Update =
-        match field.Update with
-        | null -> if field.Change then Some "true" else None
-        | upd -> Some upd
-      Check =
-        match field.Check with
-        | null -> if field.Change then Some "true" else None
-        | check -> Some check
+      Update = Option.ofObj field.Update
+      Check = Option.ofObj field.Check
     }
 
 let private makeSourceAllowedEntity (entity : RoleEntity) : SourceAllowedEntity =

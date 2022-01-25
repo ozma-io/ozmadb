@@ -396,6 +396,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
     let coldRebuildFromDatabase (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<CachedState option> =
         task {
+            logger.LogInformation("Starting cold rebuild")
             match! getMigrationLock transaction cancellationToken with
             | false -> return None
             | true ->
