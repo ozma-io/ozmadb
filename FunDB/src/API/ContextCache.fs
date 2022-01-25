@@ -263,12 +263,13 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
         let isolate = jsIsolates.Get()
         try
-            let! (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, brokenViews, prefetchedViews, sourceViews) =
+            let! (transaction, currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, brokenViews, prefetchedViews, sourceViews) =
                 task {
                     try
                         let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
                         let (brokenAttrs, defaultAttrs) = resolveAttributes layout true sourceAttrs
                         let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+                        do! checkBrokenAttributes logger cacheParams.AllowAutoMark preload transaction brokenAttrs cancellationToken
 
                         let systemViews = preloadUserViews preload
                         let! sourceViews = buildSchemaUserViews transaction.System None cancellationToken
@@ -285,6 +286,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let (newBrokenTriggers, triggers) = testEvalTriggers jsApi true triggers
                         let brokenTriggers = unionErroredTriggers brokenTriggers newBrokenTriggers
                         let mergedTriggers = mergeTriggers layout triggers
+                        do! checkBrokenTriggers logger cacheParams.AllowAutoMark preload transaction brokenTriggers cancellationToken
 
                         let (brokenViews, sourceViews) = generateViews jsApi layout mergedTriggers sourceViews cancellationToken true
                         let! userViewsUpdate = updateUserViews transaction.System sourceViews cancellationToken
@@ -293,6 +295,18 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let (newBrokenViews, userViews) = resolveUserViews layout mergedAttrs true sourceViews
                         let brokenViews = unionErroredUserViews brokenViews newBrokenViews
 
+                        let jsApi = jsRuntime.GetValue isolate
+
+                        let! sourceActions = buildSchemaActions transaction.System None cancellationToken
+                        let (brokenActions, actions) = resolveActions layout true sourceActions
+                        let (newBrokenActions, actions) = testEvalActions jsApi true actions
+                        let brokenActions = unionErroredActions brokenActions newBrokenActions
+                        do! checkBrokenActions logger cacheParams.AllowAutoMark preload transaction brokenActions cancellationToken
+
+                        let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
+                        let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
+                        do! checkBrokenPermissions logger cacheParams.AllowAutoMark preload transaction brokenPerms cancellationToken
+
                         let! currentVersion = ensureCurrentVersion transaction (isChanged || not (updateResultIsEmpty userViewsUpdate)) cancellationToken
 
                         // To dry-run user views we need to stop the transaction.
@@ -300,7 +314,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let! (newBrokenViews, prefetchedViews) = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None sourceViews userViews cancellationToken
                         let brokenViews = unionErroredUserViews brokenViews newBrokenViews
                         let transaction = new DatabaseTransaction (transaction.Connection)
-                        return (transaction, currentVersion, jsRuntime, mergedAttrs, brokenAttrs, triggers, mergedTriggers, brokenTriggers, brokenViews, prefetchedViews, sourceViews)
+                        return (transaction, currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, brokenViews, prefetchedViews, sourceViews)
                     with
                     | ex ->
                         do! transaction.Rollback ()
@@ -322,22 +336,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                 return! finishColdRebuild transaction layout userMeta false cancellationToken
             else
                 try
-                    do! checkBrokenAttributes logger cacheParams.AllowAutoMark preload transaction brokenAttrs cancellationToken
-                    let jsApi = jsRuntime.GetValue isolate
-
-                    let! sourceActions = buildSchemaActions transaction.System None cancellationToken
-                    let (brokenActions, actions) = resolveActions layout true sourceActions
-                    let (newBrokenActions, actions) = testEvalActions jsApi true actions
-                    let brokenActions = unionErroredActions brokenActions newBrokenActions
-                    do! checkBrokenActions logger cacheParams.AllowAutoMark preload transaction brokenActions cancellationToken
-
-                    do! checkBrokenTriggers logger cacheParams.AllowAutoMark preload transaction brokenTriggers cancellationToken
                     do! checkBrokenUserViews logger cacheParams.AllowAutoMark preload transaction brokenViews cancellationToken
-
-                    let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
-                    let (brokenPerms, permissions) = resolvePermissions layout true sourcePermissions
-                    do! checkBrokenPermissions logger cacheParams.AllowAutoMark preload transaction brokenPerms cancellationToken
-
                     let! _ = transaction.Commit (cancellationToken)
 
                     let systemViews = filterSystemViews sourceViews
