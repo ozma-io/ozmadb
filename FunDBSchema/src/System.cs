@@ -116,6 +116,15 @@ namespace FunWithFlags.FunDBSchema.System
         public DbSet<Trigger> Triggers { get; set; } = null!;
 
         [Entity("id", InsertedInternally=true, IsFrozen=true)]
+        [Attributes.Index("transaction_id", new [] {"transaction_id"})]
+        [Attributes.Index("transaction_timestamp", new [] {"transaction_timestamp"})]
+        [Attributes.Index("type", new [] {"type"})]
+        [Attributes.Index("timestamp", new [] {"timestamp"})]
+        [Attributes.Index("user_name", new [] {"user_name"})]
+        [Attributes.Index("schema_name", new [] {"schema_name"})]
+        [Attributes.Index("entity_name", new [] {"entity_name"})]
+        [Attributes.Index("field_name", new [] {"field_name"})]
+        [Attributes.Index("entity_id", new [] {"entity_id"})]
         public DbSet<EventEntry> Events { get; set; } = null!;
 
         public SystemContext()
@@ -575,10 +584,6 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Type { get; set; } = null!;
-        [ColumnField("json", IsImmutable=true, Default="{type: 'api'}")]
-        [Column(TypeName = "jsonb")]
-        [Required]
-        public string Source { get; set; } = "";
         [ColumnField("string", IsImmutable=true)]
         public string? UserName { get; set; }
         [ColumnField("string", IsImmutable=true)]
@@ -589,6 +594,10 @@ namespace FunWithFlags.FunDBSchema.System
         public string? FieldName { get; set; }
         [ColumnField("int", IsImmutable=true)]
         public int? EntityId { get; set; }
+        [ColumnField("json", IsImmutable=true, Default="{type: 'api'}")]
+        [Column(TypeName = "jsonb")]
+        [Required]
+        public string Source { get; set; } = "";
         [ColumnField("string", IsImmutable=true)]
         public string? Error { get; set; }
         [ColumnField("string", IsImmutable=true)]
