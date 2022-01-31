@@ -258,7 +258,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                     event.Type <- "insertEntity"
                                     event.SchemaName <- entityRef.Schema.ToString()
                                     event.EntityName <- entityRef.Name.ToString()
-                                    event.EntityId <- Nullable newId
+                                    event.RowId <- Nullable newId
                                     event.Details <- JsonConvert.SerializeObject args
                                 )
                                 if entity.TriggersMigration then
@@ -294,7 +294,6 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 event.Type <- "insertEntities"
                                 event.SchemaName <- entityRef.Schema.ToString()
                                 event.EntityName <- entityRef.Name.ToString()
-                                event.EntityId <- Nullable()
                                 event.Details <- JsonConvert.SerializeObject details
                             )
                             if entity.TriggersMigration then
@@ -346,7 +345,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 event.Type <- "updateEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
                                 event.EntityName <- entityRef.Name.ToString()
-                                event.EntityId <- Nullable id
+                                event.RowId <- Nullable id
                                 event.Details <- JsonConvert.SerializeObject args
                             )
                             if entity.TriggersMigration then
@@ -377,7 +376,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.Type <- "updateEntity"
                         event.SchemaName <- entityRef.Schema.ToString()
                         event.EntityName <- entityRef.Name.ToString()
-                        event.EntityId <- entityId
+                        event.RowId <- entityId
                         event.Error <- "access_denied"
                         event.Details <- detailsPrefix + exceptionString ex
                     )
@@ -404,7 +403,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 event.Type <- "deleteEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
                                 event.EntityName <- entityRef.Name.ToString()
-                                event.EntityId <- Nullable id
+                                event.RowId <- Nullable id
                             )
                             if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
@@ -434,7 +433,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.Type <- "deleteEntity"
                         event.SchemaName <- entityRef.Schema.ToString()
                         event.EntityName <- entityRef.Name.ToString()
-                        event.EntityId <- entityId
+                        event.RowId <- entityId
                         event.Error <- "access_denied"
                         event.Details <- detailsPrefix + exceptionString ex
                     )
@@ -470,7 +469,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.Type <- "getRelatedEntities"
                         event.SchemaName <- entityRef.Schema.ToString()
                         event.EntityName <- entityRef.Name.ToString()
-                        event.EntityId <- entityId
+                        event.RowId <- entityId
                         event.Error <- "access_denied"
                         event.Details <- detailsPrefix + exceptionString ex
                     )

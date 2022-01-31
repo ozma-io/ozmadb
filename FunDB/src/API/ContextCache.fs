@@ -274,7 +274,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let systemViews = preloadUserViews preload
                         let! sourceViews = buildSchemaUserViews transaction.System None cancellationToken
                         let sourceViews = { Schemas = Map.union sourceViews.Schemas systemViews.Schemas } : SourceUserViews
-    
+
                         let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                         let modules = resolveModules layout sourceModules
 

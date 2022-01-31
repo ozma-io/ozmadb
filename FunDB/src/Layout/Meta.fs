@@ -243,7 +243,12 @@ type private MetaBuilder (layout : Layout) =
                 let makeColumn (name, field : ResolvedColumnField) =
                     let fieldRef = { Entity = entityRef; Name = name }
                     let (column, constrs) = makeColumnFieldMeta fieldRef entity field
-                    (field.ColumnName, Set.empty, column, constrs)
+                    let keys =
+                        if entityRef = { Schema = FunQLName "public"; Name = FunQLName "events" } && name = FunQLName "row_id" then
+                            Set.singleton "entity_id"
+                        else
+                            Set.empty
+                    (field.ColumnName, keys, column, constrs)
 
                 let columnObjects = entity.ColumnFields |> Map.toSeq |> Seq.map makeColumn |> Seq.cache
                 let userColumns = columnObjects |> Seq.map (fun (name, keys, column, constrs) -> (name, (keys, column)))

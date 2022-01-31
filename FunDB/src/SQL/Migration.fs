@@ -71,7 +71,7 @@ let private deleteBuildTableObjects (tableRef : TableRef) (tableObjects : TableO
                 | CMPrimaryKey _ -> 1
                 | _ -> 0
             yield (SODropConstraint (tableRef, constrName), isPrimaryKey)
-        
+
         for KeyValue(triggerName, (keys, trig)) in tableObjects.Triggers do
             yield (SODropTrigger (tableRef, triggerName), 0)
 
@@ -314,7 +314,7 @@ let private migrateTableObjects (tableRef : TableRef) (oldTableObjects : TableOb
                 if oldName <> newName then
                     yield (SORenameConstraint (tableRef, oldName, newName), 0)
             }
-        
+
         let dropOldConstraint name constr =
             let isPrimaryKey =
                 match constr with

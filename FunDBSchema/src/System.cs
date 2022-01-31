@@ -70,11 +70,6 @@ namespace FunWithFlags.FunDBSchema.System
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<UserView> UserViews { get; set; } = null!;
 
-        [Entity("name")]
-        [Attributes.Index("name", new [] {"lower(name)"}, IsUnique=true)]
-        [CheckConstraint("not_reserved", "name <> ''")]
-        public DbSet<User> Users { get; set; } = null!;
-
         [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
         [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
@@ -115,16 +110,20 @@ namespace FunWithFlags.FunDBSchema.System
         [UniqueConstraint("name", new [] {"schema_id", "trigger_entity_id", "name"}, IsAlternateKey=true)]
         public DbSet<Trigger> Triggers { get; set; } = null!;
 
+        [Entity("name")]
+        [Attributes.Index("name", new [] {"lower(name)"}, IsUnique=true)]
+        [CheckConstraint("not_reserved", "name <> ''")]
+        public DbSet<User> Users { get; set; } = null!;
+
         [Entity("id", InsertedInternally=true, IsFrozen=true)]
-        [Attributes.Index("transaction_id", new [] {"transaction_id"})]
+        // FIXME: temporary till we update admin template.
+        [ComputedField("entity_id", "row_id")]
         [Attributes.Index("transaction_timestamp", new [] {"transaction_timestamp"})]
         [Attributes.Index("type", new [] {"type"})]
         [Attributes.Index("timestamp", new [] {"timestamp"})]
         [Attributes.Index("user_name", new [] {"user_name"})]
-        [Attributes.Index("schema_name", new [] {"schema_name"})]
-        [Attributes.Index("entity_name", new [] {"entity_name"})]
-        [Attributes.Index("field_name", new [] {"field_name"})]
-        [Attributes.Index("entity_id", new [] {"entity_id"})]
+        [Attributes.Index("field", new [] {"schema_name", "entity_name", "field_name"})]
+        [Attributes.Index("row", new [] {"schema_name", "entity_name", "row_id"})]
         public DbSet<EventEntry> Events { get; set; } = null!;
 
         public SystemContext()
@@ -221,9 +220,11 @@ namespace FunWithFlags.FunDBSchema.System
     public class StateValue
     {
         public int Id { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("string")]
         [Required]
         public string Value { get; set; } = null!;
@@ -232,6 +233,7 @@ namespace FunWithFlags.FunDBSchema.System
     public class Schema
     {
         public int Id { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
@@ -249,21 +251,27 @@ namespace FunWithFlags.FunDBSchema.System
     public class Entity
     {
         public int Id { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("reference(public.schemas)", IsImmutable=true)]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
+
         [ColumnField("string")]
         public string? MainField { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool IsAbstract { get; set; }
 
         [ColumnField("bool", Default="false")]
         public bool IsFrozen { get; set; }
+
         [ColumnField("string")]
         public string? SaveRestoreKey { get; set; }
+
         [ColumnField("reference(public.entities)", IsImmutable=true)]
         public int? ParentId { get; set; }
         public Entity? Parent { get; set; }
@@ -278,9 +286,11 @@ namespace FunWithFlags.FunDBSchema.System
     public class ColumnField
     {
         public int Id { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("reference(public.entities) on delete cascade", IsImmutable=true)]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
@@ -288,10 +298,13 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Type { get; set; } = null!;
+
         [ColumnField("string")]
         public string? Default { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool IsNullable { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool IsImmutable { get; set; }
     }
@@ -299,16 +312,21 @@ namespace FunWithFlags.FunDBSchema.System
     public class ComputedField
     {
         public int Id { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("reference(public.entities) on delete cascade", IsImmutable=true)]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool IsVirtual { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool IsMaterialized { get; set; }
 
@@ -320,14 +338,18 @@ namespace FunWithFlags.FunDBSchema.System
     public class UniqueConstraint
     {
         public int Id { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool IsAlternateKey { get; set; }
+
         // Order is important here.
         [ColumnField("array(string)")]
         [Required]
@@ -337,12 +359,15 @@ namespace FunWithFlags.FunDBSchema.System
     public class CheckConstraint
     {
         public int Id { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Expression { get; set; } = null!;
@@ -351,37 +376,47 @@ namespace FunWithFlags.FunDBSchema.System
     public class Index
     {
         public int Id { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
+
         // Order is important here.
         [ColumnField("array(string)")]
         [Required]
         public string[] Expressions { get; set; } = null!;
+
         [ColumnField("array(string)", Default="array[]")]
         [Required]
         public string[] IncludedExpressions { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool IsUnique { get; set; }
+
         [ColumnField("string")]
         public string? Predicate { get; set; }
-       [ColumnField("enum('btree', 'gist', 'gin')", Default="'btree'")]
-       [Required]
+
+        [ColumnField("enum('btree', 'gist', 'gin')", Default="'btree'")]
+        [Required]
         public string Type { get; set; } = null!;
     }
 
     public class UserViewGenerator
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Script { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
     }
@@ -389,43 +424,35 @@ namespace FunWithFlags.FunDBSchema.System
     public class UserView
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Query { get; set; } = null!;
     }
 
-    public class User
-    {
-        public int Id { get; set; }
-        [ColumnField("string")]
-        [Required]
-        public string Name { get; set; } = null!;
-        [ColumnField("bool", Default="false")]
-        public bool IsRoot { get; set; }
-        [ColumnField("reference(public.roles) on delete set null")]
-        public int? RoleId { get; set; }
-        public Role? Role { get; set; }
-        [ColumnField("bool", Default="true")]
-        public bool IsEnabled { get; set; }
-    }
-
     public class Role
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
 
@@ -437,9 +464,11 @@ namespace FunWithFlags.FunDBSchema.System
     public class RoleParent
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.roles) on delete cascade")]
         public int RoleId { get; set; }
         public Role? Role { get; set; }
+
         [ColumnField("reference(public.roles)")]
         public int ParentId { get; set; }
         public Role? Parent { get; set; }
@@ -448,22 +477,30 @@ namespace FunWithFlags.FunDBSchema.System
     public class RoleEntity
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.roles)")]
         public int RoleId { get; set; }
         public Role? Role { get; set; }
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
+
         [ColumnField("bool", Default="false")]
         public bool Insert { get; set; }
+
         [ColumnField("string")]
         public string? Check { get; set; }
+
         [ColumnField("string")]
         public string? Select { get; set; }
+
         [ColumnField("string")]
         public string? Update { get; set; }
+
         [ColumnField("string")]
         public string? Delete { get; set; }
 
@@ -473,19 +510,25 @@ namespace FunWithFlags.FunDBSchema.System
     public class RoleColumnField
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.role_entities) on delete cascade")]
         public int RoleEntityId { get; set; }
         public RoleEntity? RoleEntity { get; set; }
+
         // FIXME: Make this ColumnField relation when we implement reference constraints.
         [ColumnField("string")]
         [Required]
         public string ColumnName { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool Insert { get; set; }
+
         [ColumnField("string")]
         public string? Select { get; set; }
+
         [ColumnField("string")]
         public string? Update { get; set; }
+
         [ColumnField("string")]
         public string? Check { get; set; }
     }
@@ -493,19 +536,25 @@ namespace FunWithFlags.FunDBSchema.System
     public class FieldAttributes
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int FieldEntityId { get; set; }
         public Entity? FieldEntity { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string FieldName { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
+
         [ColumnField("int", Default="0")]
         public int Priority { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Attributes { get; set; } = null!;
@@ -514,12 +563,15 @@ namespace FunWithFlags.FunDBSchema.System
     public class Module
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Path { get; set; } = null!;
+
         [ColumnField("string")]
         [Required]
         public string Source { get; set; } = null!;
@@ -528,14 +580,18 @@ namespace FunWithFlags.FunDBSchema.System
     public class Action
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Function { get; set; } = null!;
@@ -544,31 +600,60 @@ namespace FunWithFlags.FunDBSchema.System
     public class Trigger
     {
         public int Id { get; set; }
+
         [ColumnField("reference(public.schemas)")]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int TriggerEntityId { get; set; }
         public Entity? TriggerEntity { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
+
         [ColumnField("int", Default="0")]
         public int Priority { get; set; }
+
         [ColumnField("enum('BEFORE', 'AFTER')")]
         [Required]
         public string Time { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool OnInsert { get; set; }
+
         [ColumnField("array(string)", Default="array[]")]
         public string[] OnUpdateFields { get; set; } = null!;
+
         [ColumnField("bool", Default="false")]
         public bool OnDelete { get; set; }
+
         [ColumnField("string")]
         [Required]
         public string Procedure { get; set; } = null!;
+    }
+
+    public class User
+    {
+        public int Id { get; set; }
+
+        [ColumnField("string")]
+        [Required]
+        public string Name { get; set; } = null!;
+
+        [ColumnField("bool", Default="false")]
+        public bool IsRoot { get; set; }
+
+        [ColumnField("reference(public.roles) on delete set null")]
+        public int? RoleId { get; set; }
+        public Role? Role { get; set; }
+
+        [ColumnField("bool", Default="true")]
+        public bool IsEnabled { get; set; }
     }
 
     public class EventEntry
@@ -577,29 +662,40 @@ namespace FunWithFlags.FunDBSchema.System
 
         [ColumnField("int", IsImmutable=true, Default="-1")]
         public int TransactionId { get; set; }
+
         [ColumnField("datetime", IsImmutable=true)]
         public DateTime TransactionTimestamp { get; set; }
+
         [ColumnField("datetime", IsImmutable=true)]
         public DateTime Timestamp { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Type { get; set; } = null!;
+
         [ColumnField("string", IsImmutable=true)]
         public string? UserName { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         public string? SchemaName { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         public string? EntityName { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         public string? FieldName { get; set; }
+
         [ColumnField("int", IsImmutable=true)]
-        public int? EntityId { get; set; }
+        public int? RowId { get; set; }
+
         [ColumnField("json", IsImmutable=true, Default="{type: 'api'}")]
         [Column(TypeName = "jsonb")]
         [Required]
         public string Source { get; set; } = "";
+
         [ColumnField("string", IsImmutable=true)]
         public string? Error { get; set; }
+
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Details { get; set; } = "";

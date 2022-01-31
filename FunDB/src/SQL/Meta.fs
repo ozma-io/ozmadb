@@ -460,7 +460,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
                   Constraints = constraints
                   Triggers = table.Triggers
                 } : TableObjectsMeta
-            
+
             relations <- Map.addUnique tableName (OMTable tableObjects) relations
 
             ()

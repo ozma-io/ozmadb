@@ -502,7 +502,7 @@ let private loadRestoredRows
             let currField = Map.find fieldRef.Name currEntity.ColumnFields
             (fieldRef, currField)
         let columnsWithFields = allColumns |> Array.map (List.map lookupField)
-        
+
         let indexArgument = requiredArgument (FTScalar SFTInt)
 
         let getSourceRow (rowIndex : int, topRow : JObject) =
@@ -676,7 +676,7 @@ let private insertRestoredRows
         (entityRef : ResolvedEntityRef)
         (key : PreparedSaveRestoreKey)
         (availableColumns : Set<FieldName>)
-        (dataTableRef : SQL.TableRef) 
+        (dataTableRef : SQL.TableRef)
         (idsTableRef : SQL.TableRef)
         (cancellationToken : CancellationToken) : Task =
     unitTask {
@@ -686,7 +686,7 @@ let private insertRestoredRows
             let resultExpr = SQL.VEColumn { Table = None; Name = compileName fieldName }
             SQL.SCExpr (None, resultExpr)
         let dataColumns = Seq.map getSourceColumn allFields
-        
+
         let entity = layout.FindEntity entityRef |> Option.get
         let (subEntityFields, subEntityColumns) =
             if not <| hasSubType entity then

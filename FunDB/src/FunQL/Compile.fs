@@ -2318,7 +2318,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             } : SQL.JoinExpr
                         (where, SQL.FJoin joinExpr)
                 (where, Some fromExpr)
- 
+
         let entitiesMap = fromToEntitiesMap fromMap
         let from =
             if Map.isEmpty remappedPathsMap then
