@@ -96,6 +96,9 @@ type UserViewsAPI (api : IFunDBAPI) =
             | :? UserViewResolveException as ex when ex.IsUserException ->
                 logger.LogError(ex, "Failed to compile user view: {uv}", source)
                 return Error <| UVECompilation (exceptionString ex)
+            | :? UserViewDryRunException as ex when ex.IsUserException ->
+                logger.LogError(ex, "Failed to dry run user view: {uv}", source)
+                return Error <| UVEExecution (exceptionString ex)
         }
 
     member this.GetUserViewInfo (source : UserViewSource) (flags : UserViewFlags) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
