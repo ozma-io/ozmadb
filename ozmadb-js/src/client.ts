@@ -3,6 +3,7 @@ import {
   ITransaction, ITransactionResult, IActionRef, IActionResult, ArgumentName, IFieldRef,
   IDomainValuesResult, IViewExplainResult, IExplainedQuery, IExplainFlags, ISaveSchemasOptions,
   IRestoreSchemasOptions,
+  IPermissionsInfo,
 } from "./common";
 
 /*
@@ -244,5 +245,9 @@ export default class FunDBAPI {
       params.append("drop_others", "true");
     }
     await this.fetchSendFileApi(`layouts?${params}`, token, "PUT", "application/zip", data);
+  };
+
+  getPermissions = async (token: string | null): Promise<IPermissionsInfo> => {
+    return this.fetchJsonApi("permissions", token, "GET") as Promise<IPermissionsInfo>;
   };
 }

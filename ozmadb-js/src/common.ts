@@ -434,6 +434,10 @@ export interface IQueryChunk {
   where?: IChunkWhere;
 }
 
+export interface IPermissionsInfo {
+  isRoot: boolean;
+}
+
 /*
  * Helpful functions.
  */
