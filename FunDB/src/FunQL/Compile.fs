@@ -1051,12 +1051,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             match ctx with
             | RCExpr ->
                 let newColumn = SQL.VEColumn <| realColumn sqlFunSubEntity
-                let children = entity.Children |> Map.keys
-                let children =
+                let entities = entity.Children |> Map.keys |> Seq.append (Seq.singleton fieldRef.Entity)
+                let entities =
                     match ObjectMap.tryFindType<PossibleSubtypesMeta> extra with
-                    | None -> children
-                    | Some meta -> children |> Seq.filter (fun ref -> Seq.contains ref meta.PossibleSubtypes)
-                let expr = makeSubEntityParseExprFor layout newColumn children
+                    | None -> entities
+                    | Some meta -> entities |> Seq.filter (fun ref -> Seq.contains ref meta.PossibleSubtypes)
+                let expr = makeSubEntityParseExprFor layout newColumn entities
                 (paths0, expr)
             | RCTypeExpr ->
                 (paths0, SQL.VEColumn <| realColumn sqlFunSubEntity)
