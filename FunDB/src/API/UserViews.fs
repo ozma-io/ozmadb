@@ -82,7 +82,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                         if isNull uv then
                             return Error UVENotFound
                         else
-                            let! anon = ctx.ResolveAnonymousView rctx.IsPrivileged (Some ref.Schema) uv.Query
+                            let! anon = ctx.ResolveAnonymousView true (Some ref.Schema) uv.Query
                             return Ok <| applyFlags flags anon
                     else
                         match ctx.UserViews.Find ref with
