@@ -66,7 +66,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, flags : E
           AllowBroken = uv.AllowBroken
         }
 
-    let resolveUserViewsSchema (schema : SourceUserViewsSchema) : Result<HalfResolvedSchema, UserViewsSchemaError> =
+    let resolveUserViewsSchema (schemaName : SchemaName) (schema : SourceUserViewsSchema) : Result<HalfResolvedSchema, UserViewsSchemaError> =
         let mapUserView name uv =
             try
                 checkName name
@@ -93,7 +93,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, flags : E
             try
                 if not <| Map.containsKey name layout.Schemas then
                     raisef UserViewResolveException "Unknown schema name"
-                resolveUserViewsSchema schema
+                resolveUserViewsSchema name schema
             with
             | e -> raisefWithInner UserViewResolveException e "In schema %O" name
         uvs.Schemas |> Map.map mapSchema

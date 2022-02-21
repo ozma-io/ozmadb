@@ -259,7 +259,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
                 try
                     let ref = { Schema = schemaName; Name = name }
                     match maybeUv with
-                    | Error e -> return None
+                    | Error e -> return Some (name, Error e)
                     | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
                     | Ok uv ->
                         try
