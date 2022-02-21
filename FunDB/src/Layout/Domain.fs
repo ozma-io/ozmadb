@@ -106,6 +106,7 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                         { Ref = { Entity = refEntityRef; Name = funId }
                           Immediate = true
                           Path = [||]
+                          IsInner = true
                         } : BoundFieldMeta
                     let newFieldInfo =
                         { Bound = Some newBoundInfo
@@ -121,6 +122,7 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                         { Ref = { Entity = firstEntityRef; Name = firstArrow.Name }
                           Immediate = true
                           Path = Array.skip 1 boundInfo.Path
+                          IsInner = true
                         } : BoundFieldMeta
                     let newFieldInfo =
                         { Bound = Some newBoundInfo
@@ -143,8 +145,8 @@ let private queryHash (expr : SQL.SelectExpr) : string =
     expr |> string |> Hash.sha1OfString |> String.hexBytes
 
 let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
-    let idExpr = makeSingleFieldExpr refEntityRef { Entity = Some referencedEntityRef; Name = funId }
-    let mainExpr = makeSingleFieldExpr refEntityRef { Entity = Some referencedEntityRef; Name = funMain }
+    let idExpr = makeSingleFieldExpr refEntityRef false { Entity = Some referencedEntityRef; Name = funId }
+    let mainExpr = makeSingleFieldExpr refEntityRef false { Entity = Some referencedEntityRef; Name = funMain }
     let mainSortColumn =
         { Expr = mainExpr
           Order = None

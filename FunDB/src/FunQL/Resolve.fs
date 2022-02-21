@@ -42,6 +42,7 @@ type private BoundFieldHeader =
       Key : FromFieldKey
       // Means that field is selected directly from an entity and not from a subexpression.
       Immediate : bool
+      IsInner : bool
     }
 
 [<NoEquality; NoComparison>]
@@ -167,7 +168,7 @@ let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef :
         explodeFieldRef { Entity = maybeEntityRef; Name = fieldName } |> Seq.map (fun x -> (x, value))
     fields |> Map.toSeq |> Seq.collect explodeVariations |> Map.ofSeq
 
-let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEntityId) (maybeEntityRef : EntityRef option) (parentRef : ResolvedEntityRef) (children : ResolvedEntityRef seq) : FieldMapping =
+let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEntityId) (isInner : bool) (maybeEntityRef : EntityRef option) (parentRef : ResolvedEntityRef) (children : ResolvedEntityRef seq) : FieldMapping =
     let filterField (name : FieldName, field : ResolvedFieldBits) =
         match field with
         | RColumnField f when Option.isNone f.InheritedFrom -> Some name
@@ -185,6 +186,7 @@ let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntit
                   Name = name
                   Key = key
                   Immediate = true
+                  IsInner = isInner
                 }
             explodeResolvedFieldRef { Entity = parentRef; Name = name } |> Seq.map (fun x -> (x, header))
         let headerToResolved header =
@@ -197,7 +199,7 @@ let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntit
         entity.Fields |> Seq.mapMaybe filterField |> Seq.collect expandName |> Seq.map (fun (ref, header) -> (ref, headerToResolved header))
     children |> Seq.collect mapEntity |> Map.ofSeq
 
-let private customToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEntityId) (mapping : CustomFromMapping) : FieldMapping =
+let private customToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEntityId) (isInner : bool) (mapping : CustomFromMapping) : FieldMapping =
     let makeBoundField (boundRef : ResolvedFieldRef) =
         let entity = layout.FindEntity boundRef.Entity |> Option.get
         let field = entity.FindField boundRef.Name |> Option.get
@@ -210,6 +212,7 @@ let private customToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEnti
               Name = boundRef.Name
               Key = key
               Immediate = true
+              IsInner = isInner
             }
         { Header = header
           Ref = boundRef
@@ -447,6 +450,8 @@ type BoundFieldMeta =
       // Of length `ref.Path`, contains reference entities given current type context, starting from the first referenced entity.
       // `[Ref] + Path` is the full list of used references, starting from the first one.
       Path : ResolvedEntityRef[]
+      // Set if source entity is joined as INNER (that is, it's impossible for its `id` to be NULL).
+      IsInner : bool
     }
 
 type FieldMeta =
@@ -546,6 +551,7 @@ type private ResolvedExprInfo =
 
 type private FromEntityIdMeta =
     { Id : FromEntityId
+      IsInner : bool
     }
 
 let private failCte (name : EntityName) =
@@ -869,25 +875,30 @@ type private FromEntityMappingInfo =
     }
 
 type FromEntityMeta =
-    { TypeContext : TypeContext
+    { TypeContext : TypeContext option
+      Id : int
+      IsInner : bool
+    }
+
+type private FromMappingFlags =
+    { WithoutChildren : bool
+      AllowHidden : bool
+      IsInner : bool
     }
 
 let rec private relabelFromExprType (typeContexts : TypeContextsMap) = function
     | FEntity entity ->
-        let extra =
-            match ObjectMap.tryFindType<FromEntityIdMeta> entity.Extra with
-            | None -> ObjectMap.empty
-            | Some idMeta ->
-                let key =
-                    { FromId = FIEntity idMeta.Id
-                      Path = []
-                    }
-                match Map.tryFind key typeContexts with
-                | None -> ObjectMap.empty
-                | Some ctx ->
-                    let ctxMeta = { TypeContext = ctx } : FromEntityMeta
-                    ObjectMap.singleton ctxMeta
-        FEntity { entity with Extra = extra }
+        let idMeta = ObjectMap.findType<FromEntityIdMeta> entity.Extra
+        let key =
+            { FromId = FIEntity idMeta.Id
+              Path = []
+            }
+        let ctxMeta =
+            { TypeContext = Map.tryFind key typeContexts
+              Id = idMeta.Id
+              IsInner = idMeta.IsInner
+            } : FromEntityMeta
+        FEntity { entity with Extra = ObjectMap.singleton ctxMeta }
     | FJoin join ->
         let a = relabelFromExprType typeContexts join.A
         let b = relabelFromExprType typeContexts join.B
@@ -959,9 +970,9 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         | Some entity when not entity.IsHidden || allowHidden -> entity
         | _ -> raisef ViewResolveException "Entity not found: %O" ref
 
-    let createFromMapping (fromEntityId : FromEntityId) (entityRef : ResolvedEntityRef) (pun : (EntityRef option) option) (withoutChildren : bool) (allowHidden : bool) : FieldMapping =
-        let entity = findEntityByRef entityRef allowHidden
-        if withoutChildren && entity.IsAbstract then
+    let createFromMapping (fromEntityId : FromEntityId) (entityRef : ResolvedEntityRef) (pun : (EntityRef option) option) (flags : FromMappingFlags) : FieldMapping =
+        let entity = findEntityByRef entityRef flags.AllowHidden
+        if flags.WithoutChildren && entity.IsAbstract then
             raisef ViewResolveException "Abstract entity cannot be selected as ONLY"
 
         let key =
@@ -975,6 +986,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                   Name = name
                   Key = key
                   Immediate = true
+                  IsInner = flags.IsInner
                 }
             Some
                 { Header = header
@@ -992,6 +1004,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
               ParentEntity = entityRef
               Name = entity.MainField
               Immediate = true
+              IsInner = flags.IsInner
             }
         let mainBoundField =
             { Header = mainHeader
@@ -1007,10 +1020,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             | None -> Some <| relaxEntityRef entityRef
             | Some punRef -> punRef
         let mapping = fieldsToFieldMapping fromEntityId mappingRef fields
-        if withoutChildren then
+        if flags.WithoutChildren then
             mapping
         else
-            let extraMapping = typeRestrictedFieldsToFieldMapping layout fromEntityId mappingRef entityRef (entity.Children |> Map.keys)
+            let extraMapping = typeRestrictedFieldsToFieldMapping layout fromEntityId flags.IsInner mappingRef entityRef (entity.Children |> Map.keys)
             Map.union extraMapping mapping
 
     let resolvePath (typeCtxs : TypeContextsMap) (firstOldBoundField : OldBoundField) (fullPath : PathArrow list) : BoundField list =
@@ -1053,6 +1066,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                           ParentEntity = entityRef
                           Name = ref.Name
                           Immediate = false
+                          IsInner = boundField.Header.IsInner
                         }
                     let nextBoundField = getBoundField (OBHeader refHeader)
                     let boundFields = traverse nextBoundField refs
@@ -1109,6 +1123,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                         { Ref = outer.Ref
                           Immediate = outer.Header.Immediate
                           Path = boundPath
+                          IsInner = outer.Header.IsInner
                         }
                     (Some outer, Some (inner, boundInfo))
                 | None -> (None, None)
@@ -1155,6 +1170,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                               ParentEntity = parentEntity
                               Name = firstArrow.Name
                               Immediate = false
+                              IsInner = false
                             }
                         let outer : BoundField =
                             { Header = argHeader
@@ -1183,7 +1199,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             }
 
     let resolveLimitFieldExpr (expr : ParsedFieldExpr) : ResolvedFieldExpr =
-        let resolveReference : LinkedFieldRef -> LinkedBoundFieldRef = function
+        let resolveRef : LinkedFieldRef -> LinkedBoundFieldRef = function
             | { Ref = VRPlaceholder name; Path = [||] } as ref ->
                 if Map.containsKey name arguments then
                     { Ref = ref; Extra = ObjectMap.empty }
@@ -1192,7 +1208,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             | ref -> raisef ViewResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
         let voidSubEntity field subEntity = raisef ViewResolveException "Forbidden type assertion in LIMIT or OFFSET"
         let mapper =
-            { onlyFieldExprMapper resolveReference with
+            { onlyFieldExprMapper resolveRef with
                   SubEntity = voidSubEntity
             }
         try
@@ -1212,7 +1228,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 | Failure msg -> raisef ViewResolveException "Clashing names: %s" msg
             renameFields fieldNames results
 
-    let fromEntityMapping (ctx : Context) (entity : ParsedFromEntity) : FromEntityMappingInfo =
+    let fromEntityMapping (ctx : Context) (isInner : bool) (entity : ParsedFromEntity) : FromEntityMappingInfo =
         match entity.Ref with
         | { Schema = Some schemaName; Name = entityName } ->
             if entity.AsRoot then
@@ -1225,7 +1241,12 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 match entity.Alias with
                 | None -> None
                 | Some punName -> Some ({ Schema = None; Name = punName } : EntityRef)
-            let mapping = createFromMapping fromEntityId resRef (Option.map Some punRef) entity.Only false
+            let mappingFlags =
+                { WithoutChildren = entity.Only
+                  AllowHidden = false
+                  IsInner = isInner
+                }
+            let mapping = createFromMapping fromEntityId resRef (Option.map Some punRef) mappingFlags
             let mappingRef = Option.defaultValue entity.Ref punRef
             let typeContextsMap =
                 if entity.Only then
@@ -1696,7 +1717,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             match query.From with
             | None -> (ctx, None)
             | Some from ->
-                let (info, res) = resolveFromExpr ctx Map.empty flags from
+                let (info, res) = resolveFromExpr ctx Map.empty true flags from
                 let ctx = { ctx with FieldMaps = info.Fields :: ctx.FieldMaps; Types = Map.union ctx.Types info.Types }
                 (ctx, Some res)
         let (whereTypes, qWhere) =
@@ -1736,9 +1757,9 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         (newFields, newQuery)
 
     // Set<EntityName> here is used to check uniqueness of puns.
-    and resolveFromExpr (ctx : Context) (fieldMapping : FieldMapping) (flags : SelectFlags) : ParsedFromExpr -> FromExprInfo * ResolvedFromExpr = function
+    and resolveFromExpr (ctx : Context) (fieldMapping : FieldMapping) (isInner : bool) (flags : SelectFlags) : ParsedFromExpr -> FromExprInfo * ResolvedFromExpr = function
         | FEntity entity ->
-            let entityInfo = fromEntityMapping ctx entity
+            let entityInfo = fromEntityMapping ctx isInner entity
             let fieldMapping = Map.unionWith (fun _ -> unionFieldMappingValue) fieldMapping entityInfo.Fields
             let retInfo =
                 { Fields = fieldMapping
@@ -1747,12 +1768,21 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 }
             let extra =
                 { Id = entityInfo.Id
+                  IsInner = isInner
                 } : FromEntityIdMeta
             let newEntity = { entity with Extra = ObjectMap.singleton extra }
             (retInfo, FEntity newEntity)
         | FJoin join ->
-            let (infoA, newA) = resolveFromExpr ctx fieldMapping flags join.A
-            let (infoB, newB) = resolveFromExpr ctx infoA.Fields flags join.B
+            let isInner1 =
+                match join.Type with
+                | Left | Inner -> isInner
+                | _ -> false
+            let (infoA, newA) = resolveFromExpr ctx fieldMapping isInner1 flags join.A
+            let isInner2 =
+                match join.Type with
+                | Right | Inner -> isInner
+                | _ -> false
+            let (infoB, newB) = resolveFromExpr ctx infoA.Fields isInner2 flags join.B
 
             let names =
                 try
@@ -1862,7 +1892,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 let (resolveCte, newCtes) = resolveCommonTableExprs ctx flags ctes
                 let ctx = { ctx with ResolveCTE = resolveCte }
                 (ctx, Some newCtes)
-        let entityInfo = fromEntityMapping emptyContext update.Entity
+        let entityInfo = fromEntityMapping emptyContext true update.Entity
 
         let entityRef = resolveEntityRef update.Entity.Ref
         let entity = findEntityByRef entityRef false
@@ -1871,7 +1901,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             match update.From with
             | None -> (entityInfo.Fields, Map.empty, None)
             | Some from ->
-                let (info, newFrom) = resolveFromExpr ctx entityInfo.Fields flags from
+                let (info, newFrom) = resolveFromExpr ctx entityInfo.Fields true flags from
                 match info.Names |> Seq.tryFind (fun fromRef -> fromRef.Name = entityInfo.Name.Name) with
                 | Some clashingRef -> raisef ViewResolveException "FROM source %O clashes with updated entity or alias" clashingRef.Name
                 | None -> ()
@@ -1935,12 +1965,12 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 let (resolveCte, newCtes) = resolveCommonTableExprs ctx flags ctes
                 let ctx = { ctx with ResolveCTE = resolveCte }
                 (ctx, Some newCtes)
-        let entityInfo = fromEntityMapping emptyContext delete.Entity
+        let entityInfo = fromEntityMapping emptyContext true delete.Entity
         let (fieldMapping, typeContexts, using) =
             match delete.Using with
             | None -> (entityInfo.Fields, Map.empty, None)
             | Some from ->
-                let (info, newFrom) = resolveFromExpr ctx entityInfo.Fields flags from
+                let (info, newFrom) = resolveFromExpr ctx entityInfo.Fields true flags from
                 (info.Fields, info.Types, Some newFrom)
         let ctx =
             { ctx with
@@ -1988,8 +2018,14 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
     member this.ResolveSingleFieldExpr (fromEntityId : FromEntityId) (fromMapping : SingleFromMapping) expr =
         let mapping =
             match fromMapping with
-            | SFEntity ref -> createFromMapping fromEntityId ref None false true
-            | SFCustom custom -> customToFieldMapping layout fromEntityId custom
+            | SFEntity ref ->
+                let flags =
+                    { IsInner = true
+                      AllowHidden = true
+                      WithoutChildren = false
+                    }
+                createFromMapping fromEntityId ref None flags
+            | SFCustom custom -> customToFieldMapping layout fromEntityId true custom
         let context =
             { ResolveCTE = failCte
               FieldMaps = [mapping]
@@ -2247,7 +2283,7 @@ let resolveCommandExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (cmd
       Privileged = qualifier.Privileged
     }
 
-let makeSingleFieldExpr (boundEntityRef : ResolvedEntityRef) (fieldRef : FieldRef) : ResolvedFieldExpr =
+let makeSingleFieldExpr (boundEntityRef : ResolvedEntityRef) (isInner : bool) (fieldRef : FieldRef) : ResolvedFieldExpr =
     let boundInfo =
         { Ref =
             { Entity = boundEntityRef
@@ -2255,6 +2291,7 @@ let makeSingleFieldExpr (boundEntityRef : ResolvedEntityRef) (fieldRef : FieldRe
             }
           Immediate = true
           Path = [||]
+          IsInner = isInner
         } : BoundFieldMeta
     let fieldInfo =
         { Bound = Some boundInfo

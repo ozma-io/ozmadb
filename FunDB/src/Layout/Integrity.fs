@@ -70,6 +70,7 @@ let private expandMaterializedField (layout : Layout) (fieldRef : ResolvedFieldR
                     { Ref = { fieldRef with Name = funSubEntity }
                       Immediate = true
                       Path = [||]
+                      IsInner = true
                     }
               FromEntityId = localExprFromEntityId
               ForceSQLName = None

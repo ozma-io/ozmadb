@@ -142,7 +142,7 @@ type private MetaBuilder (layout : Layout) =
         let rootInfo = Option.get field.Root
         let columnType =
             if rootInfo.IsLocal then
-                let resolved = makeSingleFieldExpr ref.Entity { Entity = None; Name = ref.Name }
+                let resolved = makeSingleFieldExpr ref.Entity true { Entity = None; Name = ref.Name }
                 let (arguments, compiled) = compileSingleFieldExpr layout materializedCompilationFlags emptyArguments resolved
                 SQL.CTGeneratedStored compiled
             else

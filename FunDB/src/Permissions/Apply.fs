@@ -244,6 +244,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
             { Ref = fieldRef
               Immediate = true
               Path = [||]
+              IsInner = true
             } : BoundFieldMeta
         let fieldInfo =
             { Bound = Some boundInfo

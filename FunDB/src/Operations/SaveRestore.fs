@@ -293,6 +293,7 @@ let private saveOneCustomEntity
                             { Ref = { Entity = entityRef; Name = fieldRef.Name }
                               Immediate = true
                               Path = boundPath
+                              IsInner = false
                             }
                       FromEntityId = 0
                       ForceSQLName = None
@@ -817,6 +818,7 @@ let private deleteNonRestoredRows
             { Ref = schemaKey
               Immediate = true
               Path = boundPath
+              IsInner = false
             } : BoundFieldMeta
         let newFieldInfo =
             { Bound = Some newBoundInfo
