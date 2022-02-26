@@ -144,9 +144,9 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
 let private queryHash (expr : SQL.SelectExpr) : string =
     expr |> string |> Hash.sha1OfString |> String.hexBytes
 
-let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
-    let idExpr = makeSingleFieldExpr refEntityRef false { Entity = Some referencedEntityRef; Name = funId }
-    let mainExpr = makeSingleFieldExpr refEntityRef false { Entity = Some referencedEntityRef; Name = funMain }
+let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (isInner : bool) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
+    let idExpr = makeSingleFieldExpr refEntityRef isInner { Entity = Some referencedEntityRef; Name = funId }
+    let mainExpr = makeSingleFieldExpr refEntityRef isInner { Entity = Some referencedEntityRef; Name = funMain }
     let mainSortColumn =
         { Expr = mainExpr
           Order = None
@@ -177,7 +177,7 @@ let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : 
 
 let private compileGenericReferenceOptionsSelect (layout : Layout) (fieldRef : ResolvedFieldRef) (refEntityRef : ResolvedEntityRef) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
     let from = FEntity { fromEntity (relaxEntityRef refEntityRef) with Alias = Some referencedName }
-    compileReferenceOptionsSelectFrom layout refEntityRef emptyArguments from where
+    compileReferenceOptionsSelectFrom layout refEntityRef emptyArguments from true where
 
 let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRef : ResolvedEntityRef) (fieldName : FieldName) (refEntityRef : ResolvedEntityRef) (extraWhere : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
     let rowFrom = FEntity { fromEntity (relaxEntityRef entityRef) with Alias = Some rowName }
@@ -197,7 +197,7 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
     let argRef = resolvedRefFieldExpr <| VRPlaceholder placeholder
     let where = FEBinaryOp (idCol, BOEq, argRef)
     let where = Option.addWith (curry FEAnd) where extraWhere
-    compileReferenceOptionsSelectFrom layout refEntityRef arguments (FJoin join) (Some where)
+    compileReferenceOptionsSelectFrom layout refEntityRef arguments (FJoin join) false (Some where)
 
 // For now, we only build domains based on immediate check constraints.
 // For example, for check constraint `user_id=>account_id=>balance > 0` we restrict `user_id` based on that.
