@@ -97,11 +97,15 @@ let private mergePrefetchedViewsSchema (a : PrefetchedViewsSchema) (b : Prefetch
     { UserViews = Map.unionUnique a.UserViews b.UserViews }
 
 let mergePrefetchedUserViews (a : PrefetchedUserViews) (b : PrefetchedUserViews) =
-    let mergeOne a b =
+    let mergeOne name a b =
         match (a, b) with
-        | (Ok schema1, Ok schema2) -> Ok (mergePrefetchedViewsSchema schema1 schema2)
+        | (Ok schema1, Ok schema2) ->
+            try
+                Ok (mergePrefetchedViewsSchema schema1 schema2)
+            with
+            | Failure e -> failwithf "Error in schema %O: %s" name e
         | _ -> failwith "Cannot merge different error types"
-    { Schemas = Map.unionWith (fun name -> mergeOne) a.Schemas b.Schemas }
+    { Schemas = Map.unionWith mergeOne a.Schemas b.Schemas }
 
 type UserViewDryRunException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
@@ -251,7 +255,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
                 return raisefWithInner UserViewDryRunException err "Test execution error"
         }
 
-    let resolveUserViewsSchema (schemaName : SchemaName) (sourceSchema : SourceUserViewsSchema) (schema : UserViewsSchema) : Task<Map<UserViewName, exn> * PrefetchedViewsSchema> = task {
+    let resolveUserViewsSchema (schemaName : SchemaName) (schema : UserViewsSchema) : Task<Map<UserViewName, exn> * PrefetchedViewsSchema> = task {
         let mutable errors = Map.empty
 
         let mapUserView (name, maybeUv : Result<ResolvedUserView, exn>) =
@@ -259,6 +263,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
                 try
                     let ref = { Schema = schemaName; Name = name }
                     match maybeUv with
+                    | Error e when not (withThisBroken true) -> return None
                     | Error e -> return Some (name, Error e)
                     | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
                     | Ok uv ->
@@ -287,7 +292,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
             | Ok schema ->
                 task {
                     try
-                        let! (schemaErrors, newSchema) = resolveUserViewsSchema name (Map.find name source.Schemas) schema
+                        let! (schemaErrors, newSchema) = resolveUserViewsSchema name schema
                         if not <| Map.isEmpty schemaErrors then
                             errors <- Map.add name (UEUserViews schemaErrors) errors
                         return Ok newSchema
