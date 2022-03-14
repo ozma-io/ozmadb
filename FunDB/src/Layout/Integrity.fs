@@ -199,7 +199,7 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
                     }
               Options =
                 Map.ofList
-                    [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "column_of_type_assertion"))
+                    [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "check_violation"))
                       (PLPgSQL.ROColumn, SQL.VEValue (SQL.VString <| fromFieldRef.Name.ToString()))
                       (PLPgSQL.ROTable, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Name.ToString()))
                       (PLPgSQL.ROSchema, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Schema.ToString()))
@@ -571,7 +571,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
                 }
           Options =
             Map.ofList
-                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "outer_check_constraint_assertion"))
+                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "check_violation"))
                   (PLPgSQL.ROTable, SQL.VEValue (constrRef.Entity.Name |> string |> SQL.VString))
                   (PLPgSQL.ROSchema, SQL.VEValue (constrRef.Entity.Schema |> string |> SQL.VString))
                 ]
@@ -682,7 +682,7 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
                 }
           Options =
             Map.ofList
-                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "inner_check_constraint_assertion"))
+                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "check_violation"))
                   (PLPgSQL.ROTable, SQL.VEValue (constrRef.Entity.Name |> string |> SQL.VString))
                   (PLPgSQL.ROSchema, SQL.VEValue (constrRef.Entity.Schema |> string |> SQL.VString))
                 ]
