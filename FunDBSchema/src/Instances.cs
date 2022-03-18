@@ -49,7 +49,7 @@ namespace FunWithFlags.FunDBSchema.Instances
         public string Owner { get; set; } = null!;
         [Required]
         public string Host { get; set; } = null!;
-         public int Port { get; set; }
+        public int Port { get; set; }
         [Required]
         public string Username { get; set; } = null!;
         [Required]
