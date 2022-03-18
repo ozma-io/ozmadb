@@ -183,7 +183,7 @@ type private MetaBuilder (layout : Layout) =
         let makeMaterializedComputedField (name, maybeField) =
             match maybeField with
             | Ok field ->
-                if not field.IsMaterialized || Option.isNone field.Root then
+                if not field.IsMaterialized || Option.isNone field.Root || Option.isSome field.InheritedFrom then
                     None
                 else
                     let fieldRef = { Entity = entityRef; Name = name }

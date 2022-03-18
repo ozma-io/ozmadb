@@ -44,13 +44,12 @@ namespace FunWithFlags.FunDBSchema.Instances
         [Required]
         public string Name { get; set; } = null!;
         public bool Enabled { get; set; }
-        [DefaultValue(true)]
-        public bool Published { get; set; }
+        public bool Published { get; set; } = true;
         [Required]
         public string Owner { get; set; } = null!;
         [Required]
         public string Host { get; set; } = null!;
-        public int Port { get; set; }
+         public int Port { get; set; }
         [Required]
         public string Username { get; set; } = null!;
         [Required]

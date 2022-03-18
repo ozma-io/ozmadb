@@ -112,7 +112,7 @@ type private AssertionsBuilder (layout : Layout) =
                 yield! columnFieldAssertions ref col
             for KeyValue (compName, maybeComp) in entity.ComputedFields do
                 match maybeComp with
-                | Ok ({ IsMaterialized = true; Root = Some { IsLocal = false } } as comp) ->
+                | Ok ({ IsMaterialized = true; Root = Some { IsLocal = false }; InheritedFrom = None } as comp) ->
                     let ref = { Entity = entityRef; Name = compName }
                     yield
                         { emptyLayoutAssertions with
@@ -159,6 +159,7 @@ let private sqlPlainId : SQL.ColumnRef = { Table = None; Name = sqlFunId }
 let private returnNullStatement = PLPgSQL.StReturn (SQL.VEValue SQL.VNull)
 
 let private plainSubEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
+let private newSubEntityColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = sqlFunSubEntity }
 
 type private CheckTriggerOptions =
     { FunctionName : SQL.SQLName
@@ -593,14 +594,9 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
     let functionName = SQL.SQLName <| sprintf "__out_chcon_check__%s__%s" entity.HashName constr.HashName
     let functionOverloads = Map.singleton [||] functionDefinition
 
-    let checkExpr = makeCheckExpr plainSubEntityColumn layout constrRef.Entity
-
     let updateCheck = buildUpdateCheck layout (Map.toSeq outerFields)
-    let updateCheck =
-        match checkExpr with
-        | None -> updateCheck
-        | Some check ->
-            SQL.VEAnd (check, updateCheck)
+    let checkExpr = makeCheckExpr newSubEntityColumn layout constrRef.Entity
+    let updateCheck = Option.addWith (fun update check -> SQL.VEAnd (check, update)) updateCheck checkExpr
 
     let getFieldColumnName (name, entityRef) =
         let entity = layout.FindEntity entityRef |> Option.get
@@ -833,14 +829,9 @@ let buildOuterMaterializedFieldStore (layout : Layout) (fieldRef : ResolvedField
     let functionName = SQL.SQLName <| sprintf "__out_mat_store__%s__%s" entity.HashName comp.HashName
     let functionOverloads = Map.singleton [||] functionDefinition
 
-    let checkExpr = makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
-
     let updateCheck = buildUpdateCheck layout (Map.toSeq outerFields)
-    let updateCheck =
-        match checkExpr with
-        | None -> updateCheck
-        | Some check ->
-            SQL.VEAnd (check, updateCheck)
+    let checkExpr = makeCheckExpr newSubEntityColumn layout fieldRef.Entity
+    let updateCheck = Option.addWith (fun update check -> SQL.VEAnd (check, update)) updateCheck checkExpr
 
     let getFieldColumnName (name, entityRef) =
         let entity = layout.FindEntity entityRef |> Option.get
@@ -924,13 +915,9 @@ let private buildInnerMaterializedFieldStore (layout : Layout) (fieldRef : Resol
 
     let affectedColumns = getPathTriggerAffected layout trigger
 
-    let checkExpr = makeCheckExpr plainSubEntityColumn layout fieldRef.Entity
-
     let updateCheck = affectedColumns |> Seq.map distinctCheck |> Seq.fold1 (curry SQL.VEOr)
-    let updateCheck =
-        match checkExpr with
-        | None -> updateCheck
-        | Some check -> SQL.VEAnd (check, updateCheck)
+    let checkExpr = makeCheckExpr newSubEntityColumn layout fieldRef.Entity
+    let updateCheck = Option.addWith (fun update check -> SQL.VEAnd (check, update)) updateCheck checkExpr
 
     let schemaName = compileName entity.Root.Schema
 
