@@ -1,8 +1,8 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using NpgsqlTypes;
 using Npgsql.NameTranslation;
 
 namespace FunWithFlags.FunDBSchema.Instances
@@ -44,7 +44,7 @@ namespace FunWithFlags.FunDBSchema.Instances
         [Required]
         public string Name { get; set; } = null!;
         public bool Enabled { get; set; }
-        [DefaultValue(false)]
+        [DefaultValue(true)]
         public bool Published { get; set; }
         [Required]
         public string Owner { get; set; } = null!;
