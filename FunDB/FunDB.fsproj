@@ -161,7 +161,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="init_instances.sql" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="funapp_migration.mjs" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="funapp_preload.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

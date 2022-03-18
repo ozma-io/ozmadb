@@ -177,6 +177,7 @@ type IInstance =
     abstract member DisableSecurity : bool
     abstract member IsTemplate : bool
     abstract member AccessedAt : DateTime option
+    abstract member Published : bool
 
     abstract member UpdateAccessedAt : DateTime -> Task
 
@@ -294,66 +295,70 @@ let private randomAccessedAtLaxSpan () =
 let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) : HttpHandler =
     let makeContext (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
         task {
-            let logger = ctx.GetLogger("withContext")
-            use _ = logger.BeginScope("Creating context for instance {}, user {} (is root: {})", inst.Instance.Name, inst.UserName, inst.IsRoot)
-            let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
-            let instancesCache = ctx.GetService<InstancesCacheStore>()
-            let! cacheStore = instancesCache.GetContextCache(connectionString)
+            let isRoot = inst.UserName = inst.Instance.Owner || inst.IsRoot
+            if not inst.Instance.Published && not isRoot then
+                return! requestError RIAccessDenied next ctx
+            else
+                let logger = ctx.GetLogger("withContext")
+                use _ = logger.BeginScope("Creating context for instance {}, user {} (is root: {})", inst.Instance.Name, inst.UserName, inst.IsRoot)
+                let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
+                let instancesCache = ctx.GetService<InstancesCacheStore>()
+                let! cacheStore = instancesCache.GetContextCache(connectionString)
 
-            let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
-            let specifiedLang =
-                if isNull acceptLanguage then
-                    None
-                else
-                    acceptLanguage
-                    |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
-                    |> Seq.first
-            let lang =
-                match specifiedLang with
-                | Some l -> l.Value.Value
-                | None -> "en-US"
+                let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
+                let specifiedLang =
+                    if isNull acceptLanguage then
+                        None
+                    else
+                        acceptLanguage
+                        |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
+                        |> Seq.first
+                let lang =
+                    match specifiedLang with
+                    | Some l -> l.Value.Value
+                    | None -> "en-US"
 
-            try
-                let longRunning =
-                    if inst.IsRoot then
-                        let headers = ctx.Request.Headers.["X-LongRunning"]
-                        if headers.Count > 0 then
-                            headers.[headers.Count - 1].ToLowerInvariant() = "yes"
+                try
+                    let longRunning =
+                        if inst.IsRoot then
+                            let headers = ctx.Request.Headers.["X-LongRunning"]
+                            if headers.Count > 0 then
+                                headers.[headers.Count - 1].ToLowerInvariant() = "yes"
+                            else
+                                false
                         else
                             false
-                    else
-                        false
-                let cancellationToken =
-                    if longRunning then
-                        let lifetime = ctx.GetService<IHostApplicationLifetime>()
-                        lifetime.ApplicationStopping
-                    else
-                        ctx.RequestAborted
-                use! dbCtx = cacheStore.GetCache cancellationToken
-                let! rctx =
-                    RequestContext.Create
-                        { UserName = inst.UserName
-                          IsRoot = (inst.UserName = inst.Instance.Owner || inst.IsRoot)
-                          CanRead = inst.CanRead
-                          Language = lang
-                          Context = dbCtx
-                        }
-                if touchAccessedAt then
-                    let currTime = DateTime.UtcNow
-                    match inst.Instance.AccessedAt with
-                    | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
-                    | _ ->  do! inst.Instance.UpdateAccessedAt currTime
-                do! inst.Instance.DisposeAsync ()
-                return! f (FunDBAPI rctx) next ctx
-            with
-            | :? ConcurrentUpdateException ->
-                // We may want to retry here in future.
-                return! requestError RIConcurrentUpdate next ctx
-            | :? RequestException as e ->
-                match e.Info with
-                | REUserNotFound
-                | RENoRole -> return! requestError RIAccessDenied next ctx
-                | REStackOverflow sources -> return! requestError (RIStackOverflow  sources) next ctx
+                    let cancellationToken =
+                        if longRunning then
+                            let lifetime = ctx.GetService<IHostApplicationLifetime>()
+                            lifetime.ApplicationStopping
+                        else
+                            ctx.RequestAborted
+                    use! dbCtx = cacheStore.GetCache cancellationToken
+                    let! rctx =
+                        RequestContext.Create
+                            { UserName = inst.UserName
+                              IsRoot = isRoot
+                              CanRead = inst.CanRead
+                              Language = lang
+                              Context = dbCtx
+                            }
+                    if touchAccessedAt then
+                        let currTime = DateTime.UtcNow
+                        match inst.Instance.AccessedAt with
+                        | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
+                        | _ ->  do! inst.Instance.UpdateAccessedAt currTime
+                    do! inst.Instance.DisposeAsync ()
+                    return! f (FunDBAPI rctx) next ctx
+                with
+                | :? ConcurrentUpdateException ->
+                    // We may want to retry here in future.
+                    return! requestError RIConcurrentUpdate next ctx
+                | :? RequestException as e ->
+                    match e.Info with
+                    | REUserNotFound
+                    | RENoRole -> return! requestError RIAccessDenied next ctx
+                    | REStackOverflow sources -> return! requestError (RIStackOverflow  sources) next ctx
         }
 
     lookupInstance makeContext

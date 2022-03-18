@@ -87,6 +87,7 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
                                   member this.DisableSecurity = instance.DisableSecurity
                                   member this.IsTemplate = instance.IsTemplate
                                   member this.AccessedAt = Option.ofNullable instance.AccessedAt
+                                  member this.Published = instance.Published
 
                                   member this.UpdateAccessedAt newTime =
                                       unitTask {
@@ -122,6 +123,7 @@ type StaticInstance (instance : Instance) =
                       member this.Username = instance.Username
                       member this.Password = instance.Password
                       member this.Database = instance.Database
+                      member this.Published = instance.Published
                       member this.DisableSecurity = instance.DisableSecurity
                       member this.IsTemplate = instance.IsTemplate
                       member this.AccessedAt = Some DateTime.UtcNow

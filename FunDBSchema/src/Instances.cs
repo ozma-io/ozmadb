@@ -44,6 +44,8 @@ namespace FunWithFlags.FunDBSchema.Instances
         [Required]
         public string Name { get; set; } = null!;
         public bool Enabled { get; set; }
+        [DefaultValue(false)]
+        public bool Published { get; set; }
         [Required]
         public string Owner { get; set; } = null!;
         [Required]
