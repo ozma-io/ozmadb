@@ -884,7 +884,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         for column in info.Columns do
             match column with
             | CTColumn name ->
-                assert newColumn.MoveNext()
+                ignore <| newColumn.MoveNext()
                 let newName = newColumn.Current
                 namesMap <- Map.add name newName namesMap
             | _ -> ()
