@@ -198,9 +198,9 @@ type ValuePrettyConverter () =
         | VDecimal d -> writer.WriteValue(d)
         | VString s -> writer.WriteValue(s)
         | VBool b -> writer.WriteValue(b)
-        | VDateTime dt -> writer.WriteValue(renderSqlDateTime dt)
-        | VDate dt -> writer.WriteValue(renderSqlDate dt)
-        | VInterval int -> writer.WriteValue(renderSqlInterval int)
+        | VDateTime dt -> serialize dt
+        | VDate dt -> serialize dt
+        | VInterval int -> serialize int
         | VJson j -> j.WriteTo(writer)
         | VRegclass rc -> writer.WriteValue(string rc)
         | VUuid u -> writer.WriteValue(u)
@@ -209,9 +209,9 @@ type ValuePrettyConverter () =
         | VDecimalArray vals -> serializeArray id vals
         | VStringArray vals -> serializeArray id vals
         | VBoolArray vals -> serializeArray id vals
-        | VDateTimeArray vals -> serializeArray renderSqlDateTime vals
-        | VDateArray vals -> serializeArray renderSqlDate vals
-        | VIntervalArray vals -> serializeArray renderSqlInterval vals
+        | VDateTimeArray vals -> serializeArray id vals
+        | VDateArray vals -> serializeArray id vals
+        | VIntervalArray vals -> serializeArray id vals
         | VRegclassArray vals -> serializeArray string vals
         | VJsonArray vals -> serializeArray id vals
         | VUuidArray vals -> serializeArray id vals

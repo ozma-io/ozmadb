@@ -18,8 +18,8 @@ open Microsoft.IdentityModel.Tokens
 open Microsoft.EntityFrameworkCore
 open Giraffe
 open NodaTime
+open NodaTime.Serialization.JsonNet
 open Npgsql
-open NpgsqlTypes
 open NetJs.Json
 
 open FunWithFlags.FunDBSchema.Instances
@@ -43,9 +43,11 @@ let httpJsonSettings =
     let converters : JsonConverter[] = [|
         FunQL.FieldValuePrettyConverter ()
         SQL.ValuePrettyConverter ()
+        NodaConverters.NormalizingIsoPeriodConverter
     |]
     let constructors = Array.map (fun conv -> fun _ -> Some conv) converters
     let jsonSettings = makeDefaultJsonSerializerSettings constructors
+    ignore <| jsonSettings.ConfigureForNodaTime(DateTimeZoneProviders.Tzdb)
     let resolver = jsonSettings.ContractResolver :?> ConverterContractResolver
     resolver.NamingStrategy <- CamelCaseNamingStrategy(
         OverrideSpecifiedNames = false

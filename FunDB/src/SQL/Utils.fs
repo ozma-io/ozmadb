@@ -75,10 +75,54 @@ let private ofNodaParseResult (result : NodaTime.Text.ParseResult<'a>) : 'a opti
     else
         None
 
-let sqlDateTimePattern = NodaTime.Text.InstantPattern.CreateWithInvariantCulture("uuuu-MM-dd'T'HH:mm:ss.ffffff")
+let private dateTimeRenderPattern = NodaTime.Text.InstantPattern.CreateWithInvariantCulture("uuuu-MM-dd HH:mm:ss.ffffff+00")
 
-let renderSqlDateTime = sqlDateTimePattern.Format
-let trySqlDateTime (s : string) : Instant option = sqlDateTimePattern.Parse(s) |> ofNodaParseResult
+let renderSqlDateTime = dateTimeRenderPattern.Format
+
+let private dateTimeSecPattern = NodaTime.Text.InstantPattern.CreateWithInvariantCulture("uuuu-MM-dd HH:mm:ss")
+let private subsecSeparator = [|';'; '.'|]
+let private usecDigitsInSecond = 6
+let private subsecMultiplier = function
+    | 1 -> 100000
+    | 2 -> 10000
+    | 3 -> 1000
+    | 4 -> 100
+    | 5 -> 10
+    | 6 -> 1
+    | _ -> failwith "Impossible"
+
+let trySqlDateTime (s : string) : Instant option =
+    let subsecPoint = s.IndexOfAny(subsecSeparator)
+    let tzPoint = s.IndexOf('+')
+    let subsecRes =
+        if subsecPoint = -1 then
+            Some (s, 0L)
+        else
+            let subsecLength = s.Length - subsecPoint
+            let subsecLength =
+                if tzPoint <> -1 then
+                    subsecLength - tzPoint
+                else
+                    subsecLength
+            let subsecLength = min subsecLength usecDigitsInSecond
+            let subsecPart = s.Substring(subsecPoint, subsecLength)
+            let secPart = s.Substring(0, subsecPoint)
+            match Int32.TryParse subsecPart with
+            | (false, _) -> None
+            | (true, subsec) ->
+                let usec = subsec * subsecMultiplier subsecLength
+                Some (secPart, int64 usec)
+    match subsecRes with
+    | None -> None
+    | Some (secPart, usec) ->
+        if tzPoint <> -1 && s.Substring(tzPoint) <> "+00" then
+            None
+        else
+            let res = dateTimeSecPattern.Parse(secPart)
+            if not res.Success then
+                None
+            else
+                Some <| res.Value.PlusNanoseconds(1000L * usec)
 
 let sqlDatePattern = NodaTime.Text.LocalDatePattern.Iso
 

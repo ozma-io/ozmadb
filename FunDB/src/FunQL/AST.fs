@@ -238,9 +238,6 @@ type FieldValuePrettyConverter () =
     override this.WriteJson (writer : JsonWriter, value : FieldValue, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
 
-        let serializeArray (convertFunc : 'a -> 'b) (vals : 'a[]) : unit =
-            serialize <| Array.map convertFunc vals
-
         match value with
         | FInt i -> writer.WriteValue(i)
         | FDecimal d -> writer.WriteValue(d)
@@ -256,9 +253,9 @@ type FieldValuePrettyConverter () =
         | FDecimalArray vals -> serialize vals
         | FStringArray vals -> serialize vals
         | FBoolArray vals -> serialize vals
-        | FDateTimeArray vals -> serializeArray renderSqlDateTime vals
-        | FDateArray vals -> serializeArray renderSqlDate vals
-        | FIntervalArray vals -> serializeArray renderSqlInterval vals
+        | FDateTimeArray vals -> serialize vals
+        | FDateArray vals -> serialize vals
+        | FIntervalArray vals -> serialize vals
         | FJsonArray vals -> serialize vals
         | FUserViewRefArray vals -> serialize vals
         | FUuidArray vals -> serialize vals
@@ -1756,16 +1753,17 @@ let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNulla
         with
         | :? JsonException -> None
 
+let private parseSingleValueStrict f = parseSingleValue (f >> Some)
+
 let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> FieldValue option =
-    let parseSingleValueStrict f = parseSingleValue (f >> Some)
     match fieldExprType with
     | FTArray SFTString -> parseSingleValueStrict FStringArray
     | FTArray SFTInt -> parseSingleValueStrict FIntArray
     | FTArray SFTDecimal -> parseSingleValueStrict FDecimalArray
     | FTArray SFTBool -> parseSingleValueStrict FBoolArray
-    | FTArray SFTDateTime -> parseSingleValue (Seq.traverseOption trySqlDateTime >> Option.map (Array.ofSeq >> FDateTimeArray))
-    | FTArray SFTDate -> parseSingleValue (Seq.traverseOption trySqlDate >> Option.map (Array.ofSeq >> FDateArray))
-    | FTArray SFTInterval -> parseSingleValue (Seq.traverseOption trySqlInterval >> Option.map (Array.ofSeq >> FIntervalArray))
+    | FTArray SFTDateTime -> parseSingleValueStrict FDateTimeArray
+    | FTArray SFTDate -> parseSingleValueStrict FDateArray
+    | FTArray SFTInterval -> parseSingleValueStrict FIntervalArray
     | FTArray SFTJson -> parseSingleValueStrict FJsonArray
     | FTArray SFTUserViewRef -> parseSingleValueStrict FUserViewRefArray
     | FTArray SFTUuid -> parseSingleValueStrict FUuidArray
@@ -1775,9 +1773,9 @@ let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> Field
     | FTScalar SFTInt -> parseSingleValueStrict FInt
     | FTScalar SFTDecimal -> parseSingleValueStrict FDecimal
     | FTScalar SFTBool -> parseSingleValueStrict FBool
-    | FTScalar SFTDateTime -> parseSingleValue (trySqlDateTime >> Option.map FDateTime)
-    | FTScalar SFTDate -> parseSingleValue (trySqlDate >> Option.map FDate)
-    | FTScalar SFTInterval -> parseSingleValue (trySqlInterval >> Option.map FInterval)
+    | FTScalar SFTDateTime -> parseSingleValueStrict FDateTime
+    | FTScalar SFTDate -> parseSingleValueStrict FDate
+    | FTScalar SFTInterval -> parseSingleValueStrict FInterval
     | FTScalar SFTJson -> parseSingleValueStrict FJson
     | FTScalar SFTUserViewRef -> parseSingleValueStrict FUserViewRef
     | FTScalar SFTUuid -> parseSingleValueStrict FUuid
