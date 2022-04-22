@@ -28,38 +28,6 @@ let tryDecimal (culture : CultureInfo) (str : string) : decimal option =
 let tryDecimalInvariant : string -> decimal option = tryDecimal CultureInfo.InvariantCulture
 let tryDecimalCurrent : string -> decimal option = tryDecimal CultureInfo.CurrentCulture
 
-let tryDateTime (culture : CultureInfo) (dateTimeStr : string) : DateTime option =
-    match DateTime.TryParse(dateTimeStr, culture, DateTimeStyles.AssumeLocal ||| DateTimeStyles.AdjustToUniversal) with
-    | (true, date) -> Some date
-    | _ -> None
-
-let tryDateTimeInvariant : string -> DateTime option = tryDateTime CultureInfo.InvariantCulture
-let tryDateTimeCurrent : string -> DateTime option = tryDateTime CultureInfo.CurrentCulture
-
-let tryDateTimeOffset (culture : CultureInfo) (dateTimeStr : string) : DateTimeOffset option =
-    match DateTimeOffset.TryParse(dateTimeStr, culture, DateTimeStyles.AssumeLocal ||| DateTimeStyles.AdjustToUniversal) with
-    | (true, date) -> Some date
-    | _ -> None
-
-let tryDateTimeOffsetInvariant : string -> DateTimeOffset option = tryDateTimeOffset CultureInfo.InvariantCulture
-let tryDateTimeOffsetCurrent : string -> DateTimeOffset option = tryDateTimeOffset CultureInfo.CurrentCulture
-
-let tryDate (culture : CultureInfo) (dateStr : string) : DateTime option =
-    match tryDateTime culture dateStr with
-    | Some date when date.Hour = 0 && date.Minute = 0 && date.Second = 0 && date.Millisecond = 0 -> Some date
-    | _ -> None
-
-let tryDateInvariant : string -> DateTime option = tryDate CultureInfo.InvariantCulture
-let tryDateCurrent : string -> DateTime option = tryDate CultureInfo.CurrentCulture
-
-let tryDateOffset (culture : CultureInfo) (dateStr : string) : DateTimeOffset option =
-    match tryDateTimeOffset culture dateStr with
-    | Some date when date.Hour = 0 && date.Minute = 0 && date.Second = 0 && date.Millisecond = 0 -> Some date
-    | _ -> None
-
-let tryDateOffsetInvariant : string -> DateTimeOffset option = tryDateOffset CultureInfo.InvariantCulture
-let tryDateOffsetCurrent : string -> DateTimeOffset option = tryDateOffset CultureInfo.CurrentCulture
-
 let tryBool (str : string) : bool option =
     match str.ToLower() with
     | "true" -> Some true

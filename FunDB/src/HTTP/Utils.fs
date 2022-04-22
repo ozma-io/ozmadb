@@ -14,6 +14,7 @@ open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 open Giraffe
+open NodaTime
 open Npgsql
 
 open FunWithFlags.FunUtils
@@ -176,10 +177,10 @@ type IInstance =
     abstract member Database : string
     abstract member DisableSecurity : bool
     abstract member IsTemplate : bool
-    abstract member AccessedAt : DateTime option
+    abstract member AccessedAt : Instant option
     abstract member Published : bool
 
-    abstract member UpdateAccessedAt : DateTime -> Task
+    abstract member UpdateAccessedAt : Instant -> Task
 
 type IInstancesSource =
     abstract member GetInstance : string -> CancellationToken -> Task<IInstance option>
@@ -204,7 +205,7 @@ let instanceConnectionString (instance : IInstance) (modify : NpgsqlConnectionSt
     builder.Username <- instance.Username
     builder.Password <- instance.Password
 #if DEBUG
-    builder.IncludeErrorDetails <- true
+    builder.IncludeErrorDetail <- true
 #endif
     builder.Enlist <- false
     modify builder
@@ -290,7 +291,8 @@ let private randomAccessedAtGen = new ThreadLocal<Random>(fun () -> Random())
 
 let private randomAccessedAtLaxSpan () =
     // A minute +/- ~5 seconds.
-    TimeSpan.FromMinutes(1.0 + (2.0 * randomAccessedAtGen.Value.NextDouble() - 0.5) * 0.09)
+    let minutes = 1.0 + (2.0 * randomAccessedAtGen.Value.NextDouble() - 0.5) * 0.09
+    Duration.FromMilliseconds(int64 (minutes * 60.0 * 1000.0))
 
 let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) : HttpHandler =
     let makeContext (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
@@ -344,7 +346,7 @@ let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHa
                               Context = dbCtx
                             }
                     if touchAccessedAt then
-                        let currTime = DateTime.UtcNow
+                        let currTime = SystemClock.Instance.GetCurrentInstant()
                         match inst.Instance.AccessedAt with
                         | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
                         | _ ->  do! inst.Instance.UpdateAccessedAt currTime

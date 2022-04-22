@@ -6,6 +6,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Npgsql.NameTranslation;
+using NodaTime;
 
 using FunWithFlags.FunDBSchema.Attributes;
 
@@ -149,12 +150,12 @@ namespace FunWithFlags.FunDBSchema.System
 
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {
-                table.SetTableName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(table.GetTableName()));
+                table.SetTableName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(table.GetTableName()!));
                 foreach (var property in table.GetProperties())
                 {
                     var storeObjectId =
                         StoreObjectIdentifier.Create(property.DeclaringEntityType, StoreObjectType.Table)!.Value;
-                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName(storeObjectId)));
+                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName(storeObjectId)!));
                 }
             }
         }
@@ -163,28 +164,28 @@ namespace FunWithFlags.FunDBSchema.System
         {
             return this.Schemas
                 .AsSplitQuery()
-                .Include(sch => sch.Entities).ThenInclude(ent => ent.ColumnFields)
-                .Include(sch => sch.Entities).ThenInclude(ent => ent.ComputedFields)
-                .Include(sch => sch.Entities).ThenInclude(ent => ent.UniqueConstraints)
-                .Include(sch => sch.Entities).ThenInclude(ent => ent.CheckConstraints)
-                .Include(sch => sch.Entities).ThenInclude(ent => ent.Indexes)
-                .Include(sch => sch.Entities).ThenInclude(ent => ent.Parent).ThenInclude(ent => ent!.Schema);
+                .Include(sch => sch.Entities!).ThenInclude(ent => ent.ColumnFields)
+                .Include(sch => sch.Entities!).ThenInclude(ent => ent.ComputedFields)
+                .Include(sch => sch.Entities!).ThenInclude(ent => ent.UniqueConstraints)
+                .Include(sch => sch.Entities!).ThenInclude(ent => ent.CheckConstraints)
+                .Include(sch => sch.Entities!).ThenInclude(ent => ent.Indexes)
+                .Include(sch => sch.Entities!).ThenInclude(ent => ent.Parent!).ThenInclude(ent => ent.Schema);
         }
 
         public IQueryable<Schema> GetRolesObjects()
         {
             return this.Schemas
                 .AsSplitQuery()
-                .Include(sch => sch.Roles).ThenInclude(role => role.Parents).ThenInclude(roleParent => roleParent.Parent).ThenInclude(role => role!.Schema)
-                .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.Entity).ThenInclude(ent => ent!.Schema)
-                .Include(sch => sch.Roles).ThenInclude(role => role.Entities).ThenInclude(roleEnt => roleEnt.ColumnFields);
+                .Include(sch => sch.Roles!).ThenInclude(role => role.Parents!).ThenInclude(roleParent => roleParent.Parent!).ThenInclude(role => role.Schema)
+                .Include(sch => sch.Roles!).ThenInclude(role => role.Entities!).ThenInclude(roleEnt => roleEnt.Entity!).ThenInclude(ent => ent.Schema)
+                .Include(sch => sch.Roles!).ThenInclude(role => role.Entities!).ThenInclude(roleEnt => roleEnt.ColumnFields);
         }
 
         public IQueryable<Schema> GetAttributesObjects()
         {
             return this.Schemas
                 .AsSplitQuery()
-                .Include(sch => sch.FieldsAttributes).ThenInclude(attr => attr.FieldEntity).ThenInclude(ent => ent!.Schema);
+                .Include(sch => sch.FieldsAttributes!).ThenInclude(attr => attr.FieldEntity!).ThenInclude(ent => ent.Schema);
         }
 
         public IQueryable<Schema> GetModulesObjects()
@@ -205,7 +206,7 @@ namespace FunWithFlags.FunDBSchema.System
         {
             return this.Schemas
                 .AsSplitQuery()
-                .Include(sch => sch.Triggers).ThenInclude(attr => attr.TriggerEntity).ThenInclude(ent => ent!.Schema);
+                .Include(sch => sch.Triggers!).ThenInclude(attr => attr.TriggerEntity!).ThenInclude(ent => ent.Schema);
         }
 
         public IQueryable<Schema> GetUserViewsObjects()
@@ -276,11 +277,11 @@ namespace FunWithFlags.FunDBSchema.System
         public int? ParentId { get; set; }
         public Entity? Parent { get; set; }
 
-        public List<ColumnField> ColumnFields { get; set; } = null!;
-        public List<ComputedField> ComputedFields { get; set; } = null!;
-        public List<UniqueConstraint> UniqueConstraints { get; set; } = null!;
-        public List<CheckConstraint> CheckConstraints { get; set; } = null!;
-        public List<Index> Indexes { get; set; } = null!;
+        public List<ColumnField>? ColumnFields { get; set; }
+        public List<ComputedField>? ComputedFields { get; set; }
+        public List<UniqueConstraint>? UniqueConstraints { get; set; }
+        public List<CheckConstraint>? CheckConstraints { get; set; }
+        public List<Index>? Indexes { get; set; }
     }
 
     public class ColumnField
@@ -664,10 +665,10 @@ namespace FunWithFlags.FunDBSchema.System
         public int TransactionId { get; set; }
 
         [ColumnField("datetime", IsImmutable=true)]
-        public DateTime TransactionTimestamp { get; set; }
+        public Instant TransactionTimestamp { get; set; }
 
         [ColumnField("datetime", IsImmutable=true)]
-        public DateTime Timestamp { get; set; }
+        public Instant Timestamp { get; set; }
 
         [ColumnField("string", IsImmutable=true)]
         [Required]

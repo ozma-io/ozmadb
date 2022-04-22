@@ -59,7 +59,7 @@ let private systemEntities =
         // So we hack it together.
         let systemOptions =
             (DbContextOptionsBuilder<SystemContext> ())
-                .UseNpgsql(null)
+                .UseNpgsql((null : Data.Common.DbConnection), fun opts -> ignore <| opts.UseNodaTime())
         use db = new SystemContext(systemOptions.Options)
         let ctxType = typeof<SystemContext>
         ctxType.GetProperties()

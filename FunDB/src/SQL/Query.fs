@@ -6,6 +6,7 @@ open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
+open NodaTime
 open Npgsql
 open NpgsqlTypes
 open FSharp.Control.Tasks.Affine
@@ -49,8 +50,16 @@ let private convertInt : obj -> int option = function
 
 let private convertDecimal : obj -> decimal option = function
     | :? decimal as value -> Some value
-    | :? float32 as value -> Some <| decimal value
-    | :? double as value -> Some <| decimal value
+    | :? float32 as value ->
+        try
+            Some <| decimal value
+        with
+        | :? OverflowException -> None
+    | :? double as value ->
+        try
+            Some <| decimal value
+        with
+        | :? OverflowException -> None
     | value -> None
 
 let private convertValue valType (rawValue : obj) =
@@ -59,17 +68,17 @@ let private convertValue valType (rawValue : obj) =
     | (VTScalar STInt, value) ->
         match convertInt value with
         | Some i -> VInt i
-        | None -> raisef QueryException "Unknown integer type: %s" (value.GetType().FullName)
+        | None -> raisef QueryException "Unknown integer value: %s %O" (value.GetType().FullName) value
     | (VTScalar STBigInt, (:? int64 as value)) -> VBigInt value
     | (VTScalar STDecimal, value) ->
         match convertDecimal value with
         | Some i -> VDecimal i
-        | None -> raisef QueryException "Unknown decimal type: %s" (value.GetType().FullName)
+        | None -> raisef QueryException "Unknown decimal value: %s %O" (value.GetType().FullName) value
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
-    | (VTScalar STDateTime, (:? NpgsqlDateTime as value)) -> VDateTime value
-    | (VTScalar STDate, (:? NpgsqlDate as value)) -> VDate value
-    | (VTScalar STInterval, (:? NpgsqlTimeSpan as value)) -> VInterval value
+    | (VTScalar STDateTime, (:? Instant as value)) -> VDateTime value
+    | (VTScalar STDate, (:? LocalDate as value)) -> VDate value
+    | (VTScalar STInterval, (:? Period as value)) -> VInterval value
     | (VTScalar STJson, (:? string as value)) ->
         match tryJson value with
         | Some j -> VJson j
@@ -92,9 +101,9 @@ let private convertValue valType (rawValue : obj) =
         | STDecimal -> VDecimalArray (convertArray convertDecimal rootVals)
         | STString -> VStringArray (convertArray tryCast<string> rootVals)
         | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
-        | STDateTime -> VDateTimeArray (convertArray tryCast<NpgsqlDateTime> rootVals)
-        | STDate -> VDateArray (convertArray tryCast<NpgsqlDate> rootVals)
-        | STInterval -> VIntervalArray (convertArray tryCast<NpgsqlTimeSpan> rootVals)
+        | STDateTime -> VDateTimeArray (convertArray tryCast<Instant> rootVals)
+        | STDate -> VDateArray (convertArray tryCast<LocalDate> rootVals)
+        | STInterval -> VIntervalArray (convertArray tryCast<Period> rootVals)
         | STRegclass -> raisef QueryException "Regclass arrays are not supported: %O" rootVals
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
         | STUuid -> VUuidArray (convertArray tryCast<Guid> rootVals)
@@ -117,7 +126,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VString s -> (Some NpgsqlDbType.Text, upcast s)
     | VRegclass name -> raisef QueryException "Regclass arguments are not supported: %O" name
     | VBool b -> (Some NpgsqlDbType.Boolean, upcast b)
-    | VDateTime dt -> (Some NpgsqlDbType.Timestamp, upcast dt)
+    | VDateTime dt -> (Some NpgsqlDbType.TimestampTz, upcast dt)
     | VDate dt -> (Some NpgsqlDbType.Date, upcast dt)
     | VInterval int -> (Some NpgsqlDbType.Interval, upcast int)
     | VJson j -> (Some NpgsqlDbType.Jsonb, upcast j)
@@ -127,7 +136,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VDecimalArray vals -> npgsqlArray NpgsqlDbType.Numeric vals
     | VStringArray vals -> npgsqlArray NpgsqlDbType.Text vals
     | VBoolArray vals -> npgsqlArray NpgsqlDbType.Boolean vals
-    | VDateTimeArray vals -> npgsqlArray NpgsqlDbType.Timestamp vals
+    | VDateTimeArray vals -> npgsqlArray NpgsqlDbType.TimestampTz vals
     | VDateArray vals -> npgsqlArray NpgsqlDbType.Date vals
     | VIntervalArray vals -> npgsqlArray NpgsqlDbType.Interval vals
     | VRegclassArray vals -> raisef QueryException "Regclass arguments are not supported: %O" vals
@@ -178,15 +187,22 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             if not hasRow0 then
                 return None
             else
-                let getRow i =
+                let rawRow = Array.create reader.FieldCount null
+
+                let getValue i rawValue =
                     let name = reader.GetName(i)
                     let typ = parseType (reader.GetDataTypeName(i))
-                    let value = reader.GetProviderSpecificValue(i) |> convertValue typ
+                    let value = convertValue typ rawValue
                     (SQLName name, typ, value)
-                let result = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
+
+                let getRow () =
+                    ignore <| reader.GetProviderSpecificValues(rawRow)
+                    Array.mapi getValue rawRow
+
+                let result = getRow ()
                 let! hasRow1 = reader.ReadAsync(cancellationToken)
                 if hasRow1 then
-                    let secondResult = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toList
+                    let secondResult = getRow ()
                     raisef QueryException "Has a second row: %O" secondResult
                 return Some result
         }
@@ -207,9 +223,15 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 (SQLName name, typ)
             let columns = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getColumn |> Seq.toArray
 
-            let getRow i =
+            let rawRow = Array.create reader.FieldCount null
+
+            let getValue i rawValue =
                 let (_, typ) = columns.[i]
-                reader.GetProviderSpecificValue(i) |> convertValue typ
+                rawValue |> convertValue typ
+
+            let getRow () =
+                ignore <| reader.GetProviderSpecificValues(rawRow)
+                Array.mapi getValue rawRow
 
             let mutable currentValue = None
             let mutable tookOnce = false
@@ -228,7 +250,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                                           match! reader.ReadAsync(cancellationToken) with
                                           | false -> return false
                                           | true ->
-                                              let row = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getRow |> Seq.toArray
+                                              let row = getRow ()
                                               currentValue <- Some row
                                               return true
                                       }

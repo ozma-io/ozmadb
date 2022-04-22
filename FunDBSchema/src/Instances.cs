@@ -4,6 +4,7 @@ using System.ComponentModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Npgsql.NameTranslation;
+using NodaTime;
 
 namespace FunWithFlags.FunDBSchema.Instances
 {
@@ -27,12 +28,12 @@ namespace FunWithFlags.FunDBSchema.Instances
 
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {
-                table.SetTableName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(table.GetTableName()));
+                table.SetTableName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(table.GetTableName()!));
                 foreach (var property in table.GetProperties())
                 {
                     var storeObjectId =
                         StoreObjectIdentifier.Create(property.DeclaringEntityType, StoreObjectType.Table)!.Value;
-                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName(storeObjectId)));
+                    property.SetColumnName(NpgsqlSnakeCaseNameTranslator.ConvertToSnakeCase(property.GetColumnName(storeObjectId)!));
                 }
             }
         }
@@ -59,7 +60,7 @@ namespace FunWithFlags.FunDBSchema.Instances
         public bool DisableSecurity { get; set; }
         public bool IsTemplate { get; set; }
         [Required]
-        public DateTime CreatedAt { get; set; }
-        public Nullable<DateTime> AccessedAt { get; set; }
+        public Instant CreatedAt { get; set; }
+        public Nullable<Instant> AccessedAt { get; set; }
     }
 }

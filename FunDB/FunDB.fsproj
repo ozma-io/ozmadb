@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>netcoreapp5.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
 
     <!-- Store generated parsers in intermediate build directory -->
     <RootIntermediateOutputPath>obj</RootIntermediateOutputPath>
@@ -170,16 +170,20 @@
     <ProjectReference Include="../FunUtils/FunUtils.fsproj" />
 
     <PackageReference Include="FSharpPlus" Version="1.2.*" />
-    <PackageReference Include="Npgsql" Version="5.0.*" />
-    <PackageReference Include="Npgsql.Json.NET" Version="5.0.*" />
+    <PackageReference Include="Npgsql" Version="6.0.*" />
+    <PackageReference Include="Npgsql.Json.NET" Version="6.0.*" />
+    <PackageReference Include="Npgsql.NodaTime" Version="6.0.*" />
     <PackageReference Include="FsLexYacc" Version="10.2.*" />
-    <PackageReference Include="Z.EntityFramework.Plus.EFCore" Version="5.1.*" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="5.0.*" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="5.0.*" />
+    <PackageReference Include="Z.EntityFramework.Plus.EFCore" Version="6.13.*" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="6.0.*" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL.NodaTime" Version="6.0.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.*" />
     <PackageReference Include="FluidCaching" Version="1.3.*" />
-    <PackageReference Include="Giraffe" Version="4.0.*" />
+    <PackageReference Include="Giraffe" Version="6.0.*" />
     <PackageReference Include="System.Data.HashFunction.CityHash" Version="2.0.*" />
-    <PackageReference Include="System.Linq.Async" Version="5.1.*" />
+    <PackageReference Include="System.Linq.Async" Version="6.0.*" />
+    <PackageReference Include="NodaTime" Version="3.1.*" />
+    <PackageReference Include="NodaTime.Serialization.JsonNet" Version="3.0.*" />
 
     <PackageReference Include="NetJs" Version="1.2.*" />
     <PackageReference Include="NetJs.Json" Version="1.2.*" />

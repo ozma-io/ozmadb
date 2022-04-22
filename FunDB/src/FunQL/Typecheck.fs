@@ -163,6 +163,8 @@ type private Typechecker (layout : ILayoutBits) =
     and typecheckFieldExpr : ResolvedFieldExpr -> ResolvedFieldType option = function
         | FEValue value -> fieldValueType value
         | FERef r -> typecheckFieldRef r
+        | FEEntityAttr (eref, attr) -> failwith "Not implemented"
+        | FEFieldAttr (fref, attr) -> failwith "Not implemented"
         | FENot e ->
             match typecheckFieldExpr e with
             | Some (FTScalar SFTBool) as typ -> typ

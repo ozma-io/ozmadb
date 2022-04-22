@@ -33,8 +33,8 @@ let saveRestoreApi : HttpHandler =
             let (schemas, api) = arg :?> (SaveSchemas * IFunDBAPI)
             match! api.SaveRestore.SaveZipSchemas schemas with
             | Ok dumpStream ->
-                ctx.SetHttpHeader "Content-Type" "application/zip"
-                return! ctx.WriteStreamAsync false dumpStream None None
+                ctx.SetHttpHeader("Content-Type", "application/zip")
+                return! ctx.WriteStreamAsync(false, dumpStream, None, None)
             | Error err -> return! saveError err next ctx
         }
 

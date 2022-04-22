@@ -7,7 +7,7 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json.Linq
-open NpgsqlTypes
+open NodaTime
 
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDBSchema.System
@@ -57,7 +57,7 @@ type IContext =
     abstract member Transaction : DatabaseTransaction
     abstract member Preload : Preload
     abstract member TransactionId : int
-    abstract member TransactionTime : NpgsqlDateTime
+    abstract member TransactionTime : Instant
     abstract member LoggerFactory : ILoggerFactory
     abstract member CancellationToken : CancellationToken
     abstract member Runtime : IJSRuntime

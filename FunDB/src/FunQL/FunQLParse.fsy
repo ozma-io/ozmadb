@@ -1,6 +1,7 @@
 %{
 
 open Newtonsoft.Json.Linq
+open System.Collections.Immutable
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
@@ -136,6 +137,13 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
     else
         failwithf "Unknown aggregate function %O" name
 
+let private uniqueImmutableSortedSet (items : 'a seq) : ImmutableSortedSet<'a> =
+    let builder = ImmutableSortedSet.CreateBuilder<'a>()
+    for item in items do
+        if not <| builder.Add(item) then
+            failwithf "Duplicate item: %O" item
+    ImmutableSortedSet.ToImmutableSortedSet builder
+
 %}
 
 // Atoms
@@ -187,6 +195,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token MATCH_REGEX_CI
 %token NOT_MATCH_REGEX
 %token NOT_MATCH_REGEX_CI
+%token GET_ENTITY_ATTR
+%token GET_FIELD_ATTR
 
 // Keywords
 %token SELECT
@@ -588,7 +598,7 @@ ValueRef:
     | ARGUMENT_ID        { VRPlaceholder (PLocal <| FunQLName $1) }
     | GLOBAL_ARGUMENT_ID { VRPlaceholder (PGlobal <| FunQLName $1) }
 
-LinkedValueRef:
+LinkedFieldRef:
     | ValueRef LinkedFieldsList {
         let (asRoot, path) = $2
         { Ref = $1; Path = List.toArray path; AsRoot = asRoot }
@@ -725,9 +735,11 @@ FieldExprMisc:
     | FieldExprMisc NOT IN FieldInSource        { inExpr FENotIn FENotInQuery $1 $4 }
     | FieldExprMisc DOUBLE_COLON FieldType      { FECast ($1, $3) }
     | CaseExpr                                  { $1 }
-    | LinkedValueRef INHERITED FROM EntityRef   { FEInheritedFrom ($1, { Ref = $4; Extra = ObjectMap.empty }) }
-    | LinkedValueRef OFTYPE EntityRef           { FEOfType ($1, { Ref = $3; Extra = ObjectMap.empty }) }
-    | LinkedValueRef                            { FERef $1 }
+    | LinkedFieldRef INHERITED FROM EntityRef   { FEInheritedFrom ($1, { Ref = $4; Extra = ObjectMap.empty }) }
+    | LinkedFieldRef OFTYPE EntityRef           { FEOfType ($1, { Ref = $3; Extra = ObjectMap.empty }) }
+    | EntityRef GET_ENTITY_ATTR Name            { FEEntityAttr ($1, $3) }
+    | LinkedFieldRef GET_FIELD_ATTR Name        { FEFieldAttr ($1, $3) }
+    | LinkedFieldRef                            { FERef $1 }
     | Value                                     { FEValue $1 }
     | Name ParenedExprList                      { makeFunc $1 $2 }
     | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN   { makeAggFunc $1 $3 }
@@ -855,7 +867,7 @@ ScalarType:
     | UVREF_TYPE                                                        { SFTUserViewRef }
     | UUID_TYPE                                                         { SFTUuid }
     | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN MaybeDeleteAction { SFTReference ($3, $5) }
-    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                         { SFTEnum ($3 |> List.toSeq |> Set.ofSeqUnique) }
+    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                         { SFTEnum (uniqueImmutableSortedSet $3) }
 
 FieldType:
     | ScalarType                               { FTScalar $1 }

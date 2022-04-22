@@ -83,11 +83,12 @@ type private FieldMappingInfo =
       ForceSQLName : SQL.ColumnName option
     }
 
-type private FieldMappingValue =
-    | FVAmbiguous of Set<EntityRef>
-    | FVResolved of FieldMappingInfo
+type private NameMappingValue<'k, 'v> when 'k : comparison =
+    | FVAmbiguous of Set<'k>
+    | FVResolved of 'v
 
-type private FieldMapping = Map<FieldRef, FieldMappingValue>
+type private NameMapping<'k, 'v> when 'k : comparison = Map<'k, NameMappingValue<'k, 'v>>
+type private FieldMapping = NameMapping<FieldRef, FieldMappingInfo>
 
 let private getFromEntityId = function
     | FIEntity id -> id
@@ -111,14 +112,17 @@ let private unbindFieldMappingValue = function
 let private unbindFieldMapping = Map.mapMaybe (fun ref -> unbindFieldMappingValue)
 
 // None in EntityRef is used only for offset/limit expressions in set operations.
-let private getAmbiguousMapping = function
+let private getAmbiguousMapping k = function
     | FVAmbiguous set -> set
-    | FVResolved info -> Set.ofSeq (Option.toSeq info.Entity)
+    | FVResolved info -> Set.singleton k
 
-let private unionFieldMappingValue (a : FieldMappingValue) (b : FieldMappingValue) : FieldMappingValue =
-    let setA = getAmbiguousMapping a
-    let setB = getAmbiguousMapping b
+let private unionNameMappingValue (k : 'k) (a : NameMappingValue<'k, 'v>) (b : NameMappingValue<'k, 'v>) : NameMappingValue<'k, 'v> =
+    let setA = getAmbiguousMapping k a
+    let setB = getAmbiguousMapping k b
     FVAmbiguous <| Set.union setA setB
+
+let private unionNameMapping (a : NameMapping<'k, 'v>) (b : NameMapping<'k, 'v>) : NameMapping<'k, 'v> =
+    Map.unionWith unionNameMappingValue a b
 
 type CustomFromField =
     { Bound : ResolvedFieldRef option
@@ -354,7 +358,7 @@ let resolveScalarFieldType (layout : IEntitiesSet) (allowReferenceOptions : bool
             raisef ViewResolveException "Cannot find entity %O from reference type" resolvedRef
         SFTReference (resolvedRef, mopts)
     | SFTEnum vals ->
-        if Set.isEmpty vals then
+        if vals.IsEmpty then
             raisef ViewResolveException "Enums must not be empty"
         SFTEnum vals
 
@@ -538,6 +542,7 @@ type private ResolveCTE = EntityName -> QSubqueryFieldsMap
 type private Context =
     { ResolveCTE : ResolveCTE
       FieldMaps : FieldMapping list
+      Entities : Map<EntityName, SchemaName option>
       Types : TypeContextsMap
     }
 
@@ -560,6 +565,7 @@ let private failCte (name : EntityName) =
 let private emptyContext =
     { ResolveCTE = failCte
       FieldMaps = []
+      Entities = Map.empty
       Types = Map.empty
     }
 
@@ -758,13 +764,27 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
 
 // Public helper functions.
 
-let replaceTopLevelEntityRefInExpr (localRef : EntityRef option) : ResolvedFieldExpr -> ResolvedFieldExpr =
+let replaceFieldRefInExpr (updateEntityRef : LinkedBoundFieldRef -> FieldRef -> LinkedBoundFieldRef) : ResolvedFieldExpr -> ResolvedFieldExpr =
     let resolveReference : LinkedBoundFieldRef -> LinkedBoundFieldRef = function
-    | { Ref = { Ref = VRColumn col } } as ref ->
-        { ref with Ref = { ref.Ref with Ref = VRColumn { col with Entity = localRef } } }
+    | { Ref = { Ref = VRColumn col } } as ref -> updateEntityRef ref col
     | ref -> ref
     let mapper = { idFieldExprMapper with FieldReference = resolveReference }
     mapFieldExpr mapper
+
+let replaceEntityRefInField (localRef : EntityRef option) (ref : LinkedBoundFieldRef) (col : FieldRef) : LinkedBoundFieldRef =
+    { ref with Ref = { ref.Ref with Ref = VRColumn { col with Entity = localRef } } }
+
+let replaceEntityRefInExpr (localRef : EntityRef option) = replaceFieldRefInExpr (replaceEntityRefInField localRef)
+
+let replacePathInField (localRef : ValueRef<FieldRef>) (asRoot : bool) (pathPrefix : PathArrow seq) (extra : ObjectMap) (ref : LinkedBoundFieldRef) (col : FieldRef) : LinkedBoundFieldRef =
+    let newFieldArrow =
+        { Name = col.Name
+          AsRoot = ref.Ref.AsRoot
+        }
+    let newPath = Seq.concat [pathPrefix; Seq.singleton newFieldArrow; Array.toSeq ref.Ref.Path] |> Array.ofSeq
+    { Ref = { Ref = localRef; Path = newPath; AsRoot = asRoot }; Extra = extra }
+
+let replacePathInExpr (localRef : ValueRef<FieldRef>) (asRoot : bool) (pathPrefix : PathArrow seq) (extra : ObjectMap) = replaceFieldRefInExpr (replacePathInField localRef asRoot pathPrefix extra)
 
 let private filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCase seq) : VirtualFieldCase seq =
     match ObjectMap.tryFindType<PossibleSubtypesMeta> extra with
@@ -863,7 +883,7 @@ let emptyExprResolutionFlags =
 
 type private FromExprInfo =
     { Fields : FieldMapping
-      Names : Set<EntityRef>
+      Entities : Map<EntityName, SchemaName option>
       Types : TypeContextsMap
     }
 
@@ -1347,6 +1367,15 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             raisef ViewResolveException "Aggregate functions are not allowed here"
         (info.Types, res)
 
+    and resolveEntityReference (entities : Map<FieldName, SchemaName option>) (entityRef : EntityRef) : EntityRef =
+        match Map.tryFind entityRef.Name entities with
+        | None -> raisef ViewResolveException "Entity %O not found" entityRef
+        | Some realSchema ->
+            match entityRef.Schema with
+            | Some _ as schema when realSchema <> schema -> raisef ViewResolveException "Entity %O not found" entityRef
+            | _ -> ()
+            { Schema = realSchema; Name = entityRef.Name }
+
     and resolveFieldExpr (ctx : Context) (expr : ParsedFieldExpr) : ResolvedExprInfo * ResolvedFieldExpr =
         let mutable isLocal = true
         let mutable hasArrows = false
@@ -1374,14 +1403,26 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
 
         let resolveQuery query =
             // TODO: implement arrows for field references in subexpressions.
-            let ctx = { ctx with FieldMaps = List.map unbindFieldMapping ctx.FieldMaps }
+            let ctx =
+                { ctx with
+                    FieldMaps = List.map unbindFieldMapping ctx.FieldMaps
+                    Entities = Map.empty
+                }
             let (_, res) = resolveSelectExpr ctx subExprSelectFlags query
             isLocal <- false
             res
-
+        
         let rec traverse (outerTypeCtxs : TypeContexts) = function
             | FEValue value -> (emptyCondTypeContexts, FEValue value)
             | FERef r -> (emptyCondTypeContexts, FERef (resolveExprReference outerTypeCtxs.Map r))
+            | FEEntityAttr (eref, attr) ->
+                // We consider entity attribute references non-local because they can change based on inner parts of the query and default attributes.
+                isLocal <- false
+                (emptyCondTypeContexts, FEEntityAttr (resolveEntityReference ctx.Entities eref, attr))
+            | FEFieldAttr (fref, attr) ->
+                // We consider field attribute references non-local because they can change based on inner parts of the query and default attributes.
+                isLocal <- false
+                (emptyCondTypeContexts, FEFieldAttr (resolveExprReference outerTypeCtxs.Map fref, attr))
             | FENot e ->
                 let (innerTypeCtxs, e) = traverse outerTypeCtxs e
                 (notTypeContexts innerTypeCtxs, FENot e)
@@ -1718,7 +1759,12 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             | None -> (ctx, None)
             | Some from ->
                 let (info, res) = resolveFromExpr ctx Map.empty true flags from
-                let ctx = { ctx with FieldMaps = info.Fields :: ctx.FieldMaps; Types = Map.union ctx.Types info.Types }
+                let ctx =
+                    { ctx with
+                        FieldMaps = info.Fields :: ctx.FieldMaps
+                        Entities = info.Entities
+                        Types = Map.union ctx.Types info.Types
+                    }
                 (ctx, Some res)
         let (whereTypes, qWhere) =
             match query.Where with
@@ -1760,10 +1806,14 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
     and resolveFromExpr (ctx : Context) (fieldMapping : FieldMapping) (isInner : bool) (flags : SelectFlags) : ParsedFromExpr -> FromExprInfo * ResolvedFromExpr = function
         | FEntity entity ->
             let entityInfo = fromEntityMapping ctx isInner entity
-            let fieldMapping = Map.unionWith (fun _ -> unionFieldMappingValue) fieldMapping entityInfo.Fields
+            let fieldMapping = unionNameMapping fieldMapping entityInfo.Fields
+            let entities =
+                match entity.Alias with
+                | None -> Map.singleton entityInfo.Name.Name entityInfo.Name.Schema
+                | Some alias -> Map.singleton alias None
             let retInfo =
                 { Fields = fieldMapping
-                  Names = Set.singleton entityInfo.Name
+                  Entities = entities
                   Types = entityInfo.Types
                 }
             let extra =
@@ -1784,9 +1834,9 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 | _ -> false
             let (infoB, newB) = resolveFromExpr ctx infoA.Fields isInner2 flags join.B
 
-            let names =
+            let entities =
                 try
-                    Set.unionUnique infoA.Names infoB.Names
+                    Map.unionUnique infoA.Entities infoB.Entities
                 with
                 | Failure msg -> raisef ViewResolveException "Clashing entity names in a join: %s" msg
             let newCtx = { ctx with FieldMaps = infoB.Fields :: ctx.FieldMaps }
@@ -1796,7 +1846,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 raisef ViewResolveException "Cannot use aggregate functions in join expression"
             let retInfo =
                 { Fields = infoB.Fields
-                  Names = names
+                  Entities = entities
                   Types = Map.union infoA.Types infoB.Types
                 }
             let newJoin =
@@ -1818,11 +1868,11 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             let mappingRef = { Schema = None; Name = subsel.Alias.Name } : EntityRef
             let fromEntityId = nextFromEntityId ()
             let newMapping = fieldsToFieldMapping fromEntityId (Some mappingRef) fields
-            let fieldMapping = Map.unionWith (fun _ -> unionFieldMappingValue) fieldMapping newMapping
+            let fieldMapping = unionNameMapping fieldMapping newMapping
             let newSubsel = { Alias = subsel.Alias; Lateral = subsel.Lateral; Select = newQ }
             let retInfo =
                 { Fields = fieldMapping
-                  Names = Set.singleton mappingRef
+                  Entities = Map.singleton subsel.Alias.Name None
                   // TODO: pass type contexts from sub-selects.
                   Types = Map.empty
                 }
@@ -1902,8 +1952,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             | None -> (entityInfo.Fields, Map.empty, None)
             | Some from ->
                 let (info, newFrom) = resolveFromExpr ctx entityInfo.Fields true flags from
-                match info.Names |> Seq.tryFind (fun fromRef -> fromRef.Name = entityInfo.Name.Name) with
-                | Some clashingRef -> raisef ViewResolveException "FROM source %O clashes with updated entity or alias" clashingRef.Name
+                match info.Entities |> Map.keys |> Seq.tryFind (fun fromName -> fromName = entityInfo.Name.Name) with
+                | Some clashingName -> raisef ViewResolveException "FROM source %O clashes with updated entity or alias" clashingName
                 | None -> ()
                 (info.Fields, info.Types, Some newFrom)
         let ctx =
@@ -2029,6 +2079,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
         let context =
             { ResolveCTE = failCte
               FieldMaps = [mapping]
+              // Not exactly right, but should't be a problem for simple expressions.
+              Entities = Map.empty
               Types = Map.empty
             }
         resolveFieldExpr context expr
@@ -2194,7 +2246,7 @@ let isScalarValueSubtype (layout : ILayoutBits) (wanted : ResolvedScalarFieldTyp
     | (SFTReference (wantedRef, optsA), SFTReference (givenRef, optsB)) ->
         let wantedEntity = layout.FindEntity wantedRef |> Option.get
         Map.containsKey givenRef wantedEntity.Children
-    | (SFTEnum wantedVals, SFTEnum givenVals) -> Set.isEmpty (Set.difference givenVals wantedVals)
+    | (SFTEnum wantedVals, SFTEnum givenVals) -> givenVals.Except(wantedVals).IsEmpty
     | (SFTInt, SFTReference _) -> true
     | (SFTString, SFTEnum _) -> true
     | (a, b) -> SQL.tryImplicitCasts (compileScalarType a) (compileScalarType b)
@@ -2219,8 +2271,8 @@ let private emptyLayoutBits =
 
 let isValueOfSubtype (wanted : ResolvedFieldType) (value : FieldValue) : bool =
     match (wanted, value) with
-    | (FTScalar (SFTEnum wantedVals), FString str) -> Set.contains str wantedVals
-    | (FTArray (SFTEnum wantedVals), FStringArray strs) -> Seq.forall (fun str -> Set.contains str wantedVals) wantedVals
+    | (FTScalar (SFTEnum wantedVals), FString str) -> wantedVals.Contains str
+    | (FTArray (SFTEnum wantedVals), FStringArray strs) -> Seq.forall (fun str -> wantedVals.Contains str) wantedVals
     | _ -> isMaybeSubtype emptyLayoutBits wanted (fieldValueType value)
 
 let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : ResolvedArgument =

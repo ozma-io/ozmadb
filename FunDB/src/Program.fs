@@ -17,7 +17,7 @@ open FSharp.Control.Tasks.Affine
 open Microsoft.IdentityModel.Tokens
 open Microsoft.EntityFrameworkCore
 open Giraffe
-open Giraffe.Serialization.Json
+open NodaTime
 open Npgsql
 open NpgsqlTypes
 open NetJs.Json
@@ -51,7 +51,7 @@ let httpJsonSettings =
         OverrideSpecifiedNames = false
     )
     jsonSettings.NullValueHandling <- NullValueHandling.Ignore
-    jsonSettings.DateTimeZoneHandling <- DateTimeZoneHandling.Utc
+    jsonSettings.DateParseHandling <- DateParseHandling.None
     jsonSettings
 
 type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
@@ -67,7 +67,7 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
                     let systemOptions =
                         (DbContextOptionsBuilder<InstancesContext> ())
                             .UseLoggerFactory(loggerFactory)
-                            .UseNpgsql(connectionString)
+                            .UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
                     new InstancesContext(systemOptions.Options)
                 try
                     match! instances.Instances.FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken) with
@@ -126,7 +126,7 @@ type StaticInstance (instance : Instance) =
                       member this.Published = instance.Published
                       member this.DisableSecurity = instance.DisableSecurity
                       member this.IsTemplate = instance.IsTemplate
-                      member this.AccessedAt = Some DateTime.UtcNow
+                      member this.AccessedAt = Some <| SystemClock.Instance.GetCurrentInstant()
 
                       member this.UpdateAccessedAt newTime = unitTask { () }
 
@@ -204,7 +204,7 @@ type Startup (config : IConfiguration) =
                     .AddAuthentication(authenticationOptions)
                     .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
 
-        ignore <| services.AddSingleton<IJsonSerializer>(NewtonsoftJsonSerializer httpJsonSettings)
+        ignore <| services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer httpJsonSettings)
         let getEventLogger (sp : IServiceProvider) =
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
             new EventLogger(logFactory)
@@ -241,7 +241,7 @@ type Startup (config : IConfiguration) =
                         Password = instanceSection.["Password"],
                         DisableSecurity = instanceSection.GetValue("DisableSecurity", false),
                         IsTemplate = instanceSection.GetValue("IsTemplate",false),
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = SystemClock.Instance.GetCurrentInstant()
                     )
                 StaticInstance(instance) :> IInstancesSource
             | _ -> failwith "Invalid InstancesSource"
@@ -251,8 +251,9 @@ type Startup (config : IConfiguration) =
 let main (args : string[]) : int =
     // Register a global converter to have nicer native F# types JSON conversion.
     JsonConvert.DefaultSettings <- fun () -> httpJsonSettings
-    // Enable JSON for PostgreSQL.
+    // Enable JSON and NodaTime for PostgreSQL.
     ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
+    ignore <| NpgsqlConnection.GlobalTypeMapper.UseNodaTime()
     // Use JavaScript Date objects.
     V8SerializationSettings.Default.UseDate <- true
 

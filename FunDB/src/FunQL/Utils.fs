@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.FunQL.Utils
 open System
 open System.Collections.Generic
 open Newtonsoft.Json.Linq
+open NodaTime
 open NpgsqlTypes
 
 open FunWithFlags.FunDB.SQL.Utils
@@ -19,9 +20,9 @@ let renderFunQLInt = renderSqlInt
 let renderFunQLBool = renderSqlBool
 let renderFunQLDecimal = renderSqlDecimal
 
-let renderFunQLDateTime (j : NpgsqlDateTime) : string = sprintf "%s :: datetime" (j |> string |> renderFunQLString)
-let renderFunQLDate (j : NpgsqlDate) : string = sprintf "%s :: date" (j |> string |> renderFunQLString)
-let renderFunQLInterval (ts : NpgsqlTimeSpan) : string = sprintf "%s :: interval" (ts |> string |> renderFunQLString)
+let renderFunQLDateTime (j : Instant) : string = sprintf "%s :: datetime" (j |> renderSqlDateTime |> renderFunQLString)
+let renderFunQLDate (j : LocalDate) : string = sprintf "%s :: date" (j |> renderSqlDate |> renderFunQLString)
+let renderFunQLInterval (ts : Period) : string = sprintf "%s :: interval" (ts |> renderSqlInterval |> renderFunQLString)
 let renderFunQLUuid (uuid : Guid) : string = sprintf "%s :: uuid" (uuid |> string |> renderFunQLString)
 
 let rec renderFunQLJson (j : JToken) : string =
@@ -36,7 +37,6 @@ let rec renderFunQLJson (j : JToken) : string =
     | JTokenType.Float -> renderFunQLDecimal <| JToken.op_Explicit j
     | JTokenType.String -> renderFunQLString <| JToken.op_Explicit j
     | JTokenType.Boolean -> renderFunQLBool <| JToken.op_Explicit j
-    | JTokenType.Date -> renderFunQLDateTime <| NpgsqlDateTime (JToken.op_Explicit j : DateTime)
     | JTokenType.Null -> "null"
     | typ -> failwith <| sprintf "Unexpected token type %O" typ
 

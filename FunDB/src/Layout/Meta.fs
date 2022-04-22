@@ -122,7 +122,7 @@ type private MetaBuilder (layout : Layout) =
                     let expr =
                         let col = SQL.VEColumn { Table = None; Name = field.ColumnName }
                         let makeValue value = SQL.VEValue (SQL.VString value)
-                        let exprs = vals |> Set.toSeq |> Seq.map makeValue |> Seq.toArray
+                        let exprs = vals |> Seq.map makeValue |> Seq.toArray
                         if Array.isEmpty exprs then
                             if field.IsNullable then
                                 SQL.VEIsNull col

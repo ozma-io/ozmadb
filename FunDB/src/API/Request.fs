@@ -1,6 +1,6 @@
 module FunWithFlags.FunDB.API.Request
 
-open System
+open NodaTime
 open System.Linq
 open System.Threading
 open System.Threading.Tasks
@@ -128,9 +128,9 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
     let makeEvent (addDetails : EventEntry -> unit) =
         let event =
             EventEntry (
-                TransactionTimestamp = ctx.TransactionTime.ToDateTime(),
+                TransactionTimestamp = ctx.TransactionTime,
                 TransactionId = ctx.TransactionId,
-                Timestamp = DateTime.UtcNow,
+                Timestamp = SystemClock.Instance.GetCurrentInstant(),
                 UserName = currentUser.Saved.Name,
                 Source = JsonConvert.SerializeObject(source)
             )

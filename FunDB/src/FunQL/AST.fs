@@ -2,9 +2,10 @@ module FunWithFlags.FunDB.FunQL.AST
 
 open System
 open System.ComponentModel
+open System.Collections.Immutable
 open System.Threading.Tasks
 open FSharpPlus
-open NpgsqlTypes
+open NodaTime
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.Affine
@@ -173,9 +174,9 @@ type [<NoEquality; NoComparison>] FieldValue =
     | FDecimal of decimal
     | FString of string
     | FBool of bool
-    | FDateTime of NpgsqlDateTime
-    | FDate of NpgsqlDate
-    | FInterval of NpgsqlTimeSpan
+    | FDateTime of Instant
+    | FDate of LocalDate
+    | FInterval of Period
     | FJson of JToken
     | FUuid of Guid
     | FUserViewRef of UserViewRef
@@ -183,9 +184,9 @@ type [<NoEquality; NoComparison>] FieldValue =
     | FDecimalArray of decimal[]
     | FStringArray of string[]
     | FBoolArray of bool[]
-    | FDateTimeArray of NpgsqlDateTime[]
-    | FDateArray of NpgsqlDate[]
-    | FIntervalArray of NpgsqlTimeSpan[]
+    | FDateTimeArray of Instant[]
+    | FDateArray of LocalDate[]
+    | FIntervalArray of Period[]
     | FJsonArray of JToken[]
     | FUserViewRefArray of UserViewRef[]
     | FUuidArray of Guid[]
@@ -215,9 +216,9 @@ type [<NoEquality; NoComparison>] FieldValue =
             | FDecimalArray vals -> renderArray renderFunQLDecimal "decimal" vals
             | FStringArray vals -> renderArray renderFunQLString "string" vals
             | FBoolArray vals -> renderArray renderFunQLBool "bool" vals
-            | FDateTimeArray vals -> renderArray (string >> renderFunQLString) "datetime" vals
-            | FDateArray vals -> renderArray (string >> renderFunQLString) "date" vals
-            | FIntervalArray vals -> renderArray (string >> renderFunQLString) "interval" vals
+            | FDateTimeArray vals -> renderArray (renderSqlDateTime >> renderFunQLString) "datetime" vals
+            | FDateArray vals -> renderArray (renderSqlDate >> renderFunQLString) "date" vals
+            | FIntervalArray vals -> renderArray (renderSqlInterval >> renderFunQLString) "interval" vals
             | FJsonArray vals -> renderArray renderFunQLJson "json" vals
             | FUserViewRefArray vals -> renderArray (fun (r : EntityRef) -> sprintf "&%s" (r.ToFunQLString())) "uvref" vals
             | FUuidArray vals -> renderArray renderFunQLUuid "uuid" vals
@@ -237,14 +238,17 @@ type FieldValuePrettyConverter () =
     override this.WriteJson (writer : JsonWriter, value : FieldValue, serializer : JsonSerializer) : unit =
         let serialize value = serializer.Serialize(writer, value)
 
+        let serializeArray (convertFunc : 'a -> 'b) (vals : 'a[]) : unit =
+            serialize <| Array.map convertFunc vals
+
         match value with
         | FInt i -> writer.WriteValue(i)
         | FDecimal d -> writer.WriteValue(d)
         | FString s -> writer.WriteValue(s)
         | FBool b -> writer.WriteValue(b)
-        | FDateTime dt -> writer.WriteValue(dt.ToDateTime())
-        | FDate dt -> writer.WriteValue(dt.ToString())
-        | FInterval int -> writer.WriteValue(int.ToString())
+        | FDateTime dt -> writer.WriteValue(renderSqlDateTime dt)
+        | FDate dt -> writer.WriteValue(renderSqlDate dt)
+        | FInterval int -> writer.WriteValue(renderSqlInterval int)
         | FJson j -> j.WriteTo(writer)
         | FUserViewRef r -> serialize r
         | FUuid uuid -> writer.WriteValue(uuid)
@@ -252,9 +256,9 @@ type FieldValuePrettyConverter () =
         | FDecimalArray vals -> serialize vals
         | FStringArray vals -> serialize vals
         | FBoolArray vals -> serialize vals
-        | FDateTimeArray vals -> serialize vals
-        | FDateArray vals -> serialize vals
-        | FIntervalArray vals -> serialize vals
+        | FDateTimeArray vals -> serializeArray renderSqlDateTime vals
+        | FDateArray vals -> serializeArray renderSqlDate vals
+        | FIntervalArray vals -> serializeArray renderSqlInterval vals
         | FJsonArray vals -> serialize vals
         | FUserViewRefArray vals -> serialize vals
         | FUuidArray vals -> serialize vals
@@ -290,7 +294,7 @@ type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarField
     | [<CaseName("uvref")>] SFTUserViewRef
     | [<CaseName("uuid")>] SFTUuid
     | [<CaseName("reference")>] SFTReference of Entity : 'e * OnDelete : ReferenceDeleteAction option
-    | [<CaseName("enum")>] SFTEnum of Values : Set<string>
+    | [<CaseName("enum")>] SFTEnum of ImmutableSortedSet<string>
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -561,6 +565,8 @@ type AttributeMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<Attri
 and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FEValue of FieldValue
     | FERef of 'f
+    | FEEntityAttr of 'e * AttributeName
+    | FEFieldAttr of 'f * AttributeName
     | FENot of FieldExpr<'e, 'f>
     | FEAnd of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
     | FEOr of FieldExpr<'e, 'f> * FieldExpr<'e, 'f>
@@ -581,8 +587,8 @@ and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | FECase of (FieldExpr<'e, 'f> * FieldExpr<'e, 'f>)[] * (FieldExpr<'e, 'f> option)
     | FEJsonArray of FieldExpr<'e, 'f>[]
     | FEJsonObject of Map<FunQLName, FieldExpr<'e, 'f>>
-    | FEFunc of FunQLName * FieldExpr<'e, 'f>[]
-    | FEAggFunc of FunQLName * AggExpr<'e, 'f>
+    | FEFunc of FunctionName * FieldExpr<'e, 'f>[]
+    | FEAggFunc of FunctionName * AggExpr<'e, 'f>
     | FESubquery of SelectExpr<'e, 'f>
     | FEInheritedFrom of 'f * SubEntityRef
     | FEOfType of 'f * SubEntityRef
@@ -593,6 +599,8 @@ and FieldExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
             match this with
             | FEValue value -> value.ToFunQLString()
             | FERef r -> r.ToFunQLString()
+            | FEEntityAttr (r, attr) -> sprintf "%s.@@%s" (r.ToFunQLString()) (attr.ToFunQLString())
+            | FEFieldAttr (r, attr) -> sprintf "%s.@%s" (r.ToFunQLString()) (attr.ToFunQLString())
             | FENot e -> sprintf "NOT (%s)" (e.ToFunQLString())
             | FEAnd (a, b) -> sprintf "(%s) AND (%s)" (a.ToFunQLString()) (b.ToFunQLString())
             | FEOr (a, b) -> sprintf "(%s) OR (%s)" (a.ToFunQLString()) (b.ToFunQLString())
@@ -1164,6 +1172,8 @@ let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<
     let rec traverse = function
         | FEValue value -> FEValue (mapper.Value value)
         | FERef r -> FERef (mapper.FieldReference r)
+        | FEEntityAttr (eref, attr) -> FEEntityAttr (mapper.EntityReference eref, attr)
+        | FEFieldAttr (fref, attr) -> FEFieldAttr (mapper.FieldReference fref, attr)
         | FENot e -> FENot (traverse e)
         | FEAnd (a, b) -> FEAnd (traverse a, traverse b)
         | FEOr (a, b) -> FEOr (traverse a, traverse b)
@@ -1249,6 +1259,8 @@ let mapTaskFieldExpr (mapper : FieldExprTaskMapper<'e1, 'f1, 'e2, 'f2>) : FieldE
     let rec traverse = function
         | FEValue value -> Task.map FEValue (mapper.Value value)
         | FERef r -> Task.map FERef (mapper.FieldReference r)
+        | FEEntityAttr (eref, attr) -> Task.map (fun eref -> FEEntityAttr (eref, attr)) (mapper.EntityReference eref)
+        | FEFieldAttr (fref, attr) -> Task.map (fun fref -> FEFieldAttr (fref, attr)) (mapper.FieldReference fref)
         | FENot e -> Task.map FENot (traverse e)
         | FEAnd (a, b) -> Task.map2 (curry FEAnd) (traverse a) (traverse b)
         | FEOr (a, b) -> Task.map2 (curry FEOr) (traverse a) (traverse b)
@@ -1342,6 +1354,8 @@ let iterFieldExpr (mapper : FieldExprIter<'e, 'f>) : FieldExpr<'e, 'f> -> unit =
     let rec traverse = function
         | FEValue value -> mapper.Value value
         | FERef r -> mapper.FieldReference r
+        | FEEntityAttr (eref, attr) -> mapper.EntityReference eref
+        | FEFieldAttr (fref, attr) -> mapper.FieldReference fref
         | FENot e -> traverse e
         | FEAnd (a, b) -> traverse a; traverse b
         | FEOr (a, b) -> traverse a; traverse b
@@ -1749,26 +1763,26 @@ let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> Field
     | FTArray SFTInt -> parseSingleValueStrict FIntArray
     | FTArray SFTDecimal -> parseSingleValueStrict FDecimalArray
     | FTArray SFTBool -> parseSingleValueStrict FBoolArray
-    | FTArray SFTDateTime -> parseSingleValue (Array.map convertDateTime >> FDateTimeArray >> Some)
+    | FTArray SFTDateTime -> parseSingleValue (Seq.traverseOption trySqlDateTime >> Option.map (Array.ofSeq >> FDateTimeArray))
     | FTArray SFTDate -> parseSingleValue (Seq.traverseOption trySqlDate >> Option.map (Array.ofSeq >> FDateArray))
     | FTArray SFTInterval -> parseSingleValue (Seq.traverseOption trySqlInterval >> Option.map (Array.ofSeq >> FIntervalArray))
     | FTArray SFTJson -> parseSingleValueStrict FJsonArray
     | FTArray SFTUserViewRef -> parseSingleValueStrict FUserViewRefArray
     | FTArray SFTUuid -> parseSingleValueStrict FUuidArray
     | FTArray (SFTReference _) -> parseSingleValueStrict FIntArray
-    | FTArray (SFTEnum vals) -> parseSingleValue (fun xs -> if Seq.forall (fun x -> Set.contains x vals) xs then Some (FStringArray xs) else None)
+    | FTArray (SFTEnum vals) -> parseSingleValue (fun xs -> if Seq.forall (fun x -> vals.Contains x) xs then Some (FStringArray xs) else None)
     | FTScalar SFTString -> parseSingleValueStrict FString
     | FTScalar SFTInt -> parseSingleValueStrict FInt
     | FTScalar SFTDecimal -> parseSingleValueStrict FDecimal
     | FTScalar SFTBool -> parseSingleValueStrict FBool
-    | FTScalar SFTDateTime -> parseSingleValue (convertDateTime >> FDateTime >> Some)
+    | FTScalar SFTDateTime -> parseSingleValue (trySqlDateTime >> Option.map FDateTime)
     | FTScalar SFTDate -> parseSingleValue (trySqlDate >> Option.map FDate)
     | FTScalar SFTInterval -> parseSingleValue (trySqlInterval >> Option.map FInterval)
     | FTScalar SFTJson -> parseSingleValueStrict FJson
     | FTScalar SFTUserViewRef -> parseSingleValueStrict FUserViewRef
     | FTScalar SFTUuid -> parseSingleValueStrict FUuid
     | FTScalar (SFTReference _) -> parseSingleValueStrict FInt
-    | FTScalar (SFTEnum vals) -> parseSingleValue (fun x -> if Set.contains x vals then Some (FString x) else None)
+    | FTScalar (SFTEnum vals) -> parseSingleValue (fun x -> if vals.Contains x then Some (FString x) else None)
 
 let fromEntity (entityRef : 'e) : FromEntity<'e> =
     { Ref = entityRef

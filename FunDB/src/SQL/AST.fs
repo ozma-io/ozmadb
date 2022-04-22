@@ -6,6 +6,7 @@ open System
 open NpgsqlTypes
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
+open NodaTime
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
@@ -113,9 +114,9 @@ type [<NoEquality; NoComparison>] Value =
     | VString of string
     | VRegclass of SchemaObject
     | VBool of bool
-    | VDateTime of NpgsqlDateTime
-    | VDate of NpgsqlDate
-    | VInterval of NpgsqlTimeSpan
+    | VDateTime of Instant
+    | VDate of LocalDate
+    | VInterval of Period
     | VJson of JToken
     | VUuid of Guid
     | VIntArray of ValueArray<int>
@@ -123,9 +124,9 @@ type [<NoEquality; NoComparison>] Value =
     | VDecimalArray of ValueArray<decimal>
     | VStringArray of ValueArray<string>
     | VBoolArray of ValueArray<bool>
-    | VDateTimeArray of ValueArray<NpgsqlDateTime>
-    | VDateArray of ValueArray<NpgsqlDate>
-    | VIntervalArray of ValueArray<NpgsqlTimeSpan>
+    | VDateTimeArray of ValueArray<Instant>
+    | VDateArray of ValueArray<LocalDate>
+    | VIntervalArray of ValueArray<Period>
     | VRegclassArray of ValueArray<SchemaObject>
     | VJsonArray of ValueArray<JToken>
     | VUuidArray of ValueArray<Guid>
@@ -150,7 +151,7 @@ type [<NoEquality; NoComparison>] Value =
             | VString s -> sprintf "%s :: text" (renderSqlString s)
             | VRegclass rc -> sprintf "%s :: regclass" (rc.ToSQLString() |> renderSqlString)
             | VBool b -> renderSqlBool b
-            | VDateTime dt -> sprintf "%s :: timestamp" (dt |> string |> renderSqlString)
+            | VDateTime dt -> sprintf "%s :: timestamptz" (dt |> string |> renderSqlString)
             | VDate d -> sprintf "%s :: date" (d |> string |> renderSqlString)
             | VInterval d -> sprintf "%s :: interval" (d |> string |> renderSqlString)
             | VJson j -> sprintf "%s :: jsonb" (j |> renderSqlJson |> renderSqlString)
@@ -160,7 +161,7 @@ type [<NoEquality; NoComparison>] Value =
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | VStringArray vals -> renderArray renderSqlString "text" vals
             | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-            | VDateTimeArray vals -> renderArray string "timestamp" vals
+            | VDateTimeArray vals -> renderArray string "timestamptz" vals
             | VDateArray vals -> renderArray string "date" vals
             | VIntervalArray vals -> renderArray string "interval" vals
             | VRegclassArray vals -> renderArray toSQLString "regclass" vals
@@ -197,9 +198,9 @@ type ValuePrettyConverter () =
         | VDecimal d -> writer.WriteValue(d)
         | VString s -> writer.WriteValue(s)
         | VBool b -> writer.WriteValue(b)
-        | VDateTime dt -> writer.WriteValue(dt.ToDateTime())
-        | VDate dt -> writer.WriteValue(dt.ToString())
-        | VInterval int -> writer.WriteValue(int.ToString())
+        | VDateTime dt -> writer.WriteValue(renderSqlDateTime dt)
+        | VDate dt -> writer.WriteValue(renderSqlDate dt)
+        | VInterval int -> writer.WriteValue(renderSqlInterval int)
         | VJson j -> j.WriteTo(writer)
         | VRegclass rc -> writer.WriteValue(string rc)
         | VUuid u -> writer.WriteValue(u)
@@ -208,9 +209,9 @@ type ValuePrettyConverter () =
         | VDecimalArray vals -> serializeArray id vals
         | VStringArray vals -> serializeArray id vals
         | VBoolArray vals -> serializeArray id vals
-        | VDateTimeArray vals -> serializeArray (fun (dt : NpgsqlDateTime) -> dt.ToDateTime()) vals
-        | VDateArray vals -> serializeArray string vals
-        | VIntervalArray vals -> serializeArray string vals
+        | VDateTimeArray vals -> serializeArray renderSqlDateTime vals
+        | VDateArray vals -> serializeArray renderSqlDate vals
+        | VIntervalArray vals -> serializeArray renderSqlInterval vals
         | VRegclassArray vals -> serializeArray string vals
         | VJsonArray vals -> serializeArray id vals
         | VUuidArray vals -> serializeArray id vals
@@ -241,7 +242,7 @@ type SimpleType =
             | STString -> "text"
             | STDecimal -> "numeric"
             | STBool -> "bool"
-            | STDateTime -> "timestamp"
+            | STDateTime -> "timestamptz"
             | STDate -> "date"
             | STInterval -> "interval"
             | STRegclass -> "regclass"
@@ -271,6 +272,7 @@ let findSimpleType (str : TypeName) : SimpleType option =
     | "timestamp with time zone" -> Some STDateTime
     | "timestamp without time zone" -> Some STDateTime
     | "timestamp" -> Some STDateTime
+    | "timestamptz" -> Some STDateTime
     | "date" -> Some STDate
     | "interval" -> Some STInterval
     | "regclass" -> Some STRegclass

@@ -1,7 +1,7 @@
 module FunWithFlags.FunDB.JavaScript.FunQL
 
 open System
-open NpgsqlTypes
+open NodaTime
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.JavaScript.AST
@@ -11,17 +11,17 @@ type JSCompileException (message : string) =
     inherit Exception(message)
 
 // FIXME: may not take offset into consideration
-let jsDateTime (dt : NpgsqlDateTime) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day; dt.Hour; dt.Minute; dt.Second; dt.Millisecond |] |> Array.map (double >> JSNumber >> JSValue))
+let jsDateTime (dt : Instant) : JSExpr = JSNew (JSVar "Date", [| dt.ToUnixTimeMilliseconds() |> double |> JSNumber |> JSValue |])
 
-let jsDate (dt : NpgsqlDate) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day |] |> Array.map (double >> JSNumber >> JSValue))
+let jsDate (dt : LocalDate) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day |] |> Array.map (double >> JSNumber >> JSValue))
 
 let jsFieldValue : FieldValue -> JSExpr = function
     | FInt i -> JSValue <| JSNumber (double i)
     | FDecimal d -> JSValue <| JSNumber (double d)
     | FString s -> JSValue <| JSString s
     | FBool b -> JSValue <| JSBool b
-    | FDateTime dt -> jsDateTime dt
-    | FDate dt -> jsDate dt
+    | FDateTime dt -> failwith "Not implemented"
+    | FDate dt -> failwith "Not implemented"
     | FInterval int -> failwith "Not implemented"
     | FJson j -> failwith "Not implemented"
     | FUserViewRef r -> failwith "Not implemented"
@@ -30,8 +30,8 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FDecimalArray decs -> JSArray <| Array.map (double >> JSNumber >> JSValue) decs
     | FStringArray strings -> JSArray <| Array.map (JSString >> JSValue) strings
     | FBoolArray bools -> JSArray <| Array.map (JSBool >> JSValue) bools
-    | FDateTimeArray dts -> JSArray <| Array.map jsDateTime dts
-    | FDateArray dts -> JSArray <| Array.map jsDate dts
+    | FDateTimeArray dts -> failwith "Not implemented"
+    | FDateArray dts -> failwith "Not implemented"
     | FIntervalArray ints -> failwith "Not implemented"
     | FJsonArray jss -> failwith "Not implemented"
     | FUserViewRefArray refs -> failwith "Not implemented"

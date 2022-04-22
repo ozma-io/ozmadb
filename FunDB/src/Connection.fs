@@ -76,7 +76,7 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
         let systemOptions =
             (DbContextOptionsBuilder<SystemContext> ())
                 .UseLoggerFactory(conn.LoggerFactory)
-                .UseNpgsql(conn.Connection)
+                .UseNpgsql(conn.Connection, fun opts -> ignore <| opts.UseNodaTime())
 #if DEBUG
         ignore <| systemOptions.EnableSensitiveDataLogging()
 #endif

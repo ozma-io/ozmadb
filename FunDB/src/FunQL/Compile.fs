@@ -2,7 +2,7 @@ module FunWithFlags.FunDB.FunQL.Compile
 
 open System
 open FSharpPlus
-open NpgsqlTypes
+open NodaTime
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
@@ -113,7 +113,7 @@ let metaSQLType : MetaType -> SQL.SimpleType option = function
     | CMMainId -> Some SQL.STInt
     | CMMainSubEntity -> Some SQL.STInt
 
-let private mapColumnType (f : 'a -> 'b) : GenericColumnType<'a> -> GenericColumnType<'b> = function
+let private mapColumnTypeFields (f : 'a -> 'b) : GenericColumnType<'a> -> GenericColumnType<'b> = function
     | CTMeta meta -> CTMeta meta
     | CTColumnMeta (name, meta) -> CTColumnMeta (f name, meta)
     | CTColumn name -> CTColumn (f name)
@@ -248,22 +248,51 @@ type private SelectSignature =
     }
 
 [<NoEquality; NoComparison>]
-type private SelectInfo =
-    { Domains : TempDomains
+type private GenericSelectInfo<'e> when 'e : comparison =
+    { Domains : GenericDomains<'e>
       // PostgreSQL column length is limited to 63 bytes, so we store column types separately.
-      Columns : TempColumnType[]
+      Columns : GenericColumnType<'e>[]
     }
 
-let private emptySelectInfo : SelectInfo =
+let private emptySelectInfo : GenericSelectInfo<'e> =
     { Domains = DSingle (0, Map.empty)
       Columns = [||]
     }
 
+let private mapSelectInfoFields (f : 'e1 -> 'e2) (info : GenericSelectInfo<'e1>) : GenericSelectInfo<'e2> =
+    { Domains = mapDomainsFields f info.Domains
+      Columns = Array.map (mapColumnTypeFields f) info.Columns
+    }
+
+type private SelectInfo = GenericSelectInfo<FieldName>
+type private TempSelectInfo = GenericSelectInfo<TempFieldName>
+
+let private finalSelectInfo = mapSelectInfoFields getFinalName
+
 type FlattenedDomains = Map<GlobalDomainId, Domain>
+
+type private EntityAttributes =
+    { Entity : Set<AttributeName>
+      Fields : Set<FieldName * AttributeName>
+    }
+
+type private EntityAttributesMap = Map<EntityName, EntityAttributes>
+
+let private emptyEntityAttributes =
+    { Entity = Set.empty
+      Fields = Set.empty
+    } : EntityAttributes
+
+let private unionEntityAttributes (a : EntityAttributes) (b : EntityAttributes) =
+    { Entity = Set.union a.Entity b.Entity
+      Fields = Set.union a.Fields b.Fields
+    }
+
+let private unionEntityAttributesMap : EntityAttributesMap -> EntityAttributesMap -> EntityAttributesMap = Map.unionWith (fun name -> unionEntityAttributes)
 
 [<NoEquality; NoComparison>]
 type private FromType =
-    | FTEntity of GlobalDomainId * TempDomain // Domain ID is used for merging.
+    | FTEntity of GlobalDomainId * Domain // Domain ID is used for merging.
     | FTSubquery of SelectInfo
 
 [<NoEquality; NoComparison>]
@@ -272,6 +301,7 @@ type private FromInfo =
       Entity : FromEntityInfo option
       MainId : SQL.ColumnName option
       MainSubEntity : SQL.ColumnName option
+      Attributes : EntityAttributes
     }
 
 type private FromMap = Map<SQL.TableName, FromInfo>
@@ -294,6 +324,9 @@ type private JoinId = int
 let compileJoinId (jid : JoinId) : SQL.TableName =
     SQL.SQLName <| sprintf "__join__%i" jid
 
+let private epochDateTime = Instant.FromUnixTimeSeconds(0)
+let private epochDate = epochDateTime.InUtc().LocalDateTime.Date
+
 let private defaultCompiledArgumentValue : FieldType<_> -> FieldValue = function
     | FTArray SFTString -> FStringArray [||]
     | FTArray SFTInt -> FIntArray [||]
@@ -311,14 +344,14 @@ let private defaultCompiledArgumentValue : FieldType<_> -> FieldValue = function
     | FTScalar SFTInt -> FInt 0
     | FTScalar SFTDecimal -> FDecimal 0m
     | FTScalar SFTBool -> FBool false
-    | FTScalar SFTDateTime -> FDateTime NpgsqlDateTime.Epoch
-    | FTScalar SFTDate -> FDate NpgsqlDate.Epoch
-    | FTScalar SFTInterval -> FInterval NpgsqlTimeSpan.Zero
+    | FTScalar SFTDateTime -> FDateTime epochDateTime
+    | FTScalar SFTDate -> FDate epochDate
+    | FTScalar SFTInterval -> FInterval Period.Zero
     | FTScalar SFTJson -> FJson (JObject ())
     | FTScalar SFTUserViewRef -> FUserViewRef { Schema = None; Name = FunQLName "" }
     | FTScalar SFTUuid -> FUuid Guid.Empty
     | FTScalar (SFTReference (entityRef, opts)) -> FInt 0
-    | FTScalar (SFTEnum vals) -> vals |> Set.toSeq |> Seq.first |> Option.get |> FString
+    | FTScalar (SFTEnum vals) -> vals |> Seq.first |> Option.get |> FString
 
 let defaultCompiledArgument (arg : CompiledArgument) : FieldValue =
     match arg.DefaultValue with
@@ -328,6 +361,15 @@ let defaultCompiledArgument (arg : CompiledArgument) : FieldValue =
             FNull
         else
             defaultCompiledArgumentValue arg.FieldType
+
+let private subselectAttributes (info : SelectInfo) : EntityAttributes =
+    let getAttribute = function
+        | CTMeta (CMRowAttribute name) ->
+            Some { emptyEntityAttributes with Entity = Set.singleton name }
+        | CTColumnMeta (colName, CCCellAttribute name) ->
+            Some { emptyEntityAttributes with Fields = Set.singleton (colName, name) }
+        | _ -> None
+    info.Columns |> Seq.mapMaybe getAttribute |> Seq.fold unionEntityAttributes emptyEntityAttributes
 
 // Evaluation of column-wise or global attributes
 type CompiledAttributesExpr =
@@ -532,6 +574,16 @@ type private CTEBindings = Map<SQL.TableName, SelectInfo>
 
 type private UpdateRecCTEBindings = SelectSignature -> TempDomains -> CTEBindings
 
+type private ExprContext =
+    { CTEs : CTEBindings
+      EntityAttributes :  EntityAttributesMap
+    }
+
+let private emptyExprContext =
+    { CTEs = Map.empty
+      EntityAttributes = Map.empty
+    } : ExprContext
+
 let private selectSignature (half : HalfCompiledSingleSelect) : SelectSignature =
     { MetaColumns = Map.keysSet half.MetaColumns
       Columns = half.Columns |> Array.map (fun col -> { Name = col.Name; Meta = Map.keysSet col.Meta })
@@ -569,7 +621,7 @@ let private signatureColumnTypes (sign : SelectSignature) : TempColumnType seq =
 let rec private idKey (entityName : EntityName) (fieldName : FieldName) (path : FieldName[]) : string =
     Seq.append (Seq.singleton entityName) (Seq.take path.Length (Seq.append (Seq.singleton fieldName) path)) |> Seq.map string |> String.concat "__"
 
-let private infoFromSignature (domains : TempDomains) (signature : SelectSignature) : SelectInfo =
+let private infoFromSignature (domains : TempDomains) (signature : SelectSignature) : TempSelectInfo =
     { Columns = Array.ofSeq (signatureColumnTypes signature)
       Domains = domains
     }
@@ -675,6 +727,7 @@ let private buildInternalJoins (layout : Layout) (initialFromMap : FromMap) (ini
               Entity = Some entityInfo
               MainId = None
               MainSubEntity = None
+              Attributes = emptyEntityAttributes
             }
         let fromMap = Map.add join.Name fromInfo fromMap
         (fromMap, from)
@@ -824,22 +877,22 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | CTMeta (CMArgAttribute (FunQLName arg, FunQLName name)) -> replacer.ConvertName <| sprintf "__arg_attr__%s__%s" arg name
         | CTColumn (FunQLName column) -> SQL.SQLName column
 
-    let renameSelectInfo (columns : FieldName[]) (info : SelectInfo) : SelectInfo =
-        let mutable columnI = 0
+    let renameSelectInfo (columns : 'f2 seq) (info : GenericSelectInfo<'f1>) : GenericSelectInfo<'f2> =
+        let newColumn = columns.GetEnumerator()
         let mutable namesMap = Map.empty
 
         for column in info.Columns do
             match column with
             | CTColumn name ->
-                let newName = TName columns.[columnI]
-                columnI <- columnI + 1
+                assert newColumn.MoveNext()
+                let newName = newColumn.Current
                 namesMap <- Map.add name newName namesMap
             | _ -> ()
 
         let renameColumns = function
             | CTColumn name -> CTColumn namesMap.[name]
             | CTColumnMeta (name, meta) -> CTColumnMeta (namesMap.[name], meta)
-            | a -> a
+            | CTMeta meta -> CTMeta meta
 
         let columns = Array.map renameColumns info.Columns
         let domains = renameDomainFields namesMap info.Domains
@@ -926,7 +979,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     let setSelectColumns (sign : SelectSignature) = setSelectExprColumns sign false
 
-    let rec domainExpression (tableRef : SQL.TableRef) (f : TempDomain -> SQL.ValueExpr) = function
+    let rec domainExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.ValueExpr) = function
         | DSingle (id, dom) -> f dom
         | DMulti (ns, nested) ->
             let makeCase (localId, subcase) =
@@ -941,7 +994,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             else
                 SQL.VECase (cases, None)
 
-    let fromInfoExpression (tableRef : SQL.TableRef) (f : TempDomain -> SQL.ValueExpr) = function
+    let fromInfoExpression (tableRef : SQL.TableRef) (f : Domain -> SQL.ValueExpr) = function
         | FTEntity (id, dom) -> f dom
         | FTSubquery info -> domainExpression tableRef f info.Domains
 
@@ -976,6 +1029,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
           Entity = None
           MainId = mainId
           MainSubEntity = mainSubEntity
+          Attributes = subselectAttributes selectSig
         }
 
     let compileOperationEntity (opEntity : ResolvedOperationEntity) : SQL.TableName * FromInfo * SQL.OperationTable =
@@ -988,14 +1042,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               IdColumn = idDefault
               AsRoot = false
             }
-        let domain = mapAllFields makeDomainEntry entity |> Map.mapKeys TName
+        let domain = mapAllFields makeDomainEntry entity
         let mainEntry =
             { Ref = { Entity = entityRef; Name = entity.MainField }
               RootEntity = entity.Root
               IdColumn = idDefault
               AsRoot = false
             }
-        let domain = Map.add (TName funMain) mainEntry domain
+        let domain = Map.add funMain mainEntry domain
         let newAlias = compileNameFromEntity entityRef opEntity.Alias
 
         let ann =
@@ -1025,6 +1079,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               Entity = Some entityInfo
               MainId = None
               MainSubEntity = None
+              Attributes = emptyEntityAttributes
             }
 
         usedDatabase <- addUsedEntityRef entityRef usedEntitySelect usedDatabase
@@ -1101,7 +1156,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     None
                 else
                     let entities = entityRefs |> Seq.map (fun ref -> getEntityByRef ref :> IEntityBits)
-                    let (newPaths, newExpr) = compileLinkedFieldExpr flags Map.empty paths <| replaceTopLevelEntityRefInExpr localRef caseComp.Expression
+                    let (newPaths, newExpr) = compileFieldExpr flags emptyExprContext paths <| replaceEntityRefInExpr localRef caseComp.Expression
                     paths <- newPaths
                     Some (entities, newExpr)
 
@@ -1193,7 +1248,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               AsRoot = asRoot
               Extra = ObjectMap.empty
             }
-        let (fromRes, from) = compileFromExpr Map.empty 0 None true (FEntity fromEntity)
+        let (fromRes, from) = compileFromExpr emptyExprContext 0 None true (FEntity fromEntity)
         assert (fromRes.Joins.NextJoinId = 0)
         let argIdRef = SQL.VEColumn { Table = Some argTableRef; Name = sqlFunId }
         let (argPaths, expr) = compilePath emptyExprCompilationFlags ctx extra emptyJoinPaths (Some argIdRef) (Some argTableRef) fieldRef None asRoot pathWithEntities
@@ -1265,7 +1320,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let selectExpr = compileReferenceArgument linked.Extra ctx argType linked.Ref.AsRoot linked.Ref.Path argInfo.Path
                 (paths0, SQL.VESubquery selectExpr)
 
-    and compileLinkedFieldExpr (flags : ExprCompilationFlags) (cteBindings : CTEBindings) (paths0 : JoinPaths) (expr : ResolvedFieldExpr) : JoinPaths * SQL.ValueExpr =
+    and compileFieldExpr (flags : ExprCompilationFlags) (ctx : ExprContext) (paths0 : JoinPaths) (expr : ResolvedFieldExpr) : JoinPaths * SQL.ValueExpr =
         let mutable paths = paths0
 
         let compileLinkedRef ctx linked =
@@ -1273,7 +1328,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             paths <- newPaths
             ret
         let compileSubSelectExpr =
-            snd << compileSelectExpr subSelectFlags cteBindings None
+            snd << compileSelectExpr subSelectFlags ctx None
 
         let compileTypeCheck includeChildren c (subEntityRef : SubEntityRef) =
             let checkForTypes =
@@ -1302,6 +1357,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let rec traverse = function
             | FEValue v -> SQL.VEValue <| compileFieldValue v
             | FERef c -> compileLinkedRef RCExpr c
+            | FEEntityAttr (eref, attr) -> failwith "Not implemented"
+            | FEFieldAttr (fref, attr) -> failwith "Not implemented"
             | FENot a -> SQL.VENot (traverse a)
             | FEAnd (a, b) -> SQL.VEAnd (traverse a, traverse b)
             | FEOr (a, b) -> SQL.VEOr (traverse a, traverse b)
@@ -1364,8 +1421,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let ret = traverse expr
         (paths, ret)
 
-    and compileOrderColumn (cteBindings : CTEBindings) (paths : JoinPaths)  (ord : ResolvedOrderColumn) : JoinPaths * SQL.OrderColumn =
-        let (paths, expr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths ord.Expr
+    and compileOrderColumn (ctx : ExprContext) (paths : JoinPaths)  (ord : ResolvedOrderColumn) : JoinPaths * SQL.OrderColumn =
+        let (paths, expr) = compileFieldExpr emptyExprCompilationFlags ctx paths ord.Expr
         let ret =
             { Expr = expr
               Order = Option.map compileOrder ord.Order
@@ -1373,14 +1430,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.OrderColumn
         (paths, ret)
 
-    and compileOrderLimitClause (cteBindings : CTEBindings) (paths0 : JoinPaths) (clause : ResolvedOrderLimitClause) : JoinPaths * SQL.OrderLimitClause =
+    and compileOrderLimitClause (ctx : ExprContext) (paths0 : JoinPaths) (clause : ResolvedOrderLimitClause) : JoinPaths * SQL.OrderLimitClause =
         let mutable paths = paths0
         let compileOrderColumn' ord =
-            let (newPaths, ret) = compileOrderColumn cteBindings paths ord
+            let (newPaths, ret) = compileOrderColumn ctx paths ord
             paths <- newPaths
             ret
         let compileFieldExpr' expr =
-            let (newPaths, ret) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
+            let (newPaths, ret) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
             paths <- newPaths
             ret
         let ret =
@@ -1390,14 +1447,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.OrderLimitClause
         (paths, ret)
 
-    and compileInsideSelectExpr (flags : SelectFlags) (compileTree : CTEBindings -> ResolvedSelectTreeExpr -> SelectSignature * 'a * SQL.SelectTreeExpr) (cteBindings : CTEBindings) (select : ResolvedSelectExpr) : SelectSignature * 'a * SQL.SelectExpr =
-        let (cteBindings, ctes) =
+    and compileInsideSelectExpr (flags : SelectFlags) (compileTree : ExprContext -> ResolvedSelectTreeExpr -> SelectSignature * 'a * SQL.SelectTreeExpr) (ctx : ExprContext) (select : ResolvedSelectExpr) : SelectSignature * 'a * SQL.SelectExpr =
+        let (ctx, ctes) =
             match select.CTEs with
-            | None -> (cteBindings, None)
+            | None -> (ctx, None)
             | Some ctes ->
-                let (bindings, newCtes) = compileCommonTableExprs flags cteBindings ctes
-                (bindings, Some newCtes)
-        let (signature, domains, tree) = compileTree cteBindings select.Tree
+                let (newCtx, newCtes) = compileCommonTableExprs flags ctx ctes
+                (newCtx, Some newCtes)
+        let (signature, domains, tree) = compileTree ctx select.Tree
         let ret =
             { CTEs = ctes
               Tree = tree
@@ -1405,8 +1462,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.SelectExpr
         (signature, domains, ret)
 
-    and compileValues (cteBindings : CTEBindings) (values : ResolvedFieldExpr[][]) : SelectSignature * TempDomains * SQL.SelectTreeExpr =
-        let compiledValues = values |> Array.map (Array.map (compileLinkedFieldExpr emptyExprCompilationFlags cteBindings emptyJoinPaths >> snd))
+    and compileValues (ctx : ExprContext) (values : ResolvedFieldExpr[][]) : SelectSignature * TempDomains * SQL.SelectTreeExpr =
+        let compiledValues = values |> Array.map (Array.map (compileFieldExpr emptyExprCompilationFlags ctx emptyJoinPaths >> snd))
         let newColumn () =
             { Name = newTempFieldName ()
               Meta = Set.empty
@@ -1419,7 +1476,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         (info, emptyDomains, SQL.SValues compiledValues)
 
     // `updateBindings` is used to update CTEBindings after non-recursive part of recursive CTE expression is compiled.
-    and compileSelectExpr (flags : SelectFlags) (cteBindings : CTEBindings) (initialUpdateBindings : UpdateRecCTEBindings option) (expr : ResolvedSelectExpr) : SelectInfo * SQL.SelectExpr =
+    and compileSelectExpr (flags : SelectFlags) (ctx : ExprContext) (initialUpdateBindings : UpdateRecCTEBindings option) (expr : ResolvedSelectExpr) : TempSelectInfo * SQL.SelectExpr =
         let (signature, domains, ret) =
             match expr.Tree with
             // We assemble a new domain when SetOp is found, and we need a different tree traversal for that.
@@ -1427,9 +1484,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let ns = newDomainNamespaceId ()
                 let domainColumn = CMDomain ns
                 let mutable lastId = 0
-                let rec compileTreeExpr (updateBindings : UpdateRecCTEBindings option) (cteBindings : CTEBindings) : ResolvedSelectTreeExpr -> SelectSignature * Map<LocalDomainId, TempDomains> * SQL.SelectTreeExpr = function
+                let rec compileTreeExpr (updateBindings : UpdateRecCTEBindings option) (ctx : ExprContext) : ResolvedSelectTreeExpr -> SelectSignature * Map<LocalDomainId, TempDomains> * SQL.SelectTreeExpr = function
                     | SSelect query ->
-                        let (info, expr) = compileSingleSelectExpr flags cteBindings query
+                        let (info, expr) = compileSingleSelectExpr flags ctx query
                         let id = lastId
                         lastId <- lastId + 1
                         let metaColumns = Map.add domainColumn (SQL.VEValue <| SQL.VInt id) info.MetaColumns
@@ -1437,18 +1494,18 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let expr = { expr with Extra = info }
                         (selectSignature info, Map.singleton id info.Domains, SQL.SSelect expr)
                     | SValues values ->
-                        let (info, domains, ret) = compileValues cteBindings values
+                        let (info, domains, ret) = compileValues ctx values
                         let id = lastId
                         lastId <- lastId + 1
                         (info, Map.singleton id domains, ret)
                     | SSetOp setOp ->
-                        let (sig1, domainsMap1, expr1) = compileExpr None cteBindings setOp.A
-                        let cteBindings =
+                        let (sig1, domainsMap1, expr1) = compileExpr None ctx setOp.A
+                        let ctx =
                             match updateBindings with
-                            | None -> cteBindings
-                            | Some update -> update sig1 (DMulti (ns, domainsMap1))
-                        let (sig2, domainsMap2, expr2) = compileExpr None cteBindings setOp.B
-                        let (limitPaths, compiledLimits) = compileOrderLimitClause cteBindings emptyJoinPaths setOp.OrderLimit
+                            | None -> ctx
+                            | Some update -> { ctx with CTEs = update sig1 (DMulti (ns, domainsMap1)) }
+                        let (sig2, domainsMap2, expr2) = compileExpr None ctx setOp.B
+                        let (limitPaths, compiledLimits) = compileOrderLimitClause ctx emptyJoinPaths setOp.OrderLimit
                         let (renames, newSig) = mergeSelectSignature sig1 sig2
                         let domainsMap1 = Map.map (fun name -> tryRenameDomainFields renames) domainsMap1
                         let domainsMap2 = Map.map (fun name -> tryRenameDomainFields renames) domainsMap2
@@ -1463,18 +1520,18 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         (newSig, Map.unionUnique domainsMap1 domainsMap2, SQL.SSetOp ret)
                 and compileExpr (updateBindings : UpdateRecCTEBindings option) = compileInsideSelectExpr flags (compileTreeExpr updateBindings)
 
-                let (signature, domainsMap, expr) = compileExpr initialUpdateBindings cteBindings expr
+                let (signature, domainsMap, expr) = compileExpr initialUpdateBindings ctx expr
                 (signature, DMulti (ns, domainsMap), expr)
             | _ ->
-                let rec compileTreeExpr (cteBindings : CTEBindings) = function
+                let rec compileTreeExpr (ctx : ExprContext) = function
                     | SSelect query ->
-                        let (info, expr) = compileSingleSelectExpr flags cteBindings query
+                        let (info, expr) = compileSingleSelectExpr flags ctx query
                         (selectSignature info, info.Domains, SQL.SSelect expr)
-                    | SValues values -> compileValues cteBindings values
+                    | SValues values -> compileValues ctx values
                     | SSetOp setOp ->
-                        let (sig1, doms1, expr1) = compileExpr cteBindings setOp.A
-                        let (sig2, doms2, expr2) = compileExpr cteBindings setOp.B
-                        let (limitPaths, compiledLimits) = compileOrderLimitClause cteBindings emptyJoinPaths setOp.OrderLimit
+                        let (sig1, doms1, expr1) = compileExpr ctx setOp.A
+                        let (sig2, doms2, expr2) = compileExpr ctx setOp.B
+                        let (limitPaths, compiledLimits) = compileOrderLimitClause ctx emptyJoinPaths setOp.OrderLimit
                         let (renames, newSig) = mergeSelectSignature sig1 sig2
                         assert Map.isEmpty limitPaths.Map
                         let ret =
@@ -1489,29 +1546,29 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
                 and compileExpr = compileInsideSelectExpr flags compileTreeExpr
 
-                compileExpr cteBindings expr
+                compileExpr ctx expr
 
         let ret = setSelectColumns signature ret
         let info = infoFromSignature domains signature
         (info, ret)
 
-    and compileCommonTableExpr (flags : SelectFlags) (cteBindings : CTEBindings) (name : SQL.TableName) (cte : ResolvedCommonTableExpr) : SelectInfo * SQL.CommonTableExpr =
+    and compileCommonTableExpr (flags : SelectFlags) (ctx : ExprContext) (name : SQL.TableName) (cte : ResolvedCommonTableExpr) : SelectInfo * SQL.CommonTableExpr =
         let extra = ObjectMap.findType<ResolvedCommonTableExprInfo> cte.Extra
         let flags = { flags with MainEntity = if extra.MainEntity then flags.MainEntity else None }
         let updateCteBindings (signature : SelectSignature) (domains : TempDomains) =
             let info = infoFromSignature domains signature
-            let info =
+            let finalInfo =
                 match cte.Fields with
-                | None -> info
+                | None -> finalSelectInfo info
                 | Some fields -> renameSelectInfo fields info
-            Map.add name info cteBindings
-        let (info, expr) = compileSelectExpr flags cteBindings (Some updateCteBindings) cte.Expr
+            Map.add name finalInfo ctx.CTEs
+        let (info, expr) = compileSelectExpr flags ctx (Some updateCteBindings) cte.Expr
         let (info, fields) =
             match cte.Fields with
-            | None -> (info, None)
+            | None -> (finalSelectInfo info, None)
             | Some fields ->
                 let info = renameSelectInfo fields info
-                let retFields = info.Columns |> Array.map (mapColumnType getFinalName >> columnName)
+                let retFields = Array.map columnName info.Columns
                 (info, Some retFields)
         let ret =
             { Fields = fields
@@ -1520,13 +1577,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.CommonTableExpr
         (info, ret)
 
-    and compileCommonTableExprs (flags : SelectFlags) (cteBindings : CTEBindings) (ctes : ResolvedCommonTableExprs) : CTEBindings * SQL.CommonTableExprs =
-        let mutable cteBindings = cteBindings
+    and compileCommonTableExprs (flags : SelectFlags) (ctx : ExprContext) (ctes : ResolvedCommonTableExprs) : ExprContext * SQL.CommonTableExprs =
+        let mutable ctx = ctx
 
         let compileOne (name, cte) =
             let name' = compileName name
-            let (info, expr) = compileCommonTableExpr flags cteBindings name' cte
-            cteBindings <- Map.add name' info cteBindings
+            let (info, expr) = compileCommonTableExpr flags ctx name' cte
+            ctx <- { ctx with CTEs = Map.add name' info ctx.CTEs }
             (name', expr)
 
         let exprs = Array.map compileOne ctes.Exprs
@@ -1534,9 +1591,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             { Recursive = ctes.Recursive
               Exprs = exprs
             } : SQL.CommonTableExprs
-        (cteBindings, ret)
+        (ctx, ret)
 
-    and compileSingleSelectExpr (flags : SelectFlags) (cteBindings : CTEBindings) (select : ResolvedSingleSelectExpr) : HalfCompiledSingleSelect * SQL.SingleSelectExpr =
+    and compileSingleSelectExpr (flags : SelectFlags) (ctx : ExprContext) (select : ResolvedSingleSelectExpr) : HalfCompiledSingleSelect * SQL.SingleSelectExpr =
         let extra =
             match ObjectMap.tryFindType<ResolvedSingleSelectMeta> select.Extra with
             | None ->
@@ -1547,7 +1604,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let (fromMap, fromPaths, from) =
             match select.From with
             | Some from ->
-                let (fromMap, newFrom) = compileFromExpr cteBindings 0 flags.MainEntity true from
+                let (fromMap, newFrom) = compileFromExpr ctx 0 flags.MainEntity true from
                 (fromMap.Tables, fromMap.Joins, Some newFrom)
             | None -> (Map.empty, emptyJoinPaths, None)
 
@@ -1557,20 +1614,20 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             match select.Where with
             | None -> None
             | Some where ->
-                let (newPaths, ret) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths where
+                let (newPaths, ret) = compileFieldExpr emptyExprCompilationFlags ctx paths where
                 paths <- newPaths
                 Some ret
         let entitiesMap = fromToEntitiesMap fromMap
         let where = addEntityChecks entitiesMap whereWithoutSubentities
 
         let compileGroupBy expr =
-            let (newPaths, compiled) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
+            let (newPaths, compiled) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
             paths <- newPaths
             compiled
         let groupBy = Array.map compileGroupBy select.GroupBy
 
         let compileRowAttr (name, expr) =
-            let (newPaths, col) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
+            let (newPaths, col) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
             paths <- newPaths
             (CMRowAttribute name, col)
         let attributeColumns =
@@ -1591,79 +1648,29 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             idColumns <- Map.add key idCol idColumns
             (true, idCol)
 
-        // Get meta columns for result columns with paths.
-        // `replacePath` is used to get system and pun columns with the same paths.
-        let getPathColumns (replacePath : PathArrow[] -> ResolvedEntityRef[] -> LinkedBoundFieldRef) (fromId : FromId) (path : PathArrow[]) (boundPath : ResolvedEntityRef[]) (fieldName : TempFieldName) =
-            assert (Array.length path = Array.length boundPath)
-            let finalEntityRef = Array.last boundPath
-            let finalEntity = getEntityByRef finalEntityRef
-            let finalArrow = Array.last path
-            let finalField = finalEntity.FindField finalArrow.Name |> Option.get
-            let finalRef = { Entity = finalEntityRef; Name = finalArrow.Name }
-
-            // Add system columns (id or sub_entity - this is a generic function).
-            let makeSystemColumn (columnConstr : int -> MetaType) (systemName : FieldName) =
-                let systemArrow = { finalArrow with Name = systemName }
-                let systemPath = Seq.append (Seq.skipLast 1 path) (Seq.singleton systemArrow) |> Array.ofSeq
-                let systemRef = replacePath systemPath boundPath
-                let (newPaths, systemExpr) = compileLinkedFieldRef emptyExprCompilationFlags RCTypeExpr paths systemRef
-                paths <- newPaths
-                systemExpr
-
-            let key =
-                { FromId = fromId
-                  Path = path |> Seq.map (fun a -> a.Name) |> Seq.toList
-                }
-
-            let (systemName, systemColumns) =
-                let (appendNew, idCol) = getIdColumn key
-                if not appendNew then
-                    (idCol, Seq.empty)
-                else
-                    let idColumn = (CMId idCol, makeSystemColumn CMId funId)
-                    let subEntityColumns =
-                        // We don't need to select entity if there are no possible children.
-                        if Seq.length (allPossibleEntitiesList layout finalEntityRef) <= 1 then
-                            Seq.empty
-                        else
-                            Seq.singleton (CMSubEntity idCol, makeSystemColumn CMSubEntity funSubEntity)
-                    let cols = Seq.append (Seq.singleton idColumn) subEntityColumns
-                    (idCol, cols)
-
-            let newDomains =
-                let newInfo =
-                    { Ref = finalRef
-                      RootEntity = finalEntity.Root
-                      IdColumn = systemName
-                      AsRoot = finalArrow.AsRoot
-                    }
-                DSingle (newGlobalDomainId (), Map.singleton fieldName newInfo )
-
-            let punColumns =
-                if not flags.IsTopLevel then
-                    Seq.empty
-                else
-                    match finalField.Field with
-                    | RColumnField { FieldType = FTScalar (SFTReference (newEntityRef, opts)) } ->
-                        let mainArrow = { Name = funMain; AsRoot = false }
-                        let punRef = replacePath (Array.append path [|mainArrow|]) (Array.append boundPath [|newEntityRef|])
-                        let (newPaths, punExpr) = compileLinkedFieldRef emptyExprCompilationFlags RCExpr paths punRef
-                        paths <- newPaths
-                        let col = (CCPun, punExpr)
-                        Seq.singleton col
-                    | _ -> Seq.empty
-
-            (newDomains, Map.ofSeq systemColumns, Map.ofSeq punColumns)
-
         let getResultColumnEntry (i : int) (result : ResolvedQueryColumnResult) : ResultColumn =
-            let currentAttrs = Map.keysSet result.Attributes
-
-            let (newPaths, resultColumn) = compileColumnResult cteBindings paths flags.IsTopLevel result
+            let (newPaths, resultColumn) = compileColumnResult ctx paths flags.IsTopLevel result
             paths <- newPaths
+
+            let getDefaultAttributes (updateEntityRef : LinkedBoundFieldRef -> FieldRef -> LinkedBoundFieldRef) (fieldRef : ResolvedFieldRef) =
+                match defaultAttrs.FindField fieldRef.Entity fieldRef.Name with
+                | None -> Seq.empty
+                | Some attrs ->
+                    let makeDefaultAttr (name, attr) =
+                        if Map.containsKey name result.Attributes then
+                            None
+                        else
+                            let expr = replaceFieldRefInExpr updateEntityRef attr.Expression
+                            let attrCol = CCCellAttribute name
+                            let (newPaths, compiled) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
+                            paths <- newPaths
+                            Some (attrCol, compiled)
+                    attrs |> Map.toSeq |> Seq.mapMaybe makeDefaultAttr
 
             match result.Result with
             // References with paths.
             | FERef resultRef when not (Array.isEmpty resultRef.Ref.Path) && addMetaColumns ->
+                // `replacePath` is used to get system and pun columns with the same paths.
                 let (boundPath, fromId, replacePath) =
                     match resultRef.Ref.Ref with
                     | VRColumn col ->
@@ -1679,11 +1686,72 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let replacePath path boundPath =
                             let newArgInfo = { argInfo with Path = boundPath }
                             { Ref = { resultRef.Ref with Path = path }; Extra = ObjectMap.singleton newArgInfo }
-                        (argInfo.Path,  FIPlaceholder arg, replacePath)
-                let (newDomains, metaColumns, colMetaColumns) = getPathColumns replacePath fromId resultRef.Ref.Path boundPath resultColumn.Name
+                        (argInfo.Path, FIPlaceholder arg, replacePath)
+
+                let finalEntityRef = Array.last boundPath
+                let finalEntity = getEntityByRef finalEntityRef
+                let finalArrow = Array.last resultRef.Ref.Path
+                let initArrow = Array.exceptLast resultRef.Ref.Path
+                let finalField = finalEntity.FindField finalArrow.Name |> Option.get
+                let finalRef = { Entity = finalEntityRef; Name = finalArrow.Name }
+
+                // Add system columns (id or sub_entity - this is a generic function).
+                let makeSystemColumn (columnConstr : int -> MetaType) (systemName : FieldName) =
+                    let systemArrow = { finalArrow with Name = systemName }
+                    let systemPath = Seq.append (Seq.skipLast 1 resultRef.Ref.Path) (Seq.singleton systemArrow) |> Array.ofSeq
+                    let systemRef = replacePath systemPath boundPath
+                    let (newPaths, systemExpr) = compileLinkedFieldRef emptyExprCompilationFlags RCTypeExpr paths systemRef
+                    paths <- newPaths
+                    systemExpr
+
+                let key =
+                    { FromId = fromId
+                      Path = resultRef.Ref.Path |> Seq.map (fun a -> a.Name) |> Seq.toList
+                    }
+
+                let (systemName, systemColumns) =
+                    let (appendNew, idCol) = getIdColumn key
+                    if not appendNew then
+                        (idCol, Seq.empty)
+                    else
+                        let idColumn = (CMId idCol, makeSystemColumn CMId funId)
+                        let subEntityColumns =
+                            // We don't need to select entity if there are no possible children.
+                            if Seq.length (allPossibleEntitiesList layout finalEntityRef) <= 1 then
+                                Seq.empty
+                            else
+                                Seq.singleton (CMSubEntity idCol, makeSystemColumn CMSubEntity funSubEntity)
+                        let cols = Seq.append (Seq.singleton idColumn) subEntityColumns
+                        (idCol, cols)
+
+                let newDomains =
+                    let newInfo =
+                        { Ref = finalRef
+                          RootEntity = finalEntity.Root
+                          IdColumn = systemName
+                          AsRoot = finalArrow.AsRoot
+                        }
+                    DSingle (newGlobalDomainId (), Map.singleton resultColumn.Name newInfo )
+
+                let punColumns =
+                    if not flags.IsTopLevel then
+                        Seq.empty
+                    else
+                        match finalField.Field with
+                        | RColumnField { FieldType = FTScalar (SFTReference (newEntityRef, opts)) } ->
+                            let mainArrow = { Name = funMain; AsRoot = false }
+                            let punRef = replacePath (Array.append resultRef.Ref.Path [|mainArrow|]) (Array.append boundPath [|newEntityRef|])
+                            let (newPaths, punExpr) = compileLinkedFieldRef emptyExprCompilationFlags RCExpr paths punRef
+                            paths <- newPaths
+                            Seq.singleton (CCPun, punExpr)
+                        | _ -> Seq.empty
+
+                let attrColumns = getDefaultAttributes (replacePathInField resultRef.Ref.Ref resultRef.Ref.AsRoot initArrow resultRef.Extra) finalRef
+                let myMeta = [ attrColumns; punColumns ] |> Seq.concat |> Map.ofSeq
+
                 { Domains = Some newDomains
-                  MetaColumns = metaColumns
-                  Column = { resultColumn with Meta = Map.unionUnique resultColumn.Meta colMetaColumns }
+                  MetaColumns = Map.ofSeq systemColumns
+                  Column = { resultColumn with Meta = Map.unionUnique resultColumn.Meta myMeta }
                 }
             // Column references without paths.
             | FERef ({ Ref = { Ref = VRColumn fieldRef } } as resultRef) when addMetaColumns ->
@@ -1696,8 +1764,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
                 // Add system columns (id or sub_entity - this is a generic function).
                 let makeMaybeSystemColumn (needColumn : ResolvedFieldRef -> bool) (columnConstr : int -> MetaType) (systemName : FieldName) =
-                    let getSystemColumn (domain : TempDomain) =
-                        match Map.tryFind (TName fieldRef.Name) domain with
+                    let getSystemColumn (domain : Domain) =
+                        match Map.tryFind fieldRef.Name domain with
                         | None -> SQL.VEValue SQL.VNull
                         | Some info ->
                             if needColumn info.Ref then
@@ -1732,8 +1800,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         let cols = Seq.append (Option.toSeq maybeIdCol) (Option.toSeq maybeSubEntityCol)
                         (idCol, cols)
 
-                let getNewDomain (domain : TempDomain) =
-                    match Map.tryFind (TName fieldRef.Name) domain with
+                let getNewDomain (domain : Domain) =
+                    match Map.tryFind fieldRef.Name domain with
                     | Some info ->
                         let newInfo =
                             { info with
@@ -1768,8 +1836,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     if not flags.IsTopLevel then
                         Seq.empty
                     else
-                        let getPunColumn (domain : TempDomain) =
-                            match Map.tryFind (TName fieldRef.Name) domain with
+                        let getPunColumn (domain : Domain) =
+                            match Map.tryFind fieldRef.Name domain with
                             | None -> SQL.VEValue SQL.VNull
                             | Some info ->
                                 match layout.FindField info.Ref.Entity info.Ref.Name |> Option.get with
@@ -1791,35 +1859,22 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             Seq.singleton col
 
                 // Nested and default attributes.
-                let attrColumns =
+                let (attrColumns, attributes) =
                     match fromInfo.FromType with
                     | FTEntity (domainId, domain) ->
                         // All initial fields for given entity are always in a domain.
-                        let info = Map.find (TName fieldRef.Name) domain
-                        match defaultAttrs.FindField info.Ref.Entity info.Ref.Name with
-                        | None -> Seq.empty
-                        | Some attrs ->
-                            let makeDefaultAttr name =
-                                let attr = Map.find name attrs
-                                let expr = replaceTopLevelEntityRefInExpr (Some entityRef) attr.Expression
-                                let attrCol = CCCellAttribute name
-                                let (newPaths, compiled) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
-                                paths <- newPaths
-                                (attrCol, compiled)
-                            let defaultSet = Map.keysSet attrs
-                            let inheritedAttrs = Set.difference defaultSet currentAttrs
-                            inheritedAttrs |> Set.toSeq |> Seq.map makeDefaultAttr
+                        let info = Map.find fieldRef.Name domain
+                        let attrColumns = getDefaultAttributes (replaceEntityRefInField (Some entityRef)) info.Ref
+                        (attrColumns, Some info.Ref)
                     | FTSubquery queryInfo ->
                         // Inherit column and cell attributes from subquery.
-                        let filterColumnAttr = function
-                        | CTColumnMeta (colName, CCCellAttribute name) when colName = TName fieldRef.Name -> Some name
-                        | _ -> None
-                        let oldAttrs = queryInfo.Columns |> Seq.mapMaybe filterColumnAttr |> Set.ofSeq
-                        let inheritedAttrs = Set.difference oldAttrs currentAttrs
-                        let makeInheritedAttr name =
+                        let makeInheritedAttr = function
+                        | CTColumnMeta (colName, CCCellAttribute name) when colName = fieldRef.Name && not (Map.containsKey name result.Attributes) ->
                             let attrCol = CCCellAttribute name
-                            (attrCol, SQL.VEColumn { Table = Some tableRef; Name = columnName (CTColumnMeta (fieldRef.Name, attrCol)) })
-                        inheritedAttrs |> Set.toSeq |> Seq.map makeInheritedAttr
+                            Some (attrCol, SQL.VEColumn { Table = Some tableRef; Name = columnName (CTColumnMeta (fieldRef.Name, attrCol)) })
+                        | _ -> None
+                        let attrColumns = queryInfo.Columns |> Seq.mapMaybe makeInheritedAttr
+                        (attrColumns, None)
 
                 let myMeta = [ attrColumns; punColumns ] |> Seq.concat |> Map.ofSeq
 
@@ -1896,7 +1951,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             else
                 (emptyDomains, metaColumns)
         let orderLimit =
-            let (newPaths, ret) = compileOrderLimitClause cteBindings paths select.OrderLimit
+            let (newPaths, ret) = compileOrderLimitClause ctx paths select.OrderLimit
             paths <- newPaths
             ret
 
@@ -1933,7 +1988,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         (info, query)
 
-    and compileColumnResult (cteBindings : CTEBindings) (paths0 : JoinPaths) (isTopLevel : bool) (result : ResolvedQueryColumnResult) : JoinPaths * SelectColumn =
+    and compileColumnResult (ctx : ExprContext) (paths0 : JoinPaths) (isTopLevel : bool) (result : ResolvedQueryColumnResult) : JoinPaths * SelectColumn =
         let mutable paths = paths0
 
         let (newPaths, newExpr) =
@@ -1941,12 +1996,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | FERef ref when not isTopLevel ->
                 // When used in sub-select, we don't replace subenitty with its JSON representation.
                 compileLinkedFieldRef emptyExprCompilationFlags RCTypeExpr paths ref
-            | _ -> compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths result.Result
+            | _ -> compileFieldExpr emptyExprCompilationFlags ctx paths result.Result
         paths <- newPaths
 
         let compileAttr (attrName, expr) =
             let attrCol = CCCellAttribute attrName
-            let (newPaths, ret) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
+            let (newPaths, ret) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
             paths <- newPaths
             (attrCol, ret)
 
@@ -1963,7 +2018,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         (paths, ret)
 
     // See description of `RealEntityAnnotation.IsInner`.
-    and compileFromExpr (cteBindings : CTEBindings) (nextJoinId : int) (mainEntity : ResolvedEntityRef option) (isInner : bool) : ResolvedFromExpr -> FromResult * SQL.FromExpr = function
+    and compileFromExpr (ctx : ExprContext) (nextJoinId : int) (mainEntity : ResolvedEntityRef option) (isInner : bool) : ResolvedFromExpr -> FromResult * SQL.FromExpr = function
         | FEntity ({ Ref = { Schema = Some schema; Name = name } } as from) ->
             let entityRef = { Schema = schema; Name = name }
             let entity = getEntityByRef entityRef
@@ -1974,14 +2029,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   IdColumn = idDefault
                   AsRoot = false
                 }
-            let domain = mapAllFields makeDomainEntry entity |> Map.mapKeys TName
+            let domain = mapAllFields makeDomainEntry entity
             let mainEntry =
                 { Ref = { Entity = entityRef; Name = entity.MainField }
                   RootEntity = entity.Root
                   IdColumn = idDefault
                   AsRoot = false
                 }
-            let domain = Map.add (TName funMain) mainEntry domain
+            let domain = Map.add funMain mainEntry domain
             let newAlias = compileAliasFromEntity entityRef from.Alias
 
             let ann =
@@ -2034,6 +2089,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   Entity = Some entityInfo
                   MainId = mainId
                   MainSubEntity = mainSubEntity
+                  Attributes = emptyEntityAttributes
                 }
 
             usedDatabase <- addUsedEntityRef entityRef usedEntitySelect usedDatabase
@@ -2046,7 +2102,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | FEntity { Ref = { Schema = None; Name = name }; Alias = pun } ->
             let name' = compileName name
             let selectSig =
-                match Map.tryFind name' cteBindings with
+                match Map.tryFind name' ctx.CTEs with
                 | None ->
                     // Most likely a temporary table.
                     emptySelectInfo
@@ -2075,7 +2131,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 match join.Type with
                 | Left | Inner -> isInner
                 | _ -> false
-            let (fromRes1, r1) = compileFromExpr cteBindings nextJoinId main1 isInner1 join.A
+            let (fromRes1, r1) = compileFromExpr ctx nextJoinId main1 isInner1 join.A
             let main2 =
                 match join.Type with
                 | Right -> mainEntity
@@ -2084,13 +2140,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 match join.Type with
                 | Right | Inner -> isInner
                 | _ -> false
-            let (fromRes2, r2) = compileFromExpr cteBindings fromRes1.Joins.NextJoinId main2 isInner2 join.B
+            let (fromRes2, r2) = compileFromExpr ctx fromRes1.Joins.NextJoinId main2 isInner2 join.B
             let fromMap = Map.unionUnique fromRes1.Tables fromRes2.Tables
             let joinPaths =
                 { Map = Map.unionUnique fromRes1.Joins.Map fromRes2.Joins.Map
                   NextJoinId = fromRes2.Joins.NextJoinId
                 }
-            let (newJoinPaths, joinExpr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings joinPaths join.Condition
+            let (newJoinPaths, joinExpr) = compileFieldExpr emptyExprCompilationFlags ctx joinPaths join.Condition
             let augmentedJoinPaths = Map.difference newJoinPaths.Map joinPaths.Map
             // Split augmented joins to joins for left and right part of the expression.
             let (newJoinPathsA, newJoinPathsB) = augmentedJoinPaths |> Map.toSeq |> Seq.partition (fun (key, join) -> Map.containsKey key.Table fromRes1.Tables)
@@ -2114,13 +2170,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   IsTopLevel = false
                   MetaColumns = true
                 }
-            let (info, expr) = compileSelectExpr flags cteBindings None subsel.Select
+            let (info, expr) = compileSelectExpr flags ctx None subsel.Select
             let (info, fields) =
                 match subsel.Alias.Fields with
-                | None -> (info, None)
+                | None -> (finalSelectInfo info, None)
                 | Some fields ->
                     let info = renameSelectInfo fields info
-                    let fields = info.Columns |> Array.map (mapColumnType getFinalName >> columnName)
+                    let fields = Array.map columnName info.Columns
                     (info, Some fields)
             let compiledAlias =
                 { Name = compileName subsel.Alias.Name
@@ -2139,20 +2195,20 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             (res, ret)
 
-    and compileInsertValue (cteBindings : CTEBindings) (paths0 : JoinPaths) : ResolvedInsertValue -> JoinPaths * SQL.InsertValue = function
+    and compileInsertValue (ctx : ExprContext) (paths0 : JoinPaths) : ResolvedInsertValue -> JoinPaths * SQL.InsertValue = function
         | IVDefault -> (paths0, SQL.IVDefault)
         | IVValue expr ->
-            let (paths, newExpr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths0 expr
+            let (paths, newExpr) = compileFieldExpr emptyExprCompilationFlags ctx paths0 expr
             assert (Map.isEmpty paths.Map)
             (paths, SQL.IVValue newExpr)
 
-    and compileInsertExpr (flags : SelectFlags) (cteBindings : CTEBindings) (insert : ResolvedInsertExpr) : SelectInfo * SQL.InsertExpr =
-        let (cteBindings, ctes) =
+    and compileInsertExpr (flags : SelectFlags) (ctx : ExprContext) (insert : ResolvedInsertExpr) : TempSelectInfo * SQL.InsertExpr =
+        let (ctx, ctes) =
             match insert.CTEs with
-            | None -> (cteBindings, None)
+            | None -> (ctx, None)
             | Some ctes ->
-                let (bindings, newCtes) = compileCommonTableExprs flags cteBindings ctes
-                (bindings, Some newCtes)
+                let (newCtx, newCtes) = compileCommonTableExprs flags ctx ctes
+                (newCtx, Some newCtes)
 
         let entityRef = tryResolveEntityRef insert.Entity.Ref |> Option.get
         let entity = getEntityByRef entityRef
@@ -2178,7 +2234,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let columns = Seq.append subEntityCol (Seq.map2 compileField insert.Fields fields) |> Seq.toArray
 
         let compileInsertValues vals =
-            let newVals = Seq.map (compileInsertValue cteBindings emptyJoinPaths >> snd) vals
+            let newVals = Seq.map (compileInsertValue ctx emptyJoinPaths >> snd) vals
             match subEntityExpr with
             | None ->
                 Array.ofSeq newVals
@@ -2198,7 +2254,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let values = Array.map compileInsertValues allVals
                 SQL.ISValues values
             | ISSelect select ->
-                let (info, newSelect) = compileSelectExpr subSelectFlags cteBindings None select
+                let (info, newSelect) = compileSelectExpr subSelectFlags ctx None select
                 let newSelect =
                     match subEntityExpr with
                     | None -> newSelect
@@ -2218,7 +2274,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.InsertExpr
         (emptySelectInfo, ret)
 
-    and compileUpdateAssignExpr (cteBindings : CTEBindings) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (paths0 : JoinPaths) (assignExpr : ResolvedUpdateAssignExpr) : JoinPaths * SQL.UpdateAssignExpr =
+    and compileUpdateAssignExpr (ctx : ExprContext) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (paths0 : JoinPaths) (assignExpr : ResolvedUpdateAssignExpr) : JoinPaths * SQL.UpdateAssignExpr =
         let compileAssignField name =
             let field = Map.find name entity.ColumnFields
             let extra = { Name = name } : RealFieldAnnotation
@@ -2228,24 +2284,24 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         match assignExpr with
         | UAESet (name, expr) ->
-            let (paths, newExpr) = compileInsertValue cteBindings paths0 expr
+            let (paths, newExpr) = compileInsertValue ctx paths0 expr
             let usedEntity = { usedEntityUpdate with Fields = Map.singleton name usedFieldUpdate }
             usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
             (paths, SQL.UAESet (compileAssignField name, newExpr))
         | UAESelect (cols, select) ->
             let newCols = Array.map compileAssignField cols
-            let (info, newSelect) = compileSelectExpr subSelectFlags cteBindings None select
+            let (info, newSelect) = compileSelectExpr subSelectFlags ctx None select
             let usedEntity = { usedEntityUpdate with Fields = cols |> Seq.map (fun name -> (name, usedFieldUpdate)) |> Map.ofSeq }
             usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
             (paths0, SQL.UAESelect (newCols, newSelect))
 
-    and compileGenericUpdateExpr (flags : SelectFlags) (cteBindings : CTEBindings) (update : ResolvedUpdateExpr) : SelectInfo * SQL.UpdateExpr =
-        let (cteBindings, ctes) =
+    and compileGenericUpdateExpr (flags : SelectFlags) (ctx : ExprContext) (update : ResolvedUpdateExpr) : TempSelectInfo * SQL.UpdateExpr =
+        let (ctx, ctes) =
             match update.CTEs with
-            | None -> (cteBindings, None)
+            | None -> (ctx, None)
             | Some ctes ->
-                let (bindings, newCtes) = compileCommonTableExprs flags cteBindings ctes
-                (bindings, Some newCtes)
+                let (newCtx, newCtes) = compileCommonTableExprs flags ctx ctes
+                (newCtx, Some newCtes)
 
         let entityRef = tryResolveEntityRef update.Entity.Ref |> Option.get
         let entity = getEntityByRef entityRef
@@ -2255,7 +2311,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let (fromMap, fromPaths, from) =
             match update.From with
             | Some from ->
-                let (fromRes, newFrom) = compileFromExpr cteBindings 0 flags.MainEntity true from
+                let (fromRes, newFrom) = compileFromExpr ctx 0 flags.MainEntity true from
                 let fromMap = Map.unionUnique fromMap fromRes.Tables
                 (fromMap, fromRes.Joins, Some newFrom)
             | None -> (fromMap, emptyJoinPaths, None)
@@ -2265,19 +2321,19 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let compileField fieldName expr =
             let field = Map.find fieldName entity.ColumnFields
             let extra = { Name = fieldName } : RealFieldAnnotation
-            let (newPaths, newExpr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
+            let (newPaths, newExpr) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
             paths <- newPaths
             (field.ColumnName, (extra :> obj, newExpr))
 
         let compileField fieldName expr =
             let field = Map.find fieldName entity.ColumnFields
             let extra = { Name = fieldName } : RealFieldAnnotation
-            let (newPaths, newExpr) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths expr
+            let (newPaths, newExpr) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
             paths <- newPaths
             (field.ColumnName, (extra :> obj, newExpr))
 
         let compileOneAssign assign =
-            let (newPaths, newAssign) = compileUpdateAssignExpr cteBindings entityRef entity paths assign
+            let (newPaths, newAssign) = compileUpdateAssignExpr ctx entityRef entity paths assign
             paths <- newPaths
             newAssign
 
@@ -2287,7 +2343,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             match update.Where with
             | None -> None
             | Some whereExpr ->
-                let (newPaths, newWhere) = compileLinkedFieldExpr emptyExprCompilationFlags cteBindings paths whereExpr
+                let (newPaths, newWhere) = compileFieldExpr emptyExprCompilationFlags ctx paths whereExpr
                 paths <- newPaths
                 Some newWhere
 
@@ -2365,13 +2421,13 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let usedEntity = { usedEntityUpdate with Fields = cols |> Seq.map (fun name -> (name, usedFieldUpdate)) |> Map.ofSeq }
             usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
 
-    and compileUpdateExpr (flags : SelectFlags) (cteBindings : CTEBindings) (update : ResolvedUpdateExpr) : SelectInfo * SQL.UpdateExpr =
-        let (selectInfo, ret) = compileGenericUpdateExpr flags cteBindings update
+    and compileUpdateExpr (flags : SelectFlags) (ctx : ExprContext) (update : ResolvedUpdateExpr) : TempSelectInfo * SQL.UpdateExpr =
+        let (selectInfo, ret) = compileGenericUpdateExpr flags ctx update
         let entityRef = tryResolveEntityRef update.Entity.Ref |> Option.get
         usedDatabase <- addUsedEntityRef entityRef usedEntityUpdate usedDatabase
         (selectInfo, ret)
 
-    and compileDeleteExpr (flags : SelectFlags) (cteBindings : CTEBindings) (delete : ResolvedDeleteExpr) : SelectInfo * SQL.DeleteExpr =
+    and compileDeleteExpr (flags : SelectFlags) (ctx : ExprContext) (delete : ResolvedDeleteExpr) : TempSelectInfo * SQL.DeleteExpr =
         // We compile it as an UPDATE statement -- compilation code is complex and we don't want to repeat that.
         let update =
             { CTEs = delete.CTEs
@@ -2381,7 +2437,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               Where = delete.Where
               Extra = delete.Extra
             } : ResolvedUpdateExpr
-        let (selectInfo, updateRet) = compileGenericUpdateExpr flags cteBindings update
+        let (selectInfo, updateRet) = compileGenericUpdateExpr flags ctx update
         let entityRef = tryResolveEntityRef update.Entity.Ref |> Option.get
         usedDatabase <- addUsedEntityRef entityRef usedEntityDelete usedDatabase
         let ret =
@@ -2394,28 +2450,28 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             } : SQL.DeleteExpr
         (selectInfo, ret)
 
-    and compileDataExpr (flags : SelectFlags) (cteBindings : CTEBindings) (dataExpr : ResolvedDataExpr) : SelectInfo * SQL.DataExpr =
+    and compileDataExpr (flags : SelectFlags) (ctx : ExprContext) (dataExpr : ResolvedDataExpr) : TempSelectInfo * SQL.DataExpr =
         match dataExpr with
         | DESelect select ->
-            let (fields, newSelect) = compileSelectExpr flags cteBindings None select
+            let (fields, newSelect) = compileSelectExpr flags ctx None select
             (fields, SQL.DESelect newSelect)
         | DEInsert insert ->
-            let (fields, newInsert) = compileInsertExpr flags cteBindings insert
+            let (fields, newInsert) = compileInsertExpr flags ctx insert
             (fields, SQL.DEInsert newInsert)
         | DEUpdate update ->
-            let (fields, newUpdate) = compileUpdateExpr flags cteBindings update
+            let (fields, newUpdate) = compileUpdateExpr flags ctx update
             (fields, SQL.DEUpdate newUpdate)
         | DEDelete delete ->
-            let (fields, newDelete) = compileDeleteExpr flags cteBindings delete
+            let (fields, newDelete) = compileDeleteExpr flags ctx delete
             (fields, SQL.DEDelete newDelete)
 
     member this.CompileSingleFromExpr (from : ResolvedFromExpr) (where : ResolvedFieldExpr option) : CompiledSingleFrom =
-        let (fromRes, compiledFrom) = compileFromExpr Map.empty 0 None true from
+        let (fromRes, compiledFrom) = compileFromExpr emptyExprContext 0 None true from
         let (newPaths, whereWithoutSubentities) =
             match where with
             | None -> (emptyJoinPaths, None)
             | Some where ->
-                let (newPaths, ret) = compileLinkedFieldExpr emptyExprCompilationFlags Map.empty fromRes.Joins where
+                let (newPaths, ret) = compileFieldExpr emptyExprCompilationFlags emptyExprContext fromRes.Joins where
                 (newPaths, Some ret)
         let (entitiesMap, compiledFrom) = buildJoins layout (fromToEntitiesMap fromRes.Tables) compiledFrom (joinsToSeq newPaths.Map)
         let finalWhere = addEntityChecks entitiesMap whereWithoutSubentities
@@ -2427,7 +2483,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         }
 
     member this.CompileSingleFieldExpr (flags : ExprCompilationFlags) (expr : ResolvedFieldExpr) =
-        let (newPaths, ret) = compileLinkedFieldExpr flags Map.empty emptyJoinPaths expr
+        let (newPaths, ret) = compileFieldExpr flags emptyExprContext emptyJoinPaths expr
         if not <| Map.isEmpty newPaths.Map then
             failwith "Unexpected join paths in single field expression"
         ret
@@ -2438,7 +2494,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               IsTopLevel = true
               MetaColumns = metaColumns
             }
-        compileSelectExpr flags Map.empty None select
+        compileSelectExpr flags emptyExprContext None select
 
     member this.CompileDataExpr (mainEntity : ResolvedEntityRef option) (metaColumns : bool) (dataExpr : ResolvedDataExpr) =
         let flags =
@@ -2446,11 +2502,11 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
               IsTopLevel = true
               MetaColumns = metaColumns
             }
-        compileDataExpr flags Map.empty dataExpr
+        compileDataExpr flags emptyExprContext dataExpr
 
     member this.CompileArgumentAttributes (args : ResolvedArgumentsMap) : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[] =
         let compileArgAttr argName (name, expr) =
-            let (newPaths, col) = compileLinkedFieldExpr emptyExprCompilationFlags Map.empty emptyJoinPaths expr
+            let (newPaths, col) = compileFieldExpr emptyExprCompilationFlags emptyExprContext emptyJoinPaths expr
             if not <| Map.isEmpty newPaths.Map then
                 failwith "Unexpected join paths in argument atribute expression"
             let colType = CTMeta <| CMArgAttribute (argName, name)
@@ -2609,7 +2665,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let compiler = QueryCompiler (layout, defaultAttrs, arguments)
     let (info, expr) = compiler.CompileSelectExpr mainEntityRef true viewExpr.Select
     let argAttrs = compiler.CompileArgumentAttributes viewExpr.Arguments
-    let columns = Array.map (mapColumnType getFinalName) info.Columns
+    let columns = Array.map (mapColumnTypeFields getFinalName) info.Columns
 
     let allPureAttrs = findPureExprAttributes columns expr
     let expr = filterNonpureExprColumns allPureAttrs expr

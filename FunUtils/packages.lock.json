@@ -4,24 +4,24 @@
     ".NETStandard,Version=v2.1": {
       "FSharp.Core": {
         "type": "Direct",
-        "requested": "[5.0.0, )",
-        "resolved": "5.0.0",
-        "contentHash": "iHoYXA0VaSQUONGENB1aVafjDDZDZpwu39MtaRCTrmwFW/cTcK0b2yKNVYneFHJMc3ChtsSoM9lNtJ1dYXkHfA=="
+        "requested": "[6.0.2, )",
+        "resolved": "6.0.2",
+        "contentHash": "8GZqv6buY71KQlWT+cl2eMi+aNX9xQ61RgI3Pzv9zPxPOX6tWCLRrBj0MYQ3h871r2RhiHUl7f0AXUD/POr8eA=="
       },
       "FSharpPlus": {
         "type": "Direct",
         "requested": "[1.2.*, )",
-        "resolved": "1.2.1",
-        "contentHash": "x2glg81ZRFNb2ezLM4AxdnQ8664DfBYJSL0FPmwGy4Fav3zJiGaKVSMQgynZNdsoJZXtctGJNAQysijadVV48w==",
+        "resolved": "1.2.3",
+        "contentHash": "cA4tFKB85Ssu94xlDj1hXTOOlGHdJlEVcC6ZLRD0eP1TxtCAN8Xmr3JisIzx/dQQ8IsKiRORHZnq4EGRS4oQDQ==",
         "dependencies": {
           "FSharp.Core": "4.6.2"
         }
       },
       "Newtonsoft.Json": {
         "type": "Direct",
-        "requested": "[12.0.*, )",
-        "resolved": "12.0.3",
-        "contentHash": "6mgjfnRB4jKMlzHSl+VD+oUc1IebOZabkbyWj2RiTgWwYPPuaK1H97G1sHqGwPlS5npiF5Q0OrxN1wni2n5QWg=="
+        "requested": "[13.0.*, )",
+        "resolved": "13.0.1",
+        "contentHash": "ppPFpBcvxdsfUonNcvITKqLl3bqxWbDCZIzDWHzjpdAHRFfZe0Dw9HmA0+za13IdyrgJwpkDTDA9fHaxOrt20A=="
       },
       "Ply": {
         "type": "Direct",
@@ -35,9 +35,9 @@
       },
       "YamlDotNet": {
         "type": "Direct",
-        "requested": "[8.1.*, )",
-        "resolved": "8.1.2",
-        "contentHash": "GlPKbb4l+91dyYVKV7UnJlr2CWooNNM1ayZWC90QAmlFPgbwSkfhgId7dGjTAHqkB84BZqjMSy5PlAYf1iejVA=="
+        "requested": "[11.2.*, )",
+        "resolved": "11.2.1",
+        "contentHash": "tBt8K+korVfrjH9wyDEhiLKxbs8qoLCLIFwvYgkSUuMC9//w3z0cFQ8LQAI/5MCKq+BMil0cfRTRvPeE7eXhQw=="
       },
       "System.Runtime.CompilerServices.Unsafe": {
         "type": "Transitive",

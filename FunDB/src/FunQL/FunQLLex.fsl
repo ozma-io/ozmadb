@@ -113,6 +113,8 @@ and tokenizeFunQL = parse
     | "/"    { Parse.DIVIDE }
     | "&"    { Parse.AMPERSAND }
     | "->>"  { Parse.DOUBLE_ARROW }
+    | ".@"   { Parse.GET_FIELD_ATTR }
+    | ".@@"  { Parse.GET_ENTITY_ATTR }
 
     // Keywords
     | t r u e                 { Parse.BOOL true }

@@ -1,10 +1,14 @@
 module FunWithFlags.FunDB.SQL.Utils
 
+// NpgsqlInterval
+#nowarn "44"
+
 open System
 open System.Text
 open System.Globalization
 open Npgsql.NameTranslation
 open NpgsqlTypes
+open NodaTime
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 
@@ -65,24 +69,44 @@ let renderSqlBigInt (i : int64) : string = i.ToString(CultureInfo.InvariantCultu
 
 let renderSqlJson (j : JToken) : string = j.ToString(Formatting.None)
 
-let trySqlDateTime (s : string) : NpgsqlDateTime option =
-    try
-        Some <| NpgsqlDateTime.Parse s
-    with
-    | :? FormatException as e -> None
-    | :? OverflowException as e -> None
+let private ofNodaParseResult (result : NodaTime.Text.ParseResult<'a>) : 'a option =
+    if result.Success then
+        Some result.Value
+    else
+        None
 
-let trySqlDate (s : string) : NpgsqlDate option =
-    match NpgsqlDate.TryParse(s) with
-    | (false, _) -> None
-    | (true, ret) -> Some ret
+let sqlDateTimePattern = NodaTime.Text.InstantPattern.CreateWithInvariantCulture("uuuu-MM-dd'T'HH:mm:ss.ffffff")
 
-let trySqlInterval (s : string) : NpgsqlTimeSpan option =
+let renderSqlDateTime = sqlDateTimePattern.Format
+let trySqlDateTime (s : string) : Instant option = sqlDateTimePattern.Parse(s) |> ofNodaParseResult
+
+let sqlDatePattern = NodaTime.Text.LocalDatePattern.Iso
+
+let renderSqlDate = sqlDatePattern.Format
+let trySqlDate (s : string) : LocalDate option = sqlDatePattern.Parse(s) |> ofNodaParseResult
+
+let renderSqlInterval (p : Period) : string =
+    let months = p.Years * NpgsqlTimeSpan.MonthsPerYear + p.Months
+    let days = p.Days
+    let ticks =
+        p.Hours * NpgsqlTimeSpan.TicksPerHour + 
+        p.Minutes * NpgsqlTimeSpan.TicksPerMinute +
+        p.Seconds * NpgsqlTimeSpan.TicksPerSecond +
+        p.Milliseconds * NpgsqlTimeSpan.TicksPerMillsecond +
+        p.Ticks +
+        p.Nanoseconds / 100L
+    NpgsqlTimeSpan(months, days, ticks) |> string
+
+let trySqlInterval (s : string) : Period option =
     match NpgsqlTimeSpan.TryParse(s) with
     | (false, _) -> None
-    | (true, ret) -> Some ret
-
-let convertDateTime (dt : DateTime) = NpgsqlDateTime dt
+    | (true, raw) ->
+        let builder = PeriodBuilder(
+            Months = raw.Months,
+            Days = raw.Days,
+            Ticks = raw.Ticks
+        )
+        Some <| builder.Build().Normalize()
 
 type ISQLString =
     abstract member ToSQLString : unit -> string

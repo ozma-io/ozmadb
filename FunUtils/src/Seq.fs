@@ -7,7 +7,7 @@ open System.Collections.Generic
 open System.Threading.Tasks
 open FSharp.Control.Tasks.NonAffine
 
-let mapMaybe (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
+let inline mapMaybe (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
     seq {
         for i in s do
             match f i with
@@ -15,7 +15,7 @@ let mapMaybe (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
             | None -> ()
     }
 
-let map2Maybe (f : 'a -> 'b -> 'c option) (s1 : seq<'a>) (s2 : seq<'b>) : seq<'c> =
+let inline map2Maybe (f : 'a -> 'b -> 'c option) (s1 : seq<'a>) (s2 : seq<'b>) : seq<'c> =
     seq {
         for (i1, i2) in Seq.zip s1 s2 do
             match f i1 i2 with
@@ -23,7 +23,7 @@ let map2Maybe (f : 'a -> 'b -> 'c option) (s1 : seq<'a>) (s2 : seq<'b>) : seq<'c
             | None -> ()
     }
 
-let map3Maybe (f : 'a -> 'b -> 'c -> 'd option) (s1 : seq<'a>) (s2 : seq<'b>) (s3 : seq<'c>) : seq<'d> =
+let inline map3Maybe (f : 'a -> 'b -> 'c -> 'd option) (s1 : seq<'a>) (s2 : seq<'b>) (s3 : seq<'c>) : seq<'d> =
     seq {
         for (i1, i2, i3) in Seq.zip3 s1 s2 s3 do
             match f i1 i2 i3 with
@@ -31,7 +31,7 @@ let map3Maybe (f : 'a -> 'b -> 'c -> 'd option) (s1 : seq<'a>) (s2 : seq<'b>) (s
             | None -> ()
     }
 
-let catMaybes (s : seq<'a option>) : seq<'a> =
+let inline catMaybes (s : seq<'a option>) : seq<'a> =
     seq {
         for i in s do
             match i with
@@ -39,7 +39,7 @@ let catMaybes (s : seq<'a option>) : seq<'a> =
             | None -> ()
     }
 
-let mapiMaybe (f : int -> 'a -> 'b option) (s : seq<'a>) : seq<'b> =
+let inline mapiMaybe (f : int -> 'a -> 'b option) (s : seq<'a>) : seq<'b> =
     seq {
         let mutable n = 0
         for i in s do
@@ -49,7 +49,7 @@ let mapiMaybe (f : int -> 'a -> 'b option) (s : seq<'a>) : seq<'b> =
             n <- n + 1
     }
 
-let mapi2Maybe (f : int -> 'a -> 'b -> 'c option) (s1 : seq<'a>) (s2 : seq<'b>) : seq<'c> =
+let inline mapi2Maybe (f : int -> 'a -> 'b -> 'c option) (s1 : seq<'a>) (s2 : seq<'b>) : seq<'c> =
     seq {
         let mutable n = 0
         for (i1, i2) in Seq.zip s1 s2 do
@@ -59,7 +59,7 @@ let mapi2Maybe (f : int -> 'a -> 'b -> 'c option) (s1 : seq<'a>) (s2 : seq<'b>) 
             n <- n + 1
     }
 
-let mapi3Maybe (f : int -> 'a -> 'b -> 'c -> 'd option) (s1 : seq<'a>) (s2 : seq<'b>) (s3 : seq<'c>) : seq<'d> =
+let inline mapi3Maybe (f : int -> 'a -> 'b -> 'c -> 'd option) (s1 : seq<'a>) (s2 : seq<'b>) (s3 : seq<'c>) : seq<'d> =
     seq {
         let mutable n = 0
         for (i1, i2, i3) in Seq.zip3 s1 s2 s3 do
@@ -69,7 +69,7 @@ let mapi3Maybe (f : int -> 'a -> 'b -> 'c -> 'd option) (s1 : seq<'a>) (s2 : seq
             n <- n + 1
     }
 
-let filteri (f : int -> 'a -> bool) (s : seq<'a>) : seq<'a> =
+let inline filteri (f : int -> 'a -> bool) (s : seq<'a>) : seq<'a> =
     seq {
         let mutable n = 0
         for i in s do
@@ -80,19 +80,19 @@ let filteri (f : int -> 'a -> bool) (s : seq<'a>) : seq<'a> =
 
 let first (s : seq<'a>) : 'a option = Seq.tryFind (fun x -> true) s
 
-let fold1 (func : 'a -> 'a -> 'a) (s : seq<'a>) : 'a =
+let inline fold1 (func : 'a -> 'a -> 'a) (s : seq<'a>) : 'a =
     Seq.fold func (Seq.head s) (Seq.tail s)
 
 let areEqual (a : seq<'a>) (b : seq<'a>) : bool =
     Seq.compareWith (fun e1 e2 -> if e1 = e2 then 0 else -1) a b = 0
 
-let iterTask (f : 'a -> Task) (s : seq<'a>) : Task =
+let inline iterTask (f : 'a -> Task) (s : seq<'a>) : Task =
     unitTask {
         for a in s do
             do! f a
     }
 
-let mapTask (f : 'a -> Task<'b>) (s : seq<'a>) : Task<seq<'b>> =
+let inline mapTask (f : 'a -> Task<'b>) (s : seq<'a>) : Task<seq<'b>> =
     task {
         let list = List<'b>()
         for a in s do
@@ -101,7 +101,16 @@ let mapTask (f : 'a -> Task<'b>) (s : seq<'a>) : Task<seq<'b>> =
         return list :> seq<'b>
     }
 
-let collectTask (f : 'a -> Task<seq<'b>>) (s : seq<'a>) : Task<seq<'b>> =
+let inline mapValueTask (f : 'a -> ValueTask<'b>) (s : seq<'a>) : ValueTask<seq<'b>> =
+    vtask {
+        let list = List<'b>()
+        for a in s do
+            let! b = f a
+            list.Add(b)
+        return list :> seq<'b>
+    }
+
+let inline collectTask (f : 'a -> Task<seq<'b>>) (s : seq<'a>) : Task<seq<'b>> =
     task {
         let list = List<'b>()
         for a in s do
@@ -110,7 +119,7 @@ let collectTask (f : 'a -> Task<seq<'b>>) (s : seq<'a>) : Task<seq<'b>> =
         return list :> seq<'b>
     }
 
-let mapTake (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
+let inline mapTake (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
     let i = s.GetEnumerator()
     let rec iter () =
         seq {
@@ -123,13 +132,13 @@ let mapTake (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
         }
     iter ()
 
-let iterStop (f : 'a -> bool) (s : seq<'a>) : unit =
+let inline iterStop (f : 'a -> bool) (s : seq<'a>) : unit =
     let i = s.GetEnumerator()
     let mutable cont = true
     while cont && i.MoveNext() do
         cont <- f i.Current
 
-let iterTaskStop (f : 'a -> Task<bool>) (s : seq<'a>) : Task<unit> =
+let inline iterTaskStop (f : 'a -> Task<bool>) (s : seq<'a>) : Task<unit> =
     task {
         let i = s.GetEnumerator()
         let mutable cont = true
@@ -138,7 +147,7 @@ let iterTaskStop (f : 'a -> Task<bool>) (s : seq<'a>) : Task<unit> =
             cont <- c
     }
 
-let foldOption (func : 'acc -> 'a -> 'acc option) (init : 'acc) (vals : seq<'a>) : 'acc option =
+let inline foldOption (func : 'acc -> 'a -> 'acc option) (init : 'acc) (vals : seq<'a>) : 'acc option =
     let mutable acc = init
     let mutable failed = false
     let tryOne a =
@@ -155,7 +164,7 @@ let foldOption (func : 'acc -> 'a -> 'acc option) (init : 'acc) (vals : seq<'a>)
     else
         Some acc
 
-let foldResult (func : 'acc -> 'a -> Result<'acc, 'e>) (init : 'acc) (vals : seq<'a>) : Result<'acc, 'e> =
+let inline foldResult (func : 'acc -> 'a -> Result<'acc, 'e>) (init : 'acc) (vals : seq<'a>) : Result<'acc, 'e> =
     let mutable acc = init
     let mutable error = None
     let tryOne a =
@@ -171,7 +180,7 @@ let foldResult (func : 'acc -> 'a -> Result<'acc, 'e>) (init : 'acc) (vals : seq
     | None -> Ok acc
     | Some e -> Error e
 
-let foldTask (func : 'acc -> 'a -> Task<'acc>) (init : 'acc) (vals : seq<'a>) : Task<'acc> =
+let inline foldTask (func : 'acc -> 'a -> Task<'acc>) (init : 'acc) (vals : seq<'a>) : Task<'acc> =
     task {
         let mutable acc = init
         for a in vals do
@@ -180,7 +189,7 @@ let foldTask (func : 'acc -> 'a -> Task<'acc>) (init : 'acc) (vals : seq<'a>) : 
         return acc
     }
 
-let foldOptionTask (func : 'acc -> 'a -> Task<'acc option>) (init : 'acc) (vals : seq<'a>) : Task<'acc option> =
+let inline foldOptionTask (func : 'acc -> 'a -> Task<'acc option>) (init : 'acc) (vals : seq<'a>) : Task<'acc option> =
     task {
         let mutable acc = init
         let mutable failed = false
@@ -201,7 +210,7 @@ let foldOptionTask (func : 'acc -> 'a -> Task<'acc option>) (init : 'acc) (vals 
             return Some acc
     }
 
-let foldResultTask (func : 'acc -> 'a -> Task<Result<'acc, 'e>>) (init : 'acc) (vals : seq<'a>) : Task<Result<'acc, 'e>> =
+let inline foldResultTask (func : 'acc -> 'a -> Task<Result<'acc, 'e>>) (init : 'acc) (vals : seq<'a>) : Task<Result<'acc, 'e>> =
     task {
         let mutable acc = init
         let mutable error = None
@@ -221,7 +230,7 @@ let foldResultTask (func : 'acc -> 'a -> Task<Result<'acc, 'e>>) (init : 'acc) (
         | Some e -> return Error e
     }
 
-let traverseOption (func : 'a -> 'b option) (vals : seq<'a>) : seq<'b> option =
+let inline traverseOption (func : 'a -> 'b option) (vals : seq<'a>) : seq<'b> option =
     let list = List<'b>()
     let mutable failed = false
     let tryOne a =
@@ -238,7 +247,7 @@ let traverseOption (func : 'a -> 'b option) (vals : seq<'a>) : seq<'b> option =
     else
         Some (list :> seq<'b>)
 
-let traverseResult (func : 'a -> Result<'b, 'e>) (vals : seq<'a>) : Result<seq<'b>, 'e> =
+let inline traverseResult (func : 'a -> Result<'b, 'e>) (vals : seq<'a>) : Result<seq<'b>, 'e> =
     let list = List<'b>()
     let mutable error = None
     let tryOne a =
@@ -254,7 +263,7 @@ let traverseResult (func : 'a -> Result<'b, 'e>) (vals : seq<'a>) : Result<seq<'
     | None -> Ok (list :> seq<'b>)
     | Some e -> Error e
 
-let traverseOptionTask (func : 'a -> Task<'b option>) (vals : seq<'a>) : Task<seq<'b> option> =
+let inline traverseOptionTask (func : 'a -> Task<'b option>) (vals : seq<'a>) : Task<seq<'b> option> =
     task {
         let list = List<'b>()
         let mutable failed = false
@@ -274,7 +283,7 @@ let traverseOptionTask (func : 'a -> Task<'b option>) (vals : seq<'a>) : Task<se
             return Some (list :> seq<'b>)
     }
 
-let traverseResultTask (func : 'a -> Task<Result<'b, 'e>>) (vals : seq<'a>) : Task<Result<seq<'b>, 'e>> =
+let inline traverseResultTask (func : 'a -> Task<Result<'b, 'e>>) (vals : seq<'a>) : Task<Result<seq<'b>, 'e>> =
     task {
         let list = List<'b>()
         let mutable error = None

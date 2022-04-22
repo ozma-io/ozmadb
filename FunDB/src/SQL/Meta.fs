@@ -474,7 +474,7 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 let createPgCatalogContext (transaction : NpgsqlTransaction) =
         let dbOptions =
             (DbContextOptionsBuilder<PgCatalogContext> ())
-                .UseNpgsql(transaction.Connection)
+                .UseNpgsql(transaction.Connection, fun opts -> ignore <| opts.UseNodaTime())
 #if DEBUG
         use loggerFactory = LoggerFactory.Create(fun builder -> ignore <| builder.AddConsole())
         ignore <| dbOptions.UseLoggerFactory(loggerFactory)

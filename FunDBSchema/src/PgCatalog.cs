@@ -76,7 +76,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 {
                     var storeObjectId =
                         StoreObjectIdentifier.Create(property.DeclaringEntityType, StoreObjectType.Table)!.Value;
-                    property.SetColumnName(property.GetColumnName(storeObjectId).ToLower());
+                    property.SetColumnName(property.GetColumnName(storeObjectId)!.ToLower());
                 }
             }
         }
@@ -102,7 +102,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
 
             var extDependIds = this.Depends.AsQueryable().Where(dep => this.Extensions.AsQueryable().Select(ext => ext.Oid).Contains(dep.RefObjId)).Select(dep => dep.ObjId);
             var namespaceIds = retQuery.Select(ns => ns.Oid);
-            var classesIds = retQuery.SelectMany(ns => ns.Classes).Select(cl => cl.Oid);
+            var classesIds = retQuery.SelectMany(ns => ns.Classes!).Select(cl => cl.Oid);
 
             var procsList = await this.Procs
                 .AsNoTracking()
@@ -124,7 +124,7 @@ namespace FunWithFlags.FunDBSchema.PgCatalog
                 .Select(attr => new
                     {
                         Attribute = attr,
-                        Source = PgGetExpr(EF.Property<string>(attr.AttrDef, "AdBin"), attr.AttrDef!.AdRelId),
+                        Source = PgGetExpr(EF.Property<string>(attr.AttrDef!, "AdBin"), attr.AttrDef!.AdRelId),
                     })
                 .ToListAsync();
             var attrs = attrsList

@@ -132,12 +132,12 @@ let private typecheckArgument (fieldType : FieldType<_>) (value : FieldValue) : 
     match fieldType with
     | FTScalar (SFTEnum vals) ->
         match value with
-        | FString str when Set.contains str vals -> ()
+        | FString str when vals.Contains str -> ()
         | FNull -> ()
         | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
     | FTArray (SFTEnum vals) ->
         match value with
-        | FStringArray strs when Seq.forall (fun str -> Set.contains str vals) strs -> ()
+        | FStringArray strs when Seq.forall (fun str -> vals.Contains str) strs -> ()
         | FNull -> ()
         | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
     // Most casting/typechecking will be done by database or Npgsql

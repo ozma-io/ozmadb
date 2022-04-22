@@ -36,17 +36,17 @@ namespace FunWithFlags.FunDBSchema
         {
             base.OnModelCreating(modelBuilder);
 
-            var pgGetExprMethod = typeof(PostgresContext).GetRuntimeMethod(nameof(PgGetExpr), new[] { typeof(string), typeof(uint) });
+            var pgGetExprMethod = typeof(PostgresContext).GetRuntimeMethod(nameof(PgGetExpr), new[] { typeof(string), typeof(uint) })!;
             modelBuilder
                 .HasDbFunction(pgGetExprMethod)
                 .HasTranslation(args => new SqlFunctionExpression("pg_get_expr", args, false, new[] { true, true }, typeof(string), null));
 
-            var pgGetTriggerDefMethod = typeof(PostgresContext).GetRuntimeMethod(nameof(PgGetTriggerDef), new[] { typeof(uint) });
+            var pgGetTriggerDefMethod = typeof(PostgresContext).GetRuntimeMethod(nameof(PgGetTriggerDef), new[] { typeof(uint) })!;
             modelBuilder
                 .HasDbFunction(pgGetTriggerDefMethod)
                 .HasTranslation(args => new SqlFunctionExpression("pg_get_triggerdef", args, false, new[] { true }, typeof(string), null));
 
-            var pgIndexamHasPropertyMethod = typeof(PostgresContext).GetRuntimeMethod(nameof(PgIndexamHasProperty), new[] { typeof(uint), typeof(string) });
+            var pgIndexamHasPropertyMethod = typeof(PostgresContext).GetRuntimeMethod(nameof(PgIndexamHasProperty), new[] { typeof(uint), typeof(string) })!;
             modelBuilder
                 .HasDbFunction(pgIndexamHasPropertyMethod)
                 .HasTranslation(args => new SqlFunctionExpression("pg_indexam_has_property", args, false, new[] { true, true }, typeof(bool), null));
