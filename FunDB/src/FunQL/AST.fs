@@ -243,9 +243,9 @@ type FieldValuePrettyConverter () =
         | FDecimal d -> writer.WriteValue(d)
         | FString s -> writer.WriteValue(s)
         | FBool b -> writer.WriteValue(b)
-        | FDateTime dt -> writer.WriteValue(renderSqlDateTime dt)
-        | FDate dt -> writer.WriteValue(renderSqlDate dt)
-        | FInterval int -> writer.WriteValue(renderSqlInterval int)
+        | FDateTime dt -> serialize dt
+        | FDate date -> serialize date
+        | FInterval int -> serialize int
         | FJson j -> j.WriteTo(writer)
         | FUserViewRef r -> serialize r
         | FUuid uuid -> writer.WriteValue(uuid)
