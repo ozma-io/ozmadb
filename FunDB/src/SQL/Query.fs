@@ -62,27 +62,35 @@ let private convertDecimal : obj -> decimal option = function
         | :? OverflowException -> None
     | value -> None
 
-let private convertValue valType (rawValue : obj) =
+let private convertDateTime : obj -> Instant option = function
+    | :? Instant as dt -> Some dt
+    // | :? LocalDateTime as ldt -> Some <| ldt.InUtc().ToInstant()
+    | value -> None
+
+let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
     match (valType, rawValue) with
     | (_, (:? DBNull as value)) -> VNull
     | (VTScalar STInt, value) ->
         match convertInt value with
         | Some i -> VInt i
-        | None -> raisef QueryException "Unknown integer value: %s %O" (value.GetType().FullName) value
+        | None -> raisef QueryException "Failed to convert integer value"
     | (VTScalar STBigInt, (:? int64 as value)) -> VBigInt value
     | (VTScalar STDecimal, value) ->
         match convertDecimal value with
         | Some i -> VDecimal i
-        | None -> raisef QueryException "Unknown decimal value: %s %O" (value.GetType().FullName) value
+        | None -> raisef QueryException "Failed to convert decimal value"
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
-    | (VTScalar STDateTime, (:? Instant as value)) -> VDateTime value
+    | (VTScalar STDateTime, value) ->
+        match convertDateTime value with
+        | Some dt -> VDateTime dt
+        | None -> raisef QueryException "Failed to convert datetime value"
     | (VTScalar STDate, (:? LocalDate as value)) -> VDate value
     | (VTScalar STInterval, (:? Period as value)) -> VInterval value
     | (VTScalar STJson, (:? string as value)) ->
         match tryJson value with
         | Some j -> VJson j
-        | None -> raisef QueryException "Invalid JSON value: %s" value
+        | None -> raisef QueryException "Invalid JSON value"
     | (VTScalar STUuid, (:? Guid as value)) -> VUuid value
     | (VTArray scalarType, (:? Array as rootVals)) ->
         let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
@@ -101,13 +109,19 @@ let private convertValue valType (rawValue : obj) =
         | STDecimal -> VDecimalArray (convertArray convertDecimal rootVals)
         | STString -> VStringArray (convertArray tryCast<string> rootVals)
         | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
-        | STDateTime -> VDateTimeArray (convertArray tryCast<Instant> rootVals)
+        | STDateTime -> VDateTimeArray (convertArray convertDateTime rootVals)
         | STDate -> VDateArray (convertArray tryCast<LocalDate> rootVals)
         | STInterval -> VIntervalArray (convertArray tryCast<Period> rootVals)
-        | STRegclass -> raisef QueryException "Regclass arrays are not supported: %O" rootVals
+        | STRegclass -> raisef QueryException "Regclass arrays are not supported"
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
         | STUuid -> VUuidArray (convertArray tryCast<Guid> rootVals)
-    | (typ, value) -> raisef QueryException "Cannot convert raw SQL value: result type %s, value type %s" (typ.ToSQLString()) (value.GetType().FullName)
+    | (typ, value) -> raisef QueryException "Cannot convert raw SQL value"
+
+let private convertValue (name : SQLName) (valType : SimpleValueType) (rawValue : obj) =
+    try
+        convertValueOrThrow valType rawValue
+    with
+    | :? QueryException as e -> raisefWithInner QueryException e "In column %O, value type %O, raw value type %s, raw value %O" name valType (rawValue.GetType().FullName) rawValue
 
 let rec private npgsqlArrayValue (vals : ArrayValue<'a> array) : obj =
     let convertOne : ArrayValue<'a> -> obj = function
@@ -190,10 +204,10 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 let rawRow = Array.create reader.FieldCount null
 
                 let getValue i rawValue =
-                    let name = reader.GetName(i)
+                    let name = SQLName <| reader.GetName(i)
                     let typ = parseType (reader.GetDataTypeName(i))
-                    let value = convertValue typ rawValue
-                    (SQLName name, typ, value)
+                    let value = convertValue name typ rawValue
+                    (name, typ, value)
 
                 let getRow () =
                     ignore <| reader.GetProviderSpecificValues(rawRow)
@@ -226,8 +240,8 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             let rawRow = Array.create reader.FieldCount null
 
             let getValue i rawValue =
-                let (_, typ) = columns.[i]
-                rawValue |> convertValue typ
+                let (name, typ) = columns.[i]
+                convertValue name typ rawValue
 
             let getRow () =
                 ignore <| reader.GetProviderSpecificValues(rawRow)

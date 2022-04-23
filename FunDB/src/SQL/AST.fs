@@ -227,6 +227,7 @@ type SimpleType =
     | [<CaseName("decimal")>] STDecimal
     | [<CaseName("bool")>] STBool
     | [<CaseName("datetime")>] STDateTime
+    | [<CaseName("datetime")>] STLocalDateTime
     | [<CaseName("date")>] STDate
     | [<CaseName("interval")>] STInterval
     | [<CaseName("regclass")>] STRegclass
