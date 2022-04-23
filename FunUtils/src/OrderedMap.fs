@@ -111,7 +111,7 @@ module OrderedMap =
         let mutable newKeys = map.Map
 
         let checkKey k =
-            if f k (Map.find k map.Map) then
+            if f k (Map.find k newKeys) then
                 true
             else
                 newKeys <- Map.remove k newKeys
