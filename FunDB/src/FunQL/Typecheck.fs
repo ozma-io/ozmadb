@@ -24,6 +24,7 @@ let decompileScalarType : SQL.SimpleType -> ScalarFieldType<_> = function
     | SQL.STString -> SFTString
     | SQL.STBool -> SFTBool
     | SQL.STDateTime -> SFTDateTime
+    | SQL.STLocalDateTime -> failwith "Unexpected timestamp encountered"
     | SQL.STDate -> SFTDate
     | SQL.STInterval -> SFTInterval
     | SQL.STJson -> SFTJson

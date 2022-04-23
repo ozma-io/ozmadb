@@ -68,6 +68,7 @@ let private parseToSimpleType : SimpleType -> (string -> Value) = function
     | STDecimal -> runCast tryDecimalInvariant >> VDecimal
     | STBool -> runCast tryBool >> VBool
     | STDateTime -> runCast trySqlDateTime >> VDateTime
+    | STLocalDateTime -> runCast trySqlLocalDateTime >> VLocalDateTime
     | STDate -> runCast trySqlDate >> VDate
     | STInterval -> runCast trySqlInterval >> VInterval
     | STRegclass -> runCast tryRegclass >> VRegclass

@@ -12,6 +12,7 @@ open FunWithFlags.FunDB.SQL.AST
 
 type TypeCategoryName = char
 
+// `bool` signifies if the type is preferred.
 type TypeCategoryMap = Map<SimpleValueType, bool>
 
 type TypeCategoriesMap = Map<TypeCategoryName, TypeCategoryMap>
@@ -41,10 +42,11 @@ type ImplicitCastsMap = Map<SimpleType, Set<SimpleType>>
 
 let sqlSimpleTypes = unionCases typeof<SimpleType> |> Seq.map (fun case -> FSharpValue.MakeUnion(case.Info, [||]) :?> SimpleType) |> Set.ofSeq
 
+// SELECT * FROM pg_catalog.pg_type WHERE typcategory = 'D';
 let sqlTypeCategories : TypeCategoriesMap =
     Map.ofList
         [ ('N', Map.ofList [(VTScalar STDecimal, true); (VTScalar STInt, false); (VTScalar STRegclass, true); (VTScalar STBigInt, false)])
-          ('D', Map.ofList [(VTScalar STDateTime, true); (VTScalar STDate, false)])
+          ('D', Map.ofList [(VTScalar STDateTime, true); (VTScalar STLocalDateTime, false); (VTScalar STDate, false)])
           ('I', Map.ofList [(VTScalar STInterval, true)])
           ('S', Map.ofList [(VTScalar STString, true)])
           ('U', Map.ofList [(VTScalar STUuid, false); (VTScalar STJson, false)])
@@ -68,11 +70,23 @@ let sqlReverseTypeCategories : ReverseTypeCategoriesMap =
 let sqlPreferredTypes : Set<SimpleValueType> =
     sqlTypeCategories |> Map.values |> Seq.collect (Map.toSeq >> Seq.mapMaybe (fun (typ, preferred) -> if preferred then Some typ else None)) |> Set.ofSeq
 
+(* Helpful query:
+     SELECT
+       pg_cast.*,
+       srctype.typname AS sourcename,
+       targettype.typname AS targetname
+     FROM pg_catalog.pg_cast
+     LEFT JOIN pg_catalog.pg_type AS srctype ON castsource = srctype.oid
+     LEFT JOIN pg_catalog.pg_type AS targettype ON casttarget = targettype.oid
+     WHERE castcontext = 'i'
+     AND castsource <> casttarget;
+*)
 let sqlImplicitCasts : ImplicitCastsMap =
     Map.ofList
         [ (STInt, Set.ofList [STDecimal; STBigInt])
           (STBigInt, Set.ofList [STDecimal])
-          (STDate, Set.ofList [STDateTime])
+          (STDate, Set.ofList [STDateTime; STLocalDateTime])
+          (STLocalDateTime, Set.ofList [STDateTime])
         ]
 
 let tryImplicitCasts (wanted : SimpleType) (given : SimpleType) =
@@ -133,7 +147,7 @@ let private funScalarIdSignatures (signs : SimpleType seq) : FunctionSignaturesM
     signs |> Seq.map (fun typ -> ([typ], typ)) |> funScalarsToSignatures
 
 let private toCharSignatures : FunctionSignaturesMap =
-    [STDateTime; STInterval; STInt; STDecimal] |> Seq.map (fun typ -> ([typ; STString], STString)) |> funScalarsToSignatures
+    [STDateTime; STLocalDateTime; STInterval; STInt; STDecimal] |> Seq.map (fun typ -> ([typ; STString], STString)) |> funScalarsToSignatures
 
 let sqlKnownFunctions : Map<FunctionName, FunctionSignaturesMap> =
     Map.ofList
@@ -153,7 +167,7 @@ let sqlKnownFunctions : Map<FunctionName, FunctionSignaturesMap> =
           // Dates
           (SQLName "age", funScalarsToSignatures [([STDateTime; STDateTime], STInterval); ([STDateTime], STInterval)])
           (SQLName "date_part", funScalarsToSignatures [([STString; STDateTime], STDecimal); ([STString; STInterval], STDecimal)])
-          (SQLName "date_trunc", funScalarsToSignatures [([STString; STDateTime], STDateTime); ([STString; STInterval], STInterval)])
+          (SQLName "date_trunc", funScalarsToSignatures [([STString; STLocalDateTime], STLocalDateTime); ([STString; STDateTime], STDateTime); ([STString; STInterval], STInterval)])
           (SQLName "isfinite", funScalarsToSignatures [([STDate], STBool); ([STDateTime], STBool); ([STDate], STBool)])
         ]
 
@@ -168,6 +182,8 @@ let private compareOverloads =
     let same = Map.ofList [((HTAny, HTAny), HTScalar (Some STBool))]
     let notsame =
         [ (STDate, STDateTime)
+          (STDate, STLocalDateTime)
+          (STDateTime, STLocalDateTime)
         ] |> Seq.map (fun pair -> (pair, STBool)) |> symmetricOpSignatures
     Map.union same notsame
 
@@ -189,9 +205,9 @@ let private plusOverloads =
       ((STDecimal, STDecimal), STDecimal)
       ((STDate, STInterval), STDate)
       ((STDate, STInt), STDate)
-      ((STDate, STDateTime), STDateTime)
       ((STInterval, STInterval), STInterval)
       ((STDateTime, STInterval), STDateTime)
+      ((STLocalDateTime, STInterval), STLocalDateTime)
     ] |> symmetricOpSignatures
 
 let private minusOverloads =
@@ -203,6 +219,7 @@ let private minusOverloads =
       ((STDateTime, STInterval), STDateTime)
       ((STInterval, STInterval), STInterval)
       ((STDateTime, STDateTime), STInterval)
+      ((STLocalDateTime, STLocalDateTime), STInterval)
     ] |> binScalarsToSignatures
 
 let private multiplyOverloads =
@@ -441,6 +458,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VString s -> Some <| VTScalar STString
     | VBool b -> Some <| VTScalar STBool
     | VDateTime dt -> Some <| VTScalar STDateTime
+    | VLocalDateTime dt -> Some <| VTScalar STLocalDateTime
     | VDate dt -> Some <| VTScalar STDate
     | VInterval int -> Some <| VTScalar STInterval
     | VRegclass rc -> Some <| VTScalar STRegclass
@@ -452,6 +470,7 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VStringArray vals -> Some <| VTArray STString
     | VBoolArray vals -> Some <| VTArray STBool
     | VDateTimeArray vals -> Some <| VTArray STDateTime
+    | VLocalDateTimeArray vals -> Some <| VTArray STLocalDateTime
     | VDateArray vals -> Some <| VTArray STDate
     | VIntervalArray vals -> Some <| VTArray STInterval
     | VRegclassArray vals -> Some <| VTArray STRegclass

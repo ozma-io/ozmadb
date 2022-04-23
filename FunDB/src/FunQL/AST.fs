@@ -291,7 +291,7 @@ type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarField
     | [<CaseName("uvref")>] SFTUserViewRef
     | [<CaseName("uuid")>] SFTUuid
     | [<CaseName("reference")>] SFTReference of Entity : 'e * OnDelete : ReferenceDeleteAction option
-    | [<CaseName("enum")>] SFTEnum of ImmutableSortedSet<string>
+    | [<CaseName("enum")>] SFTEnum of Values : ImmutableSortedSet<string>
     with
         override this.ToString () = this.ToFunQLString()
 

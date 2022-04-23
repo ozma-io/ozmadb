@@ -115,6 +115,7 @@ type [<NoEquality; NoComparison>] Value =
     | VRegclass of SchemaObject
     | VBool of bool
     | VDateTime of Instant
+    | VLocalDateTime of LocalDateTime
     | VDate of LocalDate
     | VInterval of Period
     | VJson of JToken
@@ -125,6 +126,7 @@ type [<NoEquality; NoComparison>] Value =
     | VStringArray of ValueArray<string>
     | VBoolArray of ValueArray<bool>
     | VDateTimeArray of ValueArray<Instant>
+    | VLocalDateTimeArray of ValueArray<LocalDateTime>
     | VDateArray of ValueArray<LocalDate>
     | VIntervalArray of ValueArray<Period>
     | VRegclassArray of ValueArray<SchemaObject>
@@ -151,9 +153,10 @@ type [<NoEquality; NoComparison>] Value =
             | VString s -> sprintf "%s :: text" (renderSqlString s)
             | VRegclass rc -> sprintf "%s :: regclass" (rc.ToSQLString() |> renderSqlString)
             | VBool b -> renderSqlBool b
-            | VDateTime dt -> sprintf "%s :: timestamptz" (dt |> string |> renderSqlString)
-            | VDate d -> sprintf "%s :: date" (d |> string |> renderSqlString)
-            | VInterval d -> sprintf "%s :: interval" (d |> string |> renderSqlString)
+            | VDateTime dt -> sprintf "%s :: timestamptz" (dt |> renderSqlDateTime |> renderSqlString)
+            | VLocalDateTime dt -> sprintf "%s :: timestamp" (dt |> renderSqlLocalDateTime |> renderSqlString)
+            | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
+            | VInterval d -> sprintf "%s :: interval" (d |> renderSqlInterval |> renderSqlString)
             | VJson j -> sprintf "%s :: jsonb" (j |> renderSqlJson |> renderSqlString)
             | VUuid u -> sprintf "%s :: uuid" (u |> string |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
@@ -161,9 +164,10 @@ type [<NoEquality; NoComparison>] Value =
             | VDecimalArray vals -> renderArray renderSqlDecimal "decimal" vals
             | VStringArray vals -> renderArray renderSqlString "text" vals
             | VBoolArray vals -> renderArray renderSqlBool "bool" vals
-            | VDateTimeArray vals -> renderArray string "timestamptz" vals
-            | VDateArray vals -> renderArray string "date" vals
-            | VIntervalArray vals -> renderArray string "interval" vals
+            | VDateTimeArray vals -> renderArray renderSqlDateTime "timestamptz" vals
+            | VLocalDateTimeArray vals -> renderArray renderSqlLocalDateTime "timestamp" vals
+            | VDateArray vals -> renderArray renderSqlDate "date" vals
+            | VIntervalArray vals -> renderArray renderSqlInterval "interval" vals
             | VRegclassArray vals -> renderArray toSQLString "regclass" vals
             | VJsonArray vals -> renderArray renderSqlJson "jsonb" vals
             | VUuidArray vals -> renderArray string "uuid" vals
@@ -199,6 +203,7 @@ type ValuePrettyConverter () =
         | VString s -> writer.WriteValue(s)
         | VBool b -> writer.WriteValue(b)
         | VDateTime dt -> serialize dt
+        | VLocalDateTime dt -> serialize dt
         | VDate dt -> serialize dt
         | VInterval int -> serialize int
         | VJson j -> j.WriteTo(writer)
@@ -210,6 +215,7 @@ type ValuePrettyConverter () =
         | VStringArray vals -> serializeArray id vals
         | VBoolArray vals -> serializeArray id vals
         | VDateTimeArray vals -> serializeArray id vals
+        | VLocalDateTimeArray vals -> serializeArray id vals
         | VDateArray vals -> serializeArray id vals
         | VIntervalArray vals -> serializeArray id vals
         | VRegclassArray vals -> serializeArray string vals
@@ -227,7 +233,7 @@ type SimpleType =
     | [<CaseName("decimal")>] STDecimal
     | [<CaseName("bool")>] STBool
     | [<CaseName("datetime")>] STDateTime
-    | [<CaseName("datetime")>] STLocalDateTime
+    | [<CaseName("localdatetime")>] STLocalDateTime
     | [<CaseName("date")>] STDate
     | [<CaseName("interval")>] STInterval
     | [<CaseName("regclass")>] STRegclass
@@ -244,6 +250,7 @@ type SimpleType =
             | STDecimal -> "numeric"
             | STBool -> "bool"
             | STDateTime -> "timestamptz"
+            | STLocalDateTime -> "localdatetime"
             | STDate -> "date"
             | STInterval -> "interval"
             | STRegclass -> "regclass"
@@ -270,9 +277,9 @@ let findSimpleType (str : TypeName) : SimpleType option =
     | "character varying" -> Some STString
     | "bool" -> Some STBool
     | "boolean" -> Some STBool
+    | "timestamp without time zone" -> Some STLocalDateTime
     | "timestamp with time zone" -> Some STDateTime
-    | "timestamp without time zone" -> Some STDateTime
-    | "timestamp" -> Some STDateTime
+    | "timestamp" -> Some STLocalDateTime
     | "timestamptz" -> Some STDateTime
     | "date" -> Some STDate
     | "interval" -> Some STInterval

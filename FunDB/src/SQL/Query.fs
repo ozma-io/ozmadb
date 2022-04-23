@@ -62,11 +62,6 @@ let private convertDecimal : obj -> decimal option = function
         | :? OverflowException -> None
     | value -> None
 
-let private convertDateTime : obj -> Instant option = function
-    | :? Instant as dt -> Some dt
-    // | :? LocalDateTime as ldt -> Some <| ldt.InUtc().ToInstant()
-    | value -> None
-
 let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
     match (valType, rawValue) with
     | (_, (:? DBNull as value)) -> VNull
@@ -81,10 +76,8 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
         | None -> raisef QueryException "Failed to convert decimal value"
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
-    | (VTScalar STDateTime, value) ->
-        match convertDateTime value with
-        | Some dt -> VDateTime dt
-        | None -> raisef QueryException "Failed to convert datetime value"
+    | (VTScalar STDateTime, (:? Instant as value)) -> VDateTime value
+    | (VTScalar STLocalDateTime, (:? LocalDateTime as value)) -> VLocalDateTime value
     | (VTScalar STDate, (:? LocalDate as value)) -> VDate value
     | (VTScalar STInterval, (:? Period as value)) -> VInterval value
     | (VTScalar STJson, (:? string as value)) ->
@@ -109,13 +102,14 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
         | STDecimal -> VDecimalArray (convertArray convertDecimal rootVals)
         | STString -> VStringArray (convertArray tryCast<string> rootVals)
         | STBool -> VBoolArray (convertArray tryCast<bool> rootVals)
-        | STDateTime -> VDateTimeArray (convertArray convertDateTime rootVals)
+        | STDateTime -> VDateTimeArray (convertArray tryCast<Instant> rootVals)
+        | STLocalDateTime -> VLocalDateTimeArray (convertArray tryCast<LocalDateTime> rootVals)
         | STDate -> VDateArray (convertArray tryCast<LocalDate> rootVals)
         | STInterval -> VIntervalArray (convertArray tryCast<Period> rootVals)
         | STRegclass -> raisef QueryException "Regclass arrays are not supported"
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
         | STUuid -> VUuidArray (convertArray tryCast<Guid> rootVals)
-    | (typ, value) -> raisef QueryException "Cannot convert raw SQL value"
+    | (typ, value) -> raisef QueryException "Unknown value format"
 
 let private convertValue (name : SQLName) (valType : SimpleValueType) (rawValue : obj) =
     try
@@ -141,6 +135,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VRegclass name -> raisef QueryException "Regclass arguments are not supported: %O" name
     | VBool b -> (Some NpgsqlDbType.Boolean, upcast b)
     | VDateTime dt -> (Some NpgsqlDbType.TimestampTz, upcast dt)
+    | VLocalDateTime dt -> (Some NpgsqlDbType.Timestamp, upcast dt)
     | VDate dt -> (Some NpgsqlDbType.Date, upcast dt)
     | VInterval int -> (Some NpgsqlDbType.Interval, upcast int)
     | VJson j -> (Some NpgsqlDbType.Jsonb, upcast j)
@@ -151,6 +146,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VStringArray vals -> npgsqlArray NpgsqlDbType.Text vals
     | VBoolArray vals -> npgsqlArray NpgsqlDbType.Boolean vals
     | VDateTimeArray vals -> npgsqlArray NpgsqlDbType.TimestampTz vals
+    | VLocalDateTimeArray vals -> npgsqlArray NpgsqlDbType.Timestamp vals
     | VDateArray vals -> npgsqlArray NpgsqlDbType.Date vals
     | VIntervalArray vals -> npgsqlArray NpgsqlDbType.Interval vals
     | VRegclassArray vals -> raisef QueryException "Regclass arguments are not supported: %O" vals

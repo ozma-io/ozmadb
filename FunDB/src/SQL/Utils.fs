@@ -77,10 +77,11 @@ let private ofNodaParseResult (result : NodaTime.Text.ParseResult<'a>) : 'a opti
 
 let private datePattern = NodaTime.Text.LocalDatePattern.Iso
 let private dateTimeRenderPattern = NodaTime.Text.InstantPattern.CreateWithInvariantCulture("uuuu-MM-dd HH:mm:ss.ffffff+00")
+let private localDateTimeRenderPattern = NodaTime.Text.LocalDateTimePattern.CreateWithInvariantCulture("uuuu-MM-dd HH:mm:ss.ffffff")
 
-let renderSqlDateTime = dateTimeRenderPattern.Format
+let renderSqlDateTime dt = dateTimeRenderPattern.Format dt
+let renderSqlLocalDateTime = localDateTimeRenderPattern.Format
 
-let private dateTimeSecPattern = NodaTime.Text.InstantPattern.CreateWithInvariantCulture("uuuu-MM-dd HH:mm:ss")
 let private subsecSeparator = [|';'; '.'|]
 let private subsecMultiplier = function
     | 1 -> 100000
@@ -91,7 +92,7 @@ let private subsecMultiplier = function
     | 6 -> 1
     | _ -> failwith "Invalid format"
 
-let trySqlDateTime (dateTimeStr : string) : Instant option =
+let private tryGenericSqlDateTime (allowTz : bool) (dateTimeStr : string) : (int * int * int * int64) option =
     try
         let timePoint = dateTimeStr.IndexOf(' ')
         let dateStr =
@@ -100,13 +101,14 @@ let trySqlDateTime (dateTimeStr : string) : Instant option =
             else
                 dateTimeStr.Substring(0, timePoint)
         let date = datePattern.Parse(dateStr).GetValueOrThrow()
-        let res = Instant.FromUtc(date.Year, date.Month, date.Day, 0, 0)
         if timePoint = -1 then
-            Some res
+            Some (date.Year, date.Month, date.Day, 0L)
         else
             let timeStr = dateTimeStr.Substring(timePoint + 1)
             let subsecDotPoint = timeStr.IndexOfAny(subsecSeparator)
             let tzPlusPoint = timeStr.IndexOf('+')
+            if tzPlusPoint <> -1 && not allowTz then
+                failwith "Invalid format"
             let secsStr =
                 if subsecDotPoint = -1 then
                     if tzPlusPoint <> -1 then
@@ -114,17 +116,19 @@ let trySqlDateTime (dateTimeStr : string) : Instant option =
                     else
                         timeStr
                 else
-                    if tzPlusPoint <> -1 && subsecDotPoint <= tzPlusPoint then
+                    if tzPlusPoint <> -1 && subsecDotPoint >= tzPlusPoint then
                         failwith "Invalid format"
                     timeStr.Substring(0, subsecDotPoint)
             let timeParts = secsStr.Split(':')
-            let hours = Int32.Parse(timeParts.[0])
-            let minutes = Int32.Parse(timeParts.[1])
+            let hours = Int32.Parse(timeParts.[0], NumberStyles.None)
+            let minutes = Int32.Parse(timeParts.[1], NumberStyles.None)
             let seconds =
                 match timeParts.Length with
                 | 2 -> 0
-                | 3 -> Int32.Parse(timeParts.[2])
+                | 3 -> Int32.Parse(timeParts.[2], NumberStyles.None)
                 | _ -> failwith "Invalid format"
+            if hours >= 24 || minutes >= 60 || seconds > 60 then
+                failwith "Invalid format"
             let usecs =
                 if subsecDotPoint = -1 then
                     0
@@ -138,18 +142,31 @@ let trySqlDateTime (dateTimeStr : string) : Instant option =
                             tzPlusPoint
                     let subsecLength = subsecEndPoint - subsecPoint
                     let subsecPart = timeStr.Substring(subsecPoint, subsecLength)
-                    let subsecs = Int32.Parse subsecPart
+                    let subsecs = Int32.Parse(subsecPart, NumberStyles.None)
                     subsecs * subsecMultiplier subsecLength
-            if tzPlusPoint <> -1 && timeStr.Substring(tzPlusPoint) <> "+00" then
-                failwith "Invalid format"
+            if tzPlusPoint <> -1 then
+                let tzStr = timeStr.Substring(tzPlusPoint + 1)
+                let tz = Int32.Parse(tzStr, NumberStyles.None)
+                if tz <> 0 then
+                    failwith "Invalid format"
             let totalTicks =
                 int64 usecs * NpgsqlTimeSpan.TicksPerMicrosecond +
                 int64 seconds * NpgsqlTimeSpan.TicksPerSecond +
                 int64 minutes * NpgsqlTimeSpan.TicksPerMinute +
                 int64 hours * NpgsqlTimeSpan.TicksPerHour
-            Some <| res.PlusTicks(totalTicks)
+            Some (date.Year, date.Month, date.Day, totalTicks)
     with
     | _ -> None
+
+let trySqlDateTime (dateTimeStr : string) : Instant option =
+    match tryGenericSqlDateTime true dateTimeStr with
+    | None -> None
+    | Some (years, months, days, ticks) -> Some <| Instant.FromUtc(years, months, days, 0, 0, 0).PlusTicks(ticks)
+
+let trySqlLocalDateTime (dateTimeStr : string) : LocalDateTime option =
+    match tryGenericSqlDateTime false dateTimeStr with
+    | None -> None
+    | Some (years, months, days, ticks) -> Some <| LocalDateTime(years, months, days, 0, 0).PlusTicks(ticks)
 
 let renderSqlDate = datePattern.Format
 let trySqlDate (s : string) : LocalDate option = datePattern.Parse(s) |> ofNodaParseResult
