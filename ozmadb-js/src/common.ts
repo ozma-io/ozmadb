@@ -56,7 +56,7 @@ export type UserViewSource = IAnonymousUserView | INamedUserView;
  * Database result types.
  */
 
-export type SimpleType = "int" | "decimal" | "string" | "bool" | "datetime" | "date" | "interval" | "json" | "uuid";
+export type SimpleType = "int" | "decimal" | "string" | "bool" | "datetime" | "localdatetime" | "date" | "interval" | "json" | "uuid";
 
 export interface IScalarSimpleType {
   type: SimpleType;
