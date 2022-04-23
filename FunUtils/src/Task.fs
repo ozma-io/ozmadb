@@ -18,7 +18,7 @@ type AsyncSemaphore (initialCount : int) =
             else
                 let waiter = TaskCompletionSource()
                 waiters.Enqueue(waiter)
-                waiter.Task :> Task
+                waiter.Task
 
     member this.Release () =
         let maybeToRelease =
@@ -30,7 +30,7 @@ type AsyncSemaphore (initialCount : int) =
                     None
         match maybeToRelease with
         | None -> ()
-        | Some toRelease -> toRelease.SetResult(null)
+        | Some toRelease -> toRelease.SetResult()
 
 let inline map (f : 'r1 -> 'r2) (t : ^a) : Task<'r2> =
     task {

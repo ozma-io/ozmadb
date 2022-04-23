@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.1</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
 
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
@@ -24,6 +24,10 @@
     <Compile Include="src/Expr.fs" />
     <Compile Include="src/POSIXPath.fs" />
     <Compile Include="src/Hash.fs" />
+    <Compile Include="src/HashMap.fs" />
+    <Compile Include="src/HashSet.fs" />
+    <Compile Include="src/OrderedMap.fs" />
+    <Compile Include="src/OrderedSet.fs" />
     <Compile Include="src/ObjectMap.fs" />
 
     <Compile Include="src/Serialization/Utils.fs" />
