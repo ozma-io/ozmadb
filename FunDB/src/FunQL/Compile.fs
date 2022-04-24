@@ -2515,7 +2515,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | PLocal name -> arg.Attributes |> Map.toSeq |> Seq.map (compileArgAttr name)
             | PGlobal name -> Seq.empty
 
-        args |> Map.toSeq |> Seq.collect compileArg |> Seq.toArray
+        args |> OrderedMap.toSeq |> Seq.collect compileArg |> Seq.toArray
 
     member this.ColumnName name = columnName name
 

@@ -98,7 +98,7 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
         match parse tokenizeFunQL fieldType arg.Type with
         | Ok r -> requiredArgument r
         | Error msg -> raisef ChunkException "Error parsing argument type: %s" msg
-    let parsedArguments = Map.map (fun name -> parseChunkArgument) chunk.Arguments
+    let parsedArguments = Map.map (fun name -> parseChunkArgument) chunk.Arguments |> OrderedMap.ofMap
 
     let makeCustomMapping (name : FieldName) (colName : SQL.ColumnName) =
         let info =
@@ -121,7 +121,7 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
         raisef ChunkException "Aggregate functions are not supported here"
 
     let resolveChunkValue (name : ArgumentName) (arg : SourceChunkArgument) : FieldValue =
-        let argument = Map.find (PLocal name)  localArguments
+        let argument = OrderedMap.find (PLocal name) localArguments
         match parseValueFromJson argument.ArgType true arg.Value with
         | Some v -> v
         | None -> raisef ChunkException "Couldn't parse value %O to type %O" arg.Value argument.ArgType
@@ -157,7 +157,7 @@ let queryExprChunk (layout : Layout) (chunk : ResolvedQueryChunk) (query : Query
         | None -> (argValues, arguments, None)
         | Some where ->
             let foldArgs (argValues, arguments, chunkArguments) (name, argValue) =
-                let argumentInfo = Map.find (PLocal name) where.Arguments
+                let argumentInfo = OrderedMap.find (PLocal name) where.Arguments
                 let (argId, anonName, arguments) = addAnonymousArgument argumentInfo arguments
                 let chunkArguments = Map.add anonName name chunkArguments
                 let argValues = Map.add anonName argValue argValues

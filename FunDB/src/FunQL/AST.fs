@@ -2,7 +2,6 @@ module FunWithFlags.FunDB.FunQL.AST
 
 open System
 open System.ComponentModel
-open System.Collections.Immutable
 open System.Threading.Tasks
 open FSharpPlus
 open NodaTime
@@ -291,7 +290,7 @@ type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarField
     | [<CaseName("uvref")>] SFTUserViewRef
     | [<CaseName("uuid")>] SFTUuid
     | [<CaseName("reference")>] SFTReference of Entity : 'e * OnDelete : ReferenceDeleteAction option
-    | [<CaseName("enum")>] SFTEnum of Values : ImmutableSortedSet<string>
+    | [<CaseName("enum")>] SFTEnum of Values : OrderedSet<string>
     with
         override this.ToString () = this.ToFunQLString()
 

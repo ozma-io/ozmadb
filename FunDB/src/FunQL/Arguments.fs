@@ -27,7 +27,6 @@ type CompiledArgument =
 
 type RawArguments = Map<string, JToken>
 
-type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
 type CompiledArgumentsMap = Map<Placeholder, CompiledArgument>
 type ArgumentValuesMap = Map<Placeholder, FieldValue>
 
@@ -122,7 +121,7 @@ let compileArguments (args : ResolvedArgumentsMap) : QueryArguments =
         nextPlaceholderId <- nextPlaceholderId + 1
         ret
 
-    let arguments = args |> Map.map convertArgument
+    let arguments = args |> OrderedMap.toMap |> Map.map convertArgument
     { Types = arguments
       NextPlaceholderId = nextPlaceholderId
       NextAnonymousId = 0
@@ -132,12 +131,12 @@ let private typecheckArgument (fieldType : FieldType<_>) (value : FieldValue) : 
     match fieldType with
     | FTScalar (SFTEnum vals) ->
         match value with
-        | FString str when vals.Contains str -> ()
+        | FString str when OrderedSet.contains str vals -> ()
         | FNull -> ()
         | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
     | FTArray (SFTEnum vals) ->
         match value with
-        | FStringArray strs when Seq.forall (fun str -> vals.Contains str) strs -> ()
+        | FStringArray strs when Seq.forall (fun str -> OrderedSet.contains str vals) strs -> ()
         | FNull -> ()
         | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
     // Most casting/typechecking will be done by database or Npgsql

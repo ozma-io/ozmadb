@@ -27,7 +27,7 @@ type OrderedMap<'k, 'v> when 'k : comparison =
     member this.Item
         with get key = Map.find key this.Map
 
-    member this.Keys = this.Order :> ICollection<'k>
+    member this.Keys = Array.copy this.Order :> ICollection<'k>
     member this.Values = [| for k in this.Order -> Map.find k this.Map |] :> ICollection<'v>
     
     member this.ContainsKey key = Map.containsKey key this.Map
@@ -96,6 +96,11 @@ module OrderedMap =
 
     let ofSeqUnique (objs : ('k * 'v) seq) = ofSeqGeneric (fun key value -> failwithf "Key '%O' already exists" key) objs
 
+    let ofMap (smap : Map<'k, 'v>) : OrderedMap<'k, 'v> =
+        { Order = smap |> Map.keys |> Seq.toArray
+          Map = smap
+        }
+
     let singleton (key : 'k) (value : 'v) : OrderedMap<'k, 'v> =
         { Order = [|key|]
           Map = Map.singleton key value
@@ -106,6 +111,8 @@ module OrderedMap =
     let values (map : OrderedMap<'k, 'v>) : 'v seq = keys map |> Seq.map (fun k -> Map.find k map.Map)
 
     let toSeq (map : OrderedMap<'k, 'v>) : ('k * 'v) seq = keys map |> Seq.map (fun k -> (k, Map.find k map.Map))
+
+    let toMap (map : OrderedMap<'k, 'v>) : Map<'k, 'v> = map.Map
 
     let filter (f : 'k -> 'v -> bool) (map : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
         let mutable newKeys = map.Map
@@ -138,5 +145,54 @@ module OrderedMap =
               Map = Map.remove key map.Map
             }
 
-    let contains (key : 'k) (map : OrderedMap<'k, 'v>) : bool =
+    let map (f : 'k -> 'v1 -> 'v2) (map : OrderedMap<'k, 'v1>) : OrderedMap<'k, 'v2> =
+        { Order = map.Order
+          Map = Map.map f map.Map
+        }
+
+    let mapWithKeys (f : 'k1 -> 'v1 -> ('k2 * 'v2)) (map : OrderedMap<'k1, 'v1>) : OrderedMap<'k2, 'v2> =
+        let mapOne k = f k (Map.find k map.Map)
+        let newValues = Array.map mapOne map.Order
+        { Order = Array.map fst newValues
+          Map = Map.ofArray newValues
+        }
+
+    let mapMaybe (f : 'k -> 'v1 -> 'v2 option) (map : OrderedMap<'k, 'v1>) : OrderedMap<'k, 'v2> =
+        let mapOne k =
+            Option.map (fun value -> (k, value)) <| f k (Map.find k map.Map)
+        let newValues = Seq.mapMaybe mapOne map.Order |> Array.ofSeq
+        { Order = Array.map fst newValues
+          Map = Map.ofArray newValues
+        }
+
+    let mapWithKeysMaybe (f : 'k1 -> 'v1 -> ('k2 * 'v2) option) (map : OrderedMap<'k1, 'v1>) : OrderedMap<'k2, 'v2> =
+        let mapOne k = f k (Map.find k map.Map)
+        let newValues = Seq.mapMaybe mapOne map.Order |> Array.ofSeq
+        { Order = Array.map fst newValues
+          Map = Map.ofArray newValues
+        }
+
+    let mapKeys (f : 'k1 -> 'k2) (map : OrderedMap<'k1, 'v>) : OrderedMap<'k2, 'v> =
+        let mutable newKeys = Map.empty
+
+        let mapOne k =
+            let newK = f k
+            newKeys <- Map.add newK (Map.find k map.Map) newKeys
+            newK
+        let newOrder = Array.map f map.Order
+
+        { Order = newOrder
+          Map = newKeys
+        }
+
+    let union (map1 : OrderedMap<'k, 'v>) (map2 : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
+        map2 |> toSeq |> Seq.fold (fun cmap (k, v) -> add k v cmap) map1
+
+    let containsKey (key : 'k) (map : OrderedMap<'k, 'v>) : bool =
         Map.containsKey key map.Map
+
+    let tryFind (key : 'k) (map : OrderedMap<'k, 'v>) : 'v option =
+        Map.tryFind key map.Map
+
+    let find (key : 'k) (map : OrderedMap<'k, 'v>) : 'v =
+        Map.find key map.Map

@@ -65,6 +65,10 @@ module OrderedSet =
 
     let toSeq (map : OrderedSet<'a>) : 'a seq = map.Order
 
+    let toArray (map : OrderedSet<'a>) : 'a[] = Array.copy map.Order
+
+    let toSet (map : OrderedSet<'a>) : Set<'a> = map.Keys
+
     let filter (f : 'a -> bool) (map : OrderedSet<'a>) : OrderedSet<'a> =
         let mutable newKeys = map.Keys
 
@@ -89,14 +93,12 @@ module OrderedSet =
             }
 
     let remove (item : 'a) (map : OrderedSet<'a>) : OrderedSet<'a> =
-        match Array.tryFindIndex (fun citem -> citem = item) map.Order with
-        | None -> map
-        | Some i ->
-            { Order = Array.removeAt i map.Order
-              Keys = Set.remove item map.Keys
-            }
+        filter (fun citem -> citem = item) map
 
     let contains (key : 'a) (map : OrderedSet<'a>) : bool =
         Set.contains key map.Keys
 
     let map (f : 'a -> 'b) (map : OrderedSet<'a>) : OrderedSet<'b> = map |> toSeq |> Seq.map f |> ofSeq
+
+    let difference (map1 : OrderedSet<'a>) (map2 : OrderedSet<'a>) : OrderedSet<'a> =
+        filter (fun citem -> contains citem map2) map2

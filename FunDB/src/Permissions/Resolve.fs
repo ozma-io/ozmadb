@@ -89,7 +89,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let entityInfo = SFEntity entityRef
         let (localArguments, expr) =
             try
-                resolveSingleFieldExpr layout Map.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
+                resolveSingleFieldExpr layout OrderedMap.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"
         let (exprInfo, usedReferences) = fieldExprUsedReferences layout expr

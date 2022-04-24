@@ -611,7 +611,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let entityInfo = SFEntity entityRef
         let (localArguments, expr) =
             try
-                resolveSingleFieldExpr wrappedLayout Map.empty localExprFromEntityId relatedResolutionFlags entityInfo expr
+                resolveSingleFieldExpr wrappedLayout OrderedMap.empty localExprFromEntityId relatedResolutionFlags entityInfo expr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
         let (exprInfo, usedReferences) = fieldExprUsedReferences wrappedLayout expr

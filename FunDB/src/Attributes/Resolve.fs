@@ -32,7 +32,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             try
                 let entityInfo = SFEntity entityRef
                 let (info, resolvedExpr) =
-                    resolveSingleFieldExpr layout Map.empty localExprFromEntityId attrResolutionFlags entityInfo expr
+                    resolveSingleFieldExpr layout OrderedMap.empty localExprFromEntityId attrResolutionFlags entityInfo expr
                 resolvedExpr
             with
             | e -> raisefWithInner ResolveAttributesException e "In attribute %O" name

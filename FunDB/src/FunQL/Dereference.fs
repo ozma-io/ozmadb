@@ -190,7 +190,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         { arg with Attributes = resolveAttributes arg.Attributes }
 
     let resolveArgumentsMap (argsMap : ResolvedArgumentsMap) : ResolvedArgumentsMap =
-        Map.map (fun name -> resolveArgument) argsMap
+        OrderedMap.map (fun name -> resolveArgument) argsMap
 
     member this.ResolveSelectExpr expr = resolveSelectExpr expr
     member this.ResolveArgumentsMap argsMap = resolveArgumentsMap argsMap

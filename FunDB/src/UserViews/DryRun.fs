@@ -1,9 +1,11 @@
 module FunWithFlags.FunDB.UserViews.DryRun
 
+open System
 open System.Threading
 open System.Threading.Tasks
 open FSharpPlus
 open FSharp.Control.Tasks.Affine
+open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
@@ -48,18 +50,51 @@ type UserViewColumn =
 
 [<NoEquality; NoComparison>]
 type ArgumentInfo =
-    { ArgType: ResolvedFieldType
-      Optional: bool
+    { ArgType : ResolvedFieldType
+      Optional : bool
       DefaultValue : FieldValue option
       AttributeTypes : ExecutedAttributeTypes
       Attributes : ExecutedAttributeMap
     }
 
 [<NoEquality; NoComparison>]
+type SerializedArgumentInfo =
+    { Name : ArgumentName
+      ArgType : ResolvedFieldType
+      Optional : bool
+      DefaultValue : FieldValue option
+      AttributeTypes : ExecutedAttributeTypes
+      Attributes : ExecutedAttributeMap
+    }
+
+type ArgumentsPrettyConverter () =
+    inherit JsonConverter<OrderedMap<ArgumentName, ArgumentInfo>> ()
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, someType, existingValue, hasExistingValue, serializer : JsonSerializer) : OrderedMap<ArgumentName, ArgumentInfo> =
+        raise <| NotImplementedException ()
+
+    override this.WriteJson (writer : JsonWriter, value : OrderedMap<ArgumentName, ArgumentInfo>, serializer : JsonSerializer) : unit =
+        writer.WriteStartArray ()
+        for KeyValue(k, v) in value do
+            let convInfo =
+                { Name = k
+                  ArgType = v.ArgType
+                  Optional = v.Optional
+                  DefaultValue = v.DefaultValue
+                  AttributeTypes = v.AttributeTypes
+                  Attributes = v.Attributes
+                }
+            serializer.Serialize (writer, convInfo)
+        writer.WriteEndArray ()
+
+[<NoEquality; NoComparison>]
 type UserViewInfo =
     { AttributeTypes : ExecutedAttributeTypes
       RowAttributeTypes : ExecutedAttributeTypes
-      Arguments : Map<ArgumentName, ArgumentInfo>
+      [<JsonConverter(typeof<ArgumentsPrettyConverter>)>]
+      Arguments : OrderedMap<ArgumentName, ArgumentInfo>
       Domains : UVDomains
       MainEntity : ResolvedEntityRef option
       Columns : UserViewColumn[]
@@ -215,7 +250,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
                     } : ArgumentInfo
                 Some (name, argInfo)
             | PGlobal name -> None
-        let arguments = viewExpr.Arguments |> Map.mapWithKeysMaybe getArg
+        let arguments = viewExpr.Arguments |> OrderedMap.mapWithKeysMaybe getArg
 
         { AttributeTypes = viewInfo.AttributeTypes
           RowAttributeTypes = viewInfo.RowAttributeTypes

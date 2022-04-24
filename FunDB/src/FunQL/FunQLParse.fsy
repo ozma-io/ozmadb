@@ -1,7 +1,6 @@
 %{
 
 open Newtonsoft.Json.Linq
-open System.Collections.Immutable
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
@@ -21,7 +20,7 @@ type ParsedCommonTableExprs = CommonTableExprs<EntityRef, LinkedFieldRef>
 type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
 type ParsedAggExpr = AggExpr<EntityRef, LinkedFieldRef>
 type ParsedArgument = Argument<EntityRef, EntityRef, LinkedFieldRef>
-type ParsedArgumentsMap = Map<ArgumentName, ParsedArgument>
+type ParsedArgumentsMap = OrderedMap<ArgumentName, ParsedArgument>
 type ParsedOrderColumn = OrderColumn<EntityRef, LinkedFieldRef>
 type ParsedFromEntity = FromEntity<EntityRef>
 type ParsedInsertValue = InsertValue<EntityRef, LinkedFieldRef>
@@ -77,6 +76,18 @@ let private extractInOneSource : ParsedFieldExpr[] -> InSource = function
 let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
     try
         Map.ofSeqUnique vals
+    with
+        | Failure msg -> failwith <| sprintf "%s: %s" error msg
+
+let private parseOrderedMap (error : string) (vals : ('k * 'v) seq) : OrderedMap<'k, 'v> =
+    try
+        OrderedMap.ofSeqUnique vals
+    with
+        | Failure msg -> failwith <| sprintf "%s: %s" error msg
+
+let private parseOrderedSet (error : string) (vals : 'a seq) : OrderedSet<'a> =
+    try
+        OrderedSet.ofSeqUnique vals
     with
         | Failure msg -> failwith <| sprintf "%s: %s" error msg
 
@@ -136,13 +147,6 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
         FEAggFunc (name, expr)
     else
         failwithf "Unknown aggregate function %O" name
-
-let private uniqueImmutableSortedSet (items : 'a seq) : ImmutableSortedSet<'a> =
-    let builder = ImmutableSortedSet.CreateBuilder<'a>()
-    for item in items do
-        if not <| builder.Add(item) then
-            failwithf "Duplicate item: %O" item
-    ImmutableSortedSet.ToImmutableSortedSet builder
 
 %}
 
@@ -347,12 +351,12 @@ MaybePragmasList:
     | SET Name SetEq Value SEMICOLON MaybePragmasList { ($2, $4) :: $6 }
 
 MaybeArguments:
-    |                                            { Map.empty }
+    |                                            { OrderedMap.empty }
     | LEFT_BRACE ArgumentsList RIGHT_BRACE COLON { $2 }
 
 ArgumentsList:
-    |                       { Map.empty }
-    | ArgumentsListNonEmpty { parseMap "Clashing argument names" $1 }
+    |                       { OrderedMap.empty }
+    | ArgumentsListNonEmpty { parseOrderedMap "Clashing argument names" $1 }
 
 ArgumentsListNonEmpty:
     | ArgumentEntry                             { [ $1 ] }
@@ -867,7 +871,7 @@ ScalarType:
     | UVREF_TYPE                                                        { SFTUserViewRef }
     | UUID_TYPE                                                         { SFTUuid }
     | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN MaybeDeleteAction { SFTReference ($3, $5) }
-    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                         { SFTEnum (uniqueImmutableSortedSet $3) }
+    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN                         { SFTEnum (parseOrderedSet "Clashing enum items" $3) }
 
 FieldType:
     | ScalarType                               { FTScalar $1 }

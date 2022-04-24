@@ -273,17 +273,17 @@ type ResolvedMainEntity =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-type ResolvedArgumentsMap = Map<Placeholder, ResolvedArgument>
+type ResolvedArgumentsMap = OrderedMap<Placeholder, ResolvedArgument>
 
-let private renderFunQLArguments (arguments : ResolvedArgumentsMap) =
-    if Map.isEmpty arguments then
+let private renderFunQLArguments (arguments : ResolvedArgumentsMap) : string =
+    if OrderedMap.isEmpty arguments then
         ""
     else
         let printArgument (name : Placeholder, arg : ResolvedArgument) =
             match name with
             | PGlobal _ -> None
             | PLocal _ -> Some <| sprintf "%s %s" (name.ToFunQLString()) (arg.ToFunQLString())
-        arguments |> Map.toSeq |> Seq.mapMaybe printArgument |> String.concat ", " |> sprintf "(%s):"
+        arguments |> OrderedMap.toSeq |> Seq.mapMaybe printArgument |> String.concat ", " |> sprintf "(%s):"
 
 [<NoEquality; NoComparison>]
 type ResolvedViewExpr =
@@ -358,7 +358,7 @@ let resolveScalarFieldType (layout : IEntitiesSet) (allowReferenceOptions : bool
             raisef ViewResolveException "Cannot find entity %O from reference type" resolvedRef
         SFTReference (resolvedRef, mopts)
     | SFTEnum vals ->
-        if vals.IsEmpty then
+        if OrderedSet.isEmpty vals then
             raisef ViewResolveException "Enums must not be empty"
         SFTEnum vals
 
@@ -931,7 +931,7 @@ let rec private relabelFromExprType (typeContexts : TypeContextsMap) = function
         FJoin { join with A = a; B = b }
     | FSubExpr expr -> FSubExpr expr
 
-type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsMap, resolveFlags : ExprResolutionFlags) =
+type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, ResolvedArgument>, resolveFlags : ExprResolutionFlags) =
     let mutable isPrivileged = false
 
     let mutable lastFromEntityId : FromEntityId = 0
@@ -2248,7 +2248,7 @@ let isScalarValueSubtype (layout : ILayoutBits) (wanted : ResolvedScalarFieldTyp
     | (SFTReference (wantedRef, optsA), SFTReference (givenRef, optsB)) ->
         let wantedEntity = layout.FindEntity wantedRef |> Option.get
         Map.containsKey givenRef wantedEntity.Children
-    | (SFTEnum wantedVals, SFTEnum givenVals) -> givenVals.Except(wantedVals).IsEmpty
+    | (SFTEnum wantedVals, SFTEnum givenVals) -> OrderedSet.difference givenVals wantedVals |> OrderedSet.isEmpty
     | (SFTInt, SFTReference _) -> true
     | (SFTString, SFTEnum _) -> true
     | (a, b) -> SQL.tryImplicitCasts (compileScalarType a) (compileScalarType b)
@@ -2295,10 +2295,9 @@ let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : Reso
       Attributes = attrsQualifier.ResolveArgumentAttributes arg.Attributes
     }
 
-let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * ResolvedArgumentsMap =
-    let arguments = rawArguments |> Map.map (fun name -> resolveArgument layout)
-    let localArguments = Map.mapKeys PLocal arguments
-    let allArguments = Map.union localArguments globalArgumentsMap
+let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * Map<Placeholder, ResolvedArgument> =
+    let localArguments = rawArguments |> OrderedMap.mapWithKeys (fun name arg -> (PLocal name, resolveArgument layout arg))
+    let allArguments = Map.union (OrderedMap.toMap localArguments) globalArgumentsMap
     (localArguments, allArguments)
 
 let resolveSelectExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) (select : ParsedSelectExpr) : ResolvedArgumentsMap * ResolvedSelectExpr =
