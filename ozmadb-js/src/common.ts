@@ -202,8 +202,9 @@ export interface IDomainField {
 }
 
 export interface IArgument {
-  optional: boolean;
+  name: ArgumentName;
   argType: FieldType;
+  optional: boolean;
   defaultValue?: any;
   attributeTypes: AttributeTypesMap;
   attributes: AttributesMap;
@@ -212,7 +213,7 @@ export interface IArgument {
 export interface IResultViewInfo {
   attributeTypes: AttributeTypesMap;
   rowAttributeTypes: AttributeTypesMap;
-  arguments: Record<ArgumentName, IArgument>;
+  arguments: IArgument[];
   domains: Record<DomainId, Record<ColumnName, IDomainField>>;
   mainEntity?: IEntityRef;
   columns: IResultColumnInfo[];
