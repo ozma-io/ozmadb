@@ -782,15 +782,55 @@ let replaceEntityRefInField (localRef : EntityRef option) (ref : LinkedBoundFiel
 
 let replaceEntityRefInExpr (localRef : EntityRef option) = replaceFieldRefInExpr (replaceEntityRefInField localRef)
 
-let replacePathInField (localRef : ValueRef<FieldRef>) (asRoot : bool) (pathPrefix : PathArrow seq) (extra : ObjectMap) (ref : LinkedBoundFieldRef) (col : FieldRef) : LinkedBoundFieldRef =
+let replacePathInField (layout : ILayoutBits) (localRef : ValueRef<FieldRef>) (asRoot : bool) (path : PathArrow seq) (extra : ObjectMap) (replaceLastPrefixArrow : bool) (ref : LinkedBoundFieldRef) (col : FieldRef) : LinkedBoundFieldRef =
     let newFieldArrow =
         { Name = col.Name
           AsRoot = ref.Ref.AsRoot
         }
+    let pathPrefix =
+        if replaceLastPrefixArrow then
+            Seq.exceptLast path
+        else
+            path
     let newPath = Seq.concat [pathPrefix; Seq.singleton newFieldArrow; Array.toSeq ref.Ref.Path] |> Array.ofSeq
-    { Ref = { Ref = localRef; Path = newPath; AsRoot = asRoot }; Extra = extra }
 
-let replacePathInExpr (localRef : ValueRef<FieldRef>) (asRoot : bool) (pathPrefix : PathArrow seq) (extra : ObjectMap) = replaceFieldRefInExpr (replacePathInField localRef asRoot pathPrefix extra)
+    let replaceBoundPath (boundPath : ResolvedEntityRef[]) =
+        let boundPrefix =
+            if replaceLastPrefixArrow then
+                Seq.exceptLast boundPath
+            else
+                boundPath
+        let newBoundEntity =
+            if replaceLastPrefixArrow then
+                Seq.last boundPath
+            else
+                let lastEntityRef = Seq.last boundPath
+                let lastEntity = layout.FindEntity lastEntityRef |> Option.get
+                match lastEntity.FindField col.Name with
+                | Some { Field = RColumnField { FieldType = FTScalar (SFTReference (refEntityRef, _)) } } -> refEntityRef
+                | _ -> failwith "Impossible"
+        let fieldMeta = ObjectMap.findType<FieldMeta> ref.Extra
+        let boundMeta = Option.get fieldMeta.Bound
+        Seq.concat [boundPrefix; Seq.singleton newBoundEntity; Array.toSeq boundMeta.Path] |> Array.ofSeq
+
+    let newExtra =
+        match localRef with
+        | VRPlaceholder _ ->
+            let argInfo = ObjectMap.findType<ReferencePlaceholderMeta> extra
+            let newBoundPath = replaceBoundPath argInfo.Path
+            let newArgInfo = { argInfo with Path = newBoundPath }
+            ObjectMap.add newArgInfo extra
+        | VRColumn _ ->
+            let localFieldMeta = ObjectMap.findType<FieldMeta> extra
+            let localBoundMeta = Option.get localFieldMeta.Bound
+            let newBoundPath = replaceBoundPath localBoundMeta.Path
+            let newBoundMeta = { localBoundMeta with Path = newBoundPath }
+            let newFieldMeta = { localFieldMeta with Bound = Some newBoundMeta }
+            ObjectMap.add newFieldMeta extra
+
+    { Ref = { Ref = localRef; Path = newPath; AsRoot = asRoot }; Extra = newExtra }
+
+let replacePathInExpr (layout : ILayoutBits) (localRef : ValueRef<FieldRef>) (asRoot : bool) (pathPrefix : PathArrow seq) (extra : ObjectMap) (replaceLastPrefixArrow : bool) = replaceFieldRefInExpr (replacePathInField layout localRef asRoot pathPrefix extra replaceLastPrefixArrow)
 
 let private filterCasesWithSubtypes (extra : ObjectMap) (cases : VirtualFieldCase seq) : VirtualFieldCase seq =
     match ObjectMap.tryFindType<PossibleSubtypesMeta> extra with

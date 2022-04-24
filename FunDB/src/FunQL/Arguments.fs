@@ -23,6 +23,7 @@ type CompiledArgument =
       DbType : SQL.DBValueType
       Optional : bool
       DefaultValue : FieldValue option
+      Attributes : ResolvedAttributeMap
     }
 
 type RawArguments = Map<string, JToken>
@@ -74,6 +75,7 @@ let private compileArgument (placeholderId : PlaceholderId) (arg : ResolvedArgum
       DbType = SQL.mapValueType (fun (x : SQL.SimpleType) -> x.ToSQLRawString()) (compileFieldType arg.ArgType)
       Optional = arg.Optional
       DefaultValue = arg.DefaultValue
+      Attributes = arg.Attributes
     }
 
 let emptyArguments =

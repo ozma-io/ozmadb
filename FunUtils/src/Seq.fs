@@ -78,7 +78,23 @@ let inline filteri (f : int -> 'a -> bool) (s : seq<'a>) : seq<'a> =
             n <- n + 1
     }
 
-let first (s : seq<'a>) : 'a option = Seq.tryFind (fun x -> true) s
+let first (s : seq<'a>) : 'a option =
+    let i = s.GetEnumerator ()
+    if i.MoveNext () then
+        Some i.Current
+    else
+        None
+
+let exceptLast (s : seq<'a>) : seq<'a> =
+    seq {
+        let i = s.GetEnumerator ()
+        if not <| i.MoveNext () then
+            failwith "exceptLast: empty sequence"
+        let mutable prevItem = i.Current
+        while i.MoveNext () do
+            yield prevItem
+            prevItem <- i.Current
+    }
 
 let inline fold1 (func : 'a -> 'a -> 'a) (s : seq<'a>) : 'a =
     Seq.fold func (Seq.head s) (Seq.tail s)

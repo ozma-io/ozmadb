@@ -156,7 +156,7 @@ let private sqlNewRow : SQL.TableRef = { Schema = None; Name = sqlNewName }
 let private sqlNewId : SQL.ColumnRef = { Table = Some sqlNewRow; Name = sqlFunId }
 let private sqlPlainId : SQL.ColumnRef = { Table = None; Name = sqlFunId }
 
-let private returnNullStatement = PLPgSQL.StReturn (SQL.VEValue SQL.VNull)
+let private returnNullStatement = PLPgSQL.StReturn SQL.nullExpr
 
 let private plainSubEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
 let private newSubEntityColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = sqlFunSubEntity }

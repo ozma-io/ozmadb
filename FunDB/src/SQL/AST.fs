@@ -1218,6 +1218,8 @@ let idValueExprMapper =
       Query = id
     }
 
+let nullExpr = VEValue VNull
+
 let mapValueExpr (mapper : ValueExprMapper) : ValueExpr -> ValueExpr =
     genericMapValueExpr
         { Value = mapper.Value >> VEValue
@@ -1281,7 +1283,7 @@ let emptyOrderLimitClause = { OrderBy = [||]; Limit = None; Offset = None }
 
 let rec private normalizeArrayValue (constr : 'a -> Value) : ArrayValue<'a> -> ValueExpr = function
     | AVArray arr -> normalizeArray constr arr
-    | AVNull -> VEValue VNull
+    | AVNull -> nullExpr
     | AVValue v -> VEValue (constr v)
 
 and normalizeArray (constr : 'a -> Value) (arr : ArrayValue<'a>[]) : ValueExpr =
