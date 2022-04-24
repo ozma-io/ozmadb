@@ -579,6 +579,12 @@ let private emptyCondTypeContexts =
       ExtraConditionals = true
     }
 
+let private unbindContext (ctx : Context) =
+    { ctx with
+        FieldMaps = List.map unbindFieldMapping ctx.FieldMaps
+        Entities = Map.empty
+    }
+
 let rec private foldCommonAncestor (layout : ILayoutBits) (baseRef : ResolvedEntityRef) (refA : ResolvedEntityRef) (entityA : IEntityBits) (refB : ResolvedEntityRef) (entityB : IEntityBits) : ResolvedEntityRef * IEntityBits =
     if Map.containsKey refB entityA.Children then
         (refA, entityA)
@@ -1116,7 +1122,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                 | FMBound bound -> Some <| OBField bound
                 | FMTypeRestricted header -> Some <| OBHeader header
                 | _ when Array.isEmpty f.Path -> None
-                | _ -> raisef ViewResolveException "Dereference on an unbound field in %O" f
+                | _ -> raisef ViewResolveException "Dereference of an unbound field in %O" f
 
             let boundFields = Option.map (fun old -> resolvePath typeCtxs old (Array.toList f.Path)) oldBoundField
 
@@ -1402,13 +1408,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
             ref.Ref
 
         let resolveQuery query =
-            // TODO: implement arrows for field references in subexpressions.
-            let ctx =
-                { ctx with
-                    FieldMaps = List.map unbindFieldMapping ctx.FieldMaps
-                    Entities = Map.empty
-                }
-            let (_, res) = resolveSelectExpr ctx subExprSelectFlags query
+            // TODO: Currently we unbind context because we don't support arrows in sub-expressions.
+            let (_, res) = resolveSelectExpr (unbindContext ctx) subExprSelectFlags query
             isLocal <- false
             res
         
@@ -1862,7 +1863,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : ResolvedArgumentsM
                     { ctx with FieldMaps = fieldMapping :: ctx.FieldMaps }
                 else
                     ctx
-            let (info, newQ) = resolveSelectExpr localCtx { flags with RequireNames = Option.isNone subsel.Alias.Fields } subsel.Select
+            // TODO: Currently we unbind context because we don't support arrows in sub-expressions.
+            let (info, newQ) = resolveSelectExpr (unbindContext localCtx) { flags with RequireNames = Option.isNone subsel.Alias.Fields } subsel.Select
             let info = applyAlias subsel.Alias info
             let fields = getFieldsMap info
             let mappingRef = { Schema = None; Name = subsel.Alias.Name } : EntityRef

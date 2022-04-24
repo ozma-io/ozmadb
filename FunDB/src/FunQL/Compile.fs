@@ -203,7 +203,7 @@ type JoinTree =
 
 and JoinPathsMap = Map<JoinKey, JoinTree>
 
-type JoinPathsSeq = (JoinKey * JoinPath) seq
+type JoinPathsPair = (JoinKey * JoinPath)
 
 type JoinPaths =
     { NextJoinId : int
@@ -652,7 +652,8 @@ let private makeJoinNode (layout : Layout) (joinKey : JoinKey) (join : JoinPath)
 let fromTableName (table : SQL.FromTable) =
     table.Alias |> Option.map (fun a -> a.Name) |> Option.defaultValue table.Table.Name
 
-let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : SQL.FromExpr) : SQL.FromExpr =
+// Join a table by key in existing FROM expression.
+let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : SQL.FromExpr) : SQL.FromExpr option =
     // TODO: this is implemented as such to insert JOINs at proper places considering LATERAL JOINs.
     // However, we don't support outer join paths inside sub-selects anyway, so JOINs are always appended
     // at the upper level.
@@ -673,36 +674,40 @@ let joinPath (layout : Layout) (joinKey : JoinKey) (join : JoinPath) (topFrom : 
                         (true, false, SQL.FJoin { joinExpr with B = fromB })
                 else
                     (false, false, from)
-        | from ->
-            let realName =
-                match from with
-                | SQL.FTable fTable -> fromTableName fTable
-                | SQL.FSubExpr subsel -> subsel.Alias.Name
-                | _ -> failwith "Impossible"
+        | SQL.FTable fTable as from ->
+            let realName = fromTableName fTable
             if realName = joinKey.Table then
+                (true, true, from)
+            else
+                (false, false, from)
+        | SQL.FSubExpr subsel as from ->
+            if subsel.Alias.Name = joinKey.Table then
                 (true, true, from)
             else
                 (false, false, from)
 
     let (found, insert, newFrom) = findNode topFrom
-    assert found
-    let newFrom =
-        if insert then
-            makeJoinNode layout joinKey join newFrom
-        else
-            newFrom
-    newFrom
+    if not found then
+        None
+    else
+        let newFrom =
+            if insert then
+                makeJoinNode layout joinKey join newFrom
+            else
+                newFrom
+        Some newFrom
 
-let rec joinsToSeq (paths : JoinPathsMap) : JoinPathsSeq =
+let rec joinsToSeq (paths : JoinPathsMap) : JoinPathsPair seq =
     paths |> Map.toSeq |> Seq.collect joinToSeq
 
 and private joinToSeq (joinKey : JoinKey, tree : JoinTree) : (JoinKey * JoinPath) seq =
     let me = Seq.singleton (joinKey, tree.Path)
     Seq.append me (joinsToSeq tree.Nested)
 
-let buildJoins (layout : Layout) (initialEntitiesMap : FromEntitiesMap) (initialFrom : SQL.FromExpr) (paths : JoinPathsSeq) : FromEntitiesMap * SQL.FromExpr =
+// Add multiple joins, populating FromEntitiesMap in process.
+let buildJoins (layout : Layout) (initialEntitiesMap : FromEntitiesMap) (initialFrom : SQL.FromExpr) (paths : JoinPathsPair seq) : FromEntitiesMap * SQL.FromExpr =
     let foldOne (entitiesMap, from) (joinKey : JoinKey, join : JoinPath) =
-        let from = joinPath layout joinKey join from
+        let from = Option.getOrFailWith (fun () -> "Failed to find the table for JOIN") <| joinPath layout joinKey join from
         let entity =
             { Ref = join.RealEntity
               IsInner = false
@@ -713,32 +718,26 @@ let buildJoins (layout : Layout) (initialEntitiesMap : FromEntitiesMap) (initial
         (entitiesMap, from)
     Seq.fold foldOne (initialEntitiesMap, initialFrom) paths
 
-let private buildInternalJoins (layout : Layout) (initialFromMap : FromMap) (initialFrom : SQL.FromExpr) (paths : JoinPathsSeq) : FromMap * SQL.FromExpr =
-    let foldOne (fromMap, from) (joinKey : JoinKey, join : JoinPath) =
-        let from = joinPath layout joinKey join from
-        let entityInfo =
-            { Ref = join.RealEntity
-              IsInner = false
-              AsRoot = joinKey.AsRoot
-              Check = None
-            }
-        let fromInfo =
-            { FromType = FTSubquery emptySelectInfo
-              Entity = Some entityInfo
-              MainId = None
-              MainSubEntity = None
-              Attributes = emptyEntityAttributes
-            }
-        let fromMap = Map.add join.Name fromInfo fromMap
-        (fromMap, from)
-    Seq.fold foldOne (initialFromMap, initialFrom) paths
+let private buildInternalJoins (layout : Layout) (initialFromMap : FromMap) (initialFrom : SQL.FromExpr) (paths : JoinPathsPair seq) : FromMap * SQL.FromExpr =
+    let (entitiesMap, newFrom) = buildJoins layout Map.empty initialFrom paths
+
+    let makeFromInfo name entityInfo =
+        { FromType = FTSubquery emptySelectInfo
+          Entity = Some entityInfo
+          MainId = None
+          MainSubEntity = None
+          Attributes = emptyEntityAttributes
+        }
+    let addedFromMap = Map.map makeFromInfo entitiesMap
+    let newFromMap = Map.union initialFromMap addedFromMap
+    (newFromMap, newFrom)
 
 type RenamesMap = Map<SQL.TableName, SQL.TableName>
 
 // Returned join paths sequence are only those paths that need to be added to an existing FROM expression
 // with `oldPaths` added.
 // Also returned are new `JoinPaths` with everything combined.
-let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : RenamesMap * JoinPathsSeq * JoinPaths =
+let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : RenamesMap * JoinPathsPair seq * JoinPaths =
     let mutable lastId = oldPaths.NextJoinId
     let mutable addedPaths = []
     let mutable renamesMap = Map.empty
