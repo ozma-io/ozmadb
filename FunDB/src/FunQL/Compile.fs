@@ -1954,9 +1954,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             let selectExpr = compileReferenceArgument ObjectMap.empty RCExpr argInfo asRoot [|mainArrow|] [|newEntityRef|]
                             Seq.singleton (CCPun, SQL.VESubquery selectExpr)
                         | _ -> Seq.empty
+
+                let myMeta = Map.ofSeq punColumns
+
                 { Domains = None
                   MetaColumns = Map.empty
-                  Column = { resultColumn with Meta = Map.ofSeq punColumns }
+                  Column = { resultColumn with Meta = Map.unionUnique resultColumn.Meta myMeta }
                 }
             | _ ->
                 { Domains = None
