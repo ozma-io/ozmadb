@@ -122,6 +122,7 @@ type private MetaBuilder (layout : Layout) =
                     let expr =
                         let col = SQL.VEColumn { Table = None; Name = field.ColumnName }
                         let makeValue value = SQL.VEValue (SQL.VString value)
+                        // We sort them here to avoid rebuilding check constraints when order changes.
                         let exprs = vals |> Seq.sort |> Seq.map makeValue |> Seq.toArray
                         if Array.isEmpty exprs then
                             if field.IsNullable then
