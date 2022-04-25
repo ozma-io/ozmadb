@@ -121,7 +121,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         return Ok newArgs
                 with
                 | :? ArgumentCheckException as ex when ex.IsUserException ->
-                    logger.LogError("Trigger {} returned invalid arguments", ref)
+                    logger.LogError(ex, "Trigger {} returned invalid arguments", ref)
                     let str = exceptionString ex
                     rctx.WriteEvent (fun event ->
                         event.Type <- "triggerError"

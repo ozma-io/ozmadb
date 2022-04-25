@@ -389,14 +389,16 @@ class FunDBError extends Error {
 };
 global.FunDBError = FunDBError;
 
-global.renderDate = (date) => date.toISOString().split('T')[0];
+global.formatDate = (date) => date.toISOString().split('T')[0];
+
+global.renderDate = global.formatDate;
 
 global.FunDB.insertEntity = async (entityRef, rowArgs) => {
     try {
         const retIds = await FunDB.insertEntities(entityRef, [rowArgs]);
         return retIds[0];
     } catch (e) {
-        if (e.body.error === \"transaction\") {
+        if (e.body.error === 'transaction') {
             throw new FunDBError(e.body.details);
         } else {
             throw e;
