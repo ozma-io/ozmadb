@@ -561,7 +561,7 @@ type AttributesMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<Attr
 
 and [<NoEquality; NoComparison>] Attribute<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | AExpr of FieldExpr<'e, 'f>
-    | AMapping of 'f * (FieldValue * FieldValue)[] * (FieldValue option)
+    | AMapping of 'f * HashMap<FieldValue, FieldValue> * FieldValue option
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -569,7 +569,7 @@ and [<NoEquality; NoComparison>] Attribute<'e, 'f> when 'e :> IFunQLName and 'f 
             match this with
             | AExpr e -> toFunQLString e
             | AMapping (field, es, els) ->
-                let esStr = es |> Seq.map (fun (value, e) -> sprintf "WHEN %s THEN %s" (toFunQLString value) (toFunQLString e)) |> String.concat " "
+                let esStr = es |> HashMap.toSeq |> Seq.map (fun (value, e) -> sprintf "WHEN %s THEN %s" (toFunQLString value) (toFunQLString e)) |> String.concat " "
                 let elsStr =
                     match els with
                     | None -> ""
@@ -1783,7 +1783,7 @@ let allowedPragmas : Set<PragmaName> =
           FunQLName "enable_tidscan"
         ]
 
-let private parseSingleValue<'A> (serializer : JsonSerializer) (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
+let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
     if tok.Type = JTokenType.Null then
         if isNullable then
             Some FNull
@@ -1791,43 +1791,38 @@ let private parseSingleValue<'A> (serializer : JsonSerializer) (constrFunc : 'A 
             None
     else
         try
-            constrFunc <| tok.ToObject(serializer)
+            constrFunc <| tok.ToObject()
         with
         | :? JsonException -> None
 
-let private parseSingleValueStrict serializer f = parseSingleValue serializer (f >> Some)
+let private parseSingleValueStrict f = parseSingleValue (f >> Some)
 
-let parseValueFromJsonGeneric (serializer : JsonSerializer) (fieldExprType : FieldType<'e>) : bool -> JToken -> FieldValue option =
-    let parseStrict constrFunc = parseSingleValueStrict serializer constrFunc
-    let parse constrFunc = parseSingleValue serializer constrFunc
-
+let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> FieldValue option =
     match fieldExprType with
-    | FTArray SFTString -> parseStrict FStringArray
-    | FTArray SFTInt -> parseStrict FIntArray
-    | FTArray SFTDecimal -> parseStrict FDecimalArray
-    | FTArray SFTBool -> parseStrict FBoolArray
-    | FTArray SFTDateTime -> parseStrict FDateTimeArray
-    | FTArray SFTDate -> parseStrict FDateArray
-    | FTArray SFTInterval -> parseStrict FIntervalArray
-    | FTArray SFTJson -> parseStrict FJsonArray
-    | FTArray SFTUserViewRef -> parseStrict FUserViewRefArray
-    | FTArray SFTUuid -> parseStrict FUuidArray
-    | FTArray (SFTReference _) -> parseStrict FIntArray
-    | FTArray (SFTEnum vals) -> parse (fun xs -> if Seq.forall (fun x -> vals.Contains x) xs then Some (FStringArray xs) else None)
-    | FTScalar SFTString -> parseStrict FString
-    | FTScalar SFTInt -> parseStrict FInt
-    | FTScalar SFTDecimal -> parseStrict FDecimal
-    | FTScalar SFTBool -> parseStrict FBool
-    | FTScalar SFTDateTime -> parseStrict FDateTime
-    | FTScalar SFTDate -> parseStrict FDate
-    | FTScalar SFTInterval -> parseStrict FInterval
-    | FTScalar SFTJson -> parseStrict FJson
-    | FTScalar SFTUserViewRef -> parseStrict FUserViewRef
-    | FTScalar SFTUuid -> parseStrict FUuid
-    | FTScalar (SFTReference _) -> parseStrict FInt
-    | FTScalar (SFTEnum vals) -> parse (fun x -> if vals.Contains x then Some (FString x) else None)
-
-let parseValueFromJson fieldExprType = parseValueFromJsonGeneric (JsonSerializer.CreateDefault()) fieldExprType
+    | FTArray SFTString -> parseSingleValueStrict FStringArray
+    | FTArray SFTInt -> parseSingleValueStrict FIntArray
+    | FTArray SFTDecimal -> parseSingleValueStrict FDecimalArray
+    | FTArray SFTBool -> parseSingleValueStrict FBoolArray
+    | FTArray SFTDateTime -> parseSingleValueStrict FDateTimeArray
+    | FTArray SFTDate -> parseSingleValueStrict FDateArray
+    | FTArray SFTInterval -> parseSingleValueStrict FIntervalArray
+    | FTArray SFTJson -> parseSingleValueStrict FJsonArray
+    | FTArray SFTUserViewRef -> parseSingleValueStrict FUserViewRefArray
+    | FTArray SFTUuid -> parseSingleValueStrict FUuidArray
+    | FTArray (SFTReference _) -> parseSingleValueStrict FIntArray
+    | FTArray (SFTEnum vals) -> parseSingleValue (fun xs -> if Seq.forall (fun x -> vals.Contains x) xs then Some (FStringArray xs) else None)
+    | FTScalar SFTString -> parseSingleValueStrict FString
+    | FTScalar SFTInt -> parseSingleValueStrict FInt
+    | FTScalar SFTDecimal -> parseSingleValueStrict FDecimal
+    | FTScalar SFTBool -> parseSingleValueStrict FBool
+    | FTScalar SFTDateTime -> parseSingleValueStrict FDateTime
+    | FTScalar SFTDate -> parseSingleValueStrict FDate
+    | FTScalar SFTInterval -> parseSingleValueStrict FInterval
+    | FTScalar SFTJson -> parseSingleValueStrict FJson
+    | FTScalar SFTUserViewRef -> parseSingleValueStrict FUserViewRef
+    | FTScalar SFTUuid -> parseSingleValueStrict FUuid
+    | FTScalar (SFTReference _) -> parseSingleValueStrict FInt
+    | FTScalar (SFTEnum vals) -> parseSingleValue (fun x -> if vals.Contains x then Some (FString x) else None)
 
 let fromEntity (entityRef : 'e) : FromEntity<'e> =
     { Ref = entityRef

@@ -830,7 +830,7 @@ let private getForcedFieldName (fieldInfo : FieldMeta) (currName : FieldName)  =
 let private attributeToExpr = function
     | AExpr e -> e
     | AMapping (field, cases, elseExpr) ->
-        let convCases = cases |> Array.map (fun (matchValue, ret) -> (FEValue matchValue, FEValue ret))
+        let convCases = cases |> HashMap.toSeq |> Seq.map (fun (matchValue, ret) -> (FEValue matchValue, FEValue ret)) |> Array.ofSeq
         let convElse = Option.map FEValue elseExpr
         FEMatch (FERef field, convCases, convElse)
 

@@ -50,7 +50,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
     and resolveAttribute : ResolvedAttribute -> ResolvedAttribute = function
         | AExpr expr -> AExpr (resolveFieldExpr expr)
         | AMapping (value, es, els) ->
-            let newEs = Array.map (fun (value, e) -> (resolveValue value, resolveValue e)) es
+            let newEs = HashMap.mapWithKeys (fun value e -> (resolveValue value, resolveValue e)) es
             let newEls = Option.map resolveValue els
             AMapping (value, newEs, newEls)
 

@@ -20,6 +20,7 @@ open NodaTime
 open Npgsql
 open NetJs.Json
 
+open FunWithFlags.FunDB.FunQL.Json
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.HTTP.Info
@@ -31,11 +32,8 @@ open FunWithFlags.FunDB.HTTP.Permissions
 open FunWithFlags.FunDB.HTTP.Domains
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.Operations.Preload
-open FunWithFlags.FunDB.API.Json
 open FunWithFlags.FunDB.API.InstancesCache
 open FunWithFlags.FunDB.EventLogger
-
-let private httpJsonSettings = funDBJsonSettings Seq.empty
 
 type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
     let connectionString =
@@ -187,7 +185,7 @@ type Startup (config : IConfiguration) =
                     .AddAuthentication(authenticationOptions)
                     .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
 
-        ignore <| services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer httpJsonSettings)
+        ignore <| services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer defaultJsonSettings)
         let getEventLogger (sp : IServiceProvider) =
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
             new EventLogger(logFactory)
@@ -233,7 +231,7 @@ type Startup (config : IConfiguration) =
 [<EntryPoint>]
 let main (args : string[]) : int =
     // Register a global converter to have nicer native F# types JSON conversion.
-    JsonConvert.DefaultSettings <- fun () -> httpJsonSettings
+    JsonConvert.DefaultSettings <- fun () -> defaultJsonSettings
     // Enable JSON and NodaTime for PostgreSQL.
     ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
     ignore <| NpgsqlConnection.GlobalTypeMapper.UseNodaTime()

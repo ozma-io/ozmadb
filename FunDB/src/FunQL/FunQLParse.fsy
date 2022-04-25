@@ -80,6 +80,12 @@ let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
     with
         | Failure msg -> failwith <| sprintf "%s: %s" error msg
 
+let private parseHashMap (error : string) (vals : ('k * 'v) seq) : HashMap<'k, 'v> =
+    try
+        HashMap.ofSeqUnique vals
+    with
+        | Failure msg -> failwith <| sprintf "%s: %s" error msg
+
 let private parseOrderedMap (error : string) (vals : ('k * 'v) seq) : OrderedMap<'k, 'v> =
     try
         OrderedMap.ofSeqUnique vals
@@ -537,7 +543,7 @@ AttributeValuesNonEmpty:
     | Name EQ AttributeValue COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
 
 AttributeValue:
-    | MAPPING ON LinkedFieldRef AttrMappingWhenList AttrMappingElse END { AMapping ($3, List.toArray $4, $5) }
+    | MAPPING ON LinkedFieldRef AttrMappingWhenList AttrMappingElse END { AMapping ($3, parseHashMap "Clashing mapping values" $4, $5) }
     | FieldExpr                                                         { AExpr $1 }
 
 AttrMappingWhenList:

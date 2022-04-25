@@ -17,10 +17,8 @@ open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
-open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.Chunk
-open FunWithFlags.FunDB.API.Json
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.JavaScript.Runtime
 
@@ -59,9 +57,6 @@ type private APIHandle (api : IFunDBAPI) =
             finally
                 lock <- oldLock
         }
-
-let private jsJsonSettings = funDBJsonSettings (seq { InstantFromToDateTimeConverter () })
-let private jsSerializer = JsonSerializer.Create(jsJsonSettings)
 
 let inline private wrapApiCall (handle : APIHandle) (wrap : (unit -> Task<'a>) -> Task<'b>) (f : unit -> Task<'a>) : Task<'b> =
     task {
@@ -103,7 +98,7 @@ let inline private runResultApiCall<'a, 'e when 'e :> IAPIError> (handle : APIHa
                 let! res = handle.StackLock f
                 unmask ()
                 match res with
-                | Ok r -> return V8JsonWriter.Serialize(context, r, jsSerializer)
+                | Ok r -> return V8JsonWriter.Serialize(context, r)
                 | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
             }
     Func<_>(run)
@@ -126,7 +121,7 @@ type APITemplate (isolate : Isolate) =
     let mutable runtime = Unchecked.defaultof<IJSRuntime>
 
     let throwError (context : Context) (e : 'a when 'a :> IAPIError) : 'b =
-        let body = V8JsonWriter.Serialize(context, e, jsSerializer)
+        let body = V8JsonWriter.Serialize(context, e)
         let constructor = Option.get errorConstructor
         let exc = constructor.NewInstance(body)
         raise <| JSException(e.Message, exc.Value)
@@ -139,7 +134,7 @@ type APITemplate (isolate : Isolate) =
     let jsDeserialize (context : Context) (v : Value.Value) : 'a =
         let ret =
             try
-                V8JsonReader.Deserialize<'a>(v, jsSerializer)
+                V8JsonReader.Deserialize<'a>(v)
             with
             | :? JsonReaderException as e -> throwCallError context "Failed to parse value: %s" e.Message
         if isRefNull ret then

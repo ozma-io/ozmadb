@@ -22,8 +22,7 @@ module HashMap =
         for (key, value) in objs do
             match builder.TryGetValue key with
             | (true, oldValue) ->
-                ignore <| builder.Remove(key)
-                builder.Add(key, f key oldValue value)
+                builder.[key] <- f key oldValue value
             | _ -> builder.Add(key, value)
         ImmutableDictionary.ToImmutableDictionary builder
 
@@ -33,24 +32,35 @@ module HashMap =
     let singleton (key : 'k) (value : 'v) : HashMap<'k, 'v> =
         KeyValuePair(key, value) |> Seq.singleton |> ImmutableDictionary.CreateRange
 
-    let toSeq (map : HashMap<'k, 'v>) : obj seq =
+    let toSeq (map : HashMap<'k, 'v>) : ('k * 'v) seq =
         map |> Seq.map (fun (KeyValue(k, v)) -> (k, v))
+
+    let map (f : 'k -> 'v1 -> 'v2) (map : HashMap<'k, 'v1>) : HashMap<'k, 'v2> =
+        let builder = ImmutableDictionary.CreateBuilder<'k, 'v2>()
+        for KeyValue(k, v) in map do
+            builder.[k] <- f k v
+        builder.ToImmutable()
+
+    let mapWithKeys (f : 'k1 -> 'v1 -> ('k2 * 'v2)) (map : HashMap<'k1, 'v1>) : HashMap<'k2, 'v2> =
+        let builder = ImmutableDictionary.CreateBuilder<'k2, 'v2>()
+        for KeyValue(k, v) in map do
+            let (newK, newV) = f k v
+            builder.[newK] <- newV
+        builder.ToImmutable()
 
     let filter (f : 'k -> 'v -> bool) (map : HashMap<'k, 'v>) : HashMap<'k, 'v> =
         map |> Seq.filter (fun (KeyValue(k, v)) -> f k v) |> ImmutableDictionary.CreateRange
 
     let add (key : 'k) (value : 'v) (map : HashMap<'k, 'v>) : HashMap<'k, 'v> =
         let builder = map.ToBuilder()
-        ignore <| builder.Remove(key)
-        builder.Add(key, value)
+        builder.[key] <- value
         builder.ToImmutable()
 
     let addWith (resolve : 'v -> 'v -> 'v) (k : 'k) (v : 'v) (map : HashMap<'k, 'v>) : HashMap<'k, 'v> =
         match map.TryGetValue k with
         | (true, oldValue) ->
             let builder = map.ToBuilder()
-            ignore <| builder.Remove(k)
-            builder.Add(k, resolve oldValue v)
+            builder.[k] <- resolve oldValue v
             builder.ToImmutable()
         | _ -> map.Add(k, v)
 

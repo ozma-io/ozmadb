@@ -70,6 +70,7 @@
     <Compile Include="src/FunQL/Compile.fs" />
     <Compile Include="src/FunQL/Chunk.fs" />
     <Compile Include="src/FunQL/Query.fs" />
+    <Compile Include="src/FunQL/Json.fs" />
 
     <Compile Include="src/Layout/Schema.fs" />
     <Compile Include="src/Layout/Info.fs" />
@@ -134,7 +135,6 @@
     <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
 
-    <Compile Include="src/API/Json.fs" />
     <Compile Include="src/API/Types.fs" />
     <Compile Include="src/API/JavaScript.fs" />
     <Compile Include="src/API/Triggers.fs" />

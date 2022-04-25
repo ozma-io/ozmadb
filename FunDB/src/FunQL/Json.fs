@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.API.Json
+module FunWithFlags.FunDB.FunQL.Json
 
 open System
 open Newtonsoft.Json
@@ -12,7 +12,8 @@ open FunWithFlags.FunUtils.Serialization.Json
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type InstantFromDateTimeConverter () =
+// Needed to properly convert Instants to and from JavaScript Dates.
+type InstantDateTimeConverter () =
     inherit JsonConverter<Instant> ()
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : Instant =
@@ -31,23 +32,14 @@ type InstantFromDateTimeConverter () =
         ret
 
     override this.WriteJson (writer : JsonWriter, value : Instant, serializer : JsonSerializer) : unit =
-        writer.WriteValue(NodaTime.Text.InstantPattern.General.Format(value))
-
-// Specialized converter to convert Instants to JavaScript Dates.
-type InstantFromToDateTimeConverter () =
-    inherit InstantFromDateTimeConverter ()
-
-    override this.WriteJson (writer : JsonWriter, value : Instant, serializer : JsonSerializer) : unit =
         writer.WriteValue(value.ToDateTimeOffset())
 
-let funDBJsonSettings (extraConverters : JsonConverter seq) =
+let defaultJsonSettings =
     let converters : JsonConverter seq =
         seq {
-            yield! extraConverters
-            yield FunQL.FieldValuePrettyConverter () :> JsonConverter
-            yield SQL.ValuePrettyConverter () :> JsonConverter
-            yield NodaConverters.NormalizingIsoPeriodConverter
-            yield InstantFromDateTimeConverter () :> JsonConverter
+            yield FunQL.FieldValuePrettyConverter ()
+            yield SQL.ValuePrettyConverter ()
+            yield InstantDateTimeConverter ()
         }
     let constructors = Seq.map (fun conv -> fun _ -> Some conv) converters
     let jsonSettings = makeDefaultJsonSerializerSettings (Seq.toArray constructors)
