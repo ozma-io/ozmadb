@@ -25,6 +25,11 @@ type InstantDateTimeConverter () =
                     res.Value
                 else
                     raisefWithInner JsonSerializationException res.Exception ""
+            | :? DateTime as dt ->
+                try
+                    Instant.FromDateTimeUtc dt
+                with
+                | :? ArgumentException as e -> raisefWithInner JsonSerializationException e ""
             | :? DateTimeOffset as dt ->
                 Instant.FromDateTimeOffset dt
             | _ -> raisef JsonSerializationException "Failed to parse Instant"
@@ -32,7 +37,7 @@ type InstantDateTimeConverter () =
         ret
 
     override this.WriteJson (writer : JsonWriter, value : Instant, serializer : JsonSerializer) : unit =
-        writer.WriteValue(value.ToDateTimeOffset())
+        writer.WriteValue(value.ToDateTimeUtc())
 
 let defaultJsonSettings =
     let converters : JsonConverter seq =
@@ -50,4 +55,5 @@ let defaultJsonSettings =
     )
     jsonSettings.NullValueHandling <- NullValueHandling.Ignore
     jsonSettings.DateParseHandling <- DateParseHandling.None
+    jsonSettings.DateTimeZoneHandling <- DateTimeZoneHandling.Utc
     jsonSettings
