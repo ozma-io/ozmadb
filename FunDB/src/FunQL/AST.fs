@@ -1798,7 +1798,7 @@ let private parseRawSingleValue (parseFunc : JToken -> FieldValue option) (isNul
 let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
     parseRawSingleValue (fun tok -> tok.ToObject() |> constrFunc) isNullable tok
 
-// DateTime may be parsed as DateTime by netjs.
+// datetime fields may be parsed as .NET DateTime by netjs.
 let private parseDateTime (tok : JToken) : Instant option =
     if tok.Type = JTokenType.Date then
         let dt = JToken.op_Explicit tok : DateTime

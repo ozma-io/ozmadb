@@ -43,6 +43,9 @@ type private BoundFieldHeader =
       // Means that field is selected directly from an entity and not from a subexpression.
       Immediate : bool
       IsInner : bool
+      // Arrows are not allowed in subexpressions -- we use this flag to track this.
+      // TODO: Remove this when we implement arrows in subexpressions.
+      AllowArrows : bool
     }
 
 [<NoEquality; NoComparison>]
@@ -95,21 +98,17 @@ let private getFromEntityId = function
     | from -> failwithf "Unexpected non-entity from id: %O" from
 
 // Used to unbind field mappings for subqueries as we don't support arrows in them yet.
-let private unbindFieldMappingValue = function
-    | FVAmbiguous names -> Some (FVAmbiguous names)
+let private forbidArrowsFieldMappingValue = function
+    | FVAmbiguous names -> FVAmbiguous names
     | FVResolved info ->
-        let fromId =
+        let mapping =
             match info.Mapping with
-            | FMTypeRestricted _ -> None
-            | FMBound bound -> Some <| getFromEntityId bound.Header.Key.FromId
-            | FMUnbound fromId -> Some fromId
-        match fromId with
-        | None -> None
-        | Some fromId ->
-            let info = { info with Mapping = FMUnbound fromId }
-            Some (FVResolved info)
+            | FMTypeRestricted header -> FMTypeRestricted { header with AllowArrows = false }
+            | FMBound bound -> FMBound { bound with Header = { bound.Header with AllowArrows = false } }
+            | FMUnbound fromId -> FMUnbound fromId
+        FVResolved { info with Mapping = mapping }
 
-let private unbindFieldMapping = Map.mapMaybe (fun ref -> unbindFieldMappingValue)
+let private forbidArrowsFieldMapping = Map.map (fun ref -> forbidArrowsFieldMappingValue)
 
 // None in EntityRef is used only for offset/limit expressions in set operations.
 let private getAmbiguousMapping k = function
@@ -191,6 +190,7 @@ let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntit
                   Key = key
                   Immediate = true
                   IsInner = isInner
+                  AllowArrows = true
                 }
             explodeResolvedFieldRef { Entity = parentRef; Name = name } |> Seq.map (fun x -> (x, header))
         let headerToResolved header =
@@ -217,6 +217,7 @@ let private customToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEnti
               Key = key
               Immediate = true
               IsInner = isInner
+              AllowArrows = true
             }
         { Header = header
           Ref = boundRef
@@ -583,9 +584,9 @@ let private emptyCondTypeContexts =
       ExtraConditionals = true
     }
 
-let private unbindContext (ctx : Context) =
+let private forbidArrowsContext (ctx : Context) =
     { ctx with
-        FieldMaps = List.map unbindFieldMapping ctx.FieldMaps
+        FieldMaps = List.map forbidArrowsFieldMapping ctx.FieldMaps
         Entities = Map.empty
     }
 
@@ -1057,6 +1058,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                   Key = key
                   Immediate = true
                   IsInner = flags.IsInner
+                  AllowArrows = true
                 }
             Some
                 { Header = header
@@ -1075,6 +1077,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
               Name = entity.MainField
               Immediate = true
               IsInner = flags.IsInner
+              AllowArrows = true
             }
         let mainBoundField =
             { Header = mainHeader
@@ -1121,6 +1124,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
         let rec traverse (boundField : BoundField) : PathArrow list -> BoundField list = function
             | [] -> [boundField]
             | (ref :: refs) ->
+                if not boundField.Header.AllowArrows then
+                    raisef ViewResolveException "Arrows for this field are not allowed"
                 if ref.AsRoot then
                     if not resolveFlags.Privileged then
                         raisef ViewResolveException "Cannot specify roles in non-privileged user views"
@@ -1137,6 +1142,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                           Name = ref.Name
                           Immediate = false
                           IsInner = boundField.Header.IsInner
+                          AllowArrows = true
                         }
                     let nextBoundField = getBoundField (OBHeader refHeader)
                     let boundFields = traverse nextBoundField refs
@@ -1241,6 +1247,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                               Name = firstArrow.Name
                               Immediate = false
                               IsInner = false
+                              AllowArrows = true
                             }
                         let outer : BoundField =
                             { Header = argHeader
@@ -1477,7 +1484,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
 
         let resolveQuery query =
             // TODO: Currently we unbind context because we don't support arrows in sub-expressions.
-            let (_, res) = resolveSelectExpr (unbindContext ctx) subExprSelectFlags query
+            let (_, res) = resolveSelectExpr (forbidArrowsContext ctx) subExprSelectFlags query
             isLocal <- false
             res
         
@@ -1944,7 +1951,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                 else
                     ctx
             // TODO: Currently we unbind context because we don't support arrows in sub-expressions.
-            let (info, newQ) = resolveSelectExpr (unbindContext localCtx) { flags with RequireNames = Option.isNone subsel.Alias.Fields } subsel.Select
+            let (info, newQ) = resolveSelectExpr (forbidArrowsContext localCtx) { flags with RequireNames = Option.isNone subsel.Alias.Fields } subsel.Select
             let info = applyAlias subsel.Alias info
             let fields = getFieldsMap info
             let mappingRef = { Schema = None; Name = subsel.Alias.Name } : EntityRef
