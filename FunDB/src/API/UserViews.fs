@@ -208,8 +208,10 @@ type UserViewsAPI (api : IFunDBAPI) =
                               }
                 with
                 | :? ChunkException as ex when ex.IsUserException ->
+                    logger.LogError(ex, "Failed to parse chunk")
                     return Error <| UVEArguments (exceptionString ex)
                 | :? ArgumentCheckException as ex when ex.IsUserException ->
+                    logger.LogError(ex, "Failed to parse user view arguments")
                     return Error <| UVEArguments (exceptionString ex)
                 | :? UserViewExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to execute user view")

@@ -20,7 +20,7 @@ type InstantDateTimeConverter () =
         let ret =
             match reader.Value with
             | :? string as str ->
-                let res = NodaTime.Text.InstantPattern.General.Parse str
+                let res = NodaTime.Text.InstantPattern.ExtendedIso.Parse str
                 if res.Success then
                     res.Value
                 else
