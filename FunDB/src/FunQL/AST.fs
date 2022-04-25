@@ -1783,7 +1783,7 @@ let allowedPragmas : Set<PragmaName> =
           FunQLName "enable_tidscan"
         ]
 
-let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
+let private parseRawSingleValue (parseFunc : JToken -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
     if tok.Type = JTokenType.Null then
         if isNullable then
             Some FNull
@@ -1791,9 +1791,28 @@ let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNulla
             None
     else
         try
-            constrFunc <| tok.ToObject()
+            parseFunc <| tok.ToObject()
         with
         | :? JsonException -> None
+
+let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
+    parseRawSingleValue (fun tok -> tok.ToObject() |> constrFunc) isNullable tok
+
+// DateTime may be parsed as DateTime by netjs.
+let private parseDateTime (tok : JToken) : Instant option =
+    if tok.Type = JTokenType.Date then
+        let dt = JToken.op_Explicit tok : DateTime
+        DateTime.SpecifyKind(dt, DateTimeKind.Utc) |> Instant.FromDateTimeUtc |> Some
+    else
+        try
+            Some <| tok.ToObject()
+        with
+        | :? JsonException -> None
+
+let private parseArray (constrFunc : 'a[] -> FieldValue) (parseItem : JToken -> 'a option) (tok : JToken) : FieldValue option =
+    match tok with
+    | :? JArray as arr -> arr |> Seq.traverseOption parseItem |> Option.map (Seq.toArray >> constrFunc)
+    | _ -> None
 
 let private parseSingleValueStrict f = parseSingleValue (f >> Some)
 
@@ -1803,7 +1822,7 @@ let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> Field
     | FTArray SFTInt -> parseSingleValueStrict FIntArray
     | FTArray SFTDecimal -> parseSingleValueStrict FDecimalArray
     | FTArray SFTBool -> parseSingleValueStrict FBoolArray
-    | FTArray SFTDateTime -> parseSingleValueStrict FDateTimeArray
+    | FTArray SFTDateTime -> parseRawSingleValue (parseArray FDateTimeArray parseDateTime)
     | FTArray SFTDate -> parseSingleValueStrict FDateArray
     | FTArray SFTInterval -> parseSingleValueStrict FIntervalArray
     | FTArray SFTJson -> parseSingleValueStrict FJsonArray
@@ -1815,7 +1834,7 @@ let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> Field
     | FTScalar SFTInt -> parseSingleValueStrict FInt
     | FTScalar SFTDecimal -> parseSingleValueStrict FDecimal
     | FTScalar SFTBool -> parseSingleValueStrict FBool
-    | FTScalar SFTDateTime -> parseSingleValueStrict FDateTime
+    | FTScalar SFTDateTime -> parseRawSingleValue (parseDateTime >> Option.map FDateTime)
     | FTScalar SFTDate -> parseSingleValueStrict FDate
     | FTScalar SFTInterval -> parseSingleValueStrict FInterval
     | FTScalar SFTJson -> parseSingleValueStrict FJson
