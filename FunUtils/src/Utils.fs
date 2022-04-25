@@ -14,10 +14,6 @@ type Exception = System.Exception
 
 let inline isRefNull (x : 'a) = obj.ReferenceEquals(x, null)
 
-let inline curry f a b = f (a, b)
-let inline uncurry f (a, b) = f a b
-let inline flip f a b = f b a
-
 let inline raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
     kprintf <| fun str ->
         raise  <| constr (str, inner)

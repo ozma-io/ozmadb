@@ -14,7 +14,7 @@ type ParsedSetOperationExpr = SetOperationExpr<EntityRef, LinkedFieldRef>
 type ParsedSingleSelectExpr = SingleSelectExpr<EntityRef, LinkedFieldRef>
 type ParsedQueryResult = QueryResult<EntityRef, LinkedFieldRef>
 type ParsedQueryColumnResult = QueryColumnResult<EntityRef, LinkedFieldRef>
-type ParsedAttributeMap = AttributeMap<EntityRef, LinkedFieldRef>
+type ParsedAttributesMap = AttributesMap<EntityRef, LinkedFieldRef>
 type ParsedCommonTableExpr = CommonTableExpr<EntityRef, LinkedFieldRef>
 type ParsedCommonTableExprs = CommonTableExprs<EntityRef, LinkedFieldRef>
 type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
@@ -28,7 +28,8 @@ type ParsedInsertExpr = InsertExpr<EntityRef, LinkedFieldRef>
 type ParsedUpdateExpr = UpdateExpr<EntityRef, LinkedFieldRef>
 type ParsedDeleteExpr = DeleteExpr<EntityRef, LinkedFieldRef>
 type ParsedDataExpr = DataExpr<EntityRef, LinkedFieldRef>
-type ParserUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedFieldRef>
+type ParsedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedFieldRef>
+type ParsedAttribute = Attribute<EntityRef, LinkedFieldRef>
 
 type ParsedMainEntity =
     { Entity : EntityRef
@@ -54,7 +55,7 @@ type ParsedIndexColumn = IndexColumn<EntityRef, LinkedFieldRef>
 [<NoEquality; NoComparison>]
 type private Result =
     | AResult of QueryResult<EntityRef, LinkedFieldRef>
-    | AAttribute of FunQLName * ParsedFieldExpr
+    | AAttribute of FunQLName * ParsedAttribute
 
 [<NoEquality; NoComparison>]
 type private InSource =
@@ -91,7 +92,7 @@ let private parseOrderedSet (error : string) (vals : 'a seq) : OrderedSet<'a> =
     with
         | Failure msg -> failwith <| sprintf "%s: %s" error msg
 
-let private splitResults (results : Result seq) : ParsedAttributeMap * QueryResult<'e, 'f>[] =
+let private splitResults (results : Result seq) : ParsedAttributesMap * QueryResult<'e, 'f>[] =
     let getResult = function
         | AResult res -> Some res
         | AAttribute (name, attr) -> None
@@ -118,8 +119,8 @@ let private coalesceJsonObject (exprs : (FunQLName * ParsedFieldExpr) list) : Pa
         | _ -> None
 
     match tryExtract exprs with
-    | None -> FEJsonObject (exprs |> Seq.map (fun (name, e) -> (name, e)) |> Map.ofSeq)
-    | Some vals -> FEValue (FJson (vals |> Seq.map (fun (name, v) -> (string name, JToken.FromObject v)) |> jsonObject))
+    | None -> exprs |> Seq.map (fun (name, e) -> (name, e)) |> Map.ofSeq |> FEJsonObject
+    | Some vals -> vals |> Seq.map (fun (name, v) -> (string name, JToken.FromObject v)) |> jsonObject :> JToken |> ComparableJToken |> FJson |> FEValue
 
 let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
     let rec tryExtract = function
@@ -128,8 +129,8 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
         | _ -> None
 
     match tryExtract exprs with
-    | None -> FEJsonArray (List.toArray exprs)
-    | Some vals -> FEValue (FJson (vals |> Seq.map JToken.FromObject |> jsonArray))
+    | None -> List.toArray exprs |> FEJsonArray
+    | Some vals -> vals |> Seq.map JToken.FromObject |> jsonArray :> JToken |> ComparableJToken |> FJson |> FEValue
 
 let private makeFunc (name : FunQLName) (exprs : ParsedFieldExpr array) : ParsedFieldExpr =
     if Map.containsKey name allowedFunctions then
@@ -267,6 +268,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token ACTION
 %token NO
 %token ONLY
+%token MATCH
+%token MAPPING
 
 // Types
 %token INT_TYPE
@@ -308,7 +311,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %type <ParsedFieldExpr> fieldExpr
 
 %start attributeMap
-%type <ParsedAttributeMap> attributeMap
+%type <ParsedAttributesMap> attributeMap
 
 %start indexColumn
 %type <ParsedIndexColumn> indexColumn
@@ -328,7 +331,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 viewExpr : ViewExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
-attributeMap : AttributeMap EOF { $1 }
+attributeMap : AttributesMap EOF { $1 }
 indexColumn : IndexColumn EOF { $1 }
 commandExpr : CommandExpr EOF { $1 }
 
@@ -367,7 +370,7 @@ ArgumentEntry:
     | ARGUMENT_ID Argument { (FunQLName $1, $2) }
 
 Argument:
-    | FieldType ArgNullable ArgDefault MaybeAttributeMap { { ArgType = $1; Optional = $2; DefaultValue = $3; Attributes = $4 } }
+    | FieldType ArgNullable ArgDefault MaybeAttributesMap { { ArgType = $1; Optional = $2; DefaultValue = $3; Attributes = $4 } }
 
 ArgNullable:
     |      { false }
@@ -510,28 +513,40 @@ NonEmptyQueryResults:
     | QueryResult COMMA NonEmptyQueryResults { $1 :: $3 }
 
 QueryResult:
-    | AT Name EQ FieldExpr       { AAttribute ($2, $4) }
+    | AT Name EQ AttributeValue  { AAttribute ($2, $4) }
     | Name DOT Name DOT MULTIPLY { AResult (QRAll (Some { Schema = Some $1; Name = $3; })) }
     | Name DOT MULTIPLY          { AResult (QRAll (Some { Schema = None; Name = $1; })) }
     | MULTIPLY                   { AResult (QRAll None) }
     | QueryColumnResult          { AResult (QRExpr $1) }
 
 QueryColumnResult:
-    | FieldExpr MaybeAttributeMap         { { Alias = None; Attributes = $2; Result = $1 } }
-    | FieldExpr AS Name MaybeAttributeMap { { Alias = Some $3; Attributes = $4; Result = $1 } }
+    | FieldExpr MaybeAttributesMap         { { Alias = None; Attributes = $2; Result = $1 } }
+    | FieldExpr AS Name MaybeAttributesMap { { Alias = Some $3; Attributes = $4; Result = $1 } }
 
-MaybeAttributeMap:
+MaybeAttributesMap:
     |                                                   { Map.empty }
-    | AttributeMap                                      { $1 }
+    | AttributesMap                                      { $1 }
 
-AttributeMap:
+AttributesMap:
     | AT_LEFT_BRACE RIGHT_BRACE                         { Map.empty }
     | AT_LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
 
 AttributeValuesNonEmpty:
-    | Name EQ FieldExpr                               { [($1, $3)] }
-    | Name EQ FieldExpr COMMA                         { [($1, $3)] }
-    | Name EQ FieldExpr COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
+    | Name EQ AttributeValue                               { [($1, $3)] }
+    | Name EQ AttributeValue COMMA                         { [($1, $3)] }
+    | Name EQ AttributeValue COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
+
+AttributeValue:
+    | MAPPING ON LinkedFieldRef AttrMappingWhenList AttrMappingElse END { AMapping ($3, List.toArray $4, $5) }
+    | FieldExpr                                                         { AExpr $1 }
+
+AttrMappingWhenList:
+    | WHEN Value THEN Value AttrMappingWhenList { ($2, $4) :: $5 }
+    | WHEN Value THEN Value                   { [($2, $4)] }
+
+AttrMappingElse:
+    |            { None }
+    | ELSE Value { Some $2 }
 
 SubSelectAlias:
     | AS Name               { { Name = $2; Fields = None } }
@@ -739,6 +754,7 @@ FieldExprMisc:
     | FieldExprMisc NOT IN FieldInSource        { inExpr FENotIn FENotInQuery $1 $4 }
     | FieldExprMisc DOUBLE_COLON FieldType      { FECast ($1, $3) }
     | CaseExpr                                  { $1 }
+    | MatchExpr                                 { $1 }
     | LinkedFieldRef INHERITED FROM EntityRef   { FEInheritedFrom ($1, { Ref = $4; Extra = ObjectMap.empty }) }
     | LinkedFieldRef OFTYPE EntityRef           { FEOfType ($1, { Ref = $3; Extra = ObjectMap.empty }) }
     | EntityRef GET_ENTITY_ATTR Name            { FEEntityAttr ($1, $3) }
@@ -767,6 +783,9 @@ CaseWhenList:
 CaseElse:
     |                { None }
     | ELSE FieldExpr { Some $2 }
+
+MatchExpr:
+    | MATCH ON FieldExpr CaseWhenList CaseElse END { FEMatch ($3, List.toArray $4, $5) }
 
 IntArrayList:
     | INT                    { [ $1 ] }

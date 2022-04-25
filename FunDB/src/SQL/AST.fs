@@ -10,6 +10,7 @@ open NodaTime
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.SQL.Utils
 
 type [<Struct>] SQLName = SQLName of string
@@ -107,7 +108,7 @@ let rec mapArrayValue (func : 'a -> 'b) : ArrayValue<'a> -> ArrayValue<'b> = fun
 and mapValueArray (func : 'a -> 'b) (vals : ValueArray<'a>) : ValueArray<'b> =
     Array.map (mapArrayValue func) vals
 
-type [<NoEquality; NoComparison>] Value =
+type [<StructuralEquality; NoComparison>] Value =
     | VInt of int
     | VBigInt of int64
     | VDecimal of decimal
@@ -118,7 +119,7 @@ type [<NoEquality; NoComparison>] Value =
     | VLocalDateTime of LocalDateTime
     | VDate of LocalDate
     | VInterval of Period
-    | VJson of JToken
+    | VJson of ComparableJToken
     | VUuid of Guid
     | VIntArray of ValueArray<int>
     | VBigIntArray of ValueArray<int64>
@@ -130,7 +131,7 @@ type [<NoEquality; NoComparison>] Value =
     | VDateArray of ValueArray<LocalDate>
     | VIntervalArray of ValueArray<Period>
     | VRegclassArray of ValueArray<SchemaObject>
-    | VJsonArray of ValueArray<JToken>
+    | VJsonArray of ValueArray<ComparableJToken>
     | VUuidArray of ValueArray<Guid>
     | VNull
     with
@@ -157,7 +158,7 @@ type [<NoEquality; NoComparison>] Value =
             | VLocalDateTime dt -> sprintf "%s :: timestamp" (dt |> renderSqlLocalDateTime |> renderSqlString)
             | VDate d -> sprintf "%s :: date" (d |> renderSqlDate |> renderSqlString)
             | VInterval d -> sprintf "%s :: interval" (d |> renderSqlInterval |> renderSqlString)
-            | VJson j -> sprintf "%s :: jsonb" (j |> renderSqlJson |> renderSqlString)
+            | VJson j -> sprintf "%s :: jsonb" (j.Json |> renderSqlJson |> renderSqlString)
             | VUuid u -> sprintf "%s :: uuid" (u |> string |> renderSqlString)
             | VIntArray vals -> renderArray renderSqlInt "int4" vals
             | VBigIntArray vals -> renderArray renderSqlBigInt "int8" vals
@@ -169,7 +170,7 @@ type [<NoEquality; NoComparison>] Value =
             | VDateArray vals -> renderArray renderSqlDate "date" vals
             | VIntervalArray vals -> renderArray renderSqlInterval "interval" vals
             | VRegclassArray vals -> renderArray toSQLString "regclass" vals
-            | VJsonArray vals -> renderArray renderSqlJson "jsonb" vals
+            | VJsonArray vals -> vals |> renderArray (fun j -> renderSqlJson j.Json) "jsonb"
             | VUuidArray vals -> renderArray string "uuid" vals
             | VNull -> "NULL"
 
@@ -206,7 +207,7 @@ type ValuePrettyConverter () =
         | VLocalDateTime dt -> serialize dt
         | VDate dt -> serialize dt
         | VInterval int -> serialize int
-        | VJson j -> j.WriteTo(writer)
+        | VJson j -> j.Json.WriteTo(writer)
         | VRegclass rc -> writer.WriteValue(string rc)
         | VUuid u -> writer.WriteValue(u)
         | VIntArray vals -> serializeArray id vals

@@ -1,6 +1,8 @@
 [<RequireQualifiedAccess>]
 module FunWithFlags.FunUtils.Set
 
+open FSharpPlus
+
 let toMap (f : 'k -> 'v) (s : Set<'k>) : Map<'k, 'v> =
     s |> Set.toSeq |> Seq.map (fun k -> (k, f k)) |> Map.ofSeq
 

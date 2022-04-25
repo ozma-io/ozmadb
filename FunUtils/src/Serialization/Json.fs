@@ -320,3 +320,6 @@ type ComparableJToken = ComparableJToken of JToken
 
         override this.GetHashCode () =
             jtokenComparer.GetHashCode(this.Json)
+
+        interface IEquatable<ComparableJToken> with
+            override x.Equals y = jtokenComparer.Equals(x.Json, y.Json)

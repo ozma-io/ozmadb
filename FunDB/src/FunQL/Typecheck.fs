@@ -158,7 +158,18 @@ type private Typechecker (layout : ILayoutBits) =
 
         let allVals = Seq.append (Seq.map snd es) (Option.toSeq els) |> Seq.map typecheckFieldExpr
         match unionTypes allVals with
-        | None -> raisef ViewTypecheckException "Couldn't unify CASE argument types"
+        | None -> raisef ViewTypecheckException "Couldn't unify CASE result types"
+        | Some typ -> typ
+
+    and typecheckMatch (expr : ResolvedFieldExpr) (es : (ResolvedFieldExpr * ResolvedFieldExpr)[]) (els : ResolvedFieldExpr option) : ResolvedFieldType =
+        let allConds = Seq.append (Seq.singleton expr) (Seq.map fst es) |> Seq.map typecheckFieldExpr
+        match unionTypes allConds with
+        | None -> raisef ViewTypecheckException "Couldn't unify MATCH condition types"
+        | Some ctyp -> ()
+
+        let allVals = Seq.append (Seq.map snd es) (Option.toSeq els) |> Seq.map typecheckFieldExpr
+        match unionTypes allVals with
+        | None -> raisef ViewTypecheckException "Couldn't unify MATCH result types"
         | Some typ -> typ
 
     and typecheckFieldExpr : ResolvedFieldExpr -> ResolvedFieldType option = function
@@ -192,6 +203,7 @@ type private Typechecker (layout : ILayoutBits) =
         | FEIsNull e -> Some <| typecheckAnyLogical e
         | FEIsNotNull e -> Some <| typecheckAnyLogical e
         | FECase (es, els) -> Some <| typecheckCase es els
+        | FEMatch (field, es, els) -> Some <| typecheckCase es els
         | FEJsonArray vals ->
             for v in vals do
                 ignore <| typecheckFieldExpr v

@@ -347,7 +347,7 @@ let private defaultCompiledArgumentValue : FieldType<_> -> FieldValue = function
     | FTScalar SFTDateTime -> FDateTime epochDateTime
     | FTScalar SFTDate -> FDate epochDate
     | FTScalar SFTInterval -> FInterval Period.Zero
-    | FTScalar SFTJson -> FJson (JObject ())
+    | FTScalar SFTJson -> FJson (ComparableJToken (JObject ()))
     | FTScalar SFTUserViewRef -> FUserViewRef { Schema = None; Name = FunQLName "" }
     | FTScalar SFTUuid -> FUuid Guid.Empty
     | FTScalar (SFTReference (entityRef, opts)) -> FInt 0
@@ -524,7 +524,7 @@ let private makeSubEntityParseExprFor (layout : ILayoutBits) (subEntityColumn : 
         if entity.IsAbstract then
             None
         else
-            let json = JToken.FromObject ref |> SQL.VJson |> SQL.VEValue
+            let json = JToken.FromObject ref |> ComparableJToken |> SQL.VJson |> SQL.VEValue
             Some (entity, json)
 
     let options = entities |> Seq.mapMaybe getName |> Seq.toArray
@@ -826,6 +826,13 @@ let private getForcedFieldName (fieldInfo : FieldMeta) (currName : FieldName)  =
             None
         else
             Some <| compileName currName
+
+let private attributeToExpr = function
+    | AExpr e -> e
+    | AMapping (field, cases, elseExpr) ->
+        let convCases = cases |> Array.map (fun (matchValue, ret) -> (FEValue matchValue, FEValue ret))
+        let convElse = Option.map FEValue elseExpr
+        FEMatch (FERef field, convCases, convElse)
 
 type ExprCompilationFlags =
     { ForceNoTableRef : bool
@@ -1336,7 +1343,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 match Map.tryFind attrName attrs with
                 | None -> (paths, SQL.nullExpr)
                 | Some attr ->
-                    let attrExpr = replaceFieldRefInExpr updateEntityRef attr.Expression
+                    let attrExpr = replaceFieldRefInExpr updateEntityRef <| attributeToExpr attr.Attribute
                     compileFieldExpr emptyExprCompilationFlags ctx paths attrExpr
 
         match linked.Ref.Ref with
@@ -1345,7 +1352,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             if Array.isEmpty linked.Ref.Path then
                 match Map.tryFind attrName argType.Attributes with
                 | None -> (paths, SQL.nullExpr)
-                | Some attr -> compileFieldExpr flags ctx paths attr
+                | Some attr -> compileFieldExpr flags ctx paths <| attributeToExpr attr
             else
                 let argInfo = ObjectMap.findType<ReferencePlaceholderMeta> linked.Extra
                 let lastEntityRef = Array.last argInfo.Path
@@ -1433,6 +1440,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | FEIsNull a -> SQL.VEIsNull (traverse a)
             | FEIsNotNull a -> SQL.VEIsNotNull (traverse a)
             | FECase (es, els) -> SQL.VECase (Array.map (fun (cond, expr) -> (traverse cond, traverse expr)) es, Option.map traverse els)
+            | FEMatch (expr, es, els) ->
+                let compiledExpr = traverse expr
+                SQL.VECase (Array.map (fun (cond, ret) -> (SQL.VEBinaryOp (compiledExpr, SQL.BOEq, traverse cond), traverse ret)) es, Option.map traverse els)
             | FEJsonArray vals ->
                 let compiled = Array.map traverse vals
 
@@ -1443,7 +1453,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 // Recheck if all values can be represented as JSON value; e.g. user view references are now valid values.
                 let optimized = Seq.traverseOption tryExtract compiled
                 match optimized with
-                | Some optimizedVals -> optimizedVals |> Seq.map JToken.FromObject |> jsonArray :> JToken |> SQL.VJson |> SQL.VEValue
+                | Some optimizedVals -> optimizedVals |> Seq.map JToken.FromObject |> jsonArray :> JToken |> ComparableJToken |> SQL.VJson |> SQL.VEValue
                 | None -> SQL.VEFunc (SQL.SQLName "jsonb_build_array", Array.map traverse vals)
             | FEJsonObject obj ->
                 let compiled = Map.map (fun name -> traverse) obj
@@ -1455,7 +1465,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 // Recheck if all values can be represented as JSON value; e.g. user view references are now valid values.
                 let optimized = Seq.traverseOption tryExtract (Map.toSeq compiled)
                 match optimized with
-                | Some optimizedVals -> optimizedVals |> Seq.map (fun (name, v) -> (name, JToken.FromObject v)) |> jsonObject :> JToken |> SQL.VJson |> SQL.VEValue
+                | Some optimizedVals -> optimizedVals |> Seq.map (fun (name, v) -> (name, JToken.FromObject v)) |> jsonObject :> JToken |> ComparableJToken |> SQL.VJson |> SQL.VEValue
                 | None ->
                     let args = obj |> Map.toSeq |> Seq.collect (fun (FunQLName name, v) -> [SQL.VEValue <| SQL.VString name; traverse v]) |> Seq.toArray
                     SQL.VEFunc (SQL.SQLName "jsonb_build_object", args)
@@ -1683,8 +1693,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             compiled
         let groupBy = Array.map compileGroupBy select.GroupBy
 
-        let compileRowAttr (name, expr) =
-            let (newPaths, col) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
+        let compileRowAttr (name, attr) =
+            let (newPaths, col) = compileFieldExpr emptyExprCompilationFlags ctx paths <| attributeToExpr attr
             paths <- newPaths
             (CMRowAttribute name, col)
         let attributeColumns =
@@ -1717,7 +1727,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                         if Map.containsKey name result.Attributes then
                             None
                         else
-                            let expr = replaceFieldRefInExpr updateEntityRef attr.Expression
+                            let expr = replaceFieldRefInExpr updateEntityRef <| attributeToExpr attr.Attribute
                             let attrCol = CCCellAttribute name
                             let (newPaths, compiled) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
                             paths <- newPaths
@@ -2058,9 +2068,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | _ -> compileFieldExpr emptyExprCompilationFlags ctx paths result.Result
         paths <- newPaths
 
-        let compileAttr (attrName, expr) =
+        let compileAttr (attrName, attr) =
             let attrCol = CCCellAttribute attrName
-            let (newPaths, ret) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
+            let (newPaths, ret) = compileFieldExpr emptyExprCompilationFlags ctx paths <| attributeToExpr attr
             paths <- newPaths
             (attrCol, ret)
 
@@ -2564,8 +2574,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         compileDataExpr flags emptyExprContext dataExpr
 
     member this.CompileArgumentAttributes (args : ResolvedArgumentsMap) : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[] =
-        let compileArgAttr argName (name, expr) =
-            let (newPaths, col) = compileFieldExpr emptyExprCompilationFlags emptyExprContext emptyJoinPaths expr
+        let compileArgAttr argName (name, attr) =
+            let (newPaths, col) = compileFieldExpr emptyExprCompilationFlags emptyExprContext emptyJoinPaths <| attributeToExpr attr
             if not <| Map.isEmpty newPaths.Map then
                 failwith "Unexpected join paths in argument atribute expression"
             let colType = CTMeta <| CMArgAttribute (argName, name)

@@ -10,14 +10,14 @@ type MergedAttribute =
     { SchemaName : SchemaName
       Priority : int
       Inherited : bool
-      Expression : ResolvedFieldExpr
+      Attribute : ResolvedAttribute
     }
 
-type MergedAttributeMap = Map<AttributeName, MergedAttribute>
+type MergedAttributesMap = Map<AttributeName, MergedAttribute>
 
 [<NoEquality; NoComparison>]
 type MergedAttributesEntity =
-    { Fields : Map<FieldName, MergedAttributeMap>
+    { Fields : Map<FieldName, MergedAttributesMap>
     } with
         member this.FindField (name : FieldName) =
             Map.tryFind name this.Fields
@@ -55,11 +55,11 @@ let private chooseAttribute (a : MergedAttribute) (b : MergedAttribute) : Merged
     else
         b
 
-let private mergeAttributeMap (a : MergedAttributeMap) (b : MergedAttributeMap) : MergedAttributeMap =
+let private mergeAttributesMap (a : MergedAttributesMap) (b : MergedAttributesMap) : MergedAttributesMap =
     Map.unionWith (fun name -> chooseAttribute) a b
 
 let private mergeAttributesEntity (a : MergedAttributesEntity) (b : MergedAttributesEntity) : MergedAttributesEntity =
-    { Fields = Map.unionWith (fun name -> mergeAttributeMap) a.Fields b.Fields
+    { Fields = Map.unionWith (fun name -> mergeAttributesMap) a.Fields b.Fields
     }
 
 let private mergeAttributesSchema (a : MergedAttributesSchema) (b : MergedAttributesSchema) : MergedAttributesSchema =
@@ -70,10 +70,10 @@ let private mergeAttributesPair (a : MergedDefaultAttributes) (b : MergedDefault
     { Schemas = Map.unionWith (fun name -> mergeAttributesSchema) a.Schemas b.Schemas
     }
 
-let private makeMergedAttribute (schemaName : SchemaName) (priority : int) (attr : ResolvedFieldExpr) =
+let private makeMergedAttribute (schemaName : SchemaName) (priority : int) (attr : ResolvedAttribute) =
     { SchemaName = schemaName
       Priority = priority
-      Expression = attr
+      Attribute = attr
       Inherited = false
     }
 
@@ -91,7 +91,7 @@ let private makeOneMergedAttributesEntity (schemaName : SchemaName) (entityAttrs
             Some ret
     { Fields = Map.mapMaybe addNonEmpty entityAttrs.Fields }
 
-let private markMapInherited (attrs : MergedAttributeMap) : MergedAttributeMap =
+let private markMapInherited (attrs : MergedAttributesMap) : MergedAttributesMap =
     Map.map (fun name attr -> { attr with Inherited = true }) attrs
 
 let private markEntityInherited (entityAttrs : MergedAttributesEntity) : MergedAttributesEntity =

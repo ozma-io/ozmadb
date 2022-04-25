@@ -1,7 +1,6 @@
 module FunWithFlags.FunDB.Attributes.Types
 
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.Attributes.Source
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type DefaultAttributeRef =
@@ -14,7 +13,7 @@ type DefaultAttributeRef =
 type AttributesField =
     { AllowBroken : bool
       Priority : int
-      Attributes : ResolvedAttributeMap
+      Attributes : ResolvedAttributesMap
     }
 
 [<NoEquality; NoComparison>]

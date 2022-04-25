@@ -28,15 +28,11 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             | Ok r -> r
             | Error msg -> raisef ResolveAttributesException "Error parsing attributes: %s" msg
 
-        let resolveAttribute name expr =
+        let resolvedMap =
             try
-                let entityInfo = SFEntity entityRef
-                let (info, resolvedExpr) =
-                    resolveSingleFieldExpr layout OrderedMap.empty localExprFromEntityId attrResolutionFlags entityInfo expr
-                resolvedExpr
+                resolveEntityAttributesMap layout attrResolutionFlags entityRef attrsMap
             with
-            | e -> raisefWithInner ResolveAttributesException e "In attribute %O" name
-        let resolvedMap = Map.map resolveAttribute attrsMap
+            | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
 
         { AllowBroken = fieldAttrs.AllowBroken
           Priority = fieldAttrs.Priority

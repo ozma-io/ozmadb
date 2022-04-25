@@ -82,7 +82,7 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
     | (VTScalar STInterval, (:? Period as value)) -> VInterval value
     | (VTScalar STJson, (:? string as value)) ->
         match tryJson value with
-        | Some j -> VJson j
+        | Some j -> VJson (ComparableJToken j)
         | None -> raisef QueryException "Invalid JSON value"
     | (VTScalar STUuid, (:? Guid as value)) -> VUuid value
     | (VTArray scalarType, (:? Array as rootVals)) ->
@@ -107,7 +107,7 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
         | STDate -> VDateArray (convertArray tryCast<LocalDate> rootVals)
         | STInterval -> VIntervalArray (convertArray tryCast<Period> rootVals)
         | STRegclass -> raisef QueryException "Regclass arrays are not supported"
-        | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson) rootVals)
+        | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson >> Option.map ComparableJToken) rootVals)
         | STUuid -> VUuidArray (convertArray tryCast<Guid> rootVals)
     | (typ, value) -> raisef QueryException "Unknown value format"
 
@@ -294,6 +294,6 @@ let runExplainQuery<'a when 'a :> ISQLString> (connection : QueryConnection) (qu
             } : ExplainExpr<'a>
         let queryStr = explainQuery.ToSQLString()
         match! connection.ExecuteValueQuery queryStr parameters cancellationToken with
-        | Some (_, _, VJson j) -> return j
+        | Some (_, _, VJson j) -> return j.Json
         | ret -> return failwithf "Unexpected EXPLAIN return value: %O" ret
     }

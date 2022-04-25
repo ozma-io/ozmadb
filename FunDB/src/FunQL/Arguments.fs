@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.FunQL.Arguments
 open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
@@ -23,7 +24,7 @@ type CompiledArgument =
       DbType : SQL.DBValueType
       Optional : bool
       DefaultValue : FieldValue option
-      Attributes : ResolvedAttributeMap
+      Attributes : ResolvedAttributesMap
     }
 
 type RawArguments = Map<string, JToken>
@@ -56,7 +57,7 @@ let compileFieldValue : FieldValue -> SQL.Value = function
     | FInterval int -> SQL.VInterval int
     | FJson j -> SQL.VJson j
     | FUuid u -> SQL.VUuid u
-    | FUserViewRef r -> SQL.VJson <| JToken.FromObject(r)
+    | FUserViewRef r -> JToken.FromObject(r) |> ComparableJToken |> SQL.VJson
     | FIntArray vals -> SQL.VIntArray (compileArray vals)
     | FDecimalArray vals -> SQL.VDecimalArray (compileArray vals)
     | FStringArray vals -> SQL.VStringArray (compileArray vals)
@@ -65,7 +66,7 @@ let compileFieldValue : FieldValue -> SQL.Value = function
     | FDateArray vals -> SQL.VDateArray (compileArray vals)
     | FIntervalArray vals -> SQL.VIntervalArray (compileArray vals)
     | FJsonArray vals -> SQL.VJsonArray (compileArray vals)
-    | FUserViewRefArray vals -> SQL.VJsonArray (vals |> Array.map (fun x -> JToken.FromObject(x)) |> compileArray)
+    | FUserViewRefArray vals -> SQL.VJsonArray (vals |> Array.map (fun x -> JToken.FromObject(x) |> ComparableJToken) |> compileArray)
     | FUuidArray vals -> SQL.VUuidArray (compileArray vals)
     | FNull -> SQL.VNull
 

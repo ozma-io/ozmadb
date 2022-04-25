@@ -40,15 +40,22 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         | QRExpr result -> QRExpr <| resolveColumnResult result
 
     and resolveColumnResult (result : ResolvedQueryColumnResult) : ResolvedQueryColumnResult =
-        let attributes = resolveAttributes result.Attributes
+        let attributes = resolveAttributesMap result.Attributes
         let expr = resolveFieldExpr result.Result
         { Alias = result.Alias
           Attributes = attributes
           Result = expr
         }
 
-    and resolveAttributes (attributes : ResolvedAttributeMap) : ResolvedAttributeMap =
-        Map.map (fun name expr -> resolveFieldExpr expr) attributes
+    and resolveAttribute : ResolvedAttribute -> ResolvedAttribute = function
+        | AExpr expr -> AExpr (resolveFieldExpr expr)
+        | AMapping (value, es, els) ->
+            let newEs = Array.map (fun (value, e) -> (resolveValue value, resolveValue e)) es
+            let newEls = Option.map resolveValue els
+            AMapping (value, newEs, newEls)
+
+    and resolveAttributesMap (attributes : ResolvedAttributesMap) : ResolvedAttributesMap =
+        Map.map (fun name expr -> resolveAttribute expr) attributes
 
     and resolveFieldExpr (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
         let mapper =
@@ -111,7 +118,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         }
 
     and resolveSingleSelectExpr (query : ResolvedSingleSelectExpr) : ResolvedSingleSelectExpr =
-        let attributes = resolveAttributes query.Attributes
+        let attributes = resolveAttributesMap query.Attributes
         let from = Option.map resolveFromExpr query.From
         let where = Option.map resolveFieldExpr query.Where
         let groupBy = Array.map resolveFieldExpr query.GroupBy
@@ -187,7 +194,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         | DEDelete delete -> DEDelete <| resolveDeleteExpr delete
 
     let resolveArgument (arg : ResolvedArgument) : ResolvedArgument =
-        { arg with Attributes = resolveAttributes arg.Attributes }
+        { arg with Attributes = resolveAttributesMap arg.Attributes }
 
     let resolveArgumentsMap (argsMap : ResolvedArgumentsMap) : ResolvedArgumentsMap =
         OrderedMap.map (fun name -> resolveArgument) argsMap

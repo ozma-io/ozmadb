@@ -72,7 +72,7 @@ let private parseToSimpleType : SimpleType -> (string -> Value) = function
     | STDate -> runCast trySqlDate >> VDate
     | STInterval -> runCast trySqlInterval >> VInterval
     | STRegclass -> runCast tryRegclass >> VRegclass
-    | STJson -> runCast tryJson >> VJson
+    | STJson -> runCast tryJson >> ComparableJToken >> VJson
     | STUuid -> runCast tryUuid >> VUuid
 
 // Convert string-cast patterns into actual values so that we reverse lost type information.

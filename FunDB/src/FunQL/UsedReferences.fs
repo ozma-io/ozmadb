@@ -95,11 +95,15 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         | QRExpr result -> buildForColumnResult result
 
     and buildForColumnResult (result : ResolvedQueryColumnResult) =
-        buildForAttributes result.Attributes
+        buildForAttributesMap result.Attributes
         ignore <| buildForFieldExpr result.Result
 
-    and buildForAttributes (attributes : ResolvedAttributeMap) =
-        Map.iter (fun name expr -> ignore <| buildForFieldExpr expr) attributes
+    and buildForAttribute : ResolvedAttribute -> unit = function
+        | AExpr expr -> ignore <| buildForFieldExpr expr
+        | AMapping (field, es, els) -> ()
+
+    and buildForAttributesMap (attributes : ResolvedAttributesMap) =
+        Map.iter (fun name attr -> buildForAttribute attr) attributes
 
     and buildForFieldExpr (expr : ResolvedFieldExpr) : ExprInfo =
         let mutable exprInfo = emptyExprInfo
@@ -158,7 +162,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         buildForSelectTreeExpr select.Tree
 
     and buildForSingleSelectExpr (query : ResolvedSingleSelectExpr) =
-        buildForAttributes query.Attributes
+        buildForAttributesMap query.Attributes
         Option.iter buildForFromExpr query.From
         Option.iter (ignore << buildForFieldExpr) query.Where
         Array.iter (ignore << buildForFieldExpr) query.GroupBy

@@ -554,6 +554,10 @@ type private ResolvedExprInfo =
       Types : TypeContextsMap
     }
 
+type private AttributeInfo =
+    { IsLocal : bool
+    }
+
 type private FromEntityIdMeta =
     { Id : FromEntityId
       IsInner : bool
@@ -1361,7 +1365,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
         let (exprInfo, expr) = resolveResultExpr flags ctx result.Alias result.Result
         let ret =
             { Alias = result.Alias
-              Attributes = resolveAttributes ctx result.Attributes
+              Attributes = resolveAttributesMap ctx result.Attributes
               Result = expr
             } : ResolvedQueryColumnResult
         (exprInfo, ret)
@@ -1404,8 +1408,32 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                 }
             (info, expr)
 
-    and resolveAttributes (ctx : Context) (attributes : ParsedAttributeMap) : ResolvedAttributeMap =
-        Map.map (fun name expr -> snd <| resolveNonaggrFieldExpr ctx expr) attributes
+    and resolveAttributeExpr (ctx : Context) (expr : ParsedFieldExpr) : AttributeInfo * ResolvedFieldExpr =
+        let (info, newExpr) = resolveFieldExpr ctx expr
+        if info.HasAggregates then
+            raisef ViewResolveException "Aggregate functions are not allowed here"
+        let newInfo =
+            { IsLocal = info.IsLocal
+            }
+        (newInfo, newExpr)
+
+    and resolveAttribute (ctx : Context) : ParsedAttribute -> AttributeInfo * ResolvedAttribute = function
+        | AExpr expr ->
+            let (info, newExpr) = resolveFieldExpr ctx expr
+            if info.HasAggregates then
+                raisef ViewResolveException "Aggregate functions are not allowed here"
+            let newInfo =
+                { IsLocal = info.IsLocal
+                }
+            (newInfo, AExpr newExpr)
+        | AMapping (ref, es, els) ->
+            let newRef = resolveReference ctx.FieldMaps Map.empty ref
+            let ret = AMapping (newRef.Ref, es, els)
+            let info = { IsLocal = true }
+            (info, ret)
+
+    and resolveAttributesMap (ctx : Context) (attributes : ParsedAttributesMap) : ResolvedAttributesMap =
+        Map.map (fun name -> snd << resolveAttribute ctx) attributes
 
     and resolveNonaggrFieldExpr (ctx : Context) (expr : ParsedFieldExpr) : TypeContextsMap * ResolvedFieldExpr =
         let (info, res) = resolveFieldExpr ctx expr
@@ -1490,6 +1518,18 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                     newE
                 let newEls = Option.map applyElse els
                 (emptyCondTypeContexts, FECase (newEs, newEls))
+            | FEMatch (expr, es, els) ->
+                let (typeCtxExpr, newExpr) = traverse outerTypeCtxs expr
+                let applyOne (matchExpr, e) =
+                    let (typeCtxsMatch, newMatchExpr) = traverse outerTypeCtxs matchExpr
+                    let (typeCtxs, newE) = traverse outerTypeCtxs e
+                    (newMatchExpr, newE)
+                let newEs = Array.map applyOne es
+                let applyElse e =
+                    let (typeCtxs, newE) = traverse outerTypeCtxs e
+                    newE
+                let newEls = Option.map applyElse els
+                (emptyCondTypeContexts, FEMatch (newExpr, newEs, newEls))
             | FEInheritedFrom (f, nam) ->
                 let newF = resolveExprReference outerTypeCtxs.Map f
                 let (innerTypeCtxs, newNam) = resolveSubEntity layout outerTypeCtxs.Map SECInheritedFrom newF nam
@@ -1833,7 +1873,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
         let qFrom = Option.map (relabelFromExprType whereTypes) qFrom
 
         let newQuery =
-            { Attributes = resolveAttributes ctx query.Attributes
+            { Attributes = resolveAttributesMap ctx query.Attributes
               From = qFrom
               Where = qWhere
               GroupBy = qGroupBy
@@ -2127,16 +2167,30 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
             }
         resolveFieldExpr context expr
 
-    member this.ResolveArgumentAttributes attrsMap =
-        let resolveOne name (expr : ParsedFieldExpr) : ResolvedFieldExpr =
-            let (info, res) = resolveFieldExpr emptyContext expr
-            if info.HasArrows then
+    member this.ResolveArgumentAttributesMap (attrs : ParsedAttributesMap) : ResolvedAttributesMap =
+        let resolveOne name (expr : ParsedAttribute) : ResolvedAttribute =
+            let (info, res) = resolveAttribute emptyContext expr
+            if not info.IsLocal then
                 raisef ViewResolveException "Non-local expressions are not supported in argument attributes"
-            if info.HasAggregates then
-                raisef ViewResolveException "Aggregate functions are not allowed here"
             res
 
-        Map.map resolveOne attrsMap
+        Map.map resolveOne attrs
+
+    member this.ResolveEntityAttributesMap (entityRef : ResolvedEntityRef) (attrs : ParsedAttributesMap) : ResolvedAttributesMap =
+        let flags =
+            { IsInner = true
+              AllowHidden = true
+              WithoutChildren = false
+            }
+        let mapping = createFromMapping 0 entityRef None flags
+        let context =
+            { ResolveCTE = failCte
+              FieldMaps = [mapping]
+              // Not exactly right, but should't be a problem for simple expressions.
+              Entities = Map.empty
+              Types = Map.empty
+            }
+        resolveAttributesMap context attrs
 
     member this.Privileged = isPrivileged
 
@@ -2217,8 +2271,12 @@ and private relabelSelectTreeExpr : ResolvedSelectTreeExpr -> ResolvedSelectTree
               OrderLimit = relabelOrderLimitClause setOp.OrderLimit
             }
 
+and private relabelAttribute : ResolvedAttribute -> ResolvedAttribute = function
+    | AExpr expr -> AExpr (relabelFieldExpr expr)
+    | AMapping (field, es, els) as mapping -> mapping
+
 and private relabelSingleSelectExpr (select : ResolvedSingleSelectExpr) : ResolvedSingleSelectExpr =
-    { Attributes = Map.map (fun name -> relabelFieldExpr) select.Attributes
+    { Attributes = Map.map (fun name -> relabelAttribute) select.Attributes
       Results = Array.map relabelQueryResult select.Results
       From  = Option.map relabelFromExpr select.From
       Where = Option.map relabelFieldExpr select.Where
@@ -2259,7 +2317,7 @@ and private relabelQueryResult : ResolvedQueryResult -> ResolvedQueryResult = fu
     | QRExpr result -> QRExpr <| relabelQueryColumnResult result
 
 and private relabelQueryColumnResult (result : ResolvedQueryColumnResult) : ResolvedQueryColumnResult =
-    { Attributes = Map.map (fun name -> relabelFieldExpr) result.Attributes
+    { Attributes = Map.map (fun name -> relabelAttribute) result.Attributes
       Result = relabelFieldExpr result.Result
       Alias = result.Alias
     }
@@ -2332,7 +2390,7 @@ let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : Reso
     { ArgType = argType
       Optional = arg.Optional
       DefaultValue = arg.DefaultValue
-      Attributes = attrsQualifier.ResolveArgumentAttributes arg.Attributes
+      Attributes = attrsQualifier.ResolveArgumentAttributesMap arg.Attributes
     }
 
 let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * Map<Placeholder, ResolvedArgument> =
@@ -2353,6 +2411,10 @@ let resolveSingleFieldExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMa
     let qualifier = QueryResolver (layout, allArguments, flags)
     let (info, qExpr) = qualifier.ResolveSingleFieldExpr fromEntityId fromMapping expr
     (localArguments, relabelFieldExpr qExpr)
+
+let resolveEntityAttributesMap (layout : ILayoutBits) (flags : ExprResolutionFlags) (entityRef : ResolvedEntityRef) (attrs : ParsedAttributesMap) : ResolvedAttributesMap =
+    let qualifier = QueryResolver (layout, globalArgumentsMap, flags)
+    qualifier.ResolveEntityAttributesMap entityRef attrs
 
 let resolveViewExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
     let (localArguments, allArguments) = resolveArgumentsMap layout viewExpr.Arguments

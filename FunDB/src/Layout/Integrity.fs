@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Layout.Integrity
 
+open FSharpPlus
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
