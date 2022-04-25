@@ -203,7 +203,7 @@ type private Typechecker (layout : ILayoutBits) =
         | FEIsNull e -> Some <| typecheckAnyLogical e
         | FEIsNotNull e -> Some <| typecheckAnyLogical e
         | FECase (es, els) -> Some <| typecheckCase es els
-        | FEMatch (field, es, els) -> Some <| typecheckCase es els
+        | FEMatch (field, es, els) -> Some <| typecheckMatch field es els
         | FEJsonArray vals ->
             for v in vals do
                 ignore <| typecheckFieldExpr v

@@ -323,11 +323,7 @@ let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHa
                 try
                     let longRunning =
                         if inst.IsRoot then
-                            let headers = ctx.Request.Headers.["X-LongRunning"]
-                            if headers.Count > 0 then
-                                headers.[headers.Count - 1].ToLowerInvariant() = "yes"
-                            else
-                                false
+                            tryBoolRequestArg "X-LongRunning" ctx |> Option.defaultValue false
                         else
                             false
                     let cancellationToken =
