@@ -2,7 +2,6 @@ open System
 open System.IO
 open System.Threading
 open Newtonsoft.Json
-open Newtonsoft.Json.Serialization
 open Microsoft.AspNetCore
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Builder
@@ -18,12 +17,10 @@ open Microsoft.IdentityModel.Tokens
 open Microsoft.EntityFrameworkCore
 open Giraffe
 open NodaTime
-open NodaTime.Serialization.JsonNet
 open Npgsql
 open NetJs.Json
 
 open FunWithFlags.FunDBSchema.Instances
-open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.HTTP.Info
 open FunWithFlags.FunDB.HTTP.Views
@@ -34,29 +31,13 @@ open FunWithFlags.FunDB.HTTP.Permissions
 open FunWithFlags.FunDB.HTTP.Domains
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.Operations.Preload
+open FunWithFlags.FunDB.API.Json
 open FunWithFlags.FunDB.API.InstancesCache
 open FunWithFlags.FunDB.EventLogger
-module FunQL = FunWithFlags.FunDB.FunQL.AST
-module SQL = FunWithFlags.FunDB.SQL.AST
 
-let httpJsonSettings =
-    let converters : JsonConverter[] = [|
-        FunQL.FieldValuePrettyConverter ()
-        SQL.ValuePrettyConverter ()
-        NodaConverters.NormalizingIsoPeriodConverter
-    |]
-    let constructors = Array.map (fun conv -> fun _ -> Some conv) converters
-    let jsonSettings = makeDefaultJsonSerializerSettings constructors
-    ignore <| jsonSettings.ConfigureForNodaTime(DateTimeZoneProviders.Tzdb)
-    let resolver = jsonSettings.ContractResolver :?> ConverterContractResolver
-    resolver.NamingStrategy <- CamelCaseNamingStrategy(
-        OverrideSpecifiedNames = false
-    )
-    jsonSettings.NullValueHandling <- NullValueHandling.Ignore
-    jsonSettings.DateParseHandling <- DateParseHandling.None
-    jsonSettings
+let private httpJsonSettings = funDBJsonSettings Seq.empty
 
-type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
+type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
     let connectionString =
         let builder = NpgsqlConnectionStringBuilder(connectionString)
         builder.Enlist <- false
@@ -113,7 +94,7 @@ type DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : strin
             builder.ConnectionIdleLifetime <- 30
             builder.MaxAutoPrepare <- 50
 
-type StaticInstance (instance : Instance) =
+type private StaticInstance (instance : Instance) =
     interface IInstancesSource with
         member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
             let obj =

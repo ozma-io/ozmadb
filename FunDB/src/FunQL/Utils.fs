@@ -37,6 +37,9 @@ let rec renderFunQLJson (j : JToken) : string =
     | JTokenType.Float -> renderFunQLDecimal <| JToken.op_Explicit j
     | JTokenType.String -> renderFunQLString <| JToken.op_Explicit j
     | JTokenType.Boolean -> renderFunQLBool <| JToken.op_Explicit j
+    | JTokenType.Date ->
+        let dt = JToken.op_Explicit j : DateTimeOffset
+        Instant.FromDateTimeOffset dt |> renderFunQLDateTime
     | JTokenType.Null -> "null"
     | typ -> failwith <| sprintf "Unexpected token type %O" typ
 

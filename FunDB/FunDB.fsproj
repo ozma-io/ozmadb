@@ -134,6 +134,7 @@
     <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
 
+    <Compile Include="src/API/Json.fs" />
     <Compile Include="src/API/Types.fs" />
     <Compile Include="src/API/JavaScript.fs" />
     <Compile Include="src/API/Triggers.fs" />
