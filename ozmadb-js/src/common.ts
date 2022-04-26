@@ -186,9 +186,15 @@ export interface IMainFieldInfo {
 export type AttributesMap = Record<AttributeName, unknown>;
 export type AttributeTypesMap = Record<AttributeName, ValueType>;
 
+export interface IAttributeInfo {
+  type: ValueType;
+  pure: boolean;
+}
+export type AttributesInfoMap = Record<AttributeName, IAttributeInfo>;
+
 export interface IResultColumnInfo {
   name: string;
-  attributeTypes: AttributeTypesMap;
+  attributeTypes: AttributesInfoMap;
   cellAttributeTypes: AttributeTypesMap;
   valueType: ValueType;
   punType?: ValueType;
@@ -206,12 +212,11 @@ export interface IArgument {
   argType: FieldType;
   optional: boolean;
   defaultValue?: any;
-  attributeTypes: AttributeTypesMap;
-  attributes: AttributesMap;
+  attributeTypes: AttributesInfoMap;
 }
 
 export interface IResultViewInfo {
-  attributeTypes: AttributeTypesMap;
+  attributeTypes: AttributesInfoMap;
   rowAttributeTypes: AttributeTypesMap;
   arguments: IArgument[];
   domains: Record<DomainId, Record<ColumnName, IDomainField>>;
@@ -247,6 +252,7 @@ export interface IExecutedRow {
 export interface IExecutedViewExpr {
   attributes: AttributesMap;
   columnAttributes: AttributesMap[];
+  argumentAttributes: Record<ArgumentName, AttributesMap>;
   rows: IExecutedRow[];
 }
 
@@ -275,6 +281,7 @@ export interface IViewInfoResult {
   info: IResultViewInfo;
   pureAttributes: AttributesMap;
   pureColumnAttributes: AttributesMap[];
+  pureArgumentAttributes: Record<ArgumentName, AttributesMap>;
 }
 
 export interface IViewExplainResult {
