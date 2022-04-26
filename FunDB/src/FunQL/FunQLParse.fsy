@@ -15,6 +15,7 @@ type ParsedSingleSelectExpr = SingleSelectExpr<EntityRef, LinkedFieldRef>
 type ParsedQueryResult = QueryResult<EntityRef, LinkedFieldRef>
 type ParsedQueryColumnResult = QueryColumnResult<EntityRef, LinkedFieldRef>
 type ParsedAttributesMap = AttributesMap<EntityRef, LinkedFieldRef>
+type ParsedBoundAttributesMap = BoundAttributesMap<EntityRef, LinkedFieldRef>
 type ParsedCommonTableExpr = CommonTableExpr<EntityRef, LinkedFieldRef>
 type ParsedCommonTableExprs = CommonTableExprs<EntityRef, LinkedFieldRef>
 type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
@@ -29,7 +30,7 @@ type ParsedUpdateExpr = UpdateExpr<EntityRef, LinkedFieldRef>
 type ParsedDeleteExpr = DeleteExpr<EntityRef, LinkedFieldRef>
 type ParsedDataExpr = DataExpr<EntityRef, LinkedFieldRef>
 type ParsedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedFieldRef>
-type ParsedAttribute = Attribute<EntityRef, LinkedFieldRef>
+type ParsedBoundAttribute = BoundAttribute<EntityRef, LinkedFieldRef>
 
 type ParsedMainEntity =
     { Entity : EntityRef
@@ -55,7 +56,7 @@ type ParsedIndexColumn = IndexColumn<EntityRef, LinkedFieldRef>
 [<NoEquality; NoComparison>]
 type private Result =
     | AResult of QueryResult<EntityRef, LinkedFieldRef>
-    | AAttribute of FunQLName * ParsedAttribute
+    | AAttribute of FunQLName * ParsedFieldExpr
 
 [<NoEquality; NoComparison>]
 type private InSource =
@@ -316,8 +317,8 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %start fieldExpr
 %type <ParsedFieldExpr> fieldExpr
 
-%start attributeMap
-%type <ParsedAttributesMap> attributeMap
+%start boundAttributeMap
+%type <ParsedBoundAttributesMap> boundAttributeMap
 
 %start indexColumn
 %type <ParsedIndexColumn> indexColumn
@@ -337,7 +338,7 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 viewExpr : ViewExpr EOF { $1 }
 fieldExpr : FieldExpr EOF { $1 }
 fieldType : FieldType EOF { $1 }
-attributeMap : AttributesMap EOF { $1 }
+boundAttributeMap : BoundAttributesMap EOF { $1 }
 indexColumn : IndexColumn EOF { $1 }
 commandExpr : CommandExpr EOF { $1 }
 
@@ -376,7 +377,7 @@ ArgumentEntry:
     | ARGUMENT_ID Argument { (FunQLName $1, $2) }
 
 Argument:
-    | FieldType ArgNullable ArgDefault MaybeAttributesMap { { ArgType = $1; Optional = $2; DefaultValue = $3; Attributes = $4 } }
+    | FieldType ArgNullable ArgDefault MaybeBoundAttributesMap { { ArgType = $1; Optional = $2; DefaultValue = $3; Attributes = $4 } }
 
 ArgNullable:
     |      { false }
@@ -519,38 +520,38 @@ NonEmptyQueryResults:
     | QueryResult COMMA NonEmptyQueryResults { $1 :: $3 }
 
 QueryResult:
-    | AT Name EQ AttributeValue  { AAttribute ($2, $4) }
+    | AT Name EQ FieldExpr       { AAttribute ($2, $4) }
     | Name DOT Name DOT MULTIPLY { AResult (QRAll (Some { Schema = Some $1; Name = $3; })) }
     | Name DOT MULTIPLY          { AResult (QRAll (Some { Schema = None; Name = $1; })) }
     | MULTIPLY                   { AResult (QRAll None) }
     | QueryColumnResult          { AResult (QRExpr $1) }
 
 QueryColumnResult:
-    | FieldExpr MaybeAttributesMap         { { Alias = None; Attributes = $2; Result = $1 } }
-    | FieldExpr AS Name MaybeAttributesMap { { Alias = Some $3; Attributes = $4; Result = $1 } }
+    | FieldExpr MaybeBoundAttributesMap         { { Alias = None; Attributes = $2; Result = $1 } }
+    | FieldExpr AS Name MaybeBoundAttributesMap { { Alias = Some $3; Attributes = $4; Result = $1 } }
 
-MaybeAttributesMap:
-    |                                                   { Map.empty }
-    | AttributesMap                                      { $1 }
+MaybeBoundAttributesMap:
+    |                    { Map.empty }
+    | BoundAttributesMap { $1 }
 
-AttributesMap:
-    | AT_LEFT_BRACE RIGHT_BRACE                         { Map.empty }
-    | AT_LEFT_BRACE AttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
+BoundAttributesMap:
+    | AT_LEFT_BRACE RIGHT_BRACE                              { Map.empty }
+    | AT_LEFT_BRACE BoundAttributeValuesNonEmpty RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
 
-AttributeValuesNonEmpty:
-    | Name EQ AttributeValue                               { [($1, $3)] }
-    | Name EQ AttributeValue COMMA                         { [($1, $3)] }
-    | Name EQ AttributeValue COMMA AttributeValuesNonEmpty { ($1, $3) :: $5 }
+BoundAttributeValuesNonEmpty:
+    | Name EQ BoundAttributeValue                                    { [($1, $3)] }
+    | Name EQ BoundAttributeValue COMMA                              { [($1, $3)] }
+    | Name EQ BoundAttributeValue COMMA BoundAttributeValuesNonEmpty { ($1, $3) :: $5 }
 
-AttributeValue:
-    | MAPPING ON LinkedFieldRef AttrMappingWhenList AttrMappingElse END { AMapping ($3, parseHashMap "Clashing mapping values" $4, $5) }
-    | FieldExpr                                                         { AExpr $1 }
+BoundAttributeValue:
+    | MAPPING BoundAttrMappingWhenList BoundAttrMappingElse END { BAMapping { Entries = parseHashMap "Clashing mapping values" $2; Default = $3 } }
+    | FieldExpr                                                 { BAExpr $1 }
 
-AttrMappingWhenList:
-    | WHEN Value THEN Value AttrMappingWhenList { ($2, $4) :: $5 }
-    | WHEN Value THEN Value                   { [($2, $4)] }
+BoundAttrMappingWhenList:
+    | WHEN Value THEN Value BoundAttrMappingWhenList { ($2, $4) :: $5 }
+    | WHEN Value THEN Value                          { [($2, $4)] }
 
-AttrMappingElse:
+BoundAttrMappingElse:
     |            { None }
     | ELSE Value { Some $2 }
 

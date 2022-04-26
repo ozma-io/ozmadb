@@ -7,6 +7,7 @@ open FSharpPlus
 open NodaTime
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
+open System.Runtime.Serialization
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
@@ -557,24 +558,62 @@ type [<NoEquality; NoComparison>] FromEntity<'e> when 'e :> IFunQLName =
 
 type OperationEntity<'e> when 'e :> IFunQLName = FromEntity<'e>
 
-type AttributesMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, Attribute<'e, 'f>>
+type SerializedBoundMappingEntry =
+    { When : FieldValue
+      Value : FieldValue
+    }
 
-and [<NoEquality; NoComparison>] Attribute<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    | AExpr of FieldExpr<'e, 'f>
-    | AMapping of 'f * HashMap<FieldValue, FieldValue> * FieldValue option
+type BoundMappingEntriesPrettyConverter () =
+    inherit JsonConverter<HashMap<FieldValue, FieldValue>> ()
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, someType, existingValue, hasExistingValue, serializer : JsonSerializer) : HashMap<FieldValue, FieldValue> =
+        raise <| NotImplementedException ()
+
+    override this.WriteJson (writer : JsonWriter, value : HashMap<FieldValue, FieldValue>, serializer : JsonSerializer) : unit =
+        writer.WriteStartArray ()
+        for KeyValue(k, v) in value do
+            let convInfo =
+                { When = k
+                  Value = v
+                }
+            serializer.Serialize (writer, convInfo)
+        writer.WriteEndArray ()
+
+type [<NoEquality; NoComparison>] BoundMapping =
+    { [<JsonConverter(typeof<BoundMappingEntriesPrettyConverter>)>]
+      Entries : HashMap<FieldValue, FieldValue>
+      [<DataMember(EmitDefaultValue = false)>]
+      Default : FieldValue option
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            let esStr = this.Entries |> HashMap.toSeq |> Seq.map (fun (value, e) -> sprintf "WHEN %s THEN %s" (toFunQLString value) (toFunQLString e)) |> String.concat " "
+            let elsStr =
+                match this.Default with
+                | None -> ""
+                | Some e -> sprintf "ELSE %s" (e.ToFunQLString())
+            String.concatWithWhitespaces ["MAPPING"; esStr; elsStr; "END"]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+type AttributesMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, FieldExpr<'e, 'f>>
+
+and BoundAttributesMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, BoundAttribute<'e, 'f>>
+
+and [<NoEquality; NoComparison>] BoundAttribute<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | BAExpr of FieldExpr<'e, 'f>
+    | BAMapping of BoundMapping
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             match this with
-            | AExpr e -> toFunQLString e
-            | AMapping (field, es, els) ->
-                let esStr = es |> HashMap.toSeq |> Seq.map (fun (value, e) -> sprintf "WHEN %s THEN %s" (toFunQLString value) (toFunQLString e)) |> String.concat " "
-                let elsStr =
-                    match els with
-                    | None -> ""
-                    | Some e -> sprintf "ELSE %s" (e.ToFunQLString())
-                String.concatWithWhitespaces ["MAPPING ON"; toFunQLString field; esStr; elsStr; "END"]
+            | BAExpr e -> toFunQLString e
+            | BAMapping mapping -> toFunQLString mapping
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -700,7 +739,7 @@ and [<NoEquality; NoComparison>] QueryResult<'e, 'f> when 'e :> IFunQLName and '
 
 and [<NoEquality; NoComparison>] QueryColumnResult<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Alias : EntityName option
-      Attributes : AttributesMap<'e, 'f>
+      Attributes : BoundAttributesMap<'e, 'f>
       Result : FieldExpr<'e, 'f>
     } with
         override this.ToString () = this.ToFunQLString()
@@ -1475,6 +1514,7 @@ type ResolvedCommonTableExprs = CommonTableExprs<EntityRef, LinkedBoundFieldRef>
 type ResolvedFromEntity = FromEntity<EntityRef>
 type ResolvedFromExpr = FromExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedAttributesMap = AttributesMap<EntityRef, LinkedBoundFieldRef>
+type ResolvedBoundAttributesMap = BoundAttributesMap<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>
 type ResolvedAggExpr = AggExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderColumn = OrderColumn<EntityRef, LinkedBoundFieldRef>
@@ -1486,7 +1526,7 @@ type ResolvedDataExpr = DataExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedOperationEntity = OperationEntity<EntityRef>
 type ResolvedInsertSource = InsertSource<EntityRef, LinkedBoundFieldRef>
 type ResolvedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedBoundFieldRef>
-type ResolvedAttribute = Attribute<EntityRef, LinkedBoundFieldRef>
+type ResolvedBoundAttribute = BoundAttribute<EntityRef, LinkedBoundFieldRef>
 
 type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 
@@ -1497,7 +1537,7 @@ type Argument<'te, 'e, 'f> when 'te :> IFunQLName and 'e :> IFunQLName and 'f :>
     { ArgType: FieldType<'te>
       Optional: bool
       DefaultValue : FieldValue option
-      Attributes : AttributesMap<'e, 'f>
+      Attributes : BoundAttributesMap<'e, 'f>
     } with
         override this.ToString () = this.ToFunQLString()
 

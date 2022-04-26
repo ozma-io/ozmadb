@@ -52,8 +52,8 @@ and private checkPureSubSingleSelectExpr (select : SingleSelectExpr) : PuritySta
 
 and private checkPureSubOrderLimitExpr (orderLimit : OrderLimitClause) : PurityStatus option =
     seq {
-        yield! orderLimit.Limit |> Option.toSeq |> Seq.map checkPureValueExpr 
-        yield! orderLimit.Offset |> Option.toSeq |> Seq.map checkPureValueExpr 
+        yield! orderLimit.Limit |> Option.toSeq |> Seq.map checkPureValueExpr
+        yield! orderLimit.Offset |> Option.toSeq |> Seq.map checkPureValueExpr
         yield! orderLimit.OrderBy |> Seq.map (fun order -> checkPureValueExpr order.Expr)
     } |> foldPuritySeq
 

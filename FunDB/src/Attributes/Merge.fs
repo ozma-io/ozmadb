@@ -10,7 +10,7 @@ type MergedAttribute =
     { SchemaName : SchemaName
       Priority : int
       Inherited : bool
-      Attribute : ResolvedAttribute
+      Attribute : DefaultAttribute
     }
 
 type MergedAttributesMap = Map<AttributeName, MergedAttribute>
@@ -70,7 +70,7 @@ let private mergeAttributesPair (a : MergedDefaultAttributes) (b : MergedDefault
     { Schemas = Map.unionWith (fun name -> mergeAttributesSchema) a.Schemas b.Schemas
     }
 
-let private makeMergedAttribute (schemaName : SchemaName) (priority : int) (attr : ResolvedAttribute) =
+let private makeMergedAttribute (schemaName : SchemaName) (priority : int) (attr : DefaultAttribute) =
     { SchemaName = schemaName
       Priority = priority
       Attribute = attr

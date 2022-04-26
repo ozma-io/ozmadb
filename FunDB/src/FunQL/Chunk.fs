@@ -141,8 +141,9 @@ let genericResolveChunk (layout : Layout) (namesMap : ColumnNamesMap) (chunk : S
     }
 
 let resolveViewExprChunk (layout : Layout) (viewExpr : CompiledViewExpr) (chunk : SourceQueryChunk) : ResolvedQueryChunk =
-    let getOneColumn = function
-        | (CTColumn name, columnName) -> Some (name, columnName)
+    let getOneColumn (info : CompiledColumnInfo) =
+        match info.Type with
+        | CTColumn name -> Some (name, info.Name)
         | _ -> None
     let columnsMap = viewExpr.Columns |> Seq.mapMaybe getOneColumn |> Map.ofSeq
     genericResolveChunk layout columnsMap chunk

@@ -95,15 +95,18 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         | QRExpr result -> buildForColumnResult result
 
     and buildForColumnResult (result : ResolvedQueryColumnResult) =
-        buildForAttributesMap result.Attributes
+        buildForBoundAttributesMap result.Attributes
         ignore <| buildForFieldExpr result.Result
 
-    and buildForAttribute : ResolvedAttribute -> unit = function
-        | AExpr expr -> ignore <| buildForFieldExpr expr
-        | AMapping (field, es, els) -> ()
+    and buildForBoundAttribute : ResolvedBoundAttribute -> unit = function
+        | BAExpr expr -> ignore <| buildForFieldExpr expr
+        | BAMapping mapping -> ()
+
+    and buildForBoundAttributesMap (attributes : ResolvedBoundAttributesMap) =
+        Map.iter (fun name attr -> buildForBoundAttribute attr) attributes
 
     and buildForAttributesMap (attributes : ResolvedAttributesMap) =
-        Map.iter (fun name attr -> buildForAttribute attr) attributes
+        Map.iter (fun name attr -> ignore <| buildForFieldExpr attr) attributes
 
     and buildForFieldExpr (expr : ResolvedFieldExpr) : ExprInfo =
         let mutable exprInfo = emptyExprInfo

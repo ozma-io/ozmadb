@@ -33,7 +33,7 @@ type ExecutedAttributeTypesMap = Map<AttributeName, SQL.SimpleValueType>
 
 type [<NoEquality; NoComparison>] ExecutedValue =
     { Value : SQL.Value
-      [<DataMember(EmitDefaultValue = false, Order = 42)>]
+      [<DataMember(EmitDefaultValue = false)>]
       Attributes : ExecutedAttributesMap
       [<DataMember(EmitDefaultValue = false)>]
       Pun : SQL.Value option
@@ -123,13 +123,13 @@ let private splitPairsMap pairsMap =
 
 let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SelectExpr) option =
     let allColumns =  Seq.append viewExpr.AttributesQuery.PureColumns viewExpr.AttributesQuery.PureColumnsWithArguments
-    let colTypes = allColumns |> Seq.map (fun (typ, name, col) -> typ) |> Seq.toArray
+    let colTypes = allColumns |> Seq.map (fun (info, col) -> info.Type) |> Seq.toArray
     if Array.isEmpty colTypes then
         None
     else
         let query =
             { SQL.emptySingleSelectExpr with
-                  Columns = allColumns |> Seq.map (fun (typ, name, col) -> SQL.SCExpr (Some name, col)) |> Seq.toArray
+                  Columns = allColumns |> Seq.map (fun (info, col) -> SQL.SCExpr (Some info.Name, col)) |> Seq.toArray
             }
         let select = SQL.selectExpr (SQL.SSelect query)
         Some (colTypes, select)
@@ -169,18 +169,18 @@ let private parseAttributesResult (columns : ColumnType[]) (values : (SQL.SQLNam
 let private parseResult
         (mainRootEntity : ResolvedEntityRef option)
         (domains : Domains)
-        (columns : (ColumnType * SQL.ColumnName)[])
+        (columns : CompiledColumnInfo[])
         (resultColumns : (SQL.SQLName * SQL.SimpleValueType)[])
         (rows : IAsyncEnumerable<SQL.Value[]>)
         (processFunc : ExecutedViewInfo -> IAsyncEnumerable<ExecutedRow> -> Task<'a>) : Task<'a> =
-    let takeRowAttribute i (colType, _) (_, valType) =
-        match colType with
+    let takeRowAttribute i (colInfo : CompiledColumnInfo) (_, valType) =
+        match colInfo.Type with
         | CTMeta (CMRowAttribute name) -> Some (name, (valType, i))
         | _ -> None
     let rowAttributes = Seq.mapi2Maybe takeRowAttribute columns resultColumns |> Map.ofSeq
 
-    let takeCellAttribute i (colType, _) (_, valType) =
-        match colType with
+    let takeCellAttribute i (colInfo : CompiledColumnInfo) (_, valType) =
+        match colInfo.Type with
             | CTColumnMeta (fieldName, CCCellAttribute name) -> Some (fieldName, (name, (valType, i)))
             | _ -> None
     let allCellAttributes =
@@ -189,44 +189,44 @@ let private parseResult
         |> Seq.map (fun (fieldName, attrs) -> (fieldName, attrs |> Seq.map snd |> Map.ofSeq))
         |> Map.ofSeq
 
-    let takePunAttribute i (colType, _) (_, valType) =
-        match colType with
+    let takePunAttribute i (colInfo : CompiledColumnInfo) (_, valType) =
+        match colInfo.Type with
         | CTColumnMeta (name, CCPun) -> Some (name, (valType, i))
         | _ -> None
     let punAttributes = Seq.mapi2Maybe takePunAttribute columns resultColumns |> Map.ofSeq
 
-    let takeDomainColumn i (colType, _) =
-        match colType with
+    let takeDomainColumn i (colInfo : CompiledColumnInfo) =
+        match colInfo.Type with
         | CTMeta (CMDomain ns) -> Some (ns, i)
         | _ -> None
     let domainColumns = Seq.mapiMaybe takeDomainColumn columns |> Map.ofSeq
 
-    let takeIdColumn i (colType, _) =
-        match colType with
+    let takeIdColumn i (colInfo : CompiledColumnInfo) =
+        match colInfo.Type with
         | CTMeta (CMId name) -> Some (name, i)
         | _ -> None
     let idColumns = Seq.mapiMaybe takeIdColumn columns |> Map.ofSeq
 
-    let takeSubEntityColumn i (colType, _) =
-        match colType with
+    let takeSubEntityColumn i (colInfo : CompiledColumnInfo) =
+        match colInfo.Type with
         | CTMeta (CMSubEntity name) -> Some (name, i)
         | _ -> None
     let subEntityColumns = Seq.mapiMaybe takeSubEntityColumn columns |> Map.ofSeq
 
-    let takeMainIdColumn i (colType, _) =
-        match colType with
+    let takeMainIdColumn i (colInfo : CompiledColumnInfo) =
+        match colInfo.Type with
         | CTMeta CMMainId -> Some i
         | _ -> None
     let mainIdColumn = Seq.mapiMaybe takeMainIdColumn columns |> Seq.first
 
-    let takeMainSubEntityColumn i (colType, _) =
-        match colType with
+    let takeMainSubEntityColumn i (colInfo : CompiledColumnInfo) =
+        match colInfo.Type with
         | CTMeta CMMainSubEntity -> Some i
         | _ -> None
     let mainSubEntityColumn = Seq.mapiMaybe takeMainSubEntityColumn columns |> Seq.first
 
-    let takeColumn i (colType, _) (_, valType) =
-        match colType with
+    let takeColumn i (colInfo : CompiledColumnInfo) (_, valType) =
+        match colInfo.Type with
             | CTColumn name ->
                 let cellAttributes =
                     match Map.tryFind name allCellAttributes with

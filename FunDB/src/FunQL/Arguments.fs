@@ -24,7 +24,7 @@ type CompiledArgument =
       DbType : SQL.DBValueType
       Optional : bool
       DefaultValue : FieldValue option
-      Attributes : ResolvedAttributesMap
+      Attributes : ResolvedBoundAttributesMap
     }
 
 type RawArguments = Map<string, JToken>

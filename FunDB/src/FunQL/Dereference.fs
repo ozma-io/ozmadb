@@ -40,22 +40,29 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         | QRExpr result -> QRExpr <| resolveColumnResult result
 
     and resolveColumnResult (result : ResolvedQueryColumnResult) : ResolvedQueryColumnResult =
-        let attributes = resolveAttributesMap result.Attributes
+        let attributes = resolveBoundAttributesMap result.Attributes
         let expr = resolveFieldExpr result.Result
         { Alias = result.Alias
           Attributes = attributes
           Result = expr
         }
 
-    and resolveAttribute : ResolvedAttribute -> ResolvedAttribute = function
-        | AExpr expr -> AExpr (resolveFieldExpr expr)
-        | AMapping (value, es, els) ->
-            let newEs = HashMap.mapWithKeys (fun value e -> (resolveValue value, resolveValue e)) es
-            let newEls = Option.map resolveValue els
-            AMapping (value, newEs, newEls)
+    and resolveBoundAttribute : ResolvedBoundAttribute -> ResolvedBoundAttribute = function
+        | BAExpr expr -> BAExpr (resolveFieldExpr expr)
+        | BAMapping mapping ->
+            let newEs = HashMap.mapWithKeys (fun value e -> (resolveValue value, resolveValue e)) mapping.Entries
+            let newEls = Option.map resolveValue mapping.Default
+            let ret =
+                { Entries = newEs
+                  Default = newEls
+                }
+            BAMapping ret
+
+    and resolveBoundAttributesMap (attributes : ResolvedBoundAttributesMap) : ResolvedBoundAttributesMap =
+        Map.map (fun name expr -> resolveBoundAttribute expr) attributes
 
     and resolveAttributesMap (attributes : ResolvedAttributesMap) : ResolvedAttributesMap =
-        Map.map (fun name expr -> resolveAttribute expr) attributes
+        Map.map (fun name expr -> resolveFieldExpr expr) attributes
 
     and resolveFieldExpr (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
         let mapper =
@@ -194,7 +201,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
         | DEDelete delete -> DEDelete <| resolveDeleteExpr delete
 
     let resolveArgument (arg : ResolvedArgument) : ResolvedArgument =
-        { arg with Attributes = resolveAttributesMap arg.Attributes }
+        { arg with Attributes = resolveBoundAttributesMap arg.Attributes }
 
     let resolveArgumentsMap (argsMap : ResolvedArgumentsMap) : ResolvedArgumentsMap =
         OrderedMap.map (fun name -> resolveArgument) argsMap

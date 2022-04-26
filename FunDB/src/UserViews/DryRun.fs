@@ -38,6 +38,7 @@ type UVDomainField =
 type UVDomain = Map<FieldName, UVDomainField>
 type UVDomains = Map<GlobalDomainId, UVDomain>
 
+[<NoEquality; NoComparison>]
 type AttributeInfo =
     { Type : SQL.SimpleValueType
       Pure : bool
@@ -45,11 +46,14 @@ type AttributeInfo =
 
 type AttributesInfoMap = Map<AttributeName, AttributeInfo>
 
+type AttributeMappingsMap = Map<AttributeName, BoundMapping>
+
 [<NoEquality; NoComparison>]
 type UserViewColumn =
     { Name : ViewColumnName
       AttributeTypes : AttributesInfoMap
       CellAttributeTypes : ExecutedAttributeTypesMap
+      AttributeMappings : AttributeMappingsMap
       ValueType : SQL.SimpleValueType
       PunType : SQL.SimpleValueType option
       MainField : MainField option
@@ -61,6 +65,7 @@ type ArgumentInfo =
       Optional : bool
       DefaultValue : FieldValue option
       AttributeTypes : AttributesInfoMap
+      AttributeMappings : AttributeMappingsMap
     }
 
 [<NoEquality; NoComparison>]
@@ -70,6 +75,7 @@ type SerializedArgumentInfo =
       Optional : bool
       DefaultValue : FieldValue option
       AttributeTypes : AttributesInfoMap
+      AttributeMappings : AttributeMappingsMap
     }
 
 type ArgumentsPrettyConverter () =
@@ -89,6 +95,7 @@ type ArgumentsPrettyConverter () =
                   Optional = v.Optional
                   DefaultValue = v.DefaultValue
                   AttributeTypes = v.AttributeTypes
+                  AttributeMappings = v.AttributeMappings
                 }
             serializer.Serialize (writer, convInfo)
         writer.WriteEndArray ()
@@ -211,49 +218,84 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
     let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) (results : ExecutingViewExpr) : UserViewInfo =
         let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.Entity |> Option.get, main)) viewExpr.MainEntity
 
-        let getPureAttr = function
-        | (CTMeta (CMRowAttribute attrName), name, attr) -> Some attrName
-        | _ -> None
+        let getPureAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
+            match column.Type with
+            | CTMeta (CMRowAttribute attrName) -> Some attrName
+            | _ -> None
         let pureAttrsNames = compiled.AttributesQuery.PureColumns |> Seq.mapMaybe getPureAttr |> Set.ofSeq
 
-        let getPureColumnAttr = function
-        | (CTColumnMeta (colName, CCCellAttribute attrName), name, attr) -> Some (colName, attrName)
-        | _ -> None
+        let getPureColumnAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
+            match column.Type with
+            | CTColumnMeta (colName, CCCellAttribute attrName) -> Some (colName, attrName)
+            | _ -> None
         let pureColumnAttrNames = compiled.AttributesQuery.PureColumns |> Seq.mapMaybe getPureColumnAttr |> Set.ofSeq
 
-        let getPureArgumentAttr = function
-        | (CTMeta (CMArgAttribute (argName, attrName)), name, attr) -> Some (argName, attrName)
-        | _ -> None
+        let getPureArgumentAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
+            match column.Type with
+            | CTMeta (CMArgAttribute (argName, attrName)) -> Some (argName, attrName)
+            | _ -> None
         let pureArgumentAttrNames = compiled.AttributesQuery.PureColumns |> Seq.mapMaybe getPureArgumentAttr |> Set.ofSeq
 
-        let getResultColumn name (column : ExecutedColumnInfo) : UserViewColumn =
+        let allColumnsInfo =
+            Seq.concat
+                [ Seq.map fst compiled.AttributesQuery.PureColumns
+                  Seq.map fst compiled.AttributesQuery.PureColumnsWithArguments
+                  compiled.Columns
+                ]
+
+        let getColumnAttributeMapping (column : CompiledColumnInfo) =
+            match column.Type with
+            | CTColumnMeta (colName, CCCellAttribute attrName) -> Option.map (Map.singleton attrName >> Map.singleton colName) column.Info.Mapping
+            | _ -> None
+        let columnAttributeMappings = Seq.mapMaybe getColumnAttributeMapping allColumnsInfo |> Seq.fold (Map.unionWith (fun name -> Map.union)) Map.empty
+
+        let getArgumentAttributeMapping (column : CompiledColumnInfo) =
+            match column.Type with
+            | CTMeta (CMArgAttribute (argName, attrName)) -> Option.map (Map.singleton attrName >> Map.singleton argName) column.Info.Mapping
+            | _ -> None
+        let argumentAttributeMappings = Seq.mapMaybe getArgumentAttributeMapping allColumnsInfo |> Seq.fold (Map.unionWith (fun name -> Map.union)) Map.empty
+
+        let getResultColumn (column : ExecutedColumnInfo) : UserViewColumn =
             let mainField =
                 match mainEntity with
                 | None -> None
                 | Some (entity, insertInfo) ->
-                    match Map.tryFind name insertInfo.ColumnsToFields with
+                    match Map.tryFind column.Name insertInfo.ColumnsToFields with
                     | None -> None
                     | Some fieldName ->
                         Some { Name = fieldName
                                Field = getSerializedField { Entity = insertInfo.Entity; Name = fieldName } |> Option.get
                              }
-             
+
             let getAttributeInfo attrName typ =
                 { Type = typ
-                  Pure = Set.contains (name, attrName) pureColumnAttrNames
+                  Pure = Set.contains (column.Name, attrName) pureColumnAttrNames
                 }
+            let attributeTypes = Map.map getAttributeInfo column.AttributeTypes
+            let allAttributeMappings = Map.findWithDefault column.Name Map.empty columnAttributeMappings
+            let attributeMappings =
+                Map.filter
+                    (fun attrName mapping ->
+                        try
+                            not attributeTypes.[attrName].Pure
+                        with
+                        | e -> raisefWithInner UserViewDryRunException e ""
+                    ) allAttributeMappings
 
             { Name = column.Name
-              AttributeTypes = Map.map getAttributeInfo column.AttributeTypes
+              AttributeTypes = attributeTypes
               CellAttributeTypes = column.CellAttributeTypes
+              AttributeMappings = attributeMappings
               ValueType = column.ValueType
               PunType = column.PunType
               MainField = mainField
             }
 
+        let columns = Array.map getResultColumn viewInfo.Columns
+
         let attributesStr =
             Seq.append compiled.AttributesQuery.PureColumns compiled.AttributesQuery.PureColumnsWithArguments
-            |> Seq.map (fun (typ, name, expr) -> SQL.SCExpr (Some name, expr) |> string) |> String.concat ", "
+            |> Seq.map (fun (info, expr) -> SQL.SCExpr (Some info.Name, expr) |> string) |> String.concat ", "
         let queryStr = compiled.Query.Expression.ToString()
         let hash = String.concatWithWhitespaces [attributesStr; queryStr] |> Hash.sha1OfString |> String.hexBytes
 
@@ -266,12 +308,16 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
                     { Type = typ
                       Pure = Set.contains (name, attrName) pureArgumentAttrNames
                     }
+                let attributeTypes = Map.map getAttributeInfo argAttrTypes
+                let allAttributeMappings = Map.findWithDefault name Map.empty argumentAttributeMappings
+                let attributeMappings = Map.filter (fun attrName mapping -> not attributeTypes.[attrName].Pure) allAttributeMappings
 
                 let argInfo =
                     { ArgType = info.ArgType
                       Optional = info.Optional
                       DefaultValue = info.DefaultValue
-                      AttributeTypes = Map.map getAttributeInfo argAttrTypes
+                      AttributeTypes = attributeTypes
+                      AttributeMappings = attributeMappings
                     } : ArgumentInfo
                 Some (name, argInfo)
             | PGlobal name -> None
@@ -286,7 +332,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
           RowAttributeTypes = viewInfo.RowAttributeTypes
           Arguments = arguments
           Domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.FlattenedDomains
-          Columns = Seq.map2 getResultColumn (Seq.mapMaybe getColumn compiled.Columns) viewInfo.Columns |> Seq.toArray
+          Columns = columns
           MainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.Entity) viewExpr.MainEntity
           Hash = hash
         }

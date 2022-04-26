@@ -7,6 +7,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Resolve
+open FunWithFlags.FunDB.FunQL.Purity
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Types
@@ -24,7 +25,7 @@ let private attrResolutionFlags = { emptyExprResolutionFlags with Privileged = t
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let resolveAttributesField (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (fieldAttrs : SourceAttributesField) : AttributesField =
         let attrsMap =
-            match parse tokenizeFunQL attributeMap fieldAttrs.Attributes with
+            match parse tokenizeFunQL boundAttributeMap fieldAttrs.Attributes with
             | Ok r -> r
             | Error msg -> raisef ResolveAttributesException "Error parsing attributes: %s" msg
 
@@ -34,9 +35,15 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
 
+        let finalizeOne name expr =
+            { Expression = expr
+              Purity = checkPureBoundAttribute expr
+            }
+        let defaultMap = Map.map finalizeOne resolvedMap
+
         { AllowBroken = fieldAttrs.AllowBroken
           Priority = fieldAttrs.Priority
-          Attributes = resolvedMap
+          Attributes = defaultMap
         }
 
     let resolveAttributesEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (entityAttrs : SourceAttributesEntity) : ErroredAttributesEntity * AttributesEntity =

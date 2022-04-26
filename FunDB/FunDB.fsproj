@@ -44,6 +44,7 @@
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParse.fs" />
     <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
+    <Compile Include="src/FunQL/Purity.fs" />
 
     <Compile Include="src/Connection.fs" />
     <Compile Include="src/EventLogger.fs" />

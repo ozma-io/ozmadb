@@ -175,7 +175,7 @@ let renderSqlInterval (p : Period) : string =
     let months = p.Years * NpgsqlTimeSpan.MonthsPerYear + p.Months
     let days = p.Days
     let ticks =
-        p.Hours * NpgsqlTimeSpan.TicksPerHour + 
+        p.Hours * NpgsqlTimeSpan.TicksPerHour +
         p.Minutes * NpgsqlTimeSpan.TicksPerMinute +
         p.Seconds * NpgsqlTimeSpan.TicksPerSecond +
         p.Milliseconds * NpgsqlTimeSpan.TicksPerMillsecond +
