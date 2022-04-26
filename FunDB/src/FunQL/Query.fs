@@ -28,13 +28,13 @@ type UserViewExecutionException (message : string, innerException : Exception, i
 
     new (message : string) = UserViewExecutionException (message, null, true)
 
-type ExecutedAttributeMap = Map<AttributeName, SQL.Value>
-type ExecutedAttributeTypes = Map<AttributeName, SQL.SimpleValueType>
+type ExecutedAttributesMap = Map<AttributeName, SQL.Value>
+type ExecutedAttributeTypesMap = Map<AttributeName, SQL.SimpleValueType>
 
 type [<NoEquality; NoComparison>] ExecutedValue =
     { Value : SQL.Value
       [<DataMember(EmitDefaultValue = false, Order = 42)>]
-      Attributes : ExecutedAttributeMap
+      Attributes : ExecutedAttributesMap
       [<DataMember(EmitDefaultValue = false)>]
       Pun : SQL.Value option
     }
@@ -49,7 +49,7 @@ type [<NoEquality; NoComparison>] ExecutedRow =
     { Values : ExecutedValue[]
       DomainId : GlobalDomainId option
       [<DataMember(EmitDefaultValue = false)>]
-      Attributes : ExecutedAttributeMap
+      Attributes : ExecutedAttributesMap
       [<DataMember(EmitDefaultValue = false)>]
       EntityIds : Map<DomainIdColumn, ExecutedEntityId>
       [<DataMember(EmitDefaultValue = false)>]
@@ -61,34 +61,34 @@ type [<NoEquality; NoComparison>] ExecutedRow =
 [<NoEquality; NoComparison>]
 type ExecutedColumnInfo =
     { Name : FunQLName
-      AttributeTypes : ExecutedAttributeTypes
-      CellAttributeTypes : ExecutedAttributeTypes
+      AttributeTypes : ExecutedAttributeTypesMap
+      CellAttributeTypes : ExecutedAttributeTypesMap
       ValueType : SQL.SimpleValueType
       PunType : SQL.SimpleValueType option
     }
 
 [<NoEquality; NoComparison>]
 type ExecutedViewInfo =
-    { AttributeTypes : ExecutedAttributeTypes
-      RowAttributeTypes : ExecutedAttributeTypes
+    { AttributeTypes : ExecutedAttributeTypesMap
+      RowAttributeTypes : ExecutedAttributeTypesMap
       Columns : ExecutedColumnInfo[]
-      ArgumentAttributeTypes : Map<ArgumentName, ExecutedAttributeTypes>
+      ArgumentAttributeTypes : Map<ArgumentName, ExecutedAttributeTypesMap>
     }
 
 [<NoEquality; NoComparison>]
 type ExecutingViewExpr =
-    { Attributes : ExecutedAttributeMap
-      ColumnAttributes : ExecutedAttributeMap[]
-      ArgumentAttributes : Map<ArgumentName, ExecutedAttributeMap>
+    { Attributes : ExecutedAttributesMap
+      ColumnAttributes : ExecutedAttributesMap[]
+      ArgumentAttributes : Map<ArgumentName, ExecutedAttributesMap>
       Rows : IAsyncEnumerable<ExecutedRow>
     }
 
 [<NoEquality; NoComparison>]
 type private ExecutedAttributes =
-    { Attributes : ExecutedAttributeMap
-      AttributeTypes : ExecutedAttributeTypes
-      ArgumentAttributes : Map<ArgumentName, ExecutedAttributeTypes * ExecutedAttributeMap>
-      ColumnAttributes : Map<FieldName, ExecutedAttributeTypes * ExecutedAttributeMap>
+    { Attributes : ExecutedAttributesMap
+      AttributeTypes : ExecutedAttributeTypesMap
+      ArgumentAttributes : Map<ArgumentName, ExecutedAttributeTypesMap * ExecutedAttributesMap>
+      ColumnAttributes : Map<FieldName, ExecutedAttributeTypesMap * ExecutedAttributesMap>
     }
 
 // TODO: we could improve performance with pipelining (we could also pipeline attributes query).
@@ -122,7 +122,7 @@ let private splitPairsMap pairsMap =
     (fsts, snds)
 
 let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SelectExpr) option =
-    let allColumns =  Seq.append viewExpr.AttributesQuery.PureColumns viewExpr.AttributesQuery.AttributeColumns
+    let allColumns =  Seq.append viewExpr.AttributesQuery.PureColumns viewExpr.AttributesQuery.PureColumnsWithArguments
     let colTypes = allColumns |> Seq.map (fun (typ, name, col) -> typ) |> Seq.toArray
     if Array.isEmpty colTypes then
         None

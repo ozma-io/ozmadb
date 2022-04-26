@@ -24,6 +24,7 @@
     <Compile Include="src/SQL/Misc.fs" />
     <Compile Include="src/SQL/PLPgSQL.fs" />
     <Compile Include="src/SQL/Typecheck.fs" />
+    <Compile Include="src/SQL/Purity.fs" />
     <FsYacc Include="src/SQL/SQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParse.fs" />
     <FsLex Include="src/SQL/SQLLex.fsl" OtherFlags="--unicode" />

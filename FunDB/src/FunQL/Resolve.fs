@@ -2393,16 +2393,26 @@ let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : Reso
         | _ -> ()
         if not (isValueOfSubtype argType def) then
             raisef ViewResolveException "Invalid default value, expected %O" argType
-    let attrsQualifier = QueryResolver (layout, Map.empty, emptyExprResolutionFlags)
     { ArgType = argType
       Optional = arg.Optional
       DefaultValue = arg.DefaultValue
-      Attributes = attrsQualifier.ResolveArgumentAttributesMap arg.Attributes
+      Attributes = Map.empty
     }
 
 let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * Map<Placeholder, ResolvedArgument> =
-    let localArguments = rawArguments |> OrderedMap.mapWithKeys (fun name arg -> (PLocal name, resolveArgument layout arg))
+    let halfLocalArguments = rawArguments |> OrderedMap.map (fun name arg -> resolveArgument layout arg)
+    let halfAllArguments = Map.union (halfLocalArguments |> OrderedMap.toMap |> Map.mapKeys PLocal) globalArgumentsMap
+
+    let attrsQualifier = QueryResolver (layout, halfAllArguments, emptyExprResolutionFlags)
+
+    let resolveAttrs name (arg : ResolvedArgument) =
+        let rawArg = OrderedMap.find name rawArguments
+        let newArgs = attrsQualifier.ResolveArgumentAttributesMap rawArg.Attributes
+        (PLocal name, { arg with Attributes = newArgs })
+
+    let localArguments = OrderedMap.mapWithKeys resolveAttrs halfLocalArguments
     let allArguments = Map.union (OrderedMap.toMap localArguments) globalArgumentsMap
+
     (localArguments, allArguments)
 
 let resolveSelectExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) (select : ParsedSelectExpr) : ResolvedArgumentsMap * ResolvedSelectExpr =

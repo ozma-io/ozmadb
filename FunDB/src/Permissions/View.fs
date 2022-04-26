@@ -290,11 +290,11 @@ let applyRoleViewExpr (layout : Layout) (allowedDatabase : AppliedAllowedDatabas
     let applier = PermissionsApplier (layout, allowedDatabase, view.Query.Arguments)
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
 
-    let mapAttributeColumn (typ, name, expr) =
+    let mapPureColumn (typ, name, expr) =
         let expr = applier.ApplyToValueExpr expr
         (typ, name, expr)
 
-    let attributesQuery = { view.AttributesQuery with AttributeColumns = Array.map mapAttributeColumn view.AttributesQuery.AttributeColumns }
+    let attributesQuery = { view.AttributesQuery with PureColumnsWithArguments = Array.map mapPureColumn view.AttributesQuery.PureColumnsWithArguments }
 
     let newQuery =
         { Expression = queryExpression

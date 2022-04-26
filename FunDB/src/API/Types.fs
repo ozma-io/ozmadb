@@ -168,9 +168,9 @@ type UserViewSource =
 
 [<NoEquality; NoComparison>]
 type ExecutedViewExpr =
-    { Attributes : ExecutedAttributeMap
-      ColumnAttributes : ExecutedAttributeMap[]
-      ArgumentAttributes : Map<ArgumentName, ExecutedAttributeMap>
+    { Attributes : ExecutedAttributesMap
+      ColumnAttributes : ExecutedAttributesMap[]
+      ArgumentAttributes : Map<ArgumentName, ExecutedAttributesMap>
       Rows : ExecutedRow[]
     }
 
@@ -183,8 +183,9 @@ type UserViewEntriesResult =
 [<NoEquality; NoComparison>]
 type UserViewInfoResult =
     { Info : UserViewInfo
-      PureAttributes : ExecutedAttributeMap
-      PureColumnAttributes : ExecutedAttributeMap array
+      PureAttributes : ExecutedAttributesMap
+      PureColumnAttributes : ExecutedAttributesMap[]
+      PureArgumentAttributes : Map<ArgumentName, ExecutedAttributesMap>
     }
 
 type UserViewFlags =

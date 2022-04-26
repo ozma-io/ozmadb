@@ -114,6 +114,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                     return Ok { Info = uv.Info
                                 PureAttributes = uv.PureAttributes.Attributes
                                 PureColumnAttributes = uv.PureAttributes.ColumnAttributes
+                                PureArgumentAttributes = uv.PureAttributes.ArgumentAttributes
                               }
                 with
                 | :? PermissionsApplyException as ex when ex.IsUserException ->
@@ -194,7 +195,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                         task {
                             let! rows = res.Rows.ToArrayAsync(ctx.CancellationToken)
                             return
-                                { ArgumentAttributes = res.ArgumentAttributes
+                                { ArgumentAttributes = Map.unionWith (fun name -> Map.union) uv.PureAttributes.ArgumentAttributes res.ArgumentAttributes
                                   Attributes = Map.union uv.PureAttributes.Attributes res.Attributes
                                   ColumnAttributes = Array.map2 Map.union uv.PureAttributes.ColumnAttributes res.ColumnAttributes
                                   Rows = rows

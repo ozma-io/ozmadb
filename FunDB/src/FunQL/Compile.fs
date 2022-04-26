@@ -15,6 +15,7 @@ open FunWithFlags.FunDB.FunQL.Typecheck
 open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Attributes.Merge
+open FunWithFlags.FunDB.SQL.Purity
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -374,12 +375,12 @@ let private subselectAttributes (info : SelectInfo) : EntityAttributes =
 // Evaluation of column-wise or global attributes
 type CompiledAttributesExpr =
     { PureColumns : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[]
-      AttributeColumns : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[]
+      PureColumnsWithArguments : (ColumnType * SQL.ColumnName * SQL.ValueExpr)[]
     }
 
 let private emptyAttributesExpr =
     { PureColumns = [||]
-      AttributeColumns = [||]
+      PureColumnsWithArguments = [||]
     }
 
 type CompiledPragmasMap = Map<SQL.ParameterName, SQL.Value>
@@ -2592,38 +2593,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     member this.UsedDatabase = usedDatabase
     member this.Arguments = arguments
 
-type private PurityStatus = Pure | RowPure
-
-let private addPurity (a : PurityStatus) (b : PurityStatus) : PurityStatus =
-    match (a, b) with
-    | (Pure, Pure) -> Pure
-    | (RowPure, _) -> RowPure
-    | (_, RowPure) -> RowPure
-
-let private checkPureExpr (expr : SQL.ValueExpr) : PurityStatus option =
-    let mutable noReferences = true
-    let mutable noRowReferences = true
-    let foundReference column =
-        noReferences <- false
-    let foundPlaceholder placeholder =
-        noRowReferences <- false
-    let foundQuery query =
-        // FIXME: make sure we check for unbound references here when we add support for external references in subexpressions.
-        noRowReferences <- false
-    SQL.iterValueExpr
-        { SQL.idValueExprIter with
-              ColumnReference = foundReference
-              Placeholder = foundPlaceholder
-              Query = foundQuery
-        }
-        expr
-    if not noReferences then
-        None
-    else if not noRowReferences then
-        Some RowPure
-    else
-        Some Pure
-
 [<NoEquality; NoComparison>]
 type private PureColumn =
     { ColumnType : ColumnType
@@ -2638,7 +2607,7 @@ let rec private findPureTreeExprAttributes (columnTypes : ColumnType[]) : SQL.Se
             match res with
             | SQL.SCAll _ -> None
             | SQL.SCExpr (name, expr) ->
-                match checkPureExpr expr with
+                match checkPureValueExpr expr with
                 | Some purity ->
                     let isGood =
                         match colType with
@@ -2680,6 +2649,14 @@ let rec private filterNonpureTreeExprColumns (cols : (PureColumn option)[]) : SQ
 and private filterNonpureExprColumns (cols : (PureColumn option)[]) (select : SQL.SelectExpr) : SQL.SelectExpr =
     let tree = filterNonpureTreeExprColumns cols select.Tree
     { select with Tree = tree }
+
+let private convertArgumentAttribute (colType : ColumnType, name : SQL.ColumnName, expr: SQL.ValueExpr) : PureColumn =
+    let purity = checkPureValueExpr expr |> Option.get
+    { ColumnType = colType
+      Purity = purity
+      Name = name
+      Expression = expr
+    }
 
 let rec private flattenDomains : Domains -> FlattenedDomains = function
     | DSingle (id, dom) -> Map.singleton id dom
@@ -2728,13 +2705,23 @@ let compileDataExpr (layout : Layout) (arguments : QueryArguments) (dataExpr : R
 
 let private convertPureColumns (infos : PureColumn seq) = infos |> Seq.map (fun info -> (info.ColumnType, info.Name, info.Expression)) |> Seq.toArray
 
+let private filterPureColumn (info : PureColumn) =
+    match info.Purity with
+    | Pure ->
+        match info.ColumnType with
+        | CTMeta (CMArgAttribute (argName, name)) -> true
+        | CTMeta (CMRowAttribute name) -> true
+        | CTColumnMeta (colName, CCCellAttribute name) -> true
+        | _ -> false
+    | _ -> false
+
 let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
     let mainEntityRef = viewExpr.MainEntity |> Option.map (fun main -> main.Entity)
     let arguments = compileArguments viewExpr.Arguments
     let compiler = QueryCompiler (layout, defaultAttrs, arguments)
     let (info, expr) = compiler.CompileSelectExpr mainEntityRef true viewExpr.Select
-    let argAttrs = compiler.CompileArgumentAttributes viewExpr.Arguments
     let columns = Array.map (mapColumnTypeFields getFinalName) info.Columns
+    let argAttrs = compiler.CompileArgumentAttributes viewExpr.Arguments
 
     let allPureAttrs = findPureExprAttributes columns expr
     let expr = filterNonpureExprColumns allPureAttrs expr
@@ -2742,23 +2729,12 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let checkColumn i _ = Option.isNone allPureAttrs.[i]
     let newColumns = Seq.filteri checkColumn columns |> Seq.toArray
 
-    let onlyPureAttrs = Seq.catMaybes allPureAttrs |> Seq.toArray
+    let allPureColumns = Seq.append (Seq.map convertArgumentAttribute argAttrs) (Seq.catMaybes allPureAttrs)
+    let (pureColumns, pureColumnsWithArgs) = Seq.partition filterPureColumn allPureColumns
     let attrQuery =
-        if Array.isEmpty onlyPureAttrs then
-            emptyAttributesExpr
-        else
-            let filterPureColumn (info : PureColumn) =
-                match info.ColumnType with
-                | CTMeta (CMRowAttribute name) when info.Purity = Pure -> true
-                | CTColumnMeta (colName, CCCellAttribute name) when info.Purity = Pure -> true
-                | _ -> false
-            let (pureColumns, attributeColumns) = onlyPureAttrs |> Seq.partition filterPureColumn
-            { PureColumns = convertPureColumns pureColumns
-              AttributeColumns = convertPureColumns attributeColumns
-            }
-
-    let attrQuery =
-        { attrQuery with PureColumns = Array.append attrQuery.PureColumns argAttrs }
+        { PureColumns = convertPureColumns pureColumns
+          PureColumnsWithArguments = convertPureColumns pureColumnsWithArgs
+        }
 
     let domains = mapDomainsFields getFinalName info.Domains
     let flattenedDomains = flattenDomains domains
