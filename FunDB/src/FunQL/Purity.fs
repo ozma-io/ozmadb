@@ -74,15 +74,12 @@ and checkPureFieldExpr (expr : ResolvedFieldExpr) : PurityStatus option =
     let mutable purity = Some Pure
 
     let foundReference (ref : LinkedBoundFieldRef) =
-        if not <| Array.isEmpty ref.Ref.Path then
+        match ref.Ref.Ref with
+        | VRPlaceholder _ ->
+            purity <- unionPurityOption purity (Some PureWithArgs)
+        | VRColumn _ ->
+            // TODO: check if column is in a sub-select, in which case it might still be pure.
             purity <- None
-        else
-            match ref.Ref.Ref with
-            | VRPlaceholder _ ->
-                purity <- unionPurityOption purity (Some PureWithArgs)
-            | VRColumn _ ->
-                // TODO: check if column is in a sub-select, in which case it might still be pure.
-                purity <- None
 
     let foundPlaceholder placeholder =
         purity <- unionPurityOption purity (Some PureWithArgs)
@@ -99,6 +96,10 @@ and checkPureFieldExpr (expr : ResolvedFieldExpr) : PurityStatus option =
 
     purity
 
-let checkPureBoundAttribute : ResolvedBoundAttribute -> PurityStatus option = function
+let checkPureBoundColumnAttribute : ResolvedBoundAttribute -> PurityStatus option = function
     | BAExpr e -> checkPureFieldExpr e
-    | BAMapping _ -> None
+    | BAMapping mapping ->
+        if HashMap.isEmpty mapping.Entries then
+            Some Pure
+        else
+            None

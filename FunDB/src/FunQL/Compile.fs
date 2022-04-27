@@ -2048,27 +2048,49 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   Column = { resultColumn with Meta = Map.unionUnique resultColumn.Meta myMeta }
                 }
             // Argument references without paths.
-            | FERef ({ Ref = { Ref = VRPlaceholder arg; AsRoot = asRoot } }) when addMetaColumns ->
-                let punColumns =
+            | FERef ({ Ref = { Ref = VRPlaceholder arg; AsRoot = asRoot } }) as argExpr when addMetaColumns ->
+                let metaColumns =
                     if not flags.IsTopLevel then
                         Seq.empty
                     else
                         let argInfo = Map.find arg arguments.Types
-                        match argInfo.FieldType with
-                        | FTScalar (SFTReference (newEntityRef, opts)) ->
-                            let mainArrow =
-                                { Name = funMain
-                                  AsRoot = false
-                                }
-                            let selectExpr = compileReferenceArgument ObjectMap.empty RCExpr argInfo asRoot [|mainArrow|] [|newEntityRef|]
-                            let punCol =
-                                { Expression = SQL.VESubquery selectExpr
-                                  Info = emptyColumnMetaInfo
-                                }
-                            Seq.singleton (CCPun, punCol)
-                        | _ -> Seq.empty
 
-                let myMeta = Map.ofSeq punColumns
+                        let punColumns =
+                            match argInfo.FieldType with
+                            | FTScalar (SFTReference (newEntityRef, opts)) ->
+                                let mainArrow =
+                                    { Name = funMain
+                                      AsRoot = false
+                                    }
+                                let selectExpr = compileReferenceArgument ObjectMap.empty RCExpr argInfo asRoot [|mainArrow|] [|newEntityRef|]
+                                let punCol =
+                                    { Expression = SQL.VESubquery selectExpr
+                                      Info = emptyColumnMetaInfo
+                                    }
+                                Seq.singleton (CCPun, punCol)
+                            | _ -> Seq.empty
+
+                        let makeArgumentAttributeColumn (name : AttributeName, attr : ResolvedBoundAttribute) =
+                            let expr = boundAttributeToExpr argExpr attr
+                            let mapping = boundAttributeToMapping attr
+                            let attrCol = CCCellAttribute name
+                            let (newPaths, compiled) = compileFieldExpr emptyExprCompilationFlags ctx paths expr
+                            paths <- newPaths
+                            let info =
+                                { Mapping = mapping
+                                  Purity = checkPureFieldExpr expr
+                                }
+                            let ret =
+                                { Expression = compiled
+                                  Info = info
+                                }
+                            (attrCol, ret)
+
+                        let attributeColumns = argInfo.Attributes |> Map.toSeq |> Seq.map makeArgumentAttributeColumn
+
+                        Seq.concat [punColumns; attributeColumns]
+
+                let myMeta = Map.ofSeq metaColumns
 
                 { Domains = None
                   MetaColumns = Map.empty

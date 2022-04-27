@@ -37,7 +37,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
 
         let finalizeOne name expr =
             { Expression = expr
-              Purity = checkPureBoundAttribute expr
+              Purity = checkPureBoundColumnAttribute expr
             }
         let defaultMap = Map.map finalizeOne resolvedMap
 
