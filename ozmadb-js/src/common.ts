@@ -192,9 +192,20 @@ export interface IAttributeInfo {
 }
 export type AttributesInfoMap = Record<AttributeName, IAttributeInfo>;
 
+export interface IBoundMappingEntry {
+  when: unknown;
+  value: unknown;
+}
+
+export interface IBoundMapping {
+  entries: IBoundMappingEntry[];
+  default?: unknown;
+}
+
 export interface IResultColumnInfo {
   name: string;
   attributeTypes: AttributesInfoMap;
+  attributeMappings: Record<AttributeName, IBoundMapping>;
   cellAttributeTypes: AttributeTypesMap;
   valueType: ValueType;
   punType?: ValueType;
@@ -213,6 +224,7 @@ export interface IArgument {
   optional: boolean;
   defaultValue?: any;
   attributeTypes: AttributesInfoMap;
+  attributeMappings: Record<AttributeName, IBoundMapping>;
 }
 
 export interface IResultViewInfo {
