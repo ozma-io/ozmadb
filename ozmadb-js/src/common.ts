@@ -184,13 +184,6 @@ export interface IMainFieldInfo {
 }
 
 export type AttributesMap = Record<AttributeName, unknown>;
-export type AttributeTypesMap = Record<AttributeName, ValueType>;
-
-export interface IAttributeInfo {
-  type: ValueType;
-  pure: boolean;
-}
-export type AttributesInfoMap = Record<AttributeName, IAttributeInfo>;
 
 export interface IBoundMappingEntry {
   when: unknown;
@@ -202,11 +195,34 @@ export interface IBoundMapping {
   default?: unknown;
 }
 
+export interface IBasicAttributeInfo {
+  type: ValueType;
+}
+
+export interface IMappedAttributeInfo extends IBasicAttributeInfo {
+  mapping?: IBoundMapping;
+}
+
+export interface IBoundAttributeInfo extends IMappedAttributeInfo {
+  pure: boolean;
+}
+export type BoundAttributesInfoMap = Record<AttributeName, IBoundAttributeInfo>;
+
+export interface ICellAttributeInfo extends IMappedAttributeInfo { }
+export type CellAttributesInfoMap = Record<AttributeName, ICellAttributeInfo>;
+
+export interface IViewAttributeInfo extends IBasicAttributeInfo {
+  pure: boolean;
+}
+export type ViewAttributesInfoMap = Record<AttributeName, IViewAttributeInfo>;
+
+export interface IRowAttributeInfo extends IBasicAttributeInfo { }
+export type RowAttributesInfoMap = Record<AttributeName, IRowAttributeInfo>;
+
 export interface IResultColumnInfo {
   name: string;
-  attributeTypes: AttributesInfoMap;
-  attributeMappings: Record<AttributeName, IBoundMapping>;
-  cellAttributeTypes: AttributeTypesMap;
+  attributeTypes: BoundAttributesInfoMap;
+  cellAttributeTypes: CellAttributesInfoMap;
   valueType: ValueType;
   punType?: ValueType;
   mainField?: IMainFieldInfo;
@@ -223,13 +239,12 @@ export interface IArgument {
   argType: FieldType;
   optional: boolean;
   defaultValue?: any;
-  attributeTypes: AttributesInfoMap;
-  attributeMappings: Record<AttributeName, IBoundMapping>;
+  attributeTypes: BoundAttributesInfoMap;
 }
 
 export interface IResultViewInfo {
-  attributeTypes: AttributesInfoMap;
-  rowAttributeTypes: AttributeTypesMap;
+  attributeTypes: ViewAttributesInfoMap;
+  rowAttributeTypes: RowAttributesInfoMap;
   arguments: IArgument[];
   domains: Record<DomainId, Record<ColumnName, IDomainField>>;
   mainEntity?: IEntityRef;
