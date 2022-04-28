@@ -136,7 +136,11 @@ let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName :
                         } : LinkedFieldRef
                     { Ref = lref; Extra = ObjectMap.add newFieldInfo extra }
             else
-                let lref = linkedRef <| VRColumn { Entity = Some rowEntityRef; Name = fieldName } : LinkedFieldRef
+                let lref =
+                    { Ref = VRColumn { Entity = Some rowEntityRef; Name = fieldName }
+                      Path = path
+                      AsRoot = false
+                    } : LinkedFieldRef
                 { Ref = lref; Extra = extra }
         | ref -> failwithf "Impossible reference: %O" ref
     mapFieldExpr (onlyFieldExprMapper convertRef) expr
