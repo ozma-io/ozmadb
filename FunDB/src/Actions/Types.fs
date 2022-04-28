@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Actions.Types
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ActionRef = ResolvedEntityRef
@@ -14,19 +15,13 @@ type ResolvedAction =
 
 [<NoEquality; NoComparison>]
 type ActionsSchema =
-    { Actions : Map<ActionName, Result<ResolvedAction, exn>>
+    { Actions : Map<ActionName, PossiblyBroken<ResolvedAction>>
     }
 
 [<NoEquality; NoComparison>]
 type ResolvedActions =
     { Schemas : Map<SchemaName, ActionsSchema>
     } with
-        member this.FindAction (ref : ActionRef) : Result<ResolvedAction, exn> option =
+        member this.FindAction (ref : ActionRef) : PossiblyBroken<ResolvedAction> option =
              Map.tryFind ref.Schema this.Schemas
                 |> Option.bind (fun schema -> Map.tryFind ref.Name schema.Actions)
-
-type ErroredActionsSchema = Map<ActionName, exn>
-type ErroredActions = Map<SchemaName, ErroredActionsSchema>
-
-let unionErroredActions (a : ErroredActions) (b : ErroredActions) : ErroredActions =
-    Map.unionWith (fun name -> Map.unionUnique) a b

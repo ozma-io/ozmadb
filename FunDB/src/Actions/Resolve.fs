@@ -48,7 +48,6 @@ type private Phase1Resolver (layout : Layout) =
         { Schemas = Map.map (fun name -> resolveActionsSchema) source.Schemas
         }
 
-let resolveActions (layout : Layout) (forceAllowBroken : bool) (source : SourceActions) : ErroredActions * ResolvedActions =
+let resolveActions (layout : Layout) (forceAllowBroken : bool) (source : SourceActions) : ResolvedActions =
     let phase1 = Phase1Resolver (layout)
-    let ret = phase1.ResolveActions source
-    (Map.empty, ret)
+    phase1.ResolveActions source

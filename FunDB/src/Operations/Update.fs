@@ -7,6 +7,9 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
+open FSharpPlus
+open Microsoft.FSharp.Quotations
+open Z.EntityFramework.Plus
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
@@ -166,3 +169,26 @@ let genericSystemUpdate<'updater when 'updater :> SystemUpdater> (db : SystemCon
               Changed = changed
             }
     }
+
+let private makeEntity schemaName (entity : Entity) = ({ Schema = schemaName; Name = FunQLName entity.Name }, entity)
+let private makeSchema (schema : Schema) = schema.Entities |> Seq.ofObj |> Seq.map (makeEntity (FunQLName schema.Name))
+
+let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, Entity> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
+
+let genericMarkBroken (queryable : IQueryable<'a>) (checks : Expr<'a -> bool> seq) (setBroken : Expr<'a -> 'a>) (cancellationToken : CancellationToken) : Task =
+    unitTask {
+        let errors = Seq.cache checks
+        if not <| Seq.isEmpty errors then
+            let check = errors |> Seq.fold1 (fun a b -> <@ fun field -> (%a) field || (%b) field @>)
+            let! _ = queryable.Where(Expr.toExpressionFunc check).UpdateAsync(Expr.toMemberInit setBroken, cancellationToken)
+            ()
+    }
+
+let checkSchemaName (name : SchemaName) : Expr<Schema -> bool> =
+    let schemaName = string name
+    <@ fun schema -> schema.Name = schemaName @>
+
+let checkEntityName (ref : ResolvedEntityRef) : Expr<Entity -> bool> =
+    let checkSchema = checkSchemaName ref.Schema
+    let entityName = string ref.Name
+    <@ fun entity -> entity.Name = entityName && (%checkSchema) entity.Schema @>

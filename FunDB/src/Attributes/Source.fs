@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Attributes.Source
 
+open FSharpPlus
 open System.ComponentModel
 
 open FunWithFlags.FunUtils
@@ -30,7 +31,7 @@ type SourceAttributesSchema =
     }
 
 let mergeSourceAttributesSchema (a : SourceAttributesSchema) (b : SourceAttributesSchema) : SourceAttributesSchema =
-    { Entities = Map.unionWith (fun name -> mergeSourceAttributesEntity) a.Entities b.Entities
+    { Entities = Map.unionWith mergeSourceAttributesEntity a.Entities b.Entities
     }
 
 type SourceAttributesDatabase =
@@ -49,7 +50,7 @@ let emptySourceAttributesDatabase : SourceAttributesDatabase =
     { Schemas = Map.empty }
 
 let mergeSourceAttributesDatabase (a : SourceAttributesDatabase) (b : SourceAttributesDatabase) : SourceAttributesDatabase =
-    { Schemas = Map.unionWith (fun name -> mergeSourceAttributesSchema) a.Schemas b.Schemas
+    { Schemas = Map.unionWith mergeSourceAttributesSchema a.Schemas b.Schemas
     }
 
 type SourceDefaultAttributes =

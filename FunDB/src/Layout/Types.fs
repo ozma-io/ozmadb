@@ -7,6 +7,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 open FunWithFlags.FunDB.Layout.Source
+open FunWithFlags.FunDB.Objects.Types
 
 type ResolvedConstraintRef = ResolvedFieldRef
 
@@ -207,7 +208,7 @@ let getColumnName (entity : IEntityBits) (name : FieldName) : SQL.ColumnName =
 [<NoEquality; NoComparison>]
 type ResolvedEntity =
     { ColumnFields : Map<FieldName, ResolvedColumnField>
-      ComputedFields : Map<FieldName, Result<ResolvedComputedField, exn>>
+      ComputedFields : Map<FieldName, PossiblyBroken<ResolvedComputedField>>
       UniqueConstraints : Map<ConstraintName, ResolvedUniqueConstraint>
       CheckConstraints : Map<ConstraintName, ResolvedCheckConstraint>
       Indexes : Map<IndexName, ResolvedIndex>
@@ -314,12 +315,6 @@ let filterLayout (f : SchemaName -> bool) (layout : Layout) : Layout =
     { Schemas = layout.Schemas |> Map.filter (fun name schema -> f name)
       SaveRestoredEntities = layout.SaveRestoredEntities
     }
-
-type ErroredEntity =
-    { ComputedFields : Map<FieldName, exn>
-    }
-type ErroredSchema = Map<EntityName, ErroredEntity>
-type ErroredLayout = Map<SchemaName, ErroredSchema>
 
 type PossibleEntities<'a> =
     | PEList of 'a

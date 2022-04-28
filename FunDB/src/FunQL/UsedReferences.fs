@@ -2,6 +2,8 @@ module FunWithFlags.FunDB.FunQL.UsedReferences
 
 // Count used references without accounting for meta columns.
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
@@ -269,7 +271,7 @@ let emptyFlatUsedEntity : FlatUsedEntity =
       EntryPoints = Set.empty
     }
 
-let unionFlatUsedChildren = Map.unionWith (fun name -> unionUsedEntities)
+let unionFlatUsedChildren = Map.unionWith unionUsedEntities
 
 let unionFlatUsedEntities (a : FlatUsedEntity) (b : FlatUsedEntity) : FlatUsedEntity =
     { Children = unionFlatUsedChildren a.Children b.Children

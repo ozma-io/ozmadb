@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.API.UserViews
 
+open FSharpPlus
 open System.Linq
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
@@ -88,8 +89,8 @@ type UserViewsAPI (api : IFunDBAPI) =
                         match ctx.UserViews.Find ref with
                         | None -> return Error UVENotFound
                         | Some (Error e) ->
-                            logger.LogError(e, "Requested user view {uv} is broken", ref.ToString())
-                            return Error <| UVECompilation (exceptionString e)
+                            logger.LogError(e.Error, "Requested user view {uv} is broken", ref.ToString())
+                            return Error <| UVECompilation (exceptionString e.Error)
                         | Some (Ok cached) ->
                             return Ok <| applyFlags flags cached
             with
@@ -195,7 +196,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                         task {
                             let! rows = res.Rows.ToArrayAsync(ctx.CancellationToken)
                             return
-                                { ArgumentAttributes = Map.unionWith (fun name -> Map.union) uv.PureAttributes.ArgumentAttributes res.ArgumentAttributes
+                                { ArgumentAttributes = Map.unionWith Map.union uv.PureAttributes.ArgumentAttributes res.ArgumentAttributes
                                   Attributes = Map.union uv.PureAttributes.Attributes res.Attributes
                                   ColumnAttributes = Array.map2 Map.union uv.PureAttributes.ColumnAttributes res.ColumnAttributes
                                   Rows = rows

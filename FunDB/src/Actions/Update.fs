@@ -8,12 +8,12 @@ open FSharp.Control.Tasks.Affine
 open Microsoft.FSharp.Quotations
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.Layout.Update
 open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Types
-open FunWithFlags.FunDBSchema.System
+open FunWithFlags.FunDB.Actions.Run
 
 type private ActionsUpdater (db : SystemContext) as this =
     inherit SystemUpdater(db)
@@ -62,15 +62,17 @@ let updateActions (db : SystemContext) (actions : SourceActions) (cancellationTo
             return updater
         }
 
-let private findBrokenActionsSchema (schemaName : SchemaName) (schema : ErroredActionsSchema) : ActionRef seq =
+let private findBrokenActionsSchema (schemaName : SchemaName) (schema : PreparedActionsSchema) : ActionRef seq =
     seq {
-        for KeyValue(actionName, action) in schema do
-            yield { Schema = schemaName; Name = actionName }
+        for KeyValue(actionName, maybeAction) in schema.Actions do
+            match maybeAction with
+            | Error e when not e.AllowBroken -> yield { Schema = schemaName; Name = actionName }
+            | _ -> ()
     }
 
-let private findBrokenActions (actions : ErroredActions) : ActionRef seq =
+let private findBrokenActions (actions : PreparedActions) : ActionRef seq =
     seq {
-        for KeyValue(schemaName, schema) in actions do
+        for KeyValue(schemaName, schema) in actions.Schemas do
             yield! findBrokenActionsSchema schemaName schema
     }
 
@@ -79,7 +81,7 @@ let private checkActionName (ref : ActionRef) : Expr<Action -> bool> =
     let uvName = string ref.Name
     <@ fun action -> (%checkSchema) action.Schema && action.Name = uvName @>
 
-let markBrokenActions (db : SystemContext) (actions : ErroredActions) (cancellationToken : CancellationToken) : Task =
+let markBrokenActions (db : SystemContext) (actions : PreparedActions) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let checks = findBrokenActions actions |> Seq.map checkActionName
         do! genericMarkBroken db.Actions checks <@ fun x -> Action(AllowBroken = true) @> cancellationToken

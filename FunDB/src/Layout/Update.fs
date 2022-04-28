@@ -1,26 +1,18 @@
 module FunWithFlags.FunDB.Layout.Update
 
-open System
-open System.Linq
 open FSharpPlus
 open Microsoft.FSharp.Quotations
-open Z.EntityFramework.Plus
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDBSchema.System
-
-let private makeEntity schemaName (entity : Entity) = ({ Schema = schemaName; Name = FunQLName entity.Name }, entity)
-let private makeSchema (schema : Schema) = schema.Entities |> Seq.ofObj |> Seq.map (makeEntity (FunQLName schema.Name))
-
-let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, Entity> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
 
 type private LayoutUpdater (db : SystemContext) as this =
     inherit SystemUpdater(db)
@@ -169,32 +161,25 @@ let updateLayout (db : SystemContext) (layout : SourceLayout) (cancellationToken
             return updater
         }
 
-let private findBrokenComputedFieldsEntity (entityRef : ResolvedEntityRef) (entity : ErroredEntity) : ResolvedFieldRef seq =
+let private findBrokenComputedFieldsEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : ResolvedFieldRef seq =
     seq {
-        for KeyValue(fieldName, field) in entity.ComputedFields do
-            yield { Entity = entityRef; Name = fieldName }
+        for KeyValue(fieldName, maybeField) in entity.ComputedFields do
+            match maybeField with
+            | Error e when not e.AllowBroken -> yield { Entity = entityRef; Name = fieldName }
+            | _ -> ()
     }
 
-let private findBrokenComputedFieldsSchema (schemaName : SchemaName) (schema : ErroredSchema) : ResolvedFieldRef seq =
+let private findBrokenComputedFieldsSchema (schemaName : SchemaName) (schema : ResolvedSchema) : ResolvedFieldRef seq =
     seq {
-        for KeyValue(entityName, entity) in schema do
+        for KeyValue(entityName, entity) in schema.Entities do
             yield! findBrokenComputedFieldsEntity { Schema = schemaName; Name = entityName } entity
     }
 
-let private findBrokenComputedFields (layout : ErroredLayout) : ResolvedFieldRef seq =
+let private findBrokenComputedFields (layout : Layout) : ResolvedFieldRef seq =
     seq {
-        for KeyValue(schemaName, schema) in layout do
+        for KeyValue(schemaName, schema) in layout.Schemas do
             yield! findBrokenComputedFieldsSchema schemaName schema
     }
-
-let checkSchemaName (name : SchemaName) : Expr<Schema -> bool> =
-    let schemaName = string name
-    <@ fun schema -> schema.Name = schemaName @>
-
-let checkEntityName (ref : ResolvedEntityRef) : Expr<Entity -> bool> =
-    let checkSchema = checkSchemaName ref.Schema
-    let entityName = string ref.Name
-    <@ fun entity -> entity.Name = entityName && (%checkSchema) entity.Schema @>
 
 let checkColumnFieldName (ref : ResolvedFieldRef) : Expr<ColumnField -> bool> =
     let checkEntity = checkEntityName ref.Entity
@@ -206,15 +191,6 @@ let checkComputedFieldName (ref : ResolvedFieldRef) : Expr<ComputedField -> bool
     let compName = string ref.Name
     <@ fun field -> field.Name = compName && (%checkEntity) field.Entity @>
 
-let genericMarkBroken (queryable : IQueryable<'a>) (checks : Expr<'a -> bool> seq) (setBroken : Expr<'a -> 'a>) (cancellationToken : CancellationToken) : Task =
-    unitTask {
-        let errors = Array.ofSeq checks
-        if not <| Array.isEmpty errors then
-            let check = errors |> Seq.fold1 (fun a b -> <@ fun field -> (%a) field || (%b) field @>)
-            let! _ = queryable.Where(Expr.toExpressionFunc check).UpdateAsync(Expr.toMemberInit setBroken, cancellationToken)
-            ()
-    }
-
-let markBrokenLayout (db : SystemContext) (layout : ErroredLayout) (cancellationToken : CancellationToken) : Task =
+let markBrokenLayout (db : SystemContext) (layout : Layout) (cancellationToken : CancellationToken) : Task =
     let checks = findBrokenComputedFields layout |> Seq.map checkComputedFieldName
     genericMarkBroken db.ComputedFields checks <@ fun x -> ComputedField(AllowBroken = true) @> cancellationToken

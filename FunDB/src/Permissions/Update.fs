@@ -7,12 +7,11 @@ open Microsoft.EntityFrameworkCore;
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
-open FunWithFlags.FunDB.Layout.Update
-open FunWithFlags.FunDBSchema.System
 
 type private PermissionsUpdater (db : SystemContext, allSchemas : Schema seq) as this =
     inherit SystemUpdater(db)
@@ -124,30 +123,38 @@ let updatePermissions (db : SystemContext) (roles : SourcePermissions) (cancella
 type private RoleErrorRef = ERRole of RoleRef
                           | EREntity of AllowedEntityRef
 
-let private findBrokenAllowedSchema (roleRef : RoleRef) (allowedSchemaName : SchemaName) (schema : ErroredAllowedSchema) : RoleErrorRef seq =
+let private findBrokenAllowedSchema (roleRef : RoleRef) (allowedSchemaName : SchemaName) (schema : AllowedSchema) : RoleErrorRef seq =
     seq {
-        for KeyValue(allowedEntityName, entity) in schema do
-            yield EREntity { Role = roleRef; Entity = { Schema = allowedSchemaName; Name = allowedEntityName } }
+        for KeyValue(allowedEntityName, maybeEntity) in schema.Entities do
+            let markBroken =
+                match maybeEntity with
+                | Ok entity -> not entity.AllowBroken && allowedEntityIsHalfBroken entity
+                | Error e -> not e.AllowBroken
+            if markBroken then
+                yield EREntity { Role = roleRef; Entity = { Schema = allowedSchemaName; Name = allowedEntityName } }
     }
 
-let private findBrokenRole (roleRef : RoleRef) (role : ErroredRole) : RoleErrorRef seq =
+let private findBrokenRole (roleRef : RoleRef) (role : ResolvedRole) : RoleErrorRef seq =
     seq {
-        match role with
-        | ERFatal e -> yield ERRole roleRef
-        | ERDatabase db ->
-            for KeyValue(allowedSchemaName, schema) in db do
-                yield! findBrokenAllowedSchema roleRef allowedSchemaName schema
+        for KeyValue(allowedSchemaName, schema) in role.Permissions.Schemas do
+            yield! findBrokenAllowedSchema roleRef allowedSchemaName schema
     }
 
-let private findBrokenRolesSchema (schemaName : SchemaName) (roles : ErroredRoles) : RoleErrorRef seq =
+let private findBrokenRolesSchema (schemaName : SchemaName) (schema : PermissionsSchema) : RoleErrorRef seq =
     seq {
-        for KeyValue(roleName, role) in roles do
-            yield! findBrokenRole { Schema = schemaName; Name = roleName } role
+        for KeyValue(roleName, maybeRole) in schema.Roles do
+            let ref = { Schema = schemaName; Name = roleName }
+            match maybeRole with
+            | Ok role ->
+                yield! findBrokenRole ref role
+            | Error e ->
+                if not e.AllowBroken then
+                    yield ERRole ref
     }
 
-let private findBrokenPermissions (roles : ErroredPermissions) : RoleErrorRef seq =
+let private findBrokenPermissions (roles : Permissions) : RoleErrorRef seq =
     seq {
-        for KeyValue(schemaName, schema) in roles do
+        for KeyValue(schemaName, schema) in roles.Schemas do
             yield! findBrokenRolesSchema schemaName schema
     }
 
@@ -161,7 +168,7 @@ let private checkAllowedEntityName (ref : AllowedEntityRef) : Expr<RoleEntity ->
     let checkRole = checkRoleName ref.Role
     <@ fun allowed -> (%checkRole) allowed.Role && (%checkEntity) allowed.Entity @>
 
-let markBrokenPermissions (db : SystemContext) (roles : ErroredPermissions) (cancellationToken : CancellationToken) : Task =
+let markBrokenPermissions (db : SystemContext) (roles : Permissions) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let broken = findBrokenPermissions roles
         let roleChecks = broken |> Seq.mapMaybe (function ERRole ref -> Some ref | _ -> None) |> Seq.map checkRoleName

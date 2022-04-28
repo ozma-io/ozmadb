@@ -1,8 +1,10 @@
 module FunWithFlags.FunDB.Permissions.Types
 
+open FunWithFlags.FunUtils
+
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Optimize
-open FunWithFlags.FunDB.Permissions.Source
+open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type UserName = string
@@ -16,7 +18,6 @@ type AllowedEntityRef =
     Entity : ResolvedEntityRef
   }
 
-
 [<NoEquality; NoComparison>]
 type AllowedField =
     { // Are you allowed to INSERT this field?
@@ -29,48 +30,39 @@ type AllowedField =
       Check : ResolvedOptimizedFieldExpr
     }
 
-[<NoEquality; NoComparison>]
-type AllowedOperationError =
-    { Source : string
-      Error : exn
-    }
-
 // Each filter and check expression here is later multiplied (ANDed) by corresponding parent entity expressions (or empty allowed entity if parent entity is not in allowed, effectively rendering all filters FALSE).
+// Role may work even when broken, just with less access rights. Hence we split AllowBroken and exceptions in several fields.
 [<NoEquality; NoComparison>]
 type AllowedEntity =
     { AllowBroken : bool
       // Post-UPDATE/INSERT check expression.
       Check : ResolvedOptimizedFieldExpr
       // Are you allowed to INSERT?
-      Insert : bool
+      Insert : Result<bool, exn>
       // Which entries are you allowed to SELECT?
       Select : ResolvedOptimizedFieldExpr
       // Which entries are you allowed to UPDATE? This is multiplied with SELECT later.
       Update : ResolvedOptimizedFieldExpr
       // Which entries are you allowed to DELETE? This is multiplied with SELECT later.
-      Delete : ResolvedOptimizedFieldExpr
+      Delete : Result<ResolvedOptimizedFieldExpr, exn>
       Fields : Map<FieldName, AllowedField>
     }
+
+let allowedEntityIsHalfBroken (entity : AllowedEntity) = (Result.isError entity.Insert || Result.isError entity.Delete)
 
 let emptyAllowedEntity : AllowedEntity =
     { AllowBroken = false
       Check = OFEFalse
-      Insert = false
+      Insert = Ok false
       Select = OFEFalse
       Update = OFEFalse
-      Delete = OFEFalse
+      Delete = Ok OFEFalse
       Fields = Map.empty
     }
 
 [<NoEquality; NoComparison>]
-type AllowedEntityError =
-    { Source : SourceAllowedEntity
-      Error : exn
-    }
-
-[<NoEquality; NoComparison>]
 type AllowedSchema =
-    { Entities : Map<EntityName, Result<AllowedEntity, AllowedEntityError>>
+    { Entities : Map<EntityName, PossiblyBroken<AllowedEntity>>
     }
 
 [<NoEquality; NoComparison>]
@@ -143,7 +135,6 @@ type ResolvedRole =
     { Parents : Set<ResolvedRoleRef>
       Permissions : AllowedDatabase
       Flattened : FlatRole
-      AllowBroken : bool
     }
 
 let emptyFlatRole =
@@ -154,12 +145,11 @@ let emptyResolvedRole =
     { Parents = Set.empty
       Permissions = emptyAllowedDatabase
       Flattened = emptyFlatRole
-      AllowBroken = false
     }
 
 [<NoEquality; NoComparison>]
 type PermissionsSchema =
-    { Roles : Map<RoleName, Result<ResolvedRole, exn>>
+    { Roles : Map<RoleName, PossiblyBroken<ResolvedRole>>
     }
 
 [<NoEquality; NoComparison>]
@@ -170,13 +160,3 @@ type Permissions =
             match Map.tryFind ref.Schema this.Schemas with
             | None -> None
             | Some schema -> Map.tryFind ref.Name schema.Roles
-
-type ErroredAllowedSchema = Map<EntityName, exn>
-type ErroredAllowedDatabase = Map<SchemaName, ErroredAllowedSchema>
-
-type ErroredRole =
-    | ERFatal of exn
-    | ERDatabase of ErroredAllowedDatabase
-
-type ErroredRoles = Map<RoleName, ErroredRole>
-type ErroredPermissions = Map<SchemaName, ErroredRoles>

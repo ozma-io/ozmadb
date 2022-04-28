@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.Attributes.Merge
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Types
@@ -56,18 +58,18 @@ let private chooseAttribute (a : MergedAttribute) (b : MergedAttribute) : Merged
         b
 
 let private mergeAttributesMap (a : MergedAttributesMap) (b : MergedAttributesMap) : MergedAttributesMap =
-    Map.unionWith (fun name -> chooseAttribute) a b
+    Map.unionWith chooseAttribute a b
 
 let private mergeAttributesEntity (a : MergedAttributesEntity) (b : MergedAttributesEntity) : MergedAttributesEntity =
-    { Fields = Map.unionWith (fun name -> mergeAttributesMap) a.Fields b.Fields
+    { Fields = Map.unionWith mergeAttributesMap a.Fields b.Fields
     }
 
 let private mergeAttributesSchema (a : MergedAttributesSchema) (b : MergedAttributesSchema) : MergedAttributesSchema =
-    { Entities = Map.unionWith (fun name -> mergeAttributesEntity) a.Entities b.Entities
+    { Entities = Map.unionWith mergeAttributesEntity a.Entities b.Entities
     }
 
 let private mergeAttributesPair (a : MergedDefaultAttributes) (b : MergedDefaultAttributes) : MergedDefaultAttributes =
-    { Schemas = Map.unionWith (fun name -> mergeAttributesSchema) a.Schemas b.Schemas
+    { Schemas = Map.unionWith mergeAttributesSchema a.Schemas b.Schemas
     }
 
 let private makeMergedAttribute (schemaName : SchemaName) (priority : int) (attr : DefaultAttribute) =

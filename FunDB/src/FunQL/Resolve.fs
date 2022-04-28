@@ -121,7 +121,7 @@ let private unionNameMappingValue (k : 'k) (a : NameMappingValue<'k, 'v>) (b : N
     FVAmbiguous <| Set.union setA setB
 
 let private unionNameMapping (a : NameMapping<'k, 'v>) (b : NameMapping<'k, 'v>) : NameMapping<'k, 'v> =
-    Map.unionWith unionNameMappingValue a b
+    Map.unionWithKey unionNameMappingValue a b
 
 type CustomFromField =
     { Bound : ResolvedFieldRef option
@@ -540,10 +540,15 @@ let private findMainEntity (select : ResolvedSelectExpr) : (ResolvedEntityRef * 
 
 type private ResolveCTE = EntityName -> QSubqueryFieldsMap
 
+type private FromEntityInfo =
+    { Schema : SchemaName option
+      EntityAttributes : Set<AttributeName>
+    }
+
 type private Context =
     { ResolveCTE : ResolveCTE
       FieldMaps : FieldMapping list
-      Entities : Map<EntityName, SchemaName option>
+      Entities : Map<EntityName, FromEntityInfo>
       Types : TypeContextsMap
     }
 
@@ -567,14 +572,14 @@ type private FromEntityIdMeta =
 let private failCte (name : EntityName) =
     raisef ViewResolveException "Table %O not found" name
 
-let private emptyContext =
+let private emptyContext : Context =
     { ResolveCTE = failCte
       FieldMaps = []
       Entities = Map.empty
       Types = Map.empty
     }
 
-let private emptyTypeContexts =
+let private emptyTypeContexts : TypeContexts =
     { Map = Map.empty
       ExtraConditionals = false
     }
@@ -934,7 +939,7 @@ let emptyExprResolutionFlags =
 
 type private FromExprInfo =
     { Fields : FieldMapping
-      Entities : Map<EntityName, SchemaName option>
+      Entities : Map<EntityName, FromEntityInfo>
       Types : TypeContextsMap
     }
 
@@ -1032,7 +1037,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
         }
 
     let andTypeContexts (ctxA : TypeContexts) (ctxB : TypeContexts) =
-        { Map = Map.unionWith (fun name -> andTypeContext) ctxA.Map ctxB.Map
+        { Map = Map.unionWith andTypeContext ctxA.Map ctxB.Map
           ExtraConditionals = ctxA.ExtraConditionals || ctxB.ExtraConditionals
         }
 
@@ -1450,14 +1455,14 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
             raisef ViewResolveException "Aggregate functions are not allowed here"
         (info.Types, res)
 
-    and resolveEntityReference (entities : Map<FieldName, SchemaName option>) (entityRef : EntityRef) : EntityRef =
-        match Map.tryFind entityRef.Name entities with
+    and resolveEntityReference (ctx : Context) (entityRef : EntityRef) : EntityRef =
+        match Map.tryFind entityRef.Name ctx.Entities with
         | None -> raisef ViewResolveException "Entity %O not found" entityRef
-        | Some realSchema ->
+        | Some entityInfo ->
             match entityRef.Schema with
-            | Some _ as schema when realSchema <> schema -> raisef ViewResolveException "Entity %O not found" entityRef
+            | Some _ as schema when entityInfo.Schema <> schema -> raisef ViewResolveException "Entity %O not found" entityRef
             | _ -> ()
-            { Schema = realSchema; Name = entityRef.Name }
+            { Schema = entityInfo.Schema; Name = entityRef.Name }
 
     and resolveFieldExpr (ctx : Context) (expr : ParsedFieldExpr) : ResolvedExprInfo * ResolvedFieldExpr =
         let mutable isLocal = true
@@ -1494,9 +1499,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
             | FEValue value -> (emptyCondTypeContexts, FEValue value)
             | FERef r -> (emptyCondTypeContexts, FERef (resolveExprReference outerTypeCtxs.Map r))
             | FEEntityAttr (eref, attr) ->
+                let newEref = resolveEntityReference ctx eref
                 // We consider entity attribute references non-local because they can change based on inner parts of the query and default attributes.
                 isLocal <- false
-                (emptyCondTypeContexts, FEEntityAttr (resolveEntityReference ctx.Entities eref, attr))
+                (emptyCondTypeContexts, FEEntityAttr (newEref, attr))
             | FEFieldAttr (fref, attr) ->
                 // We consider field attribute references non-local because they can change based on inner parts of the query and default attributes.
                 isLocal <- false
@@ -1898,9 +1904,15 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
             let entityInfo = fromEntityMapping ctx isInner entity
             let fieldMapping = unionNameMapping fieldMapping entityInfo.Fields
             let entities =
-                match entity.Alias with
-                | None -> Map.singleton entityInfo.Name.Name entityInfo.Name.Schema
-                | Some alias -> Map.singleton alias None
+                let (name, maybeSchema) =
+                    match entity.Alias with
+                    | None -> (entityInfo.Name.Name, entityInfo.Name.Schema)
+                    | Some alias -> (alias, None)
+                let info =
+                    { Schema = maybeSchema
+                      EntityAttributes = Set.empty
+                    }
+                Map.singleton name info
             let retInfo =
                 { Fields = fieldMapping
                   Entities = entities
@@ -1961,9 +1973,13 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
             let newMapping = fieldsToFieldMapping fromEntityId (Some mappingRef) fields
             let fieldMapping = unionNameMapping fieldMapping newMapping
             let newSubsel = { Alias = subsel.Alias; Lateral = subsel.Lateral; Select = newQ }
+            let entityInfo =
+                { Schema = None
+                  EntityAttributes = Set.empty
+                }
             let retInfo =
                 { Fields = fieldMapping
-                  Entities = Map.singleton subsel.Alias.Name None
+                  Entities = Map.singleton subsel.Alias.Name entityInfo
                   // TODO: pass type contexts from sub-selects.
                   Types = Map.empty
                 }

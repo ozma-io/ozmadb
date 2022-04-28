@@ -306,7 +306,7 @@ type private PathTrigger =
 
 let private unionPathTrigger (a : PathTrigger) (b : PathTrigger) : PathTrigger =
     { // Values should be the same.
-      Fields = Map.unionWith (fun name -> Set.union) a.Fields b.Fields
+      Fields = Map.unionWith Set.union a.Fields b.Fields
       Root = b.Root
     }
 

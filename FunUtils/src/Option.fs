@@ -2,7 +2,6 @@
 module FunWithFlags.FunUtils.Option
 
 open System.Threading.Tasks
-open FSharp.Control.Tasks.NonAffine
 open FSharpPlus
 
 let getOrFailWith (errorFunc : unit -> string) : 'a option -> 'a = function

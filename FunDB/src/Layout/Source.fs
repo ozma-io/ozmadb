@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Layout.Source
 
+open FSharpPlus
 open Microsoft.FSharp.Reflection
 open Newtonsoft.Json
 
@@ -116,5 +117,5 @@ let emptySourceLayout : SourceLayout =
     }
 
 let unionSourceLayout (a : SourceLayout) (b : SourceLayout) : SourceLayout =
-    { Schemas = Map.unionWith (fun name -> unionSourceSchema) a.Schemas b.Schemas
+    { Schemas = Map.unionWith unionSourceSchema a.Schemas b.Schemas
     }

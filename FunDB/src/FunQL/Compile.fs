@@ -83,7 +83,7 @@ let rec private mergeDomains (doms1 : GenericDomains<'e>) (doms2 : GenericDomain
     | (DSingle (oldId, dom), doms)
     | (doms, DSingle (oldId, dom)) -> appendDomain dom doms
     | (DMulti (ns1, subdoms1), (DMulti (ns2, subdoms2))) when ns1 = ns2 ->
-        DMulti (ns1,  Map.unionWith (fun nsId -> mergeDomains) subdoms1 subdoms2)
+        DMulti (ns1,  Map.unionWith mergeDomains subdoms1 subdoms2)
     | (DMulti (ns1, subdoms1), (DMulti _ as doms2)) ->
         DMulti (ns1, Map.map (fun name doms1 -> mergeDomains doms1 doms2) subdoms1)
 
@@ -324,7 +324,7 @@ let private unionEntityAttributes (a : EntityAttributes) (b : EntityAttributes) 
       Fields = Set.union a.Fields b.Fields
     }
 
-let private unionEntityAttributesMap : EntityAttributesMap -> EntityAttributesMap -> EntityAttributesMap = Map.unionWith (fun name -> unionEntityAttributes)
+let private unionEntityAttributesMap : EntityAttributesMap -> EntityAttributesMap -> EntityAttributesMap = Map.unionWith unionEntityAttributes
 
 [<NoEquality; NoComparison>]
 type private FromType =
@@ -640,9 +640,9 @@ let private mergeSelectSignature (a : SelectSignature) (b : SelectSignature) : M
             renames <- Map.add a.Name newName renames
         elif newName <> b.Name then
             renames <- Map.add b.Name newName renames
-        { Name = newName; Meta = Map.unionWith (fun name _ _ -> emptyColumnMetaInfo) a.Meta b.Meta }
+        { Name = newName; Meta = Map.unionWith (fun _ _ -> emptyColumnMetaInfo) a.Meta b.Meta }
     let ret =
-        { MetaColumns = Map.unionWith (fun name _ _ -> emptyColumnMetaInfo) a.MetaColumns b.MetaColumns
+        { MetaColumns = Map.unionWith (fun _ _ -> emptyColumnMetaInfo) a.MetaColumns b.MetaColumns
           Columns = Array.map2 mergeOne a.Columns b.Columns
         }
     (renames, ret)
@@ -2110,7 +2110,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let resultColumns = resultEntries |> Array.map (fun x -> x.Column)
         let emptyDomains = DSingle (newGlobalDomainId (), Map.empty)
 
-        let checkSameMeta (name : MetaType) (a : ResultMetaColumn) (b : ResultMetaColumn) =
+        let checkSameMeta (a : ResultMetaColumn) (b : ResultMetaColumn) =
             assert (string a.Expression = string b.Expression)
             b
 

@@ -1,7 +1,5 @@
 module FunWithFlags.FunDB.FunQL.Arguments
 
-open Newtonsoft.Json.Linq
-
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.Exception

@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Triggers.Source
 
+open FSharpPlus
 open Microsoft.FSharp.Reflection
 open System.ComponentModel
 
@@ -50,7 +51,7 @@ type SourceTriggersSchema =
     }
 
 let mergeSourceTriggersSchema (a : SourceTriggersSchema) (b : SourceTriggersSchema) : SourceTriggersSchema =
-    { Entities = Map.unionWith (fun name -> mergeSourceTriggersEntity) a.Entities b.Entities
+    { Entities = Map.unionWith mergeSourceTriggersEntity a.Entities b.Entities
     }
 
 type SourceTriggersDatabase =
@@ -65,7 +66,7 @@ let emptySourceTriggersDatabase : SourceTriggersDatabase =
     { Schemas = Map.empty }
 
 let mergeSourceTriggerDatabase (a : SourceTriggersDatabase) (b : SourceTriggersDatabase) : SourceTriggersDatabase =
-    { Schemas = Map.unionWith (fun name -> mergeSourceTriggersSchema) a.Schemas b.Schemas
+    { Schemas = Map.unionWith mergeSourceTriggersSchema a.Schemas b.Schemas
     }
 
 type SourceTriggers =

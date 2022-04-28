@@ -17,10 +17,10 @@ open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Merge
+open FunWithFlags.FunDB.Triggers.Run
 open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Operations.Command
 open FunWithFlags.FunDB.API.Types
-open FunWithFlags.FunDB.API.Triggers
 
 let private insertEntityComments (ref : ResolvedEntityRef) (role : RoleType) (arguments : LocalArgumentsMap) =
     let refStr = sprintf "insert into %O" ref
@@ -103,17 +103,17 @@ type EntitiesAPI (api : IFunDBAPI) =
     let logger = ctx.LoggerFactory.CreateLogger<EntitiesAPI>()
     let query = ctx.Transaction.Connection.Query
 
-    let runArgsTrigger (run : ITriggerScript -> Task<ArgsTriggerResult>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : LocalArgumentsMap) (trigger : MergedTrigger) : Task<Result<LocalArgumentsMap, BeforeTriggerError<unit>>> =
+    let runArgsTrigger (run : TriggerScript -> Task<ArgsTriggerResult>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : LocalArgumentsMap) (trigger : MergedTrigger) : Task<Result<LocalArgumentsMap, BeforeTriggerError<unit>>> =
         let ref =
             { Schema = trigger.Schema
               Entity = Option.defaultValue entityRef trigger.Inherited
               Name = trigger.Name
             }
-        let script = ctx.FindTrigger ref |> Option.get
+        let preparedTrigger = ctx.FindTrigger ref |> Option.get
         rctx.RunWithSource (ESTrigger ref) <| fun () ->
             task {
                 try
-                    match! run script with
+                    match! run preparedTrigger.Script with
                     | ATCancelled -> return Error (BECancelled ())
                     | ATUntouched -> return Ok args
                     | ATTouched rawArgs ->
@@ -140,17 +140,17 @@ type EntitiesAPI (api : IFunDBAPI) =
                     return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException str))
             }
 
-    let runAfterTrigger (run : ITriggerScript -> Task) (entityRef : ResolvedEntityRef) (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
+    let runAfterTrigger (run : TriggerScript -> Task) (entityRef : ResolvedEntityRef) (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
         let ref =
             { Schema = trigger.Schema
               Entity = Option.defaultValue entityRef trigger.Inherited
               Name = trigger.Name
             }
-        let script = ctx.FindTrigger ref |> Option.get
+        let preparedTrigger = ctx.FindTrigger ref |> Option.get
         rctx.RunWithSource (ESTrigger ref) <| fun () ->
             task {
                 try
-                    do! run script
+                    do! run preparedTrigger.Script
                     return Ok ()
                 with
                 | :? TriggerRunException as ex when ex.IsUserException ->
@@ -182,12 +182,12 @@ type EntitiesAPI (api : IFunDBAPI) =
               Entity = Option.defaultValue entityRef trigger.Inherited
               Name = trigger.Name
             }
-        let script = ctx.FindTrigger ref |> Option.get
+        let preparedTrigger = ctx.FindTrigger ref |> Option.get
         rctx.RunWithSource (ESTrigger ref) <| fun () ->
             task {
                 let! id = resolveKey query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef None key ctx.CancellationToken
                 try
-                    let! maybeContinue = script.RunDeleteTriggerBefore entityRef id ctx.CancellationToken
+                    let! maybeContinue = preparedTrigger.Script.RunDeleteTriggerBefore entityRef id ctx.CancellationToken
                     if maybeContinue then
                         return Ok (RKId id)
                     else

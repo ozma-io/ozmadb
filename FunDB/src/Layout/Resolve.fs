@@ -16,6 +16,7 @@ open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.FunQL.Typecheck
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Source
+open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -306,7 +307,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                     | None -> Some parentRef
                     | Some pref -> Some pref
                 let inheritedFields = Map.map (fun name field -> { field with InheritedFrom = addParent field.InheritedFrom } : HalfResolvedComputedField) p.ComputedFields
-                Map.unionWith unionComputedField inheritedFields selfComputedFields
+                Map.unionWithKey unionComputedField inheritedFields selfComputedFields
 
         try
             // At this point we have already checked name clashes through hierarchy, we only need to check that hash names are unique.
@@ -544,7 +545,7 @@ let private sortSaveRestoredEntities (saveRestoredParents : (ResolvedEntityRef *
     }
 
 type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntitiesMap, referencingFields : ReferencingEntitiesMap, cascadeDeletedEntities : Set<ResolvedEntityRef>, forceAllowBroken : bool) =
-    let mutable cachedComputedFields : Map<ResolvedFieldRef, Result<ResolvedComputedField, exn>> = Map.empty
+    let mutable cachedComputedFields : Map<ResolvedFieldRef, PossiblyBroken<ResolvedComputedField>> = Map.empty
     let mutable cachedCaseExpressions : Map<ResolvedFieldRef, VirtualFieldCase array> = Map.empty
     let mutable cachedSaveRestoredEntities : Map<ResolvedEntityRef, ResolvedEntityRef option> = Map.empty
 
@@ -559,7 +560,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     let fieldRef = { Entity = currRef; Name = name }
                     match resolveComputedField stack currEnt fieldRef comp with
                     | Ok field -> Some field
-                    | Error e -> raisefWithInner ResolveLayoutException e "Computed field %O is broken" fieldRef
+                    | Error e -> raisefWithInner ResolveLayoutException e.Error "Computed field %O is broken" fieldRef
             let findComputedFieldBits name =
                 Option.map (fun x -> x :> IComputedFieldBits) <| Map.tryFind name currEnt.ComputedFields
 
@@ -703,7 +704,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           IsMaterialized = comp.Source.IsMaterialized
         }
 
-    and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : HalfResolvedComputedField) : Result<ResolvedComputedField, exn> =
+    and resolveComputedField (stack : Set<ResolvedFieldRef>) (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) (comp : HalfResolvedComputedField) : PossiblyBroken<ResolvedComputedField> =
         match comp.InheritedFrom with
         | Some parentRef ->
             let origFieldRef = { fieldRef with Entity = parentRef }
@@ -723,7 +724,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     field
                 with
                 | :? ResolveLayoutException as e when comp.Source.AllowBroken || forceAllowBroken ->
-                    Error (e :> exn)
+                    Error { Error = e; AllowBroken = comp.Source.AllowBroken }
 
     and resolveLocalExpr (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : RelatedExpr =
         // Local expressions are used as-is in the database, so `Immediate = false`.
@@ -875,18 +876,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         | typ when keyColumn -> raisef ResolveLayoutException "Type %O of field %O is not supported for key columns" typ fieldRef
         | _ -> ()
 
-    let resolveEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) : ErroredEntity * ResolvedEntity =
-        let mutable computedErrors = Map.empty
-
+    let resolveEntity (entityRef : ResolvedEntityRef) (entity : HalfResolvedEntity) : ResolvedEntity =
         let mapComputedField name field =
             try
-                let ret = resolveComputedField Set.empty entity { Entity = entityRef; Name = name } field
-                match ret with
-                | Error e ->
-                    if Option.isNone field.InheritedFrom && field.Source.AllowBroken then
-                        computedErrors <- Map.add name e computedErrors
-                    Error e
-                | Ok r -> Ok r
+                resolveComputedField Set.empty entity { Entity = entityRef; Name = name } field
             with
             | e -> raisefWithInner ResolveLayoutException e "In computed field %O" name
 
@@ -933,46 +926,36 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         | None -> ()
         | Some saveRestoreKey -> checkSaveRestoreKey Set.empty entityRef entity saveRestoreKey
 
-        let ret : ResolvedEntity =
-            { ColumnFields = entity.ColumnFields
-              ComputedFields = computedFields
-              UniqueConstraints = entity.UniqueConstraints
-              CheckConstraints = checkConstraints
-              Indexes = indexes
-              MainField = entity.Source.MainField
-              InsertedInternally = entity.InsertedInternally
-              UpdatedInternally = entity.UpdatedInternally
-              DeletedInternally = false
-              TriggersMigration = entity.Source.TriggersMigration
-              SaveRestoreKey = entity.Source.SaveRestoreKey
-              IsHidden = entity.Source.IsHidden
-              Parent = entity.Source.Parent
-              Children = entity.Children
-              Root = entity.Root
-              TypeName = entity.TypeName
-              IsAbstract = entity.Source.IsAbstract
-              IsFrozen = entity.Source.IsFrozen
-              HashName = makeHashName entityRef.Name
-              RequiredFields = requiredFields
-              ReferencingFields = Map.findWithDefault entityRef Map.empty referencingFields
-              CascadeDeleted = Set.contains entityRef cascadeDeletedEntities
-            }
-        let errors =
-            { ComputedFields = computedErrors
-            }
-        (errors, ret)
+        { ColumnFields = entity.ColumnFields
+          ComputedFields = computedFields
+          UniqueConstraints = entity.UniqueConstraints
+          CheckConstraints = checkConstraints
+          Indexes = indexes
+          MainField = entity.Source.MainField
+          InsertedInternally = entity.InsertedInternally
+          UpdatedInternally = entity.UpdatedInternally
+          DeletedInternally = false
+          TriggersMigration = entity.Source.TriggersMigration
+          SaveRestoreKey = entity.Source.SaveRestoreKey
+          IsHidden = entity.Source.IsHidden
+          Parent = entity.Source.Parent
+          Children = entity.Children
+          Root = entity.Root
+          TypeName = entity.TypeName
+          IsAbstract = entity.Source.IsAbstract
+          IsFrozen = entity.Source.IsFrozen
+          HashName = makeHashName entityRef.Name
+          RequiredFields = requiredFields
+          ReferencingFields = Map.findWithDefault entityRef Map.empty referencingFields
+          CascadeDeleted = Set.contains entityRef cascadeDeletedEntities
+        }
 
-    let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) : ErroredSchema * ResolvedSchema =
-        let mutable errors = Map.empty
-
+    let resolveSchema (schemaName : SchemaName) (schema : SourceSchema) : ResolvedSchema =
         let mapEntity name entity =
             let ref = { Schema = schemaName; Name = name }
             let halfEntity = Map.find ref entities
             try
-                let (entityErrors, entity) = resolveEntity ref halfEntity
-                if not (Map.isEmpty entityErrors.ComputedFields) then
-                    errors <- Map.add name entityErrors errors
-                entity
+                resolveEntity ref halfEntity
             with
             | e -> raisefWithInner ResolveLayoutException e "In entity %O" name
 
@@ -983,31 +966,22 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         with
         | Failure msg -> raisef ResolveLayoutException "Entity names hash clash: %s" msg
 
-        let ret =
-            { Entities = entities
-            } : ResolvedSchema
-        (errors, ret)
+        { Entities = entities
+        }
 
-    let resolveLayout () : ErroredLayout * Layout =
-        let mutable errors = Map.empty
-
+    let resolveLayout () : Layout =
         let mapSchema name schema =
             try
-                let (schemaErrors, ret) = resolveSchema name schema
-                if not <| Map.isEmpty schemaErrors then
-                    errors <- Map.add name schemaErrors errors
-                ret
+                resolveSchema name schema
             with
             | e -> raisefWithInner ResolveLayoutException e "In schema %O" name
 
         let schemas = Map.map mapSchema layout.Schemas
         let saveRestoredEntities = sortSaveRestoredEntities (Map.toSeq cachedSaveRestoredEntities) |> Seq.toArray
 
-        let ret =
-            { Schemas = schemas
-              SaveRestoredEntities = saveRestoredEntities
-            } : Layout
-        (errors, ret)
+        { Schemas = schemas
+          SaveRestoredEntities = saveRestoredEntities
+        }
 
     member this.ResolveLayout () = resolveLayout ()
 
@@ -1120,14 +1094,14 @@ type private Phase3Resolver (layout : Layout, internallyDeletedEntities : Set<Re
 
     member this.ResolveLayout () = resolveLayout ()
 
-let resolveLayout (layout : SourceLayout) (forceAllowBroken : bool) : ErroredLayout * Layout =
+let resolveLayout (forceAllowBroken : bool) (layout : SourceLayout) : Layout =
     let phase1 = Phase1Resolver layout
     let entities = phase1.ResolveLayout ()
     let referencingFields = fillReferencingFields phase1.RootEntities entities phase1.ReferencingFields
     let cascadeDeletedEntities = fillCascadeDeletedEntities entities phase1.CascadeDeletedEntities
     let phase2 = Phase2Resolver (layout, entities, referencingFields, cascadeDeletedEntities, forceAllowBroken)
-    let (errors, layout2) = phase2.ResolveLayout ()
+    let layout2 = phase2.ResolveLayout ()
     let internallyDeletedEntities = fillInternallyDeletedEntities layout2 referencingFields phase1.InternallyDeletedEntities
     let phase3 = Phase3Resolver (layout2, internallyDeletedEntities)
     let layout3 = phase3.ResolveLayout ()
-    (errors, layout3)
+    layout3

@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.SQL.DDL
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.AST
@@ -365,7 +367,7 @@ let emptySchemaMeta : SchemaMeta =
     }
 
 let unionSchemaMeta (a : SchemaMeta) (b : SchemaMeta) =
-    { Relations = Map.unionWith (fun name -> unionRelation) a.Relations b.Relations
+    { Relations = Map.unionWith unionRelation a.Relations b.Relations
       Functions = Map.unionUnique a.Functions b.Functions // We could allow merging overloads, but we choose not to, as it may be confusing.
     }
 
@@ -384,7 +386,7 @@ let emptyDatabaseMeta : DatabaseMeta =
     }
 
 let unionDatabaseMeta (a : DatabaseMeta) (b : DatabaseMeta) =
-    { Schemas = Map.unionWith (fun key (keys1, meta1) (keys2, meta2) -> (Set.union keys1 keys2, unionSchemaMeta meta1 meta2)) a.Schemas b.Schemas
+    { Schemas = Map.unionWith (fun (keys1, meta1) (keys2, meta2) -> (Set.union keys1 keys2, unionSchemaMeta meta1 meta2)) a.Schemas b.Schemas
       Extensions = Set.union a.Extensions b.Extensions
     }
 

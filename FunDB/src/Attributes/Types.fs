@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Attributes.Types
 
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Purity
+open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type DefaultAttributeRef =
@@ -10,6 +11,7 @@ type DefaultAttributeRef =
     } with
         override this.ToString () = sprintf "%s.%s" (this.Schema.ToFunQLString()) (this.Field.ToFunQLString())
 
+[<NoEquality; NoComparison>]
 type DefaultAttribute =
     { Expression : ResolvedBoundAttribute
       Purity : PurityStatus option
@@ -24,7 +26,7 @@ type AttributesField =
 
 [<NoEquality; NoComparison>]
 type AttributesEntity =
-    { Fields : Map<FieldName, Result<AttributesField, exn>>
+    { Fields : Map<FieldName, PossiblyBroken<AttributesField>>
     } with
         member this.FindField (name : FieldName) =
             Map.tryFind name this.Fields
@@ -50,8 +52,3 @@ type AttributesDatabase =
 type DefaultAttributes =
     { Schemas : Map<SchemaName, AttributesDatabase>
     }
-
-type ErroredAttributesEntity = Map<FieldName, exn>
-type ErroredAttributesSchema = Map<EntityName, ErroredAttributesEntity>
-type ErroredAttributesDatabase = Map<SchemaName, ErroredAttributesSchema>
-type ErroredDefaultAttributes = Map<SchemaName, ErroredAttributesDatabase>

@@ -175,7 +175,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                             | Ok role -> RTRole { Role = Some role; Ref = Some roleRef; CanRead = opts.CanRead }
                             | Error _ when opts.CanRead -> RTRole { Role = None; Ref = Some roleRef; CanRead = true }
                             | Error e ->
-                                logger.LogError(e, "Role for user {} is broken", opts.UserName)
+                                logger.LogError(e.Error, "Role for user {} is broken", opts.UserName)
                                 raise <| RequestException RENoRole
             let userId = maybeUser |> Option.map (fun u -> u.Id)
             let initialUser =
@@ -247,7 +247,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                                 match ctx.Permissions.Find roleRef |> Option.get with
                                 | Ok role -> RTRole { Role = Some role; Ref = Some roleRef; CanRead = opts.CanRead }
                                 | Error e ->
-                                    logger.LogError(e, "Role for user {} is broken", userName)
+                                    logger.LogError(e.Error, "Role for user {} is broken", userName)
                                     raise <| RequestException RENoRole
             let newUser =
                 { Id = maybeUser |> Option.map (fun u -> u.Id)
@@ -268,7 +268,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             match ctx.Permissions.Find newRole with
             | Some (Ok role) -> RTRole { Role = Some role; Ref = Some newRole; CanRead = opts.CanRead }
             | Some (Error e) ->
-                logger.LogError(e, "Role {} is broken", newRole)
+                logger.LogError(e.Error, "Role {} is broken", newRole)
                 raise <| RequestException RENoRole
             | None ->
                 raise <| RequestException RENoRole

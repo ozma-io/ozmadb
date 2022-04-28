@@ -31,12 +31,14 @@ open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Update
+open FunWithFlags.FunDB.Attributes.Parse
 open FunWithFlags.FunDB.Attributes.Resolve
 open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Update
 open FunWithFlags.FunDB.Actions.Resolve
 open FunWithFlags.FunDB.Actions.Types
+open FunWithFlags.FunDB.Actions.Run
 open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Update
 open FunWithFlags.FunDB.Modules.Resolve
@@ -46,7 +48,9 @@ open FunWithFlags.FunDB.Triggers.Resolve
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Update
+open FunWithFlags.FunDB.Triggers.Run
 open FunWithFlags.FunDB.UserViews.Types
+open FunWithFlags.FunDB.UserViews.DryRun
 open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Operations.Update
@@ -271,137 +275,162 @@ let buildUserDatabaseMeta (transaction : NpgsqlTransaction) (preload : Preload) 
         return SQL.filterDatabaseMeta (fun (SQL.SQLName name) -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta
     }
 
-let private checkBrokenLayout (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenLayout : ErroredLayout) (cancellationToken : CancellationToken) =
+let private checkBrokenLayout (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (layout : Layout) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
-        for KeyValue(schemaName, schema) in brokenLayout do
-            for KeyValue(entityName, entity) in schema do
-                let isSystem = Map.containsKey schemaName preload.Schemas
-                if isSystem || not allowAutoMark then
-                    critical <- true
-                for KeyValue(compName, err) in entity.ComputedFields do
+        for KeyValue(schemaName, schema) in layout.Schemas do
+            for KeyValue(entityName, entity) in schema.Entities do
+                for KeyValue(compName, maybeComputedField) in entity.ComputedFields do
+                    match maybeComputedField with
+                    | Error err when not err.AllowBroken ->
+                        let isSystem = Map.containsKey schemaName preload.Schemas
                         if isSystem || not allowAutoMark then
-                            logger.LogWarning(err, "Computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
+                            critical <- true
+                            logger.LogWarning(err.Error, "Computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
                         else
-                            logger.LogWarning(err, "Marking computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
+                            logger.LogWarning(err.Error, "Marking computed field {ref} as broken", { Entity = { Schema = schemaName; Name = entityName }; Name = compName })
+                    | _ -> ()
 
             if critical then
                 failwith "Cannot mark some layout as broken"
-            do! markBrokenLayout conn.System brokenLayout cancellationToken
+            do! markBrokenLayout conn.System layout cancellationToken
     }
 
-let checkBrokenAttributes (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenAttrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) =
+let checkBrokenAttributes (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (attrs : DefaultAttributes) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
-        for KeyValue(schemaName, schema) in brokenAttrs do
-            let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem || not allowAutoMark then
-                critical <- true
-            for KeyValue(attrsSchemaName, attrsSchema) in schema do
-                for KeyValue(attrsEntityName, attrsEntity) in attrsSchema do
-                    for KeyValue(attrsFieldName, err) in attrsEntity do
-                        let schemaStr = schemaName.ToString()
-                        let defFieldName = ({ Entity = { Schema = attrsSchemaName; Name = attrsEntityName }; Name = attrsFieldName } : ResolvedFieldRef).ToString()
-                        if isSystem || not allowAutoMark then
-                            logger.LogError(err, "Default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
-                        else
-                            logger.LogWarning(err, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
+        for KeyValue(schemaName, schema) in attrs.Schemas do
+            for KeyValue(attrsSchemaName, attrsSchema) in schema.Schemas do
+                for KeyValue(attrsEntityName, attrsEntity) in attrsSchema.Entities do
+                    for KeyValue(attrsFieldName, maybeAttr) in attrsEntity.Fields do
+                        match maybeAttr with
+                        | Error err when not err.AllowBroken ->
+                            let isSystem = Map.containsKey schemaName preload.Schemas
+                            let schemaStr = schemaName.ToString()
+                            let defFieldName = ({ Entity = { Schema = attrsSchemaName; Name = attrsEntityName }; Name = attrsFieldName } : ResolvedFieldRef).ToString()
+                            if isSystem || not allowAutoMark then
+                                critical <- true
+                                logger.LogError(err.Error, "Default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
+                            else
+                                logger.LogWarning(err.Error, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
+                        | _ -> ()
         if critical then
             failwith "Cannot mark some default attributes as broken"
-        do! markBrokenAttributes conn.System brokenAttrs cancellationToken
+        do! markBrokenAttributes conn.System attrs cancellationToken
     }
 
-let checkBrokenActions (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenActions : ErroredActions) (cancellationToken : CancellationToken) =
+let checkBrokenActions (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (actions : PreparedActions) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
-        for KeyValue(schemaName, schema) in brokenActions do
-            let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem || not allowAutoMark then
-                critical <- true
-            for KeyValue(actionName, err) in schema do
-                let schemaStr = schemaName.ToString()
-                let actionNameStr = ({ Schema = schemaName; Name = actionName } : ActionRef).ToString()
-                if isSystem || not allowAutoMark then
-                    logger.LogError(err, "Action {name} from {schema} is broken", actionNameStr, schemaStr)
-                else
-                    logger.LogWarning(err, "Marking action {name} from {schema} as broken", actionNameStr, schemaStr)
+        for KeyValue(schemaName, schema) in actions.Schemas do
+            for KeyValue(actionName, maybeAction) in schema.Actions do
+                match maybeAction with
+                | Error err when not err.AllowBroken ->
+                    let isSystem = Map.containsKey schemaName preload.Schemas
+                    let schemaStr = schemaName.ToString()
+                    let actionNameStr = ({ Schema = schemaName; Name = actionName } : ActionRef).ToString()
+                    if isSystem || not allowAutoMark then
+                        critical <- true
+                        logger.LogError(err.Error, "Action {name} from {schema} is broken", actionNameStr, schemaStr)
+                    else
+                        logger.LogWarning(err.Error, "Marking action {name} from {schema} as broken", actionNameStr, schemaStr)
+                | _ -> ()
         if critical then
             failwith "Cannot mark some system actions as broken"
-        do! markBrokenActions conn.System brokenActions cancellationToken
+        do! markBrokenActions conn.System actions cancellationToken
     }
 
-let checkBrokenTriggers (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenTriggers : ErroredTriggers) (cancellationToken : CancellationToken) =
+let checkBrokenTriggers (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (triggers : PreparedTriggers) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
-        for KeyValue(schemaName, schema) in brokenTriggers do
-            let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem || not allowAutoMark then
-                critical <- true
-            for KeyValue(triggerSchemaName, triggersSchema) in schema do
-                for KeyValue(triggerEntityName, triggersEntity) in triggersSchema do
-                    for KeyValue(triggerName, err) in triggersEntity do
-                        let schemaStr = schemaName.ToString()
-                        let triggerNameStr = ({ Schema = schemaName; Entity = { Schema = triggerSchemaName; Name = triggerEntityName }; Name = triggerName } : TriggerRef).ToString()
-                        if isSystem || not allowAutoMark then
-                            logger.LogError(err, "Trigger {name} from {schema} is broken", triggerNameStr, schemaStr)
-                        else
-                            logger.LogWarning(err, "Marking trigger {name} from {schema} as broken", triggerNameStr, schemaStr)
+        for KeyValue(schemaName, schema) in triggers.Schemas do
+            for KeyValue(triggerSchemaName, triggersSchema) in schema.Schemas do
+                for KeyValue(triggerEntityName, triggersEntity) in triggersSchema.Entities do
+                    for KeyValue(triggerName, maybeTrigger) in triggersEntity.Triggers do
+                        match maybeTrigger with
+                        | Error err when not err.AllowBroken ->
+                            let isSystem = Map.containsKey schemaName preload.Schemas
+                            let schemaStr = schemaName.ToString()
+                            let triggerNameStr = ({ Schema = schemaName; Entity = { Schema = triggerSchemaName; Name = triggerEntityName }; Name = triggerName } : TriggerRef).ToString()
+                            if isSystem || not allowAutoMark then
+                                critical <- true
+                                logger.LogError(err.Error, "Trigger {name} from {schema} is broken", triggerNameStr, schemaStr)
+                            else
+                                logger.LogWarning(err.Error, "Marking trigger {name} from {schema} as broken", triggerNameStr, schemaStr)
+                        | _ -> ()
         if critical then
             failwith "Cannot mark some triggers as broken"
-        do! markBrokenTriggers conn.System brokenTriggers cancellationToken
+        do! markBrokenTriggers conn.System triggers cancellationToken
     }
 
-let checkBrokenUserViews (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenViews : ErroredUserViews) (cancellationToken : CancellationToken) =
+let checkBrokenUserViews (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (userViews : PrefetchedUserViews) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
-        for KeyValue(schemaName, mschema) in brokenViews do
+        for KeyValue(schemaName, maybeSchema) in userViews.Schemas do
             let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem || not allowAutoMark then
-                critical <- true
-            match mschema with
-            | UEUserViews schema ->
-                for KeyValue(uvName, err) in schema do
-                    let uvName = ({ Schema = schemaName; Name = uvName } : ResolvedUserViewRef).ToString()
-                    if isSystem || not allowAutoMark then
-                        logger.LogError(err, "View {uv} is broken", uvName)
-                    else
-                        logger.LogWarning(err, "Marking {uv} as broken", uvName)
-            | UEGenerator err ->
+            match maybeSchema with
+            | Ok schema ->
+                for KeyValue(uvName, maybeUv) in schema.UserViews do
+                    match maybeUv with
+                    | Error err when not err.AllowBroken ->
+                        let uvName = ({ Schema = schemaName; Name = uvName } : ResolvedUserViewRef).ToString()
+                        if isSystem || not allowAutoMark then
+                            critical <- true
+                            logger.LogError(err.Error, "View {uv} is broken", uvName)
+                        else
+                            logger.LogWarning(err.Error, "Marking {uv} as broken", uvName)
+                    | _ -> ()
+            | Error err when not err.AllowBroken ->
                 if isSystem || not allowAutoMark then
-                    logger.LogError(err, "View generator for schema {schema} is broken", schemaName)
+                    critical <- true
+                    logger.LogError(err.Error, "View generator for schema {schema} is broken", schemaName)
                 else
-                    logger.LogWarning(err, "Marking view generator for schema {schema} as broken", schemaName)
+                    logger.LogWarning(err.Error, "Marking view generator for schema {schema} as broken", schemaName)
+            | _ -> ()
         if critical then
             failwith "Cannot mark some user views as broken"
-        do! markBrokenUserViews conn.System brokenViews cancellationToken
+        do! markBrokenUserViews conn.System userViews cancellationToken
     }
 
-let checkBrokenPermissions (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (brokenPerms : ErroredPermissions) (cancellationToken : CancellationToken) =
+let checkBrokenPermissions (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (perms : Permissions) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
-        for KeyValue(schemaName, schema) in brokenPerms do
+        for KeyValue(schemaName, schema) in perms.Schemas do
             let isSystem = Map.containsKey schemaName preload.Schemas
-            if isSystem || not allowAutoMark then
-                critical <- true
-            for KeyValue(roleName, role) in schema do
-                match role with
-                | ERFatal err ->
-                        if isSystem || not allowAutoMark then
-                            logger.LogError(err, "Role {role} is broken", roleName)
-                        else
-                            logger.LogWarning(err, "Marking {role} as broken", roleName)
-                | ERDatabase errs ->
-                    for KeyValue(allowedSchemaName, allowedSchema) in errs do
-                        for KeyValue(allowedEntityName, err) in allowedSchema do
-                            let roleName = ({ Schema = schemaName; Name = roleName } : ResolvedRoleRef).ToString()
-                            let allowedName = ({ Schema = allowedSchemaName; Name = allowedEntityName } : ResolvedEntityRef).ToString()
-                            if isSystem || not allowAutoMark then
-                                logger.LogError(err, "Role {role} is broken for entity {entity}", roleName, allowedName)
-                            else
-                                logger.LogWarning(err, "Marking {role} as broken for entity {entity}", roleName, allowedName)
+            for KeyValue(roleName, maybeRole) in schema.Roles do
+                match maybeRole with
+                | Ok role ->
+                    for KeyValue(allowedSchemaName, allowedSchema) in role.Permissions.Schemas do
+                        for KeyValue(allowedEntityName, maybeEntity) in allowedSchema.Entities do
+                            let markRole (e : Exception) =
+                                let roleName = ({ Schema = schemaName; Name = roleName } : ResolvedRoleRef).ToString()
+                                let allowedName = ({ Schema = allowedSchemaName; Name = allowedEntityName } : ResolvedEntityRef).ToString()
+                                if isSystem || not allowAutoMark then
+                                    critical <- true
+                                    logger.LogError(e, "Role {role} is broken for entity {entity}", roleName, allowedName)
+                                else
+                                    logger.LogWarning(e, "Marking {role} as broken for entity {entity}", roleName, allowedName)
+
+                            match maybeEntity with
+                            | Ok entity ->
+                                match entity.Insert with
+                                | Error e when not entity.AllowBroken -> markRole e
+                                | _ -> ()
+                                match entity.Delete with
+                                | Error e when not entity.AllowBroken -> markRole e
+                                | _ -> ()
+                            | Error err when not err.AllowBroken -> markRole err.Error
+                            | _ -> ()
+                | Error err when not err.AllowBroken->
+                    if isSystem || not allowAutoMark then
+                        critical <- true
+                        logger.LogError(err.Error, "Role {role} is broken", roleName)
+                    else
+                        logger.LogWarning(err.Error, "Marking {role} as broken", roleName)
+                | _ -> ()
         if critical then
             failwith "Cannot mark some roles as broken"
-        do! markBrokenPermissions conn.System brokenPerms cancellationToken
+        do! markBrokenPermissions conn.System perms cancellationToken
     }
 
 // Returns only user meta
@@ -409,7 +438,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
     task {
         logger.LogInformation("Migrating system entities to the current version")
         let sourcePreloadLayout = preloadLayout preload
-        let (_, preloadLayout) = resolveLayout sourcePreloadLayout false
+        let preloadLayout = resolveLayout false sourcePreloadLayout
         let (_, newSystemMeta) = buildFullLayoutMeta preloadLayout preloadLayout
         let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken |> Task.map correlateDatabaseMeta
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
@@ -433,8 +462,8 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
 
         let! sourceUserLayout = buildSchemaLayoutExceptPreload conn.System preload cancellationToken
         let sourceLayout = unionSourceLayout sourcePreloadLayout sourceUserLayout
-        let (brokenLayout, layout) = resolveLayout sourceLayout true
-        do! checkBrokenLayout logger allowAutoMark preload conn brokenLayout cancellationToken
+        let layout = resolveLayout true sourceLayout
+        do! checkBrokenLayout logger allowAutoMark preload conn layout cancellationToken
 
         // We migrate layout first so that permissions and attributes have schemas in the table.
         let! layoutUpdate = updateLayout conn.System sourcePreloadLayout cancellationToken
@@ -446,7 +475,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                 with
                 | e ->
                     // Maybe we'll get a better error
-                    let (errors, perms) = resolvePermissions preloadLayout false permissions
+                    let perms = resolvePermissions preloadLayout false permissions
                     return reraise' e
             }
         let! attributesUpdate =
@@ -457,7 +486,8 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                 with
                 | e ->
                     // Maybe we'll get a better error
-                    let (errors, attrs) = resolveAttributes preloadLayout false defaultAttributes
+                    let parsedAttrs = parseAttributes false defaultAttributes
+                    let errors = resolveAttributes preloadLayout false parsedAttrs
                     return reraise' e
             }
         let! actionsUpdate =
@@ -468,7 +498,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                 with
                 | e ->
                     // Maybe we'll get a better error
-                    let (errors, actions) = resolveActions preloadLayout false actions
+                    let actions = resolveActions preloadLayout false actions
                     return reraise' e
             }
         let! triggersUpdate =
@@ -479,7 +509,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                 with
                 | e ->
                     // Maybe we'll get a better error
-                    let (errors, triggers) = resolveTriggers preloadLayout false triggers
+                    let triggers = resolveTriggers preloadLayout false triggers
                     return reraise' e
             }
         let! modulesUpdate =

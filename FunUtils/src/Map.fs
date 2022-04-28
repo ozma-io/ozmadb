@@ -27,22 +27,15 @@ let mapTask (f : 'k -> 'a -> Task<'b>) (m : Map<'k, 'a>) : Task<Map<'k, 'b>> =
 let mapMaybe (f : 'k -> 'a -> 'b option) (m : Map<'k, 'a>) : Map<'k, 'b> =
     m |> Seq.mapMaybe (fun (KeyValue(k, v)) -> Option.map (fun v' -> (k, v')) (f k v)) |> Map.ofSeq
 
-let unionWith (resolve : 'k -> 'v -> 'v -> 'v) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
+let unionWithKey (resolve : 'k -> 'v -> 'v -> 'v) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
     Seq.fold (fun currA (KeyValue(k, v)) -> addWith (resolve k) k v currA) a b
 
 let unionUnique (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
     Seq.fold (fun currA (KeyValue(k, v)) -> addUnique k v currA) a b
 
-let union (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
-    Seq.fold (fun currA (KeyValue(k, v)) -> Map.add k v currA) a b
-
 let intersectWithMaybe (resolve : 'k -> 'v -> 'v -> 'v1 option) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v1> =
     Enumerable.Join(a, b, (fun (KeyValue(k, v)) -> k), (fun (KeyValue(k, v)) -> k), fun (KeyValue(k1, v1)) (KeyValue(k2, v2)) -> Option.map (fun r -> (k1, r)) (resolve k1 v1 v2))
     |> Seq.catMaybes
-    |> Map.ofSeq
-
-let intersectWith (resolve : 'k -> 'v -> 'v -> 'v1) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v1> =
-    Enumerable.Join(a, b, (fun (KeyValue(k, v)) -> k), (fun (KeyValue(k, v)) -> k), fun (KeyValue(k1, v1)) (KeyValue(k2, v2)) -> (k1, resolve k1 v1 v2))
     |> Map.ofSeq
 
 let difference (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
@@ -95,7 +88,7 @@ let findWithDefault (k : 'k) (def : 'v) (vals : Map<'k, 'v>) : 'v =
     | None -> def
     | Some v -> v
 
-let findWithDefaultThunk (k : 'k) (def : unit -> 'v) (vals : Map<'k, 'v>) : 'v =
+let findWithLazyDefault (k : 'k) (def : unit -> 'v) (vals : Map<'k, 'v>) : 'v =
     match Map.tryFind k vals with
     | None -> def ()
     | Some v -> v

@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Actions.Run
 
+open FSharpPlus
 open Newtonsoft.Json.Linq
 open System.Threading
 open System.Threading.Tasks
@@ -9,6 +10,7 @@ open NetJs.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
+open FunWithFlags.FunDB.Objects.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Actions.Types
@@ -50,77 +52,49 @@ type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
 
     member this.Runtime = runtime
 
-type ActionScriptsSchema =
-    { Actions : Map<ActionName, ActionScript>
+type PreparedActionsSchema =
+    { Actions : Map<ActionName, PossiblyBroken<ActionScript>>
     }
 
-type ActionScripts =
-    { Schemas : Map<ActionName, ActionScriptsSchema>
+type PreparedActions =
+    { Schemas : Map<ActionName, PreparedActionsSchema>
     } with
-        member this.FindAction (ref : ActionRef) : ActionScript option =
+        member this.FindAction (ref : ActionRef) : PossiblyBroken<ActionScript> option =
              Map.tryFind ref.Schema this.Schemas
                 |> Option.bind (fun schema -> Map.tryFind ref.Name schema.Actions)
 
 let private actionName (actionRef : ActionRef) =
     sprintf "actions/%O/%O.mjs" actionRef.Schema actionRef.Name
 
-let private prepareActionScriptsSchema (runtime : IJSRuntime) (schemaName : SchemaName) (actions : ActionsSchema) : ActionScriptsSchema =
-    let getOne name = function
-    | Error e -> None
-    | Ok action -> Some (ActionScript(runtime, actionName { Schema = schemaName; Name = name }, action.Function))
-
-    { Actions = Map.mapMaybe getOne actions.Actions
-    }
-
-let prepareActionScripts (runtime : IJSRuntime) (actions : ResolvedActions) : ActionScripts =
-    { Schemas = Map.map (prepareActionScriptsSchema runtime) actions.Schemas
-    }
-
-type private TestActionEvaluator (runtime : IJSRuntime, forceAllowBroken : bool) =
-    let testAction (actionRef : ActionRef) (action : ResolvedAction) : unit =
-        ignore <| ActionScript(runtime, actionName actionRef, action.Function)
-
-    let testActionsSchema (schemaName : SchemaName) (entityActions : ActionsSchema) : ErroredActionsSchema * ActionsSchema =
-        let mutable errors = Map.empty
-
-        let mapAction name (action : ResolvedAction) =
+type private PreparedActionsBuilder (runtime : IJSRuntime, forceAllowBroken : bool) =
+    let prepareActionsSchema (schemaName : SchemaName) (actions : ActionsSchema) : PreparedActionsSchema =
+        let prepareOne name (action : ResolvedAction) =
             try
-                try
-                    let ref = { Schema = schemaName; Name = name }
-                    testAction ref action
-                    Ok action
-                with
-                | :? ActionRunException as e when action.AllowBroken || forceAllowBroken ->
-                    if not action.AllowBroken then
-                        errors <- Map.add name (e :> exn) errors
-                    Error (e :> exn)
+                let script = ActionScript(runtime, actionName { Schema = schemaName; Name = name }, action.Function)
+                Ok script
             with
-            | e -> raisefWithInner ActionRunException e "In action %O" name
+            | :? ActionRunException as e when action.AllowBroken || forceAllowBroken ->
+                Error { Error = e; AllowBroken = action.AllowBroken }
 
-        let ret =
-            { Actions = entityActions.Actions |> Map.map (fun name -> Result.bind (mapAction name))
-            } : ActionsSchema
-        (errors, ret)
+        { Actions = Map.map (fun name -> Result.bind (prepareOne name)) actions.Actions
+        }
 
-    let testActions (actions : ResolvedActions) : ErroredActions * ResolvedActions =
-        let mutable errors = Map.empty
+    let prepareActions (actions : ResolvedActions) : PreparedActions =
+        { Schemas = Map.map prepareActionsSchema actions.Schemas
+        }
 
-        let mapDatabase name schema =
-            try
-                let (dbErrors, newSchema) = testActionsSchema name schema
-                if not <| Map.isEmpty dbErrors then
-                    errors <- Map.add name dbErrors errors
-                newSchema
-            with
-            | e -> raisefWithInner ActionRunException e "In schema %O" name
+    member this.PrepareActions actions = prepareActions actions
 
-        let ret =
-            { Schemas = actions.Schemas |> Map.map mapDatabase
-            } : ResolvedActions
-        (errors, ret)
+let prepareActions (runtime : IJSRuntime) (forceAllowBroken : bool) (actions : ResolvedActions) : PreparedActions =
+    let eval = PreparedActionsBuilder(runtime, forceAllowBroken)
+    eval.PrepareActions actions
 
-    member this.TestActions actions = testActions actions
+let private resolvedPreparedActionsSchema (resolved : ActionsSchema) (prepared : PreparedActionsSchema) : ActionsSchema =
+    let getOne name = Result.map2 (fun a b -> b) prepared.Actions.[name]
+    let actions = Map.map getOne resolved.Actions
+    { Actions = actions }
 
-let testEvalActions (runtime : IJSRuntime) (forceAllowBroken : bool) (actions : ResolvedActions) : ErroredActions * ResolvedActions =
-    let eval = TestActionEvaluator(runtime, forceAllowBroken)
-    eval.TestActions actions
+let resolvedPreparedActions (resolved : ResolvedActions) (prepared : PreparedActions) : ResolvedActions =
+    let getOne name resolvedSchema = resolvedPreparedActionsSchema resolvedSchema prepared.Schemas.[name]
+    let schemas = Map.map getOne resolved.Schemas
+    { Schemas = schemas }

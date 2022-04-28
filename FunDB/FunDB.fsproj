@@ -49,6 +49,8 @@
     <Compile Include="src/Connection.fs" />
     <Compile Include="src/EventLogger.fs" />
 
+    <Compile Include="src/Objects/Types.fs" />
+
     <!-- Needed early for various other parts -->
     <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Types.fs" />
@@ -61,6 +63,7 @@
     <!-- Needed early for FunQL compilation -->
     <Compile Include="src/Attributes/Source.fs" />
     <Compile Include="src/Attributes/Types.fs" />
+    <Compile Include="src/Attributes/Parse.fs" />
     <Compile Include="src/Attributes/Merge.fs" />
 
     <Compile Include="src/FunQL/Resolve.fs" />
@@ -112,13 +115,14 @@
     <Compile Include="src/Actions/Run.fs" />
 
     <Compile Include="src/Triggers/Resolve.fs" />
+    <Compile Include="src/Triggers/Run.fs" />
     <Compile Include="src/Triggers/Schema.fs" />
 
     <Compile Include="src/UserViews/Source.fs" />
     <Compile Include="src/UserViews/Types.fs" />
+    <Compile Include="src/UserViews/Generate.fs" />
     <Compile Include="src/UserViews/Resolve.fs" />
     <Compile Include="src/UserViews/Schema.fs" />
-    <Compile Include="src/UserViews/Generate.fs" />
     <Compile Include="src/UserViews/DryRun.fs" />
 
     <Compile Include="src/Operations/Entity.fs" />
@@ -139,7 +143,6 @@
 
     <Compile Include="src/API/Types.fs" />
     <Compile Include="src/API/JavaScript.fs" />
-    <Compile Include="src/API/Triggers.fs" />
     <Compile Include="src/API/ContextCache.fs" />
     <Compile Include="src/API/InstancesCache.fs" />
     <Compile Include="src/API/Request.fs" />

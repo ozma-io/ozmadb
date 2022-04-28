@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.Triggers.Merge
 
+open FSharpPlus
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Triggers.Source
@@ -101,7 +103,7 @@ let private mergeSortedTriggers (a : MergedTrigger[]) (b : MergedTrigger[]) : Me
 
 let private mergeTriggersTime (a : MergedTriggersTime) (b : MergedTriggersTime) : MergedTriggersTime =
     { OnInsert = mergeSortedTriggers a.OnInsert b.OnInsert
-      OnUpdateFields = Map.unionWith (fun name -> mergeSortedTriggers) a.OnUpdateFields b.OnUpdateFields
+      OnUpdateFields = Map.unionWith mergeSortedTriggers a.OnUpdateFields b.OnUpdateFields
       OnDelete = mergeSortedTriggers a.OnDelete b.OnDelete
     }
 
@@ -111,15 +113,17 @@ let private mergeTriggersEntity (a : MergedTriggersEntity) (b : MergedTriggersEn
     }
 
 let private mergeTriggersSchema (a : MergedTriggersSchema) (b : MergedTriggersSchema) : MergedTriggersSchema =
-    { Entities = Map.unionWith (fun name -> mergeTriggersEntity) a.Entities b.Entities
+    { Entities = Map.unionWith mergeTriggersEntity a.Entities b.Entities
     }
 
 let private mergeTriggersPair (a : MergedTriggers) (b : MergedTriggers) : MergedTriggers =
-    { Schemas = Map.unionWith (fun name -> mergeTriggersSchema) a.Schemas b.Schemas
+    { Schemas = Map.unionWith mergeTriggersSchema a.Schemas b.Schemas
     }
 
-let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : TriggerName) : Result<ResolvedTrigger, exn> -> MergedTriggersEntity option = function
-    | Ok trigger when trigger.OnInsert || trigger.OnUpdateFields <> TUFSet Set.empty || trigger.OnDelete ->
+let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : TriggerName) (trigger : ResolvedTrigger) : MergedTriggersEntity option =
+    if not (trigger.OnInsert && trigger.OnUpdateFields <> TUFSet Set.empty && trigger.OnDelete) then
+        None
+    else
         let merged =
             { Schema = schemaName
               Name = name
@@ -139,7 +143,6 @@ let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : Trigger
             | TTBefore -> { emptyMergedTriggersEntity with Before = time }
             | TTAfter -> { emptyMergedTriggersEntity with After = time }
         Some entity
-    | _ -> None
 
 let private markTriggerInherited (originalRef : ResolvedEntityRef) (trigger : MergedTrigger) : MergedTrigger =
     { trigger with Inherited = Some originalRef }
@@ -156,7 +159,7 @@ let private markEntityInherited (originalRef : ResolvedEntityRef) (entityTrigger
     }
 
 type private TriggersMerger (layout : Layout) =
-    let emitMergedTriggersEntity (schemaName : SchemaName) (triggerName : TriggerName) (triggerEntityRef : ResolvedEntityRef) (triggerEntity : ResolvedEntity) (trigger : Result<ResolvedTrigger, exn>) =
+    let emitMergedTriggersEntity (schemaName : SchemaName) (triggerName : TriggerName) (triggerEntityRef : ResolvedEntityRef) (triggerEntity : ResolvedEntity) (trigger : ResolvedTrigger) =
         seq {
             match makeOneMergedTriggerEntity schemaName triggerName trigger with
             | None -> ()
@@ -175,8 +178,10 @@ type private TriggersMerger (layout : Layout) =
                     for KeyValue(triggerEntityName, entity) in schema.Entities do
                         let triggerRef = { Schema = triggerSchemaName; Name = triggerEntityName }
                         let triggerEntity = layout.FindEntity triggerRef |> Option.get
-                        for KeyValue(triggerName, trigger) in entity.Triggers do
-                            yield! emitMergedTriggersEntity schemaName triggerName triggerRef triggerEntity trigger
+                        for KeyValue(triggerName, maybeTrigger) in entity.Triggers do
+                            match maybeTrigger with
+                            | Ok trigger -> yield! emitMergedTriggersEntity schemaName triggerName triggerRef triggerEntity trigger
+                            | Error e -> ()
         }
 
     let mergeTriggers (triggers : ResolvedTriggers) : MergedTriggers =

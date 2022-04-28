@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.JavaScript.Runtime
+open FunWithFlags.FunDB.Objects.Types
 
 type UserViewGenerateException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
@@ -21,6 +22,20 @@ type UserViewGenerateException (message : string, innerException : Exception, is
         UserViewGenerateException (message, innerException, isUserException innerException)
 
     new (message : string) = UserViewGenerateException (message, null, true)
+
+[<NoEquality; NoComparison>]
+type GeneratedUserViewsSchema =
+    { UserViews : Map<SchemaName, SourceUserView>
+    }
+
+[<NoEquality; NoComparison>]
+type GeneratedUserViews =
+    { Schemas : Map<SchemaName, PossiblyBroken<GeneratedUserViewsSchema>>
+    } with
+        member this.Find (ref : ResolvedUserViewRef) =
+            match Map.tryFind ref.Schema this.Schemas with
+            | Some (Ok schema) -> Map.tryFind ref.Name schema.UserViews
+            | _ -> None
 
 let private convertUserView (KeyValue (k, v : Value.Value)) =
     let query = v.GetString().Get()
@@ -51,72 +66,51 @@ type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scri
     member this.Generate layout cancellationToken = generateUserViews layout cancellationToken
     member this.Runtime = runtime
 
-type private UserViewGenerator =
-    { Generator : UserViewsGeneratorScript
-      Source : SourceUserViewsGeneratorScript
-      SourceSchema : SourceUserViewsSchema
-    }
-
-type private PreparedUserViewSchema =
-    | PUVGenerator of UserViewGenerator
-    | PUVError of SourceUserViewsGeneratorScript * UserViewsSchemaError
-    | PUVStatic of SourceUserViewsSchema
-
-type private UserViewsGenerators = Map<SchemaName, PreparedUserViewSchema>
-
-type private UserViewsGeneratorState (layout : Layout, triggers : MergedTriggers, cancellationToken : CancellationToken, forceAllowBroken : bool) =
-    let generateUserViewsSchema (gen : UserViewGenerator) : Result<SourceUserViewsSchema, UserViewsSchemaError> =
-        let layout = V8JsonWriter.Serialize(gen.Generator.Runtime.Context, serializeLayout triggers layout)
-        try
-            let uvs = gen.Generator.Generate layout cancellationToken
-            Ok { UserViews = uvs
-                 GeneratorScript = Some gen.Source
-               }
-        with
-        | :? NetJsException as e when forceAllowBroken || gen.Source.AllowBroken ->
-            Error { Source = gen.SourceSchema; Error = e :> exn }
-
-    let generateUserViews (gens : UserViewsGenerators) : ErroredUserViews * SourceUserViews =
-        let mutable errors : ErroredUserViews = Map.empty
-        let generateOne name = function
-            | PUVGenerator gen ->
-                match generateUserViewsSchema gen with
-                | Ok ret -> ret
-                | Error err ->
-                    errors <- Map.add name (UEGenerator err.Error) errors
-                    { UserViews = Map.empty; GeneratorScript = err.Source.GeneratorScript }
-            | PUVStatic ret -> ret
-            | PUVError (script, err) ->
-                if not script.AllowBroken then
-                    errors <- Map.add name (UEGenerator err.Error) errors
-                { UserViews = Map.empty; GeneratorScript = err.Source.GeneratorScript }
-        let schemas = Map.map generateOne gens
-        let ret = { Schemas = schemas } : SourceUserViews
-        (errors, ret)
-
-    member this.GenerateUserViews gens = generateUserViews gens
-
 let private generatorName (schemaName : SchemaName) =
     sprintf "user_views_generators/%O.mjs" schemaName
 
-type UserViewsGenerator (runtime : IJSRuntime, userViews : SourceUserViews, createForceAllowBroken : bool) =
-    let prepareGenerator (name : SchemaName) (schema : SourceUserViewsSchema) =
-        match schema.GeneratorScript with
-        | None -> PUVStatic schema
-        | Some script ->
-            try
-                let gen = UserViewsGeneratorScript (runtime, generatorName name, script.Script)
-                let ret =
-                    { Generator = gen
-                      Source = script
-                      SourceSchema = schema
-                    }
-                PUVGenerator ret
-            with
-            | :? NetJsException as e when createForceAllowBroken || script.AllowBroken ->
-                PUVError (script, { Source = schema; Error = e :> exn })
-    let gens : UserViewsGenerators = Map.map prepareGenerator userViews.Schemas
+type private UserViewsGenerator (runtime : IJSRuntime, layout : Layout, triggers : MergedTriggers, cancellationToken : CancellationToken, forceAllowBroken : bool) =
+    let generateUserViewsSchema (name : SchemaName) (script : SourceUserViewsGeneratorScript) : PossiblyBroken<GeneratedUserViewsSchema> =
+        try
+            let gen = UserViewsGeneratorScript (runtime, generatorName name, script.Script)
+            let layout = V8JsonWriter.Serialize(runtime.Context, serializeLayout triggers layout)
+            let uvs = gen.Generate layout cancellationToken
+            Ok { UserViews = uvs }
+        with
+        | :? NetJsException as e when forceAllowBroken || script.AllowBroken ->
+            Error { Error = e; AllowBroken = script.AllowBroken }
 
-    member this.GenerateUserViews (layout : Layout) (triggers : MergedTriggers) (cancellationToken : CancellationToken) (forceAllowBroken : bool) : ErroredUserViews * SourceUserViews =
-        let state = UserViewsGeneratorState(layout, triggers, cancellationToken, forceAllowBroken)
-        state.GenerateUserViews gens
+    let generateUserViews (views : SourceUserViews) : GeneratedUserViews =
+        let generateOne name (view : SourceUserViewsSchema) =
+            match view.GeneratorScript with
+            | None -> Ok { UserViews = view.UserViews }
+            | Some script -> generateUserViewsSchema name script
+        let schemas = Map.map generateOne views.Schemas
+        { Schemas = schemas }
+
+    member this.GenerateUserViews views = generateUserViews views
+
+let generateUserViews
+        (runtime : IJSRuntime)
+        (layout : Layout)
+        (triggers : MergedTriggers)
+        (forceAllowBroken : bool)
+        (userViews : SourceUserViews)
+        (cancellationToken : CancellationToken) : GeneratedUserViews =
+    let state = UserViewsGenerator(runtime, layout, triggers, cancellationToken, forceAllowBroken)
+    state.GenerateUserViews userViews
+
+let passthruGeneratedUserViews (source : SourceUserViews) : GeneratedUserViews =
+    let schemas = source.Schemas |> Map.map (fun name schema -> Ok { UserViews = schema.UserViews })
+    { Schemas = schemas }
+
+let generatedUserViewsSource (source : SourceUserViews) (generated : GeneratedUserViews) : SourceUserViews =
+    let getOne name (sourceSchema : SourceUserViewsSchema) =
+        let userViews =
+            match generated.Schemas.[name] with
+            | Ok generatedSchema -> generatedSchema.UserViews
+            | Error e -> Map.empty
+        { UserViews = userViews; GeneratorScript = sourceSchema.GeneratorScript }
+    
+    let schemas = Map.map getOne source.Schemas
+    { Schemas = schemas }

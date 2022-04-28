@@ -8,12 +8,11 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.UserViews.Source
-open FunWithFlags.FunDB.UserViews.Types
-open FunWithFlags.FunDB.Layout.Update
-open FunWithFlags.FunDBSchema.System
+open FunWithFlags.FunDB.UserViews.DryRun
 
 type private UserViewsUpdater (db : SystemContext) as this =
     inherit SystemUpdater(db)
@@ -73,19 +72,22 @@ let updateUserViews (db : SystemContext) (uvs : SourceUserViews) (cancellationTo
 type private UserViewErrorRef = ERGenerator of SchemaName
                               | ERUserView of ResolvedUserViewRef
 
-let private findBrokenUserViewsSchema (schemaName : SchemaName) (schema : ErroredUserViewsSchema) : UserViewErrorRef seq =
+let private findBrokenUserViewsSchema (schemaName : SchemaName) (schema : PrefetchedViewsSchema) : UserViewErrorRef seq =
     seq {
-        match schema with
-        | UEGenerator e -> yield ERGenerator schemaName
-        | UEUserViews schema ->
-            for KeyValue(uvName, uv) in schema do
-                yield ERUserView { Schema = schemaName; Name = uvName }
+        for KeyValue(uvName, maybeUv) in schema.UserViews do
+            match maybeUv with
+            | Error e when not e.AllowBroken -> yield ERUserView { Schema = schemaName; Name = uvName }
+            | _ -> ()
     }
 
-let private findBrokenUserViews (uvs : ErroredUserViews) : UserViewErrorRef seq =
+let private findBrokenUserViews (uvs : PrefetchedUserViews) : UserViewErrorRef seq =
     seq {
-        for KeyValue(schemaName, schema) in uvs do
-            yield! findBrokenUserViewsSchema schemaName schema
+        for KeyValue(schemaName, maybeSchema) in uvs.Schemas do
+            match maybeSchema with
+            | Ok schema -> yield! findBrokenUserViewsSchema schemaName schema
+            | Error e ->
+                if not e.AllowBroken then
+                    yield ERGenerator schemaName
     }
 
 let private checkUserViewName (ref : ResolvedUserViewRef) : Expr<UserView -> bool> =
@@ -97,7 +99,7 @@ let private checkUserViewGeneratorSchema (schemaName : SchemaName) : Expr<UserVi
     let rawSchemaName = string schemaName
     <@ fun uvGen -> uvGen.Schema.Name = rawSchemaName @>
 
-let markBrokenUserViews (db : SystemContext) (uvs : ErroredUserViews) (cancellationToken : CancellationToken) : Task =
+let markBrokenUserViews (db : SystemContext) (uvs : PrefetchedUserViews) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let broken = findBrokenUserViews uvs
         let genChecks = broken |> Seq.mapMaybe (function ERGenerator ref -> Some ref | _ -> None) |> Seq.map checkUserViewGeneratorSchema

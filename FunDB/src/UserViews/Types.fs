@@ -1,10 +1,10 @@
 module FunWithFlags.FunDB.UserViews.Types
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type ViewColumnName = FunQLName
@@ -21,36 +21,14 @@ type ResolvedUserView =
 
 [<NoEquality; NoComparison>]
 type UserViewsSchema =
-    { UserViews : Map<UserViewName, Result<ResolvedUserView, exn>>
-      GeneratorScript : SourceUserViewsGeneratorScript option
+    { UserViews : Map<UserViewName, PossiblyBroken<ResolvedUserView>>
     }
 
 [<NoEquality; NoComparison>]
-type UserViewsSchemaError =
-  { Source : SourceUserViewsSchema
-    Error : exn
-  }
-
-[<NoEquality; NoComparison>]
 type UserViews =
-    { Schemas : Map<SchemaName, Result<UserViewsSchema, UserViewsSchemaError>>
+    { Schemas : Map<SchemaName, PossiblyBroken<UserViewsSchema>>
     } with
         member this.Find (ref : ResolvedUserViewRef) =
             match Map.tryFind ref.Schema this.Schemas with
             | Some (Ok schema) -> Map.tryFind ref.Name schema.UserViews
             | _ -> None
-
-type ErroredUserViewsSchema =
-    | UEGenerator of exn
-    | UEUserViews of Map<UserViewName, exn>
-
-type ErroredUserViews = Map<SchemaName, ErroredUserViewsSchema>
-
-let unionErroredUserViews (a : ErroredUserViews) (b : ErroredUserViews) : ErroredUserViews =
-    let mergeOne a b =
-        match (a, b) with
-        | (UEUserViews schema1, UEUserViews schema2) -> UEUserViews (Map.unionUnique schema1 schema2)
-        | (UEGenerator e, UEUserViews _) -> UEGenerator e
-        | (UEUserViews _, UEGenerator e) -> UEGenerator e
-        | _ -> failwith "Cannot merge different error types"
-    Map.unionWith (fun name -> mergeOne) a b

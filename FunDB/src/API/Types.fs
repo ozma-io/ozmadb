@@ -22,6 +22,7 @@ open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDB.Actions.Run
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Triggers.Merge
+open FunWithFlags.FunDB.Triggers.Run
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Attributes.Merge
@@ -35,20 +36,6 @@ open FunWithFlags.FunDB.Operations.Entity
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 module SQL = FunWithFlags.FunDB.SQL.Query
-
-type ArgsTriggerResult =
-    | ATTouched of RawArguments
-    | ATUntouched
-    | ATCancelled
-
-type ITriggerScript =
-    abstract member RunInsertTriggerBefore : ResolvedEntityRef -> LocalArgumentsMap -> CancellationToken -> Task<ArgsTriggerResult>
-    abstract member RunUpdateTriggerBefore : ResolvedEntityRef -> int -> LocalArgumentsMap -> CancellationToken -> Task<ArgsTriggerResult>
-    abstract member RunDeleteTriggerBefore : ResolvedEntityRef -> int -> CancellationToken -> Task<bool>
-
-    abstract member RunInsertTriggerAfter : ResolvedEntityRef -> int -> LocalArgumentsMap -> CancellationToken -> Task
-    abstract member RunUpdateTriggerAfter : ResolvedEntityRef -> int -> LocalArgumentsMap -> CancellationToken -> Task
-    abstract member RunDeleteTriggerAfter : ResolvedEntityRef -> CancellationToken -> Task
 
 type IContext =
     inherit IDisposable
@@ -79,7 +66,7 @@ type IContext =
     abstract member WriteEvent : EventEntry -> unit
     abstract member SetAPI : IFunDBAPI -> unit
     abstract member FindAction : ActionRef -> Result<ActionScript, exn> option
-    abstract member FindTrigger : TriggerRef -> ITriggerScript option
+    abstract member FindTrigger : TriggerRef -> PreparedTrigger option
 
 [<NoEquality; NoComparison>]
 type RoleInfo =

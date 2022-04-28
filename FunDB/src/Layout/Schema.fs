@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Layout.Schema
 
+open FSharpPlus
 open System
 open System.Linq
 open System.Linq.Expressions
@@ -7,7 +8,6 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
-open Microsoft.FSharp.Quotations
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Layout.Source
@@ -108,7 +108,7 @@ let private applyHiddenLayoutSchemaData (sourceSchema : SourceSchema) (systemSch
               TriggersMigration = systemEntity.TriggersMigration
               IsHidden = systemEntity.IsHidden
         }
-    { Entities = Map.unionWith (fun name -> mergeOne) sourceSchema.Entities systemSchema.Entities
+    { Entities = Map.unionWith mergeOne sourceSchema.Entities systemSchema.Entities
     }
 
 let applyHiddenLayoutData (sourceLayout : SourceLayout) (systemLayout : SourceLayout) : SourceLayout =

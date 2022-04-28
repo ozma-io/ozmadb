@@ -20,6 +20,7 @@ open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.SQL.Chunk
 open FunWithFlags.FunDB.SQL.Query
+open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 [<NoEquality; NoComparison>]
@@ -144,12 +145,12 @@ type PrefetchedUserView =
 
 [<NoEquality; NoComparison>]
 type PrefetchedViewsSchema =
-    { UserViews : Map<UserViewName, Result<PrefetchedUserView, exn>>
+    { UserViews : Map<UserViewName, PossiblyBroken<PrefetchedUserView>>
     }
 
 [<NoEquality; NoComparison>]
 type PrefetchedUserViews =
-    { Schemas : Map<SchemaName, Result<PrefetchedViewsSchema, UserViewsSchemaError>>
+    { Schemas : Map<SchemaName, PossiblyBroken<PrefetchedViewsSchema>>
     } with
         member this.Find (ref : ResolvedUserViewRef) =
             match Map.tryFind ref.Schema this.Schemas with
@@ -168,7 +169,7 @@ let mergePrefetchedUserViews (a : PrefetchedUserViews) (b : PrefetchedUserViews)
             with
             | Failure e -> failwithf "Error in schema %O: %s" name e
         | _ -> failwith "Cannot merge different error types"
-    { Schemas = Map.unionWith mergeOne a.Schemas b.Schemas }
+    { Schemas = Map.unionWithKey mergeOne a.Schemas b.Schemas }
 
 type UserViewDryRunException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
@@ -262,14 +263,14 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
             match column.Type with
             | CTColumnMeta (colName, CCCellAttribute attrName) -> Option.map (Map.singleton attrName >> Map.singleton colName) column.Info.Mapping
             | _ -> None
-        let columnAttributeMappings = Seq.mapMaybe getColumnAttributeMapping allPureColumnsInfo |> Seq.fold (Map.unionWith (fun name -> Map.union)) Map.empty
-        let cellAttributeMappings = Seq.mapMaybe getColumnAttributeMapping compiled.Columns |> Seq.fold (Map.unionWith (fun name -> Map.union)) Map.empty
+        let columnAttributeMappings = Seq.mapMaybe getColumnAttributeMapping allPureColumnsInfo |> Seq.fold (Map.unionWith Map.union) Map.empty
+        let cellAttributeMappings = Seq.mapMaybe getColumnAttributeMapping compiled.Columns |> Seq.fold (Map.unionWith Map.union) Map.empty
 
         let getArgumentAttributeMapping (column : CompiledColumnInfo) =
             match column.Type with
             | CTMeta (CMArgAttribute (argName, attrName)) -> Option.map (Map.singleton attrName >> Map.singleton argName) column.Info.Mapping
             | _ -> None
-        let argumentAttributeMappings = Seq.mapMaybe getArgumentAttributeMapping allPureColumnsInfo |> Seq.fold (Map.unionWith (fun name -> Map.union)) Map.empty
+        let argumentAttributeMappings = Seq.mapMaybe getArgumentAttributeMapping allPureColumnsInfo |> Seq.fold (Map.unionWith Map.union) Map.empty
 
         let getResultColumn (column : ExecutedColumnInfo) : UserViewColumn =
             let mainField =
@@ -397,66 +398,57 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
                 return raisefWithInner UserViewDryRunException err "Test execution error"
         }
 
-    let resolveUserViewsSchema (schemaName : SchemaName) (schema : UserViewsSchema) : Task<Map<UserViewName, exn> * PrefetchedViewsSchema> = task {
-        let mutable errors = Map.empty
-
-        let mapUserView (name, maybeUv : Result<ResolvedUserView, exn>) =
-            task {
-                try
-                    let ref = { Schema = schemaName; Name = name }
-                    match maybeUv with
-                    | Error e when not (withThisBroken true) -> return None
-                    | Error e -> return Some (name, Error e)
-                    | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
-                    | Ok uv ->
-                        try
-                            let comment = sprintf "Dry-run of %O" ref
-                            let! r = dryRunUserView uv (Some comment)
-                            return Some (name, Ok r)
-                        with
-                        | :? UserViewDryRunException as e when uv.AllowBroken || forceAllowBroken ->
-                            if not uv.AllowBroken then
-                                errors <- Map.add name (e :> exn) errors
-                            return Some (name, Error (e :> exn))
-                with
-                | e -> return raisefWithInner UserViewDryRunException e "In user view %O" name
-            }
-
-        let! userViews = schema.UserViews |> Map.toSeq |> Seq.mapTask mapUserView |> Task.map (Seq.catMaybes >> Map.ofSeq)
-        let ret = { UserViews = userViews } : PrefetchedViewsSchema
-        return (errors, ret)
-    }
-
-    let resolveUserViews (source : SourceUserViews) (resolved : UserViews) : Task<ErroredUserViews * PrefetchedUserViews> = task {
-        let mutable errors : ErroredUserViews = Map.empty
-
-        let mapSchema name = function
-            | Ok schema ->
+    let resolveUserViewsSchema (schemaName : SchemaName) (schema : UserViewsSchema) : Task<PrefetchedViewsSchema> =
+        task {
+            let mapUserView (name, maybeUv : PossiblyBroken<ResolvedUserView>) =
                 task {
                     try
-                        let! (schemaErrors, newSchema) = resolveUserViewsSchema name schema
-                        if not <| Map.isEmpty schemaErrors then
-                            errors <- Map.add name (UEUserViews schemaErrors) errors
-                        return Ok newSchema
+                        let ref = { Schema = schemaName; Name = name }
+                        match maybeUv with
+                        | Error e when not (withThisBroken true) -> return None
+                        | Error e -> return Some (name, Error e)
+                        | Ok uv when not (withThisBroken uv.AllowBroken) -> return None
+                        | Ok uv ->
+                            try
+                                let comment = sprintf "Dry-run of %O" ref
+                                let! r = dryRunUserView uv (Some comment)
+                                return Some (name, Ok r)
+                            with
+                            | :? UserViewDryRunException as e when uv.AllowBroken || forceAllowBroken ->
+                                return Some (name, Error { Error = e; AllowBroken = uv.AllowBroken })
                     with
-                    | e -> return raisefWithInner UserViewDryRunException e "In schema %O" name
+                    | e -> return raisefWithInner UserViewDryRunException e "In user view %O" name
                 }
-            | Error e -> Task.result (Error e)
 
-        let! schemas = resolved.Schemas |> Map.mapTask mapSchema
-        let ret = { Schemas = schemas } : PrefetchedUserViews
-        return (errors, ret)
-    }
+            let! userViews = schema.UserViews |> Map.toSeq |> Seq.mapTask mapUserView |> Task.map (Seq.catMaybes >> Map.ofSeq)
+            return { UserViews = userViews }
+        }
+
+    let resolveUserViews (source : SourceUserViews) (resolved : UserViews) : Task<PrefetchedUserViews> =
+        task {
+            let mapSchema name = function
+                | Ok schema ->
+                    task {
+                        try
+                            let! ret = resolveUserViewsSchema name schema
+                            return Ok ret
+                        with
+                        | e -> return raisefWithInner UserViewDryRunException e "In schema %O" name
+                    }
+                | Error e -> Task.result (Error e)
+
+            let! schemas = resolved.Schemas |> Map.mapTask mapSchema
+            return { Schemas = schemas }
+        }
 
     member this.DryRunAnonymousUserView uv = dryRunUserView uv
     member this.DryRunUserViews = resolveUserViews
 
 // Warning: this should be executed outside of any transactions because of test runs.
-let dryRunUserViews (conn : QueryConnection) (layout : Layout) (triggers : MergedTriggers) (forceAllowBroken : bool) (onlyWithAllowBroken : bool option) (sourceViews : SourceUserViews) (userViews : UserViews) (cancellationToken : CancellationToken) : Task<ErroredUserViews * PrefetchedUserViews> =
+let dryRunUserViews (conn : QueryConnection) (layout : Layout) (triggers : MergedTriggers) (forceAllowBroken : bool) (onlyWithAllowBroken : bool option) (sourceViews : SourceUserViews) (userViews : UserViews) (cancellationToken : CancellationToken) : Task<PrefetchedUserViews> =
     task {
         let runner = DryRunner(layout, triggers, conn, forceAllowBroken, onlyWithAllowBroken, cancellationToken)
-        let! (errors, ret) = runner.DryRunUserViews sourceViews userViews
-        return (errors, ret)
+        return! runner.DryRunUserViews sourceViews userViews
     }
 
 let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (triggers : MergedTriggers) (q: ResolvedUserView) (cancellationToken : CancellationToken) : Task<PrefetchedUserView> =

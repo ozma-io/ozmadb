@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Triggers.Source
+open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
 type TriggerUpdateFields =
@@ -18,18 +19,18 @@ type TriggerRef =
 
 [<NoEquality; NoComparison>]
 type ResolvedTrigger =
-    { AllowBroken : bool
-      Priority : int
+    { Priority : int
       Time : TriggerTime
       OnInsert : bool
       OnUpdateFields : TriggerUpdateFields
       OnDelete : bool
       Procedure : string
+      AllowBroken : bool
     }
 
 [<NoEquality; NoComparison>]
 type TriggersEntity =
-    { Triggers : Map<TriggerName, Result<ResolvedTrigger, exn>>
+    { Triggers : Map<TriggerName, PossiblyBroken<ResolvedTrigger>>
     }
 
 [<NoEquality; NoComparison>]
@@ -50,17 +51,3 @@ type TriggersDatabase =
 type ResolvedTriggers =
     { Schemas : Map<SchemaName, TriggersDatabase>
     }
-
-type ErroredTriggersEntity = Map<TriggerName, exn>
-type ErroredTriggersSchema = Map<EntityName, ErroredTriggersEntity>
-type ErroredTriggersDatabase = Map<SchemaName, ErroredTriggersSchema>
-type ErroredTriggers = Map<SchemaName, ErroredTriggersDatabase>
-
-let private unionErroredTriggersSchema (a : ErroredTriggersSchema) (b : ErroredTriggersSchema) =
-    Map.unionWith (fun name -> Map.unionUnique) a b
-
-let private unionErroredTriggersDatabase (a : ErroredTriggersDatabase) (b : ErroredTriggersDatabase) =
-    Map.unionWith (fun name -> unionErroredTriggersSchema) a b
-
-let unionErroredTriggers (a : ErroredTriggers) (b : ErroredTriggers) =
-    Map.unionWith (fun name -> unionErroredTriggersDatabase) a b

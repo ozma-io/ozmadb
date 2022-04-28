@@ -9,6 +9,7 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types
+open FunWithFlags.FunDB.Objects.Types
 
 type ResolveTriggersException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
@@ -57,18 +58,16 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                 | _ -> ()
             | _ -> ()
 
-        { AllowBroken = trigger.AllowBroken
-          Priority = trigger.Priority
+        { Priority = trigger.Priority
           Time = trigger.Time
           OnInsert = trigger.OnInsert
           OnUpdateFields = updateFields
           OnDelete = trigger.OnDelete
           Procedure = trigger.Procedure
+          AllowBroken = trigger.AllowBroken
         }
 
-    let resolveTriggersEntity (entity : ResolvedEntity) (entityTriggers : SourceTriggersEntity) : ErroredTriggersEntity * TriggersEntity =
-        let mutable errors = Map.empty
-
+    let resolveTriggersEntity (entity : ResolvedEntity) (entityTriggers : SourceTriggersEntity) : TriggersEntity =
         let mapTrigger name (trigger : SourceTrigger) =
             try
                 try
@@ -76,80 +75,57 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     Ok <| resolveTrigger entity trigger
                 with
                 | :? ResolveTriggersException as e when trigger.AllowBroken || forceAllowBroken ->
-                    if not trigger.AllowBroken then
-                        errors <- Map.add name (e :> exn) errors
-                    Error (e :> exn)
+                    Error { Error = e; AllowBroken = trigger.AllowBroken }
             with
             | e -> raisefWithInner ResolveTriggersException e "In trigger %O" name
 
-        let ret =
-            { Triggers = entityTriggers.Triggers |> Map.map mapTrigger
-            }
-        (errors, ret)
+        { Triggers = entityTriggers.Triggers |> Map.map mapTrigger
+        }
 
-    let resolveTriggersSchema (schema : ResolvedSchema) (schemaTriggers : SourceTriggersSchema) : ErroredTriggersSchema * TriggersSchema =
-        let mutable errors = Map.empty
-
+    let resolveTriggersSchema (schema : ResolvedSchema) (schemaTriggers : SourceTriggersSchema) : TriggersSchema =
         let mapEntity name entityTriggers =
             try
                 let entity =
                     match Map.tryFind name schema.Entities with
                     | Some entity when not entity.IsHidden -> entity
                     | _ -> raisef ResolveTriggersException "Unknown entity name"
-                let (entityErrors, newEntity) = resolveTriggersEntity entity entityTriggers
-                if not <| Map.isEmpty entityErrors then
-                    errors <- Map.add name entityErrors errors
-                newEntity
+                resolveTriggersEntity entity entityTriggers
             with
             | e -> raisefWithInner ResolveTriggersException e "In triggers entity %O" name
 
-        let ret =
-            { Entities = schemaTriggers.Entities |> Map.map mapEntity
-            }
-        (errors, ret)
+        { Entities = schemaTriggers.Entities |> Map.map mapEntity
+        }
 
-    let resolveTriggersDatabase (db : SourceTriggersDatabase) : ErroredTriggersDatabase * TriggersDatabase =
-        let mutable errors = Map.empty
-
+    let resolveTriggersDatabase (db : SourceTriggersDatabase) : TriggersDatabase =
         let mapSchema name schemaTriggers =
             try
                 let schema =
                     match Map.tryFind name layout.Schemas with
                     | None -> raisef ResolveTriggersException "Unknown schema name"
                     | Some schema -> schema
-                let (schemaErrors, newSchema) = resolveTriggersSchema schema schemaTriggers
-                if not <| Map.isEmpty schemaErrors then
-                    errors <- Map.add name schemaErrors errors
-                newSchema
+                resolveTriggersSchema schema schemaTriggers
             with
             | e -> raisefWithInner ResolveTriggersException e "In triggers schema %O" name
 
-        let ret =
-            { Schemas = db.Schemas |> Map.map mapSchema
-            } : TriggersDatabase
-        (errors, ret)
+        { Schemas = db.Schemas |> Map.map mapSchema
+        }
 
-    let resolveTriggers (triggers : SourceTriggers) : ErroredTriggers * ResolvedTriggers =
+    let resolveTriggers (triggers : SourceTriggers) : ResolvedTriggers =
         let mutable errors = Map.empty
 
         let mapDatabase name db =
             try
                 if not <| Map.containsKey name layout.Schemas then
                     raisef ResolveTriggersException "Unknown schema name"
-                let (dbErrors, newDb) = resolveTriggersDatabase db
-                if not <| Map.isEmpty dbErrors then
-                    errors <- Map.add name dbErrors errors
-                newDb
+                resolveTriggersDatabase db
             with
             | e -> raisefWithInner ResolveTriggersException e "In schema %O" name
 
-        let ret =
-            { Schemas = triggers.Schemas |> Map.map mapDatabase
-            }
-        (errors, ret)
+        { Schemas = triggers.Schemas |> Map.map mapDatabase
+        }
 
     member this.ResolveTriggers triggers = resolveTriggers triggers
 
-let resolveTriggers (layout : Layout) (forceAllowBroken : bool) (source : SourceTriggers) : ErroredTriggers * ResolvedTriggers =
+let resolveTriggers (layout : Layout) (forceAllowBroken : bool) (source : SourceTriggers) : ResolvedTriggers =
     let phase1 = Phase1Resolver (layout, forceAllowBroken)
     phase1.ResolveTriggers source

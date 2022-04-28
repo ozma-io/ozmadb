@@ -7,12 +7,11 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Types
-open FunWithFlags.FunDB.Layout.Update
-open FunWithFlags.FunDBSchema.System
 
 type private AttributesUpdater (db : SystemContext, allSchemas : Schema seq) as this =
     inherit SystemUpdater(db)
@@ -79,27 +78,29 @@ let updateAttributes (db : SystemContext) (attrs : SourceDefaultAttributes) (can
             return updater
         }
 
-let private findBrokenAttributesEntity (schemaName : SchemaName) (attrEntityRef : ResolvedEntityRef) (entity : ErroredAttributesEntity) : DefaultAttributeRef seq =
+let private findBrokenAttributesEntity (schemaName : SchemaName) (attrEntityRef : ResolvedEntityRef) (entity : AttributesEntity) : DefaultAttributeRef seq =
     seq {
-        for KeyValue(attrFieldName, field) in entity do
-            yield { Schema = schemaName; Field = { Entity = attrEntityRef; Name = attrFieldName } }
+        for KeyValue(attrFieldName, maybeField) in entity.Fields do
+            match maybeField with
+            | Error e when not e.AllowBroken -> yield { Schema = schemaName; Field = { Entity = attrEntityRef; Name = attrFieldName } }
+            | _ -> ()
     }
 
-let private findBrokenAttributesSchema (schemaName : SchemaName) (attrSchemaName : SchemaName) (schema : ErroredAttributesSchema) : DefaultAttributeRef seq =
+let private findBrokenAttributesSchema (schemaName : SchemaName) (attrSchemaName : SchemaName) (schema : AttributesSchema) : DefaultAttributeRef seq =
     seq {
-        for KeyValue(attrEntityName, entity) in schema do
+        for KeyValue(attrEntityName, entity) in schema.Entities do
             yield! findBrokenAttributesEntity schemaName { Schema = attrSchemaName; Name = attrEntityName } entity
     }
 
-let private findBrokenAttributesDatabase (schemaName : SchemaName) (db : ErroredAttributesDatabase) : DefaultAttributeRef seq =
+let private findBrokenAttributesDatabase (schemaName : SchemaName) (db : AttributesDatabase) : DefaultAttributeRef seq =
     seq {
-        for KeyValue(attrSchemaName, schema) in db do
+        for KeyValue(attrSchemaName, schema) in db.Schemas do
             yield! findBrokenAttributesSchema schemaName attrSchemaName schema
     }
 
-let private findBrokenAttributes (attrs : ErroredDefaultAttributes) : DefaultAttributeRef seq =
+let private findBrokenAttributes (attrs : DefaultAttributes) : DefaultAttributeRef seq =
     seq {
-        for KeyValue(schemaName, schema) in attrs do
+        for KeyValue(schemaName, schema) in attrs.Schemas do
             yield! findBrokenAttributesDatabase schemaName schema
     }
 
@@ -109,6 +110,6 @@ let private checkAttributeName (ref : DefaultAttributeRef) : Expr<FieldAttribute
     let fieldName = string ref.Field.Name
     <@ fun attrs -> (%checkSchema) attrs.Schema && (%checkEntity) attrs.FieldEntity && attrs.FieldName = fieldName @>
 
-let markBrokenAttributes (db : SystemContext) (attrs : ErroredDefaultAttributes) (cancellationToken : CancellationToken) : Task =
+let markBrokenAttributes (db : SystemContext) (attrs : DefaultAttributes) (cancellationToken : CancellationToken) : Task =
     let checks = findBrokenAttributes attrs |> Seq.map checkAttributeName
     genericMarkBroken db.FieldsAttributes checks <@ fun x -> FieldAttributes(AllowBroken = true) @> cancellationToken

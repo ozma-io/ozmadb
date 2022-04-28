@@ -407,7 +407,7 @@ let applyPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : Fla
                 let newAppliedDb = applyPermissionsForEntity layout rootRef allowedEntity usedEntity
                 match maybeAppliedDb with
                 | None -> Some newAppliedDb
-                | Some oldAppliedDb -> Some <| Map.unionWith (fun name -> unionHalfAppliedAllowedEntities) oldAppliedDb newAppliedDb
+                | Some oldAppliedDb -> Some <| Map.unionWith unionHalfAppliedAllowedEntities oldAppliedDb newAppliedDb
             with
             | :? PermissionsApplyException as e ->
                 exceptions <- (roleRef, e) :: exceptions

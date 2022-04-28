@@ -2,15 +2,13 @@ module FunWithFlags.FunDB.Attributes.Resolve
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
-open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Lex
-open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Purity
 open FunWithFlags.FunDB.Layout.Types
-open FunWithFlags.FunDB.Attributes.Source
+open FunWithFlags.FunDB.Attributes.Parse
 open FunWithFlags.FunDB.Attributes.Types
+open FunWithFlags.FunDB.Objects.Types
 
 type ResolveAttributesException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
@@ -23,15 +21,10 @@ type ResolveAttributesException (message : string, innerException : Exception, i
 let private attrResolutionFlags = { emptyExprResolutionFlags with Privileged = true }
 
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
-    let resolveAttributesField (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (fieldAttrs : SourceAttributesField) : AttributesField =
-        let attrsMap =
-            match parse tokenizeFunQL boundAttributeMap fieldAttrs.Attributes with
-            | Ok r -> r
-            | Error msg -> raisef ResolveAttributesException "Error parsing attributes: %s" msg
-
+    let resolveAttributesField (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (fieldAttrs : ParsedAttributesField) : AttributesField =
         let resolvedMap =
             try
-                resolveEntityAttributesMap layout attrResolutionFlags entityRef attrsMap
+                resolveEntityAttributesMap layout attrResolutionFlags entityRef fieldAttrs.Attributes
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
 
@@ -46,32 +39,25 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
           Attributes = defaultMap
         }
 
-    let resolveAttributesEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (entityAttrs : SourceAttributesEntity) : ErroredAttributesEntity * AttributesEntity =
-        let mutable errors = Map.empty
-
-        let mapField name (fieldAttrs : SourceAttributesField) =
-            try
+    let resolveAttributesEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (entityAttrs : ParsedAttributesEntity) : AttributesEntity =
+        let mapField name = function
+            | Error e -> Error e
+            | Ok fieldAttrs ->
                 try
-                    match entity.FindField name with
-                    | None -> raisef ResolveAttributesException "Unknown field name"
-                    | Some field ->
-                            Ok <| resolveAttributesField entityRef entity fieldAttrs
+                    try
+                        match entity.FindField name with
+                        | None -> raisef ResolveAttributesException "Unknown field name"
+                        | Some field -> Ok <| resolveAttributesField entityRef entity fieldAttrs
+                    with
+                    | :? ResolveAttributesException as e when fieldAttrs.AllowBroken || forceAllowBroken ->
+                        Error { Error = e; AllowBroken = fieldAttrs.AllowBroken }
                 with
-                | :? ResolveAttributesException as e when fieldAttrs.AllowBroken || forceAllowBroken ->
-                    if not fieldAttrs.AllowBroken then
-                        errors <- Map.add name (e :> exn) errors
-                    Error (e :> exn)
-            with
-            | e -> raisefWithInner ResolveAttributesException e "In field %O" name
+                | e -> raisefWithInner ResolveAttributesException e "In field %O" name
 
-        let ret =
-            { Fields = entityAttrs.Fields |> Map.map mapField
-            }
-        (errors, ret)
+        { Fields = entityAttrs.Fields |> Map.map mapField
+        }
 
-    let resolveAttributesSchema (schemaName : SchemaName) (schema : ResolvedSchema) (schemaAttrs : SourceAttributesSchema) : ErroredAttributesSchema * AttributesSchema =
-        let mutable errors = Map.empty
-
+    let resolveAttributesSchema (schemaName : SchemaName) (schema : ResolvedSchema) (schemaAttrs : ParsedAttributesSchema) : AttributesSchema =
         let mapEntity name entityAttrs =
             try
                 let entity =
@@ -79,60 +65,41 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
                     | Some entity when not entity.IsHidden -> entity
                     | _ -> raisef ResolveAttributesException "Unknown entity name"
                 let ref = { Schema = schemaName; Name = name }
-                let (entityErrors, newEntity) = resolveAttributesEntity ref entity entityAttrs
-                if not <| Map.isEmpty entityErrors then
-                    errors <- Map.add name entityErrors errors
-                newEntity
+                resolveAttributesEntity ref entity entityAttrs
             with
             | e -> raisefWithInner ResolveAttributesException e "In entity %O" name
 
-        let ret =
-            { Entities = schemaAttrs.Entities |> Map.map mapEntity
-            }
-        (errors, ret)
+        { Entities = schemaAttrs.Entities |> Map.map mapEntity
+        }
 
-    let resolveAttributesDatabase (db : SourceAttributesDatabase) : ErroredAttributesDatabase * AttributesDatabase =
-        let mutable errors = Map.empty
-
+    let resolveAttributesDatabase (db : ParsedAttributesDatabase) : AttributesDatabase =
         let mapSchema name schemaAttrs =
             try
                 let schema =
                     match Map.tryFind name layout.Schemas with
                     | None -> raisef ResolveAttributesException "Unknown schema name"
                     | Some schema -> schema
-                let (schemaErrors, newSchema) = resolveAttributesSchema name schema schemaAttrs
-                if not <| Map.isEmpty schemaErrors then
-                    errors <- Map.add name schemaErrors errors
-                newSchema
+                resolveAttributesSchema name schema schemaAttrs
             with
             | e -> raisefWithInner ResolveAttributesException e "For schema %O" name
 
-        let ret =
-            { Schemas = db.Schemas |> Map.map mapSchema
-            } : AttributesDatabase
-        (errors, ret)
+        { Schemas = db.Schemas |> Map.map mapSchema
+        }
 
-    let resolveAttributes (defaultAttrs : SourceDefaultAttributes) : ErroredDefaultAttributes * DefaultAttributes =
-        let mutable errors = Map.empty
-
+    let resolveAttributes (defaultAttrs : ParsedDefaultAttributes) : DefaultAttributes =
         let mapDatabase name db =
             try
                 if not <| Map.containsKey name layout.Schemas then
                     raisef ResolveAttributesException "Unknown schema name"
-                let (dbErrors, newDb) = resolveAttributesDatabase db
-                if not <| Map.isEmpty dbErrors then
-                    errors <- Map.add name dbErrors errors
-                newDb
+                resolveAttributesDatabase db
             with
             | e -> raisefWithInner ResolveAttributesException e "In schema %O" name
 
-        let ret =
-            { Schemas = defaultAttrs.Schemas |> Map.map mapDatabase
-            }
-        (errors, ret)
+        { Schemas = defaultAttrs.Schemas |> Map.map mapDatabase
+        }
 
     member this.ResolveAttributes defaultAttrs = resolveAttributes defaultAttrs
 
-let resolveAttributes (layout : Layout) (forceAllowBroken : bool) (source : SourceDefaultAttributes) : ErroredDefaultAttributes * DefaultAttributes =
+let resolveAttributes (layout : Layout) (forceAllowBroken : bool) (source : ParsedDefaultAttributes) : DefaultAttributes =
     let phase1 = Phase1Resolver (layout, forceAllowBroken)
     phase1.ResolveAttributes source

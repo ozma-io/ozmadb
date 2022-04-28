@@ -1629,7 +1629,7 @@ let unionUsedEntities (a : UsedEntity) (b : UsedEntity) : UsedEntity =
       Insert = a.Insert || b.Insert
       Update = a.Update || b.Update
       Delete = a.Delete || b.Delete
-      Fields = Map.unionWith (fun name -> unionUsedFields) a.Fields b.Fields
+      Fields = Map.unionWith unionUsedFields a.Fields b.Fields
     }
 
 let addUsedEntityField (fieldName : FieldName) (usedField : UsedField) (usedEntity : UsedEntity) =
@@ -1656,7 +1656,7 @@ let emptyUsedSchema : UsedSchema =
     }
 
 let unionUsedSchemas (a : UsedSchema) (b : UsedSchema) : UsedSchema =
-    { Entities = Map.unionWith (fun name -> unionUsedEntities) a.Entities b.Entities
+    { Entities = Map.unionWith unionUsedEntities a.Entities b.Entities
     }
 
 [<Struct>]
@@ -1678,7 +1678,7 @@ let emptyUsedDatabase : UsedDatabase =
     }
 
 let unionUsedDatabases (a : UsedDatabase) (b : UsedDatabase) : UsedDatabase =
-    { Schemas = Map.unionWith (fun name -> unionUsedSchemas) a.Schemas b.Schemas
+    { Schemas = Map.unionWith unionUsedSchemas a.Schemas b.Schemas
     }
 
 let addUsedEntity (schemaName : SchemaName) (entityName : EntityName) (usedEntity : UsedEntity) (usedDatabase : UsedDatabase) : UsedDatabase =

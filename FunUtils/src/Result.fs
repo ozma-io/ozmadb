@@ -17,14 +17,10 @@ let getErrorOption : Result<'a, 'e> -> 'e option = function
     | Ok _ -> None
     | Error v -> Some v
 
-let get : Result<'a, 'e> -> 'a = function
-    | Ok v -> v
-    | Error _ -> failwith "Result.get"
-
 let getError : Result<'a, 'e> -> 'e = function
     | Ok _ -> failwith "Result.getError"
     | Error v -> v
 
-let getOrDefault (f : 'e -> 'a) : Result<'a, 'e> -> 'a = function
+let getValue (f : 'e -> 'a) : Result<'a, 'e> -> 'a = function
     | Ok a -> a
     | Error e -> f e
