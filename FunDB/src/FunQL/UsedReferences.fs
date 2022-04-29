@@ -17,50 +17,22 @@ type UsedReferences =
       HasRestrictedEntities : bool
     }
 
-type ExprInfo =
-    { IsLocal : bool
-      HasArrows : bool
-      HasQuery : bool
-      HasAggregates : bool
-    }
-
-let emptyExprInfo =
-    { IsLocal = true
-      HasArrows = false
-      HasQuery = false
-      HasAggregates = false
-    }
-
-let unionExprInfo (a : ExprInfo) (b : ExprInfo) =
-    { IsLocal = a.IsLocal && b.IsLocal
-      HasArrows = a.HasArrows || b.HasArrows
-      HasQuery = a.HasQuery || b.HasQuery
-      HasAggregates = a.HasAggregates || b.HasAggregates
-    }
-
 type private UsedReferencesBuilder (layout : ILayoutBits) =
     let mutable usedArguments : UsedArguments = Set.empty
     let mutable usedDatabase : UsedDatabase = emptyUsedDatabase
     let mutable hasRestrictedEntities = false
 
-    let rec addField (extra : ObjectMap) (ref : ResolvedFieldRef) (field : ResolvedFieldInfo) : ExprInfo =
+    let rec addField (extra : ObjectMap) (ref : ResolvedFieldRef) (field : ResolvedFieldInfo)=
         match field.Field with
         | RId
         | RSubEntity
         | RColumnField _ ->
             usedDatabase <- addUsedFieldRef ref usedFieldSelect usedDatabase
-            emptyExprInfo
         | RComputedField comp ->
-            let info =
-                computedFieldCases layout extra { ref with Name = field.Name } comp
-                |> Seq.map (fun (case, comp) -> buildForFieldExpr comp.Expression)
-                |> Seq.fold unionExprInfo emptyExprInfo
-            if comp.IsMaterialized then
-                emptyExprInfo
-            else
-                info
+            for (case, comp) in computedFieldCases layout extra { ref with Name = field.Name } comp do
+                buildForFieldExpr comp.Expression
 
-    and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) (asRoot : bool) : (ResolvedEntityRef * PathArrow) list -> ExprInfo = function
+    and buildForPath (extra : ObjectMap) (ref : ResolvedFieldRef) (asRoot : bool) : (ResolvedEntityRef * PathArrow) list -> unit = function
         | [] ->
             let entity = layout.FindEntity ref.Entity |> Option.get
             let field = entity.FindField ref.Name |> Option.get
@@ -69,20 +41,16 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             usedDatabase <- addUsedFieldRef ref usedFieldSelect usedDatabase
             if not asRoot then
                 hasRestrictedEntities <- true
-            let info = buildForPath extra { Entity = entityRef; Name = arrow.Name } arrow.AsRoot paths
-            { info with
-                IsLocal = false
-                HasArrows = true
-            }
+            buildForPath extra { Entity = entityRef; Name = arrow.Name } arrow.AsRoot paths
 
-    and buildForReference (ref : LinkedBoundFieldRef) : ExprInfo =
+    and buildForReference (ref : LinkedBoundFieldRef) =
         match ref.Ref.Ref with
         | VRColumn _ ->
             match ObjectMap.tryFindType<FieldMeta> ref.Extra with
             | Some { Bound = Some boundInfo } ->
                 let pathWithEntities = Seq.zip boundInfo.Path ref.Ref.Path |> Seq.toList
                 buildForPath ref.Extra boundInfo.Ref ref.Ref.AsRoot pathWithEntities
-            | _ -> emptyExprInfo
+            | _ -> ()
         | VRPlaceholder name ->
             usedArguments <- Set.add name usedArguments
             match ObjectMap.tryFindType<ReferencePlaceholderMeta> ref.Extra with
@@ -90,7 +58,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
                 let argRef = { Entity = argInfo.Path.[0]; Name = ref.Ref.Path.[0].Name }
                 let pathWithEntities = Seq.zip argInfo.Path ref.Ref.Path |> Seq.skip 1 |> Seq.toList
                 buildForPath ref.Extra argRef ref.Ref.AsRoot pathWithEntities
-            | _ -> emptyExprInfo
+            | _ -> ()
 
     and buildForResult : ResolvedQueryResult -> unit = function
         | QRAll alias -> ()
@@ -98,45 +66,32 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
 
     and buildForColumnResult (result : ResolvedQueryColumnResult) =
         buildForBoundAttributesMap result.Attributes
-        ignore <| buildForFieldExpr result.Result
+        buildForFieldExpr result.Result
 
-    and buildForBoundAttribute : ResolvedBoundAttribute -> unit = function
-        | BAExpr expr -> ignore <| buildForFieldExpr expr
+    and buildForBoundAttributeExpr : ResolvedBoundAttributeExpr -> unit = function
+        | BAExpr expr -> buildForFieldExpr expr
         | BAMapping mapping -> ()
+
+    and buildForBoundAttribute (attr : ResolvedBoundAttribute) =
+        buildForBoundAttributeExpr attr.Expression
+
+    and buildForAttribute (attr : ResolvedAttribute) =
+        buildForFieldExpr attr.Expression
 
     and buildForBoundAttributesMap (attributes : ResolvedBoundAttributesMap) =
         Map.iter (fun name attr -> buildForBoundAttribute attr) attributes
 
     and buildForAttributesMap (attributes : ResolvedAttributesMap) =
-        Map.iter (fun name attr -> ignore <| buildForFieldExpr attr) attributes
+        Map.iter (fun name attr -> buildForAttribute attr) attributes
 
-    and buildForFieldExpr (expr : ResolvedFieldExpr) : ExprInfo =
-        let mutable exprInfo = emptyExprInfo
-
-        let iterReference ref =
-            let newExprInfo = buildForReference ref
-            exprInfo <- unionExprInfo exprInfo newExprInfo
-
-        let iterQuery query =
-            buildForSelectExpr query
-            exprInfo <-
-                { exprInfo with
-                    IsLocal = false
-                    HasQuery = true
-                }
-
-        let iterAggregate aggr =
-            exprInfo <- { exprInfo with HasAggregates = true }
-
+    and buildForFieldExpr (expr : ResolvedFieldExpr) =
         let mapper =
             { idFieldExprIter with
-                FieldReference = iterReference
-                Query = iterQuery
-                Aggregate = iterAggregate
+                FieldReference = buildForReference
+                Query = buildForSelectExpr
             }
 
         iterFieldExpr mapper expr
-        exprInfo
 
     and buildForOrderColumn (ord : ResolvedOrderColumn) =
         buildForFieldExpr ord.Expr |> ignore
@@ -249,15 +204,13 @@ let selectExprUsedReferences (layout : ILayoutBits) (expr : ResolvedSelectExpr) 
       HasRestrictedEntities = builder.HasRestrictedEntities
     }
 
-let fieldExprUsedReferences (layout : ILayoutBits) (expr : ResolvedFieldExpr) : ExprInfo * UsedReferences =
+let fieldExprUsedReferences (layout : ILayoutBits) (expr : ResolvedFieldExpr) : UsedReferences =
     let builder = UsedReferencesBuilder (layout)
     let info = builder.BuildForFieldExpr expr
-    let ret =
-        { UsedDatabase = builder.UsedDatabase
-          UsedArguments = builder.UsedArguments
-          HasRestrictedEntities = builder.HasRestrictedEntities
-        }
-    (info, ret)
+    { UsedDatabase = builder.UsedDatabase
+      UsedArguments = builder.UsedArguments
+      HasRestrictedEntities = builder.HasRestrictedEntities
+    }
 
 // Used entities grouped by root entity.
 // All fields in entities belong to that entities.

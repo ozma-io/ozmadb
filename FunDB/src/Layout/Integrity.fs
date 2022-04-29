@@ -113,7 +113,7 @@ type private AssertionsBuilder (layout : Layout) =
                 yield! columnFieldAssertions ref col
             for KeyValue (compName, maybeComp) in entity.ComputedFields do
                 match maybeComp with
-                | Ok ({ IsMaterialized = true; Root = Some { IsLocal = false }; InheritedFrom = None } as comp) ->
+                | Ok ({ IsMaterialized = true; Root = Some { Flags = flags }; InheritedFrom = None } as comp) when not <| exprIsLocal flags ->
                     let ref = { Entity = entityRef; Name = compName }
                     yield
                         { emptyLayoutAssertions with

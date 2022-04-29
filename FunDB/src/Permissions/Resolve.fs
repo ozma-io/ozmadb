@@ -92,13 +92,13 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
             | Error msg -> raisef ResolvePermissionsException "Error parsing: %s" msg
 
         let entityInfo = SFEntity entityRef
-        let (localArguments, expr) =
+        let (exprInfo, expr) =
             try
                 resolveSingleFieldExpr layout OrderedMap.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"
-        let (exprInfo, usedReferences) = fieldExprUsedReferences layout expr
-        if exprInfo.HasAggregates then
+        let usedReferences = fieldExprUsedReferences layout expr
+        if exprInfo.Flags.HasAggregates then
             raisef ResolvePermissionsException "Forbidden aggregate function in a restriction"
         if not allowIds && Option.isSome (usedReferences.UsedDatabase.FindField entityRef funId) then
             raisef ResolvePermissionsException "Cannot use id in this restriction"

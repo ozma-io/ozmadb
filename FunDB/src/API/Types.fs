@@ -170,9 +170,9 @@ type UserViewEntriesResult =
 [<NoEquality; NoComparison>]
 type UserViewInfoResult =
     { Info : UserViewInfo
-      PureAttributes : ExecutedAttributesMap
-      PureColumnAttributes : ExecutedAttributesMap[]
-      PureArgumentAttributes : Map<ArgumentName, ExecutedAttributesMap>
+      ConstAttributes : ExecutedAttributesMap
+      ConstColumnAttributes : ExecutedAttributesMap[]
+      ConstArgumentAttributes : Map<ArgumentName, ExecutedAttributesMap>
     }
 
 type UserViewFlags =

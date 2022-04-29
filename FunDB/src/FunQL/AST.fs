@@ -600,11 +600,75 @@ type [<NoEquality; NoComparison>] BoundMapping =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-type AttributesMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, FieldExpr<'e, 'f>>
+type ResolvedExprFlags =
+    { HasSubqueries : bool
+      HasFetches : bool
+      HasArrows : bool
+      HasAggregates : bool
+      HasPlaceholders : bool
+      HasFields : bool
+    }
+
+let emptyResolvedExprFlags : ResolvedExprFlags =
+    { HasSubqueries = false
+      HasFetches = false
+      HasArrows = false
+      HasAggregates = false
+      HasPlaceholders = false
+      HasFields = false
+    }
+
+let unknownResolvedExprFlags : ResolvedExprFlags =
+    { HasSubqueries = true
+      HasFetches = true
+      HasArrows = true
+      HasAggregates = false
+      HasPlaceholders = true
+      HasFields = true
+    }
+
+let fieldResolvedExprFlags : ResolvedExprFlags =
+    { emptyResolvedExprFlags with HasFields = true }
+
+let unionResolvedExprFlags (a : ResolvedExprFlags) (b : ResolvedExprFlags) =
+    { HasSubqueries = a.HasSubqueries || b.HasSubqueries
+      HasFetches = a.HasFetches || b.HasFetches
+      HasArrows = a.HasArrows || b.HasArrows
+      HasAggregates = a.HasAggregates || b.HasAggregates
+      HasPlaceholders = a.HasPlaceholders || b.HasPlaceholders
+      HasFields = a.HasFields || b.HasFields
+    }
+
+let exprIsLocal (flags : ResolvedExprFlags) =
+    not (flags.HasFetches || flags.HasSubqueries || flags.HasArrows)
+
+type DependencyStatus = DSConst | DSSingle | DSPerRow
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | DSConst -> "CONST"
+            | DSSingle -> "SINGLE"
+            | DSPerRow -> "PER ROW"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+let unionDependencyStatus (a : DependencyStatus) (b : DependencyStatus) : DependencyStatus =
+    match (a, b) with
+    | (DSConst, DSConst) -> DSConst
+    | (DSConst, DSSingle)
+    | (DSSingle, DSConst)
+    | (DSSingle, DSSingle) -> DSSingle
+    | (DSPerRow, _)
+    | (_, DSPerRow) -> DSPerRow
+
+type AttributesMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, Attribute<'e, 'f>>
 
 and BoundAttributesMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<AttributeName, BoundAttribute<'e, 'f>>
 
-and [<NoEquality; NoComparison>] BoundAttribute<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] BoundAttributeExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | BAExpr of FieldExpr<'e, 'f>
     | BAMapping of BoundMapping
     with
@@ -614,6 +678,30 @@ and [<NoEquality; NoComparison>] BoundAttribute<'e, 'f> when 'e :> IFunQLName an
             match this with
             | BAExpr e -> toFunQLString e
             | BAMapping mapping -> toFunQLString mapping
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] BoundAttribute<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { Expression : BoundAttributeExpr<'e, 'f>
+      Dependency : DependencyStatus
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            sprintf "%O %O" this.Dependency this.Expression
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] Attribute<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    { Expression : FieldExpr<'e, 'f>
+      Dependency : DependencyStatus
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            sprintf "%O %O" this.Dependency this.Expression
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -1527,6 +1615,8 @@ type ResolvedOperationEntity = OperationEntity<EntityRef>
 type ResolvedInsertSource = InsertSource<EntityRef, LinkedBoundFieldRef>
 type ResolvedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedBoundAttribute = BoundAttribute<EntityRef, LinkedBoundFieldRef>
+type ResolvedAttribute = Attribute<EntityRef, LinkedBoundFieldRef>
+type ResolvedBoundAttributeExpr = BoundAttributeExpr<EntityRef, LinkedBoundFieldRef>
 
 type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 

@@ -185,6 +185,10 @@ and tokenizeFunQL = parse
     | o n l y                 { Parse.ONLY }
     | m a t c h               { Parse.MATCH }
     | m a p p i n g           { Parse.MAPPING }
+    | c o n s t               { Parse.CONST }
+    | s i n g l e             { Parse.SINGLE }
+    | p e r                   { Parse.PER }
+    | r o w                   { Parse.ROW }
 
     // Types
     | i n t             { Parse.INT_TYPE }

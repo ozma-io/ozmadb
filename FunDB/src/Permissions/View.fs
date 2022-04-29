@@ -290,11 +290,11 @@ let applyRoleViewExpr (layout : Layout) (allowedDatabase : AppliedAllowedDatabas
     let applier = PermissionsApplier (layout, allowedDatabase, view.Query.Arguments)
     let queryExpression = applier.ApplyToSelectExpr view.Query.Expression
 
-    let mapPureColumn (info, expr) =
+    let mapSingleRowColumn (info, expr) =
         let expr = applier.ApplyToValueExpr expr
         (info, expr)
 
-    let attributesQuery = { view.AttributesQuery with PureColumnsWithArguments = Array.map mapPureColumn view.AttributesQuery.PureColumnsWithArguments }
+    let singleRowQuery = { view.SingleRowQuery with SingleRowColumns = Array.map mapSingleRowColumn view.SingleRowQuery.SingleRowColumns }
 
     let newQuery =
         { Expression = queryExpression
@@ -302,6 +302,6 @@ let applyRoleViewExpr (layout : Layout) (allowedDatabase : AppliedAllowedDatabas
         }
 
     { view with
-          AttributesQuery = attributesQuery
+          SingleRowQuery = singleRowQuery
           Query = newQuery
     }

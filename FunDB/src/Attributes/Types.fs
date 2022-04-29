@@ -1,7 +1,6 @@
 module FunWithFlags.FunDB.Attributes.Types
 
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.SQL.Purity
 open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -12,16 +11,10 @@ type DefaultAttributeRef =
         override this.ToString () = sprintf "%s.%s" (this.Schema.ToFunQLString()) (this.Field.ToFunQLString())
 
 [<NoEquality; NoComparison>]
-type DefaultAttribute =
-    { Expression : ResolvedBoundAttribute
-      Purity : PurityStatus option
-    }
-
-[<NoEquality; NoComparison>]
 type AttributesField =
     { AllowBroken : bool
       Priority : int
-      Attributes : Map<AttributeName, DefaultAttribute>
+      Attributes : ResolvedBoundAttributesMap
     }
 
 [<NoEquality; NoComparison>]

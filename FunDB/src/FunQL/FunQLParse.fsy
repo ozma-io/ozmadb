@@ -30,7 +30,9 @@ type ParsedUpdateExpr = UpdateExpr<EntityRef, LinkedFieldRef>
 type ParsedDeleteExpr = DeleteExpr<EntityRef, LinkedFieldRef>
 type ParsedDataExpr = DataExpr<EntityRef, LinkedFieldRef>
 type ParsedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedFieldRef>
+type ParsedBoundAttributeExpr = BoundAttributeExpr<EntityRef, LinkedFieldRef>
 type ParsedBoundAttribute = BoundAttribute<EntityRef, LinkedFieldRef>
+type ParsedAttribute = Attribute<EntityRef, LinkedFieldRef>
 
 type ParsedMainEntity =
     { Entity : EntityRef
@@ -54,9 +56,9 @@ type ParsedCommandExpr =
 type ParsedIndexColumn = IndexColumn<EntityRef, LinkedFieldRef>
 
 [<NoEquality; NoComparison>]
-type private Result =
-    | AResult of QueryResult<EntityRef, LinkedFieldRef>
-    | AAttribute of FunQLName * ParsedFieldExpr
+type private RawQueryResult =
+    | AResult of ParsedQueryResult
+    | AAttribute of AttributeName * ParsedAttribute
 
 [<NoEquality; NoComparison>]
 type private InSource =
@@ -99,7 +101,7 @@ let private parseOrderedSet (error : string) (vals : 'a seq) : OrderedSet<'a> =
     with
         | Failure msg -> failwith <| sprintf "%s: %s" error msg
 
-let private splitResults (results : Result seq) : ParsedAttributesMap * QueryResult<'e, 'f>[] =
+let private splitResults (results : RawQueryResult seq) : ParsedAttributesMap * ParsedQueryResult[] =
     let getResult = function
         | AResult res -> Some res
         | AAttribute (name, attr) -> None
@@ -277,6 +279,10 @@ let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldE
 %token ONLY
 %token MATCH
 %token MAPPING
+%token CONST
+%token SINGLE
+%token PER
+%token ROW
 
 // Types
 %token INT_TYPE
@@ -520,11 +526,20 @@ NonEmptyQueryResults:
     | QueryResult COMMA NonEmptyQueryResults { $1 :: $3 }
 
 QueryResult:
-    | AT Name EQ FieldExpr       { AAttribute ($2, $4) }
+    | AT Name EQ AttributeValue  { AAttribute ($2, $4) }
     | Name DOT Name DOT MULTIPLY { AResult (QRAll (Some { Schema = Some $1; Name = $3; })) }
     | Name DOT MULTIPLY          { AResult (QRAll (Some { Schema = None; Name = $1; })) }
     | MULTIPLY                   { AResult (QRAll None) }
     | QueryColumnResult          { AResult (QRExpr $1) }
+
+AttributeValue:
+    | Dependency FieldExpr { { Expression = $2; Dependency = $1 } }
+
+Dependency:
+    |         { DSPerRow }
+    | PER ROW { DSPerRow }
+    | SINGLE  { DSSingle }
+    | CONST   { DSConst }
 
 QueryColumnResult:
     | FieldExpr MaybeBoundAttributesMap         { { Alias = None; Attributes = $2; Result = $1 } }
@@ -544,8 +559,15 @@ BoundAttributeValuesNonEmpty:
     | Name EQ BoundAttributeValue COMMA BoundAttributeValuesNonEmpty { ($1, $3) :: $5 }
 
 BoundAttributeValue:
+    | Dependency BoundAttributeValueExpr { { Expression = $2; Dependency = $1 } }
+
+BoundAttributeValueExpr:
     | MAPPING BoundAttrMappingWhenList BoundAttrMappingElse END { BAMapping { Entries = parseHashMap "Clashing mapping values" $2; Default = $3 } }
     | FieldExpr                                                 { BAExpr $1 }
+
+MaybeConst:
+    | CONST { true }
+    |       { false }
 
 BoundAttrMappingWhenList:
     | WHEN Value THEN Value BoundAttrMappingWhenList { ($2, $4) :: $5 }

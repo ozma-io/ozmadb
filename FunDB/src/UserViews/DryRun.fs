@@ -43,7 +43,7 @@ type UVDomains = Map<GlobalDomainId, UVDomain>
 type BoundAttributeInfo =
     { Type : SQL.SimpleValueType
       Mapping : BoundMapping option
-      Pure : bool
+      Const : bool
     }
 
 [<NoEquality; NoComparison>]
@@ -130,7 +130,7 @@ type UserViewInfo =
     }
 
 [<NoEquality; NoComparison>]
-type PureAttributes =
+type ConstAttributes =
     { Attributes : ExecutedAttributesMap
       ColumnAttributes : ExecutedAttributesMap[]
       ArgumentAttributes : Map<ArgumentName, ExecutedAttributesMap>
@@ -139,7 +139,7 @@ type PureAttributes =
 [<NoEquality; NoComparison>]
 type PrefetchedUserView =
     { Info : UserViewInfo
-      PureAttributes : PureAttributes
+      ConstAttributes : ConstAttributes
       UserView : ResolvedUserView
     }
 
@@ -183,17 +183,17 @@ let private getColumn : (ColumnType * SQL.ColumnName) -> FunQLName option = func
     | (CTColumn c, _) -> Some c
     | _ -> None
 
-let private getPureAttributes (info : UserViewInfo) (res : ExecutingViewExpr) : PureAttributes =
+let private getConstAttributes (info : UserViewInfo) (res : ExecutingViewExpr) : ConstAttributes =
     let pureAttrs = res.Attributes |> Map.filter (fun name _ -> info.AttributeTypes.[name].Pure)
 
-    let filterColumnPure (colInfo : UserViewColumn) attrs =
-        attrs |> Map.filter (fun attrName _ -> colInfo.AttributeTypes.[attrName].Pure)
-    let pureColumnAttrs = Array.map2 filterColumnPure info.Columns res.ColumnAttributes
+    let filterConstColumn (colInfo : UserViewColumn) attrs =
+        attrs |> Map.filter (fun attrName _ -> colInfo.AttributeTypes.[attrName].Const)
+    let pureColumnAttrs = Array.map2 filterConstColumn info.Columns res.ColumnAttributes
 
-    let filterArgumentPure (argName : ArgumentName) attrs =
+    let filterConstArgument (argName : ArgumentName) attrs =
         let argInfo = info.Arguments.[argName]
-        attrs |> Map.filter (fun attrName _ -> argInfo.AttributeTypes.[attrName].Pure)
-    let pureArgumentAttrs = res.ArgumentAttributes |> Map.map filterArgumentPure
+        attrs |> Map.filter (fun attrName _ -> argInfo.AttributeTypes.[attrName].Const)
+    let pureArgumentAttrs = res.ArgumentAttributes |> Map.map filterConstArgument
 
     { Attributes = pureAttrs
       ColumnAttributes = pureColumnAttrs
@@ -235,42 +235,42 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
     let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) (results : ExecutingViewExpr) : UserViewInfo =
         let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.Entity |> Option.get, main)) viewExpr.MainEntity
 
-        let getPureAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
+        let getConstAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
             match column.Type with
             | CTMeta (CMRowAttribute attrName) -> Some attrName
             | _ -> None
-        let pureAttrsNames = compiled.AttributesQuery.PureColumns |> Seq.mapMaybe getPureAttr |> Set.ofSeq
+        let constAttrsNames = compiled.SingleRowQuery.ConstColumns |> Seq.mapMaybe getConstAttr |> Set.ofSeq
 
-        let getPureColumnAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
+        let getConstColunmAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
             match column.Type with
             | CTColumnMeta (colName, CCCellAttribute attrName) -> Some (colName, attrName)
             | _ -> None
-        let pureColumnAttrNames = compiled.AttributesQuery.PureColumns |> Seq.mapMaybe getPureColumnAttr |> Set.ofSeq
+        let constColumnAttrNames = compiled.SingleRowQuery.ConstColumns |> Seq.mapMaybe getConstColunmAttr |> Set.ofSeq
 
-        let getPureArgumentAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
+        let getConstArgumentAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
             match column.Type with
             | CTMeta (CMArgAttribute (argName, attrName)) -> Some (argName, attrName)
             | _ -> None
-        let pureArgumentAttrNames = compiled.AttributesQuery.PureColumns |> Seq.mapMaybe getPureArgumentAttr |> Set.ofSeq
+        let constArgumentAttrNames = compiled.SingleRowQuery.ConstColumns |> Seq.mapMaybe getConstArgumentAttr |> Set.ofSeq
 
-        let allPureColumnsInfo =
+        let allSingleRowColumnsInfo =
             Seq.concat
-                [ Seq.map fst compiled.AttributesQuery.PureColumns
-                  Seq.map fst compiled.AttributesQuery.PureColumnsWithArguments
+                [ Seq.map fst compiled.SingleRowQuery.ConstColumns
+                  Seq.map fst compiled.SingleRowQuery.SingleRowColumns
                 ]
 
         let getColumnAttributeMapping (column : CompiledColumnInfo) =
             match column.Type with
             | CTColumnMeta (colName, CCCellAttribute attrName) -> Option.map (Map.singleton attrName >> Map.singleton colName) column.Info.Mapping
             | _ -> None
-        let columnAttributeMappings = Seq.mapMaybe getColumnAttributeMapping allPureColumnsInfo |> Seq.fold (Map.unionWith Map.union) Map.empty
+        let columnAttributeMappings = Seq.mapMaybe getColumnAttributeMapping allSingleRowColumnsInfo |> Seq.fold (Map.unionWith Map.union) Map.empty
         let cellAttributeMappings = Seq.mapMaybe getColumnAttributeMapping compiled.Columns |> Seq.fold (Map.unionWith Map.union) Map.empty
 
         let getArgumentAttributeMapping (column : CompiledColumnInfo) =
             match column.Type with
             | CTMeta (CMArgAttribute (argName, attrName)) -> Option.map (Map.singleton attrName >> Map.singleton argName) column.Info.Mapping
             | _ -> None
-        let argumentAttributeMappings = Seq.mapMaybe getArgumentAttributeMapping allPureColumnsInfo |> Seq.fold (Map.unionWith Map.union) Map.empty
+        let argumentAttributeMappings = Seq.mapMaybe getArgumentAttributeMapping allSingleRowColumnsInfo |> Seq.fold (Map.unionWith Map.union) Map.empty
 
         let getResultColumn (column : ExecutedColumnInfo) : UserViewColumn =
             let mainField =
@@ -286,14 +286,14 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
 
             let columnMappings = Map.findWithDefault column.Name Map.empty columnAttributeMappings
             let getColumnAttributeInfo attrName typ =
-                let isPure = Set.contains (column.Name, attrName) pureColumnAttrNames
+                let isConst = Set.contains (column.Name, attrName) constColumnAttrNames
                 let mapping =
-                    if isPure then
+                    if isConst then
                         None
                     else
                         Map.tryFind attrName columnMappings
                 { Type = typ
-                  Pure = isPure
+                  Const = isConst
                   Mapping = mapping
                 }
             let columnAttributeTypes = Map.map getColumnAttributeInfo column.AttributeTypes
@@ -316,7 +316,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
         let columns = Array.map getResultColumn viewInfo.Columns
 
         let attributesStr =
-            Seq.append compiled.AttributesQuery.PureColumns compiled.AttributesQuery.PureColumnsWithArguments
+            Seq.append compiled.SingleRowQuery.ConstColumns compiled.SingleRowQuery.SingleRowColumns
             |> Seq.map (fun (info, expr) -> SQL.SCExpr (Some info.Name, expr) |> string) |> String.concat ", "
         let queryStr = compiled.Query.Expression.ToString()
         let hash = String.concatWithWhitespaces [attributesStr; queryStr] |> Hash.sha1OfString |> String.hexBytes
@@ -328,14 +328,14 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
 
                 let argMappings = Map.findWithDefault name Map.empty argumentAttributeMappings
                 let getAttributeInfo attrName typ =
-                    let isPure =Set.contains (name, attrName) pureArgumentAttrNames
+                    let isConst =Set.contains (name, attrName) constArgumentAttrNames
                     let mapping =
-                        if isPure then
+                        if isConst then
                             None
                         else
                             Map.tryFind attrName argMappings
                     { Type = typ
-                      Pure = isPure
+                      Const = isConst
                       Mapping = mapping
                     }
                 let attributeTypes = Map.map getAttributeInfo argAttrTypes
@@ -352,7 +352,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
 
         let getViewAttributeInfo attrName typ =
             { Type = typ
-              Pure = Set.contains attrName pureAttrsNames
+              Pure = Set.contains attrName constAttrsNames
             }
 
         let getRowAttributeInfo attrName typ =
@@ -376,7 +376,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
                           { uv.Compiled.Query with
                                 Expression = selectExprChunk emptyLimit uv.Compiled.Query.Expression
                           }
-                      AttributesQuery = uv.Compiled.AttributesQuery
+                      SingleRowQuery = uv.Compiled.SingleRowQuery
                 }
             let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)
 
@@ -384,14 +384,14 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
                 return! runViewExpr conn limited comment arguments cancellationToken <| fun info res ->
                     let nonpureCompiled =
                         { uv.Compiled with
-                              AttributesQuery = { uv.Compiled.AttributesQuery with PureColumns = [||] }
+                              SingleRowQuery = { uv.Compiled.SingleRowQuery with ConstColumns = [||] }
                         }
                     let nonpureUv = { uv with Compiled = nonpureCompiled }
                     let mergedInfo = mergeViewInfo uv.Resolved uv.Compiled info res
                     Task.FromResult
                         { UserView = nonpureUv
                           Info = mergedInfo
-                          PureAttributes = getPureAttributes mergedInfo res
+                          ConstAttributes = getConstAttributes mergedInfo res
                         }
             with
             | :? UserViewExecutionException as err ->

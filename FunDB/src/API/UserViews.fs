@@ -113,9 +113,9 @@ type UserViewsAPI (api : IFunDBAPI) =
                     | RTRole role when role.CanRead -> ()
                     | RTRole role -> ignore <| applyPermissions ctx.Layout (Option.defaultValue emptyResolvedRole role.Role) uv.UserView.Compiled.UsedDatabase
                     return Ok { Info = uv.Info
-                                PureAttributes = uv.PureAttributes.Attributes
-                                PureColumnAttributes = uv.PureAttributes.ColumnAttributes
-                                PureArgumentAttributes = uv.PureAttributes.ArgumentAttributes
+                                ConstAttributes = uv.ConstAttributes.Attributes
+                                ConstColumnAttributes = uv.ConstAttributes.ColumnAttributes
+                                ConstArgumentAttributes = uv.ConstAttributes.ArgumentAttributes
                               }
                 with
                 | :? PermissionsApplyException as ex when ex.IsUserException ->
@@ -196,9 +196,9 @@ type UserViewsAPI (api : IFunDBAPI) =
                         task {
                             let! rows = res.Rows.ToArrayAsync(ctx.CancellationToken)
                             return
-                                { ArgumentAttributes = Map.unionWith Map.union uv.PureAttributes.ArgumentAttributes res.ArgumentAttributes
-                                  Attributes = Map.union uv.PureAttributes.Attributes res.Attributes
-                                  ColumnAttributes = Array.map2 Map.union uv.PureAttributes.ColumnAttributes res.ColumnAttributes
+                                { ArgumentAttributes = Map.unionWith Map.union uv.ConstAttributes.ArgumentAttributes res.ArgumentAttributes
+                                  Attributes = Map.union uv.ConstAttributes.Attributes res.Attributes
+                                  ColumnAttributes = Array.map2 Map.union uv.ConstAttributes.ColumnAttributes res.ColumnAttributes
                                   Rows = rows
                                 }
                         }

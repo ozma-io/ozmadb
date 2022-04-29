@@ -4,7 +4,6 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
-open FunWithFlags.FunDB.FunQL.Purity
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Attributes.Parse
 open FunWithFlags.FunDB.Attributes.Types
@@ -28,15 +27,9 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
 
-        let finalizeOne name expr =
-            { Expression = expr
-              Purity = checkPureBoundColumnAttribute expr
-            }
-        let defaultMap = Map.map finalizeOne resolvedMap
-
         { AllowBroken = fieldAttrs.AllowBroken
           Priority = fieldAttrs.Priority
-          Attributes = defaultMap
+          Attributes = resolvedMap
         }
 
     let resolveAttributesEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (entityAttrs : ParsedAttributesEntity) : AttributesEntity =

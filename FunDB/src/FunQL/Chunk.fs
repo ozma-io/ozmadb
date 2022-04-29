@@ -10,7 +10,6 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Resolve
-open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.FunQL.Compile
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Chunk
@@ -109,26 +108,25 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
         (ref, info)
     let customMapping = Map.mapWithKeys makeCustomMapping namesMap : CustomFromMapping
 
-    let (localArguments, resolvedExpr) =
+    let (info, resolvedExpr) =
         try
             resolveSingleFieldExpr layout parsedArguments chunkFromEntityId emptyExprResolutionFlags (SFCustom customMapping) parsedExpr
         with
         | :? ViewResolveException as e -> raisefWithInner ChunkException e ""
-    let (info, usedArguments) = fieldExprUsedReferences layout resolvedExpr
-    if not info.IsLocal then
+    if not <| exprIsLocal info.Flags then
         raisef ChunkException "Expression is required to be local"
-    if info.HasAggregates then
+    if info.Flags.HasAggregates then
         raisef ChunkException "Aggregate functions are not supported here"
 
     let resolveChunkValue (name : ArgumentName) (arg : SourceChunkArgument) : FieldValue =
-        let argument = OrderedMap.find (PLocal name) localArguments
+        let argument = OrderedMap.find (PLocal name) info.LocalArguments
         match parseValueFromJson argument.ArgType true arg.Value with
         | Some v -> v
         | None -> raisef ChunkException "Couldn't parse value %O to type %O" arg.Value argument.ArgType
 
     let argValues = Map.map resolveChunkValue chunk.Arguments
 
-    { Arguments = localArguments
+    { Arguments = info.LocalArguments
       ArgumentValues = argValues
       ColumnNames = namesMap
       Expression = resolvedExpr

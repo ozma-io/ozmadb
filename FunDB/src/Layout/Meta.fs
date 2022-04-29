@@ -142,7 +142,7 @@ type private MetaBuilder (layout : Layout) =
     let makeMaterializedComputedFieldMeta (ref : ResolvedFieldRef) (entity : ResolvedEntity) (field : ResolvedComputedField) : SQL.ColumnMeta =
         let rootInfo = Option.get field.Root
         let columnType =
-            if rootInfo.IsLocal then
+            if exprIsLocal rootInfo.Flags then
                 let resolved = makeSingleFieldExpr ref.Entity true { Entity = None; Name = ref.Name }
                 let (arguments, compiled) = compileSingleFieldExpr layout materializedCompilationFlags emptyArguments resolved
                 SQL.CTGeneratedStored compiled

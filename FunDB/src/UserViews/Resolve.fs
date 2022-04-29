@@ -53,7 +53,8 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, flags : E
             try
                 resolveViewExpr layout flags parsed
             with
-            | :? ViewResolveException as e -> raisefWithInner UserViewResolveException e "Resolve error"
+            | :? ViewResolveException as e ->
+                raisefWithInner UserViewResolveException e "Resolve error"
         { Resolved = resolved
           AllowBroken = uv.AllowBroken
         }

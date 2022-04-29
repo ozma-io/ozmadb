@@ -121,8 +121,8 @@ let private splitPairsMap pairsMap =
     let snds = Map.map (fun name -> snd) pairsMap
     (fsts, snds)
 
-let private getAttributesQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SelectExpr) option =
-    let allColumns =  Seq.append viewExpr.AttributesQuery.PureColumns viewExpr.AttributesQuery.PureColumnsWithArguments
+let private getSingleRowQuery (viewExpr : CompiledViewExpr) : (ColumnType[] * SQL.SelectExpr) option =
+    let allColumns =  Seq.append viewExpr.SingleRowQuery.ConstColumns viewExpr.SingleRowQuery.SingleRowColumns
     let colTypes = allColumns |> Seq.map (fun (info, col) -> info.Type) |> Seq.toArray
     if Array.isEmpty colTypes then
         None
@@ -350,7 +350,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
 
             let! attrsResult =
                 task {
-                    match getAttributesQuery viewExpr with
+                    match getSingleRowQuery viewExpr with
                     | None ->
                         return
                             { Attributes = Map.empty
@@ -420,7 +420,7 @@ let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr)
 
             let! attrsResult =
                 task {
-                    match getAttributesQuery viewExpr with
+                    match getSingleRowQuery viewExpr with
                     | None -> return None
                     | Some (colTypes, query) ->
                         let! ret = runExplainQuery connection query parameters explainOpts cancellationToken

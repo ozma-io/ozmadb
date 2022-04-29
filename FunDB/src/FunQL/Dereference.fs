@@ -47,7 +47,7 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
           Result = expr
         }
 
-    and resolveBoundAttribute : ResolvedBoundAttribute -> ResolvedBoundAttribute = function
+    and resolveBoundAttributeExpr : ResolvedBoundAttributeExpr -> ResolvedBoundAttributeExpr = function
         | BAExpr expr -> BAExpr (resolveFieldExpr expr)
         | BAMapping mapping ->
             let newEs = HashMap.mapWithKeys (fun value e -> (resolveValue value, resolveValue e)) mapping.Entries
@@ -58,11 +58,21 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
                 }
             BAMapping ret
 
+    and resolveBoundAttribute (attr : ResolvedBoundAttribute) : ResolvedBoundAttribute =
+        { Dependency = attr.Dependency
+          Expression = resolveBoundAttributeExpr attr.Expression
+        }
+
+    and resolveAttribute (attr : ResolvedAttribute) : ResolvedAttribute =
+        { Dependency = attr.Dependency
+          Expression = resolveFieldExpr attr.Expression
+        }
+
     and resolveBoundAttributesMap (attributes : ResolvedBoundAttributesMap) : ResolvedBoundAttributesMap =
         Map.map (fun name expr -> resolveBoundAttribute expr) attributes
 
     and resolveAttributesMap (attributes : ResolvedAttributesMap) : ResolvedAttributesMap =
-        Map.map (fun name expr -> resolveFieldExpr expr) attributes
+        Map.map (fun name expr -> resolveAttribute expr) attributes
 
     and resolveFieldExpr (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
         let mapper =

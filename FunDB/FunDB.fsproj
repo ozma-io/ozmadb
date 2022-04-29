@@ -24,7 +24,6 @@
     <Compile Include="src/SQL/Misc.fs" />
     <Compile Include="src/SQL/PLPgSQL.fs" />
     <Compile Include="src/SQL/Typecheck.fs" />
-    <Compile Include="src/SQL/Purity.fs" />
     <FsYacc Include="src/SQL/SQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.SQL.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/SQLParse.fs" />
     <FsLex Include="src/SQL/SQLLex.fsl" OtherFlags="--unicode" />
@@ -44,7 +43,6 @@
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParse.fs" />
     <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
-    <Compile Include="src/FunQL/Purity.fs" />
 
     <Compile Include="src/Connection.fs" />
     <Compile Include="src/EventLogger.fs" />

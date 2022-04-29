@@ -518,12 +518,6 @@ let private relatedResolutionFlags = { emptyExprResolutionFlags with Privileged 
 // PHASE 2: Building computed fields, sub entity parse expressions and other stuff.
 //
 
-type private RelatedExpr =
-    { Info : ExprInfo
-      References : UsedReferences
-      Expr : ResolvedFieldExpr
-    }
-
 let rec private sortSaveRestoredEntities' (visited : Set<ResolvedEntityRef>) (saveRestoredParents : (ResolvedEntityRef * ResolvedEntityRef) seq) =
     if Seq.isEmpty saveRestoredParents then
         Seq.empty
@@ -608,20 +602,16 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
     and initialWrappedLayout = makeWrappedLayout Set.empty
 
-    and resolveRelatedExpr (wrappedLayout : ILayoutBits) (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : RelatedExpr =
+    and resolveRelatedExpr (wrappedLayout : ILayoutBits) (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
         let entityInfo = SFEntity entityRef
-        let (localArguments, expr) =
+        let (exprInfo, expr) =
             try
                 resolveSingleFieldExpr wrappedLayout OrderedMap.empty localExprFromEntityId relatedResolutionFlags entityInfo expr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
-        let (exprInfo, usedReferences) = fieldExprUsedReferences wrappedLayout expr
-        if exprInfo.HasAggregates then
+        if exprInfo.Flags.HasAggregates then
             raisef ResolveLayoutException "Aggregate functions are not allowed here"
-        { Info = exprInfo
-          References = usedReferences
-          Expr = expr
-        }
+        (exprInfo, expr)
 
     and resolveMyVirtualCases (entity : HalfResolvedEntity) (fieldRef : ResolvedFieldRef) : VirtualFieldCase array =
         let childVirtualCases = findVirtualChildren entity fieldRef.Name |> Seq.toArray
@@ -669,17 +659,19 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
     and resolveOneComputeField (stack : Set<ResolvedFieldRef>) (fieldRef : ResolvedFieldRef) (entity : HalfResolvedEntity) (comp : HalfResolvedComputedField) : ResolvedComputedField =
         let wrappedLayout = makeWrappedLayout stack
         // Computed fields are always assumed to reference immediate fields. Also read shortcomings of current computed field compilation in Compile.fs.
-        let expr = resolveRelatedExpr wrappedLayout fieldRef.Entity (parseRelatedExpr comp.Source.Expression)
+        let (exprInfo, expr) = resolveRelatedExpr wrappedLayout fieldRef.Entity (parseRelatedExpr comp.Source.Expression)
+        let usedReferences = fieldExprUsedReferences wrappedLayout expr
+
         if comp.Source.IsMaterialized then
-            if expr.Info.HasQuery then
+            if exprInfo.Flags.HasSubqueries then
                 raisef ResolveLayoutException "Queries are not supported in materialized computed fields"
-            if not <| Set.isEmpty expr.References.UsedArguments then
+            if exprInfo.Flags.HasPlaceholders then
                 raisef ResolveLayoutException "Arguments are not allowed in materialized computed fields"
-            if expr.References.HasRestrictedEntities then
+            if usedReferences.HasRestrictedEntities then
                 raisef ResolveLayoutException "Restricted (plain) join arrows are not allowed in materialized computed fields"
         let exprType =
             try
-                typecheckFieldExpr wrappedLayout expr.Expr
+                typecheckFieldExpr wrappedLayout expr
             with
             | :? ViewTypecheckException as e -> raisefWithInner ResolveLayoutException e "Failed to typecheck computed column"
         let virtualInfo =
@@ -691,11 +683,11 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             else
                 None
 
-        { Expression = expr.Expr
+        { Expression = expr
           Type = exprType
           InheritedFrom = None
-          IsLocal = expr.Info.IsLocal
-          UsedDatabase = expr.References.UsedDatabase
+          Flags = exprInfo.Flags
+          UsedDatabase = usedReferences.UsedDatabase
           AllowBroken = comp.Source.AllowBroken
           HashName = comp.HashName
           ColumnName = comp.ColumnName
@@ -726,24 +718,25 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                 | :? ResolveLayoutException as e when comp.Source.AllowBroken || forceAllowBroken ->
                     Error { Error = e; AllowBroken = comp.Source.AllowBroken }
 
-    and resolveLocalExpr (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : RelatedExpr =
+    and resolveLocalExpr (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
         // Local expressions are used as-is in the database, so `Immediate = false`.
-        let expr = resolveRelatedExpr initialWrappedLayout entityRef expr
-        if not expr.Info.IsLocal then
+        let (exprInfo, expr) = resolveRelatedExpr initialWrappedLayout entityRef expr
+        if not <| exprIsLocal exprInfo.Flags then
             raisef ResolveLayoutException "Non-local expressions are not allowed here"
-        if not <| Set.isEmpty expr.References.UsedArguments then
+        if exprInfo.Flags.HasPlaceholders then
             raisef ResolveLayoutException "Arguments are not allowed here"
-        expr
+        (exprInfo, expr)
 
     let resolveCheckConstraint (entityRef : ResolvedEntityRef) (constrName : ConstraintName) (constr : SourceCheckConstraint) : ResolvedCheckConstraint =
-        let expr = resolveRelatedExpr initialWrappedLayout entityRef (parseRelatedExpr constr.Expression)
-        if expr.Info.HasQuery then
+        let (exprInfo, expr) = resolveRelatedExpr initialWrappedLayout entityRef (parseRelatedExpr constr.Expression)
+        if exprInfo.Flags.HasSubqueries then
             raisef ResolveLayoutException "Subqueries are not allowed here"
-        if not <| Set.isEmpty expr.References.UsedArguments then
+        if exprInfo.Flags.HasPlaceholders then
             raisef ResolveLayoutException "Arguments are not allowed here"
-        { Expression = expr.Expr
-          UsedDatabase = expr.References.UsedDatabase
-          IsLocal = expr.Info.IsLocal
+        let usedReferences = fieldExprUsedReferences initialWrappedLayout expr
+        { Expression = expr
+          UsedDatabase = usedReferences.UsedDatabase
+          IsLocal = exprIsLocal exprInfo.Flags
           HashName = makeHashName constrName
         }
 
@@ -753,7 +746,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | Ok r -> r
             | Error msg -> raisef ResolveLayoutException "Error parsing index expression: %s" msg
 
-        let expr = resolveLocalExpr entityRef col.Expr
+        let (exprInfo, expr) = resolveLocalExpr entityRef col.Expr
         let indexInfo = getIndexTypeInfo indexType
         let (order, nullsOrder) =
             if indexInfo.CanOrder then
@@ -778,7 +771,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | Some clOps ->
                 if not <| Map.containsKey indexType clOps then
                     raisef ResolveLayoutException "Invalid operation class for index type %O: %O" indexType cl
-        { Expr = expr.Expr
+        { Expr = expr
           OpClass = col.OpClass
           Order = order
           Nulls = nullsOrder
@@ -790,10 +783,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
         let entity = initialWrappedLayout.FindEntity entityRef |> Option.get
         let resolveIncludedExpr x =
-            let expr = resolveLocalExpr entityRef (parseRelatedExpr x)
+            let (exprInfo, expr) = resolveLocalExpr entityRef (parseRelatedExpr x)
             let isGood =
                 match expr with
-                | { Expr = FERef { Ref = { Ref = VRColumn col } } } ->
+                | FERef { Ref = { Ref = VRColumn col } } ->
                     match entity.FindField col.Name with
                     | Some { Field = RColumnField _ }
                     | Some { Field = RId }
@@ -805,8 +798,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             expr
 
         let exprs = Array.map (resolveIndexColumn entityRef index.Type) index.Expressions
-        let includedExprs = Array.map (fun x -> (resolveLocalExpr entityRef (parseRelatedExpr x)).Expr) index.IncludedExpressions
-        let predicate = Option.map (fun x -> (resolveLocalExpr entityRef (parseRelatedExpr x)).Expr) index.Predicate
+        let includedExprs = Array.map (fun x -> resolveLocalExpr entityRef (parseRelatedExpr x) |> snd) index.IncludedExpressions
+        let predicate = Option.map (fun x -> resolveLocalExpr entityRef (parseRelatedExpr x) |> snd) index.Predicate
 
         { Expressions = exprs
           IncludedExpressions = includedExprs
@@ -1038,14 +1031,13 @@ type private Phase3Resolver (layout : Layout, internallyDeletedEntities : Set<Re
         if not isRoot then
             comp
         else
-            let mutable isLocal = true
+            let mutable flags = emptyResolvedExprFlags
             let mutable usedDatabase = emptyUsedDatabase
 
             let getCaseType (case : VirtualFieldCase, currComp : ResolvedComputedField) =
                 if currComp.IsMaterialized <> comp.IsMaterialized then
                   raisef ResolveLayoutException "Virtual computed fields cannot be partially materialized: %O" fieldRef
-                if not currComp.IsLocal then
-                    isLocal <- false
+                flags <- unionResolvedExprFlags flags currComp.Flags
                 usedDatabase <- unionUsedDatabases currComp.UsedDatabase usedDatabase
                 comp.Type
             let caseTypes = computedFieldCases layout ObjectMap.empty fieldRef comp |> Seq.map getCaseType
@@ -1054,7 +1046,7 @@ type private Phase3Resolver (layout : Layout, internallyDeletedEntities : Set<Re
             | None -> raisef ResolveLayoutException "Could not unify types for virtual field cases: %O" fieldRef
             | Some typ ->
                 let root =
-                    { IsLocal = isLocal
+                    { Flags = flags
                       UsedDatabase = usedDatabase
                       Type = typ
                     }
