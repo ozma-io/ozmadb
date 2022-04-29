@@ -345,7 +345,7 @@ type APITemplate (isolate : Isolate) =
                 else
                     emptyQueryChunk
             let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Domains.GetDomainValues ref rowId chunk
+            let run = runResultApiCall handle context <| fun () -> handle.API.Domains.GetDomainValues ref rowId chunk emptyDomainFlags
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 

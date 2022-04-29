@@ -84,6 +84,13 @@ let boolRequestArg (name : string) (ctx: HttpContext) : bool =
 let intRequestArg (name : string) (ctx: HttpContext) : int option =
     ctx.TryGetQueryStringValue name |> Option.bind Parsing.tryIntInvariant
 
+let flagIfDebug (flag : bool) : bool =
+#if DEBUG
+    flag
+#else
+    false
+#endif
+
 let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
     let getArg (KeyValue(name : string, par)) =
         if name.StartsWith("__") then

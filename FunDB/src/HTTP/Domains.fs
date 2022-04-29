@@ -27,6 +27,7 @@ type DomainRequest =
       PretendUser : UserName option
       PretendRole : ResolvedEntityRef option
       RowId : int option
+      ForceRecompile : bool
     }
 
 type DomainExplainRequest =
@@ -36,15 +37,16 @@ type DomainExplainRequest =
       PretendUser : UserName option
       PretendRole : ResolvedEntityRef option
       RowId : int option
+      ForceRecompile : bool
       Analyze : bool option
       Verbose : bool option
       Costs : bool option
     }
 
 let domainsApi : HttpHandler =
-    let returnValues (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) next ctx =
+    let returnValues (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) next ctx =
         task {
-            match! api.Domains.GetDomainValues ref rowId chunk with
+            match! api.Domains.GetDomainValues ref rowId chunk flags with
             | Ok res -> return! Successful.ok (json res) next ctx
             | Error err -> return! domainError err next ctx
         }
@@ -57,7 +59,10 @@ let domainsApi : HttpHandler =
                   Limit = intRequestArg "__limit" ctx
                   Where = None
                 } : SourceQueryChunk
-            return! returnValues api ref rowId chunk next ctx
+            let flags =
+                { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+                } : DomainFlags
+            return! returnValues api ref rowId chunk flags next ctx
         }
 
     let postGetDomainValues (ref : ResolvedFieldRef) (api : IFunDBAPI) =
@@ -67,11 +72,14 @@ let domainsApi : HttpHandler =
                   Offset = req.Offset
                   Where = req.Where
                 } : SourceQueryChunk
-            setPretends api req.PretendUser req.PretendRole (fun () -> returnValues api ref req.RowId chunk next ctx)
+            let flags =
+                { ForceRecompile = flagIfDebug <| req.ForceRecompile
+                } : DomainFlags
+            setPretends api req.PretendUser req.PretendRole (fun () -> returnValues api ref req.RowId chunk flags next ctx)
 
-    let returnExplain (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (explainOpts : SQL.ExplainOptions) next ctx =
+    let returnExplain (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) (explainOpts : SQL.ExplainOptions) next ctx =
         task {
-            match! api.Domains.GetDomainExplain ref rowId chunk explainOpts with
+            match! api.Domains.GetDomainExplain ref rowId chunk flags explainOpts with
             | Ok res -> return! Successful.ok (json res) next ctx
             | Error err -> return! domainError err next ctx
         }
@@ -85,12 +93,15 @@ let domainsApi : HttpHandler =
                       Limit = intRequestArg "__limit" ctx
                       Where = None
                     } : SourceQueryChunk
+                let flags =
+                    { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+                    } : DomainFlags
                 let explainOpts =
                     { Analyze = tryBoolRequestArg "__analyze" ctx
                       Costs = tryBoolRequestArg "__costs" ctx
                       Verbose = tryBoolRequestArg "__verbose" ctx
                     } : SQL.ExplainOptions
-                return! returnExplain api ref rowId chunk explainOpts next ctx
+                return! returnExplain api ref rowId chunk flags explainOpts next ctx
             }
 
     let postGetDomainExplain (ref : ResolvedFieldRef) (api : IFunDBAPI) =
@@ -100,12 +111,15 @@ let domainsApi : HttpHandler =
                   Limit = req.Limit
                   Where = req.Where
                 } : SourceQueryChunk
+            let flags =
+                { ForceRecompile = flagIfDebug <| req.ForceRecompile
+                } : DomainFlags
             let explainOpts =
                 { Analyze = req.Analyze
                   Costs = req.Costs
                   Verbose = req.Verbose
                 } : SQL.ExplainOptions
-            setPretends api req.PretendUser req.PretendRole (fun () -> returnExplain api ref req.RowId chunk explainOpts next ctx)
+            setPretends api req.PretendUser req.PretendRole (fun () -> returnExplain api ref req.RowId chunk flags explainOpts next ctx)
 
     let domainApi (schema, entity, name) =
         let ref = { Entity = { Schema = FunQLName schema; Name = FunQLName entity }; Name = FunQLName name }

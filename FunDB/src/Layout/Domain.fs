@@ -64,8 +64,8 @@ let findDomainForField (layout : Layout) (fieldRef : ResolvedFieldRef) (domains 
             | Some entity -> Map.tryFind fieldRef.Name entity.Fields
 
 // If domain depends on values in local row (that is, will be different for different rows).
-let private hasLocalDependencies (ref : ResolvedFieldRef) (usedDatabase : UsedDatabase) : bool =
-    let localEntity = usedDatabase.FindEntity ref.Entity |> Option.get
+let private hasLocalDependencies (entityRef : ResolvedEntityRef) (usedDatabase : UsedDatabase) : bool =
+    let localEntity = usedDatabase.FindEntity entityRef |> Option.get
     // We always have at least one field in used local fields: the reference itself. Hence we just check that size is larger than 1.
     Map.count localEntity.Fields > 1
 
@@ -186,9 +186,8 @@ let private compileGenericReferenceOptionsSelect (layout : Layout) (fieldRef : R
 let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRef : ResolvedEntityRef) (fieldName : FieldName) (refEntityRef : ResolvedEntityRef) (extraWhere : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
     let rowFrom = FEntity { fromEntity (relaxEntityRef entityRef) with Alias = Some rowName }
     let refFrom = FEntity { fromEntity (relaxEntityRef refEntityRef) with Alias = Some referencedName }
-    // This could be rewritten to use CROSS JOIN.
     let join =
-        { Type = Outer
+        { Type = Inner
           A = rowFrom
           B = refFrom
           Condition = FEValue (FBool true)
@@ -202,6 +201,22 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
     let where = FEBinaryOp (idCol, BOEq, argRef)
     let where = Option.addWith (curry FEAnd) where extraWhere
     compileReferenceOptionsSelectFrom layout refEntityRef arguments (FJoin join) false (Some where)
+
+type private ChildCheckTree =
+    { Entity : ResolvedEntityRef
+      Checks : ResolvedCheckConstraint seq
+      Children : ChildCheckTrees
+    }
+
+and private ChildCheckTrees = ChildCheckTree seq
+
+let rec private filterChildCheckTree (f : ResolvedCheckConstraint -> bool) (tree : ChildCheckTree) : ChildCheckTree =
+    { Entity = tree.Entity
+      Checks = Seq.filter f tree.Checks
+      Children = filterChildCheckTrees f tree.Children
+    }
+
+and private filterChildCheckTrees (f : ResolvedCheckConstraint -> bool) = Seq.map (filterChildCheckTree f)
 
 // For now, we only build domains based on immediate check constraints.
 // For example, for check constraint `user_id=>account_id=>balance > 0` we restrict `user_id` based on that.
@@ -223,16 +238,29 @@ type private DomainsBuilder (layout : Layout) =
             fullSelectsCache <- Map.add refEntityRef ret fullSelectsCache
             ret
 
+    let rec getParentEntityChecks (entityRef : ResolvedEntityRef) (fieldName : FieldName) (entity : ResolvedEntity) =
+        seq {
+            yield!
+                entity.CheckConstraints
+                |> Map.values
+                |> Seq.map (fun constr -> (entityRef, constr))
+            match entity.Parent with
+            | None -> ()
+            | Some parentRef ->
+                let parentEntity = layout.FindEntity parentRef |> Option.get
+                if Map.containsKey fieldName parentEntity.ColumnFields then
+                    yield! getParentEntityChecks parentRef fieldName parentEntity
+        }
+
     let buildReferenceFieldDomain (entity : ResolvedEntity) (fieldRef : ResolvedFieldRef) (refEntityRef : ResolvedEntityRef) : FieldDomain =
         let (rowSpecificChecks, genericChecks) =
-            entity.CheckConstraints
-            |> Map.values
-            |> Seq.filter (fun constr -> constr.UsedDatabase.FindField fieldRef.Entity fieldRef.Name |> Option.isSome)
-            |> Seq.partition (fun constr -> hasLocalDependencies fieldRef constr.UsedDatabase)
+            getParentEntityChecks fieldRef.Entity fieldRef.Name entity
+            |> Seq.filter (fun (entityRef, constr) -> constr.UsedDatabase.FindField entityRef fieldRef.Name |> Option.isSome)
+            |> Seq.partition (fun (entityRef, constr) -> hasLocalDependencies entityRef constr.UsedDatabase)
 
         let mergeChecks (usedDatabase1 : UsedDatabase, check1 : ResolvedFieldExpr) (usedDatabase2 : UsedDatabase, check2 : ResolvedFieldExpr) = (unionUsedDatabases usedDatabase1 usedDatabase2, FEAnd (check1, check2))
-        let buildCheck (checks : ResolvedCheckConstraint seq) : UsedDatabase * ResolvedFieldExpr =
-            checks |> Seq.map (fun constr -> (constr.UsedDatabase, renameDomainCheck refEntityRef fieldRef.Name constr.Expression)) |> Seq.fold1 mergeChecks
+        let buildCheck (checks : (ResolvedEntityRef * ResolvedCheckConstraint) seq) : UsedDatabase * ResolvedFieldExpr =
+            checks |> Seq.map (fun (entityRef, constr) -> (constr.UsedDatabase, renameDomainCheck refEntityRef fieldRef.Name constr.Expression)) |> Seq.fold1 mergeChecks
 
         let genericCheck =
             if Seq.isEmpty genericChecks then
@@ -317,6 +345,15 @@ type private DomainsBuilder (layout : Layout) =
 
     member this.BuildLayoutDomains () = buildLayoutDomains ()
 
+    member this.BuildSingleLayoutDomain (fieldRef : ResolvedFieldRef) : FieldDomain option =
+        let entity = layout.FindEntity fieldRef.Entity |> Option.get
+        let field = Map.find fieldRef.Name entity.ColumnFields
+        buildFieldDomain entity fieldRef field
+
 let buildLayoutDomains (layout : Layout) : LayoutDomains =
     let builder = DomainsBuilder layout
     builder.BuildLayoutDomains ()
+
+let buildSingleLayoutDomain (layout : Layout) (fieldRef : ResolvedFieldRef) : FieldDomain option =
+    let builder = DomainsBuilder layout
+    builder.BuildSingleLayoutDomain fieldRef

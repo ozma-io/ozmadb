@@ -24,13 +24,6 @@ let private uvError e =
         | UVEExecution _ -> RequestErrors.unprocessableEntity
     handler (json e)
 
-let private flagIfDebug (flag : bool) : bool =
-#if DEBUG
-    flag
-#else
-    false
-#endif
-
 type UserViewRequest =
     { Args: RawArguments
       ForceRecompile : bool

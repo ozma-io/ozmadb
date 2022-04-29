@@ -36,9 +36,15 @@ type DomainsAPI (api : IFunDBAPI) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<DomainsAPI>()
 
-    member this.GetDomainValues (fieldRef : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) =
+    let getDomain (flags : DomainFlags) (fieldRef : ResolvedFieldRef) : FieldDomain option =
+        if flags.ForceRecompile then
+            buildSingleLayoutDomain ctx.Layout fieldRef
+        else
+            findDomainForField ctx.Layout fieldRef ctx.Domains
+
+    member this.GetDomainValues (fieldRef : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) =
         task {
-            match findDomainForField ctx.Layout fieldRef ctx.Domains with
+            match getDomain flags fieldRef with
             | None -> return Error DENotFound
             | Some domain ->
                 try
@@ -75,7 +81,7 @@ type DomainsAPI (api : IFunDBAPI) =
                     return Error DEAccessDenied
         }
 
-    member this.GetDomainExplain (fieldRef : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (explainOpts : SQL.ExplainOptions) =
+    member this.GetDomainExplain (fieldRef : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) (explainOpts : SQL.ExplainOptions) =
         task {
             if not (canExplain rctx.User.Saved.Type) then
                 logger.LogError("Explain access denied")
@@ -85,7 +91,7 @@ type DomainsAPI (api : IFunDBAPI) =
                 )
                 return Error DEAccessDenied
             else
-                match findDomainForField ctx.Layout fieldRef ctx.Domains with
+                match getDomain flags fieldRef with
                 | None -> return Error DENotFound
                 | Some domain ->
                     try
@@ -118,5 +124,5 @@ type DomainsAPI (api : IFunDBAPI) =
         }
 
     interface IDomainsAPI with
-        member this.GetDomainValues fieldRef rowId chunk = this.GetDomainValues fieldRef rowId chunk
-        member this.GetDomainExplain fieldRef rowId chunk explainOpts = this.GetDomainExplain fieldRef rowId chunk explainOpts
+        member this.GetDomainValues fieldRef rowId chunk flags = this.GetDomainValues fieldRef rowId chunk flags
+        member this.GetDomainExplain fieldRef rowId chunk flags explainOpts = this.GetDomainExplain fieldRef rowId chunk flags explainOpts

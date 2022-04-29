@@ -388,9 +388,17 @@ type DomainErrorInfo =
         interface IAPIError with
             member this.Message = this.Message
 
+type DomainFlags =
+    { ForceRecompile : bool
+    }
+
+let emptyDomainFlags =
+    { ForceRecompile = false
+    } : DomainFlags
+
 type IDomainsAPI =
-    abstract member GetDomainValues : ResolvedFieldRef -> int option -> SourceQueryChunk -> Task<Result<DomainValuesResult, DomainErrorInfo>>
-    abstract member GetDomainExplain : ResolvedFieldRef -> int option -> SourceQueryChunk -> SQL.ExplainOptions -> Task<Result<ExplainedQuery, DomainErrorInfo>>
+    abstract member GetDomainValues : ResolvedFieldRef -> int option -> SourceQueryChunk -> DomainFlags -> Task<Result<DomainValuesResult, DomainErrorInfo>>
+    abstract member GetDomainExplain : ResolvedFieldRef -> int option -> SourceQueryChunk -> DomainFlags -> SQL.ExplainOptions -> Task<Result<ExplainedQuery, DomainErrorInfo>>
 
 type IFunDBAPI =
     abstract member Request : IRequestContext
