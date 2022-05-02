@@ -204,7 +204,7 @@ export interface IMappedAttributeInfo extends IBasicAttributeInfo {
 }
 
 export interface IBoundAttributeInfo extends IMappedAttributeInfo {
-  pure: boolean;
+  const: boolean;
 }
 export type BoundAttributesInfoMap = Record<AttributeName, IBoundAttributeInfo>;
 
@@ -212,7 +212,7 @@ export interface ICellAttributeInfo extends IMappedAttributeInfo { }
 export type CellAttributesInfoMap = Record<AttributeName, ICellAttributeInfo>;
 
 export interface IViewAttributeInfo extends IBasicAttributeInfo {
-  pure: boolean;
+  const: boolean;
 }
 export type ViewAttributesInfoMap = Record<AttributeName, IViewAttributeInfo>;
 
@@ -306,9 +306,9 @@ export interface IViewExprResult {
 
 export interface IViewInfoResult {
   info: IResultViewInfo;
-  pureAttributes: AttributesMap;
-  pureColumnAttributes: AttributesMap[];
-  pureArgumentAttributes: Record<ArgumentName, AttributesMap>;
+  constAttributes: AttributesMap;
+  constColumnAttributes: AttributesMap[];
+  constArgumentAttributes: Record<ArgumentName, AttributesMap>;
 }
 
 export interface IViewExplainResult {
