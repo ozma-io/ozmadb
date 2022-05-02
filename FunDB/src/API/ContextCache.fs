@@ -171,7 +171,16 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
         DefaultObjectPool(policy, Environment.ProcessorCount)
 
     let filterSystemViews (views : SourceUserViews) : SourceUserViews =
-        { Schemas = filterPreloadedSchemas preload views.Schemas
+        let schemas = filterPreloadedSchemas preload views.Schemas
+
+        // Filter out generated user views, so that later comparison doesn't include them.
+        let mapOne schemaName (uvSchema : SourceUserViewsSchema) =
+            match uvSchema.GeneratorScript with
+            | None -> uvSchema
+            | Some script -> { uvSchema with UserViews = Map.empty }
+        let pristineSchemas = Map.map mapOne schemas
+
+        { Schemas = pristineSchemas
         }
 
     let filterUserLayout (layout : Layout) : Layout =

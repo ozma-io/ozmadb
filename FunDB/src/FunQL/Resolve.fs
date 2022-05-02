@@ -1317,7 +1317,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                     match boundFields with
                     | Some (inner, meta) -> boundFieldInfo typeCtxs inner (Seq.singleton (fieldInfo :> obj))
                     | None -> ObjectMap.singleton fieldInfo
-                
+
                 let newFieldRef = { Entity = info.Entity; Name = ref.Name } : FieldRef
                 let newRef = { Ref = { f with Ref = VRColumn newFieldRef }; Extra = extra }
 
@@ -1415,7 +1415,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                 { refInfo with ExprInfo = { refInfo.ExprInfo with Flags = { refInfo.ExprInfo.Flags with HasArrows = true } } }
             else
                 refInfo
-    
+
         (refInfo, newRef)
 
     let resolveLimitFieldExpr (expr : ParsedFieldExpr) : ResolvedFieldExpr =
@@ -2334,7 +2334,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                 let ctx = { ctx with ResolveCTE = ctesInfo.ResolveCTE }
                 (ctx, Some newCtes)
         let entityFromInfo = fromEntityMapping emptyContext true delete.Entity
-    
+
         let (entityInfo, using) =
             match delete.Using with
             | None -> (entityFromInfo.SingleFrom, None)

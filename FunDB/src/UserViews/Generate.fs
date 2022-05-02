@@ -111,6 +111,6 @@ let generatedUserViewsSource (source : SourceUserViews) (generated : GeneratedUs
             | Ok generatedSchema -> generatedSchema.UserViews
             | Error e -> Map.empty
         { UserViews = userViews; GeneratorScript = sourceSchema.GeneratorScript }
-    
+
     let schemas = Map.map getOne source.Schemas
     { Schemas = schemas }

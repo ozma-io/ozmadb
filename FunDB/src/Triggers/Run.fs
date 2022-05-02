@@ -197,7 +197,7 @@ type private PreparedTriggersBuilder (runtime : IJSRuntime, forceAllowBroken : b
     let prepareTriggers (triggers : ResolvedTriggers) : PreparedTriggers =
         { Schemas = Map.map prepareTriggersDatabase triggers.Schemas
         }
-    
+
     member this.PrepareTriggers triggers = prepareTriggers triggers
 
 let prepareTriggers (runtime : IJSRuntime) (forceAllowBroken : bool) (triggers : ResolvedTriggers) =
