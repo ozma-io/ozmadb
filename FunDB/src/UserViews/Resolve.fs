@@ -43,7 +43,17 @@ type private HalfResolvedSchema =
 
 type private HalfResolvedViews = Map<SchemaName, PossiblyBroken<HalfResolvedSchema>>
 
-type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, flags : ExprResolutionFlags) =
+type private Phase1Resolver (layout : Layout, defaultAttrs : MergedDefaultAttributes, forceAllowBroken : bool, flags : ExprResolutionFlags) =
+    let hasDefaultAttribute (fieldRef : ResolvedFieldRef) (name : AttributeName) = 
+        match defaultAttrs.FindField fieldRef.Entity fieldRef.Name with
+        | None -> false
+        | Some attrs -> Map.containsKey name attrs
+
+    let callbacks =
+        { Layout = layout
+          HasDefaultAttribute = hasDefaultAttribute
+        }
+
     let resolveUserView (uv : SourceUserView) : HalfResolvedView =
         let parsed =
             match parse tokenizeFunQL viewExpr uv.Query with
@@ -51,7 +61,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, flags : E
             | Ok rawExpr -> rawExpr
         let resolved =
             try
-                resolveViewExpr layout flags parsed
+                resolveViewExpr callbacks flags parsed
             with
             | :? ViewResolveException as e ->
                 raisefWithInner UserViewResolveException e "Resolve error"
@@ -178,13 +188,13 @@ let private uvResolutionFlags = { emptyExprResolutionFlags with Privileged = tru
 
 // Warning: this should be executed outside of any transactions because of test runs.
 let resolveUserViews (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (forceAllowBroken : bool) (userViews : GeneratedUserViews) : UserViews =
-    let phase1 = Phase1Resolver(layout, forceAllowBroken, uvResolutionFlags)
+    let phase1 = Phase1Resolver(layout, defaultAttrs, forceAllowBroken, uvResolutionFlags)
     let resolvedViews = phase1.ResolveUserViews userViews
     let phase2 = Phase2Resolver(layout, defaultAttrs, (fun ref -> None), resolvedViews, forceAllowBroken)
     phase2.ResolveUserViews ()
 
 let resolveAnonymousUserView (layout : Layout) (isPrivileged : bool) (defaultAttrs : MergedDefaultAttributes) (findExistingView : FindExistingView) (homeSchema : SchemaName option) (q: string) : ResolvedUserView =
-    let phase1 = Phase1Resolver(layout, false, { emptyExprResolutionFlags with Privileged = isPrivileged })
+    let phase1 = Phase1Resolver(layout, defaultAttrs, false, { emptyExprResolutionFlags with Privileged = isPrivileged })
     let resolvedView = phase1.ResolveUserView { Query = q; AllowBroken = false }
     let phase2 = Phase2Resolver(layout, defaultAttrs, findExistingView, Map.empty, false)
     phase2.ResolveAnonymousUserView homeSchema resolvedView

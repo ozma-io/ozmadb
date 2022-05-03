@@ -61,9 +61,13 @@ let resolveCommand (layout : Layout) (isPrivileged : bool) (rawCommand : string)
         match parse tokenizeFunQL commandExpr rawCommand with
         | Error msg -> raisef CommandResolveException "Parse error: %s" msg
         | Ok rawExpr -> rawExpr
+    let callbacks =
+        { Layout = layout
+          HasDefaultAttribute = emptyHasDefaultAttribute
+        }
     let resolved =
         try
-            resolveCommandExpr layout { emptyExprResolutionFlags with Privileged = isPrivileged } parsed
+            resolveCommandExpr callbacks { emptyExprResolutionFlags with Privileged = isPrivileged } parsed
         with
         | :? ViewResolveException as e -> raisefWithInner CommandResolveException e "Resolve error"
     resolved

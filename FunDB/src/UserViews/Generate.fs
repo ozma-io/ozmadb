@@ -77,7 +77,6 @@ type private UserViewsGenerator (runtime : IJSRuntime, layout : Layout, triggers
             let gen = UserViewsGeneratorScript(runtime, generatorName name, script.Script)
             let layout = V8JsonWriter.Serialize(runtime.Context, serializedLayout)
             let uvs = gen.Generate layout cancellationToken
-            eprintfn "Generated user views for schema %O: %O" name uvs
             Ok { UserViews = uvs }
         with
         | :? NetJsException as e when forceAllowBroken || script.AllowBroken ->

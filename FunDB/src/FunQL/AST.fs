@@ -685,11 +685,14 @@ and [<NoEquality; NoComparison>] BoundAttributeExpr<'e, 'f> when 'e :> IFunQLNam
 and [<NoEquality; NoComparison>] BoundAttribute<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Expression : BoundAttributeExpr<'e, 'f>
       Dependency : DependencyStatus
+      Internal : bool
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            sprintf "%O %O" this.Dependency this.Expression
+            let internalStr =
+                if this.Internal then "INTERNAL" else ""
+            String.concatWithWhitespaces [internalStr; toFunQLString this.Dependency; toFunQLString this.Expression]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -697,11 +700,14 @@ and [<NoEquality; NoComparison>] BoundAttribute<'e, 'f> when 'e :> IFunQLName an
 and [<NoEquality; NoComparison>] Attribute<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Expression : FieldExpr<'e, 'f>
       Dependency : DependencyStatus
+      Internal : bool
     } with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
-            sprintf "%O %O" this.Dependency this.Expression
+            let internalStr =
+                if this.Internal then "INTERNAL" else ""
+            String.concatWithWhitespaces [internalStr; toFunQLString this.Dependency; toFunQLString this.Expression]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -1624,8 +1630,8 @@ type PragmasMap = Map<PragmaName, FieldValue>
 
 [<NoEquality; NoComparison>]
 type Argument<'te, 'e, 'f> when 'te :> IFunQLName and 'e :> IFunQLName and 'f :> IFunQLName =
-    { ArgType: FieldType<'te>
-      Optional: bool
+    { ArgType : FieldType<'te>
+      Optional : bool
       DefaultValue : FieldValue option
       Attributes : BoundAttributesMap<'e, 'f>
     } with

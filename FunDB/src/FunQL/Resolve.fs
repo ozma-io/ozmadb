@@ -64,6 +64,13 @@ type private BoundFieldHeader =
       // Arrows are not allowed in subexpressions -- we use this flag to track this.
     }
 
+// `BoundField` exists only for fields that are bound to one and only one field.
+// Any set operation which merges fields with different bound fields discards that.
+// It's used for:
+// * checking dereferences;
+// * finding bound columns for main entity.
+// Should not be used for anything else - different cells can be bound to different
+// fields.
 [<NoEquality; NoComparison>]
 type private BoundField =
     { Header : BoundFieldHeader
@@ -77,16 +84,19 @@ type private BoundField =
       Name : FieldName
     }
 
-// `BoundField` exists only for fields that are bound to one and only one field.
-// Any set operation which merges fields with different bound fields discards that.
-// It's used for:
-// * checking dereferences;
-// * finding bound columns for main entity.
-// Should not be used for anything else - different cells can be bound to different
-// fields.
-type private QSubqueryFieldsMap = Map<FieldName, BoundField option>
+type private SubqueryField =
+    { Bound : BoundField option
+      FieldAttributes : Set<AttributeName>
+    }
 
-type private QSubqueryFields = (FieldName option * BoundField option)[]
+let private emptySubqueryField : SubqueryField =
+    { Bound = None
+      FieldAttributes = Set.empty
+    }
+
+type private SubqueryFieldsMap = Map<FieldName, SubqueryField>
+
+type private SubqueryFields = (FieldName option * SubqueryField)[]
 
 type private SubqueryExprInfo =
     { HasArguments : bool
@@ -113,7 +123,8 @@ let private resolvedToSubqueryExprInfo (info : ResolvedExprInfo) : SubqueryExprI
     }
 
 type private SubqueryInfo =
-    { Fields : QSubqueryFields
+    { Fields : SubqueryFields
+      EntityAttributes : Set<AttributeName>
       ExprInfo : SubqueryExprInfo
     }
 
@@ -126,6 +137,7 @@ type private ResolvedFieldMapping =
 type private FieldMappingInfo =
     { Entity : EntityRef option
       EntityId : FromEntityId
+      FieldAttributes : Set<AttributeName>
       Mapping : ResolvedFieldMapping
       // Used for injected expressions which need to use existing column names.
       // For example, chunk WHERE expressions use column names from original user view,
@@ -190,10 +202,10 @@ let private explodeResolvedFieldRef (fieldRef : ResolvedFieldRef) : FieldRef seq
         yield { Entity = Some { Schema = Some schemaName; Name = entityName }; Name = fieldName }
     }
 
-let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef : EntityRef option) (fields : QSubqueryFieldsMap) : FieldMapping =
-    let explodeVariations (fieldName, maybeBoundField) =
+let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef : EntityRef option) (fields : SubqueryFieldsMap) : FieldMapping =
+    let explodeVariations (fieldName, subqueryField : SubqueryField) =
         let mapping =
-            match maybeBoundField with
+            match subqueryField.Bound with
             | None -> FMUnbound
             | Some bound -> FMBound bound
         let info =
@@ -201,6 +213,7 @@ let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef :
               EntityId = fromEntityId
               Mapping = mapping
               ForceSQLName = None
+              FieldAttributes = subqueryField.FieldAttributes
             }
         let value = FVResolved info
         explodeFieldRef { Entity = maybeEntityRef; Name = fieldName } |> Seq.map (fun x -> (x, value))
@@ -238,6 +251,7 @@ let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntit
                   EntityId = fromEntityId
                   Mapping = FMTypeRestricted header
                   ForceSQLName = None
+                  FieldAttributes = Set.empty
                 }
             FVResolved info
         entity.Fields |> Seq.mapMaybe filterField |> Seq.collect expandName |> Seq.map (fun (ref, header) -> (ref, headerToResolved header))
@@ -275,6 +289,7 @@ let private customToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEnti
               EntityId = fromEntityId
               Mapping = fieldMapping
               ForceSQLName = info.ForceSQLName
+              FieldAttributes = Set.empty
             }
         let value = FVResolved info
         explodeFieldRef fieldRef |> Seq.map (fun x -> (x, value))
@@ -290,7 +305,7 @@ let private mapRecursiveValue (f : 'a -> 'b) = function
     | RValue a -> RValue (f a)
     | RRecursive r -> RRecursive r
 
-let private renameFields (names : FieldName[]) (fields : QSubqueryFields) : QSubqueryFields =
+let private renameFields (names : FieldName[]) (fields : SubqueryFields) : SubqueryFields =
     if Array.length names <> Array.length fields then
         raisef ViewResolveException "Inconsistent number of columns"
     Array.map2 (fun newName (oldName, info) -> (Some newName, info)) names fields
@@ -298,7 +313,7 @@ let private renameFields (names : FieldName[]) (fields : QSubqueryFields) : QSub
 let private renameFieldsInSubquery (names : FieldName[]) (info : SubqueryInfo) : SubqueryInfo =
     { info with Fields = renameFields names info.Fields }
 
-let private getFieldsMap (fields : QSubqueryFields) : QSubqueryFieldsMap =
+let private getFieldsMap (fields : SubqueryFields) : SubqueryFieldsMap =
     fields |> Seq.mapMaybe (fun (mname, info) -> Option.map (fun name -> (name, info)) mname) |> Map.ofSeq
 
 // If a query has a main entity it satisfies two properties:
@@ -367,17 +382,22 @@ type ResolvedCommandExpr =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-let private unionBoundFieldInfo (f1 : BoundField option) (f2 : BoundField option) : BoundField option =
-    match (f1, f2) with
-    | (Some bf1, Some bf2) when bf1.Ref = bf2.Ref -> Some bf1
-    | _ -> None
+let private unionSubqueryField (a : SubqueryField) (b : SubqueryField) =
+    let bound =
+        match (a.Bound, b.Bound) with
+        | (Some bf1, Some bf2) when bf1.Ref = bf2.Ref -> Some bf1
+        | _ -> None
+    { Bound = bound
+      FieldAttributes = Set.union a.FieldAttributes b.FieldAttributes
+    }
 
 let private unionSubqueryInfo (a : SubqueryInfo) (b : SubqueryInfo) =
     if Array.length a.Fields <> Array.length b.Fields then
         raisef ViewResolveException "Different number of columns in a set operation expression"
-    let newFields = Array.map2 (fun (name1, info1) (name2, info2) -> (name1, unionBoundFieldInfo info1 info2)) a.Fields b.Fields
+    let newFields = Array.map2 (fun (name1, info1) (name2, info2) -> (name1, unionSubqueryField info1 info2)) a.Fields b.Fields
     { Fields = newFields
       ExprInfo = unionSubqueryExprInfo a.ExprInfo b.ExprInfo
+      EntityAttributes = Set.union a.EntityAttributes b.EntityAttributes
     }
 
 let private subqueryToResolvedExprInfo (localEntities : Set<FromEntityId>) (info : SubqueryInfo) : ResolvedExprInfo =
@@ -949,7 +969,7 @@ let computedFieldCases (layout : ILayoutBits) (extra : ObjectMap) (ref : Resolve
 
         Seq.map compileCase filteredCases
 
-let private resolveMainEntity (layout : ILayoutBits) (fields : QSubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
+let private resolveMainEntity (layout : ILayoutBits) (fields : SubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
     let ref = resolveEntityRef main.Entity
     let entity =
         match layout.FindEntity ref with
@@ -966,7 +986,7 @@ let private resolveMainEntity (layout : ILayoutBits) (fields : QSubqueryFieldsMa
         | QRExpr result ->
             let name = result.TryToName () |> Option.get
             match Map.tryFind name fields with
-            | Some (Some { Ref = fieldRef; Field = RColumnField _ }) when fieldRef.Entity = ref -> Some (name, fieldRef.Name)
+            | Some { Bound = Some { Ref = fieldRef; Field = RColumnField _ } } when fieldRef.Entity = ref -> Some (name, fieldRef.Name)
             | _ -> None
     let mappedResults = columns |> Seq.mapMaybe getField |> Map.ofSeqUnique
 
@@ -995,6 +1015,7 @@ type private OuterField =
 type private ReferenceInfo =
     { InnerField : BoundField option
       ExprInfo : ResolvedExprInfo
+      FieldAttributes : Set<AttributeName>
     }
 
 type private ResultInfo =
@@ -1090,7 +1111,10 @@ let rec private relabelFromExprType (typeContexts : TypeContextsMap) = function
         FJoin { join with A = a; B = b }
     | FSubExpr expr -> FSubExpr expr
 
-type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, ResolvedArgument>, resolveFlags : ExprResolutionFlags) =
+type private FindArgument = ArgumentRef -> ResolvedArgument option
+type HasDefaultAttribute = ResolvedFieldRef -> AttributeName -> bool
+
+type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, hasDefaultAttribute : HasDefaultAttribute, resolveFlags : ExprResolutionFlags) =
     let mutable isPrivileged = false
 
     let mutable lastFromEntityId : FromEntityId = 0
@@ -1098,6 +1122,11 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let ret = lastFromEntityId
         lastFromEntityId <- lastFromEntityId + 1
         ret
+
+    let getArgument arg =
+        match findArgument arg with
+        | None -> raisef ViewResolveException "Unknown argument: %O" arg
+        | Some argInfo -> argInfo
 
     let notTypeContext (ctx : TypeContext) : PossibleEntities<TypeContext> =
         if Set.isEmpty ctx.AllowedSubtypes then
@@ -1173,7 +1202,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
                   Immediate = true
                   IsInner = flags.IsInner
                 }
-            Some
+            let bound =
                 { Header = header
                   Ref = { Entity = entityRef; Name = name }
                   Entity = entity
@@ -1181,6 +1210,9 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
                   ForceRename = false
                   Name = name
                 }
+            { Bound = Some bound
+              FieldAttributes = Set.empty
+            }
 
         let realFields = mapAllFields makeBoundField entity
         let mainFieldInfo = Option.get <| entity.FindFieldBits funMain
@@ -1199,7 +1231,11 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
               ForceRename = true
               Name = mainFieldInfo.Name
             }
-        let fields = Map.add funMain (Some mainBoundField) realFields
+        let mainSubqueryField =
+            { Bound = Some mainBoundField
+              FieldAttributes = Set.empty
+            }
+        let fields = Map.add funMain mainSubqueryField realFields
         let mappingRef =
             match pun with
             | None -> Some <| relaxEntityRef entityRef
@@ -1334,15 +1370,13 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
                 let refInfo =
                     { ExprInfo = exprInfo
                       InnerField = Option.map (fun (inner, meta) -> inner) boundFields
+                      FieldAttributes = info.FieldAttributes
                     }
                 (refInfo, newRef)
             | VRArgument arg ->
                 if ctx.NoArguments then
                     raisef ViewResolveException "Arguments are not allowed here: %O" arg
-                let argInfo =
-                    match Map.tryFind arg arguments with
-                    | None -> raisef ViewResolveException "Unknown argument: %O" arg
-                    | Some argInfo -> argInfo
+                let argInfo = getArgument arg
                 let (innerBoundField, boundInfo) =
                     if Array.isEmpty f.Path then
                         (None, ObjectMap.empty)
@@ -1394,6 +1428,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
                 let refInfo =
                     { ExprInfo = exprInfo
                       InnerField = innerBoundField
+                      FieldAttributes = Set.empty
                     }
                 let newRef = { Ref = { f with Ref = VRArgument arg }; Extra = boundInfo }
 
@@ -1426,22 +1461,20 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
     let resolveLimitFieldExpr (expr : ParsedFieldExpr) : ResolvedFieldExpr =
         let resolveRef : LinkedFieldRef -> LinkedBoundFieldRef = function
             | { Ref = VRArgument name; Path = [||] } as ref ->
-                if Map.containsKey name arguments then
-                    { Ref = ref; Extra = ObjectMap.empty }
-                else
-                    raisef ViewResolveException "Undefined placeholder: %O" name
+                let argInfo = getArgument name
+                { Ref = ref; Extra = ObjectMap.empty }
             | ref -> raisef ViewResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
         let voidSubEntity field subEntity = raisef ViewResolveException "Forbidden type assertion in LIMIT or OFFSET"
         let mapper =
             { onlyFieldExprMapper resolveRef with
-                  SubEntity = voidSubEntity
+                SubEntity = voidSubEntity
             }
         try
             mapFieldExpr mapper expr
         with
         | :? UnexpectedExprException as e -> raisefWithInner ViewResolveException e ""
 
-    let applyAlias (alias : EntityAlias) (results : QSubqueryFields) : QSubqueryFields =
+    let applyAlias (alias : EntityAlias) (results : SubqueryFields) : SubqueryFields =
         checkName alias.Name
         match alias.Fields with
         | None -> results
@@ -1597,16 +1630,17 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let newAttr =
             { Expression = expr
               Dependency = exprDependency info.Info
+              Internal = attr.Internal
             }
         (info.Info, newAttr)
 
     and resolveBoundAttribute (ctx : Context) (boundExprInfo : ResolvedExprInfo) (attr : ParsedBoundAttribute) : ResolvedExprInfo * ResolvedBoundAttribute =
         match attr.Expression with
         | BAExpr expr ->
-            let (info, newAttr) = resolveAttribute ctx { Expression = expr; Dependency = attr.Dependency }
-            (info, { Expression = BAExpr newAttr.Expression; Dependency = newAttr.Dependency })
+            let (info, newAttr) = resolveAttribute ctx { Internal = attr.Internal; Expression = expr; Dependency = attr.Dependency }
+            (info, { Internal = newAttr.Internal; Expression = BAExpr newAttr.Expression; Dependency = newAttr.Dependency })
         | BAMapping mapping ->
-            (boundExprInfo, { Expression = BAMapping mapping; Dependency = exprDependency boundExprInfo })
+            (boundExprInfo, { Internal = attr.Internal; Expression = BAMapping mapping; Dependency = exprDependency boundExprInfo })
 
     and resolveAttributesMap (ctx : Context) (attributes : ParsedAttributesMap) : ResolvedExprInfo * ResolvedAttributesMap =
         let mutable exprInfo = emptyResolvedExprInfo
@@ -1632,14 +1666,30 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
             raisef ViewResolveException "Aggregate functions are not allowed here"
         (info, res)
 
-    and resolveEntityReference (ctx : Context) (entityRef : EntityRef) : EntityRef =
+    and resolveEntityReference (ctx : Context) (entityRef : EntityRef) : FromEntityInfo * EntityRef =
         match Map.tryFind entityRef.Name ctx.Entities with
         | None -> raisef ViewResolveException "Entity %O not found" entityRef
         | Some entityInfo ->
             match entityRef.Schema with
             | Some _ as schema when entityInfo.Schema <> schema -> raisef ViewResolveException "Entity %O not found" entityRef
             | _ -> ()
-            { Schema = entityInfo.Schema; Name = entityRef.Name }
+            let newRef = { Schema = entityInfo.Schema; Name = entityRef.Name } : EntityRef
+            (entityInfo, newRef)
+
+    and fieldAttributeExists (refInfo : ReferenceInfo) (fieldRef : LinkedBoundFieldRef) (attrName : AttributeName) =
+            if Set.contains attrName refInfo.FieldAttributes then
+                true
+            else
+                match refInfo.InnerField with
+                | Some innerField -> hasDefaultAttribute innerField.Ref attrName
+                | None ->
+                    // Check argument.
+                    match fieldRef.Ref.Ref with
+                    | VRArgument arg ->
+                        assert Array.isEmpty fieldRef.Ref.Path
+                        let argInfo = getArgument arg
+                        Map.containsKey attrName argInfo.Attributes
+                    | _ -> false
 
     and resolveFieldExpr (ctx : Context) (expr : ParsedFieldExpr) : InnerResolvedExprInfo * ResolvedFieldExpr =
         let mutable exprInfo = emptyResolvedExprInfo
@@ -1647,7 +1697,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let resolveExprReference typeCtxs col =
             let (refInfo, ref) = resolveReference ctx typeCtxs col
             exprInfo <- unionResolvedExprInfo exprInfo refInfo.ExprInfo
-            ref
+            (refInfo, ref)
 
         let resolveQuery query =
             let (selectInfo, res) = resolveSelectExpr (subSelectContext ctx) subExprSelectFlags query
@@ -1671,16 +1721,23 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
 
         let rec traverse (outerTypeCtxs : TypeContexts) = function
             | FEValue value -> (emptyCondTypeContexts, FEValue value)
-            | FERef r -> (emptyCondTypeContexts, FERef (resolveExprReference outerTypeCtxs.Map r))
+            | FERef r ->
+                let (refInfo, newRef) = resolveExprReference outerTypeCtxs.Map r
+                (emptyCondTypeContexts, FERef newRef)
             | FEEntityAttr (eref, attr) ->
-                let newEref = resolveEntityReference ctx eref
+                let (entityInfo, newEref) = resolveEntityReference ctx eref
+                if not <| Set.contains attr entityInfo.EntityAttributes then
+                    raisef ViewResolveException "Entity attribute %O is not specified for %O" attr eref
                 // We consider entity attribute references non-local because they can change based on inner parts of the query and default attributes.
                 exprInfo <- { exprInfo with Flags = unionResolvedExprFlags exprInfo.Flags unknownResolvedExprFlags }
                 (emptyCondTypeContexts, FEEntityAttr (newEref, attr))
             | FEFieldAttr (fref, attr) ->
+                let (refInfo, newRef) = resolveExprReference outerTypeCtxs.Map fref
+                if not <| fieldAttributeExists refInfo newRef attr then
+                    raisef ViewResolveException "Field attribute %O is not specified for field %O" attr newRef
                 // We consider field attribute references non-local because they can change based on inner parts of the query and default attributes.
                 exprInfo <- { exprInfo with Flags = unionResolvedExprFlags exprInfo.Flags unknownResolvedExprFlags }
-                (emptyCondTypeContexts, FEFieldAttr (resolveExprReference outerTypeCtxs.Map fref, attr))
+                (emptyCondTypeContexts, FEFieldAttr (newRef, attr))
             | FENot e ->
                 let (innerTypeCtxs, e) = traverse outerTypeCtxs e
                 (notTypeContexts innerTypeCtxs, FENot e)
@@ -1720,7 +1777,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
                 let newEls = Option.map applyElse els
                 (emptyCondTypeContexts, FEMatch (newExpr, newEs, newEls))
             | FEInheritedFrom (f, nam) ->
-                let newF = resolveExprReference outerTypeCtxs.Map f
+                let (refInfo, newF) = resolveExprReference outerTypeCtxs.Map f
                 let (innerTypeCtxs, newNam) = resolveSubEntity layout outerTypeCtxs.Map SECInheritedFrom newF nam
                 let ctx =
                     { Map = innerTypeCtxs
@@ -1728,7 +1785,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
                     }
                 (ctx, FEInheritedFrom (newF, newNam))
             | FEOfType (f, nam) ->
-                let newF = resolveExprReference outerTypeCtxs.Map f
+                let (refInfo, newF) = resolveExprReference outerTypeCtxs.Map f
                 let (innerTypeCtxs, newNam) = resolveSubEntity layout outerTypeCtxs.Map SECOfType newF nam
                 let ctx =
                     { Map = innerTypeCtxs
@@ -1977,10 +2034,10 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let newResults = unionSubqueryInfo results1 results2
         // Bogus entity id for incompatible fields that are merged together.
         let setOpEntityId = nextFromEntityId ()
-        let mapField (fieldName, fieldInfo) =
+        let mapField (fieldName, fieldInfo : SubqueryField) =
             let ref = { Entity = None; Name = fieldName } : FieldRef
             let mapping =
-                match fieldInfo with
+                match fieldInfo.Bound with
                 | None -> FMUnbound
                 | Some bound -> FMBound bound
             let info =
@@ -1988,6 +2045,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
                   Mapping = mapping
                   ForceSQLName = None
                   EntityId = setOpEntityId
+                  FieldAttributes = fieldInfo.FieldAttributes
                 }
             (ref, FVResolved info)
         let orderLimitMapping =
@@ -2029,10 +2087,11 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
                 entry |> Array.map mapValue
 
             let newValues = values |> Array.map mapEntry
-            let fields = Seq.init valuesLength (fun i -> (None, None)) |> Array.ofSeq
+            let fields = Seq.init valuesLength (fun i -> (None, emptySubqueryField)) |> Array.ofSeq
             let info =
                 { Fields = fields
                   ExprInfo = exprInfo
+                  EntityAttributes = Set.empty
                 }
             (info, SValues newValues)
         | SSetOp setOp ->
@@ -2078,9 +2137,14 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let rawResults = Array.map (resolveResult flags ctx) query.Results
         let hasAggregates = Array.exists (fun (info : ResultInfo, expr) -> info.ExprInfo.Flags.HasAggregates) rawResults || not (Array.isEmpty qGroupBy)
         let results = Array.map snd rawResults
-        let getFields : ResultInfo * ResolvedQueryResult -> FieldName option * BoundField option = function
+        let getFields : ResultInfo * ResolvedQueryResult -> FieldName option * SubqueryField = function
             | (_, QRAll alias) -> failwith "Impossible QRAll"
-            | (info, QRExpr result) -> (result.TryToName (), if hasAggregates then None else info.Field)
+            | (info, QRExpr result) ->
+                let subInfo =
+                    { Bound = if hasAggregates then None else info.Field
+                      FieldAttributes = Map.keysSet result.Attributes
+                    }
+                (result.TryToName (), subInfo)
         let newFields = rawResults |> Array.map getFields
         try
             newFields |> Seq.mapMaybe fst |> Set.ofSeqUnique |> ignore
@@ -2090,6 +2154,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let info =
             { Fields = newFields
               ExprInfo = exprInfo
+              EntityAttributes = Map.keysSet attributes
             }
 
         let extra =
@@ -2162,7 +2227,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
             let newSubsel = { Alias = subsel.Alias; Lateral = subsel.Lateral; Select = newQ }
             let entityInfo =
                 { Schema = None
-                  EntityAttributes = Set.empty
+                  EntityAttributes = info.EntityAttributes
                   Id = fromEntityId
                 }
             let myFromInfo =
@@ -2242,6 +2307,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let subqueryInfo =
             { Fields = [||]
               ExprInfo = exprInfo
+              EntityAttributes = Set.empty
             }
         (subqueryInfo, newExpr)
 
@@ -2319,6 +2385,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let subqueryInfo =
             { Fields = [||]
               ExprInfo = exprInfo
+              EntityAttributes = Set.empty
             }
         (subqueryInfo, newExpr)
 
@@ -2364,6 +2431,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, R
         let subqueryInfo =
             { Fields = [||]
               ExprInfo = exprInfo
+              EntityAttributes = Set.empty
             }
         (subqueryInfo, newExpr)
 
@@ -2523,11 +2591,13 @@ and private relabelBoundAttributeExpr : ResolvedBoundAttributeExpr -> ResolvedBo
 
 and private relabelAttribute (attr : ResolvedAttribute) : ResolvedAttribute =
     { Dependency = attr.Dependency
+      Internal = attr.Internal
       Expression = relabelFieldExpr attr.Expression
     }
 
 and private relabelBoundAttribute (attr : ResolvedBoundAttribute) : ResolvedBoundAttribute =
     { Dependency = attr.Dependency
+      Internal = attr.Internal
       Expression = relabelBoundAttributeExpr attr.Expression
     }
 
@@ -2648,11 +2718,21 @@ let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : Reso
       Attributes = Map.empty
     }
 
-let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * Map<ArgumentRef, ResolvedArgument> =
-    let halfLocalArguments = rawArguments |> OrderedMap.map (fun name arg -> resolveArgument layout arg)
-    let halfAllArguments = Map.unionUnique (halfLocalArguments |> OrderedMap.toMap |> Map.mapKeys PLocal) globalArgumentsMap
+type ResolveCallbacks =
+    { Layout : ILayoutBits
+      HasDefaultAttribute : HasDefaultAttribute
+    }
 
-    let attrsQualifier = QueryResolver (layout, halfAllArguments, emptyExprResolutionFlags)
+let emptyHasDefaultAttribute (fieldRef : ResolvedFieldRef) (name : AttributeName) = false
+
+let private resolveArgumentsMap (callbacks : ResolveCallbacks) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * FindArgument =
+    let halfLocalArguments = rawArguments |> OrderedMap.map (fun name arg -> resolveArgument callbacks.Layout arg)
+
+    let getHalfArgument = function
+        | PLocal name -> OrderedMap.tryFind name halfLocalArguments
+        | PGlobal name -> Map.tryFind name globalArgumentTypes
+
+    let attrsQualifier = QueryResolver (callbacks.Layout, getHalfArgument, callbacks.HasDefaultAttribute, emptyExprResolutionFlags)
 
     let resolveAttrs name (arg : ResolvedArgument) =
         let rawArg = OrderedMap.find name rawArguments
@@ -2660,13 +2740,20 @@ let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArg
         (PLocal name, { arg with Attributes = newArgs })
 
     let localArguments = OrderedMap.mapWithKeys resolveAttrs halfLocalArguments
-    let allArguments = Map.unionUnique (OrderedMap.toMap localArguments) globalArgumentsMap
 
-    (localArguments, allArguments)
+    let getArgument = function
+        | PLocal _ as arg -> OrderedMap.tryFind arg localArguments
+        | PGlobal name -> Map.tryFind name globalArgumentTypes
 
-let resolveSelectExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) (select : ParsedSelectExpr) : ResolvedArgumentsMap * ResolvedSelectExpr =
-    let (localArguments, allArguments) = resolveArgumentsMap layout arguments
-    let qualifier = QueryResolver (layout, allArguments, flags)
+    (localArguments, getArgument)
+
+let private getArgumentsQualifier (callbacks : ResolveCallbacks) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) =
+    let (localArguments, getArgument) = resolveArgumentsMap callbacks arguments
+    let qualifier = QueryResolver (callbacks.Layout, getArgument, callbacks.HasDefaultAttribute, flags)
+    (localArguments, qualifier)
+
+let resolveSelectExpr (callbacks : ResolveCallbacks) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) (select : ParsedSelectExpr) : ResolvedArgumentsMap * ResolvedSelectExpr =
+    let (localArguments, qualifier) = getArgumentsQualifier callbacks arguments flags
     let (info, qQuery) = qualifier.ResolveSelectExpr subExprSelectFlags select
     if Array.length info.Fields <> 1 then
         raisef ViewResolveException "Expression queries must have only one resulting column"
@@ -2677,9 +2764,8 @@ type SingleFieldExprInfo =
       Flags : ResolvedExprFlags
     }
 
-let resolveSingleFieldExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMap) (fromEntityId : FromEntityId) (flags : ExprResolutionFlags) (fromMapping : SingleFromMapping) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
-    let (localArguments, allArguments) = resolveArgumentsMap layout arguments
-    let qualifier = QueryResolver (layout, allArguments, flags)
+let resolveSingleFieldExpr (callbacks : ResolveCallbacks) (arguments : ParsedArgumentsMap) (fromEntityId : FromEntityId) (flags : ExprResolutionFlags) (fromMapping : SingleFromMapping) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
+    let (localArguments, qualifier) = getArgumentsQualifier callbacks arguments flags
     let (exprInfo, qExpr) = qualifier.ResolveSingleFieldExpr fromEntityId fromMapping expr
     let singleInfo =
         { LocalArguments = localArguments
@@ -2687,15 +2773,18 @@ let resolveSingleFieldExpr (layout : ILayoutBits) (arguments : ParsedArgumentsMa
         }
     (singleInfo, relabelFieldExpr qExpr)
 
-let resolveEntityAttributesMap (layout : ILayoutBits) (flags : ExprResolutionFlags) (entityRef : ResolvedEntityRef) (attrs : ParsedBoundAttributesMap) : ResolvedBoundAttributesMap =
-    let qualifier = QueryResolver (layout, globalArgumentsMap, flags)
+let resolveEntityAttributesMap (callbacks : ResolveCallbacks) (flags : ExprResolutionFlags) (entityRef : ResolvedEntityRef) (attrs : ParsedBoundAttributesMap) : ResolvedBoundAttributesMap =
+    let getArgument = function
+        | PLocal name -> None
+        | PGlobal name -> Map.tryFind name globalArgumentTypes
+
+    let qualifier = QueryResolver (callbacks.Layout, getArgument, callbacks.HasDefaultAttribute, flags)
     qualifier.ResolveEntityAttributesMap entityRef attrs
 
-let resolveViewExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
-    let (localArguments, allArguments) = resolveArgumentsMap layout viewExpr.Arguments
-    let qualifier = QueryResolver (layout, allArguments, flags)
+let resolveViewExpr (callbacks : ResolveCallbacks) (flags : ExprResolutionFlags) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
+    let (localArguments, qualifier) = getArgumentsQualifier callbacks viewExpr.Arguments flags
     let (info, qQuery) = qualifier.ResolveSelectExpr viewExprSelectFlags viewExpr.Select
-    let mainEntity = Option.map (resolveMainEntity layout (getFieldsMap info.Fields) qQuery) viewExpr.MainEntity
+    let mainEntity = Option.map (resolveMainEntity callbacks.Layout (getFieldsMap info.Fields) qQuery) viewExpr.MainEntity
     { Pragmas = Map.filter (fun name v -> Set.contains name allowedPragmas) viewExpr.Pragmas
       Arguments = localArguments
       Select = relabelSelectExpr qQuery
@@ -2703,9 +2792,8 @@ let resolveViewExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (viewEx
       Privileged = qualifier.Privileged
     }
 
-let resolveCommandExpr (layout : ILayoutBits) (flags : ExprResolutionFlags) (cmdExpr : ParsedCommandExpr) : ResolvedCommandExpr =
-    let (localArguments, allArguments) = resolveArgumentsMap layout cmdExpr.Arguments
-    let qualifier = QueryResolver (layout, allArguments, flags)
+let resolveCommandExpr (callbacks : ResolveCallbacks) (flags : ExprResolutionFlags) (cmdExpr : ParsedCommandExpr) : ResolvedCommandExpr =
+    let (localArguments, qualifier) = getArgumentsQualifier callbacks cmdExpr.Arguments flags
     let (results, qCommand) = qualifier.ResolveDataExpr viewExprSelectFlags cmdExpr.Command
     { Pragmas = Map.filter (fun name v -> Set.contains name allowedPragmas) cmdExpr.Pragmas
       Arguments = localArguments

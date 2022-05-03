@@ -15,3 +15,11 @@ let rec exceptLast (arr : 'a array) : 'a array =
     if len = 0 then
         failwith "exceptLast: empty array"
     Array.take (len - 1) arr
+
+let filteri (f : int -> 'a -> bool) (arr : 'a[]) : 'a[] =
+    let mutable currI = 0
+    let check value =
+        let ret = f currI value
+        currI <- currI + 1
+        ret
+    Array.filter check arr

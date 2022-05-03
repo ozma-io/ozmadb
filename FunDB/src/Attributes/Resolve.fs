@@ -20,10 +20,16 @@ type ResolveAttributesException (message : string, innerException : Exception, i
 let private attrResolutionFlags = { emptyExprResolutionFlags with Privileged = true }
 
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
-    let resolveAttributesField (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (fieldAttrs : ParsedAttributesField) : AttributesField =
+    let callbacks =
+        { Layout = layout
+          // TODO: allow attributes to refer to each other.
+          HasDefaultAttribute = emptyHasDefaultAttribute
+        }
+
+    let resolveAttributesField (fieldRef : ResolvedFieldRef) (fieldAttrs : ParsedAttributesField) : AttributesField =
         let resolvedMap =
             try
-                resolveEntityAttributesMap layout attrResolutionFlags entityRef fieldAttrs.Attributes
+                resolveEntityAttributesMap callbacks attrResolutionFlags fieldRef.Entity fieldAttrs.Attributes
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
 
@@ -38,9 +44,10 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             | Ok fieldAttrs ->
                 try
                     try
-                        match entity.FindField name with
-                        | None -> raisef ResolveAttributesException "Unknown field name"
-                        | Some field -> Ok <| resolveAttributesField entityRef entity fieldAttrs
+                        if entity.FindField name |> Option.isNone then
+                            raisef ResolveAttributesException "Unknown field name"
+                        let fieldRef = { Entity = entityRef; Name = name }
+                        Ok <| resolveAttributesField fieldRef fieldAttrs
                     with
                     | :? ResolveAttributesException as e when fieldAttrs.AllowBroken || forceAllowBroken ->
                         Error { Error = e; AllowBroken = fieldAttrs.AllowBroken }

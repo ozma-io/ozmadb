@@ -61,11 +61,13 @@ type private ReferenceResolver (checkViewExists : ResolvedUserViewRef -> unit, h
     and resolveBoundAttribute (attr : ResolvedBoundAttribute) : ResolvedBoundAttribute =
         { Dependency = attr.Dependency
           Expression = resolveBoundAttributeExpr attr.Expression
+          Internal = attr.Internal
         }
 
     and resolveAttribute (attr : ResolvedAttribute) : ResolvedAttribute =
         { Dependency = attr.Dependency
           Expression = resolveFieldExpr attr.Expression
+          Internal = attr.Internal
         }
 
     and resolveBoundAttributesMap (attributes : ResolvedBoundAttributesMap) : ResolvedBoundAttributesMap =

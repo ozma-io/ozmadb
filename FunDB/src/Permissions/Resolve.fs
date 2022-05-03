@@ -85,6 +85,11 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
     let mutable resolved : Map<ResolvedEntityRef, PossiblyBroken<HalfAllowedEntity>> = Map.empty
     let mutable flattened : Map<ResolvedEntityRef, FlatAllowedRoleEntity> = Map.empty
 
+    let callbacks =
+        { Layout = layout
+          HasDefaultAttribute = emptyHasDefaultAttribute
+        }
+
     let resolveRestriction (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowIds : bool) (where : string) : ResolvedOptimizedFieldExpr =
         let whereExpr =
             match parse tokenizeFunQL fieldExpr where with
@@ -94,7 +99,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let entityInfo = SFEntity entityRef
         let (exprInfo, expr) =
             try
-                resolveSingleFieldExpr layout OrderedMap.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
+                resolveSingleFieldExpr callbacks OrderedMap.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"
         let usedReferences = fieldExprUsedReferences layout expr

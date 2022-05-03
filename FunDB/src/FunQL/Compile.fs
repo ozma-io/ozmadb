@@ -166,11 +166,13 @@ type private TempDomains = GenericDomains<TempFieldName>
 type ColumnMetaInfo =
     { Mapping : BoundMapping option
       Dependency : DependencyStatus
+      Internal : bool
     }
 
 let emptyColumnMetaInfo =
     { Mapping = None
       Dependency = DSPerRow
+      Internal = false
     }
 
 type private ResultMetaColumn =
@@ -946,12 +948,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         | CTColumn (FunQLName column) -> SQL.SQLName column
 
     let compileEntityAttribute (entityAttributes : EntityAttributesMap) (entityRef : EntityRef) (attrName : AttributeName) : SQL.ValueExpr =
-        match Map.tryFind (compileName entityRef.Name) entityAttributes with
-        | Some attrs when Set.contains attrName attrs.Entity ->
-            let colName = columnName <| CTMeta (CMRowAttribute attrName)
-            let colRef = { Table = Some (compileEntityRef entityRef); Name = colName } : SQL.ColumnRef
-            SQL.VEColumn colRef
-        | _ -> SQL.nullExpr
+        let attrs = Map.find (compileName entityRef.Name) entityAttributes
+        let colName = columnName <| CTMeta (CMRowAttribute attrName)
+        let colRef = { Table = Some (compileEntityRef entityRef); Name = colName } : SQL.ColumnRef
+        SQL.VEColumn colRef
 
     let renameSelectInfo (columns : 'f2 seq) (info : GenericSelectInfo<'f1>) : GenericSelectInfo<'f2> =
         let newColumn = columns.GetEnumerator()
@@ -1397,14 +1397,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     and compileFieldAttribute (flags : ExprCompilationFlags) (ctx : ExprContext) (paths : JoinPaths) (linked : LinkedBoundFieldRef) (attrName : AttributeName) : JoinPaths * SQL.ValueExpr =
         let getDefaultAttribute (updateEntityRef : LinkedBoundFieldRef -> FieldRef -> LinkedBoundFieldRef) (entityRef : ResolvedEntityRef) (name : FieldName) =
-            match defaultAttrs.FindField entityRef name with
-            | None -> (paths, SQL.nullExpr)
-            | Some attrs ->
-                match Map.tryFind attrName attrs with
-                | None -> (paths, SQL.nullExpr)
-                | Some attr ->
-                    let attrExpr = replaceFieldRefInExpr updateEntityRef <| convertBoundAttributeExpr (FERef linked) attr.Attribute.Expression
-                    compileFieldExpr emptyExprCompilationFlags ctx paths attrExpr
+            let attrs = defaultAttrs.FindField entityRef name |> Option.get
+            let attr = Map.find attrName attrs
+            let attrExpr = replaceFieldRefInExpr updateEntityRef <| convertBoundAttributeExpr (FERef linked) attr.Attribute.Expression
+            compileFieldExpr emptyExprCompilationFlags ctx paths attrExpr
 
         match linked.Ref.Ref with
         | VRArgument arg ->
@@ -1759,6 +1755,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let info =
                 { Mapping = None
                   Dependency = attr.Dependency
+                  Internal = attr.Internal
                 }
             let col =
                 { Expression = colExpr
@@ -1792,8 +1789,10 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 | None -> Seq.empty
                 | Some attrs ->
                     let makeDefaultAttr (name, attr : MergedAttribute) =
-                        // Skip pure attributes if we are not at the top level.
-                        if Map.containsKey name result.Attributes || attr.Attribute.Dependency <> DSPerRow && not flags.IsTopLevel then
+                        if
+                                Map.containsKey name result.Attributes ||
+                                // Skip pure attributes if we are not at the top level.
+                                not flags.IsTopLevel && attr.Attribute.Dependency <> DSPerRow then
                             None
                         else
                             let expr = replaceFieldRefInExpr updateEntityRef <| convertBoundAttributeExpr (FERef resultRef) attr.Attribute.Expression
@@ -1804,6 +1803,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             let info =
                                 { Mapping = mapping
                                   Dependency = attr.Attribute.Dependency
+                                  Internal = attr.Attribute.Internal
                                 }
                             let ret =
                                 { Expression = compiled
@@ -2072,6 +2072,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             let info =
                                 { Mapping = mapping
                                   Dependency = attr.Dependency
+                                  Internal = attr.Internal
                                 }
                             let ret =
                                 { Expression = compiled
@@ -2194,6 +2195,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let info =
                 { Mapping = mapping
                   Dependency = attr.Dependency
+                  Internal = attr.Internal
                 }
             paths <- newPaths
             let ret =
@@ -2703,25 +2705,29 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     member this.CompileArgumentAttributes (args : ResolvedArgumentsMap) : (CompiledColumnInfo * SQL.ValueExpr)[] =
         let compileArgAttr argName (name, attr : ResolvedBoundAttribute) =
-            let linkedRef = PLocal argName |> VRArgument |> resolvedRefFieldExpr
-            let expr = convertBoundAttributeExpr linkedRef attr.Expression
-            let (newPaths, colExpr) = compileFieldExpr emptyExprCompilationFlags emptyExprContext emptyJoinPaths expr
-            if not <| Map.isEmpty newPaths.Map then
-                failwith "Unexpected join paths in argument atribute expression"
-            let colType = CTMeta <| CMArgAttribute (argName, name)
-            let info =
-                { Mapping = boundAttributeToMapping attr.Expression
-                  Dependency = attr.Dependency
-                }
-            let column =
-                { Name = columnName colType
-                  Type = colType
-                  Info = info
-                }
-            (column, colExpr)
+            if attr.Internal then
+                None
+            else
+                let linkedRef = PLocal argName |> VRArgument |> resolvedRefFieldExpr
+                let expr = convertBoundAttributeExpr linkedRef attr.Expression
+                let (newPaths, colExpr) = compileFieldExpr emptyExprCompilationFlags emptyExprContext emptyJoinPaths expr
+                if not <| Map.isEmpty newPaths.Map then
+                    failwith "Unexpected join paths in argument atribute expression"
+                let colType = CTMeta <| CMArgAttribute (argName, name)
+                let info =
+                    { Mapping = boundAttributeToMapping attr.Expression
+                      Dependency = attr.Dependency
+                      Internal = attr.Internal
+                    }
+                let column =
+                    { Name = columnName colType
+                      Type = colType
+                      Info = info
+                    }
+                Some (column, colExpr)
         let compileArg (pl : ArgumentRef, arg : ResolvedArgument) =
             match pl with
-            | PLocal name -> arg.Attributes |> Map.toSeq |> Seq.map (compileArgAttr name)
+            | PLocal name -> arg.Attributes |> Map.toSeq |> Seq.mapMaybe (compileArgAttr name)
             | PGlobal name -> Seq.empty
 
         args |> OrderedMap.toSeq |> Seq.collect compileArg |> Seq.toArray
@@ -2731,39 +2737,38 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
     member this.UsedDatabase = usedDatabase
     member this.Arguments = arguments
 
-let rec private findPureTreeExprColumns (cols : CompiledColumnInfo[]) : SQL.SelectTreeExpr -> (CompiledColumnInfo * SQL.ValueExpr) seq = function
+let rec private findSelectExprSingleRows (f : int -> SQL.ColumnName option -> SQL.ValueExpr -> 'b option) : SQL.SelectTreeExpr -> 'b seq = function
     | SQL.SSelect query ->
-        let assignPure (colType : CompiledColumnInfo) res =
+        let assignPure i res =
             match res with
-            | SQL.SCAll _ -> failwith "Not implemented"
-            | SQL.SCExpr (name, expr) ->
-                if colType.Info.Dependency <> DSPerRow then
-                    Some (colType, expr)
-                else
-                    None
-        Seq.map2Maybe assignPure cols query.Columns
+            | SQL.SCAll _ -> None
+            | SQL.SCExpr (name, expr) -> f i name expr
+        Seq.mapiMaybe assignPure query.Columns
     | SQL.SValues vals -> Seq.empty
     | SQL.SSetOp setOp -> Seq.empty
 
-and private findSingleRowColumns (cols : CompiledColumnInfo[]) (select : SQL.SelectExpr) : (CompiledColumnInfo * SQL.ValueExpr) seq =
-    findPureTreeExprColumns cols select.Tree
+and private findSelectSingleRows (f : int -> SQL.ColumnName option -> SQL.ValueExpr -> 'b option) (select : SQL.SelectExpr) : 'b seq =
+    findSelectExprSingleRows f select.Tree
 
-let rec private filterNonpureTreeExpr (cols : CompiledColumnInfo[]) : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
+let rec private filterSelectExprColumns (f : int -> bool) : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
     | SQL.SSelect query ->
-        let checkColumn i _ = cols.[i].Info.Dependency = DSPerRow
-        SQL.SSelect { query with Columns = Seq.filteri checkColumn query.Columns |> Seq.toArray }
-    | SQL.SValues values -> SQL.SValues values
+        let checkColumn i _ = f i
+        SQL.SSelect { query with Columns = Array.filteri checkColumn query.Columns }
+    | SQL.SValues values ->
+        let checkColumn i _ = f i
+        let mappedValues = values |> Array.map (Array.filteri checkColumn)
+        SQL.SValues mappedValues
     | SQL.SSetOp setOp ->
         SQL.SSetOp
             { Operation = setOp.Operation
               AllowDuplicates = setOp.AllowDuplicates
-              A = filterPerRowColumns cols setOp.A
-              B = filterPerRowColumns cols setOp.B
+              A = filterSelectColumns f setOp.A
+              B = filterSelectColumns f setOp.B
               OrderLimit = setOp.OrderLimit
             }
 
-and private filterPerRowColumns (cols : CompiledColumnInfo[]) (select : SQL.SelectExpr) : SQL.SelectExpr =
-    let tree = filterNonpureTreeExpr cols select.Tree
+and private filterSelectColumns (f : int -> bool) (select : SQL.SelectExpr) : SQL.SelectExpr =
+    let tree = filterSelectExprColumns f select.Tree
     { select with Tree = tree }
 
 let rec private flattenDomains : Domains -> FlattenedDomains = function
@@ -2831,11 +2836,19 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let allColumns = info.Columns |> Array.map (convertTempColumnInfo compiler)
     let argAttrs = compiler.CompileArgumentAttributes viewExpr.Arguments
 
-    let nonPerRowColumns = findSingleRowColumns allColumns expr
-    let perRowExpr = filterPerRowColumns allColumns expr
+    let columnIsSingleRow i name col =
+        let info = allColumns.[i]
+        if info.Info.Dependency <> DSPerRow && not info.Info.Internal then
+            Some (info, col)
+        else
+            None
 
-    let checkColumn i _ = allColumns.[i].Info.Dependency = DSPerRow
-    let perRowColumns = Seq.filteri checkColumn allColumns |> Seq.toArray
+    let nonPerRowColumns = findSelectSingleRows columnIsSingleRow expr
+
+    let columnInfoIsPerRow info = info.Info.Dependency = DSPerRow && not info.Info.Internal
+    let columnIsPerRow i = columnInfoIsPerRow allColumns.[i]
+    let perRowExpr = filterSelectColumns columnIsPerRow expr
+    let perRowColumns = Array.filter columnInfoIsPerRow allColumns
 
     let allNonPerRowColumns = Seq.append argAttrs nonPerRowColumns
 

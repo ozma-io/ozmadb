@@ -612,9 +612,13 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
 
     and resolveRelatedExpr (wrappedLayout : ILayoutBits) (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
         let entityInfo = SFEntity entityRef
+        let callbacks =
+            { Layout = wrappedLayout
+              HasDefaultAttribute = emptyHasDefaultAttribute
+            }
         let (exprInfo, expr) =
             try
-                resolveSingleFieldExpr wrappedLayout OrderedMap.empty localExprFromEntityId relatedResolutionFlags entityInfo expr
+                resolveSingleFieldExpr callbacks OrderedMap.empty localExprFromEntityId relatedResolutionFlags entityInfo expr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
         if exprInfo.Flags.HasAggregates then

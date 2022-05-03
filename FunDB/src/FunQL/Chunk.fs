@@ -108,9 +108,13 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
         (ref, info)
     let customMapping = Map.mapWithKeys makeCustomMapping namesMap : CustomFromMapping
 
+    let callbacks =
+        { Layout = layout
+          HasDefaultAttribute = emptyHasDefaultAttribute
+        }
     let (info, resolvedExpr) =
         try
-            resolveSingleFieldExpr layout parsedArguments chunkFromEntityId emptyExprResolutionFlags (SFCustom customMapping) parsedExpr
+            resolveSingleFieldExpr callbacks parsedArguments chunkFromEntityId emptyExprResolutionFlags (SFCustom customMapping) parsedExpr
         with
         | :? ViewResolveException as e -> raisefWithInner ChunkException e ""
     if not <| exprIsLocal info.Flags then
