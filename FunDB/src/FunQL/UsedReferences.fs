@@ -51,9 +51,9 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
                 let pathWithEntities = Seq.zip boundInfo.Path ref.Ref.Path |> Seq.toList
                 buildForPath ref.Extra boundInfo.Ref ref.Ref.AsRoot pathWithEntities
             | _ -> ()
-        | VRPlaceholder name ->
+        | VRArgument name ->
             usedArguments <- Set.add name usedArguments
-            match ObjectMap.tryFindType<ReferencePlaceholderMeta> ref.Extra with
+            match ObjectMap.tryFindType<ReferenceArgumentMeta> ref.Extra with
             | Some argInfo when not (Array.isEmpty ref.Ref.Path) ->
                 let argRef = { Entity = argInfo.Path.[0]; Name = ref.Ref.Path.[0].Name }
                 let pathWithEntities = Seq.zip argInfo.Path ref.Ref.Path |> Seq.skip 1 |> Seq.toList

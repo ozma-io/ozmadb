@@ -197,7 +197,7 @@ let private compileRowSpecificReferenceOptionsSelect (layout : Layout) (entityRe
     let (argId, arguments) = addArgument placeholder argumentInfo emptyArguments
 
     let idCol = resolvedRefFieldExpr <| VRColumn { Entity = Some rowEntityRef; Name = funId } : ResolvedFieldExpr
-    let argRef = resolvedRefFieldExpr <| VRPlaceholder placeholder
+    let argRef = resolvedRefFieldExpr <| VRArgument placeholder
     let where = FEBinaryOp (idCol, BOEq, argRef)
     let where = Option.addWith (curry FEAnd) where extraWhere
     compileReferenceOptionsSelectFrom layout refEntityRef arguments (FJoin join) false (Some where)

@@ -92,7 +92,7 @@ let private scalarBool = FTScalar SFTBool
 type private Typechecker (layout : ILayoutBits) =
     let rec typecheckFieldRef (linked : LinkedBoundFieldRef) : ResolvedFieldType option =
         match linked.Ref.Ref with
-        | VRPlaceholder arg -> failwith "Not implemented"
+        | VRArgument arg -> failwith "Not implemented"
         | VRColumn col ->
             let fieldInfo = ObjectMap.findType<FieldMeta> linked.Extra
             let boundInfo = Option.get fieldInfo.Bound

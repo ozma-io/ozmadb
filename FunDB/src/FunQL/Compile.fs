@@ -913,7 +913,7 @@ let private selfTableRef = { Schema = None; Name = selfTableName } : SQL.TableRe
 // Expects metadata:
 // * `FieldMeta` for all immediate FERefs in result expressions when meta columns are required;
 // * `FieldMeta` with `Bound` filled for all field references with paths;
-// * `ReferencePlaceholderMeta` for all placeholders with paths.
+// * `ReferenceArgumentMeta` for all placeholders with paths.
 type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttributes, initialArguments : QueryArguments) =
     // Only compiler can robustly detect used schemas and arguments, accounting for meta columns.
     let mutable arguments = initialArguments
@@ -1384,14 +1384,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     | _ -> columnRef
                 (paths0, SQL.VEColumn columnRef)
             | _ -> failwith "Unexpected path with no bound field"
-        | VRPlaceholder arg ->
+        | VRArgument arg ->
             let argType = getArgumentType arg
 
             if Array.isEmpty linked.Ref.Path then
                 // Explicitly set argument type to avoid ambiguity,
                 (paths0, SQL.VECast (SQL.VEPlaceholder argType.PlaceholderId, argType.DbType))
             else
-                let argInfo = ObjectMap.findType<ReferencePlaceholderMeta> linked.Extra
+                let argInfo = ObjectMap.findType<ReferenceArgumentMeta> linked.Extra
                 let selectExpr = compileReferenceArgument linked.Extra ctx argType linked.Ref.AsRoot linked.Ref.Path argInfo.Path
                 (paths0, SQL.VESubquery selectExpr)
 
@@ -1407,14 +1407,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     compileFieldExpr emptyExprCompilationFlags ctx paths attrExpr
 
         match linked.Ref.Ref with
-        | VRPlaceholder arg ->
+        | VRArgument arg ->
             let argType = getArgumentType arg
             if Array.isEmpty linked.Ref.Path then
                 match Map.tryFind attrName argType.Attributes with
                 | None -> (paths, SQL.nullExpr)
                 | Some attr -> compileFieldExpr flags ctx paths <| convertBoundAttributeExpr (FERef linked) attr.Expression
             else
-                let argInfo = ObjectMap.findType<ReferencePlaceholderMeta> linked.Extra
+                let argInfo = ObjectMap.findType<ReferenceArgumentMeta> linked.Extra
                 let lastEntityRef = Array.last argInfo.Path
                 let lastArrow = Array.last linked.Ref.Path
                 getDefaultAttribute (replacePathInField layout linked.Ref.Ref linked.Ref.AsRoot linked.Ref.Path linked.Extra true) lastEntityRef lastArrow.Name
@@ -1826,12 +1826,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             let newFieldInfo = { fieldInfo with Bound = Some newBoundInfo }
                             { Ref = { resultRef.Ref with Path = path }; Extra = ObjectMap.singleton newFieldInfo }
                         (boundInfo.Path, FIEntity fieldInfo.FromEntityId, replacePath)
-                    | VRPlaceholder arg ->
-                        let argInfo = ObjectMap.findType<ReferencePlaceholderMeta> resultRef.Extra
+                    | VRArgument arg ->
+                        let argInfo = ObjectMap.findType<ReferenceArgumentMeta> resultRef.Extra
                         let replacePath path boundPath =
                             let newArgInfo = { argInfo with Path = boundPath }
                             { Ref = { resultRef.Ref with Path = path }; Extra = ObjectMap.singleton newArgInfo }
-                        (argInfo.Path, FIPlaceholder arg, replacePath)
+                        (argInfo.Path, FIArgument arg, replacePath)
 
                 let finalEntityRef = Array.last boundPath
                 let finalEntity = getEntityByRef finalEntityRef
@@ -2041,7 +2041,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   Column = { resultColumn with Meta = Map.unionUnique resultColumn.Meta myMeta }
                 }
             // Argument references without paths.
-            | FERef ({ Ref = { Ref = VRPlaceholder arg; AsRoot = asRoot } }) as argExpr when addMetaColumns ->
+            | FERef ({ Ref = { Ref = VRArgument arg; AsRoot = asRoot } }) as argExpr when addMetaColumns ->
                 let metaColumns =
                     if not flags.IsTopLevel then
                         Seq.empty
@@ -2703,7 +2703,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
     member this.CompileArgumentAttributes (args : ResolvedArgumentsMap) : (CompiledColumnInfo * SQL.ValueExpr)[] =
         let compileArgAttr argName (name, attr : ResolvedBoundAttribute) =
-            let linkedRef = PLocal argName |> VRPlaceholder |> resolvedRefFieldExpr
+            let linkedRef = PLocal argName |> VRArgument |> resolvedRefFieldExpr
             let expr = convertBoundAttributeExpr linkedRef attr.Expression
             let (newPaths, colExpr) = compileFieldExpr emptyExprCompilationFlags emptyExprContext emptyJoinPaths expr
             if not <| Map.isEmpty newPaths.Map then
@@ -2719,7 +2719,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                   Info = info
                 }
             (column, colExpr)
-        let compileArg (pl : Placeholder, arg : ResolvedArgument) =
+        let compileArg (pl : ArgumentRef, arg : ResolvedArgument) =
             match pl with
             | PLocal name -> arg.Attributes |> Map.toSeq |> Seq.map (compileArgAttr name)
             | PGlobal name -> Seq.empty

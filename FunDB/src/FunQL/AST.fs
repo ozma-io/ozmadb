@@ -149,7 +149,7 @@ let relaxFieldRef (ref : ResolvedFieldRef) : FieldRef =
 let tryResolveFieldRef (ref : FieldRef) : ResolvedFieldRef option =
     ref.Entity |> Option.bind (tryResolveEntityRef >> Option.map (fun entity -> { Entity = entity; Name = ref.Name }))
 
-type Placeholder =
+type ArgumentRef =
     | PLocal of ArgumentName
     | PGlobal of ArgumentName
         override this.ToString () = this.ToFunQLString()
@@ -438,14 +438,14 @@ type LinkedRef<'f> when 'f :> IFunQLName =
 
 type ValueRef<'f> when 'f :> IFunQLName =
     | VRColumn of 'f
-    | VRPlaceholder of Placeholder
+    | VRArgument of ArgumentRef
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             match this with
             | VRColumn c -> c.ToFunQLString()
-            | VRPlaceholder p -> p.ToFunQLString()
+            | VRArgument p -> p.ToFunQLString()
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -453,7 +453,7 @@ type ValueRef<'f> when 'f :> IFunQLName =
         member this.ToName () =
             match this with
             | VRColumn c -> c.ToName ()
-            | VRPlaceholder p -> p.ToName ()
+            | VRArgument p -> p.ToName ()
 
         interface IFunQLName with
             member this.ToName () = this.ToName ()
@@ -605,7 +605,7 @@ type ResolvedExprFlags =
       HasFetches : bool
       HasArrows : bool
       HasAggregates : bool
-      HasPlaceholders : bool
+      HasArguments : bool
       HasFields : bool
     }
 
@@ -614,7 +614,7 @@ let emptyResolvedExprFlags : ResolvedExprFlags =
       HasFetches = false
       HasArrows = false
       HasAggregates = false
-      HasPlaceholders = false
+      HasArguments = false
       HasFields = false
     }
 
@@ -623,7 +623,7 @@ let unknownResolvedExprFlags : ResolvedExprFlags =
       HasFetches = true
       HasArrows = true
       HasAggregates = false
-      HasPlaceholders = true
+      HasArguments = true
       HasFields = true
     }
 
@@ -635,7 +635,7 @@ let unionResolvedExprFlags (a : ResolvedExprFlags) (b : ResolvedExprFlags) =
       HasFetches = a.HasFetches || b.HasFetches
       HasArrows = a.HasArrows || b.HasArrows
       HasAggregates = a.HasAggregates || b.HasAggregates
-      HasPlaceholders = a.HasPlaceholders || b.HasPlaceholders
+      HasArguments = a.HasArguments || b.HasArguments
       HasFields = a.HasFields || b.HasFields
     }
 
@@ -1811,7 +1811,7 @@ let tryFindUsedField (schemaName : SchemaName) (entityName : EntityName) (fieldN
 
 let tryFindUsedFieldRef (ref : ResolvedFieldRef) = tryFindUsedField ref.Entity.Schema ref.Entity.Name ref.Name
 
-type UsedArguments = Set<Placeholder>
+type UsedArguments = Set<ArgumentRef>
 
 type LocalArgumentsMap = Map<ArgumentName, FieldValue>
 

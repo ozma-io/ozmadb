@@ -302,7 +302,7 @@ let private saveOneCustomEntity
                 let ref = { Ref = { Ref = VRColumn plainRef; Path = path; AsRoot = false }; Extra = ObjectMap.singleton fieldInfo } : LinkedBoundFieldRef
                 FERef ref
 
-        let schemaExpr = FERef { Ref = { Ref = VRPlaceholder schemaArg; Path = [||]; AsRoot = false }; Extra = ObjectMap.empty }
+        let schemaExpr = FERef { Ref = { Ref = VRArgument schemaArg; Path = [||]; AsRoot = false }; Extra = ObjectMap.empty }
         let whereExpr = FEBinaryOp (getReference key.SchemaNamePath, BOEq, schemaExpr)
 
         let resultColumns =
@@ -496,7 +496,7 @@ let private loadRestoredRows
             let (compiledArg, name, newArguments) = addAnonymousArgument arg arguments
             arguments <- newArguments
             argumentValues <- Map.add compiledArg.PlaceholderId (compileFieldValue v) argumentValues
-            resolvedRefFieldExpr <| VRPlaceholder (PLocal name)
+            resolvedRefFieldExpr <| VRArgument (PLocal name)
 
         let lookupField (fieldRef : ResolvedFieldRef) =
             let currEntity = layout.FindEntity fieldRef.Entity |> Option.get
@@ -563,7 +563,7 @@ let private loadRestoredRows
               Fields = Some rawColumnNames
             } : EntityAlias
 
-        let schemaIdExpr = resolvedRefFieldExpr <| VRPlaceholder schemaArg
+        let schemaIdExpr = resolvedRefFieldExpr <| VRArgument schemaArg
 
         let mutable from = FSubExpr (subSelectExpr rawSelect rawAlias)
         let mutable lastSubkeyId = 0
@@ -831,7 +831,7 @@ let private deleteNonRestoredRows
               AsRoot = false
             } : LinkedFieldRef
         let schemaRef = { Ref = lref; Extra = ObjectMap.singleton newFieldInfo }
-        let schemaArgExpr = resolvedRefFieldExpr <| VRPlaceholder schemaArg
+        let schemaArgExpr = resolvedRefFieldExpr <| VRArgument schemaArg
         let check = FEBinaryOp (FERef schemaRef, BOEq, schemaArgExpr)
 
         let deletedRef = relaxEntityRef entityRef

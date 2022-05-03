@@ -369,7 +369,7 @@ let private renameAllFieldExprEntities (toEntityRef : EntityRef) : ResolvedField
             { ref with Ref = { ref.Ref with Ref = VRColumn { Entity = Some toEntityRef; Name = fieldName } } }
         | { Ref = { Ref = VRColumn ({ Entity = None; Name = name } as fieldRef) } } ->
             failwithf "Unexpected column ref during rename: %O" fieldRef
-        | { Ref = { Ref = VRPlaceholder _ } } as ref -> ref
+        | { Ref = { Ref = VRArgument _ } } as ref -> ref
     mapFieldExpr { idFieldExprMapper with FieldReference = mapReference }
 
 let private buildFinalRestriction (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> ResolvedFieldExpr option = function

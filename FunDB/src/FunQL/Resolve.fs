@@ -28,7 +28,7 @@ type ViewResolveException (message : string, innerException : Exception, isUserE
 type FromEntityId = int
 type FromId =
     | FIEntity of FromEntityId
-    | FIPlaceholder of Placeholder
+    | FIArgument of ArgumentRef
 
 type FromFieldKey =
     { FromId : FromId
@@ -89,25 +89,25 @@ type private QSubqueryFieldsMap = Map<FieldName, BoundField option>
 type private QSubqueryFields = (FieldName option * BoundField option)[]
 
 type private SubqueryExprInfo =
-    { HasPlaceholders : bool
+    { HasArguments : bool
       HasFetches : bool
       ExternalEntities : Set<FromEntityId>
     }
 
 let private emptySubqueryExprInfo : SubqueryExprInfo =
-    { HasPlaceholders = false
+    { HasArguments = false
       HasFetches = false
       ExternalEntities = Set.empty
     }
 
 let private unionSubqueryExprInfo (a : SubqueryExprInfo) (b : SubqueryExprInfo) : SubqueryExprInfo =
-    { HasPlaceholders = a.HasPlaceholders || b.HasPlaceholders
+    { HasArguments = a.HasArguments || b.HasArguments
       HasFetches = a.HasFetches || b.HasFetches
       ExternalEntities = Set.union a.ExternalEntities b.ExternalEntities
     }
 
 let private resolvedToSubqueryExprInfo (info : ResolvedExprInfo) : SubqueryExprInfo =
-    { HasPlaceholders = info.Flags.HasPlaceholders
+    { HasArguments = info.Flags.HasArguments
       HasFetches = info.Flags.HasFetches
       ExternalEntities = info.ExternalEntities
     }
@@ -317,13 +317,13 @@ type ResolvedMainEntity =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
-type ResolvedArgumentsMap = OrderedMap<Placeholder, ResolvedArgument>
+type ResolvedArgumentsMap = OrderedMap<ArgumentRef, ResolvedArgument>
 
 let private renderFunQLArguments (arguments : ResolvedArgumentsMap) : string =
     if OrderedMap.isEmpty arguments then
         ""
     else
-        let printArgument (name : Placeholder, arg : ResolvedArgument) =
+        let printArgument (name : ArgumentRef, arg : ResolvedArgument) =
             match name with
             | PGlobal _ -> None
             | PLocal _ -> Some <| sprintf "%s %s" (name.ToFunQLString()) (arg.ToFunQLString())
@@ -386,7 +386,7 @@ let private subqueryToResolvedExprInfo (localEntities : Set<FromEntityId>) (info
     let subExternalEntities = Set.difference info.ExprInfo.ExternalEntities localEntities
     let newFlags =
         { emptyResolvedExprFlags with
-            HasPlaceholders = info.ExprInfo.HasPlaceholders
+            HasArguments = info.ExprInfo.HasArguments
             HasFetches = info.ExprInfo.HasFetches
             HasFields = not <| Set.isEmpty subLocalEntities
         }
@@ -504,7 +504,7 @@ type SubEntityMeta =
     { PossibleEntities : PossibleEntities<Set<ResolvedEntityRef>>
     }
 
-type ReferencePlaceholderMeta =
+type ReferenceArgumentMeta =
     { // Of length `ref.Path`, contains reference entities given current type context, starting from the first referenced entity. Guaranteed to be non-empty.
       Path : ResolvedEntityRef[]
     }
@@ -629,7 +629,7 @@ type private InnerResolvedExprInfo =
 
 let private exprDependency (info : ResolvedExprInfo) : DependencyStatus =
     if not info.Flags.HasFields then
-        if info.Flags.HasPlaceholders then
+        if info.Flags.HasArguments then
             DSSingle
         else
             DSConst
@@ -780,14 +780,14 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
                     let fieldArrow = Array.last field.Ref.Path
                     { Entity = entityRef; Name = fieldArrow.Name }
             (fieldRef, typeCtxKey)
-        | VRPlaceholder arg ->
+        | VRArgument arg ->
             let pathInfo =
-                match ObjectMap.tryFindType<ReferencePlaceholderMeta> field.Extra with
+                match ObjectMap.tryFindType<ReferenceArgumentMeta> field.Extra with
                 | Some info -> info
                 | None -> raisef ViewResolveException "Unbound field in a type assertion"
             let arrowNames = field.Ref.Path |> Seq.map (fun arr -> arr.Name) |> Seq.toList
             let typeCtxKey =
-                { FromId = FIPlaceholder arg
+                { FromId = FIArgument arg
                   Path = List.exceptLast arrowNames
                 }
             let fieldRef =
@@ -899,8 +899,8 @@ let replacePathInField (layout : ILayoutBits) (localRef : ValueRef<FieldRef>) (a
 
     let newExtra =
         match localRef with
-        | VRPlaceholder _ ->
-            let argInfo = ObjectMap.findType<ReferencePlaceholderMeta> extra
+        | VRArgument _ ->
+            let argInfo = ObjectMap.findType<ReferenceArgumentMeta> extra
             let newBoundPath = replaceBoundPath argInfo.Path
             let newArgInfo = { argInfo with Path = newBoundPath }
             ObjectMap.add newArgInfo extra
@@ -1090,7 +1090,7 @@ let rec private relabelFromExprType (typeContexts : TypeContextsMap) = function
         FJoin { join with A = a; B = b }
     | FSubExpr expr -> FSubExpr expr
 
-type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, ResolvedArgument>, resolveFlags : ExprResolutionFlags) =
+type private QueryResolver (layout : ILayoutBits, arguments : Map<ArgumentRef, ResolvedArgument>, resolveFlags : ExprResolutionFlags) =
     let mutable isPrivileged = false
 
     let mutable lastFromEntityId : FromEntityId = 0
@@ -1336,7 +1336,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                       InnerField = Option.map (fun (inner, meta) -> inner) boundFields
                     }
                 (refInfo, newRef)
-            | VRPlaceholder arg ->
+            | VRArgument arg ->
                 if ctx.NoArguments then
                     raisef ViewResolveException "Arguments are not allowed here: %O" arg
                 let argInfo =
@@ -1354,7 +1354,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                                 | head :: tail -> (head, tail)
                                 | _ -> failwith "Impossible"
                             let key =
-                                { FromId = FIPlaceholder arg
+                                { FromId = FIArgument arg
                                   Path = []
                                 }
                             let (entityRef, argEntity, argField) =
@@ -1385,17 +1385,17 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                                     |> Seq.toArray
                             let boundInfo =
                                 { Path = boundPath
-                                } : ReferencePlaceholderMeta
+                                } : ReferenceArgumentMeta
                             let info = boundFieldInfo typeCtxs inner (Seq.singleton (boundInfo :> obj))
                             (Some inner, info)
                         | _ -> raisef ViewResolveException "Argument is not a reference: %O" ref
 
-                let exprInfo = { emptyResolvedExprInfo with Flags = { emptyResolvedExprFlags with HasPlaceholders = true } }
+                let exprInfo = { emptyResolvedExprInfo with Flags = { emptyResolvedExprFlags with HasArguments = true } }
                 let refInfo =
                     { ExprInfo = exprInfo
                       InnerField = innerBoundField
                     }
-                let newRef = { Ref = { f with Ref = VRPlaceholder arg }; Extra = boundInfo }
+                let newRef = { Ref = { f with Ref = VRArgument arg }; Extra = boundInfo }
 
                 (refInfo, newRef)
 
@@ -1425,7 +1425,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
 
     let resolveLimitFieldExpr (expr : ParsedFieldExpr) : ResolvedFieldExpr =
         let resolveRef : LinkedFieldRef -> LinkedBoundFieldRef = function
-            | { Ref = VRPlaceholder name; Path = [||] } as ref ->
+            | { Ref = VRArgument name; Path = [||] } as ref ->
                 if Map.containsKey name arguments then
                     { Ref = ref; Extra = ObjectMap.empty }
                 else
@@ -1657,7 +1657,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
             let externalEntities = Set.difference selectInfo.ExprInfo.ExternalEntities ctx.LocalEntities
             let newFlags =
                 { emptyResolvedExprFlags with
-                    HasPlaceholders = selectInfo.ExprInfo.HasPlaceholders
+                    HasArguments = selectInfo.ExprInfo.HasArguments
                     HasFetches = selectInfo.ExprInfo.HasFetches
                     HasFields = not <| Set.isEmpty localEntities
                 }
@@ -2411,7 +2411,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
     member this.ResolveArgumentAttributesMap (attrs : ParsedBoundAttributesMap) : ResolvedBoundAttributesMap =
         let boundExprInfo =
             { emptyResolvedExprInfo with
-                Flags = { emptyResolvedExprFlags with HasPlaceholders = true }
+                Flags = { emptyResolvedExprFlags with HasArguments = true }
             }
         let resolveOne name (expr : ParsedBoundAttribute) : ResolvedBoundAttribute =
             let (info, res) = resolveBoundAttribute emptyContext boundExprInfo expr
@@ -2648,7 +2648,7 @@ let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : Reso
       Attributes = Map.empty
     }
 
-let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * Map<Placeholder, ResolvedArgument> =
+let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * Map<ArgumentRef, ResolvedArgument> =
     let halfLocalArguments = rawArguments |> OrderedMap.map (fun name arg -> resolveArgument layout arg)
     let halfAllArguments = Map.unionUnique (halfLocalArguments |> OrderedMap.toMap |> Map.mapKeys PLocal) globalArgumentsMap
 

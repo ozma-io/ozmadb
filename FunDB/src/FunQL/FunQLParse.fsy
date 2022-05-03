@@ -643,8 +643,8 @@ EntityRef:
 
 ValueRef:
     | FieldRef           { VRColumn $1 }
-    | ARGUMENT_ID        { VRPlaceholder (PLocal <| FunQLName $1) }
-    | GLOBAL_ARGUMENT_ID { VRPlaceholder (PGlobal <| FunQLName $1) }
+    | ARGUMENT_ID        { VRArgument (PLocal <| FunQLName $1) }
+    | GLOBAL_ARGUMENT_ID { VRArgument (PGlobal <| FunQLName $1) }
 
 LinkedFieldRef:
     | ValueRef LinkedFieldsList {

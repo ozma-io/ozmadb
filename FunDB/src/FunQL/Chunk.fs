@@ -67,13 +67,13 @@ let private maybeAddAnonymousInt (int : int option) (argValues : LocalArgumentsM
     | Some offset ->
         let (argInfo, arg, arguments) = addAnonymousArgument limitOffsetArgument arguments
         let argValues = Map.add arg (FInt offset) argValues
-        let sqlPlaceholder = Some <| SQL.VEPlaceholder argInfo.PlaceholderId
-        (argValues, arguments, sqlPlaceholder)
+        let sqlArgumentRef = Some <| SQL.VEPlaceholder argInfo.PlaceholderId
+        (argValues, arguments, sqlArgumentRef)
 
 // `chunkArguments` is a map from anonymous argument name to a real argument name.
 let private compileWhereExpr (layout : Layout) (initialArguments : QueryArguments) (chunkArguments : Map<ArgumentName, ArgumentName>) (expr : ResolvedFieldExpr) =
     // A small hack: remake compiled arguments map so that it only contains chunk arguments.
-    let convertArgument (name : Placeholder) =
+    let convertArgument (name : ArgumentRef) =
         match name with
         | PGlobal glob -> Some name
         | PLocal loc ->

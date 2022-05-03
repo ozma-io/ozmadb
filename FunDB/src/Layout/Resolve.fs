@@ -673,7 +673,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         if comp.Source.IsMaterialized then
             if exprInfo.Flags.HasSubqueries then
                 raisef ResolveLayoutException "Queries are not supported in materialized computed fields"
-            if exprInfo.Flags.HasPlaceholders then
+            if exprInfo.Flags.HasArguments then
                 raisef ResolveLayoutException "Arguments are not allowed in materialized computed fields"
             if usedReferences.HasRestrictedEntities then
                 raisef ResolveLayoutException "Restricted (plain) join arrows are not allowed in materialized computed fields"
@@ -731,7 +731,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let (exprInfo, expr) = resolveRelatedExpr initialWrappedLayout entityRef expr
         if not <| exprIsLocal exprInfo.Flags then
             raisef ResolveLayoutException "Non-local expressions are not allowed here"
-        if exprInfo.Flags.HasPlaceholders then
+        if exprInfo.Flags.HasArguments then
             raisef ResolveLayoutException "Arguments are not allowed here"
         (exprInfo, expr)
 
@@ -739,7 +739,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         let (exprInfo, expr) = resolveRelatedExpr initialWrappedLayout entityRef (parseRelatedExpr constr.Expression)
         if exprInfo.Flags.HasSubqueries then
             raisef ResolveLayoutException "Subqueries are not allowed here"
-        if exprInfo.Flags.HasPlaceholders then
+        if exprInfo.Flags.HasArguments then
             raisef ResolveLayoutException "Arguments are not allowed here"
         let usedReferences = fieldExprUsedReferences initialWrappedLayout expr
         { Expression = expr

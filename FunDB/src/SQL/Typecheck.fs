@@ -30,7 +30,7 @@ type HoledValueType =
     | HTArray of SimpleType option
     | HTAny
 
-type HolePlaceholder = SimpleValueType
+type HoleArgument = SimpleValueType
 
 type FunctionSignaturesMap = Map<HoledValueType[], HoledValueType>
 
@@ -106,7 +106,7 @@ let canAcceptType (wanted : SimpleValueType) (given : SimpleValueType) =
     else
         tryImplicitValueCasts wanted given
 
-let private specializeHoledType (pl : HolePlaceholder) (holedTyp : HoledValueType) : SimpleValueType option =
+let private specializeHoledType (pl : HoleArgument) (holedTyp : HoledValueType) : SimpleValueType option =
     match holedTyp with
     | HTAny -> Some pl
     | HTScalar None ->
@@ -126,7 +126,7 @@ let private getHoledType (holedTyp : HoledValueType) : SimpleValueType =
     | HTArray (Some typ) -> VTArray typ
     | _ -> failwith "Unexpected hole in type"
 
-let private inferHole (holedTyp : HoledValueType) (comparedTyp : SimpleValueType) : Result<HolePlaceholder option, unit> =
+let private inferHole (holedTyp : HoledValueType) (comparedTyp : SimpleValueType) : Result<HoleArgument option, unit> =
     match holedTyp with
     | HTAny -> Ok (Some comparedTyp)
     | HTScalar None ->
@@ -268,13 +268,13 @@ let binaryOperatorSignature = function
     | BOJsonTextArrow -> jsonTextArrowOverloads
 
 let private expandHoledSignatures (signature : HoledValueType[]) (ret : HoledValueType) (typs : SimpleValueType option[]) : (SimpleValueType[] * SimpleValueType) seq =
-    let addPlaceholder pls (hole, mtyp) =
+    let addArgument pls (hole, mtyp) =
         let typ = Option.defaultValue (VTScalar STString) mtyp
         match inferHole hole typ with
         | Error () -> None
         | Ok None -> Some pls
         | Ok (Some pl) -> Some (Set.add pl pls)
-    match Seq.zip signature typs |> Seq.foldOption addPlaceholder Set.empty with
+    match Seq.zip signature typs |> Seq.foldOption addArgument Set.empty with
     | None -> Seq.empty
     | Some pls when Set.isEmpty pls ->
         Seq.singleton (Array.map getHoledType signature, getHoledType ret)

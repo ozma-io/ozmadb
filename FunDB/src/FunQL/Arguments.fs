@@ -27,8 +27,8 @@ type CompiledArgument =
 
 type RawArguments = Map<string, JToken>
 
-type CompiledArgumentsMap = Map<Placeholder, CompiledArgument>
-type ArgumentValuesMap = Map<Placeholder, FieldValue>
+type CompiledArgumentsMap = Map<ArgumentRef, CompiledArgument>
+type ArgumentValuesMap = Map<ArgumentRef, FieldValue>
 
 [<NoEquality; NoComparison>]
 type QueryArguments =
@@ -83,7 +83,7 @@ let emptyArguments =
       NextAnonymousId = 0
     }
 
-let addArgument (name : Placeholder) (arg : ResolvedArgument) (args : QueryArguments) : CompiledArgument * QueryArguments =
+let addArgument (name : ArgumentRef) (arg : ResolvedArgument) (args : QueryArguments) : CompiledArgument * QueryArguments =
     match Map.tryFind name args.Types with
     | Some oldArg -> (oldArg, args)
     | None ->
@@ -144,7 +144,7 @@ let private typecheckArgument (fieldType : FieldType<_>) (value : FieldValue) : 
     | _ -> ()
 
 let prepareArguments (args : QueryArguments) (values : ArgumentValuesMap) : ExprParameters =
-    let makeParameter (name : Placeholder) (mapping : CompiledArgument) =
+    let makeParameter (name : ArgumentRef) (mapping : CompiledArgument) =
         let (notFound, value) =
             match Map.tryFind name values with
             | None ->
@@ -161,8 +161,8 @@ let prepareArguments (args : QueryArguments) (values : ArgumentValuesMap) : Expr
     args.Types |> Map.mapWithKeys makeParameter
 
 // Used to compile expressions with some arguments hidden or renamed, and insert changed arguments back.
-let modifyArgumentsInNamespace (changeNames : Placeholder -> Placeholder option) (modify : QueryArguments -> QueryArguments * 'a) (arguments : QueryArguments) : QueryArguments * 'a =
-    let convertArgument (name : Placeholder) (arg : CompiledArgument) =
+let modifyArgumentsInNamespace (changeNames : ArgumentRef -> ArgumentRef option) (modify : QueryArguments -> QueryArguments * 'a) (arguments : QueryArguments) : QueryArguments * 'a =
+    let convertArgument (name : ArgumentRef) (arg : CompiledArgument) =
         match changeNames name with
         | Some newName -> Some (newName, arg)
         | None -> None
@@ -171,7 +171,7 @@ let modifyArgumentsInNamespace (changeNames : Placeholder -> Placeholder option)
     let nsArguments = { arguments with Types = nsArgumentsMap }
     let (newNsArguments, ret) = modify nsArguments
 
-    let maybeInsertArgument (currMap : CompiledArgumentsMap) (name : Placeholder, arg : CompiledArgument) =
+    let maybeInsertArgument (currMap : CompiledArgumentsMap) (name : ArgumentRef, arg : CompiledArgument) =
         if arg.PlaceholderId >= arguments.NextPlaceholderId then
             assert (not <| Map.containsKey name currMap)
             Map.add name arg currMap
@@ -184,7 +184,7 @@ let modifyArgumentsInNamespace (changeNames : Placeholder -> Placeholder option)
 
 // We don't check that all required arguments are provided; it happens later.
 let convertQueryArguments (globalArgValues : LocalArgumentsMap) (extraArgValues : ArgumentValuesMap) (rawArgValues : RawArguments) (arguments : QueryArguments) : ArgumentValuesMap =
-    let findArgument (name : Placeholder) (arg : CompiledArgument) =
+    let findArgument (name : ArgumentRef) (arg : CompiledArgument) =
         match Map.tryFind name extraArgValues with
         | Some arg -> Some arg
         | None ->
