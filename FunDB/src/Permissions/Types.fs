@@ -121,7 +121,8 @@ type FlatAllowedRoleEntity =
 
 [<NoEquality; NoComparison>]
 type FlatAllowedEntity =
-  { Roles : Map<ResolvedRoleRef, FlatAllowedRoleEntity>
+  { // All roles listed here apply and are summed (as if OR'ed together).
+    Roles : Map<ResolvedRoleRef, FlatAllowedRoleEntity>
   }
 
 type FlatAllowedDatabase = Map<ResolvedEntityRef, FlatAllowedEntity>

@@ -774,7 +774,7 @@ let private buildInternalJoins (layout : Layout) (initialFromMap : FromMap) (ini
           Attributes = emptyEntityAttributes
         }
     let addedFromMap = Map.map makeFromInfo entitiesMap
-    let newFromMap = Map.union initialFromMap addedFromMap
+    let newFromMap = Map.unionUnique initialFromMap addedFromMap
     (newFromMap, newFrom)
 
 type RenamesMap = Map<SQL.TableName, SQL.TableName>
@@ -814,7 +814,7 @@ let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : RenamesMap 
 
     let renamedNewPaths = renameNewPaths None oldPaths.Map newPaths.Map
     let ret =
-        { Map = Map.union oldPaths.Map renamedNewPaths
+        { Map = Map.union renamedNewPaths oldPaths.Map
           NextJoinId = lastId
         }
 
@@ -2768,7 +2768,7 @@ and private filterPerRowColumns (cols : CompiledColumnInfo[]) (select : SQL.Sele
 
 let rec private flattenDomains : Domains -> FlattenedDomains = function
     | DSingle (id, dom) -> Map.singleton id dom
-    | DMulti (ns, subdoms) -> subdoms |> Map.values |> Seq.fold (fun m subdoms -> Map.union m (flattenDomains subdoms)) Map.empty
+    | DMulti (ns, subdoms) -> subdoms |> Map.values |> Seq.fold (fun m subdoms -> Map.unionUnique m (flattenDomains subdoms)) Map.empty
 
 type CompiledExprInfo =
     { Arguments : QueryArguments

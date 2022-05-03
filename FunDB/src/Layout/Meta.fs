@@ -382,7 +382,7 @@ type private MetaBuilder (layout : Layout) =
         assert Set.isSubset (Map.keysSet schemas) (subLayout.Schemas |> Map.keys |> Seq.map compileName |> Set.ofSeq)
         // Tables separately.
         let tables = ret |> Seq.map (fun (name, (tables, objects)) -> tables) |> Seq.fold (Map.unionWith SQL.unionTableObjectsMeta) Map.empty
-        let splitTables = tables |> Map.toSeq |> Seq.map makeSplitTable |> Map.ofSeqWith (fun name -> Map.union)
+        let splitTables = tables |> Map.toSeq |> Seq.map makeSplitTable |> Map.ofSeqWith (fun name -> Map.unionUnique)
         let mergeTables (schemaName : SQL.SQLName) (keys : SQL.MigrationKeysSet, schema : SQL.SchemaMeta) =
             match Map.tryFind schemaName splitTables with
             | None -> (keys, schema)

@@ -110,7 +110,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                                 Set.difference emptySchemas restoredSchemas
                         let dumps =
                             let emptyDumps = droppedSchemas |> Seq.map (fun name -> (name, emptySchemaDump)) |> Map.ofSeq
-                            Map.union emptyDumps rawDumps
+                            Map.union rawDumps emptyDumps
                         let! modified = restoreSchemas ctx.Transaction ctx.Layout dumps ctx.CancellationToken
                         do! deleteSchemas ctx.Layout ctx.Transaction droppedSchemas ctx.CancellationToken
                         if modified || not (Set.isEmpty droppedSchemas) then

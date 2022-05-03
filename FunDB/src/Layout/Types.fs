@@ -84,17 +84,23 @@ type VirtualFieldCase =
       PossibleEntities : Set<ResolvedEntityRef>
     }
 
+type IVirtualFieldBits =
+    // Root virtual field in hierarchy.
+    abstract member InheritedFrom : ResolvedEntityRef option
+
 [<NoEquality; NoComparison>]
 type VirtualField =
     { Cases : VirtualFieldCase[]
       InheritedFrom : ResolvedEntityRef option
-    }
+    } with
+        interface IVirtualFieldBits with
+            member this.InheritedFrom = this.InheritedFrom
 
 // These fields are available without fully resolving a computed field.
 type IComputedFieldBits =
     abstract member InheritedFrom : ResolvedEntityRef option
     abstract member AllowBroken : bool
-    abstract member IsVirtual : bool
+    abstract member Virtual : IVirtualFieldBits option
 
 [<NoEquality; NoComparison>]
 type RootComputedField =
@@ -122,7 +128,7 @@ type ResolvedComputedField =
         interface IComputedFieldBits with
             member this.InheritedFrom = this.InheritedFrom
             member this.AllowBroken = this.AllowBroken
-            member this.IsVirtual = Option.isSome this.Virtual
+            member this.Virtual = Option.map (fun x -> upcast x) this.Virtual
 
 [<NoEquality; NoComparison>]
 type GenericResolvedField<'col, 'comp> =

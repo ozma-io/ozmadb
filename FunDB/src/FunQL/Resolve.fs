@@ -209,8 +209,13 @@ let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef :
 let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEntityId) (isInner : bool) (maybeEntityRef : EntityRef option) (parentRef : ResolvedEntityRef) (children : ResolvedEntityRef seq) : FieldMapping =
     let filterField (name : FieldName, field : ResolvedFieldBits) =
         match field with
-        | RColumnField f when Option.isNone f.InheritedFrom -> Some name
-        | RComputedField f when Option.isNone f.InheritedFrom -> Some name
+        | RColumnField { InheritedFrom = None } -> Some name
+        | RComputedField f when Option.isNone f.InheritedFrom ->
+            // Filter out children virtual fields.
+            match f.Virtual with
+            | None -> Some name
+            | Some v when Option.isNone v.InheritedFrom -> Some name
+            | _ -> None
         | _ -> None
     let mapEntity (entityRef : ResolvedEntityRef) =
         let entity = layout.FindEntity entityRef |> Option.get
@@ -583,7 +588,7 @@ and private findMainEntityTreeExpr (ctes : ResolvedCommonTableExprsMap) (current
             RRecursive r1
 
 and private findMainEntityExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) (select : ResolvedSelectExpr) : RecursiveValue<ResolvedEntityRef * ResolvedQueryResult[]> =
-    let ctes = Map.union ctes (cteBindings select)
+    let ctes = Map.union (cteBindings select) ctes
     findMainEntityTreeExpr ctes currentCte select.Tree
 
 // Returns map from query column names to fields in main entity
@@ -743,7 +748,7 @@ let private boundFieldInfo (typeCtxs : TypeContextsMap) (inner : BoundField) (ex
         seq {
             let addSubtypesInfo =
                 match inner.Field with
-                | RComputedField comp -> comp.IsVirtual
+                | RComputedField comp -> Option.isSome comp.Virtual
                 | RSubEntity -> true
                 | _ -> false
             if addSubtypesInfo then
@@ -1037,7 +1042,7 @@ let private unionFromExprInfo (a : FromExprInfo) (b : FromExprInfo) =
         | Failure msg -> raisef ViewResolveException "Clashing entity names: %s" msg
     { Fields = unionNameMapping a.Fields b.Fields
       Entities = entities
-      Types = Map.union a.Types b.Types
+      Types = Map.unionUnique a.Types b.Types
       ExprInfo = unionSubqueryExprInfo a.ExprInfo b.ExprInfo
     }
 
@@ -1045,7 +1050,7 @@ let private addFromToContext (fromInfo : FromExprInfo) (ctx : Context) =
     { ctx with
         FieldMaps = fromInfo.Fields :: ctx.FieldMaps
         Entities = fromInfo.Entities
-        Types = Map.union ctx.Types fromInfo.Types
+        Types = Map.unionUnique ctx.Types fromInfo.Types
         LocalEntities = fromInfo.Entities |> Map.values |> Seq.map (fun info -> info.Id) |> Set.ofSeq
     }
 
@@ -1204,7 +1209,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
             mapping
         else
             let extraMapping = typeRestrictedFieldsToFieldMapping layout fromEntityId flags.IsInner mappingRef entityRef (entity.Children |> Map.keys)
-            Map.union extraMapping mapping
+            Map.unionUnique extraMapping mapping
 
     let resolvePath (typeCtxs : TypeContextsMap) (firstOldBoundField : OldBoundField) (fullPath : PathArrow list) : BoundField list =
         let getBoundField (oldBoundField : OldBoundField) : BoundField =
@@ -2127,9 +2132,8 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                 | _ -> false
             let (infoB, newB) = resolveFromExpr ctx infoA isInner2 flags join.B
 
-            let newCtx = { ctx with FieldMaps = infoB.Fields :: ctx.FieldMaps }
-
-            let (innerInfo, newFieldExpr) = resolveFieldExpr newCtx join.Condition
+            let localCtx = addFromToContext infoB ctx
+            let (innerInfo, newFieldExpr) = resolveFieldExpr localCtx join.Condition
             if innerInfo.Info.Flags.HasAggregates then
                 raisef ViewResolveException "Cannot use aggregate functions in join expression"
             let retInfo =
@@ -2264,11 +2268,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                 let (newEntityInfo, newFrom) = resolveFromExpr ctx entityFromInfo.SingleFrom true flags from
                 (newEntityInfo, Some newFrom)
         exprInfo <- unionSubqueryExprInfo exprInfo entityInfo.ExprInfo
-        let ctx =
-            { ctx with
-                FieldMaps = entityInfo.Fields :: ctx.FieldMaps
-                Types = Map.union ctx.Types entityInfo.Types
-            }
+        let ctx = addFromToContext entityInfo ctx
 
         let mutable columns = Set.empty
 
@@ -2342,11 +2342,7 @@ type private QueryResolver (layout : ILayoutBits, arguments : Map<Placeholder, R
                 let (newEntityInfo, newFrom) = resolveFromExpr ctx entityFromInfo.SingleFrom true flags from
                 (newEntityInfo, Some newFrom)
         exprInfo <- unionSubqueryExprInfo exprInfo entityInfo.ExprInfo
-        let ctx =
-            { ctx with
-                FieldMaps = entityInfo.Fields :: ctx.FieldMaps
-                Types = Map.union ctx.Types entityInfo.Types
-            }
+        let ctx = addFromToContext entityInfo ctx
 
         let (whereTypes, where) =
             match delete.Where with
@@ -2654,7 +2650,7 @@ let private resolveArgument (layout : ILayoutBits) (arg : ParsedArgument) : Reso
 
 let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * Map<Placeholder, ResolvedArgument> =
     let halfLocalArguments = rawArguments |> OrderedMap.map (fun name arg -> resolveArgument layout arg)
-    let halfAllArguments = Map.union (halfLocalArguments |> OrderedMap.toMap |> Map.mapKeys PLocal) globalArgumentsMap
+    let halfAllArguments = Map.unionUnique (halfLocalArguments |> OrderedMap.toMap |> Map.mapKeys PLocal) globalArgumentsMap
 
     let attrsQualifier = QueryResolver (layout, halfAllArguments, emptyExprResolutionFlags)
 
@@ -2664,7 +2660,7 @@ let private resolveArgumentsMap (layout : ILayoutBits) (rawArguments : ParsedArg
         (PLocal name, { arg with Attributes = newArgs })
 
     let localArguments = OrderedMap.mapWithKeys resolveAttrs halfLocalArguments
-    let allArguments = Map.union (OrderedMap.toMap localArguments) globalArgumentsMap
+    let allArguments = Map.unionUnique (OrderedMap.toMap localArguments) globalArgumentsMap
 
     (localArguments, allArguments)
 

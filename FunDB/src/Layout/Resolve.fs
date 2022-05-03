@@ -80,17 +80,24 @@ let private resolveEntityRef (name : EntityRef) =
     | None -> raisef ResolveLayoutException "Unspecified schema for entity %O" name
 
 [<NoEquality; NoComparison>]
+type private HalfVirtualField =
+    { InheritedFrom : ResolvedEntityRef option
+    } with
+        interface IVirtualFieldBits with
+            member this.InheritedFrom = this.InheritedFrom
+
+[<NoEquality; NoComparison>]
 type private HalfResolvedComputedField =
     { Source : SourceComputedField
       ColumnName : SQL.SQLName
       HashName : HashName
       InheritedFrom : ResolvedEntityRef option
-      VirtualInheritedFrom : ResolvedEntityRef option
+      Virtual : HalfVirtualField option
     } with
         interface IComputedFieldBits with
             member this.AllowBroken = this.Source.AllowBroken
             member this.InheritedFrom = this.InheritedFrom
-            member this.IsVirtual = this.Source.IsVirtual
+            member this.Virtual = Option.map (fun x -> upcast x) this.Virtual
 
 [<NoEquality; NoComparison>]
 type private HalfResolvedEntity =
@@ -181,20 +188,21 @@ type private Phase1Resolver (layout : SourceLayout) =
     let mutable cascadeDeletedEntities : Set<ResolvedEntityRef> = Set.empty
 
     let unionComputedField (name : FieldName) (parent : HalfResolvedComputedField) (child : HalfResolvedComputedField) =
-        if parent.Source.IsVirtual && child.Source.IsVirtual then
-            let virtualInherited =
-                match parent.VirtualInheritedFrom with
+        match (parent.Virtual, child.Virtual) with
+        | (Some parentVirtual, Some childVirtual) ->
+            let newInheritedFrom =
+                match parentVirtual.InheritedFrom with
+                | Some from -> from
                 | None ->
-                    // `parent` is root virtual field. Parents always have `InheritedFrom`, so we can use it in this case.
+                    // `parent` is root virtual field. When `unionComputedField` is called parent fields already have `InheritedFrom` set, so the following is safe.
                     Option.get parent.InheritedFrom
-                | Some inherited -> inherited
 
             { child with
-                  VirtualInheritedFrom = Some virtualInherited
+                  Virtual = Some { childVirtual with InheritedFrom = Some newInheritedFrom }
                   // Always use root column name.
                   ColumnName = parent.ColumnName
             }
-        else
+        | _ ->
             raisef ResolveLayoutException "Computed field names clash: %O" name
 
     let resolveFieldType (fieldRef : ResolvedFieldRef) (field : SourceColumnField) (ft : ParsedFieldType) : ResolvedFieldType =
@@ -220,7 +228,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                         raisef ResolveLayoutException "Can't declare reference field with no default value SET DEFAULT"
                     if field.IsImmutable then
                         raisef ResolveLayoutException "Can't declare immutable reference field SET DEFAULT"
-                referencingFields <- Map.addWith Map.union refEntityRef (Map.singleton fieldRef deleteAction) referencingFields
+                referencingFields <- Map.addWith Map.unionUnique refEntityRef (Map.singleton fieldRef deleteAction) referencingFields
                 t
             | t -> t
         with
@@ -273,7 +281,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 checkFieldName name
                 { Source = field
                   InheritedFrom = None
-                  VirtualInheritedFrom = None
+                  Virtual = if field.IsVirtual then Some { InheritedFrom = None } else None
                   ColumnName = sqlColumnName entityRef entity name
                   HashName = makeHashName name
                 }
@@ -305,7 +313,7 @@ type private Phase1Resolver (layout : SourceLayout) =
                 let parentRef = Option.get entity.Parent
                 let addParent = function
                     | None -> Some parentRef
-                    | Some pref -> Some pref
+                    | Some _ as pref -> pref
                 let inheritedFields = Map.map (fun name field -> { field with InheritedFrom = addParent field.InheritedFrom } : HalfResolvedComputedField) p.ComputedFields
                 Map.unionWithKey unionComputedField inheritedFields selfComputedFields
 
@@ -471,7 +479,7 @@ let private fillReferencingFields (rootEntities : ResolvedEntityRef seq) (entiti
     let rec go (prevReferences : Map<ResolvedFieldRef, ReferenceDeleteAction>) (entityRef : ResolvedEntityRef) =
         let entity = Map.find entityRef entities
         let thisReferences = Map.findWithDefault entityRef Map.empty referencesMap
-        let references = Map.union prevReferences thisReferences
+        let references = Map.unionUnique prevReferences thisReferences
         referencesMap <- Map.add entityRef references referencesMap
         for KeyValue(childRef, child) in entity.Children do
             if child.Direct then
@@ -675,13 +683,13 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             with
             | :? ViewTypecheckException as e -> raisefWithInner ResolveLayoutException e "Failed to typecheck computed column"
         let virtualInfo =
-            if comp.Source.IsVirtual then
+            match comp.Virtual with
+            | None -> None
+            | Some v ->
                 Some
                     { Cases = resolveVirtualCases entity fieldRef
-                      InheritedFrom = comp.VirtualInheritedFrom
+                      InheritedFrom = v.InheritedFrom
                     }
-            else
-                None
 
         { Expression = expr
           Type = exprType

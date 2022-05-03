@@ -79,7 +79,7 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
         let (argValues, query) = queryExprChunk layout resolvedChunk query
 
         try
-            let arguments = Map.union arguments (Map.mapKeys PLocal argValues)
+            let arguments = Map.unionUnique arguments (Map.mapKeys PLocal argValues)
             return! connection.ExecuteQuery (convertComments comments + query.Expression.ToSQLString()) (prepareArguments query.Arguments arguments) cancellationToken <| fun columns result ->
                 task {
                     let! values = result.Select(convertDomainValue).ToArrayAsync(cancellationToken)
@@ -111,7 +111,7 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
         let arguments = Option.defaultWith (fun () -> query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)) maybeArguments
 
         try
-            let arguments = Map.union arguments (Map.mapKeys PLocal argValues)
+            let arguments = Map.unionUnique arguments (Map.mapKeys PLocal argValues)
             let compiledArgs = prepareArguments query.Arguments arguments
             let! explanation = runExplainQuery connection query.Expression compiledArgs explainOpts cancellationToken
             return { Query = string query.Expression; Parameters = compiledArgs; Explanation = explanation }

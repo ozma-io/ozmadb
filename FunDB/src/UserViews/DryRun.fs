@@ -263,14 +263,14 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
             match column.Type with
             | CTColumnMeta (colName, CCCellAttribute attrName) -> Option.map (Map.singleton attrName >> Map.singleton colName) column.Info.Mapping
             | _ -> None
-        let columnAttributeMappings = Seq.mapMaybe getColumnAttributeMapping allSingleRowColumnsInfo |> Seq.fold (Map.unionWith Map.union) Map.empty
-        let cellAttributeMappings = Seq.mapMaybe getColumnAttributeMapping compiled.Columns |> Seq.fold (Map.unionWith Map.union) Map.empty
+        let columnAttributeMappings = Seq.mapMaybe getColumnAttributeMapping allSingleRowColumnsInfo |> Seq.fold (Map.unionWith Map.unionUnique) Map.empty
+        let cellAttributeMappings = Seq.mapMaybe getColumnAttributeMapping compiled.Columns |> Seq.fold (Map.unionWith Map.unionUnique) Map.empty
 
         let getArgumentAttributeMapping (column : CompiledColumnInfo) =
             match column.Type with
             | CTMeta (CMArgAttribute (argName, attrName)) -> Option.map (Map.singleton attrName >> Map.singleton argName) column.Info.Mapping
             | _ -> None
-        let argumentAttributeMappings = Seq.mapMaybe getArgumentAttributeMapping allSingleRowColumnsInfo |> Seq.fold (Map.unionWith Map.union) Map.empty
+        let argumentAttributeMappings = Seq.mapMaybe getArgumentAttributeMapping allSingleRowColumnsInfo |> Seq.fold (Map.unionWith Map.unionUnique) Map.empty
 
         let getResultColumn (column : ExecutedColumnInfo) : UserViewColumn =
             let mainField =

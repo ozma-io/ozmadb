@@ -186,7 +186,7 @@ module OrderedMap =
         }
 
     let union (map1 : OrderedMap<'k, 'v>) (map2 : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
-        map2 |> toSeq |> Seq.fold (fun cmap (k, v) -> add k v cmap) map1
+        map1 |> toSeq |> Seq.fold (fun cmap (k, v) -> add k v cmap) map2
 
     let containsKey (key : 'k) (map : OrderedMap<'k, 'v>) : bool =
         Map.containsKey key map.Map

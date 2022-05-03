@@ -70,11 +70,14 @@ let private generatorName (schemaName : SchemaName) =
     sprintf "user_views_generators/%O.mjs" schemaName
 
 type private UserViewsGenerator (runtime : IJSRuntime, layout : Layout, triggers : MergedTriggers, cancellationToken : CancellationToken, forceAllowBroken : bool) =
+    let serializedLayout = serializeLayout triggers layout
+
     let generateUserViewsSchema (name : SchemaName) (script : SourceUserViewsGeneratorScript) : PossiblyBroken<GeneratedUserViewsSchema> =
         try
-            let gen = UserViewsGeneratorScript (runtime, generatorName name, script.Script)
-            let layout = V8JsonWriter.Serialize(runtime.Context, serializeLayout triggers layout)
+            let gen = UserViewsGeneratorScript(runtime, generatorName name, script.Script)
+            let layout = V8JsonWriter.Serialize(runtime.Context, serializedLayout)
             let uvs = gen.Generate layout cancellationToken
+            eprintfn "Generated user views for schema %O: %O" name uvs
             Ok { UserViews = uvs }
         with
         | :? NetJsException as e when forceAllowBroken || script.AllowBroken ->

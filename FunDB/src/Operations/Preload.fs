@@ -444,7 +444,6 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
 
         let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
-        logger.LogDebug("Going to run system migration:\n{}", systemMigration |> Seq.map (fun x -> string x + ";") |> String.concat "\n")
         let! _ = migrateDatabase conn.Connection.Query systemMigration cancellationToken
 
         // Second migration shouldn't produce any changes.
@@ -544,7 +543,6 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
             }
 
         let userMigration = planDatabaseMigration currentUserMeta newUserMeta
-        logger.LogDebug("Going to run user migration:\n{}", userMigration |> Seq.map (fun x -> string x + ";") |> String.concat "\n")
         let! _ = migrateDatabase conn.Connection.Query userMigration cancellationToken
 
         // Second migration shouldn't produce any changes.

@@ -185,7 +185,7 @@ let private compareOverloads =
           (STDate, STLocalDateTime)
           (STDateTime, STLocalDateTime)
         ] |> Seq.map (fun pair -> (pair, STBool)) |> symmetricOpSignatures
-    Map.union same notsame
+    Map.unionUnique same notsame
 
 let private concatOverloads =
     Map.ofList

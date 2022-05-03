@@ -71,13 +71,13 @@ let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEntity :
     (fields, ret)
 
 let private unionFlatEntities (a : FlatAllowedEntity) (b : FlatAllowedEntity) : FlatAllowedEntity =
-    { // Allowed entities for all roles are expected to be fully built when merging flat entities.
+    { // Same roles may be encountered on both sides on diamond inheritance; this is harmless, since they should both be the same.
       Roles = Map.union a.Roles b.Roles
     }
 
 let private unionFlatAllowedDatabases : FlatAllowedDatabase -> FlatAllowedDatabase -> FlatAllowedDatabase = Map.unionWith unionFlatEntities
 
-let private unionFlatRoles (a : FlatRole) (b: FlatRole) =
+let private unionFlatRoles (a : FlatRole) (b: FlatRole) : FlatRole =
     { Entities = unionFlatAllowedDatabases a.Entities b.Entities
     }
 

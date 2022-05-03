@@ -337,7 +337,7 @@ let resolveAltKey
 
         let opQuery = buildSelectOperation layout applyRole entityRef <| fun aliasRef ->
             let alt = altKeyCheck layout entityRef keyName keyArgs aliasRef
-            argumentValues <- Map.union argumentValues alt.ArgumentValues
+            argumentValues <- Map.unionUnique argumentValues alt.ArgumentValues
             let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
             { Where = alt.Where
               Columns = seq { entityId }
@@ -479,7 +479,7 @@ let updateEntity
         let keyCheck = rowKeyCheck layout entityRef key aliasRef
 
         let mutable arguments = keyCheck.Arguments
-        let mutable argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) keyCheck.ArgumentValues
+        let mutable argumentValues = Map.unionUnique (Map.mapKeys PGlobal globalArgs) keyCheck.ArgumentValues
 
         let getValue (fieldName : FieldName, fieldValue : FieldValue) =
             let field = Map.find fieldName entity.ColumnFields
@@ -562,7 +562,7 @@ let deleteEntity
         let tableRef = compileResolvedEntityRef entity.Root
         let aliasRef = { Schema = None; Name = tableRef.Name } : SQL.TableRef
         let keyCheck = rowKeyCheck layout entityRef key aliasRef
-        let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) keyCheck.ArgumentValues
+        let argumentValues = Map.unionUnique (Map.mapKeys PGlobal globalArgs) keyCheck.ArgumentValues
 
         if entity.IsAbstract then
             raisef EntityExecutionException "Entity %O is abstract" entityRef
@@ -642,7 +642,7 @@ let private getSubEntity
 
             let opQuery = buildSelectOperation layout applyRole entityRef <| fun aliasRef ->
                 let keyCheck = rowKeyCheck layout entityRef key aliasRef
-                argumentValues <- Map.union argumentValues keyCheck.ArgumentValues
+                argumentValues <- Map.unionUnique argumentValues keyCheck.ArgumentValues
                 let entitySubEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunSubEntity }
 
                 let results =
@@ -703,7 +703,7 @@ let private getRelatedRowIds
             | _ -> None
 
         let initialArgumentValues = Map.singleton (PLocal funRelatedId) (FInt relatedId)
-        let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) initialArgumentValues
+        let argumentValues = Map.unionUnique (Map.mapKeys PGlobal globalArgs) initialArgumentValues
 
         let opQuery = buildSelectOperation layout applyRole fieldRef.Entity <| fun aliasRef ->
             let (idArg, arguments) = addArgument (PLocal funRelatedId) funIdArg emptyArguments

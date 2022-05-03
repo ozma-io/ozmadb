@@ -196,9 +196,9 @@ type UserViewsAPI (api : IFunDBAPI) =
                         task {
                             let! rows = res.Rows.ToArrayAsync(ctx.CancellationToken)
                             return
-                                { ArgumentAttributes = Map.unionWith Map.union uv.ConstAttributes.ArgumentAttributes res.ArgumentAttributes
-                                  Attributes = Map.union uv.ConstAttributes.Attributes res.Attributes
-                                  ColumnAttributes = Array.map2 Map.union uv.ConstAttributes.ColumnAttributes res.ColumnAttributes
+                                { ArgumentAttributes = Map.unionWith Map.unionUnique uv.ConstAttributes.ArgumentAttributes res.ArgumentAttributes
+                                  Attributes = Map.unionUnique uv.ConstAttributes.Attributes res.Attributes
+                                  ColumnAttributes = Array.map2 Map.unionUnique uv.ConstAttributes.ColumnAttributes res.ColumnAttributes
                                   Rows = rows
                                 }
                         }

@@ -364,7 +364,7 @@ let rec private findOuterFields (layout : Layout) (expr : ResolvedFieldExpr) : M
         | RComputedField comp ->
             for (case, comp) in computedFieldCases layout ref.Extra { boundInfo.Ref with Name = field.Name } comp do
                 let fields = findOuterFields layout comp.Expression
-                outerFields <- Map.union fields outerFields
+                outerFields <- Map.union outerFields fields
         | _ -> ()
 
     let mapper =

@@ -28,10 +28,10 @@ let mapMaybe (f : 'k -> 'a -> 'b option) (m : Map<'k, 'a>) : Map<'k, 'b> =
     m |> Seq.mapMaybe (fun (KeyValue(k, v)) -> Option.map (fun v' -> (k, v')) (f k v)) |> Map.ofSeq
 
 let unionWithKey (resolve : 'k -> 'v -> 'v -> 'v) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
-    Seq.fold (fun currA (KeyValue(k, v)) -> addWith (resolve k) k v currA) a b
+    Map.fold (fun currA k v-> addWith (resolve k) k v currA) a b
 
 let unionUnique (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v> =
-    Seq.fold (fun currA (KeyValue(k, v)) -> addUnique k v currA) a b
+    Map.fold (fun currA k v -> addUnique k v currA) a b
 
 let intersectWithMaybe (resolve : 'k -> 'v -> 'v -> 'v1 option) (a : Map<'k, 'v>) (b : Map<'k, 'v>) : Map<'k, 'v1> =
     Enumerable.Join(a, b, (fun (KeyValue(k, v)) -> k), (fun (KeyValue(k, v)) -> k), fun (KeyValue(k1, v1)) (KeyValue(k2, v2)) -> Option.map (fun r -> (k1, r)) (resolve k1 v1 v2))

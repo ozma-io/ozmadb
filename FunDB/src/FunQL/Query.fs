@@ -148,7 +148,7 @@ let private parseAttributesResult (columns : ColumnType[]) (values : (SQL.SQLNam
 
     let colAttributes =
         Seq.map2Maybe takeColumnAttribute columns values
-        |> Map.ofSeqWith (fun name -> Map.union)
+        |> Map.ofSeqWith (fun name -> Map.unionUnique)
         |> Map.map (fun fieldName -> splitPairsMap)
 
     let takeArgAttribute colType (_, valType, v) =
@@ -157,7 +157,7 @@ let private parseAttributesResult (columns : ColumnType[]) (values : (SQL.SQLNam
         | _ -> None
     let argAttributes =
         Seq.map2Maybe takeArgAttribute columns values
-        |> Map.ofSeqWith (fun name -> Map.union)
+        |> Map.ofSeqWith (fun name -> Map.unionUnique)
         |> Map.map (fun fieldName -> splitPairsMap)
 
     { Attributes = Map.map (fun name -> snd) viewAttributes
