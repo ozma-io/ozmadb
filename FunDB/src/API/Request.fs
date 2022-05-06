@@ -19,17 +19,13 @@ open FunWithFlags.FunDB.API.Types
 type RequestErrorInfo =
     | REUserNotFound
     | RENoRole
-    | REStackOverflow of Trace : EventSource list
+    | REStackOverflow of Source : EventSource
     with
         member this.Message =
             match this with
             | REUserNotFound -> "User not found"
             | RENoRole -> "Access denied"
-            | REStackOverflow sources ->
-                sources
-                    |> Seq.map (sprintf "in %O")
-                    |> String.concat "\n"
-                    |> sprintf "Stack depth exceeded:\n%s"
+            | REStackOverflow source -> sprintf "Stack depth exceeded in %O" source
 
 type RequestException (info : RequestErrorInfo, innerException : exn) =
     inherit UserException(info.Message, innerException)
@@ -208,7 +204,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
     member this.RunWithSource (newSource : EventSource) (func : unit -> Task<'a>) : Task<'a> =
         task {
             if sourceDepth >= maxSourceDepth then
-                raise <| RequestException (REStackOverflow [newSource])
+                raise <| RequestException (REStackOverflow newSource)
             let oldSource = source
             source <- newSource
             sourceDepth <- sourceDepth + 1
@@ -218,7 +214,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                 with
                 | :? RequestException as e ->
                     match e.Info with
-                    | REStackOverflow sources -> return raise <| RequestException (REStackOverflow (oldSource :: sources))
+                    | REStackOverflow source -> return raise <| RequestException(REStackOverflow oldSource, e)
                     | _ -> return reraise' e
             finally
                 sourceDepth <- sourceDepth - 1

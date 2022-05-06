@@ -356,14 +356,26 @@ let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHa
                     do! inst.Instance.DisposeAsync ()
                     return! f (FunDBAPI rctx) next ctx
                 with
-                | :? ConcurrentUpdateException ->
+                | :? ConcurrentUpdateException as e ->
+                    logger.LogError(e, "Concurrent update exception")
                     // We may want to retry here in future.
                     return! requestError RIConcurrentUpdate next ctx
                 | :? RequestException as e ->
+                    logger.LogError(e, "Request error")
                     match e.Info with
                     | REUserNotFound
                     | RENoRole -> return! requestError RIAccessDenied next ctx
-                    | REStackOverflow sources -> return! requestError (RIStackOverflow  sources) next ctx
+                    | REStackOverflow firstSource ->
+                        let rec findAllSources (inner : exn) =
+                            match inner with
+                            | :? RequestException as e ->
+                                match e.Info with
+                                | REStackOverflow source -> source :: findAllSources e.InnerException
+                                | _ -> []
+                            | _ -> []
+                        
+                        let allSources = firstSource :: findAllSources e.InnerException
+                        return! requestError (RIStackOverflow allSources) next ctx
         }
 
     lookupInstance makeContext
