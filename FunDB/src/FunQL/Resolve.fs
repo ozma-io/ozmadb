@@ -2153,18 +2153,13 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
                     { Bound = if hasAggregates then None else info.Field
                       FieldAttributes = Map.keysSet result.Attributes
                     }
+                exprInfo <- unionSubqueryExprInfo exprInfo (resolvedToSubqueryExprInfo info.ExprInfo)
                 (result.TryToName (), subInfo)
         let newFields = rawResults |> Array.map getFields
         try
             newFields |> Seq.mapMaybe fst |> Set.ofSeqUnique |> ignore
         with
             | Failure msg -> raisef ViewResolveException "Clashing result names: %s" msg
-
-        let info =
-            { Fields = newFields
-              ExprInfo = exprInfo
-              EntityAttributes = Map.keysSet attributes
-            }
 
         let extra =
             { HasAggregates = hasAggregates
@@ -2180,6 +2175,12 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
               Results = results
               OrderLimit = orderLimit
               Extra = ObjectMap.singleton extra
+            }
+
+        let info =
+            { Fields = newFields
+              ExprInfo = exprInfo
+              EntityAttributes = Map.keysSet attributes
             }
         (info, newQuery)
 
