@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Operations.Update
 
 open System
+open Npgsql
 open System.Reflection
 open System.Linq
 open System.Threading
@@ -56,56 +57,57 @@ let private getDbSet<'a when 'a :> DbContext> (defaultSchema : SchemaName) (db :
         let ref = { Schema = schema; Name = FunQLName tableName }
         Some (entityType, ref)
 
-let private systemEntities =
+let systemEntitiesMap : Lazy<HashMap<Type, ResolvedEntityRef>> =
     lazy (
         // We *need* to have a database provider, even if we only want to look at the model.
         // So we hack it together.
+        use bogusConnection = new NpgsqlConnection()
         let systemOptions =
             (DbContextOptionsBuilder<SystemContext> ())
-                .UseNpgsql((null : Data.Common.DbConnection), fun opts -> ignore <| opts.UseNodaTime())
+                .UseNpgsql(bogusConnection, fun opts -> ignore <| opts.UseNodaTime())
         use db = new SystemContext(systemOptions.Options)
         let ctxType = typeof<SystemContext>
         ctxType.GetProperties()
             |> Seq.mapMaybe (getDbSet funSchema db)
-            |> dict
+            |> HashMap.ofSeq
     )
 
 type DeferredDeleteSet = Set<ResolvedEntityRef * RowId>
 
-let getSystemEntityRef (typ : Type) =
-    match systemEntities.Value.TryGetValue typ with
-    | (true, ref) -> Some ref
-    | (false, _) -> None
-
-let private cascadeDeleteDeferred (filterEntities : ResolvedEntityRef -> bool) (layout : Layout) (connection : DatabaseTransaction) (deferredSet : DeferredDeleteSet) (cancellationToken : CancellationToken) =
+let private cascadeDeleteDeferred
+        (filterEntities : ResolvedEntityRef -> bool)
+        (layout : Layout)
+        (connection : DatabaseTransaction)
+        (deferredSet : DeferredDeleteSet)
+        (cancellationToken : CancellationToken) =
     unitTask {
-        let rec go (deferredSet : DeferredDeleteSet) =
-            unitTask {
-                let mutable deferredSet = deferredSet
-
-                let deleteOne (entityRef : ResolvedEntityRef) (id : RowId) =
-                    unitTask {
-                        deferredSet <- Set.remove (entityRef, id) deferredSet
-                        let! _ = deleteEntity connection.Connection.Query Map.empty layout None entityRef (RKId id) None cancellationToken
-                        ()
-                    }
-
-                let (entityRef, id) = deferredSet |> Seq.first |> Option.get
-                let! tree = getRelatedEntities connection.Connection.Query Map.empty layout None (fun entityRef rowId refFieldRef -> filterEntities refFieldRef.Entity) entityRef (RKId id) None cancellationToken
-                do! iterReferencesUpwardsTask deleteOne (function | RDANoAction -> true | _ -> false) tree
-                if not <| Set.isEmpty deferredSet then
-                    do! go deferredSet
-            }
-
         if not <| Set.isEmpty deferredSet then
-            do! connection.DeferConstraints cancellationToken <| fun () -> task { do! go deferredSet }
+            do! connection.DeferConstraints cancellationToken <| fun () ->
+                task {
+                    let checkReference entityRef rowId (refFieldRef : ResolvedFieldRef) = filterEntities refFieldRef.Entity
+                    let mutable currentSet = deferredSet
+                    while not <| Set.isEmpty currentSet do
+                        let (entityRef, id) = currentSet |> Seq.first |> Option.get
+                        let! tree = getRelatedEntities connection.Connection.Query Map.empty layout None checkReference entityRef (RKId id) None cancellationToken
+
+                        let deleteOne (entityRef : ResolvedEntityRef) (id : RowId) =
+                            unitTask {
+                                let! _ = deleteEntity connection.Connection.Query Map.empty layout None entityRef (RKId id) None cancellationToken
+                                ()
+                            }
+
+                        let! deletedRows = iterDeleteReferences deleteOne tree
+                        for i in deletedRows do
+                            let node = tree.Nodes.[i]
+                            currentSet <- Set.remove (node.Entity, node.Id) currentSet
+                }
     }
 
 type SystemUpdater(db : SystemContext) =
     let mutable deletedObjects = Set.empty
 
     member this.DeleteObject (typ : Type, id : RowId) =
-        let entityRef = getSystemEntityRef typ |> Option.get
+        let entityRef = HashMap.find typ systemEntitiesMap.Value
         deletedObjects <- Set.add (entityRef, id) deletedObjects
 
     member inline this.DeleteObject (row : ^a) =
@@ -137,7 +139,7 @@ let unionUpdateResult (a : UpdateResult) (b : UpdateResult) =
     }
 
 let deleteDeferredFromUpdate (layout : Layout) (connection : DatabaseTransaction) (result : UpdateResult) (cancellationToken : CancellationToken) =
-    cascadeDeleteDeferred (fun entityRef -> entityRef.Schema <> funSchema) layout connection result.DeferredDeletes cancellationToken
+    cascadeDeleteDeferred (fun entityRef -> entityRef.Schema = funSchema) layout connection result.DeferredDeletes cancellationToken
 
 let private schemaEntityRef : ResolvedEntityRef = { Schema = funSchema; Name = FunQLName "schemas" }
 

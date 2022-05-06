@@ -162,17 +162,21 @@ type private TempColumnType = GenericColumnType<TempFieldName>
 type private TempDomain = GenericDomain<TempFieldName>
 type private TempDomains = GenericDomains<TempFieldName>
 
+// These fields don't make sense for most of column types.
+// TODO: Possibly better is to have a separate `ExtraColumnType` and friends with needed info attached.
 [<NoEquality; NoComparison>]
 type ColumnMetaInfo =
     { Mapping : BoundMapping option
       Dependency : DependencyStatus
       Internal : bool
+      SingleRow : SQL.ValueExpr option
     }
 
 let emptyColumnMetaInfo =
     { Mapping = None
       Dependency = DSPerRow
       Internal = false
+      SingleRow = None
     }
 
 type private ResultMetaColumn =
@@ -1756,6 +1760,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 { Mapping = None
                   Dependency = attr.Dependency
                   Internal = attr.Internal
+                  SingleRow = if attr.Dependency = DSPerRow then None else Some colExpr
                 }
             let col =
                 { Expression = colExpr
@@ -1789,10 +1794,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 | None -> Seq.empty
                 | Some attrs ->
                     let makeDefaultAttr (name, attr : MergedAttribute) =
-                        if
-                                Map.containsKey name result.Attributes ||
-                                // Skip pure attributes if we are not at the top level.
-                                not flags.IsTopLevel && attr.Attribute.Dependency <> DSPerRow then
+                        if Map.containsKey name result.Attributes then
                             None
                         else
                             let expr = replaceFieldRefInExpr updateEntityRef <| convertBoundAttributeExpr (FERef resultRef) attr.Attribute.Expression
@@ -1804,6 +1806,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                 { Mapping = mapping
                                   Dependency = attr.Attribute.Dependency
                                   Internal = attr.Attribute.Internal
+                                  SingleRow = if attr.Attribute.Dependency = DSPerRow then None else Some compiled
                                 }
                             let ret =
                                 { Expression = compiled
@@ -2022,8 +2025,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             match colInfo.Type with
                             | CTColumnMeta (colName, CCCellAttribute name) when colName = fieldRef.Name && not (Map.containsKey name result.Attributes) ->
                                 let attrCol = CCCellAttribute name
-                                // Pure expressions are to be inserted at the top level instead.
-                                assert (colInfo.Info.Dependency = DSPerRow)
                                 let attrExpr = SQL.VEColumn { Table = Some tableRef; Name = columnName (CTColumnMeta (fieldRef.Name, attrCol)) }
                                 let res =
                                     { Expression = attrExpr
@@ -2073,6 +2074,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                 { Mapping = mapping
                                   Dependency = attr.Dependency
                                   Internal = attr.Internal
+                                  SingleRow = Some compiled
                                 }
                             let ret =
                                 { Expression = compiled
@@ -2196,6 +2198,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 { Mapping = mapping
                   Dependency = attr.Dependency
                   Internal = attr.Internal
+                  SingleRow = if attr.Dependency = DSPerRow then None else Some ret
                 }
             paths <- newPaths
             let ret =
@@ -2718,6 +2721,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     { Mapping = boundAttributeToMapping attr.Expression
                       Dependency = attr.Dependency
                       Internal = attr.Internal
+                      SingleRow = Some colExpr
                     }
                 let column =
                     { Name = columnName colType
@@ -2839,7 +2843,7 @@ let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (
     let columnIsSingleRow i name col =
         let info = allColumns.[i]
         if info.Info.Dependency <> DSPerRow && not info.Info.Internal then
-            Some (info, col)
+            Some (info, Option.get info.Info.SingleRow)
         else
             None
 

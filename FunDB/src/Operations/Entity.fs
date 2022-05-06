@@ -1,4 +1,4 @@
-﻿module FunWithFlags.FunDB.Operations.Entity
+module FunWithFlags.FunDB.Operations.Entity
 
 open FSharpPlus
 open System.Linq
@@ -761,18 +761,29 @@ type ReferencesTree =
       Root : ReferencesRowIndex
     }
 
-let iterReferencesUpwardsTask (f : ResolvedEntityRef -> RowId -> Task) (filterAction : ReferenceDeleteAction -> bool) (tree : ReferencesTree) : Task =
-    let mutable visited = Set.empty
-    let rec go i =
-        unitTask {
-            visited <- Set.add i visited
-            let node = tree.Nodes.[i]
-            for child in node.References do
-                if not <| Set.contains child.Row visited && filterAction child.DeleteAction then
-                    do! go child.Row
-            do! f node.Entity node.Id
-        }
-    go tree.Root
+let iterDeleteReferences (f : ResolvedEntityRef -> RowId -> Task) (tree : ReferencesTree) : Task<Set<ReferencesRowIndex>> =
+    task {
+        let mutable visited = Set.empty
+        let rec go deleteAction i =
+            unitTask {
+                visited <- Set.add i visited
+                let node = tree.Nodes.[i]
+                for child in node.References do
+                    match child.DeleteAction with
+                    // Walk into CASCADE and NO ACTION nodes, as they are deleted explicitly (in NO ACTION case)
+                    // or their children need to be inspected (in CASCADE case).
+                    | RDACascade
+                    | RDANoAction when not (Set.contains child.Row visited) ->
+                        do! go (Some child.DeleteAction) child.Row
+                    | _ -> ()
+                // Don't explicitly delete CASCADE nodes.
+                match deleteAction with
+                | Some RDACascade -> ()
+                | _ -> do! f node.Entity node.Id
+            }
+        do! go None tree.Root
+        return visited
+    }
 
 let getRelatedEntities
         (connection : QueryConnection)
@@ -780,7 +791,7 @@ let getRelatedEntities
         (layout : Layout)
         (applyRole : ResolvedRole option)
         (filterFields : ResolvedEntityRef -> RowId -> ResolvedFieldRef -> bool)
-        (entityRef : ResolvedEntityRef)
+        (initialEntityRef : ResolvedEntityRef)
         (key : RowKey)
         (comments : string option)
         (cancellationToken : CancellationToken) : Task<ReferencesTree> =
@@ -810,7 +821,7 @@ let getRelatedEntities
                     return Seq.empty
                 else
                     let! related = getRelatedRowIds connection globalArgs layout applyRole refFieldRef relatedId comments cancellationToken
-                    let go (id, subEntityRef) =
+                    let getOne (id, subEntityRef) =
                         task {
                             let entity = layout.FindEntity subEntityRef |> Option.get
                             let! idx =
@@ -825,10 +836,10 @@ let getRelatedEntities
                                   DeleteAction = deleteAction
                                 }
                         }
-                    return! Seq.mapTask go related
+                    return! Seq.mapTask getOne related
             }
 
-        let! (id, subEntityRef) = getSubEntity connection globalArgs layout applyRole entityRef key comments cancellationToken
+        let! (id, subEntityRef) = getSubEntity connection globalArgs layout applyRole initialEntityRef key comments cancellationToken
         let subEntity = layout.FindEntity subEntityRef |> Option.get
         let! root = findOne id subEntityRef subEntity
         let nodes = seq {0..lastId - 1} |> Seq.map (fun idx -> nodes.[idx]) |> Seq.toArray

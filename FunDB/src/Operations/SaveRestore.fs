@@ -1053,6 +1053,7 @@ let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Ma
             seq {
                 layoutUpdate
                 permissionsUpdate
+                userViewsUpdate
                 attributesUpdate
                 actionsUpdate
                 triggersUpdate
@@ -1060,6 +1061,8 @@ let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Ma
             } |> Seq.fold1 unionUpdateResult
 
         do! deleteDeferredFromUpdate oldLayout conn fullUpdate cancellationToken
+        // Clear EF Core objects from cache, so they will be fetched anew.
+        conn.System.ChangeTracker.Clear()
 
         return not <| updateResultIsEmpty fullUpdate
     }

@@ -1367,6 +1367,22 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
                         { emptyResolvedExprInfo with ExternalEntities = Set.singleton info.EntityId }
                     else
                         fieldResolvedExprInfo
+                let exprInfo =
+                    match boundFields with
+                    | Some ({ Field = RComputedField _; Ref = fieldRef } as inner, meta) ->
+                        // Find full field, we only have IComputedFieldBits in OuterField...
+                        match inner.Entity.FindField inner.Ref.Name with
+                        | Some { Field = RComputedField comp; Name = realName } ->
+                            let newExprFlags =
+                                if comp.IsMaterialized then
+                                    { exprInfo.Flags with HasFields = true }
+                                else
+                                    computedFieldCases layout newRef.Extra { fieldRef with Name = realName } comp
+                                    |> Seq.map (fun (case, caseComp) -> caseComp.Flags)
+                                    |> Seq.fold unionResolvedExprFlags exprInfo.Flags
+                            { exprInfo with Flags = newExprFlags }
+                        | _ -> failwith "Impossible"
+                    | _ -> exprInfo
                 let refInfo =
                     { ExprInfo = exprInfo
                       InnerField = Option.map (fun (inner, meta) -> inner) boundFields
@@ -1377,8 +1393,9 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
                 if ctx.NoArguments then
                     raisef ViewResolveException "Arguments are not allowed here: %O" arg
                 let argInfo = getArgument arg
+                let hasSubquery = not <| Array.isEmpty f.Path
                 let (innerBoundField, boundInfo) =
-                    if Array.isEmpty f.Path then
+                    if not hasSubquery then
                         (None, ObjectMap.empty)
                     else
                         match argInfo.ArgType with
@@ -1424,7 +1441,13 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
                             (Some inner, info)
                         | _ -> raisef ViewResolveException "Argument is not a reference: %O" ref
 
-                let exprInfo = { emptyResolvedExprInfo with Flags = { emptyResolvedExprFlags with HasArguments = true } }
+                let exprFlags =
+                    { emptyResolvedExprFlags with
+                        HasArguments = true
+                        HasSubqueries = hasSubquery
+                        HasFetches = hasSubquery
+                    }
+                let exprInfo = { emptyResolvedExprInfo with Flags = exprFlags }
                 let refInfo =
                     { ExprInfo = exprInfo
                       InnerField = innerBoundField
@@ -1434,22 +1457,6 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
 
                 (refInfo, newRef)
 
-        let refInfo =
-            match refInfo.InnerField with
-            | Some ({ Field = RComputedField _; Ref = fieldRef } as outer) ->
-                // Find full field, we only have IComputedFieldBits in OuterField...
-                match outer.Entity.FindField outer.Ref.Name with
-                | Some { Field = RComputedField comp; Name = realName } ->
-                    let exprFlags =
-                        if comp.IsMaterialized then
-                            fieldResolvedExprFlags
-                        else
-                            computedFieldCases layout newRef.Extra { fieldRef with Name = realName } comp
-                            |> Seq.map (fun (case, caseComp) -> caseComp.Flags)
-                            |> Seq.fold unionResolvedExprFlags refInfo.ExprInfo.Flags
-                    { refInfo with ExprInfo = { refInfo.ExprInfo with Flags = exprFlags } }
-                | _ -> failwith "Impossible"
-            | _ -> refInfo
         let refInfo =
             if not <| Array.isEmpty f.Path then
                 { refInfo with ExprInfo = { refInfo.ExprInfo with Flags = { refInfo.ExprInfo.Flags with HasArrows = true } } }
@@ -1627,9 +1634,11 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
             | DSSingle -> { ctx with FieldMaps = [] }
             | DSConst -> { ctx with FieldMaps = []; NoArguments = true }
         let (info, expr) = resolveFieldExpr newCtx attr.Expression
+        let newDep = exprDependency info.Info
+        assert (newDep <= attr.Dependency)
         let newAttr =
             { Expression = expr
-              Dependency = exprDependency info.Info
+              Dependency = newDep
               Internal = attr.Internal
             }
         (info.Info, newAttr)
@@ -1694,10 +1703,10 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
     and resolveFieldExpr (ctx : Context) (expr : ParsedFieldExpr) : InnerResolvedExprInfo * ResolvedFieldExpr =
         let mutable exprInfo = emptyResolvedExprInfo
 
-        let resolveExprReference typeCtxs col =
-            let (refInfo, ref) = resolveReference ctx typeCtxs col
+        let resolveExprReference typeCtxs ref =
+            let (refInfo, newRef) = resolveReference ctx typeCtxs ref
             exprInfo <- unionResolvedExprInfo exprInfo refInfo.ExprInfo
-            (refInfo, ref)
+            (refInfo, newRef)
 
         let resolveQuery query =
             let (selectInfo, res) = resolveSelectExpr (subSelectContext ctx) subExprSelectFlags query
