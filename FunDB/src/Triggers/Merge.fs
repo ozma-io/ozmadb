@@ -121,7 +121,7 @@ let private mergeTriggersPair (a : MergedTriggers) (b : MergedTriggers) : Merged
     }
 
 let private makeOneMergedTriggerEntity (schemaName : SchemaName) (name : TriggerName) (trigger : ResolvedTrigger) : MergedTriggersEntity option =
-    if not (trigger.OnInsert && trigger.OnUpdateFields <> TUFSet Set.empty && trigger.OnDelete) then
+    if not (trigger.OnInsert || trigger.OnUpdateFields <> TUFSet Set.empty || trigger.OnDelete) then
         None
     else
         let merged =
