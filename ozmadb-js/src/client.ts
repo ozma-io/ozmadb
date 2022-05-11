@@ -148,7 +148,6 @@ export default class FunDBAPI {
       ...opts,
       query,
       args,
-      ...opts?.chunk,
     };
     return this.getUserView("anonymous", token, req);
   };
@@ -157,7 +156,6 @@ export default class FunDBAPI {
     const req: IUserViewEntriesRequest = {
       ...opts,
       args,
-      ...opts?.chunk,
     };
     return this.getUserView(`by_name/${ref.schema}/${ref.name}`, token, req);
   };
@@ -171,7 +169,6 @@ export default class FunDBAPI {
       ...opts,
       query,
       args,
-      ...opts?.chunk,
     };
     return this.getUserViewExplain("anonymous", token, req);
   };
@@ -180,7 +177,6 @@ export default class FunDBAPI {
     const req: IUserViewExplainRequest = {
       ...opts,
       args,
-      ...opts?.chunk,
     };
     return this.getUserViewExplain(`by_name/${ref.schema}/${ref.name}`, token, req);
   };
@@ -201,7 +197,6 @@ export default class FunDBAPI {
     const req: IDomainsRequest = {
       ...opts,
       rowId,
-      ...opts?.chunk,
     };
     return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}/entries`, token, "POST", req) as Promise<IDomainValuesResult>;
   };
@@ -210,7 +205,6 @@ export default class FunDBAPI {
     const req: IDomainsExplainRequest = {
       ...opts,
       rowId,
-      ...opts?.chunk,
     };
     return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}/explain`, token, "POST", req) as Promise<IExplainedQuery>;
   };
