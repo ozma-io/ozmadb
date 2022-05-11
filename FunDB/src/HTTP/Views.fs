@@ -30,9 +30,7 @@ type UserViewRequest =
       NoAttributes : bool
       NoTracking : bool
       NoPuns : bool
-      Offset : int option
-      Limit : int option
-      Where : SourceChunkWhere option
+      Chunk : SourceQueryChunk option
       PretendRole : ResolvedEntityRef option
       PretendUser : UserName option
     }
@@ -43,9 +41,7 @@ type UserViewExplainRequest =
       NoAttributes : bool
       NoTracking : bool
       NoPuns : bool
-      Offset : int option
-      Limit : int option
-      Where : SourceChunkWhere option
+      Chunk : SourceQueryChunk option
       PretendRole : ResolvedEntityRef option
       PretendUser : UserName option
       Analyze : bool option
@@ -93,11 +89,7 @@ let viewsApi : HttpHandler =
               NoTracking = req.NoTracking
               NoPuns = req.NoPuns
             } : UserViewFlags
-        let chunk =
-            { Offset = req.Offset
-              Limit = req.Limit
-              Where = req.Where
-            } : SourceQueryChunk
+        let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
         setPretends api req.PretendUser req.PretendRole (fun () -> returnView viewRef api req.Args chunk flags next ctx)
 
     let postSelectFromView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
@@ -174,11 +166,7 @@ let viewsApi : HttpHandler =
               NoTracking = req.NoTracking
               NoPuns = req.NoPuns
             } : UserViewFlags
-        let chunk =
-            { Offset = req.Offset
-              Limit = req.Limit
-              Where = req.Where
-            } : SourceQueryChunk
+        let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
         let explainOpts =
             { Analyze = req.Analyze
               Costs = req.Costs

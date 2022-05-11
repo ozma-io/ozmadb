@@ -38,6 +38,12 @@ type SourceQueryChunk =
       Where : SourceChunkWhere option
     }
 
+let emptySourceQueryChunk : SourceQueryChunk =
+    { Offset = None
+      Limit = None
+      Where = None
+    }
+
 type ColumnNamesMap = Map<FieldName, SQL.ColumnName>
 
 type ResolvedChunkWhere =

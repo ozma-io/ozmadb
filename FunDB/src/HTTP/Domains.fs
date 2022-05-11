@@ -21,9 +21,7 @@ let private domainError e =
     handler (json e)
 
 type DomainRequest =
-    { Limit : int option
-      Offset : int option
-      Where : SourceChunkWhere option
+    { Chunk : SourceQueryChunk option
       PretendUser : UserName option
       PretendRole : ResolvedEntityRef option
       RowId : int option
@@ -31,9 +29,7 @@ type DomainRequest =
     }
 
 type DomainExplainRequest =
-    { Limit : int option
-      Offset : int option
-      Where : SourceChunkWhere option
+    { Chunk : SourceQueryChunk option
       PretendUser : UserName option
       PretendRole : ResolvedEntityRef option
       RowId : int option
@@ -67,11 +63,7 @@ let domainsApi : HttpHandler =
 
     let postGetDomainValues (ref : ResolvedFieldRef) (api : IFunDBAPI) =
         safeBindJson <| fun (req : DomainRequest) (next : HttpFunc) (ctx : HttpContext) ->
-            let chunk =
-                { Limit = req.Limit
-                  Offset = req.Offset
-                  Where = req.Where
-                } : SourceQueryChunk
+            let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
             let flags =
                 { ForceRecompile = flagIfDebug <| req.ForceRecompile
                 } : DomainFlags
@@ -106,11 +98,7 @@ let domainsApi : HttpHandler =
 
     let postGetDomainExplain (ref : ResolvedFieldRef) (api : IFunDBAPI) =
         safeBindJson <| fun (req : DomainExplainRequest) (next : HttpFunc) (ctx : HttpContext) ->
-            let chunk =
-                { Offset = req.Offset
-                  Limit = req.Limit
-                  Where = req.Where
-                } : SourceQueryChunk
+            let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
             let flags =
                 { ForceRecompile = flagIfDebug <| req.ForceRecompile
                 } : DomainFlags
