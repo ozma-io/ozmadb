@@ -201,6 +201,7 @@ export default class FunDBAPI {
     const req: IDomainsRequest = {
       ...opts,
       rowId,
+      ...opts?.chunk,
     };
     return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}/entries`, token, "POST", req) as Promise<IDomainValuesResult>;
   };
