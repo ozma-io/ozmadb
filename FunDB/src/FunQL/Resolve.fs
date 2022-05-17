@@ -640,6 +640,7 @@ type private Context =
       LocalEntities : Set<FromEntityId>
       Types : TypeContextsMap
       NoArguments : bool
+      NoFetches : bool
     }
 
 type private InnerResolvedExprInfo =
@@ -649,7 +650,7 @@ type private InnerResolvedExprInfo =
 
 let private exprDependency (info : ResolvedExprInfo) : DependencyStatus =
     if not info.Flags.HasFields then
-        if info.Flags.HasArguments then
+        if info.Flags.HasArguments || info.Flags.HasFetches then
             DSSingle
         else
             DSConst
@@ -671,6 +672,7 @@ let private emptyContext : Context =
       LocalEntities = Set.empty
       Types = Map.empty
       NoArguments = false
+      NoFetches = false
     }
 
 let private emptyTypeContexts : TypeContexts =
@@ -1632,7 +1634,7 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
             match attr.Dependency with
             | DSPerRow -> ctx
             | DSSingle -> { ctx with FieldMaps = [] }
-            | DSConst -> { ctx with FieldMaps = []; NoArguments = true }
+            | DSConst -> { ctx with FieldMaps = []; NoArguments = true; NoFetches = true }
         let (info, expr) = resolveFieldExpr newCtx attr.Expression
         let newDep = exprDependency info.Info
         assert (newDep <= attr.Dependency)
@@ -2187,6 +2189,8 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
     // Set<EntityName> here is used to check uniqueness of puns.
     and resolveFromExpr (ctx : Context) (fromInfo : FromExprInfo) (isInner : bool) (flags : SelectFlags) : ParsedFromExpr -> FromExprInfo * ResolvedFromExpr = function
         | FEntity entity ->
+            if ctx.NoFetches then
+                raisef ViewResolveException "Fetches are not allowed here"
             let entityInfo = fromEntityMapping ctx isInner entity
             let fromInfo = unionFromExprInfo fromInfo entityInfo.SingleFrom
             let extra =
@@ -2476,13 +2480,9 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
                 createFromMapping fromEntityId ref None flags
             | SFCustom custom -> customToFieldMapping layout fromEntityId true custom
         let context =
-            { ResolveCTE = failCte
-              FieldMaps = [mapping]
-              // Not exactly right, but should't be a problem for simple expressions.
-              Entities = Map.empty
-              Types = Map.empty
-              LocalEntities = Set.singleton fromEntityId
-              NoArguments = false
+            { emptyContext with
+                  FieldMaps = [mapping]
+                  LocalEntities = Set.singleton fromEntityId
             }
         resolveFieldExpr context expr
 
@@ -2505,13 +2505,9 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
             }
         let mapping = createFromMapping 0 entityRef None flags
         let context =
-            { ResolveCTE = failCte
-              FieldMaps = [mapping]
-              // Not exactly right, but should't be a problem for simple expressions.
-              Entities = Map.empty
-              Types = Map.empty
-              LocalEntities = Set.singleton 0
-              NoArguments = false
+            { emptyContext with
+                  FieldMaps = [mapping]
+                  LocalEntities = Set.singleton 0
             }
         let (info, ret) = resolveBoundAttributesMap context fieldResolvedExprInfo attrs
         ret
