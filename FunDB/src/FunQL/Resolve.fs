@@ -1309,7 +1309,7 @@ type private QueryResolver (layout : ILayoutBits, findArgument : FindArgument, h
             match f.Ref with
             | VRColumn ref ->
                 let rec findInMappings = function
-                    | [] -> raisef ViewResolveException "Unknown reference: %O" ref
+                    | [] -> raisef ViewResolveException "Unknown field: %O" ref
                     | mapping :: mappings ->
                         match Map.tryFind ref mapping with
                         | Some (FVResolved info) -> info
