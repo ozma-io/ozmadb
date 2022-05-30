@@ -242,12 +242,17 @@ export interface IArgument {
   attributeTypes: BoundAttributesInfoMap;
 }
 
+export interface IMainEntity {
+  entity: IEntityRef;
+  forInsert: boolean;
+}
+
 export interface IResultViewInfo {
   attributeTypes: ViewAttributesInfoMap;
   rowAttributeTypes: RowAttributesInfoMap;
   arguments: IArgument[];
   domains: Record<DomainId, Record<ColumnName, IDomainField>>;
-  mainEntity?: IEntityRef;
+  mainEntity?: IMainEntity;
   columns: IResultColumnInfo[];
   hash: string;
 }
