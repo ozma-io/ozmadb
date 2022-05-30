@@ -1263,6 +1263,25 @@ type IndexColumn<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
+// If a query has a main entity, all rows can be bound to some entry of that entity.
+// If FOR INSERT is specified, columns must additionally contain all required fields of that entity.
+[<NoEquality; NoComparison>]
+type MainEntity<'e> when 'e :> IFunQLName =
+    { Entity : 'e
+      ForInsert : bool
+      Extra : ObjectMap
+    } with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            if this.ForInsert then
+                sprintf "FOR INSERT INTO %s" (this.Entity.ToFunQLString())
+            else
+                sprintf "FOR UPDATE OF %s" (this.Entity.ToFunQLString())
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString ()
+
 type SubEntityContext =
     | SECInheritedFrom
     | SECOfType
@@ -1625,6 +1644,7 @@ type ResolvedAttribute = Attribute<EntityRef, LinkedBoundFieldRef>
 type ResolvedBoundAttributeExpr = BoundAttributeExpr<EntityRef, LinkedBoundFieldRef>
 
 type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
+type ResolvedMainEntity = MainEntity<EntityRef>
 
 type PragmasMap = Map<PragmaName, FieldValue>
 

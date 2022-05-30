@@ -118,13 +118,19 @@ type ArgumentsPrettyConverter () =
         writer.WriteEndArray ()
 
 [<NoEquality; NoComparison>]
+type MainEntityInfo =
+    { Entity : ResolvedEntityRef
+      ForInsert : bool
+    }
+
+[<NoEquality; NoComparison>]
 type UserViewInfo =
     { AttributeTypes : ViewAttributesInfoMap
       RowAttributeTypes : RowAttributesInfoMap
       [<JsonConverter(typeof<ArgumentsPrettyConverter>)>]
       Arguments : OrderedMap<ArgumentName, ArgumentInfo>
       Domains : UVDomains
-      MainEntity : ResolvedEntityRef option
+      MainEntity : MainEntityInfo option
       Columns : UserViewColumn[]
       Hash : string
     }
@@ -206,6 +212,11 @@ let private emptyLimit =
       Where = None
     }
 
+type private DryRunMainEntity =
+    { Entity : ResolvedEntityRef
+      Meta : MainEntityMeta
+    }
+
 type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
     let mutable serializedFields : Map<ResolvedFieldRef, SerializedColumnField> = Map.empty
 
@@ -233,7 +244,13 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
         | Some b -> b = allowBroken
 
     let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) (results : ExecutingViewExpr) : UserViewInfo =
-        let mainEntity = Option.map (fun (main : ResolvedMainEntity) -> (layout.FindEntity main.Entity |> Option.get, main)) viewExpr.MainEntity
+        let getMainEntity (main : ResolvedMainEntity) =
+            let ref = tryResolveEntityRef main.Entity |> Option.get
+            let meta = ObjectMap.findType<MainEntityMeta> main.Extra
+            { Entity = ref
+              Meta = meta
+            }
+        let mainEntity = Option.map getMainEntity viewExpr.MainEntity
 
         let getConstAttr (column : CompiledColumnInfo, expr : SQL.ValueExpr) =
             match column.Type with
@@ -276,12 +293,12 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
             let mainField =
                 match mainEntity with
                 | None -> None
-                | Some (entity, insertInfo) ->
-                    match Map.tryFind column.Name insertInfo.ColumnsToFields with
+                | Some main ->
+                    match Map.tryFind column.Name main.Meta.ColumnsToFields with
                     | None -> None
                     | Some fieldName ->
                         Some { Name = fieldName
-                               Field = getSerializedField { Entity = insertInfo.Entity; Name = fieldName } |> Option.get
+                               Field = getSerializedField { Entity = main.Entity; Name = fieldName } |> Option.get
                              }
 
             let columnMappings = Map.findWithDefault column.Name Map.empty columnAttributeMappings
@@ -358,13 +375,19 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
         let getRowAttributeInfo attrName typ =
             { Type = typ
             }
+        
+        let getMainEntityInfo (main : ResolvedMainEntity) =
+            let mainInfo = Option.get mainEntity
+            { Entity = mainInfo.Entity
+              ForInsert = main.ForInsert
+            }
 
         { AttributeTypes = Map.map getViewAttributeInfo viewInfo.AttributeTypes
           RowAttributeTypes = Map.map getRowAttributeInfo viewInfo.RowAttributeTypes
           Arguments = arguments
           Domains = Map.map (fun id -> Map.map (fun name -> mergeDomainField)) compiled.FlattenedDomains
           Columns = columns
-          MainEntity = Option.map (fun (main : ResolvedMainEntity) -> main.Entity) viewExpr.MainEntity
+          MainEntity = Option.map getMainEntityInfo viewExpr.MainEntity
           Hash = hash
         }
 

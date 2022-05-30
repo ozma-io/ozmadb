@@ -316,21 +316,10 @@ let private renameFieldsInSubquery (names : FieldName[]) (info : SubqueryInfo) :
 let private getFieldsMap (fields : SubqueryFields) : SubqueryFieldsMap =
     fields |> Seq.mapMaybe (fun (mname, info) -> Option.map (fun name -> (name, info)) mname) |> Map.ofSeq
 
-// If a query has a main entity it satisfies two properties:
-// 1. All rows can be bound to some entry of that entity;
-// 2. Columns contain all required fields of that entity.
-type ResolvedMainEntity =
-    { Entity : ResolvedEntityRef
-      ColumnsToFields : Map<FieldName, FieldName>
+type MainEntityMeta =
+    { ColumnsToFields : Map<FieldName, FieldName>
       FieldsToColumns : Map<FieldName, FieldName>
-    } with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            sprintf "FOR INSERT INTO %s" (this.Entity.ToFunQLString())
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString ()
+    }
 
 type ResolvedArgumentsMap = OrderedMap<ArgumentRef, ResolvedArgument>
 
@@ -567,57 +556,68 @@ let private cteBindings (select : ResolvedSelectExpr) : ResolvedCommonTableExprs
     | None ->
         Map.empty
 
-let rec private findMainEntityFromExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) : ResolvedFromExpr -> RecursiveValue<ResolvedEntityRef> = function
-    | FEntity { Ref = { Schema = Some schemaName; Name = name } } -> RValue { Schema = schemaName; Name = name }
+type private MainEntityResult =
+    { Entity : ResolvedEntityRef
+      Results : ResolvedQueryResult[]
+    }
+
+let rec private tryFindMainEntityFromExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) : ResolvedFromExpr -> RecursiveValue<ResolvedEntityRef> option = function
+    | FEntity { Ref = { Schema = Some schemaName; Name = name } } -> Some <| RValue { Schema = schemaName; Name = name }
     | FEntity { Ref = { Schema = None; Name = name } } ->
         let cte = Map.find name ctes
         let extra = ObjectMap.findType<ResolvedCommonTableExprTempMeta> cte.Extra
         if extra.MainEntity then
-            RRecursive <| Option.get currentCte
+            Option.get currentCte |> RRecursive |> Some
         else
             extra.MainEntity <- true
-            mapRecursiveValue fst <| findMainEntityExpr ctes (Some name) cte.Expr
+            tryFindMainEntityExpr ctes (Some name) cte.Expr |> Option.map (mapRecursiveValue (fun res -> res.Entity))
     | FJoin join ->
         match join.Type with
-        | Left -> findMainEntityFromExpr ctes currentCte join.A
-        | Right -> findMainEntityFromExpr ctes currentCte join.B
-        | _ -> raisef ViewResolveException "Unsupported JOIN type when validating main entity"
+        | Left -> tryFindMainEntityFromExpr ctes currentCte join.A
+        | Right -> tryFindMainEntityFromExpr ctes currentCte join.B
+        | _ -> None
     | FSubExpr subsel ->
-        mapRecursiveValue fst <| findMainEntityExpr ctes currentCte subsel.Select
+        tryFindMainEntityExpr ctes currentCte subsel.Select |> Option.map (mapRecursiveValue (fun res -> res.Entity))
 
-and private findMainEntityTreeExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) : ResolvedSelectTreeExpr -> RecursiveValue<ResolvedEntityRef * ResolvedQueryResult[] > = function
-    | SSelect sel when not (Array.isEmpty sel.GroupBy) -> raisef ViewResolveException "Queries with GROUP BY cannot use FOR INSERT INTO"
-    | SSelect { Results = results; From = Some from } ->
-        mapRecursiveValue (fun ref -> (ref, results)) <| findMainEntityFromExpr ctes currentCte from
-    | SSelect _ -> raisef ViewResolveException "FROM clause is not found when validating main entity"
-    | SValues _ -> raisef ViewResolveException "VALUES clause found when validating main entity"
+and private tryFindMainEntityTreeExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) : ResolvedSelectTreeExpr -> RecursiveValue<MainEntityResult> option = function
+    | SSelect ({ From = Some from } as sel) ->
+        let refResults ref =
+            { Entity = ref
+              Results = sel.Results
+            }
+        tryFindMainEntityFromExpr ctes currentCte from |> Option.map (mapRecursiveValue refResults)
+    | SSelect _ -> None
+    | SValues _ -> None
     | SSetOp setOp ->
-        let ret1 = findMainEntityExpr ctes currentCte setOp.A
-        let ret2 = findMainEntityExpr ctes currentCte setOp.B
-        match (ret1, ret2) with
-        | (RValue ((refA, resultsA) as ret), RValue (refB, resultsB)) ->
-            if refA <> refB then
-                raisef ViewResolveException "Conflicting main entities found in set operation"
-            RValue ret
-        | (RRecursive cte, RValue ret)
-        | (RValue ret, RRecursive cte) ->
-            assert (cte = Option.get currentCte)
-            RValue ret
-        | (RRecursive r1, RRecursive r2) ->
-            assert (r1 = r2)
-            RRecursive r1
+        monad' {
+            let! ret1 = tryFindMainEntityExpr ctes currentCte setOp.A
+            let! ret2 = tryFindMainEntityExpr ctes currentCte setOp.B
+            match (ret1, ret2) with
+            | (RValue mainA, RValue mainB) ->
+                if mainA.Entity <> mainB.Entity then
+                    return! None
+                else
+                    return RValue mainA
+            | (RRecursive cte, RValue ret)
+            | (RValue ret, RRecursive cte) ->
+                assert (cte = Option.get currentCte)
+                return RValue ret
+            | (RRecursive r1, RRecursive r2) ->
+                assert (r1 = r2)
+                return RRecursive r1
+        }
 
-and private findMainEntityExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) (select : ResolvedSelectExpr) : RecursiveValue<ResolvedEntityRef * ResolvedQueryResult[]> =
+and private tryFindMainEntityExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) (select : ResolvedSelectExpr) : RecursiveValue<MainEntityResult> option =
     let ctes = Map.union (cteBindings select) ctes
-    findMainEntityTreeExpr ctes currentCte select.Tree
+    tryFindMainEntityTreeExpr ctes currentCte select.Tree
 
 // Returns map from query column names to fields in main entity
 // Be careful as changes here also require changes to main id propagation in the compiler.
-let private findMainEntity (select : ResolvedSelectExpr) : (ResolvedEntityRef * ResolvedQueryResult[]) =
+let private tryFindMainEntity (select : ResolvedSelectExpr) : MainEntityResult option =
     let getValue = function
-    | RValue (ref, results) -> (ref, results)
+    | RValue ret -> ret
     | RRecursive r -> failwithf "Impossible recursion detected in %O" r
-    getValue <| findMainEntityExpr Map.empty None select
+    tryFindMainEntityExpr Map.empty None select |> Option.map getValue
 
 type private ResolveCTE = EntityName -> SubqueryInfo
 
@@ -971,18 +971,7 @@ let computedFieldCases (layout : ILayoutBits) (extra : ObjectMap) (ref : Resolve
 
         Seq.map compileCase filteredCases
 
-let private resolveMainEntity (layout : ILayoutBits) (fields : SubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity =
-    let ref = resolveEntityRef main.Entity
-    let entity =
-        match layout.FindEntity ref with
-        | None -> raisef ViewResolveException "Entity not found: %O" main.Entity
-        | Some e -> e :?> ResolvedEntity
-    if entity.IsAbstract then
-        raisef ViewResolveException "Entity is abstract: %O" main.Entity
-    let (foundRef, columns) = findMainEntity query
-    if foundRef <> ref then
-        raisef ViewResolveException "Cannot map main entity to the expression: %O, possible value: %O" ref foundRef
-
+let private mainEntityColumnsMeta (fields : SubqueryFieldsMap) (ref : ResolvedEntityRef) (columns : ResolvedQueryResult[]) : MainEntityMeta =
     let getField : ResolvedQueryResult -> (FieldName * FieldName) option = function
         | QRAll _ -> failwith "Impossible QRAll"
         | QRExpr result ->
@@ -991,17 +980,46 @@ let private resolveMainEntity (layout : ILayoutBits) (fields : SubqueryFieldsMap
             | Some { Bound = Some { Ref = fieldRef; Field = RColumnField _ } } when fieldRef.Entity = ref -> Some (name, fieldRef.Name)
             | _ -> None
     let mappedResults = columns |> Seq.mapMaybe getField |> Map.ofSeqUnique
-
-    let checkField fieldName (field : ResolvedColumnField) =
-        if Option.isNone field.DefaultValue && not field.IsNullable then
-            if not (Map.containsKey fieldName mappedResults) then
-                raisef ViewResolveException "Required inserted entity field is not in the view expression: %O" fieldName
-    entity.ColumnFields |> Map.iter checkField
-
-    { Entity = ref
-      FieldsToColumns = Map.reverse mappedResults
+    { FieldsToColumns = Map.reverse mappedResults
       ColumnsToFields = mappedResults
     }
+
+let private detectMainEntity (fields : SubqueryFieldsMap) (query : ResolvedSelectExpr) : ResolvedMainEntity option =
+    match tryFindMainEntity query with
+    | None -> None
+    | Some found ->
+        let meta = mainEntityColumnsMeta fields found.Entity found.Results
+        Some
+            { Entity = relaxEntityRef found.Entity
+              ForInsert = false
+              Extra = ObjectMap.singleton meta
+            }
+
+let private resolveMainEntity (layout : ILayoutBits) (fields : SubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity option =
+    match tryFindMainEntity query with
+    | None -> raisef ViewResolveException "Main entity not matched in the expression"
+    | Some found ->
+        let requestedRef = resolveEntityRef main.Entity
+        if found.Entity <> requestedRef then
+            raisef ViewResolveException "Main entity %O is specified, but %O is detected" requestedRef ref
+
+        let meta = mainEntityColumnsMeta fields found.Entity found.Results
+
+        if main.ForInsert then
+            let entity = layout.FindEntity found.Entity |> Option.get
+            if entity.IsAbstract then
+                raisef ViewResolveException "Entity is abstract: %O" main.Entity
+            let checkField (fieldName, field : ResolvedColumnField) =
+                if Option.isNone field.DefaultValue && not field.IsNullable then
+                    if not (Map.containsKey fieldName meta.ColumnsToFields) then
+                        raisef ViewResolveException "Required inserted entity field is not in the view expression: %O" fieldName
+            entity.ColumnFields |> Seq.iter checkField
+
+        Some
+            { Entity = relaxEntityRef found.Entity
+              ForInsert = main.ForInsert
+              Extra = ObjectMap.singleton meta
+            }
 
 type private SelectFlags =
     { RequireNames : bool
@@ -2790,7 +2808,11 @@ let resolveEntityAttributesMap (callbacks : ResolveCallbacks) (flags : ExprResol
 let resolveViewExpr (callbacks : ResolveCallbacks) (flags : ExprResolutionFlags) (viewExpr : ParsedViewExpr) : ResolvedViewExpr =
     let (localArguments, qualifier) = getArgumentsQualifier callbacks viewExpr.Arguments flags
     let (info, qQuery) = qualifier.ResolveSelectExpr viewExprSelectFlags viewExpr.Select
-    let mainEntity = Option.map (resolveMainEntity callbacks.Layout (getFieldsMap info.Fields) qQuery) viewExpr.MainEntity
+    let fieldsMap = getFieldsMap info.Fields
+    let mainEntity =
+        match viewExpr.MainEntity with
+        | None -> detectMainEntity fieldsMap qQuery
+        | Some main -> resolveMainEntity callbacks.Layout fieldsMap qQuery main
     { Pragmas = Map.filter (fun name v -> Set.contains name allowedPragmas) viewExpr.Pragmas
       Arguments = localArguments
       Select = relabelSelectExpr qQuery

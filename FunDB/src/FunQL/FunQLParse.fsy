@@ -33,10 +33,7 @@ type ParsedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedFieldRef>
 type ParsedBoundAttributeExpr = BoundAttributeExpr<EntityRef, LinkedFieldRef>
 type ParsedBoundAttribute = BoundAttribute<EntityRef, LinkedFieldRef>
 type ParsedAttribute = Attribute<EntityRef, LinkedFieldRef>
-
-type ParsedMainEntity =
-    { Entity : EntityRef
-    }
+type ParsedMainEntity = MainEntity<EntityRef>
 
 [<NoEquality; NoComparison>]
 type ParsedViewExpr =
@@ -354,7 +351,7 @@ commandExpr : CommandExpr EOF { $1 }
 // SELECT
 
 ViewExpr:
-    | MaybeArguments MaybePragmas SelectExpr InsertEntityClause { { Pragmas = $2; Arguments = $1; Select = $3; MainEntity = $4 } }
+    | MaybeArguments MaybePragmas SelectExpr MainEntityClause { { Pragmas = $2; Arguments = $1; Select = $3; MainEntity = $4 } }
 
 MaybePragmas:
     | MaybePragmasList { parseMap "Clashing pragma names" $1 }
@@ -513,9 +510,10 @@ FromClause:
     |               { None }
     | FROM FromExpr { Some $2 }
 
-InsertEntityClause:
+MainEntityClause:
     |                           { None }
-    | FOR INSERT INTO EntityRef { Some { Entity = $4 } }
+    | FOR INSERT INTO EntityRef { Some { Entity = $4; ForInsert = true; Extra = ObjectMap.empty } }
+    | FOR UPDATE OF EntityRef   { Some { Entity = $4; ForInsert = false; Extra = ObjectMap.empty } }
 
 QueryResults:
     |                                { [] }

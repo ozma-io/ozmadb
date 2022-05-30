@@ -2833,7 +2833,7 @@ let private convertTempColumnInfo (compiler : QueryCompiler) (info : TempColumnI
     }
 
 let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =
-    let mainEntityRef = viewExpr.MainEntity |> Option.map (fun main -> main.Entity)
+    let mainEntityRef = viewExpr.MainEntity |> Option.map (fun main -> tryResolveEntityRef main.Entity |> Option.get)
     let arguments = compileArguments viewExpr.Arguments
     let compiler = QueryCompiler (layout, defaultAttrs, arguments)
     let (info, expr) = compiler.CompileSelectExpr mainEntityRef true viewExpr.Select
