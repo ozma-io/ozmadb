@@ -94,47 +94,32 @@ let referencedEntityRef : EntityRef = { Schema = None; Name = referencedName }
 //
 // Row-specific check is the one that has both references to the field we build domain for, as well as other local fields.
 // We split them into references to two separate entities: `row` and `referenced`.
-let private renameDomainCheck (refEntityRef : ResolvedEntityRef) (refFieldName : FieldName) (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
+let private renameDomainCheck (layout : Layout) (refEntityRef : ResolvedEntityRef) (refFieldName : FieldName) (expr : ResolvedFieldExpr) : ResolvedFieldExpr =
     let convertRef : LinkedBoundFieldRef -> LinkedBoundFieldRef = function
         | { Ref = { Ref = VRColumn { Name = fieldName }; Path = path }; Extra = extra } as ref ->
-            let fieldInfo = ObjectMap.findType<FieldMeta> extra
-            let boundInfo = Option.get fieldInfo.Bound
+            let info = ObjectMap.findType<FieldRefMeta> extra
+            let columnInfo = Option.get info.Column
+            let boundInfo = getFieldRefBoundColumn info
             if fieldName = refFieldName then
                 // Referenced entity.
                 if Array.isEmpty path then
-                    let newBoundInfo =
-                        { Ref = { Entity = refEntityRef; Name = funId }
-                          Immediate = true
-                          Path = [||]
-                          IsInner = true
-                        } : BoundFieldMeta
-                    let newFieldInfo =
-                        { Bound = Some newBoundInfo
-                          FromEntityId = fieldInfo.FromEntityId
-                          ForceSQLName = None
-                        } : FieldMeta
-                    let lref = linkedRef <| VRColumn { Entity = Some referencedEntityRef; Name = funId } : LinkedFieldRef
-                    { Ref = lref; Extra = ObjectMap.add newFieldInfo extra }
+                    let fieldRef = { Entity = Some referencedEntityRef; Name = funId } : FieldRef
+                    let simpleMeta =
+                        { simpleColumnMeta refEntityRef with
+                              EntityId = columnInfo.EntityId
+                        }
+                    makeColumnReference layout simpleMeta fieldRef
                 else
                     let firstArrow = path.[0]
-                    let firstEntityRef = boundInfo.Path.[0]
-                    let newBoundInfo =
-                        { Ref = { Entity = firstEntityRef; Name = firstArrow.Name }
-                          Immediate = true
-                          Path = Array.skip 1 boundInfo.Path
-                          IsInner = true
-                        } : BoundFieldMeta
-                    let newFieldInfo =
-                        { Bound = Some newBoundInfo
-                          FromEntityId = fieldInfo.FromEntityId
-                          ForceSQLName = None
-                        } : FieldMeta
-                    let lref =
-                        { Ref = VRColumn { Entity = Some referencedEntityRef; Name = firstArrow.Name }
-                          Path = Array.skip 1 path
-                          AsRoot = false
-                        } : LinkedFieldRef
-                    { Ref = lref; Extra = ObjectMap.add newFieldInfo extra }
+                    let firstEntityRef = info.Path.[0]
+                    let simpleMeta =
+                        { simpleColumnMeta firstEntityRef with
+                            EntityId = columnInfo.EntityId
+                            Path = Array.skip 1 path
+                            PathEntities = Array.skip 1 info.Path
+                        }
+                    let fieldRef = { Entity = Some referencedEntityRef; Name = firstArrow.Name } : FieldRef
+                    makeColumnReference layout simpleMeta fieldRef
             else
                 let lref =
                     { Ref = VRColumn { Entity = Some rowEntityRef; Name = fieldName }
@@ -149,8 +134,9 @@ let private queryHash (expr : SQL.SelectExpr) : string =
     expr |> string |> Hash.sha1OfString |> String.hexBytes
 
 let private compileReferenceOptionsSelectFrom (layout : Layout) (refEntityRef : ResolvedEntityRef) (arguments : QueryArguments) (from : ResolvedFromExpr) (isInner : bool) (where : ResolvedFieldExpr option) : UsedDatabase * Query<SQL.SelectExpr> =
-    let idExpr = makeSingleFieldExpr refEntityRef isInner { Entity = Some referencedEntityRef; Name = funId }
-    let mainExpr = makeSingleFieldExpr refEntityRef isInner { Entity = Some referencedEntityRef; Name = funMain }
+    let exprMeta = { simpleColumnMeta refEntityRef with IsInner = isInner }
+    let idExpr = makeSingleFieldExpr layout exprMeta { Entity = Some referencedEntityRef; Name = funId }
+    let mainExpr = makeSingleFieldExpr layout exprMeta { Entity = Some referencedEntityRef; Name = funMain }
     let mainSortColumn =
         { Expr = mainExpr
           Order = None
@@ -260,7 +246,7 @@ type private DomainsBuilder (layout : Layout) =
 
         let mergeChecks (usedDatabase1 : UsedDatabase, check1 : ResolvedFieldExpr) (usedDatabase2 : UsedDatabase, check2 : ResolvedFieldExpr) = (unionUsedDatabases usedDatabase1 usedDatabase2, FEAnd (check1, check2))
         let buildCheck (checks : (ResolvedEntityRef * ResolvedCheckConstraint) seq) : UsedDatabase * ResolvedFieldExpr =
-            checks |> Seq.map (fun (entityRef, constr) -> (constr.UsedDatabase, renameDomainCheck refEntityRef fieldRef.Name constr.Expression)) |> Seq.fold1 mergeChecks
+            checks |> Seq.map (fun (entityRef, constr) -> (constr.UsedDatabase, renameDomainCheck layout refEntityRef fieldRef.Name constr.Expression)) |> Seq.fold1 mergeChecks
 
         let genericCheck =
             if Seq.isEmpty genericChecks then

@@ -7,6 +7,8 @@ open System.Collections.Generic
 type OrderedMap<'k, 'v> when 'k : comparison =
     private { Order : 'k[]; Map : Map<'k, 'v> }
 
+    override this.ToString () = this.Order |> Seq.map (fun k -> string (k, Map.find k this.Map)) |> String.concat ", " |> sprintf "[%s]"
+
     member this.Count = this.Order.Length
 
     member this.Contains (KeyValue(key, value)) =

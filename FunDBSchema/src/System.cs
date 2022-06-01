@@ -117,14 +117,13 @@ namespace FunWithFlags.FunDBSchema.System
         public DbSet<User> Users { get; set; } = null!;
 
         [Entity("id", InsertedInternally=true, IsFrozen=true)]
-        // FIXME: temporary till we update admin template.
-        [ComputedField("entity_id", "row_id")]
-        [Attributes.Index("transaction_timestamp", new [] {"transaction_timestamp"})]
-        [Attributes.Index("type", new [] {"type"})]
-        [Attributes.Index("timestamp", new [] {"timestamp"})]
-        [Attributes.Index("user_name", new [] {"user_name"})]
-        [Attributes.Index("field", new [] {"schema_name", "entity_name", "field_name"})]
-        [Attributes.Index("row", new [] {"schema_name", "entity_name", "row_id"})]
+
+        [Attributes.Index("transaction_timestamp", new [] {"\"transaction_timestamp\""})]
+        [Attributes.Index("type", new [] {"\"type\""})]
+        [Attributes.Index("timestamp", new [] {"\"timestamp\""})]
+        [Attributes.Index("user_name", new [] {"\"user_name\""})]
+        [Attributes.Index("field", new [] {"\"schema_name\"", "\"entity_name\"", "\"field_name\""})]
+        [Attributes.Index("row", new [] {"\"schema_name\"", "\"entity_name\"", "\"row_id\""})]
         public DbSet<EventEntry> Events { get; set; } = null!;
 
         public SystemContext()
@@ -689,7 +688,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("int", IsImmutable=true)]
         public int? RowId { get; set; }
 
-        [ColumnField("json", IsImmutable=true, Default="{type: 'api'}")]
+        [ColumnField("json", IsImmutable=true, Default="{\"type\": 'api'}")]
         [Column(TypeName = "jsonb")]
         [Required]
         public string Source { get; set; } = "";

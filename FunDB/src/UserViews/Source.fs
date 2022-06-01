@@ -20,7 +20,11 @@ type SourceUserViewsSchema =
 
 type SourceUserViews =
     { Schemas : Map<SchemaName, SourceUserViewsSchema>
-    }
+    } with
+        member this.Find (ref : ResolvedUserViewRef) =
+            match Map.tryFind ref.Schema this.Schemas with
+            | Some schema -> Map.tryFind ref.Name schema.UserViews
+            | _ -> None
 
 let emptySourceUserViewsSchema : SourceUserViewsSchema =
     { UserViews = Map.empty

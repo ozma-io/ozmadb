@@ -103,8 +103,10 @@ type ResolvedEntityRef =
 let relaxEntityRef (ref : ResolvedEntityRef) : EntityRef =
     { Schema = Some ref.Schema; Name = ref.Name }
 
-let tryResolveEntityRef (ref : EntityRef) : ResolvedEntityRef option =
-    Option.map (fun schema -> { Schema = schema; Name = ref.Name }) ref.Schema
+let getResolvedEntityRef (ref : EntityRef) : ResolvedEntityRef =
+    match ref.Schema with
+    | Some schema -> { Schema = schema; Name = ref.Name }
+    | None -> failwith "No schema specified"
 
 type ResolvedUserViewRef = ResolvedEntityRef
 
@@ -145,9 +147,6 @@ type ResolvedFieldRef =
 
 let relaxFieldRef (ref : ResolvedFieldRef) : FieldRef =
     { Entity = Some <| relaxEntityRef ref.Entity; Name = ref.Name }
-
-let tryResolveFieldRef (ref : FieldRef) : ResolvedFieldRef option =
-    ref.Entity |> Option.bind (tryResolveEntityRef >> Option.map (fun entity -> { Entity = entity; Name = ref.Name }))
 
 type ArgumentRef =
     | PLocal of ArgumentName
@@ -478,6 +477,20 @@ type EntityAlias =
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
+
+type DomainExprInfo =
+    { AsRoot : bool
+    } with
+    override this.ToString () = this.ToFunQLString()
+
+    member this.ToFunQLString () =
+        if this.AsRoot then
+            "WITH SUPERUSER ROLE"
+        else
+            ""
+
+    interface IFunQLString with
+        member this.ToFunQLString () = this.ToFunQLString()
 
 type [<NoEquality; NoComparison>] BinaryOperator =
     | BOLess
@@ -939,9 +952,24 @@ and [<NoEquality; NoComparison>] SingleSelectExpr<'e, 'f> when 'e :> IFunQLName 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString ()
 
+and [<NoEquality; NoComparison>] ValuesValue<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | VVExpr of FieldExpr<'e, 'f>
+    | VVDefault
+    with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | VVExpr e -> e.ToFunQLString()
+            | VVDefault -> "DEFAULT"
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
 and [<NoEquality; NoComparison>] SelectTreeExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | SSelect of SingleSelectExpr<'e, 'f>
-    | SValues of FieldExpr<'e, 'f>[][]
+    // TODO: Add a SelectExpr node to support nested WITH clauses.
+    | SValues of ValuesValue<'e, 'f>[][]
     | SSetOp of SetOperationExpr<'e, 'f>
     with
         member this.ToFunQLString () =
@@ -949,7 +977,7 @@ and [<NoEquality; NoComparison>] SelectTreeExpr<'e, 'f> when 'e :> IFunQLName an
             | SSelect e -> e.ToFunQLString()
             | SValues values ->
                 assert not (Array.isEmpty values)
-                let printOne (array : FieldExpr<'e, 'f> array) =
+                let printOne (array : ValuesValue<'e, 'f>[]) =
                     assert not (Array.isEmpty array)
                     array |> Seq.map toFunQLString |> String.concat ", " |> sprintf "(%s)"
                 let valuesStr = values |> Seq.map printOne |> String.concat ", "
@@ -993,9 +1021,36 @@ and [<NoEquality; NoComparison>] SetOperationExpr<'e, 'f> when 'e :> IFunQLName 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and [<NoEquality; NoComparison>] SubSelectExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+and [<NoEquality; NoComparison>] TableExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
+    | TESelect of SelectExpr<'e, 'f>
+    | TEDomain of 'f * DomainExprInfo
+    | TEFieldDomain of 'e * FieldName * DomainExprInfo
+    | TETypeDomain of FieldType<'e> * DomainExprInfo
+     with
+        override this.ToString () = this.ToFunQLString()
+
+        member this.ToFunQLString () =
+            match this with
+            | TESelect sel -> sprintf "(%O)" sel
+            | TEDomain (ref, info) ->
+                let domainStr = sprintf "DOMAIN OF %s" (toFunQLString ref)
+                let infoStr = toFunQLString info
+                String.concatWithWhitespaces [domainStr; infoStr]
+            | TEFieldDomain (entity, field, info) ->
+                let domainStr = sprintf "DOMAIN OF FIELD %O.%s" entity (toFunQLString field)
+                let infoStr = toFunQLString info
+                String.concatWithWhitespaces [domainStr; infoStr]
+            | TETypeDomain (typ, info) ->
+                let domainStr = sprintf "DOMAIN OF TYPE %O" typ
+                let infoStr = toFunQLString info
+                String.concatWithWhitespaces [domainStr; infoStr]
+
+        interface IFunQLString with
+            member this.ToFunQLString () = this.ToFunQLString()
+
+and [<NoEquality; NoComparison>] FromTableExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     { Alias : EntityAlias
-      Select : SelectExpr<'e, 'f>
+      Expression : TableExpr<'e, 'f>
       Lateral : bool
     } with
         override this.ToString () = this.ToFunQLString()
@@ -1003,24 +1058,23 @@ and [<NoEquality; NoComparison>] SubSelectExpr<'e, 'f> when 'e :> IFunQLName and
         member this.ToFunQLString () =
             let lateralStr =
                 if this.Lateral then "LATERAL" else ""
-            let exprStr = sprintf "(%s)" (this.Select.ToFunQLString())
-            String.concatWithWhitespaces [lateralStr; exprStr; this.Alias.ToFunQLString()]
+            String.concatWithWhitespaces [lateralStr; toFunQLString this.Expression; toFunQLString this.Alias]
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
 and [<NoEquality; NoComparison>] FromExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    // We don't allow fields aliasing for entities, because we don't guarantee order of entity fields.
+    // TODO: We don't have fields aliasing implemented for entities yet, because internally we don't guarantee order of entity fields.
     | FEntity of FromEntity<'e>
+    | FTableExpr of FromTableExpr<'e, 'f>
     | FJoin of JoinExpr<'e, 'f>
-    | FSubExpr of SubSelectExpr<'e, 'f>
     with
         override this.ToString () = this.ToFunQLString()
 
         member this.ToFunQLString () =
             match this with
             | FEntity ent -> ent.ToFunQLString()
-            | FSubExpr subsel -> subsel.ToFunQLString()
+            | FTableExpr expr -> expr.ToFunQLString()
             | FJoin join -> join.ToFunQLString()
 
         interface IFunQLString with
@@ -1100,22 +1154,7 @@ and [<NoEquality; NoComparison>] CommonTableExprs<'e, 'f> when 'e :> IFunQLName 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-and [<NoEquality; NoComparison>] InsertValue<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    | IVValue of FieldExpr<'e, 'f>
-    | IVDefault
-    with
-        override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            match this with
-            | IVValue e -> e.ToFunQLString()
-            | IVDefault -> "DEFAULT"
-
-        interface IFunQLString with
-            member this.ToFunQLString () = this.ToFunQLString()
-
 and [<NoEquality; NoComparison>] InsertSource<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    | ISValues of InsertValue<'e, 'f>[][]
     | ISSelect of SelectExpr<'e, 'f>
     | ISDefaultValues
     with
@@ -1123,12 +1162,6 @@ and [<NoEquality; NoComparison>] InsertSource<'e, 'f> when 'e :> IFunQLName and 
 
         member this.ToFunQLString () =
             match this with
-            | ISValues values ->
-                let renderInsertValue (values : InsertValue<'e, 'f>[]) =
-                    values |> Seq.map toFunQLString |> String.concat ", " |> sprintf "(%s)"
-
-                assert (not <| Array.isEmpty values)
-                sprintf "VALUES %s" (values |> Seq.map renderInsertValue |> String.concat ", ")
             | ISSelect sel -> sel.ToFunQLString()
             | ISDefaultValues -> "DEFAULT VALUES"
 
@@ -1157,7 +1190,7 @@ and [<NoEquality; NoComparison>] InsertExpr<'e, 'f> when 'e :> IFunQLName and 'f
             member this.ToFunQLString () = this.ToFunQLString()
 
 and [<NoEquality; NoComparison>] UpdateAssignExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
-    | UAESet of FieldName * InsertValue<'e, 'f>
+    | UAESet of FieldName * ValuesValue<'e, 'f>
     | UAESelect of FieldName[] * SelectExpr<'e, 'f>
     with
         override this.ToString () = this.ToFunQLString()
@@ -1631,7 +1664,7 @@ type ResolvedBoundAttributesMap = BoundAttributesMap<EntityRef, LinkedBoundField
 type ResolvedOrderLimitClause = OrderLimitClause<EntityRef, LinkedBoundFieldRef>
 type ResolvedAggExpr = AggExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedOrderColumn = OrderColumn<EntityRef, LinkedBoundFieldRef>
-type ResolvedInsertValue = InsertValue<EntityRef, LinkedBoundFieldRef>
+type ResolvedValuesValue = ValuesValue<EntityRef, LinkedBoundFieldRef>
 type ResolvedInsertExpr = InsertExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedUpdateExpr = UpdateExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedDeleteExpr = DeleteExpr<EntityRef, LinkedBoundFieldRef>
@@ -1642,6 +1675,8 @@ type ResolvedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedBoundFieldRef>
 type ResolvedBoundAttribute = BoundAttribute<EntityRef, LinkedBoundFieldRef>
 type ResolvedAttribute = Attribute<EntityRef, LinkedBoundFieldRef>
 type ResolvedBoundAttributeExpr = BoundAttributeExpr<EntityRef, LinkedBoundFieldRef>
+type ResolvedTableExpr = TableExpr<EntityRef, LinkedBoundFieldRef>
+type ResolvedFromTableExpr = FromTableExpr<EntityRef, LinkedBoundFieldRef>
 
 type ResolvedIndexColumn = IndexColumn<EntityRef, LinkedBoundFieldRef>
 type ResolvedMainEntity = MainEntity<EntityRef>
@@ -2050,8 +2085,8 @@ let entityAlias (name : EntityName) : EntityAlias =
       Fields = None
     }
 
-let subSelectExpr (select : SelectExpr<'e, 'f>) (alias : EntityAlias) : SubSelectExpr<'e, 'f> =
-    { Select = select
+let fromSubSelectExpr (select : SelectExpr<'e, 'f>) (alias : EntityAlias) : FromTableExpr<'e, 'f> =
+    { Expression = TESelect select
       Alias = alias
       Lateral = false
     }

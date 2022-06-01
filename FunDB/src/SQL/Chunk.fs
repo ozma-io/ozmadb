@@ -57,11 +57,11 @@ type private ChunkApplier (chunk : QueryChunk) =
                   Columns = None
                 }
             let innerSelect = selectExpr values
-            let subsel = subSelectExpr fromAlias innerSelect
+            let tableExpr = subSelectExpr fromAlias innerSelect
             let outerSelect =
                 { emptySingleSelectExpr with
                     Columns = [| SCAll None |]
-                    From = Some <| FSubExpr subsel
+                    From = Some <| FTableExpr tableExpr
                     OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
                 }
             SSelect outerSelect
@@ -83,11 +83,11 @@ type private ChunkApplier (chunk : QueryChunk) =
                 { Name = SQLName "inner"
                   Columns = None
                 }
-            let subsel = subSelectExpr fromAlias select
+            let tableExpr = subSelectExpr fromAlias select
             let outerSelect =
                 { emptySingleSelectExpr with
                       Columns = [| SCAll None |]
-                      From = Some <| FSubExpr subsel
+                      From = Some <| FTableExpr tableExpr
                       Where = Some where
                       OrderLimit = applyToOrderLimit chunk emptyOrderLimitClause
                 }

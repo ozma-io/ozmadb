@@ -16,51 +16,6 @@ type ViewTypecheckException (message : string, innerException : Exception, isUse
 
     new (message : string) = ViewTypecheckException (message, null, true)
 
-let decompileScalarType : SQL.SimpleType -> ScalarFieldType<_> = function
-    | SQL.STInt -> SFTInt
-    | SQL.STBigInt -> failwith "Unexpected bigint encountered"
-    | SQL.STRegclass -> failwith "Unexpected regclass encountered"
-    | SQL.STDecimal -> SFTDecimal
-    | SQL.STString -> SFTString
-    | SQL.STBool -> SFTBool
-    | SQL.STDateTime -> SFTDateTime
-    | SQL.STLocalDateTime -> failwith "Unexpected timestamp encountered"
-    | SQL.STDate -> SFTDate
-    | SQL.STInterval -> SFTInterval
-    | SQL.STJson -> SFTJson
-    | SQL.STUuid -> SFTUuid
-
-let decompileFieldType : SQL.SimpleValueType -> FieldType<_> = function
-    | SQL.VTScalar typ -> FTScalar <| decompileScalarType typ
-    | SQL.VTArray typ -> FTArray <| decompileScalarType typ
-
-let compileBinaryOp = function
-    | BOLess -> SQL.BOLess
-    | BOLessEq -> SQL.BOLessEq
-    | BOGreater -> SQL.BOGreater
-    | BOGreaterEq -> SQL.BOGreaterEq
-    | BOEq -> SQL.BOEq
-    | BONotEq -> SQL.BONotEq
-    | BOConcat -> SQL.BOConcat
-    | BOLike -> SQL.BOLike
-    | BOILike -> SQL.BOILike
-    | BONotLike -> SQL.BONotLike
-    | BONotILike -> SQL.BONotILike
-    | BOMatchRegex -> SQL.BOMatchRegex
-    | BOMatchRegexCI -> SQL.BOMatchRegexCI
-    | BONotMatchRegex -> SQL.BONotMatchRegex
-    | BONotMatchRegexCI -> SQL.BONotMatchRegexCI
-    | BOPlus -> SQL.BOPlus
-    | BOMinus -> SQL.BOMinus
-    | BOMultiply -> SQL.BOMultiply
-    | BODivide -> SQL.BODivide
-    | BOJsonArrow -> SQL.BOJsonArrow
-    | BOJsonTextArrow -> SQL.BOJsonTextArrow
-
-let unionTypes (args : (ResolvedFieldType option) seq) : ResolvedFieldType option =
-    let sqlArgs = args |> Seq.map (Option.map compileFieldType)
-    SQL.unionTypes sqlArgs |> Option.map decompileFieldType
-
 let private checkFunc (name : FunctionName) (args : (ResolvedFieldType option) seq) : ResolvedFieldType =
     try
         match Map.find name allowedFunctions with
@@ -91,25 +46,15 @@ let private scalarBool = FTScalar SFTBool
 
 type private Typechecker (layout : ILayoutBits) =
     let rec typecheckFieldRef (linked : LinkedBoundFieldRef) : ResolvedFieldType option =
-        match linked.Ref.Ref with
-        | VRArgument arg -> failwith "Not implemented"
-        | VRColumn col ->
-            let fieldInfo = ObjectMap.findType<FieldMeta> linked.Extra
-            let boundInfo = Option.get fieldInfo.Bound
-            let fieldRef =
-                if Array.isEmpty linked.Ref.Path then
-                    boundInfo.Ref
-                else
-                    let entityRef = Array.last boundInfo.Path
-                    let arrow = Array.last linked.Ref.Path
-                    { Entity = entityRef; Name = arrow.Name }
-            let entity = layout.FindEntity fieldRef.Entity |> Option.get
-            let field = entity.FindField fieldRef.Name |> Option.get
-            match field.Field with
-            | RId -> Some (FTScalar <| SFTReference (fieldRef.Entity, None))
-            | RSubEntity -> Some scalarJson
-            | RColumnField col -> Some col.FieldType
-            | RComputedField comp -> comp.Type
+        let fieldInfo = ObjectMap.findType<FieldRefMeta> linked.Extra
+        if Array.isEmpty linked.Ref.Path then
+            fieldInfo.Type
+        else
+            let lastField = Array.last linked.Ref.Path
+            let lastEntity = Array.last fieldInfo.Path
+            let entity = layout.FindEntity lastEntity |> Option.get
+            let field = entity.FindField lastField.Name |> Option.get
+            resolvedFieldType field.Field
 
     and typecheckBinaryLogical (a : ResolvedFieldExpr) (b : ResolvedFieldExpr) : ResolvedFieldType =
         let ta = typecheckFieldExpr a
@@ -199,7 +144,7 @@ type private Typechecker (layout : ILayoutBits) =
         | FENotInQuery (e, query) -> failwith "Not implemented"
         | FECast (e, typ) ->
             // We always expect cast to succeed; worst case it's impossible, whatever.
-            Some (mapFieldType (tryResolveEntityRef >> Option.get) typ)
+            Some (mapFieldType getResolvedEntityRef typ)
         | FEIsNull e -> Some <| typecheckAnyLogical e
         | FEIsNotNull e -> Some <| typecheckAnyLogical e
         | FECase (es, els) -> Some <| typecheckCase es els

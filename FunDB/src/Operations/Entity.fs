@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.Operations.Entity
+﻿module FunWithFlags.FunDB.Operations.Entity
 
 open FSharpPlus
 open System.Linq
@@ -391,7 +391,7 @@ let insertEntities
                 let (argInfo, argName, newArguments) = addAnonymousArgument (requiredArgument <| FTScalar SFTString) arguments
                 arguments <- newArguments
                 argumentValues <- Map.add (PLocal argName) (FString entity.TypeName) argumentValues
-                (Seq.singleton (null, sqlFunSubEntity), Seq.singleton (argInfo.PlaceholderId |> SQL.VEPlaceholder |> SQL.IVValue))
+                (Seq.singleton (null, sqlFunSubEntity), Seq.singleton (argInfo.PlaceholderId |> SQL.VEPlaceholder |> SQL.IVExpr))
             else
                 (Seq.empty, Seq.empty)
 
@@ -418,7 +418,7 @@ let insertEntities
                     let (argInfo, argName, newArguments) = addAnonymousArgument (requiredArgument field.FieldType) arguments
                     arguments <- newArguments
                     argumentValues <- Map.add (PLocal argName) arg argumentValues
-                    SQL.IVValue (SQL.VEPlaceholder argInfo.PlaceholderId)
+                    SQL.IVExpr (SQL.VEPlaceholder argInfo.PlaceholderId)
 
             for requiredName in entity.RequiredFields do
                 if not <| Map.containsKey requiredName rowArgs then
@@ -494,7 +494,7 @@ let updateEntity
                 { Name = field.ColumnName
                   Extra = extra :> obj
                 } : SQL.UpdateColumnName
-            SQL.UAESet (colName, SQL.IVValue <| SQL.VEPlaceholder argInfo.PlaceholderId)
+            SQL.UAESet (colName, SQL.IVExpr <| SQL.VEPlaceholder argInfo.PlaceholderId)
 
         let assigns = updateArgs |> Map.toSeq |> Seq.map getValue |> Seq.toArray
 

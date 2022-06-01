@@ -107,17 +107,14 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
 
     let makeCustomMapping (name : FieldName) (colName : SQL.ColumnName) =
         let info =
-            { Bound = None
+            { Bound = CFUnbound
               ForceSQLName = Some colName
             } : CustomFromField
         let ref = { Entity = None; Name = name } : FieldRef
         (ref, info)
     let customMapping = Map.mapWithKeys makeCustomMapping namesMap : CustomFromMapping
 
-    let callbacks =
-        { Layout = layout
-          HasDefaultAttribute = emptyHasDefaultAttribute
-        }
+    let callbacks = resolveCallbacks layout
     let (info, resolvedExpr) =
         try
             resolveSingleFieldExpr callbacks parsedArguments chunkFromEntityId emptyExprResolutionFlags (SFCustom customMapping) parsedExpr

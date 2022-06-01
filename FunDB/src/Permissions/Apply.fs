@@ -238,23 +238,9 @@ type private ChildrenCheck =
     }
 
 type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef, getFilter : ResolvedEntityRef -> EntityAccessFilter) =
-    let boundFieldRef : LinkedBoundFieldRef =
-        let fieldRef = { Entity = rootRef; Name = funSubEntity }
-        let boundInfo =
-            { Ref = fieldRef
-              Immediate = true
-              Path = [||]
-              IsInner = true
-            } : BoundFieldMeta
-        let fieldInfo =
-            { Bound = Some boundInfo
-              FromEntityId = localExprFromEntityId
-              ForceSQLName = None
-            } : FieldMeta
-        let lref = linkedRef <| VRColumn { Entity = Some <| relaxEntityRef rootRef; Name = funSubEntity } : LinkedFieldRef
-        { Ref = lref
-          Extra = ObjectMap.singleton fieldInfo
-        }
+    let boundFieldRef =
+        let fieldRef = { Entity = Some <| relaxEntityRef rootRef; Name = funSubEntity } : FieldRef
+        makeColumnReference layout (simpleColumnMeta rootRef) fieldRef
 
     let rec buildOfTypeCheck (entityRef : ResolvedEntityRef) =
         let entity = layout.FindEntity entityRef |> Option.get

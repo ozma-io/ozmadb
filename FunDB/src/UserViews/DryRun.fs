@@ -245,7 +245,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
 
     let mergeViewInfo (viewExpr : ResolvedViewExpr) (compiled : CompiledViewExpr) (viewInfo : ExecutedViewInfo) (results : ExecutingViewExpr) : UserViewInfo =
         let getMainEntity (main : ResolvedMainEntity) =
-            let ref = tryResolveEntityRef main.Entity |> Option.get
+            let ref = getResolvedEntityRef main.Entity
             let meta = ObjectMap.findType<MainEntityMeta> main.Extra
             { Entity = ref
               Meta = meta
@@ -375,7 +375,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
         let getRowAttributeInfo attrName typ =
             { Type = typ
             }
-        
+
         let getMainEntityInfo (main : ResolvedMainEntity) =
             let mainInfo = Option.get mainEntity
             { Entity = mainInfo.Entity

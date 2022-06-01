@@ -286,21 +286,14 @@ let private saveOneCustomEntity
             | fieldRef :: fullPath ->
                 let path = fullPath |> Seq.map (fun fieldRef -> { Name = fieldRef.Name; AsRoot = false }) |> Seq.toArray
                 let boundPath = fullPath |> Seq.map (fun fieldRef -> fieldRef.Entity) |> Seq.toArray
-
-                let fieldInfo =
-                    { Bound =
-                        Some
-                            { Ref = { Entity = entityRef; Name = fieldRef.Name }
-                              Immediate = true
-                              Path = boundPath
-                              IsInner = false
-                            }
-                      FromEntityId = 0
-                      ForceSQLName = None
-                    } : FieldMeta
+                let boundMeta =
+                    { simpleColumnMeta entityRef with
+                        IsInner = false
+                        Path = path
+                        PathEntities = boundPath
+                    }
                 let plainRef = relaxFieldRef fieldRef
-                let ref = { Ref = { Ref = VRColumn plainRef; Path = path; AsRoot = false }; Extra = ObjectMap.singleton fieldInfo } : LinkedBoundFieldRef
-                FERef ref
+                makeSingleFieldExpr layout boundMeta plainRef
 
         let schemaExpr = FERef { Ref = { Ref = VRArgument schemaArg; Path = [||]; AsRoot = false }; Extra = ObjectMap.empty }
         let whereExpr = FEBinaryOp (getReference key.SchemaNamePath, BOEq, schemaExpr)
@@ -551,7 +544,7 @@ let private loadRestoredRows
 
             let indexColumn = valueToArgument indexArgument (FInt rowIndex)
             let rawValues = columnsWithFields |> Seq.map (getRowValue [] topRow) |> Seq.map2 valueToArgument argumentsRow
-            Seq.append (Seq.singleton indexColumn) rawValues |> Seq.toArray
+            Seq.append (Seq.singleton indexColumn) rawValues |> Seq.map VVExpr |> Seq.toArray
 
         let rawValues = rows |> Seq.indexed |> Seq.map getSourceRow |> Seq.toArray
         let rawSelect = SValues rawValues |> selectExpr
@@ -565,7 +558,7 @@ let private loadRestoredRows
 
         let schemaIdExpr = resolvedRefFieldExpr <| VRArgument schemaArg
 
-        let mutable from = FSubExpr (subSelectExpr rawSelect rawAlias)
+        let mutable from = FTableExpr <| fromSubSelectExpr rawSelect rawAlias
         let mutable lastSubkeyId = 0
         let mutable checkNotNull = []
 
@@ -753,7 +746,7 @@ let private updateRestoredRows
         let getAssignment (fieldName : FieldName) =
             let field = Map.tryFind fieldName entity.ColumnFields |> Option.get
             let resultExpr = SQL.VEColumn { Table = Some dataTableRef; Name = compileName fieldName }
-            SQL.UAESet (SQL.updateColumnName field.ColumnName, SQL.IVValue resultExpr)
+            SQL.UAESet (SQL.updateColumnName field.ColumnName, SQL.IVExpr resultExpr)
         let assignments = Seq.map getAssignment availableColumns |> Seq.toArray
 
         let updatedRef = compileResolvedEntityRef entity.Root : SQL.TableRef
@@ -814,25 +807,16 @@ let private deleteNonRestoredRows
 
         let boundPath = schemaPath |> Seq.map (fun ref -> ref.Entity) |> Seq.toArray
         let arrowPath = schemaPath |> Seq.map (fun ref -> { Name = ref.Name; AsRoot = false }) |> Seq.toArray
-        let newBoundInfo =
-            { Ref = schemaKey
-              Immediate = true
-              Path = boundPath
-              IsInner = false
-            } : BoundFieldMeta
-        let newFieldInfo =
-            { Bound = Some newBoundInfo
-              FromEntityId = 0
-              ForceSQLName = None
-            } : FieldMeta
-        let lref =
-            { Ref = VRColumn (relaxFieldRef schemaKey)
-              Path = arrowPath
-              AsRoot = false
-            } : LinkedFieldRef
-        let schemaRef = { Ref = lref; Extra = ObjectMap.singleton newFieldInfo }
+        let boundMeta =
+            { simpleColumnMeta schemaKey.Entity with
+                IsInner = false
+                Path = arrowPath
+                PathEntities = boundPath
+            }
+        let plainRef = relaxFieldRef schemaKey
+        let schemaRefExpr = makeSingleFieldExpr layout boundMeta plainRef
         let schemaArgExpr = resolvedRefFieldExpr <| VRArgument schemaArg
-        let check = FEBinaryOp (FERef schemaRef, BOEq, schemaArgExpr)
+        let check = FEBinaryOp (schemaRefExpr, BOEq, schemaArgExpr)
 
         let deletedRef = relaxEntityRef entityRef
         let check =

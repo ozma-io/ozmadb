@@ -647,9 +647,23 @@ and [<NoEquality; NoComparison>] AggExpr =
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
-and [<NoEquality; NoComparison>] SubSelectExpr =
-    { Alias : TableAlias
-      Select : SelectExpr
+and [<NoEquality; NoComparison>] TableExpr =
+    | TESelect of SelectExpr
+    | TEFunc of FunctionName * ValueExpr[]
+     with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            match this with
+            | TESelect sel -> sprintf "(%O)" sel
+            | TEFunc (name, args) -> sprintf "%s(%s)" (name.ToSQLString()) (args |> Seq.map toSQLString |> String.concat ", ")
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+and [<NoEquality; NoComparison>] FromTableExpr =
+    { Alias : TableAlias option
+      Expression : TableExpr
       Lateral : bool
     } with
         override this.ToString () = this.ToSQLString()
@@ -657,23 +671,23 @@ and [<NoEquality; NoComparison>] SubSelectExpr =
         member this.ToSQLString () =
             let lateralStr =
                 if this.Lateral then "LATERAL" else ""
-            let exprStr = sprintf "(%s)" (this.Select.ToSQLString())
-            String.concatWithWhitespaces [lateralStr; exprStr; this.Alias.ToSQLString()]
+            let aliasStr = optionToSQLString this.Alias
+            String.concatWithWhitespaces [lateralStr; toSQLString this.Expression; aliasStr]
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] FromExpr =
     | FTable of FromTable
+    | FTableExpr of FromTableExpr
     | FJoin of JoinExpr
-    | FSubExpr of SubSelectExpr
     with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
             match this with
             | FTable ftable -> ftable.ToSQLString()
-            | FSubExpr subsel -> subsel.ToSQLString()
+            | FTableExpr expr -> expr.ToSQLString()
             | FJoin join -> join.ToSQLString()
 
         interface ISQLString with
@@ -883,14 +897,14 @@ and [<NoEquality; NoComparison>] SetOperationExpr =
             member this.ToSQLString () = this.ToSQLString()
 
 and [<NoEquality; NoComparison>] InsertValue =
-    | IVValue of ValueExpr
+    | IVExpr of ValueExpr
     | IVDefault
     with
         override this.ToString () = this.ToSQLString()
 
         member this.ToSQLString () =
             match this with
-            | IVValue e -> e.ToSQLString()
+            | IVExpr e -> e.ToSQLString()
             | IVDefault -> "DEFAULT"
 
         interface ISQLString with
@@ -1343,9 +1357,9 @@ let deleteExpr (table : OperationTable) : DeleteExpr =
       Extra = null
     }
 
-let subSelectExpr (alias : TableAlias) (select : SelectExpr) : SubSelectExpr =
-    { Alias = alias
-      Select = select
+let subSelectExpr (alias : TableAlias) (select : SelectExpr) : FromTableExpr =
+    { Alias = Some alias
+      Expression = TESelect select
       Lateral = false
     }
 

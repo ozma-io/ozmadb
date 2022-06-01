@@ -157,15 +157,26 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
         let mapper = { idValueExprMapper with Query = applyToSelectExpr }
         mapValueExpr mapper
 
+    and applyToTableExpr : TableExpr -> TableExpr = function
+        | TESelect subsel -> TESelect <| applyToSelectExpr subsel
+        | TEFunc (name, args) -> TEFunc (name, Array.map applyToValueExpr args)
+
+    and applyToFromTableExpr (expr : FromTableExpr) : FromTableExpr =
+        { Expression = applyToTableExpr expr.Expression
+          Alias = expr.Alias
+          Lateral = expr.Lateral
+        }
+
     and applyToFromExpr : FromExpr -> FromExpr = function
         | FTable ({ Extra = :? RealEntityAnnotation as ann } as fTable) when not ann.IsInner && not ann.AsRoot ->
             match getSelectRestriction ann.RealEntity with
             | None -> FTable fTable
             | Some newSelect ->
                 // `Alias` is guaranteed to be there for all table queries.
-                let subsel = subSelectExpr (Option.get fTable.Alias) newSelect
-                FSubExpr subsel
+                let newExpr = subSelectExpr (Option.get fTable.Alias) newSelect
+                FTableExpr newExpr
         | FTable fTable -> FTable fTable
+        | FTableExpr expr -> FTableExpr <| applyToFromTableExpr expr
         | FJoin join ->
             FJoin
                 { Type = join.Type
@@ -173,12 +184,10 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                   B = applyToFromExpr join.B
                   Condition = applyToValueExpr join.Condition
                 }
-        | FSubExpr subsel ->
-            FSubExpr { subsel with Select = applyToSelectExpr subsel.Select }
 
     and applyToInsertValue = function
         | IVDefault -> IVDefault
-        | IVValue expr -> IVValue <| applyToValueExpr expr
+        | IVExpr expr -> IVExpr <| applyToValueExpr expr
 
     and applyToUpdateAssignExpr = function
         | UAESet (name, expr) -> UAESet (name, applyToInsertValue expr)

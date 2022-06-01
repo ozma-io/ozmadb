@@ -74,11 +74,6 @@ let private makeHashNameFor (maxLength : int) name =
 
 let private makeHashName (FunQLName name) = makeHashNameFor hashNameLength name
 
-let private resolveEntityRef (name : EntityRef) =
-    match tryResolveEntityRef name with
-    | Some ref -> ref
-    | None -> raisef ResolveLayoutException "Unspecified schema for entity %O" name
-
 [<NoEquality; NoComparison>]
 type private HalfVirtualField =
     { InheritedFrom : ResolvedEntityRef option
@@ -207,7 +202,7 @@ type private Phase1Resolver (layout : SourceLayout) =
 
     let resolveFieldType (fieldRef : ResolvedFieldRef) (field : SourceColumnField) (ft : ParsedFieldType) : ResolvedFieldType =
         try
-            match resolveFieldType layout true ft with
+            match resolveFieldType layout (Some fieldRef.Entity.Schema) true ft with
             | FTScalar SFTUserViewRef
             | FTArray SFTUserViewRef -> raisef ResolveLayoutException "User view references are not supported as field types"
             | FTArray (SFTReference (ref, opts)) -> raisef ResolveLayoutException "Arrays of references are not supported as field types"
@@ -613,8 +608,8 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
     and resolveRelatedExpr (wrappedLayout : ILayoutBits) (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
         let entityInfo = SFEntity entityRef
         let callbacks =
-            { Layout = wrappedLayout
-              HasDefaultAttribute = emptyHasDefaultAttribute
+            { resolveCallbacks wrappedLayout with
+                HomeSchema = Some entityRef.Schema
             }
         let (exprInfo, expr) =
             try

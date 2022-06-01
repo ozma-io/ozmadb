@@ -12,7 +12,6 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Resolve
-open FunWithFlags.FunDB.FunQL.Dereference
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Attributes.Merge
 open FunWithFlags.FunDB.Objects.Types
@@ -30,51 +29,54 @@ let private getColumn : ColumnType -> FunQLName option = function
     | CTColumn c -> Some c
     | _ -> None
 
-[<NoEquality; NoComparison>]
-type private HalfResolvedView =
-    { Resolved : ResolvedViewExpr
-      AllowBroken : bool
-    }
+type FindExistingView = ResolvedUserViewRef -> PossiblyBroken<ResolvedUserView> option
 
-[<NoEquality; NoComparison>]
-type private HalfResolvedSchema =
-    { UserViews : Map<UserViewName, PossiblyBroken<HalfResolvedView>>
-    }
+let emptyFindExistingView (ref : ResolvedUserViewRef) : PossiblyBroken<ResolvedUserView> option = None
 
-type private HalfResolvedViews = Map<SchemaName, PossiblyBroken<HalfResolvedSchema>>
-
-type private Phase1Resolver (layout : Layout, defaultAttrs : MergedDefaultAttributes, forceAllowBroken : bool, flags : ExprResolutionFlags) =
-    let hasDefaultAttribute (fieldRef : ResolvedFieldRef) (name : AttributeName) = 
+type private Phase1Resolver (layout : Layout, defaultAttrs : MergedDefaultAttributes, forceAllowBroken : bool, flags : ExprResolutionFlags, userViews : GeneratedUserViews, findExistingView : FindExistingView) =
+    let hasDefaultAttribute (fieldRef : ResolvedFieldRef) (name : AttributeName) =
         match defaultAttrs.FindField fieldRef.Entity fieldRef.Name with
         | None -> false
         | Some attrs -> Map.containsKey name attrs
 
-    let callbacks =
+    let hasUserView (uvRef : ResolvedUserViewRef) =
+        match Map.tryFind uvRef.Schema userViews.Schemas with
+        | Some (Ok schema) ->
+            Map.containsKey uvRef.Name schema.UserViews || Option.isSome (findExistingView uvRef)
+        | _ -> Option.isSome (findExistingView uvRef)
+
+    let defaultCallbacks =
         { Layout = layout
+          HomeSchema = None
           HasDefaultAttribute = hasDefaultAttribute
+          HasUserView = hasUserView
         }
 
-    let resolveUserView (uv : SourceUserView) : HalfResolvedView =
+    let resolveUserView (homeSchema : SchemaName option) (uv : SourceUserView) : ResolvedUserView =
         let parsed =
             match parse tokenizeFunQL viewExpr uv.Query with
             | Error msg -> raisef UserViewResolveException "Parse error: %s" msg
             | Ok rawExpr -> rawExpr
         let resolved =
+            let callbacks = { defaultCallbacks with HomeSchema = homeSchema }
             try
                 resolveViewExpr callbacks flags parsed
             with
             | :? ViewResolveException as e ->
                 raisefWithInner UserViewResolveException e "Resolve error"
+        let compiled = compileViewExpr layout defaultAttrs resolved
+
         { Resolved = resolved
+          Compiled = compiled
           AllowBroken = uv.AllowBroken
         }
 
-    let resolveUserViewsSchema (schemaName : SchemaName) (schema : GeneratedUserViewsSchema) : PossiblyBroken<HalfResolvedSchema> =
+    let resolveUserViewsSchema (schemaName : SchemaName) (schema : GeneratedUserViewsSchema) : PossiblyBroken<UserViewsSchema> =
         let mapUserView name uv =
             try
                 checkName name
                 try
-                    Ok <| resolveUserView uv
+                    Ok <| resolveUserView (Some schemaName) uv
                 with
                 | :? UserViewResolveException as e when forceAllowBroken || uv.AllowBroken ->
                     let ret =
@@ -89,7 +91,7 @@ type private Phase1Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
 
         Ok { UserViews = uvs }
 
-    let resolveUserViews (uvs : GeneratedUserViews) : HalfResolvedViews =
+    let resolveUserViews () : UserViews =
         let mapSchema name schema =
             try
                 if not <| Map.containsKey name layout.Schemas then
@@ -97,104 +99,18 @@ type private Phase1Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
                 resolveUserViewsSchema name schema
             with
             | e -> raisefWithInner UserViewResolveException e "In schema %O" name
-        uvs.Schemas |> Map.map (fun name -> Result.bind (mapSchema name))
-
-    member this.ResolveUserView uv = resolveUserView uv
-    member this.ResolveUserViews uvs = resolveUserViews uvs
-
-type FindExistingView = ResolvedUserViewRef -> PossiblyBroken<ResolvedUserView> option
-
-type private Phase2Resolver (layout : Layout, defaultAttrs : MergedDefaultAttributes, findExistingView : FindExistingView, halfResolved : HalfResolvedViews, forceAllowBroken : bool) =
-    let mutable cachedViews : Map<ResolvedUserViewRef, PossiblyBroken<ResolvedUserView>> = Map.empty
-
-    let findCached (ref : ResolvedUserViewRef) =
-        match Map.tryFind ref cachedViews with
-        | Some r -> Some r
-        | None -> findExistingView ref
-
-    let resolveUserView (homeSchema : SchemaName option) (uv : HalfResolvedView) : ResolvedUserView =
-        let checkView ref =
-            match findExistingView ref with
-            | Some _ -> ()
-            | None ->
-                let mschema =
-                    match Map.tryFind ref.Schema halfResolved with
-                    | None -> raisef UserViewResolveException "Referenced view not found: %O" ref
-                    | Some r -> r
-                match mschema with
-                | Ok schema ->
-                    if not <| Map.containsKey ref.Name schema.UserViews then
-                        raisef UserViewResolveException "Referenced view not found: %O" ref
-                | Error e ->
-                    raisef UserViewResolveException "User view's schema is broken: %O" ref
-
-        let dereferenced =
-            try
-                dereferenceViewExpr checkView homeSchema uv.Resolved
-            with
-            | :? ViewDereferenceException as err -> raisefWithInner UserViewResolveException err "Dereference error"
-        let compiled = compileViewExpr layout defaultAttrs dereferenced
-
-        { Resolved = dereferenced
-          Compiled = compiled
-          AllowBroken = uv.AllowBroken
+        { Schemas = userViews.Schemas |> Map.map (fun name -> Result.bind (mapSchema name))
         }
 
-    let resolveUserViewsSchema (schemaName : SchemaName) (schema : HalfResolvedSchema) : UserViewsSchema =
-        let mapUserView name (maybeUv : PossiblyBroken<HalfResolvedView>) =
-            let ref = { Schema = schemaName; Name = name }
-            match maybeUv with
-            | Error e ->
-                let ret = Error e
-                cachedViews <- Map.add ref ret cachedViews
-                ret
-            | Ok uv ->
-                match findCached ref with
-                | Some (Error e) -> Error e
-                | Some (Ok cached) -> Ok cached
-                | None ->
-                    let r =
-                        try
-                            let r = resolveUserView (Some schemaName) uv
-                            Ok r
-                        with
-                        | :? UserViewResolveException as e when uv.AllowBroken || forceAllowBroken ->
-                            Error { Error = e; AllowBroken = uv.AllowBroken }
-                        | e -> raisefWithInner UserViewResolveException e "In user view %O" ref
-                    cachedViews <- Map.add ref r cachedViews
-                    r
-
-        let userViews = schema.UserViews |> Map.map mapUserView
-        { UserViews = userViews
-        }
-
-    let resolveUserViews () : UserViews =
-        let mapSchema name schema =
-            try
-                resolveUserViewsSchema name schema
-            with
-            | :? UserViewResolveException as e ->
-                raisefWithInner UserViewResolveException e "In schema %O" name
-
-        let schemas = halfResolved |> Map.map (fun name -> Result.map (mapSchema name))
-        { Schemas = schemas }
-
-    member this.ResolveAnonymousUserView homeSchema uv =
-        assert (Map.isEmpty halfResolved)
-        resolveUserView homeSchema uv
+    member this.ResolveUserView homeSchema uv = resolveUserView homeSchema uv
     member this.ResolveUserViews () = resolveUserViews ()
 
 let private uvResolutionFlags = { emptyExprResolutionFlags with Privileged = true }
 
-// Warning: this should be executed outside of any transactions because of test runs.
 let resolveUserViews (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (forceAllowBroken : bool) (userViews : GeneratedUserViews) : UserViews =
-    let phase1 = Phase1Resolver(layout, defaultAttrs, forceAllowBroken, uvResolutionFlags)
-    let resolvedViews = phase1.ResolveUserViews userViews
-    let phase2 = Phase2Resolver(layout, defaultAttrs, (fun ref -> None), resolvedViews, forceAllowBroken)
-    phase2.ResolveUserViews ()
+    let phase1 = Phase1Resolver(layout, defaultAttrs, forceAllowBroken, uvResolutionFlags, userViews, emptyFindExistingView)
+    phase1.ResolveUserViews ()
 
 let resolveAnonymousUserView (layout : Layout) (isPrivileged : bool) (defaultAttrs : MergedDefaultAttributes) (findExistingView : FindExistingView) (homeSchema : SchemaName option) (q: string) : ResolvedUserView =
-    let phase1 = Phase1Resolver(layout, defaultAttrs, false, { emptyExprResolutionFlags with Privileged = isPrivileged })
-    let resolvedView = phase1.ResolveUserView { Query = q; AllowBroken = false }
-    let phase2 = Phase2Resolver(layout, defaultAttrs, findExistingView, Map.empty, false)
-    phase2.ResolveAnonymousUserView homeSchema resolvedView
+    let phase1 = Phase1Resolver(layout, defaultAttrs, false, { emptyExprResolutionFlags with Privileged = isPrivileged }, emptyGeneratedUserViews, findExistingView)
+    phase1.ResolveUserView homeSchema { Query = q; AllowBroken = false }

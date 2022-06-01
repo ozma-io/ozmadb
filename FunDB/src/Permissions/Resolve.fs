@@ -81,14 +81,11 @@ let private unionFlatRoles (a : FlatRole) (b: FlatRole) : FlatRole =
     { Entities = unionFlatAllowedDatabases a.Entities b.Entities
     }
 
-type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb : SourceAllowedDatabase) =
+type private RoleResolver (layout : Layout, forceAllowBroken : bool, hasUserView : HasUserView, allowedDb : SourceAllowedDatabase, roleSchema : SchemaName) =
+    let defaultCallbacks = resolveCallbacks layout
+
     let mutable resolved : Map<ResolvedEntityRef, PossiblyBroken<HalfAllowedEntity>> = Map.empty
     let mutable flattened : Map<ResolvedEntityRef, FlatAllowedRoleEntity> = Map.empty
-
-    let callbacks =
-        { Layout = layout
-          HasDefaultAttribute = emptyHasDefaultAttribute
-        }
 
     let resolveRestriction (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (allowIds : bool) (where : string) : ResolvedOptimizedFieldExpr =
         let whereExpr =
@@ -99,7 +96,8 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         let entityInfo = SFEntity entityRef
         let (exprInfo, expr) =
             try
-                resolveSingleFieldExpr callbacks OrderedMap.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
+                // TOOD: allow to specify `__self` as home schema.
+                resolveSingleFieldExpr defaultCallbacks OrderedMap.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"
         let usedReferences = fieldExprUsedReferences layout expr
@@ -317,7 +315,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
         { Entities = allowedSchema.Entities |> Map.map mapEntity
         }
 
-    let resolveAllowedDatabase (): AllowedDatabase =
+    let resolveAllowedDatabase () : AllowedDatabase =
         let mapSchema name allowedSchema =
             try
                 let schema =
@@ -334,7 +332,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, allowedDb :
     member this.ResolveAllowedDatabase () = resolveAllowedDatabase ()
     member this.Flattened = flattened
 
-type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissions : SourcePermissions) =
+type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, hasUserView : HasUserView, permissions : SourcePermissions) =
     let mutable resolved : Map<ResolvedRoleRef, PossiblyBroken<ResolvedRole>> = Map.empty
 
     let rec resolveOneRole (stack : Set<ResolvedRoleRef>) (ref : ResolvedRoleRef) (role : SourceRole) : ResolvedRole =
@@ -353,7 +351,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
             match resolveRole newStack parentRef parentRole with
             | Ok role -> role.Flattened
             | Error e -> raisefWithInner ResolvePermissionsParentException e.Error "Error in parent %O" parentRef
-        let resolver = RoleResolver (layout, forceAllowBroken, role.Permissions)
+        let resolver = RoleResolver (layout, forceAllowBroken, hasUserView, role.Permissions, ref.Schema)
         let flattenedParents = role.Parents |> Set.toSeq |> Seq.map resolveParent |> Seq.fold unionFlatRoles emptyFlatRole
         let resolved = resolver.ResolveAllowedDatabase ()
         let flattened =
@@ -403,6 +401,6 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, permissio
 
     member this.ResolvePermissions = resolvePermissions
 
-let resolvePermissions (layout : Layout) (forceAllowBroken : bool) (source : SourcePermissions) : Permissions =
-    let phase1 = Phase1Resolver (layout, forceAllowBroken, source)
+let resolvePermissions (layout : Layout) (hasUserView : HasUserView) (forceAllowBroken : bool) (source : SourcePermissions) : Permissions =
+    let phase1 = Phase1Resolver (layout, forceAllowBroken, hasUserView, source)
     phase1.ResolvePermissions ()

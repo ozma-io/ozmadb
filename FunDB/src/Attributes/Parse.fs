@@ -59,7 +59,7 @@ type ParsedDefaultAttributes =
 type private Phase1Resolver (forceAllowBroken : bool) =
     let parseAttributesField (fieldAttrs : SourceAttributesField) : ParsedAttributesField =
         let attrsMap =
-            match parse tokenizeFunQL boundAttributeMap fieldAttrs.Attributes with
+            match parse tokenizeFunQL boundAttributesMap fieldAttrs.Attributes with
             | Ok r -> r
             | Error msg -> raisef ParseAttributesException "Error parsing attributes: %s" msg
 

@@ -65,19 +65,8 @@ let private expandMaterializedField (layout : Layout) (fieldRef : ResolvedFieldR
         let (case, comp) = cases.[0]
         comp.Expression
     else
-        let subEntityInfo =
-            { Bound =
-                Some
-                    { Ref = { fieldRef with Name = funSubEntity }
-                      Immediate = true
-                      Path = [||]
-                      IsInner = true
-                    }
-              FromEntityId = localExprFromEntityId
-              ForceSQLName = None
-            } : FieldMeta
         let subEntityPlainRef = { Entity = Some <| relaxEntityRef fieldRef.Entity; Name = funSubEntity } : FieldRef
-        let subEntityRef = { Ref = { Ref = VRColumn subEntityPlainRef; Path = [||]; AsRoot = false }; Extra = ObjectMap.singleton subEntityInfo } : LinkedBoundFieldRef
+        let subEntityRef = makeColumnReference layout (simpleColumnMeta fieldRef.Entity) subEntityPlainRef
         let buildCase (case : VirtualFieldCase, comp : ResolvedComputedField) =
             let info = { PossibleEntities = PEList case.PossibleEntities } : SubEntityMeta
             let extra = ObjectMap.singleton info
@@ -353,8 +342,8 @@ let rec private findOuterFields (layout : Layout) (expr : ResolvedFieldExpr) : M
     let mutable outerFields = Map.empty
 
     let iterReference (ref : LinkedBoundFieldRef) =
-        let fieldInfo = ObjectMap.findType<FieldMeta> ref.Extra
-        let boundInfo = Option.get fieldInfo.Bound
+        let info = ObjectMap.findType<FieldRefMeta> ref.Extra
+        let boundInfo = getFieldRefBoundColumn info
         let field = layout.FindField boundInfo.Ref.Entity boundInfo.Ref.Name |> Option.get
         match field.Field with
         | RColumnField col ->
@@ -415,9 +404,9 @@ type private AffectedByExprBuilder (layout : Layout, constrEntityRef : ResolvedE
         let mutable triggers = Seq.empty
 
         let iterReference (ref : LinkedBoundFieldRef) =
-            let fieldInfo = ObjectMap.findType<FieldMeta> ref.Extra
-            let boundInfo = Option.get fieldInfo.Bound
-            let pathWithEntities = Seq.zip boundInfo.Path ref.Ref.Path |> List.ofSeq
+            let info = ObjectMap.findType<FieldRefMeta> ref.Extra
+            let boundInfo = getFieldRefBoundColumn info
+            let pathWithEntities = Seq.zip info.Path ref.Ref.Path |> List.ofSeq
             let newTriggers = buildPathTriggers ref.Extra boundInfo.Ref pathWithEntities
             triggers <- Seq.append triggers newTriggers
         let mapper =
@@ -508,6 +497,7 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
                 (None, fTable.Alias |> Option.map (fun x -> x.Name), None)
             else
                 (None, None, Some from)
+        | SQL.FTableExpr expr -> failwith "Unexpected subexpression"
         | SQL.FJoin join as expr ->
             let (valExprA, nameA, ma) = useNewInFromExpr join.A
             let (valExprB, nameB, mb) = useNewInFromExpr join.B
@@ -527,7 +517,6 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
                           Condition = useNewInValueExpr join.Condition
                         }
                 (valExpr, name, Some ret)
-        | SQL.FSubExpr subsel -> failwith "Unexpected subexpression"
 
     member this.UseNewInSelectExpr expr = useNewInSelectExpr expr
 
@@ -985,7 +974,7 @@ let private compileMaterializedFieldUpdate (layout : Layout) (fieldRef : Resolve
     let joinSame = SQL.VEBinaryOp (SQL.VEColumn updateId, SQL.BOEq, SQL.VEColumn joinedUpdateId)
     let opTable = SQL.operationTable tableRef
 
-    let assign = SQL.UAESet (SQL.updateColumnName comp.ColumnName, SQL.IVValue compiledResult)
+    let assign = SQL.UAESet (SQL.updateColumnName comp.ColumnName, SQL.IVExpr compiledResult)
     { SQL.updateExpr opTable with
           Assignments = [|assign|]
           From = Some compiledFrom

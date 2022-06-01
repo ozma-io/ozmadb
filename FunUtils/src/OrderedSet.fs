@@ -7,6 +7,8 @@ open System.Collections.Generic
 type OrderedSet<'a> when 'a : comparison =
     private { Order : 'a[]; Keys : Set<'a> }
 
+    override this.ToString () = this.Order.ToString ()
+
     member this.Count = this.Order.Length
 
     member this.Contains key = Set.contains key this.Keys
@@ -15,7 +17,7 @@ type OrderedSet<'a> when 'a : comparison =
 
     member this.CopyTo (arr : 'a[], arrayIndex : int) =
         this.Order.CopyTo(arr, arrayIndex)
-
+    
     interface IEnumerable with
         member this.GetEnumerator () = this.GetEnumerator ()
 

@@ -272,12 +272,6 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
             let! (transaction, currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, prefetchedViews, sourceViews) =
                 task {
                     try
-                        let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
-                        let parsedAttrs = parseAttributes true sourceAttrs
-                        let defaultAttrs = resolveAttributes layout true parsedAttrs
-                        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
-                        do! checkBrokenAttributes logger cacheParams.AllowAutoMark preload transaction defaultAttrs cancellationToken
-
                         let systemViews = preloadUserViews preload
                         let! sourceViews = buildSchemaUserViews transaction.System None cancellationToken
                         let sourceViews = { Schemas = Map.union systemViews.Schemas sourceViews.Schemas } : SourceUserViews
@@ -297,6 +291,13 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let generatedViews = generateUserViews jsApi layout mergedTriggers true sourceViews cancellationToken
                         let sourceViews = generatedUserViewsSource sourceViews generatedViews
                         let! userViewsUpdate = updateUserViews transaction.System sourceViews cancellationToken
+
+                        let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
+                        let parsedAttrs = parseAttributes true sourceAttrs
+                        let defaultAttrs = resolveAttributes layout (generatedViews.Find >> Option.isSome) true parsedAttrs
+                        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+                        do! checkBrokenAttributes logger cacheParams.AllowAutoMark preload transaction defaultAttrs cancellationToken
+
                         let userViews = resolveUserViews layout mergedAttrs true generatedViews
 
                         let jsApi = jsRuntime.GetValue isolate
@@ -307,7 +308,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         do! checkBrokenActions logger cacheParams.AllowAutoMark preload transaction preparedActions cancellationToken
 
                         let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
-                        let permissions = resolvePermissions layout true sourcePermissions
+                        let permissions = resolvePermissions layout (generatedViews.Find >> Option.isSome) true sourcePermissions
                         do! checkBrokenPermissions logger cacheParams.AllowAutoMark preload transaction permissions cancellationToken
 
                         let! currentVersion = ensureCurrentVersion transaction (isChanged || not (updateResultIsEmpty userViewsUpdate)) cancellationToken
@@ -427,16 +428,18 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
                         let layout = resolveLayout false sourceLayout
 
-                        let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
-                        let parsedAttrs = parseAttributes false sourceAttrs
-                        let defaultAttrs = resolveAttributes layout false parsedAttrs
-                        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
                         let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
                         let triggers = resolveTriggers layout false sourceTriggers
                         let mergedTriggers = mergeTriggers layout triggers
 
                         let! sourceUvs = buildSchemaUserViews transaction.System None cancellationToken
+
+                        let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
+                        let parsedAttrs = parseAttributes false sourceAttrs
+                        let defaultAttrs = resolveAttributes layout (sourceUvs.Find >> Option.isSome) false parsedAttrs
+                        let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
+
                         let userViews = resolveUserViews layout mergedAttrs false (passthruGeneratedUserViews sourceUvs)
 
                         // To dry-run user views we need to stop the transaction.
@@ -489,7 +492,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         finally
                             jsIsolates.Return myIsolate
 
-                    let permissions = resolvePermissions layout false sourcePermissions
+                    let permissions = resolvePermissions layout (prefetchedViews.Find >> Option.bind Result.getOption >> Option.isSome) false sourcePermissions
 
                     // Another instance has already rebuilt them, so just load them from the database.
                     let systemViews = filterSystemViews sourceUvs
@@ -635,30 +638,6 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 with
                                 | :? ResolveLayoutException as e -> raisefWithInner ContextException e "Failed to resolve layout"
 
-                            let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
-                            if not <| preloadPermissionsAreUnchanged sourcePermissions preload then
-                                raisef ContextException "Cannot modify system permissions"
-                            let permissions =
-                                try
-                                    resolvePermissions layout false sourcePermissions
-                                with
-                                | :? ResolvePermissionsException as e -> raisefWithInner ContextException e "Failed to resolve permissions"
-
-                            let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
-                            if not <| preloadAttributesAreUnchanged sourceAttrs preload then
-                                raisef ContextException "Cannot modify system default attributes"
-                            let parsedAttrs =
-                                try
-                                    parseAttributes false sourceAttrs
-                                with
-                                | :? ParseAttributesException as e -> raisefWithInner ContextException e "Failed to parse default attributes"
-                            let defaultAttrs =
-                                try
-                                    resolveAttributes layout false parsedAttrs
-                                with
-                                | :? ResolveAttributesException as e -> raisefWithInner ContextException e "Failed to resolve default attributes"
-                            let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
-
                             let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                             if not <| preloadModulesAreUnchanged sourceModules preload then
                                 raisef ContextException "Cannot modify system modules"
@@ -703,6 +682,29 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             let! sourceUserViews = buildSchemaUserViews transaction.System None cancellationToken
                             if filterSystemViews sourceUserViews <> oldState.Context.SystemViews then
                                 raisef ContextException "Cannot modify system user views"
+                            logger.LogInformation("Updating generated user views")
+                            let generatedUserViews =
+                                try
+                                    generateUserViews jsApi layout mergedTriggers false sourceUserViews cancellationToken
+                                with
+                                | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
+                            let! userViewsUpdate = updateUserViews transaction.System (generatedUserViewsSource sourceUserViews generatedUserViews) cancellationToken
+                            do! deleteDeferredFromUpdate layout transaction userViewsUpdate cancellationToken
+
+                            let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
+                            if not <| preloadAttributesAreUnchanged sourceAttrs preload then
+                                raisef ContextException "Cannot modify system default attributes"
+                            let parsedAttrs =
+                                try
+                                    parseAttributes false sourceAttrs
+                                with
+                                | :? ParseAttributesException as e -> raisefWithInner ContextException e "Failed to parse default attributes"
+                            let defaultAttrs =
+                                try
+                                    resolveAttributes layout (generatedUserViews.Find >> Option.isSome) false parsedAttrs
+                                with
+                                | :? ResolveAttributesException as e -> raisefWithInner ContextException e "Failed to resolve default attributes"
+                            let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
 
                             // Actually migrate.
                             let (newAssertions, wantedUserMeta) = buildFullLayoutMeta layout (filterUserLayout layout)
@@ -719,20 +721,21 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             with
                             | :? LayoutIntegrityException as e -> return raisefWithInner ContextException e "Failed to perform integrity checks"
 
-                            logger.LogInformation("Updating generated user views")
-                            let generatedUserViews =
-                                try
-                                    generateUserViews jsApi layout mergedTriggers false sourceUserViews cancellationToken
-                                with
-                                | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
-                            let! userViewsUpdate = updateUserViews transaction.System (generatedUserViewsSource sourceUserViews generatedUserViews) cancellationToken
-                            do! deleteDeferredFromUpdate layout transaction userViewsUpdate cancellationToken
-
                             let userViews =
                                 try
                                     resolveUserViews layout mergedAttrs false generatedUserViews
                                 with
                                 | :? UserViewResolveException as err -> raisefWithInner ContextException err "Failed to resolve user views"
+
+                            let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
+                            if not <| preloadPermissionsAreUnchanged sourcePermissions preload then
+                                raisef ContextException "Cannot modify system permissions"
+                            let permissions =
+                                try
+                                    resolvePermissions layout (userViews.Find >> Option.bind Result.getOption >> Option.isSome) false sourcePermissions
+                                with
+                                | :? ResolvePermissionsException as e -> raisefWithInner ContextException e "Failed to resolve permissions"
+
                             let! badUserViews =
                                 task {
                                     try

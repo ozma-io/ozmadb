@@ -246,9 +246,15 @@ let private parseResult
 
     let parseRow (values : SQL.Value[]) =
         let getCell (cellAttributes, i, column) =
-            let attrs = Map.map (fun name (valType, i) -> values.[i]) cellAttributes
-            let pun = Map.tryFind column.Name punAttributes |> Option.map (fun (valType, i) -> values.[i])
             let value = values.[i]
+            let attrs = Map.map (fun name (valType, i) -> values.[i]) cellAttributes
+            let pun =
+                match value with
+                | SQL.VNull -> None
+                | _ ->
+                    match Map.tryFind column.Name punAttributes with
+                    | Some (valType, i) -> Some values.[i]
+                    | None -> None
             { Attributes = attrs
               Value = value
               Pun = pun

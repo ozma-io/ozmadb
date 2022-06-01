@@ -37,6 +37,10 @@ type GeneratedUserViews =
             | Some (Ok schema) -> Map.tryFind ref.Name schema.UserViews
             | _ -> None
 
+let emptyGeneratedUserViews : GeneratedUserViews =
+    { Schemas = Map.empty
+    }
+
 let private convertUserView (KeyValue (k, v : Value.Value)) =
     let query = v.GetString().Get()
     let uv =

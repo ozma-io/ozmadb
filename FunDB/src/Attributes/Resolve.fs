@@ -19,17 +19,15 @@ type ResolveAttributesException (message : string, innerException : Exception, i
 
 let private attrResolutionFlags = { emptyExprResolutionFlags with Privileged = true }
 
-type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
-    let callbacks =
-        { Layout = layout
-          // TODO: allow attributes to refer to each other.
-          HasDefaultAttribute = emptyHasDefaultAttribute
-        }
+type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, hasUserView : HasUserView) =
+    // TODO: allow attributes to refer to each other.
+    let defaultCallbacks = { resolveCallbacks layout with HasUserView = hasUserView }
 
-    let resolveAttributesField (fieldRef : ResolvedFieldRef) (fieldAttrs : ParsedAttributesField) : AttributesField =
+    let resolveAttributesField (homeSchema : SchemaName) (fieldRef : ResolvedFieldRef) (fieldAttrs : ParsedAttributesField) : AttributesField =
         let resolvedMap =
             try
-                resolveEntityAttributesMap callbacks attrResolutionFlags fieldRef.Entity fieldAttrs.Attributes
+                // TOOD: allow to specify `__self` as home schema.
+                resolveEntityAttributesMap defaultCallbacks attrResolutionFlags fieldRef.Entity fieldAttrs.Attributes
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
 
@@ -38,16 +36,16 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
           Attributes = resolvedMap
         }
 
-    let resolveAttributesEntity (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (entityAttrs : ParsedAttributesEntity) : AttributesEntity =
+    let resolveAttributesEntity (homeSchema : SchemaName) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (entityAttrs : ParsedAttributesEntity) : AttributesEntity =
         let mapField name = function
             | Error e -> Error e
             | Ok fieldAttrs ->
                 try
                     try
                         if entity.FindField name |> Option.isNone then
-                            raisef ResolveAttributesException "Unknown field name"
+                            raisef ResolveAttributesException "Field not found"
                         let fieldRef = { Entity = entityRef; Name = name }
-                        Ok <| resolveAttributesField fieldRef fieldAttrs
+                        Ok <| resolveAttributesField homeSchema fieldRef fieldAttrs
                     with
                     | :? ResolveAttributesException as e when fieldAttrs.AllowBroken || forceAllowBroken ->
                         Error { Error = e; AllowBroken = fieldAttrs.AllowBroken }
@@ -57,29 +55,29 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
         { Fields = entityAttrs.Fields |> Map.map mapField
         }
 
-    let resolveAttributesSchema (schemaName : SchemaName) (schema : ResolvedSchema) (schemaAttrs : ParsedAttributesSchema) : AttributesSchema =
+    let resolveAttributesSchema (homeSchema : SchemaName) (schemaName : SchemaName) (schema : ResolvedSchema) (schemaAttrs : ParsedAttributesSchema) : AttributesSchema =
         let mapEntity name entityAttrs =
             try
                 let entity =
                     match Map.tryFind name schema.Entities with
                     | Some entity when not entity.IsHidden -> entity
-                    | _ -> raisef ResolveAttributesException "Unknown entity name"
+                    | _ -> raisef ResolveAttributesException "Entity not found"
                 let ref = { Schema = schemaName; Name = name }
-                resolveAttributesEntity ref entity entityAttrs
+                resolveAttributesEntity homeSchema ref entity entityAttrs
             with
             | e -> raisefWithInner ResolveAttributesException e "In entity %O" name
 
         { Entities = schemaAttrs.Entities |> Map.map mapEntity
         }
 
-    let resolveAttributesDatabase (db : ParsedAttributesDatabase) : AttributesDatabase =
+    let resolveAttributesDatabase (homeSchema : SchemaName) (db : ParsedAttributesDatabase) : AttributesDatabase =
         let mapSchema name schemaAttrs =
             try
                 let schema =
                     match Map.tryFind name layout.Schemas with
-                    | None -> raisef ResolveAttributesException "Unknown schema name"
+                    | None -> raisef ResolveAttributesException "Schema not found"
                     | Some schema -> schema
-                resolveAttributesSchema name schema schemaAttrs
+                resolveAttributesSchema homeSchema name schema schemaAttrs
             with
             | e -> raisefWithInner ResolveAttributesException e "For schema %O" name
 
@@ -91,7 +89,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
             try
                 if not <| Map.containsKey name layout.Schemas then
                     raisef ResolveAttributesException "Unknown schema name"
-                resolveAttributesDatabase db
+                resolveAttributesDatabase name db
             with
             | e -> raisefWithInner ResolveAttributesException e "In schema %O" name
 
@@ -100,6 +98,6 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
 
     member this.ResolveAttributes defaultAttrs = resolveAttributes defaultAttrs
 
-let resolveAttributes (layout : Layout) (forceAllowBroken : bool) (source : ParsedDefaultAttributes) : DefaultAttributes =
-    let phase1 = Phase1Resolver (layout, forceAllowBroken)
+let resolveAttributes (layout : Layout) (hasUserView : HasUserView) (forceAllowBroken : bool)  (source : ParsedDefaultAttributes) : DefaultAttributes =
+    let phase1 = Phase1Resolver (layout, forceAllowBroken, hasUserView)
     phase1.ResolveAttributes source

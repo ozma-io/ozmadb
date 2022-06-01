@@ -67,7 +67,6 @@
     <Compile Include="src/FunQL/Resolve.fs" />
     <Compile Include="src/FunQL/Typecheck.fs" />
     <Compile Include="src/FunQL/UsedReferences.fs" />
-    <Compile Include="src/FunQL/Dereference.fs" />
     <Compile Include="src/FunQL/Optimize.fs" />
     <Compile Include="src/FunQL/Arguments.fs" />
     <Compile Include="src/FunQL/Compile.fs" />

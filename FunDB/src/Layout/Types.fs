@@ -149,6 +149,10 @@ type ResolvedFieldBits = GenericResolvedField<ResolvedColumnField, IComputedFiel
 
 let resolvedFieldToBits : ResolvedField -> ResolvedFieldBits = mapResolvedField id (fun x -> x :> IComputedFieldBits)
 
+let resolvedFieldType : GenericResolvedField<ResolvedColumnField, 'cf> -> ResolvedFieldType option = function
+    | RColumnField { FieldType = typ } -> Some typ
+    | _ -> None
+
 type FieldInfo<'col, 'comp> =
     { Name : FieldName
       // If a field is considered to not have an implicit name (so an explicit one is required in `SELECT`).
@@ -281,6 +285,12 @@ type ILayoutBits =
     inherit IEntitiesSet
 
     abstract member FindEntity : ResolvedEntityRef -> IEntityBits option
+
+let emptyLayoutBits =
+    { new ILayoutBits with
+          member this.FindEntity ent = None
+          member this.HasVisibleEntity ent = false
+    }
 
 [<NoEquality; NoComparison>]
 type Layout =

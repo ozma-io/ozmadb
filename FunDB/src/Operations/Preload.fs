@@ -16,6 +16,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.System
 open FunWithFlags.FunDB.Layout.Types
@@ -474,7 +475,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                 with
                 | e ->
                     // Maybe we'll get a better error
-                    let perms = resolvePermissions preloadLayout false permissions
+                    let perms = resolvePermissions preloadLayout emptyHasUserView false permissions
                     return reraise' e
             }
         let! attributesUpdate =
@@ -486,7 +487,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                 | e ->
                     // Maybe we'll get a better error
                     let parsedAttrs = parseAttributes false defaultAttributes
-                    let errors = resolveAttributes preloadLayout false parsedAttrs
+                    let errors = resolveAttributes preloadLayout emptyHasUserView false parsedAttrs
                     return reraise' e
             }
         let! actionsUpdate =

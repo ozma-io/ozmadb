@@ -44,21 +44,17 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             buildForPath extra { Entity = entityRef; Name = arrow.Name } arrow.AsRoot paths
 
     and buildForReference (ref : LinkedBoundFieldRef) =
-        match ref.Ref.Ref with
-        | VRColumn _ ->
-            match ObjectMap.tryFindType<FieldMeta> ref.Extra with
-            | Some { Bound = Some boundInfo } ->
-                let pathWithEntities = Seq.zip boundInfo.Path ref.Ref.Path |> Seq.toList
-                buildForPath ref.Extra boundInfo.Ref ref.Ref.AsRoot pathWithEntities
-            | _ -> ()
-        | VRArgument name ->
-            usedArguments <- Set.add name usedArguments
-            match ObjectMap.tryFindType<ReferenceArgumentMeta> ref.Extra with
-            | Some argInfo when not (Array.isEmpty ref.Ref.Path) ->
-                let argRef = { Entity = argInfo.Path.[0]; Name = ref.Ref.Path.[0].Name }
-                let pathWithEntities = Seq.zip argInfo.Path ref.Ref.Path |> Seq.skip 1 |> Seq.toList
-                buildForPath ref.Extra argRef ref.Ref.AsRoot pathWithEntities
-            | _ -> ()
+        let info = ObjectMap.tryFindType<FieldRefMeta> ref.Extra |> Option.defaultValue emptyFieldRefMeta
+        match info.Bound with
+        | Some (BMColumn boundInfo) ->
+            let pathWithEntities = Seq.zip info.Path ref.Ref.Path |> Seq.toList
+            buildForPath ref.Extra boundInfo.Ref ref.Ref.AsRoot pathWithEntities
+        | Some (BMArgument arg) ->
+            let argRef = { Entity = info.Path.[0]; Name = ref.Ref.Path.[0].Name }
+            let pathWithEntities = Seq.zip info.Path ref.Ref.Path |> Seq.skip 1 |> Seq.toList
+            buildForPath ref.Extra argRef ref.Ref.AsRoot pathWithEntities
+        | None ->
+            assert (Array.isEmpty ref.Ref.Path)
 
     and buildForResult : ResolvedQueryResult -> unit = function
         | QRAll alias -> ()
@@ -108,7 +104,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             buildForSelectExpr setOp.B
             buildForOrderLimitClause setOp.OrderLimit
         | SValues values ->
-            let buildForOne = Array.iter (ignore << buildForFieldExpr)
+            let buildForOne = Array.iter buildForValuesValue
             Array.iter buildForOne values
 
     and buildForCommonTableExpr (cte : ResolvedCommonTableExpr) =
@@ -129,34 +125,48 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
         Array.iter buildForResult query.Results
         buildForOrderLimitClause query.OrderLimit
 
+    and buildForTableExpr : ResolvedTableExpr -> unit = function
+        | TESelect subsel -> buildForSelectExpr subsel
+        | TEDomain (dom, flags) ->
+            if flags.AsRoot then
+                hasRestrictedEntities <- true
+        | TEFieldDomain (entity, field, flags) ->
+            if flags.AsRoot then
+                hasRestrictedEntities <- true
+        | TETypeDomain (typ, flags) ->
+            if flags.AsRoot then
+                hasRestrictedEntities <- true
+
+    and buildForFromTableExpr (expr : ResolvedFromTableExpr) =
+        buildForTableExpr expr.Expression
+
     and buildForFromExpr : ResolvedFromExpr -> unit = function
         | FEntity fromEnt ->
-            if not fromEnt.AsRoot then
+            if fromEnt.AsRoot then
                 hasRestrictedEntities <- true
+        | FTableExpr expr -> buildForFromTableExpr expr
         | FJoin join ->
             buildForFromExpr join.A
             buildForFromExpr join.B
             ignore <| buildForFieldExpr join.Condition
-        | FSubExpr subsel -> buildForSelectExpr subsel.Select
 
-    and buildForInsertValue : ResolvedInsertValue -> unit = function
-        | IVDefault -> ()
-        | IVValue expr -> ignore <| buildForFieldExpr expr
+    and buildForValuesValue : ResolvedValuesValue -> unit = function
+        | VVDefault -> ()
+        | VVExpr expr -> ignore <| buildForFieldExpr expr
 
     and buildForInsertExpr (insert : ResolvedInsertExpr) =
         Option.iter buildForCommonTableExprs insert.CTEs
-        let entityRef = tryResolveEntityRef insert.Entity.Ref |> Option.get
+        let entityRef = getResolvedEntityRef insert.Entity.Ref
         let usedFields = insert.Fields |> Seq.map (fun fieldName -> (fieldName, usedFieldInsert)) |> Map.ofSeq
         let usedEntity = { usedEntityInsert with Fields = usedFields }
         usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
         match insert.Source with
         | ISDefaultValues -> ()
-        | ISValues vals -> Array.iter (Array.iter buildForInsertValue) vals
         | ISSelect select -> buildForSelectExpr select
 
     and buildForUpdateAssignExpr (entityRef : ResolvedEntityRef) = function
         | UAESet (name, expr) ->
-            buildForInsertValue expr
+            buildForValuesValue expr
             let usedEntity = { usedEntityUpdate with Fields = Map.singleton name usedFieldUpdate }
             usedDatabase <- addUsedEntityRef entityRef usedEntity usedDatabase
         | UAESelect (cols, expr) ->
@@ -166,7 +176,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
 
     and buildForUpdateExpr (update : ResolvedUpdateExpr) =
         Option.iter buildForCommonTableExprs update.CTEs
-        let entityRef = tryResolveEntityRef update.Entity.Ref |> Option.get
+        let entityRef = getResolvedEntityRef update.Entity.Ref
         for assign in update.Assignments do
             buildForUpdateAssignExpr entityRef assign
         usedDatabase <- addUsedEntityRef entityRef usedEntityUpdate usedDatabase
@@ -175,7 +185,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
 
     and buildForDeleteExpr (delete : ResolvedDeleteExpr) =
         Option.iter buildForCommonTableExprs delete.CTEs
-        let entityRef = tryResolveEntityRef delete.Entity.Ref |> Option.get
+        let entityRef = getResolvedEntityRef delete.Entity.Ref
         usedDatabase <- addUsedEntityRef entityRef usedEntityDelete usedDatabase
         Option.iter buildForFromExpr delete.Using
         Option.iter (ignore << buildForFieldExpr) delete.Where
