@@ -580,13 +580,16 @@ let rec private tryFindMainEntityFromExpr (ctes : ResolvedCommonTableExprsMap) (
         tryFindMainEntityExpr ctes currentCte subsel.Select |> Option.map (mapRecursiveValue (fun res -> res.Entity))
 
 and private tryFindMainEntityTreeExpr (ctes : ResolvedCommonTableExprsMap) (currentCte : EntityName option) : ResolvedSelectTreeExpr -> RecursiveValue<MainEntityResult> option = function
-    | SSelect sel when not <| Array.isEmpty sel.GroupBy -> None
     | SSelect ({ From = Some from } as sel) ->
-        let refResults ref =
-            { Entity = ref
-              Results = sel.Results
-            }
-        tryFindMainEntityFromExpr ctes currentCte from |> Option.map (mapRecursiveValue refResults)
+        let info = ObjectMap.findType<ResolvedSingleSelectMeta> sel.Extra
+        if info.HasAggregates || not <| Array.isEmpty sel.GroupBy then
+            None
+        else
+            let refResults ref =
+                { Entity = ref
+                  Results = sel.Results
+                }
+            tryFindMainEntityFromExpr ctes currentCte from |> Option.map (mapRecursiveValue refResults)
     | SSelect _ -> None
     | SValues _ -> None
     | SSetOp setOp ->
