@@ -421,7 +421,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
     // Called when state update by another instance is detected. More lightweight than full `coldRebuildFromDatabase`.
     let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState> =
         task {
-            let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews) =
+            let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, prefetchedViews) =
                 task {
                     try
                         let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
@@ -441,10 +441,12 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                         // To dry-run user views we need to stop the transaction.
                         let! _ = transaction.Rollback ()
-                        // We dry-run those views that _can_ be failed here, outside of a transaction.
-                        let! prefetchedBadViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some true) sourceUvs userViews cancellationToken
+                        // Even "known"-good user views can fail here because database data may change over time. Consider
+                        // `SELECT (SELECT foo FROM bar)`, where "bar" is a table with one row. If an insert happens
+                        // and "bar" contains two rows now, this query will fail.
+                        let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None sourceUvs userViews cancellationToken
                         let transaction = new DatabaseTransaction(transaction.Connection)
-                        return (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews, prefetchedBadViews)
+                        return (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, prefetchedViews)
                     with
                     | ex ->
                         do! transaction.Rollback ()
@@ -463,16 +465,14 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                 return! rebuildFromDatabase transaction currentVersion2 cancellationToken
             else
                 try
-                    // Now dry-run those views that _cannot_ fail - we can get an exception here and stop, which is the point -
-                    // views with `allowBroken = true` fail on first error and so can be dry-run inside a transaction.
-                    let! prefetchedGoodViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some false) sourceUvs userViews cancellationToken
+                    do! checkBrokenUserViews logger cacheParams.AllowAutoMark preload transaction prefetchedViews cancellationToken
 
                     let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                     let! sourceActions = buildSchemaActions transaction.System None cancellationToken
                     let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
                     let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
 
-                    do! transaction.Rollback ()
+                    let! _ = transaction.Commit cancellationToken
 
                     let actions = resolveActions layout false sourceActions
 
@@ -491,7 +491,6 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                     let permissions = resolvePermissions layout false sourcePermissions
 
-                    let prefetchedViews = mergePrefetchedUserViews prefetchedBadViews prefetchedGoodViews
                     // Another instance has already rebuilt them, so just load them from the database.
                     let systemViews = filterSystemViews sourceUvs
                     let domains = buildLayoutDomains layout
