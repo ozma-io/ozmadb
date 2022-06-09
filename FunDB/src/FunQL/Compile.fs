@@ -2285,7 +2285,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         (paths, ret)
 
     and compileFromTableExpr (ctx : ExprContext) (nextJoinId : int) (mainEntity : ResolvedEntityRef option) (isInner : bool) (tableExpr : ResolvedFromTableExpr) : FromResult * SQL.FromExpr =
-        let compileSubSelect subsel =
+        let compileSubSelect (alias : EntityAlias) (subsel : ResolvedSelectExpr) =
             let flags =
                 { MainEntity = mainEntity
                   IsTopLevel = false
@@ -2293,14 +2293,14 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             let (info, expr) = compileSelectExpr flags ctx None subsel
             let (info, fields) =
-                match tableExpr.Alias.Fields with
+                match alias.Fields with
                 | None -> (finalSelectInfo info, None)
                 | Some fields ->
                     let info = renameSelectInfo fields info
                     let fields = info.Columns |> Array.map (fun col -> columnName col.Type)
                     (info, Some fields)
             let compiledAlias =
-                { Name = compileName tableExpr.Alias.Name
+                { Name = compileName alias.Name
                   Columns = fields
                 } : SQL.TableAlias
             let compiledSubsel =
@@ -2316,7 +2316,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 }
             (res, ret)
         match tableExpr.Expression with
-        | TESelect subsel -> compileSubSelect subsel
+        | TESelect subsel -> compileSubSelect tableExpr.Alias subsel
         | TEDomain _ -> failwith "Unexpected non-resolved domain"
         | TEFieldDomain _ -> failwith "Unexpected non-resolved domain"
         | TETypeDomain (fieldType, flags) ->
@@ -2324,7 +2324,8 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | FTScalar (SFTEnum vals) ->
                 let compileEnumValue = FString >> FEValue >> VVExpr >> Array.singleton
                 let values = vals |> OrderedSet.toArray |> Array.map compileEnumValue |> SValues
-                compileSubSelect <| selectExpr values
+                let alias = { tableExpr.Alias with Fields = Some [| enumDomainValuesColumn |] }
+                compileSubSelect alias (selectExpr values)
             | _ -> failwith "Invalid domain type"
 
     // See description of `RealEntityAnnotation.IsInner`.
