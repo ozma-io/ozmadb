@@ -121,7 +121,6 @@ let isScalarValueSubtype (layout : ILayoutBits) (wanted : ResolvedScalarFieldTyp
     | (SFTInt, SFTReference _) -> true
     | (SFTString, SFTEnum _) -> true
     | (a, b) -> SQL.tryImplicitCasts (compileScalarType a) (compileScalarType b)
-    | _ -> false
 
 let isSubtype (layout : ILayoutBits) (wanted : ResolvedFieldType) (given : ResolvedFieldType) : bool =
     match (wanted, given) with
@@ -349,7 +348,7 @@ let private resolvedFieldForcedSQLName : GenericResolvedField<ResolvedColumnFiel
     | _ -> None
 
 let private boundValueForcedSQLName : BoundValue -> SQL.ColumnName option = function
-    | BVColumn { Field = RColumnField col; Header = { Immediate = true; Single = false } } -> Some col.ColumnName
+    | BVColumn { Field = field; Header = { Immediate = true; Single = false } } -> resolvedFieldForcedSQLName field
     | _ -> None
 
 let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef : EntityRef option) (fields : SubqueryFieldsMap) : FieldMapping =
