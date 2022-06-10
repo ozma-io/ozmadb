@@ -84,12 +84,14 @@ type private HalfVirtualField =
 [<NoEquality; NoComparison>]
 type private HalfResolvedComputedField =
     { Source : SourceComputedField
-      ColumnName : SQL.SQLName
+      ColumnName : SQL.ColumnName
       HashName : HashName
       InheritedFrom : ResolvedEntityRef option
       Virtual : HalfVirtualField option
     } with
         interface IComputedFieldBits with
+            member this.ColumnName = this.ColumnName
+            member this.IsMaterialized = this.Source.IsMaterialized
             member this.AllowBroken = this.Source.AllowBroken
             member this.InheritedFrom = this.InheritedFrom
             member this.Virtual = Option.map (fun x -> upcast x) this.Virtual

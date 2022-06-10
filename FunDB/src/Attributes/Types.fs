@@ -10,11 +10,17 @@ type DefaultAttributeRef =
     } with
         override this.ToString () = sprintf "%s.%s" (this.Schema.ToFunQLString()) (this.Field.ToFunQLString())
 
+type [<NoEquality; NoComparison>] DefaultAttribute =
+    { Value : ResolvedBoundAttribute
+      // Doesn't depend on any other fields except the bound one.
+      Single : bool
+    }
+
 [<NoEquality; NoComparison>]
 type AttributesField =
     { AllowBroken : bool
       Priority : int
-      Attributes : ResolvedBoundAttributesMap
+      Attributes : Map<AttributeName, DefaultAttribute>
     }
 
 [<NoEquality; NoComparison>]

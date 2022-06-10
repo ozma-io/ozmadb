@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.UserViews.Resolve
 
+open FSharpPlus
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
@@ -13,6 +14,7 @@ open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Attributes.Merge
 open FunWithFlags.FunDB.Objects.Types
 
@@ -34,10 +36,12 @@ type FindExistingView = ResolvedUserViewRef -> PossiblyBroken<ResolvedUserView> 
 let emptyFindExistingView (ref : ResolvedUserViewRef) : PossiblyBroken<ResolvedUserView> option = None
 
 type private Phase1Resolver (layout : Layout, defaultAttrs : MergedDefaultAttributes, forceAllowBroken : bool, flags : ExprResolutionFlags, userViews : GeneratedUserViews, findExistingView : FindExistingView) =
-    let hasDefaultAttribute (fieldRef : ResolvedFieldRef) (name : AttributeName) =
-        match defaultAttrs.FindField fieldRef.Entity fieldRef.Name with
-        | None -> false
-        | Some attrs -> Map.containsKey name attrs
+    let getDefaultAttribute (fieldRef : ResolvedFieldRef) (name : AttributeName) : DefaultAttribute option =
+        monad {
+            let! attrs =  defaultAttrs.FindField fieldRef.Entity fieldRef.Name
+            let! attr = Map.tryFind name attrs
+            return attr.Attribute
+        }
 
     let hasUserView (uvRef : ResolvedUserViewRef) =
         match Map.tryFind uvRef.Schema userViews.Schemas with
@@ -48,7 +52,7 @@ type private Phase1Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
     let defaultCallbacks =
         { Layout = layout
           HomeSchema = None
-          HasDefaultAttribute = hasDefaultAttribute
+          GetDefaultAttribute = getDefaultAttribute
           HasUserView = hasUserView
         }
 

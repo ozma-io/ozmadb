@@ -98,6 +98,8 @@ type VirtualField =
 
 // These fields are available without fully resolving a computed field.
 type IComputedFieldBits =
+    abstract member ColumnName : SQL.ColumnName
+    abstract member IsMaterialized : bool
     abstract member InheritedFrom : ResolvedEntityRef option
     abstract member AllowBroken : bool
     abstract member Virtual : IVirtualFieldBits option
@@ -126,6 +128,8 @@ type ResolvedComputedField =
       Root : RootComputedField option
     } with
         interface IComputedFieldBits with
+            member this.ColumnName = this.ColumnName
+            member this.IsMaterialized = this.IsMaterialized
             member this.InheritedFrom = this.InheritedFrom
             member this.AllowBroken = this.AllowBroken
             member this.Virtual = Option.map (fun x -> upcast x) this.Virtual
@@ -149,7 +153,7 @@ type ResolvedFieldBits = GenericResolvedField<ResolvedColumnField, IComputedFiel
 
 let resolvedFieldToBits : ResolvedField -> ResolvedFieldBits = mapResolvedField id (fun x -> x :> IComputedFieldBits)
 
-let resolvedFieldType : GenericResolvedField<ResolvedColumnField, 'cf> -> ResolvedFieldType option = function
+let resolvedFieldType : GenericResolvedField<ResolvedColumnField, 'comp> -> ResolvedFieldType option = function
     | RColumnField { FieldType = typ } -> Some typ
     | _ -> None
 

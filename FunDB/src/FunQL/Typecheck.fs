@@ -44,19 +44,19 @@ let private scalarJson = FTScalar SFTJson
 
 let private scalarBool = FTScalar SFTBool
 
-type private Typechecker (layout : ILayoutBits) =
-    let rec typecheckFieldRef (linked : LinkedBoundFieldRef) : ResolvedFieldType option =
-        let fieldInfo = ObjectMap.findType<FieldRefMeta> linked.Extra
-        if Array.isEmpty linked.Ref.Path then
-            fieldInfo.Type
-        else
-            let lastField = Array.last linked.Ref.Path
-            let lastEntity = Array.last fieldInfo.Path
-            let entity = layout.FindEntity lastEntity |> Option.get
-            let field = entity.FindField lastField.Name |> Option.get
-            resolvedFieldType field.Field
+let resolvedRefType (layout : ILayoutBits) (linked : LinkedBoundFieldRef) : ResolvedFieldType option =
+    let fieldInfo = ObjectMap.findType<FieldRefMeta> linked.Extra
+    if Array.isEmpty linked.Ref.Path then
+        fieldInfo.Type
+    else
+        let lastField = Array.last linked.Ref.Path
+        let lastEntity = Array.last fieldInfo.Path
+        let entity = layout.FindEntity lastEntity |> Option.get
+        let field = entity.FindField lastField.Name |> Option.get
+        resolvedFieldType field.Field
 
-    and typecheckBinaryLogical (a : ResolvedFieldExpr) (b : ResolvedFieldExpr) : ResolvedFieldType =
+type private Typechecker (layout : ILayoutBits) =
+    let rec typecheckBinaryLogical (a : ResolvedFieldExpr) (b : ResolvedFieldExpr) : ResolvedFieldType =
         let ta = typecheckFieldExpr a
         if not <| isMaybeSubtype layout scalarBool ta then
             raisef ViewTypecheckException "Boolean expected, %O found" ta
@@ -119,7 +119,7 @@ type private Typechecker (layout : ILayoutBits) =
 
     and typecheckFieldExpr : ResolvedFieldExpr -> ResolvedFieldType option = function
         | FEValue value -> fieldValueType value
-        | FERef r -> typecheckFieldRef r
+        | FERef r -> resolvedRefType layout r
         | FEEntityAttr (eref, attr) -> failwith "Not implemented"
         | FEFieldAttr (fref, attr) -> failwith "Not implemented"
         | FENot e ->

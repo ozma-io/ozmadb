@@ -19,6 +19,21 @@ type ResolveAttributesException (message : string, innerException : Exception, i
 
 let private attrResolutionFlags = { emptyExprResolutionFlags with Privileged = true }
 
+let private convertBoundAttribute (attr : ResolvedBoundAttribute) : DefaultAttribute =
+    let single =
+        match attr.Expression with
+        | BAMapping map -> true
+        | BAExpr expr ->
+            match attr.Dependency with
+            | DSConst -> true
+            | DSSingle -> true
+            | DSPerRow ->
+                // FIXME: Actually check if the expression is singular.
+                false
+    { Value = attr
+      Single = single
+    }
+
 type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, hasUserView : HasUserView) =
     // TODO: allow attributes to refer to each other.
     let defaultCallbacks = { resolveCallbacks layout with HasUserView = hasUserView }
@@ -31,9 +46,11 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, hasUserVi
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
 
+        let attrsMap = Map.map (fun name -> convertBoundAttribute) resolvedMap
+
         { AllowBroken = fieldAttrs.AllowBroken
           Priority = fieldAttrs.Priority
-          Attributes = resolvedMap
+          Attributes = attrsMap
         }
 
     let resolveAttributesEntity (homeSchema : SchemaName) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (entityAttrs : ParsedAttributesEntity) : AttributesEntity =
