@@ -1,9 +1,7 @@
 import {
   IEntityRef, IEntity, IUserViewRef, IQueryChunk, IApiError, IViewExprResult, IViewInfoResult,
-  ITransaction, ITransactionResult, IActionRef, IActionResult, ArgumentName, IFieldRef,
-  IDomainValuesResult, IViewExplainResult, IExplainedQuery, IExplainFlags, ISaveSchemasOptions,
-  IRestoreSchemasOptions,
-  IPermissionsInfo,
+  IActionRef, IActionResult, ArgumentName, IFieldRef,
+  IDomainValuesResult, FieldName, IPermissionsInfo, RowKey, RowId,
 } from "./common";
 
 /*
@@ -42,11 +40,26 @@ const fetchJson = async (input: RequestInfo, init?: RequestInit): Promise<unknow
   return response.json();
 };
 
+interface IExplainFlags {
+  verbose?: boolean;
+  analyze?: boolean;
+  costs?: boolean;
+}
+
+export interface IExplainedQuery {
+  query: string;
+  parameters: Record<number, any>;
+  explanation: object;
+}
+
+export interface IViewExplainResult {
+  rows: IExplainedQuery;
+  attributes?: IExplainedQuery;
+}
+
 interface IAnonymousUserViewRequest {
   query: string;
 }
-
-interface IUserViewInfoRequest { }
 
 interface IUserViewCommonRequest extends IQueryChunk {
   args?: Record<ArgumentName, any>;
@@ -81,6 +94,68 @@ export interface IEntriesRequestOpts {
 }
 
 export interface IEntriesExplainOpts extends IEntriesRequestOpts, IExplainFlags { }
+
+export interface IInsertEntityOp {
+  type: "insert";
+  entity: IEntityRef;
+  entries: Record<FieldName, unknown>;
+}
+
+export interface IUpdateEntityOp {
+  type: "update";
+  entity: IEntityRef;
+  id: RowKey;
+  entries: Record<FieldName, unknown>;
+}
+
+export interface IDeleteEntityOp {
+  type: "delete";
+  entity: IEntityRef;
+  id: RowKey;
+}
+
+export interface ICommandOp {
+  type: "command";
+  command: string;
+  arguments?: Record<ArgumentName, any>;
+}
+
+export type TransactionOp = IInsertEntityOp | IUpdateEntityOp | IDeleteEntityOp | ICommandOp;
+
+export interface ITransaction {
+  operations: TransactionOp[];
+  deferConstraints?: boolean;
+  forceAllowBroken?: boolean;
+}
+
+export interface IInsertEntityResult {
+  type: "insert";
+  id: RowId | null;
+}
+
+export interface IUpdateEntityResult {
+  type: "update";
+  id: RowId;
+}
+
+export interface IDeleteEntityResult {
+  type: "delete";
+}
+
+export type TransactionOpResult = IInsertEntityResult | IUpdateEntityResult | IDeleteEntityResult;
+
+export interface ITransactionResult {
+  results: TransactionOpResult[];
+}
+
+export interface ISaveSchemasOptions {
+  skipPreloaded?: boolean;
+}
+
+export interface IRestoreSchemasOptions {
+  dropOthers?: boolean;
+  forceAllowBroken?: boolean;
+}
 
 export default class FunDBAPI {
   private apiUrl: string;
@@ -226,6 +301,9 @@ export default class FunDBAPI {
     const params = new URLSearchParams();
     if (options?.dropOthers) {
       params.append("drop_others", "true");
+    }
+    if (options?.forceAllowBroken) {
+      params.append("force_allow_broken", "true");
     }
     await this.fetchSendFileApi(`layouts?${params}`, token, "PUT", "application/zip", data);
   };

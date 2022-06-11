@@ -288,18 +288,6 @@ export interface IExecutedViewExpr {
   rows: IExecutedRow[];
 }
 
-export interface IExplainedQuery {
-  query: string;
-  parameters: Record<number, any>;
-  explanation: object;
-}
-
-export interface IExplainFlags {
-  verbose?: boolean;
-  analyze?: boolean;
-  costs?: boolean;
-}
-
 /*
  * User view API responses.
  */
@@ -314,11 +302,6 @@ export interface IViewInfoResult {
   constAttributes: AttributesMap;
   constColumnAttributes: AttributesMap[];
   constArgumentAttributes: Record<ArgumentName, AttributesMap>;
-}
-
-export interface IViewExplainResult {
-  rows: IExplainedQuery;
-  attributes?: IExplainedQuery;
 }
 
 /*
@@ -350,62 +333,6 @@ export interface IReferencesTree {
   root: ReferencesRowIndex;
 }
 
-export interface IInsertEntityOp {
-  type: "insert";
-  entity: IEntityRef;
-  entries: Record<FieldName, unknown>;
-}
-
-export interface IUpdateEntityOp {
-  type: "update";
-  entity: IEntityRef;
-  id: RowKey;
-  entries: Record<FieldName, unknown>;
-}
-
-export interface IDeleteEntityOp {
-  type: "delete";
-  entity: IEntityRef;
-  id: RowKey;
-}
-
-export interface ICommandOp {
-  type: "command";
-  command: string;
-  arguments?: Record<ArgumentName, any>;
-}
-
-export type TransactionOp = IInsertEntityOp | IUpdateEntityOp | IDeleteEntityOp | ICommandOp;
-
-export interface ITransaction {
-  operations: TransactionOp[];
-  deferConstraints?: boolean;
-}
-
-/*
- * Transaction API responses.
- */
-
-export interface IInsertEntityResult {
-  type: "insert";
-  id: RowId | null;
-}
-
-export interface IUpdateEntityResult {
-  type: "update";
-  id: RowId;
-}
-
-export interface IDeleteEntityResult {
-  type: "delete";
-}
-
-export type TransactionOpResult = IInsertEntityResult | IUpdateEntityResult | IDeleteEntityResult;
-
-export interface ITransactionResult {
-  results: TransactionOpResult[];
-}
-
 /*
  * Action API responses.
  */
@@ -427,18 +354,6 @@ export interface IDomainValuesResult {
   values: IDomainValue[];
   punType: ValueType;
   hash: string;
-}
-
-/*
- * Save/restore API options.
- */
-
-export interface ISaveSchemasOptions {
-  skipPreloaded?: boolean;
-}
-
-export interface IRestoreSchemasOptions {
-  dropOthers?: boolean;
 }
 
 /*
