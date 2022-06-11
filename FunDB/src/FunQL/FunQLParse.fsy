@@ -976,6 +976,7 @@ Name:
     | ACTION  { FunQLName "action" }
     | CASCADE { FunQLName "cascade" }
     | TYPE    { FunQLName "type" }
+    | FIELD   { FunQLName "field" }
 
 IndexOpClass:
     |      { None }

@@ -50,9 +50,10 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
             let pathWithEntities = Seq.zip info.Path ref.Ref.Path |> Seq.toList
             buildForPath ref.Extra boundInfo.Ref ref.Ref.AsRoot pathWithEntities
         | Some (BMArgument arg) ->
-            let argRef = { Entity = info.Path.[0]; Name = ref.Ref.Path.[0].Name }
-            let pathWithEntities = Seq.zip info.Path ref.Ref.Path |> Seq.skip 1 |> Seq.toList
-            buildForPath ref.Extra argRef ref.Ref.AsRoot pathWithEntities
+            if not <| Array.isEmpty ref.Ref.Path then
+                let argRef = { Entity = info.Path.[0]; Name = ref.Ref.Path.[0].Name }
+                let pathWithEntities = Seq.zip info.Path ref.Ref.Path |> Seq.skip 1 |> Seq.toList
+                buildForPath ref.Extra argRef ref.Ref.AsRoot pathWithEntities
         | None ->
             assert (Array.isEmpty ref.Ref.Path)
 
