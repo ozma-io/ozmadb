@@ -163,6 +163,10 @@ type PrefetchedUserViews =
             | Some (Ok schema) -> Map.tryFind ref.Name schema.UserViews
             | _ -> None
 
+let emptyPrefetchedUserViews : PrefetchedUserViews =
+    { Schemas = Map.empty
+    }
+
 let private mergePrefetchedViewsSchema (a : PrefetchedViewsSchema) (b : PrefetchedViewsSchema) =
     { UserViews = Map.unionUnique a.UserViews b.UserViews }
 
@@ -447,7 +451,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
             return { UserViews = userViews }
         }
 
-    let resolveUserViews (source : SourceUserViews) (resolved : UserViews) : Task<PrefetchedUserViews> =
+    let resolveUserViews (resolved : UserViews) : Task<PrefetchedUserViews> =
         task {
             let mapSchema name = function
                 | Ok schema ->
@@ -468,10 +472,10 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
     member this.DryRunUserViews = resolveUserViews
 
 // Warning: this should be executed outside of any transactions because of test runs.
-let dryRunUserViews (conn : QueryConnection) (layout : Layout) (triggers : MergedTriggers) (forceAllowBroken : bool) (onlyWithAllowBroken : bool option) (sourceViews : SourceUserViews) (userViews : UserViews) (cancellationToken : CancellationToken) : Task<PrefetchedUserViews> =
+let dryRunUserViews (conn : QueryConnection) (layout : Layout) (triggers : MergedTriggers) (forceAllowBroken : bool) (onlyWithAllowBroken : bool option) (userViews : UserViews) (cancellationToken : CancellationToken) : Task<PrefetchedUserViews> =
     task {
         let runner = DryRunner(layout, triggers, conn, forceAllowBroken, onlyWithAllowBroken, cancellationToken)
-        return! runner.DryRunUserViews sourceViews userViews
+        return! runner.DryRunUserViews userViews
     }
 
 let dryRunAnonymousUserView (conn : QueryConnection) (layout : Layout) (triggers : MergedTriggers) (q: ResolvedUserView) (cancellationToken : CancellationToken) : Task<PrefetchedUserView> =

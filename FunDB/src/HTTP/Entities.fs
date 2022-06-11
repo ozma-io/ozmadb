@@ -22,6 +22,7 @@ let private errorHandler = function
 type TopLevelTransaction =
     { Operations : TransactionOp[]
       DeferConstraints : bool
+      ForceAllowBroken : bool
     }
 
 type RelatedEntitiesRequest =
@@ -55,17 +56,24 @@ let entitiesApi : HttpHandler =
               route "/info" >=> GET >=> withContext (getEntityInfo entityRef)
             ]
 
+    let runTransactionInner (api : IFunDBAPI) (transaction : TopLevelTransaction) =
+        task {
+            if transaction.ForceAllowBroken then
+                api.Request.Context.SetForceAllowBroken ()
+            return! api.Entities.RunTransaction { Operations = transaction.Operations }
+        }
+
     let runTransaction (api : IFunDBAPI) =
-        safeBindJson <| fun transaction (next : HttpFunc) (ctx : HttpContext) ->
+        safeBindJson <| fun (transaction : TopLevelTransaction) (next : HttpFunc) (ctx : HttpContext) ->
             task {
                 if not transaction.DeferConstraints then
-                    match! api.Entities.RunTransaction { Operations = transaction.Operations } with
+                    match! runTransactionInner api transaction with
                     | Ok ret ->
                         return! commitAndReturn (json ret) api next ctx
                     | Error err ->
                         return! RequestErrors.badRequest (json err) next ctx
                 else
-                    match! api.Entities.DeferConstraints (fun () -> api.Entities.RunTransaction { Operations = transaction.Operations }) with
+                    match! api.Entities.DeferConstraints (fun () -> runTransactionInner api transaction) with
                     | Ok (Ok ret) ->
                         return! commitAndReturn (json ret) api next ctx
                     | Ok (Error err) ->

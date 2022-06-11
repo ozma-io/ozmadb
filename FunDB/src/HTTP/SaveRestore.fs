@@ -8,7 +8,6 @@ open Giraffe
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.API.Types
 
 let private saveError e =
@@ -26,6 +25,12 @@ let private restoreError e =
         | RREInvalidFormat _ -> RequestErrors.unprocessableEntity
         | RREConsistency _ -> RequestErrors.badRequest
     handler (json e)
+
+[<NoEquality; NoComparison>]
+type private RestoreFlags =
+    { DropOthers : bool
+      ForceAllowBroken : bool
+    }
 
 let saveRestoreApi : HttpHandler =
     let saveZipSchemas (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
@@ -67,44 +72,45 @@ let saveRestoreApi : HttpHandler =
             return! negotiateWith saveSchemaNegotiationRules negotiateConfig.UnacceptableHandler (schemas, api) next ctx
         }
 
-    let getDropOthers (nextOp : bool -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        match ctx.GetQueryStringValue "drop_others" with
-        | Ok v ->
-            match Parsing.tryBool v with
-            | Some r -> nextOp r next ctx
-            | None -> RequestErrors.BAD_REQUEST "Invalid value for drop_others" next ctx
-        | Error _ -> nextOp false next ctx
+    let getRestoreFlags (nextOp : RestoreFlags -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+        let flags =
+            { DropOthers = boolRequestArg "drop_others" ctx
+              ForceAllowBroken = boolRequestArg "force_allow_broken" ctx
+            }
+        nextOp flags next ctx
 
-    let restoreJsonSchemas (api : IFunDBAPI) (dropOthers : bool) =
+    let restoreJsonSchemas (api : IFunDBAPI) (flags : RestoreFlags) =
         safeBindJson <| fun dump (next : HttpFunc) (ctx : HttpContext) ->
             task {
-                match! api.SaveRestore.RestoreSchemas dump dropOthers with
+                match! api.SaveRestore.RestoreSchemas dump flags.DropOthers with
                 | Ok () -> return! commitAndOk api next ctx
                 | Error err -> return! restoreError err next ctx
             }
 
-    let restoreZipSchemas (api : IFunDBAPI) (dropOthers : bool) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let restoreZipSchemas (api : IFunDBAPI) (flags : RestoreFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             use stream = new MemoryStream()
             do! ctx.Request.Body.CopyToAsync(stream)
             ignore <| stream.Seek(0L, SeekOrigin.Begin)
-            match! api.SaveRestore.RestoreZipSchemas stream dropOthers with
+            match! api.SaveRestore.RestoreZipSchemas stream flags.DropOthers with
             | Ok () -> return! commitAndOk api next ctx
             | Error err -> return! restoreError err next ctx
         }
 
-    let restoreSchemas (api : IFunDBAPI) (dropOthers : bool) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let restoreSchemas (api : IFunDBAPI) (flags : RestoreFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
+            if flags.ForceAllowBroken then
+                api.Request.Context.SetForceAllowBroken ()
             match ctx.TryGetRequestHeader "Content-Type" with
-            | Some "application/json" -> return! restoreJsonSchemas api dropOthers next ctx
-            | Some "application/zip" -> return! restoreZipSchemas api dropOthers next ctx
+            | Some "application/json" -> return! restoreJsonSchemas api flags next ctx
+            | Some "application/zip" -> return! restoreZipSchemas api flags next ctx
             | _ -> return! RequestErrors.unsupportedMediaType (json (RIRequest "Unsupported media type")) next ctx
         }
 
     let massSaveRestoreApi =
         choose
             [ route "" >=> GET >=> withContext saveSchemas
-              route "" >=> PUT >=> withContext (fun api -> getDropOthers (restoreSchemas api))
+              route "" >=> PUT >=> withContext (fun api -> getRestoreFlags (restoreSchemas api))
             ]
 
     choose

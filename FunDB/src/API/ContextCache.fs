@@ -209,7 +209,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
             | entry -> return (transaction, tryIntInvariant entry.Value)
         }
 
-    let ensureCurrentVersion (conn : DatabaseTransaction) (bump : bool) (cancellationToken : CancellationToken) : Task<int> =
+    let ensureAndGetVersion (conn : DatabaseTransaction) (bump : bool) (cancellationToken : CancellationToken) : Task<int> =
         task {
                 let! versionEntry = conn.System.State.AsTracking().FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
                 match versionEntry with
@@ -269,7 +269,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
         let isolate = jsIsolates.Get()
         try
-            let! (transaction, currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, prefetchedViews, sourceViews) =
+            let! (currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, sourceViews, userViews) =
                 task {
                     try
                         let systemViews = preloadUserViews preload
@@ -311,29 +311,21 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let permissions = resolvePermissions layout (generatedViews.Find >> Option.isSome) true sourcePermissions
                         do! checkBrokenPermissions logger cacheParams.AllowAutoMark preload transaction permissions cancellationToken
 
-                        let! currentVersion = ensureCurrentVersion transaction (isChanged || not (updateResultIsEmpty userViewsUpdate)) cancellationToken
+                        do! deleteDeferredFromUpdate layout transaction userViewsUpdate cancellationToken
+
+                        let! currentVersion = ensureAndGetVersion transaction (isChanged || not (updateResultIsEmpty userViewsUpdate)) cancellationToken
 
                         // To dry-run user views we need to stop the transaction.
                         let! _ = transaction.Commit (cancellationToken)
-                        let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None sourceViews userViews cancellationToken
-                        do! deleteDeferredFromUpdate layout transaction userViewsUpdate cancellationToken
-                        let transaction = new DatabaseTransaction (transaction.Connection)
-                        return (transaction, currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, prefetchedViews, sourceViews)
+                        return (currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, sourceViews, userViews)
                     with
                     | ex ->
                         do! transaction.Rollback ()
                         return reraise' ex
                 }
-            let! currentVersion2 =
-                task {
-                    try
-                        return! ensureCurrentVersion transaction false cancellationToken
-                    with
-                    | ex ->
-                        do! transaction.Rollback ()
-                        return reraise' ex
-                }
-            if currentVersion2 <> currentVersion then
+            let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None userViews cancellationToken
+            let! (transaction, newCurrentVersion) = openAndGetCurrentVersion cancellationToken
+            if newCurrentVersion <> Some currentVersion then
                 let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
                 let layout = resolveLayout false sourceLayout
                 let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
@@ -420,9 +412,9 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
         }
 
     // Called when state update by another instance is detected. More lightweight than full `coldRebuildFromDatabase`.
-    let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState> =
+    let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState option> =
         task {
-            let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, prefetchedViews) =
+            let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews) =
                 task {
                     try
                         let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
@@ -444,28 +436,19 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                         // To dry-run user views we need to stop the transaction.
                         let! _ = transaction.Rollback ()
-                        // Even "known"-good user views can fail here because database data may change over time. Consider
-                        // `SELECT (SELECT foo FROM bar)`, where "bar" is a table with one row. If an insert happens
-                        // and "bar" contains two rows now, this query will fail.
-                        let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None sourceUvs userViews cancellationToken
-                        let transaction = new DatabaseTransaction(transaction.Connection)
-                        return (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, prefetchedViews)
+                        // `forceAllowBroken` is set to `true` to overcome potential race condition between this call and `forceAllowBroken` update during migration.
+                        return (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews)
                     with
                     | ex ->
                         do! transaction.Rollback ()
                         return reraise' ex
                 }
-            let! currentVersion2 =
-                task {
-                    try
-                        return! ensureCurrentVersion transaction false cancellationToken
-                    with
-                    | ex ->
-                        do! transaction.Rollback ()
-                        return reraise' ex
-                }
-            if currentVersion2 <> currentVersion then
-                return! rebuildFromDatabase transaction currentVersion2 cancellationToken
+            let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None userViews cancellationToken
+            let! (transaction, newCurrentVersion) = openAndGetCurrentVersion cancellationToken
+            if newCurrentVersion <> Some currentVersion then
+                match newCurrentVersion with
+                | None -> return! coldRebuildFromDatabase transaction cancellationToken
+                | Some ver -> return! rebuildFromDatabase transaction ver cancellationToken
             else
                 try
                     do! checkBrokenUserViews logger cacheParams.AllowAutoMark preload transaction prefetchedViews cancellationToken
@@ -513,7 +496,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                           UserMeta = userMeta
                         }
 
-                    return { Version = currentVersion; Context = newState }
+                    return Some { Version = currentVersion; Context = newState }
                 with
                 | ex ->
                     do! transaction.Rollback ()
@@ -553,8 +536,10 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     unitTask {
                         let! databaseVersion = getDatabaseVersion transaction cancellationToken
                         if databaseVersion = Some currentDatabaseVersion then
-                            let! newState = rebuildFromDatabase transaction ver cancellationToken
-                            cachedState <- Some newState
+                            match! rebuildFromDatabase transaction ver cancellationToken with
+                            | None -> ()
+                            | Some newState ->
+                                cachedState <- Some newState
                         else
                             match! coldRebuildFromDatabase transaction cancellationToken with
                             | None -> ()
@@ -567,9 +552,11 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     let! _ = updateStateAndRelease transaction cancellationToken <| fun () ->
                         unitTask {
                             transaction.Connection.Connection.UnprepareAll()
-                            let! newState = rebuildFromDatabase transaction ver cancellationToken
-                            clearCaches ()
-                            cachedState <- Some newState
+                            match! rebuildFromDatabase transaction ver cancellationToken with
+                            | None -> ()
+                            | Some newState ->
+                                clearCaches ()
+                                cachedState <- Some newState
                         }
                     return! getCachedState cancellationToken
                 else
@@ -613,6 +600,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             | :? RestoreSchemaException as err -> return raisefWithInner ContextException err "Failed to restore custom entities"
                     }
 
+                let mutable forceAllowBroken = false
+
                 let migrate () =
                     task {
                         let! localSuccess = cachedStateLock.WaitAsync(0)
@@ -634,9 +623,26 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 raisef ContextException "Cannot modify system layout"
                             let layout =
                                 try
-                                    resolveLayout false sourceLayout
+                                    resolveLayout forceAllowBroken sourceLayout
                                 with
                                 | :? ResolveLayoutException as e -> raisefWithInner ContextException e "Failed to resolve layout"
+                            if forceAllowBroken then
+                                do! checkBrokenLayout logger true preload transaction layout cancellationToken
+
+                            // Actually migrate.
+                            let (newAssertions, wantedUserMeta) = buildFullLayoutMeta layout (filterUserLayout layout)
+                            let migration = planDatabaseMigration oldState.Context.UserMeta wantedUserMeta
+                            try
+                                do! migrateDatabase transaction.Connection.Query migration cancellationToken
+                            with
+                            | :? QueryException as e -> return raisefUserWithInner ContextException e "Migration error"
+
+                            let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
+                            let addedAssertions = differenceLayoutAssertions newAssertions oldAssertions
+                            try
+                                do! checkAssertions transaction.Connection.Query layout addedAssertions cancellationToken
+                            with
+                            | :? LayoutIntegrityException as e -> return raisefWithInner ContextException e "Failed to perform integrity checks"
 
                             let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                             if not <| preloadModulesAreUnchanged sourceModules preload then
@@ -655,29 +661,33 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 raisef ContextException "Cannot modify system actions"
                             let actions =
                                 try
-                                    resolveActions layout false sourceActions
+                                    resolveActions layout forceAllowBroken sourceActions
                                 with
                                 | :? ResolveActionsException as e -> raisefWithInner ContextException e "Failed to resolve actions"
                             let preparedActions =
                                 try
-                                    prepareActions jsApi false actions
+                                    prepareActions jsApi forceAllowBroken actions
                                 with
                                 | :? ActionRunException as e -> raisefWithInner ContextException e "Failed to resolve actions"
+                            if forceAllowBroken then
+                                do! checkBrokenActions logger true preload transaction preparedActions cancellationToken
 
                             let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
                             if not <| preloadTriggersAreUnchanged sourceTriggers preload then
                                 raisef ContextException "Cannot modify system triggers"
                             let triggers =
                                 try
-                                    resolveTriggers layout false sourceTriggers
+                                    resolveTriggers layout forceAllowBroken sourceTriggers
                                 with
                                 | :? ResolveTriggersException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
                             let preparedTriggers =
                                 try
-                                    prepareTriggers jsApi false triggers
+                                    prepareTriggers jsApi forceAllowBroken triggers
                                 with
                                 | :? TriggerRunException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
                             let mergedTriggers = mergeTriggers layout triggers
+                            if forceAllowBroken then
+                                do! checkBrokenTriggers logger true preload transaction preparedTriggers cancellationToken
 
                             let! sourceUserViews = buildSchemaUserViews transaction.System None cancellationToken
                             if filterSystemViews sourceUserViews <> oldState.Context.SystemViews then
@@ -685,7 +695,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             logger.LogInformation("Updating generated user views")
                             let generatedUserViews =
                                 try
-                                    generateUserViews jsApi layout mergedTriggers false sourceUserViews cancellationToken
+                                    generateUserViews jsApi layout mergedTriggers forceAllowBroken sourceUserViews cancellationToken
                                 with
                                 | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
                             let! userViewsUpdate = updateUserViews transaction.System (generatedUserViewsSource sourceUserViews generatedUserViews) cancellationToken
@@ -696,34 +706,21 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 raisef ContextException "Cannot modify system default attributes"
                             let parsedAttrs =
                                 try
-                                    parseAttributes false sourceAttrs
+                                    parseAttributes forceAllowBroken sourceAttrs
                                 with
                                 | :? ParseAttributesException as e -> raisefWithInner ContextException e "Failed to parse default attributes"
                             let defaultAttrs =
                                 try
-                                    resolveAttributes layout (generatedUserViews.Find >> Option.isSome) false parsedAttrs
+                                    resolveAttributes layout (generatedUserViews.Find >> Option.isSome) forceAllowBroken parsedAttrs
                                 with
                                 | :? ResolveAttributesException as e -> raisefWithInner ContextException e "Failed to resolve default attributes"
                             let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
-
-                            // Actually migrate.
-                            let (newAssertions, wantedUserMeta) = buildFullLayoutMeta layout (filterUserLayout layout)
-                            let migration = planDatabaseMigration oldState.Context.UserMeta wantedUserMeta
-                            try
-                                do! migrateDatabase transaction.Connection.Query migration cancellationToken
-                            with
-                            | :? QueryException as e -> return raisefUserWithInner ContextException e "Migration error"
-
-                            let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
-                            let addedAssertions = differenceLayoutAssertions newAssertions oldAssertions
-                            try
-                                do! checkAssertions transaction.Connection.Query layout addedAssertions cancellationToken
-                            with
-                            | :? LayoutIntegrityException as e -> return raisefWithInner ContextException e "Failed to perform integrity checks"
+                            if forceAllowBroken then
+                                do! checkBrokenAttributes logger true preload transaction defaultAttrs cancellationToken
 
                             let userViews =
                                 try
-                                    resolveUserViews layout mergedAttrs false generatedUserViews
+                                    resolveUserViews layout mergedAttrs forceAllowBroken generatedUserViews
                                 with
                                 | :? UserViewResolveException as err -> raisefWithInner ContextException err "Failed to resolve user views"
 
@@ -732,16 +729,21 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 raisef ContextException "Cannot modify system permissions"
                             let permissions =
                                 try
-                                    resolvePermissions layout (userViews.Find >> Option.bind Result.getOption >> Option.isSome) false sourcePermissions
+                                    resolvePermissions layout (userViews.Find >> Option.bind Result.getOption >> Option.isSome) forceAllowBroken sourcePermissions
                                 with
                                 | :? ResolvePermissionsException as e -> raisefWithInner ContextException e "Failed to resolve permissions"
+                            if forceAllowBroken then
+                                do! checkBrokenPermissions logger true preload transaction permissions cancellationToken
 
-                            let! badUserViews =
+                            let! checkedPrefetchedUserViews =
                                 task {
-                                    try
-                                        return! dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some false) sourceUserViews userViews cancellationToken
-                                    with
-                                    | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
+                                    if forceAllowBroken then
+                                        return emptyPrefetchedUserViews
+                                    else
+                                        try
+                                            return! dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some false) userViews cancellationToken
+                                        with
+                                        | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                                 }
 
                             do! updateCustomEntities layout
@@ -759,7 +761,20 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             with
                             | :? DbUpdateException as e -> raisefUserWithInner ContextException e "State update error"
 
-                            let! goodUserViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some true) sourceUserViews userViews cancellationToken
+                            let! prefetchedUserViews =
+                                task {
+                                    if forceAllowBroken then
+                                        let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None userViews cancellationToken
+                                        let! (transaction, newVersion) = openAndGetCurrentVersion cancellationToken
+                                        // In the rare event we have a race condition, don't mark user views as broken -- something might have changed.
+                                        // They will be marked later by some other instance.
+                                        if newVersion = Some oldState.Version then
+                                            do! checkBrokenUserViews logger true preload transaction prefetchedViews cancellationToken
+                                        return prefetchedViews
+                                    else
+                                        let! uncheckedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some true) userViews cancellationToken
+                                        return mergePrefetchedUserViews checkedPrefetchedUserViews uncheckedViews
+                                }
 
                             let domains = buildLayoutDomains layout
 
@@ -772,7 +787,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                   ActionScripts = IsolateLocal(fun isolate -> prepareActions (jsRuntime.GetValue isolate) false actions)
                                   Triggers = mergedTriggers
                                   TriggerScripts = IsolateLocal(fun isolate -> prepareTriggers (jsRuntime.GetValue isolate) false triggers)
-                                  UserViews = mergePrefetchedUserViews badUserViews goodUserViews
+                                  UserViews = prefetchedUserViews
                                   Domains = domains
                                   SystemViews = filterSystemViews sourceUserViews
                                   UserMeta = wantedUserMeta
@@ -915,6 +930,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                           needMigration <- true
                         member this.ScheduleUpdateCustomEntities newRows =
                             newCustomEntities <- Some newRows
+                        member this.SetForceAllowBroken () =
+                            forceAllowBroken <- true
 
                         member this.CheckIntegrity () = checkIntegrity ()
                         member this.GetAnonymousView isPrivileged query = getAnonymousView isPrivileged query

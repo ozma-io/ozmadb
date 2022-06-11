@@ -56,6 +56,7 @@ type IContext =
     abstract member Triggers : MergedTriggers
     abstract member Domains : LayoutDomains
 
+    abstract member SetForceAllowBroken : unit -> unit
     abstract member ScheduleMigration : unit -> unit
     abstract member ScheduleUpdateCustomEntities : SchemaCustomEntities -> unit
     abstract member Commit : unit -> Task

@@ -276,7 +276,7 @@ let buildUserDatabaseMeta (transaction : NpgsqlTransaction) (preload : Preload) 
         return SQL.filterDatabaseMeta (fun (SQL.SQLName name) -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta
     }
 
-let private checkBrokenLayout (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (layout : Layout) (cancellationToken : CancellationToken) =
+let checkBrokenLayout (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (layout : Layout) (cancellationToken : CancellationToken) =
     unitTask {
         let mutable critical = false
         for KeyValue(schemaName, schema) in layout.Schemas do
