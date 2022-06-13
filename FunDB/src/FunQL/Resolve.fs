@@ -545,21 +545,6 @@ let private unionSubqueryInfo (a : SubqueryInfo) (b : SubqueryInfo) =
       EntityAttributes = Set.union a.EntityAttributes b.EntityAttributes
     }
 
-let private subqueryToResolvedExprInfo (localEntities : Set<FromEntityId>) (info : SubqueryInfo) : ResolvedExprInfo =
-    let subLocalEntities = Set.intersect info.ExprInfo.ExternalEntities localEntities
-    // We add entities that are not local to our own external entities.
-    let subExternalEntities = Set.difference info.ExprInfo.ExternalEntities localEntities
-    let newFlags =
-        { emptyResolvedExprFlags with
-            HasArguments = info.ExprInfo.HasArguments
-            HasFetches = info.ExprInfo.HasFetches
-            HasFields = not <| Set.isEmpty subLocalEntities
-        }
-    { emptyResolvedExprInfo with
-        Flags = newFlags
-        ExternalEntities = subExternalEntities
-    }
-
 let private checkName (FunQLName name) : unit =
     if not (goodName name) || String.length name > SQL.sqlIdentifierLength then
         raisef ViewResolveException "Invalid name: %s" name
@@ -1710,15 +1695,15 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                         fieldResolvedExprInfo
                 let exprInfo =
                     match innerValue with
-                    | Some (BVColumn ({ Field = RComputedField _; Ref = fieldRef } as inner)) ->
+                    | Some (BVColumn ({ Field = RComputedField _ } as inner)) ->
                         // Find full field, we only have IComputedFieldBits in the inner field...
                         match inner.Entity.FindField inner.Ref.Name with
-                        | Some { Field = RComputedField comp; Name = realName } ->
+                        | Some { Field = RComputedField comp } ->
                             let newExprFlags =
                                 if comp.IsMaterialized then
                                     { exprInfo.Flags with HasFields = true }
                                 else
-                                    computedFieldCases layout newRef.Extra { fieldRef with Name = realName } comp
+                                    computedFieldCases layout newRef.Extra inner.Ref comp
                                     |> Seq.map (fun (case, caseComp) -> caseComp.Flags)
                                     |> Seq.fold unionResolvedExprFlags exprInfo.Flags
                             { exprInfo with Flags = newExprFlags }
@@ -2098,7 +2083,13 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 if not <| fieldAttributeExists refInfo attr then
                     raisef ViewResolveException "Field attribute %O is not specified for field %O" attr newRef
                 // We consider field attribute references non-local because they can change based on inner parts of the query and default attributes.
-                exprInfo <- { exprInfo with Flags = unionResolvedExprFlags exprInfo.Flags unknownResolvedExprFlags }
+                // That is, unless reference is an argument, in which case it's basically a subquery and this is already accounted for
+                // in argument flags.
+                let newFlags =
+                    match newRef.Ref.Ref with
+                    | VRColumn _ -> unknownResolvedExprFlags
+                    | VRArgument _ -> refInfo.ExprInfo.Flags
+                exprInfo <- { exprInfo with Flags = unionResolvedExprFlags exprInfo.Flags newFlags }
                 (emptyCondTypeContexts, FEFieldAttr (newRef, attr))
             | FENot e ->
                 let (innerTypeCtxs, e) = traverse outerTypeCtxs e
