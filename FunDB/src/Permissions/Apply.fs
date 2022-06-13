@@ -238,9 +238,11 @@ type private ChildrenCheck =
     }
 
 type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef, getFilter : ResolvedEntityRef -> EntityAccessFilter) =
-    let boundFieldRef =
-        let fieldRef = { Entity = Some <| relaxEntityRef rootRef; Name = funSubEntity } : FieldRef
-        makeColumnReference layout (simpleColumnMeta rootRef) fieldRef
+    let subEntityFieldRef =
+        lazy (
+            let fieldRef = { Entity = Some <| relaxEntityRef rootRef; Name = funSubEntity } : FieldRef
+            makeColumnReference layout (simpleColumnMeta rootRef) fieldRef
+        )
 
     let rec buildOfTypeCheck (entityRef : ResolvedEntityRef) =
         let entity = layout.FindEntity entityRef |> Option.get
@@ -253,7 +255,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
                 { Ref = relaxEntityRef entityRef
                   Extra = ObjectMap.empty
                 }
-            optimizeFieldExpr <| FEOfType (boundFieldRef, subEntityRef)
+            optimizeFieldExpr <| FEOfType (subEntityFieldRef.Value, subEntityRef)
     and getOfTypeCheck = memoizeN buildOfTypeCheck
 
     let rec buildInheritedFromCheck (entityRef : ResolvedEntityRef) =
@@ -267,7 +269,7 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
                 { Ref = relaxEntityRef entityRef
                   Extra = ObjectMap.empty
                 }
-            optimizeFieldExpr <| FEInheritedFrom (boundFieldRef, subEntityRef)
+            optimizeFieldExpr <| FEInheritedFrom (subEntityFieldRef.Value, subEntityRef)
     and getInheritedFromCheck = memoizeN buildInheritedFromCheck
 
     let rec buildParentCheck (entityRef : ResolvedEntityRef) =
