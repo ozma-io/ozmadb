@@ -1376,6 +1376,10 @@ let private boundValueToDomain : BoundValue -> BoundValue = function
     | BVArgument arg -> BVArgument { arg with Immediate = true }
     | BVColumn col -> BVColumn { col with Header = { col.Header with Single = true; Immediate = true } }
 
+type private UnresolvedBoundColumn =
+    | UBCColumn of BoundColumn
+    | UBCHeader of BoundColumnHeader
+
 type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArgument, resolveFlags : ExprResolutionFlags) =
     let { Layout = layout } = callbacks
 
@@ -1546,17 +1550,27 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
           Types = Map.empty
         }
 
-    let resolvePath (typeCtxs : TypeContextsMap) (firstHeader : BoundColumnHeader) (fullPath : PathArrow list) : BoundColumn list =
-        let getBoundField (header : BoundColumnHeader) : BoundColumn =
+    let resolvePath (typeCtxs : TypeContextsMap) (firstHeader : UnresolvedBoundColumn) (fullPath : PathArrow list) : BoundColumn list =
+        let getBoundField (unresolved : UnresolvedBoundColumn) : BoundColumn =
+            let header =
+                match unresolved with
+                | UBCColumn col -> col.Header
+                | UBCHeader header -> header
             match findFieldWithContext layout typeCtxs header.Key header.ParentEntity header.Name with
             | None ->
                 raisef ViewResolveException "Field not found: %O" { Entity = header.ParentEntity; Name = header.Name }
             | Some (entityRef, entity, field) ->
+                // It's important to inherit `ForceRename` from the unresolved field,
+                // as it may already have a proper name.
+                let forceRename =
+                    match unresolved with
+                    | UBCColumn col -> col.ForceRename
+                    | UBCHeader header -> field.ForceRename
                 { Header = header
                   Ref = { Entity = entityRef; Name = field.Name }
                   Field = resolvedFieldToBits field.Field
                   Entity = entity
-                  ForceRename = field.ForceRename
+                  ForceRename = forceRename
                 }
 
         let rec traverse (boundField : BoundColumn) : PathArrow list -> BoundColumn list = function
@@ -1580,7 +1594,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                           Single = false
                           IsInner = boundField.Header.IsInner
                         }
-                    let nextBoundField = getBoundField refHeader
+                    let nextBoundField = getBoundField (UBCHeader refHeader)
                     let boundFields = traverse nextBoundField refs
                     boundField :: boundFields
                 | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
@@ -1600,10 +1614,6 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             { FromId = fromId
               Path = []
             }
-        let (entityRef, argEntity, argField) =
-            match findFieldWithContext layout typeCtxs key parentEntity firstArrow.Name with
-            | Some ret -> ret
-            | None -> raisef ViewResolveException "Field doesn't exist in %O: %O" parentEntity firstArrow.Name
         let argHeader =
             { Key = key
               ParentEntity = parentEntity
@@ -1612,7 +1622,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
               Single = false
               IsInner = false
             }
-        resolvePath typeCtxs argHeader remainingPath
+        resolvePath typeCtxs (UBCHeader argHeader) remainingPath
 
     let resolveReference (ctx : Context) (typeCtxs : TypeContextsMap) (f : LinkedFieldRef) : ReferenceInfo * LinkedBoundFieldRef =
         if f.AsRoot then
@@ -1647,8 +1657,8 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
 
                 let (outerValue, innerValue, boundFields) =
                     match info.Mapping with
-                    | FMBound (BVColumn bound) -> getFromCurrentBoundField bound.Header
-                    | FMTypeRestricted header -> getFromCurrentBoundField header
+                    | FMBound (BVColumn bound) -> getFromCurrentBoundField (UBCColumn bound)
+                    | FMTypeRestricted header -> getFromCurrentBoundField (UBCHeader header)
                     | FMBound (BVArgument arg) ->
                         if Array.isEmpty f.Path then
                             (Some (BVArgument arg), Some (BVArgument arg), [])
