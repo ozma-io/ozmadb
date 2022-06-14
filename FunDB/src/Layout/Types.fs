@@ -153,9 +153,17 @@ type ResolvedFieldBits = GenericResolvedField<ResolvedColumnField, IComputedFiel
 
 let resolvedFieldToBits : ResolvedField -> ResolvedFieldBits = mapResolvedField id (fun x -> x :> IComputedFieldBits)
 
-let resolvedFieldType : GenericResolvedField<ResolvedColumnField, 'comp> -> ResolvedFieldType option = function
+let resolvedFieldBitsType : ResolvedFieldBits -> ResolvedFieldType option = function
+    | RId -> Some (FTScalar SFTInt)
+    | RSubEntity -> Some (FTScalar SFTJson)
     | RColumnField { FieldType = typ } -> Some typ
-    | _ -> None
+    | RComputedField _ -> None
+
+let resolvedFieldType : ResolvedField -> ResolvedFieldType option = function
+    | RId -> Some (FTScalar SFTInt)
+    | RSubEntity -> Some (FTScalar SFTJson)
+    | RColumnField { FieldType = typ } -> Some typ
+    | RComputedField { Type = typ } -> typ
 
 type FieldInfo<'col, 'comp> =
     { Name : FieldName

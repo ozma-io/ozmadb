@@ -16,6 +16,10 @@ type ViewTypecheckException (message : string, innerException : Exception, isUse
 
     new (message : string) = ViewTypecheckException (message, null, true)
 
+let private optionTypeToString : ResolvedFieldType option -> string = function
+    | Some t -> string t
+    | None -> "<unknown>"
+
 let private checkFunc (name : FunctionName) (args : (ResolvedFieldType option) seq) : ResolvedFieldType =
     try
         match Map.find name allowedFunctions with
@@ -32,12 +36,12 @@ let private checkFunc (name : FunctionName) (args : (ResolvedFieldType option) s
             | Some ret -> ret
             | None -> raisef ViewTypecheckException "Cannot unify values of different types"
     with
-    | e -> raisefWithInner ViewTypecheckException e "In function call %O%O" name (Seq.toList args)
+    | e -> raisefWithInner ViewTypecheckException e "In function call %O(%s)" name (args |> Seq.map optionTypeToString |> String.concat ", ")
 
 let private checkBinaryOp (op : BinaryOperator) (a : ResolvedFieldType option) (b : ResolvedFieldType option) : ResolvedFieldType =
     let overloads = SQL.binaryOperatorSignature (compileBinaryOp op)
     match SQL.findBinaryOpOverloads overloads (Option.map compileFieldType a) (Option.map compileFieldType b) with
-    | None -> raisef ViewTypecheckException "Couldn't deduce operator overload for %O %O %O" a op b
+    | None -> raisef ViewTypecheckException "Couldn't deduce operator overload for %s %O %s" (optionTypeToString a) op (optionTypeToString b)
     | Some (typs, ret) -> decompileFieldType ret
 
 let private scalarJson = FTScalar SFTJson
@@ -59,10 +63,10 @@ type private Typechecker (layout : ILayoutBits) =
     let rec typecheckBinaryLogical (a : ResolvedFieldExpr) (b : ResolvedFieldExpr) : ResolvedFieldType =
         let ta = typecheckFieldExpr a
         if not <| isMaybeSubtype layout scalarBool ta then
-            raisef ViewTypecheckException "Boolean expected, %O found" ta
+            raisef ViewTypecheckException "Boolean expected, %O found" (optionTypeToString ta)
         let tb = typecheckFieldExpr b
         if not <| isMaybeSubtype layout scalarBool tb then
-            raisef ViewTypecheckException "Boolean expected, %O found" tb
+            raisef ViewTypecheckException "Boolean expected, %O found" (optionTypeToString tb)
         scalarBool
 
     and typecheckAnyLogical (a : ResolvedFieldExpr) : ResolvedFieldType =
@@ -99,7 +103,7 @@ type private Typechecker (layout : ILayoutBits) =
         for (check, expr) in es do
             let checkt = typecheckFieldExpr check
             if not <| isMaybeSubtype layout scalarBool checkt then
-                raisef ViewTypecheckException "Boolean expected, %O found" checkt
+                raisef ViewTypecheckException "Boolean expected, %s found" (optionTypeToString checkt)
 
         let allVals = Seq.append (Seq.map snd es) (Option.toSeq els) |> Seq.map typecheckFieldExpr
         match unionTypes allVals with

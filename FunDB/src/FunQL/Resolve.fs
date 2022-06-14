@@ -394,7 +394,7 @@ let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntit
             let info =
                 { Entity = maybeEntityRef
                   EntityId = fromEntityId
-                  Type = resolvedFieldType field
+                  Type = resolvedFieldBitsType field
                   Mapping = FMTypeRestricted header
                   ForceSQLName = resolvedFieldForcedSQLName field
                   FieldAttributes = Set.empty
@@ -1479,7 +1479,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                   ForceRename = false
                 }
             { Bound = Some (BVColumn bound)
-              Type = resolvedFieldType field
+              Type = resolvedFieldBitsType field
               FieldAttributes = Set.empty
             }
 
@@ -1502,7 +1502,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             }
         let mainSubqueryField =
             { Bound = Some (BVColumn mainBoundField)
-              Type = resolvedFieldType mainFieldInfo.Field
+              Type = resolvedFieldBitsType mainFieldInfo.Field
               FieldAttributes = Set.empty
             }
         let fields = Map.add funMain mainSubqueryField realFields
@@ -1663,11 +1663,8 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                         if Array.isEmpty f.Path then
                             (Some (BVArgument arg), Some (BVArgument arg), [])
                         else
-                            let fieldType =
-                                match info.Type with
-                                | Some typ -> typ
-                                | None -> raisef ViewResolveException "Dereference of an unbound field in %O" f
-                            let path = resolvePathByType typeCtxs (FIEntity info.EntityId) fieldType f.Path
+                            let argInfo = getArgument arg.Ref
+                            let path = resolvePathByType typeCtxs (FIEntity info.EntityId) argInfo.ArgType f.Path
                             (Some (BVArgument arg), Some (BVColumn <| List.last path), path)
                     | FMUnbound ->
                         if Array.isEmpty f.Path then
@@ -1680,13 +1677,25 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                             let path = resolvePathByType typeCtxs (FIEntity info.EntityId) fieldType f.Path
                             (None, Some (BVColumn <| List.last path), path)
 
+                let newType =
+                    match info.Type with
+                    | Some _ as typ -> typ
+                    | None ->
+                        match outerValue with
+                        // We delay acquiring computed field types until they are actually used.
+                        | Some (BVColumn ({ Field = RComputedField _ } as col)) ->
+                            match col.Entity.FindField col.Ref.Name with
+                            | Some { Field = RComputedField comp } -> comp.Type
+                            | _ -> failwith "Impossible"
+                        | _ -> None
+
                 let columnInfo =
                     { EntityId = info.EntityId
                       ForceSQLName = info.ForceSQLName
                     }
                 let fieldInfo =
                     { Path = boundFields |> Seq.map (fun x -> x.Ref.Entity) |> Array.ofSeq
-                      Type = info.Type
+                      Type = newType
                       Column = Some columnInfo
                       Bound = Option.map boundValueMeta outerValue
                     } : FieldRefMeta
@@ -1939,7 +1948,10 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                         raisef ViewResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
                     match field.Field with
                     // We erase field information for computed fields from results, as they would be expanded at this point.
-                    | RComputedField comp -> (None, None)
+                    | RComputedField comp ->
+                        match field.Entity.FindField field.Ref.Name with
+                        | Some { Field = RComputedField comp } -> (None, comp.Type)
+                        | _ -> failwith "Impossible"
                     | _ ->
                         // Field is no longer immediate, and rename is not needed because a name is assigned here.
                         let header = { field.Header with Immediate = false }
@@ -1948,7 +1960,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                                 Header = header
                                 ForceRename = false
                             }
-                        (Some (BVColumn newField), resolvedFieldType field.Field)
+                        (Some (BVColumn newField), resolvedFieldBitsType field.Field)
             let info =
                 { Bound = resultBound
                   Type = innerType
