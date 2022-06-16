@@ -2009,6 +2009,8 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             (info, { Internal = newAttr.Internal; Expression = BAExpr newAttr.Expression; Dependency = newAttr.Dependency })
         | BAMapping mapping ->
             (boundExprInfo, { Internal = attr.Internal; Expression = BAMapping mapping; Dependency = exprDependency boundExprInfo })
+        | BAArrayMapping mapping ->
+            (boundExprInfo, { Internal = attr.Internal; Expression = BAArrayMapping mapping; Dependency = exprDependency boundExprInfo })
 
     and resolveAttributesMap (ctx : Context) (attributes : ParsedAttributesMap) : ResolvedExprInfo * ResolvedAttributesMap =
         let mutable exprInfo = emptyResolvedExprInfo
@@ -3016,6 +3018,7 @@ and private relabelSelectTreeExpr : ResolvedSelectTreeExpr -> ResolvedSelectTree
 and private relabelBoundAttributeExpr : ResolvedBoundAttributeExpr -> ResolvedBoundAttributeExpr = function
     | BAExpr expr -> BAExpr (relabelFieldExpr expr)
     | BAMapping _ as mapping -> mapping
+    | BAArrayMapping _ as mapping -> mapping
 
 and private relabelAttribute (attr : ResolvedAttribute) : ResolvedAttribute =
     { Dependency = attr.Dependency

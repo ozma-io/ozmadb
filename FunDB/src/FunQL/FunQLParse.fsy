@@ -581,9 +581,13 @@ BoundAttributeValues:
 BoundAttributeValue:
     | MaybeInternal Dependency BoundAttributeValueExpr { { Internal = $1; Dependency = $2; Expression = $3 } }
 
+BoundMapping:
+    | MAPPING BoundAttrMappingWhenList BoundAttrMappingElse END { { Entries = parseHashMap "Clashing mapping values" $2; Default = $3 } }
+
 BoundAttributeValueExpr:
-    | MAPPING BoundAttrMappingWhenList BoundAttrMappingElse END { BAMapping { Entries = parseHashMap "Clashing mapping values" $2; Default = $3 } }
-    | FieldExpr                                                 { BAExpr $1 }
+    | BoundMapping       { BAMapping $1 }
+    | ARRAY BoundMapping { BAArrayMapping $2 }
+    | FieldExpr          { BAExpr $1 }
 
 OptConst:
     | CONST { true }

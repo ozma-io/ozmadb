@@ -68,6 +68,7 @@ type private UsedReferencesBuilder (layout : ILayoutBits) =
     and buildForBoundAttributeExpr : ResolvedBoundAttributeExpr -> unit = function
         | BAExpr expr -> buildForFieldExpr expr
         | BAMapping mapping -> ()
+        | BAArrayMapping mapping -> ()
 
     and buildForBoundAttribute (attr : ResolvedBoundAttribute) =
         buildForBoundAttributeExpr attr.Expression

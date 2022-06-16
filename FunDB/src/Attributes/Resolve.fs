@@ -23,6 +23,7 @@ let private convertBoundAttribute (attr : ResolvedBoundAttribute) : DefaultAttri
     let single =
         match attr.Expression with
         | BAMapping map -> true
+        | BAArrayMapping map -> true
         | BAExpr expr ->
             match attr.Dependency with
             | DSConst -> true

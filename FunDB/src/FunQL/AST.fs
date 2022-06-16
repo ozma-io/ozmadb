@@ -684,6 +684,7 @@ and BoundAttributesMap<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName = Map<
 and [<NoEquality; NoComparison>] BoundAttributeExpr<'e, 'f> when 'e :> IFunQLName and 'f :> IFunQLName =
     | BAExpr of FieldExpr<'e, 'f>
     | BAMapping of BoundMapping
+    | BAArrayMapping of BoundMapping
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -691,6 +692,7 @@ and [<NoEquality; NoComparison>] BoundAttributeExpr<'e, 'f> when 'e :> IFunQLNam
             match this with
             | BAExpr e -> toFunQLString e
             | BAMapping mapping -> toFunQLString mapping
+            | BAArrayMapping mapping -> sprintf "ARRAY %O" mapping
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
@@ -1377,6 +1379,11 @@ let mapScalarFieldType (func : 'e1 -> 'e2) : ScalarFieldType<'e1> -> ScalarField
 let mapFieldType (func : 'e1 -> 'e2) : FieldType<'e1> -> FieldType<'e2> = function
     | FTScalar typ -> FTScalar <| mapScalarFieldType func typ
     | FTArray typ -> FTArray <| mapScalarFieldType func typ
+
+let mapBoundAttributeExpr (f : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) : BoundAttributeExpr<'e1, 'f1> -> BoundAttributeExpr<'e2, 'f2> = function
+    | BAExpr e -> BAExpr (f e)
+    | BAMapping mapping -> BAMapping mapping
+    | BAArrayMapping mapping -> BAArrayMapping mapping
 
 let rec mapFieldExpr (mapper : FieldExprMapper<'e1, 'f1, 'e2, 'f2>) : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2> =
     let rec traverse = function

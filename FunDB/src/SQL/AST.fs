@@ -1396,3 +1396,9 @@ let commonTableExpr (expr : DataExpr) : CommonTableExpr =
       Materialized = None
       Expr = expr
     }
+
+let fromTableExpr (expr : TableExpr) : FromTableExpr =
+    { Expression = expr
+      Alias = None
+      Lateral = false
+    }
