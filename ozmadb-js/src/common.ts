@@ -360,14 +360,14 @@ export interface IDomainValuesResult {
  * Error types.
  */
 
-export type RequestErrorType = "internal" | "request" | "no_endpoint" | "no_instance" | "access_denied" | "concurrent_update";
+export type RequestErrorType = "internal" | "request" | "noEndpoint" | "noInstance" | "accessDenied" | "concurrentUpdate";
 
 export interface IApiError {
   error: string;
   message: string;
 }
 
-export type UserViewErrorType = RequestErrorType | "not_found" | "compilation" | "execution" | "arguments";
+export type UserViewErrorType = RequestErrorType | "notFound" | "compilation" | "execution" | "arguments";
 
 /*
  * Extra types.
