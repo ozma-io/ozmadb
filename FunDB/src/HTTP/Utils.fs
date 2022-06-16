@@ -33,11 +33,11 @@ open FunWithFlags.FunDB.API.API
 type RequestErrorInfo =
     | [<CaseName("internal")>] RIInternal of Message : string
     | [<CaseName("request")>] RIRequest of Message : string
-    | [<CaseName("no_endpoint")>] RINoEndpoint
-    | [<CaseName("no_instance")>] RINoInstance
-    | [<CaseName("access_denied")>] RIAccessDenied
-    | [<CaseName("concurrent_update")>] RIConcurrentUpdate
-    | [<CaseName("stack_overflow")>] RIStackOverflow of Trace : EventSource list
+    | [<CaseName("noEndpoint")>] RINoEndpoint
+    | [<CaseName("noInstance")>] RINoInstance
+    | [<CaseName("accessDenied")>] RIAccessDenied
+    | [<CaseName("concurrentUpdate")>] RIConcurrentUpdate
+    | [<CaseName("stackOverflow")>] RIStackOverflow of Trace : EventSource list
     with
         [<DataMember>]
         member this.Message =

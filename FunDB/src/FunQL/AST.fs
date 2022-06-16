@@ -262,10 +262,10 @@ type FieldValuePrettyConverter () =
         | FNull -> writer.WriteNull()
 
 type [<StructuralEquality; NoComparison>] ReferenceDeleteAction =
-    | [<CaseName("no_action")>] RDANoAction
+    | [<CaseName("noAction")>] RDANoAction
     | [<CaseName("cascade")>] RDACascade
-    | [<CaseName("set_null")>] RDASetNull
-    | [<CaseName("set_default")>] RDASetDefault
+    | [<CaseName("setNull")>] RDASetNull
+    | [<CaseName("setDefault")>] RDASetDefault
     with
         override this.ToString () = this.ToFunQLString()
 

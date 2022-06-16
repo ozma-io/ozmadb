@@ -131,8 +131,8 @@ type IAPIError =
 
 [<SerializeAsObject("error")>]
 type UserViewErrorInfo =
-    | [<CaseName("not_found")>] UVENotFound
-    | [<CaseName("access_denied")>] UVEAccessDenied
+    | [<CaseName("notFound")>] UVENotFound
+    | [<CaseName("accessDenied")>] UVEAccessDenied
     | [<CaseName("compilation")>] UVECompilation of Details : string
     | [<CaseName("execution")>] UVEExecution of Details : string
     | [<CaseName("arguments")>] UVEArguments of Details : string
@@ -197,9 +197,9 @@ type IUserViewsAPI =
 
 [<SerializeAsObject("error")>]
 type EntityErrorInfo =
-    | [<CaseName("not_found")>] EENotFound
+    | [<CaseName("notFound")>] EENotFound
     | [<CaseName("frozen")>] EEFrozen
-    | [<CaseName("access_denied")>] EEAccessDenied
+    | [<CaseName("accessDenied")>] EEAccessDenied
     | [<CaseName("arguments")>] EEArguments of Details : string
     | [<CaseName("compilation")>] EECompilation of Details : string
     | [<CaseName("execution")>] EEExecution of Details : string
@@ -232,7 +232,7 @@ type TransactionOp =
     | [<CaseName("insert")>] TInsertEntity of Entity : ResolvedEntityRef * Entries : RawArguments
     | [<CaseName("update")>] TUpdateEntity of Entity : ResolvedEntityRef * Id : RawRowKey * Entries : RawArguments
     | [<CaseName("delete")>] TDeleteEntity of Entity : ResolvedEntityRef * Id : RawRowKey
-    | [<CaseName("recursive_delete")>] TRecursiveDeleteEntity of Entity : ResolvedEntityRef * Id : RawRowKey
+    | [<CaseName("recursiveDelete")>] TRecursiveDeleteEntity of Entity : ResolvedEntityRef * Id : RawRowKey
     | [<CaseName("command")>] TCommand of Command : string * Arguments : RawArguments
 
 [<SerializeAsObject("type")>]
@@ -240,7 +240,7 @@ type TransactionOpResult =
     | [<CaseName("insert")>] TRInsertEntity of Id : RowId option
     | [<CaseName("update")>] TRUpdateEntity of Id : RowId
     | [<CaseName("delete")>] TRDeleteEntity
-    | [<CaseName("recursive_delete")>] TRRecursiveDeleteEntity of Deleted : ReferencesTree
+    | [<CaseName("recursiveDelete")>] TRRecursiveDeleteEntity of Deleted : ReferencesTree
     | [<CaseName("command")>] TRCommand
 
 [<NoEquality; NoComparison>]
@@ -279,8 +279,8 @@ type TransactionResult =
 
 [<SerializeAsObject("error")>]
 type SaveErrorInfo =
-    | [<CaseName("access_denied")>] RSEAccessDenied
-    | [<CaseName("not_found")>] RSENotFound
+    | [<CaseName("accessDenied")>] RSEAccessDenied
+    | [<CaseName("notFound")>] RSENotFound
     with
         [<DataMember>]
         member this.Message =
@@ -293,9 +293,9 @@ type SaveErrorInfo =
 
 [<SerializeAsObject("error")>]
 type RestoreErrorInfo =
-    | [<CaseName("access_denied")>] RREAccessDenied
+    | [<CaseName("accessDenied")>] RREAccessDenied
     | [<CaseName("preloaded")>] RREPreloaded
-    | [<CaseName("invalid_format")>] RREInvalidFormat of Details : string
+    | [<CaseName("invalidFormat")>] RREInvalidFormat of Details : string
     | [<CaseName("consistency")>] RREConsistency of Details : string
     with
         [<DataMember>]
@@ -327,7 +327,7 @@ type ActionResult =
 
 [<SerializeAsObject("error")>]
 type ActionErrorInfo =
-    | [<CaseName("not_found")>] AENotFound
+    | [<CaseName("notFound")>] AENotFound
     | [<CaseName("compilation")>] AECompilation of Details : string
     | [<CaseName("exception")>] AEException of Details : string
     with
@@ -361,8 +361,8 @@ type DomainValuesResult =
 
 [<SerializeAsObject("error")>]
 type DomainErrorInfo =
-    | [<CaseName("not_found")>] DENotFound
-    | [<CaseName("access_denied")>] DEAccessDenied
+    | [<CaseName("notFound")>] DENotFound
+    | [<CaseName("accessDenied")>] DEAccessDenied
     | [<CaseName("arguments")>] DEArguments of Details : string
     | [<CaseName("execution")>] DEExecution of Details : string
     with
