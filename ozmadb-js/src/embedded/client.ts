@@ -52,7 +52,7 @@ export default class FunAppEmbeddedClient {
     });
   }
 
-  private async sendRequest<R>(request: R): Promise<any> {
+  private async sendRequest<R extends { type: string }>(request: R): Promise<any> {
     return new Promise((resolve, reject) => {
       const id = this.lastId++;
       const msg: IRequest<R> = {
