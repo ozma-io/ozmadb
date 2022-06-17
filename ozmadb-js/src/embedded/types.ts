@@ -1,4 +1,4 @@
-import { AttributesMap } from "../types";
+import { AttributesMap, IActionRef, IUserViewRef } from "../types";
 
 export const apiVersion = 1;
 
@@ -69,3 +69,36 @@ export type ControlServerMessage = PageServerMessage | ChangeHeightResponse | Up
 
 export type AnyClientMessage = PageClientMessage | ControlClientMessage;
 export type AnyServerMessage = PageServerMessage | ControlServerMessage;
+
+export type QueryTargetType = "top" | "root" | "modal" | "blank" | "modal-auto";
+
+export interface IQueryLinkOpts {
+  new?: boolean;
+  args?: Record<string, unknown>;
+  defaultValues?: Record<string, unknown>;
+  target?: QueryTargetType;
+}
+
+export type QueryLink = (IQueryLinkOpts & IUserViewRef) | (IQueryLinkOpts & { ref: IUserViewRef });
+
+export type HrefTargetType = "top" | "blank";
+
+export interface IHrefLinkOpts {
+  target?: HrefTargetType;
+}
+
+export interface IHrefLink extends IHrefLinkOpts {
+  href: string;
+}
+
+export type HrefLink = IHrefLink | string;
+
+export type Link = QueryLink | HrefLink;
+
+export interface IGotoRequestData {
+  type: "goto";
+  link: Link;
+}
+
+export type GotoRequest = IRequest<IGotoRequestData>;
+export type GotoResponse = Response<undefined, CommonError>;

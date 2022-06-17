@@ -1,7 +1,8 @@
 import {
   AnyServerMessage, CommonError, IChangeHeightRequestData, ICurrentValue, IReadyRequestData,
-  IRequest, IUpdateValueRequestData, Response, apiVersion,
+  IRequest, IUpdateValueRequestData, Response, apiVersion, Link, IGotoRequestData, IHrefLinkOpts,
 } from "./types";
+import { redirectClick } from "./utils";
 
 /*
  * Embedded API client.
@@ -128,5 +129,52 @@ export default class FunAppEmbeddedClient {
       rawValue,
     };
     await this.sendRequest(updateMessage);
+  }
+
+  async goto(link: Link) {
+    await this.initialized;
+    const gotoMessage: IGotoRequestData = {
+      type: "goto",
+      link,
+    };
+    await this.sendRequest(gotoMessage);
+  }
+
+  hrefClick(opts?: IHrefLinkOpts | Link): (event: MouseEvent) => void;
+  hrefClick(event: MouseEvent): void;
+
+  hrefClick(arg?: IHrefLinkOpts | Link | MouseEvent): ((event: MouseEvent) => void) | void {
+    let opts: IHrefLinkOpts | Link | undefined;
+    const handler = (event: MouseEvent) => {
+      // If a link is already given, follow it.
+      let link: Link | undefined;
+      if (typeof opts === "string" || (typeof opts === "object" && ("href" in opts || "name" in opts || "ref" in opts))) {
+        link = opts;
+      } else if (event.currentTarget) {
+        // Try to autodetect the link.
+        const el = event.currentTarget as Element;
+        const href = el.getAttribute?.("href");
+        if (href) {
+          link = href;
+        }
+      }
+      if (!link) {
+        console.error("Couldn't autodetect link to follow");
+        return;
+      }
+
+      event.stopPropagation();
+      if (!redirectClick(event, true)) {
+        return;
+      }
+      void this.goto(link);
+    };
+
+    if (arg instanceof MouseEvent) {
+      return handler(arg);
+    } else {
+      opts = arg;
+      return handler;
+    }
   }
 }
