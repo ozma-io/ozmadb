@@ -26,6 +26,7 @@ export default class FunAppEmbeddedClient {
   private _currentValue: ICurrentValue | undefined;
   private requests: Record<number, (response: Response<any, CommonError>) => void> = {};
   private needUpdateHeight = true;
+  private handler = (msg: MessageEvent<AnyServerMessage>) => this.eventHandler(msg);
 
   constructor() {
     if (window.parent === null) {
@@ -33,11 +34,8 @@ export default class FunAppEmbeddedClient {
     }
 
     this.parent = window.parent;
+    window.addEventListener("message", this.handler);
     this.initialized = (async () => {
-      /* eslint-disable @typescript-eslint/unbound-method */
-      window.addEventListener("message", this.eventHandler);
-      /* eslint-enable @typescript-eslint/unbound-method */
-
       const readyMessage: IReadyRequestData = {
         type: "ready",
         version: apiVersion,
