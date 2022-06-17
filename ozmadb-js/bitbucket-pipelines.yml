@@ -1,0 +1,39 @@
+options:
+  max-time: 5
+pipelines:
+  default:
+    - step: &build
+        name: Build
+        image: node:lts
+        caches:
+          - node
+          - yarn
+        script:
+          - ./build.sh
+          - yarn lint
+        artifacts:
+          - dist/**
+          - bundle/**
+  pull-requests:
+    '**':
+      - step: *build
+  branches:
+    master:
+      - step: *build
+      - step:
+          name: Deploy to test
+          image: atlassian/default-image:2
+          deployment: test
+          script:
+            - dev/deploy.sh bitbucket@manager.services.ozma.io development
+      - step:
+          name: Deploy to production
+          image: atlassian/default-image:2
+          deployment: production
+          trigger: manual
+          script:
+            - dev/deploy.sh bitbucket@manager.services.ozma.io production
+
+definitions:
+  caches:
+    yarn: /usr/local/share/.cache/yarn
