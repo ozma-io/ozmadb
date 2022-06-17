@@ -25,11 +25,13 @@ export default class FunAppEmbeddedClient {
   private valueHandlers: ValueHandler[] = [];
   private _currentValue: ICurrentValue | undefined;
   private requests: Record<number, (response: Response<any, CommonError>) => void> = {};
+  private needUpdateHeight = true;
 
   constructor() {
     if (window.parent === null) {
       throw new Error("Client is expected to be run in <iframe>");
     }
+
     this.parent = window.parent;
     this.initialized = (async () => {
       /* eslint-disable @typescript-eslint/unbound-method */
@@ -42,6 +44,12 @@ export default class FunAppEmbeddedClient {
       };
       await this.sendRequest(readyMessage);
     })();
+    void this.initialized.then(() => {
+      if (this.needUpdateHeight) {
+        return this.setHeight();
+      }
+      return undefined;
+    });
   }
 
   private async sendRequest<R>(request: R): Promise<any> {
@@ -103,11 +111,14 @@ export default class FunAppEmbeddedClient {
     }
   }
 
-  async changeHeight(height: number) {
+  async setHeight(height?: number) {
+    this.needUpdateHeight = false;
     await this.initialized;
+    const newHeight = height ?? document.body.clientHeight;
+
     const heightMessage: IChangeHeightRequestData = {
       type: "changeHeight",
-      height,
+      height: newHeight,
     };
     await this.sendRequest(heightMessage);
   }
