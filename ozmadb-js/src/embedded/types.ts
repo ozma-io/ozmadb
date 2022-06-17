@@ -70,5 +70,6 @@ export type PageServerMessage = ReadyResponse;
 export type ControlClientMessage = PageClientMessage | ChangeHeightRequest | UpdateValueRequest;
 export type ControlServerMessage = PageServerMessage | ChangeHeightResponse | UpdateValueResponse | IUpdateValuePush;
 
+export type AnyClientRequestData = IReadyRequestData | IChangeHeightRequestData | IUpdateValueRequestData;
 export type AnyClientMessage = PageClientMessage | ControlClientMessage;
 export type AnyServerMessage = PageServerMessage | ControlServerMessage;
