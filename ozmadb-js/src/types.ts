@@ -392,11 +392,3 @@ export interface IQueryChunk {
 export interface IPermissionsInfo {
   isRoot: boolean;
 }
-
-/*
- * Helpful functions.
- */
-
-export const goodName = (name: string): boolean => {
-  return !(name === "" || name.includes(' ') || name.includes('/') || name.includes("__"));
-}

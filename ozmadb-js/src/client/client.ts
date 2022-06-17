@@ -2,7 +2,7 @@ import {
   IEntityRef, IEntity, IUserViewRef, IQueryChunk, IApiError, IViewExprResult, IViewInfoResult,
   IActionRef, IActionResult, ArgumentName, IFieldRef,
   IDomainValuesResult, FieldName, IPermissionsInfo, RowKey, RowId,
-} from "./common";
+} from "../types";
 
 /*
  * Low-level API client.
@@ -157,7 +157,7 @@ export interface IRestoreSchemasOptions {
   forceAllowBroken?: boolean;
 }
 
-export default class FunDBAPI {
+export default class FunDBClient {
   private apiUrl: string;
 
   constructor(opts: { apiUrl: string }) {

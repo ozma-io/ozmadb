@@ -1,7 +1,7 @@
 import {
   IEntityRef, IRoleRef, IEntity, UserViewSource, IViewExprResult, IViewInfoResult, IQueryChunk, ILayout, UserViewName,
   IFieldRef, IDomainValuesResult, IApiError, RowId, RowKey, IReferencesTree,
-} from "./common";
+} from "../types";
 
 export declare const renderDate: (date : Date) => string;
 export declare const renderFunQLName: (name: string) => string;
