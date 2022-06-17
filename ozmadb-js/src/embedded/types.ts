@@ -2,17 +2,16 @@ import { AttributesMap } from "../types";
 
 export const apiVersion = 1;
 
-
 export interface IRequest<Request> {
   type: "request";
   id?: unknown;
   request: Request;
-};
+}
 
 export interface IResponseCommon {
   type: "response";
   id: unknown;
-};
+}
 
 export interface IResponseSuccess<Result> extends IResponseCommon {
   status: "ok";
@@ -27,7 +26,6 @@ export interface IResponseError<Error> extends IResponseCommon {
 
 export type Response<Result, Error> = IResponseSuccess<Result> | IResponseError<Error>;
 
-
 export type CommonError = "internal" | "badRequest";
 
 export interface IReadyRequestData {
@@ -38,7 +36,6 @@ export interface IReadyRequestData {
 export type ReadyRequest = IRequest<IReadyRequestData>;
 export type ReadyResponse = Response<undefined, CommonError>;
 
-
 export interface IChangeHeightRequestData {
   type: "changeHeight";
   height: number;
@@ -47,7 +44,6 @@ export interface IChangeHeightRequestData {
 export type ChangeHeightRequest = IRequest<IChangeHeightRequestData>;
 export type ChangeHeightResponse = Response<undefined, CommonError>;
 
-
 export interface IUpdateValueRequestData {
   type: "updateValue";
   rawValue: unknown;
@@ -55,7 +51,6 @@ export interface IUpdateValueRequestData {
 
 export type UpdateValueRequest = IRequest<IUpdateValueRequestData>;
 export type UpdateValueResponse = Response<undefined, CommonError>;
-
 
 export interface ICurrentValue {
   rawValue: unknown;
@@ -68,7 +63,6 @@ export interface IUpdateValuePush {
   type: "updateValue";
   update: ICurrentValue;
 }
-
 
 export type PageClientMessage = ReadyRequest;
 export type PageServerMessage = ReadyResponse;

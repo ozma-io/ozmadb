@@ -1,7 +1,6 @@
 import {
-  AnyServerMessage,
-  apiVersion,
-  CommonError, IChangeHeightRequestData, ICurrentValue, IReadyRequestData, IRequest, IUpdateValueRequestData, Response
+  AnyServerMessage, CommonError, IChangeHeightRequestData, ICurrentValue, IReadyRequestData,
+  IRequest, IUpdateValueRequestData, Response, apiVersion,
 } from "./types";
 
 /*
@@ -21,7 +20,7 @@ export type ValueHandler = (newValue: ICurrentValue) => void;
 
 export default class FunAppEmbeddedClient {
   private parent: Window;
-  private lastId: number = 0;
+  private lastId = 0;
   private initialized: Promise<void>;
   private valueHandlers: ValueHandler[] = [];
   private _currentValue: ICurrentValue | undefined;

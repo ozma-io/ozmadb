@@ -23,14 +23,14 @@ const fetchFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Respo
     response = await fetch(input, init);
   } catch (e) {
     if (e instanceof TypeError) {
-      throw new FunDBError({ error: "network_failure", message: e.message });
+      throw new FunDBError({ error: "networkFailure", message: e.message });
     } else {
       throw e;
     }
   }
   if (!response.ok) {
     const body = await response.json();
-    throw new FunDBError(body);
+    throw new FunDBError(body as IApiError);
   }
   return response;
 };
