@@ -1,6 +1,7 @@
 import {
   AnyServerMessage, CommonError, IChangeHeightRequestData, ICurrentValue, IReadyRequestData,
-  IRequest, IUpdateValueRequestData, Response, apiVersion, Link, IGotoRequestData, IHrefLinkOpts,
+  IRequest, IUpdateValueRequestData, Response, apiVersion, Link, IGotoRequestData, IHrefLinkOpts, HrefTarget,
+  IQueryLink, IHrefLink, RawLink,
 } from "./types";
 import { redirectClick } from "./utils";
 
@@ -27,7 +28,7 @@ export default class FunAppEmbeddedClient {
   private _currentValue: ICurrentValue | undefined;
   private requests: Record<number, (response: Response<any, CommonError>) => void> = {};
   private needUpdateHeight = true;
-  private handler = (msg: MessageEvent<AnyServerMessage>) => this.eventHandler(msg);
+  private messageHandler = (msg: MessageEvent<AnyServerMessage>) => this.handleMessage(msg);
 
   constructor() {
     if (window.parent === null) {
@@ -35,7 +36,7 @@ export default class FunAppEmbeddedClient {
     }
 
     this.parent = window.parent;
-    window.addEventListener("message", this.handler);
+    window.addEventListener("message", this.messageHandler);
     this.initialized = (async () => {
       const readyMessage: IReadyRequestData = {
         type: "ready",
@@ -70,7 +71,7 @@ export default class FunAppEmbeddedClient {
     });
   }
 
-  private eventHandler(event: MessageEvent<AnyServerMessage>) {
+  private handleMessage(event: MessageEvent<AnyServerMessage>) {
     if (event.source !== this.parent) return;
     const msg = event.data;
 
@@ -140,41 +141,58 @@ export default class FunAppEmbeddedClient {
     await this.sendRequest(gotoMessage);
   }
 
-  hrefClick(opts?: IHrefLinkOpts | Link): (event: MouseEvent) => void;
-  hrefClick(event: MouseEvent): void;
-
-  hrefClick(arg?: IHrefLinkOpts | Link | MouseEvent): ((event: MouseEvent) => void) | void {
-    let opts: IHrefLinkOpts | Link | undefined;
-    const handler = (event: MouseEvent) => {
-      // If a link is already given, follow it.
-      let link: Link | undefined;
-      if (typeof opts === "string" || (typeof opts === "object" && ("href" in opts || "name" in opts || "ref" in opts))) {
-        link = opts;
-      } else if (event.currentTarget) {
-        // Try to autodetect the link.
-        const el = event.currentTarget as Element;
-        const href = el.getAttribute?.("href");
-        if (href) {
-          link = href;
-        }
-      }
-      if (!link) {
-        console.error("Couldn't autodetect link to follow");
-        return;
-      }
-
-      event.stopPropagation();
-      if (!redirectClick(event, true)) {
-        return;
-      }
-      void this.goto(link);
-    };
-
-    if (arg instanceof MouseEvent) {
-      return handler(arg);
-    } else {
-      opts = arg;
-      return handler;
+  linkClick(event: MouseEvent, opts?: IHrefLinkOpts | RawLink): void {
+    if (!redirectClick(event, true)) {
+      return;
     }
+
+    // If a link is already given, follow it.
+    let link: Link | undefined;
+    if (typeof opts === "string") {
+      link = {
+        href: opts,
+      };
+    } else if (typeof opts === "object" && opts && ("href" in opts || "ref" in opts)) {
+      link = opts;
+    } else if (typeof opts === "object" && opts && "name" in opts) {
+      link = {
+        ref: {
+          schema: opts.schema,
+          name: opts.name,
+        },
+        args: opts.args,
+        defaultValues: opts.defaultValues,
+        new: opts.new,
+        target: opts.target,
+      };
+    } else {
+      // Try to autodetect the link.
+      const aEl = (event.target as Element).closest("a[href]");
+      if (aEl) {
+        const href = aEl.getAttribute("href")!;
+        let target: HrefTarget | undefined;
+        const rawTarget = aEl.getAttribute("target");
+        if (rawTarget === "_top") {
+          target = "top";
+        } else if (rawTarget === "_blank") {
+          target = "blank";
+        }
+        link = {
+          href,
+          target,
+        };
+      }
+    }
+    if (!link) {
+      console.error("Couldn't autodetect link to follow");
+      return;
+    }
+
+    event.stopPropagation();
+    event.preventDefault();
+    if (event.ctrlKey) {
+      link = { ...link, target: "blank" };
+    }
+    void this.goto(link);
   }
 }

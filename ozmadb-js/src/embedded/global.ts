@@ -13,5 +13,3 @@ declare global {
 
 window.FunApp = Index.FunApp;
 window.FunAppEmbeddedError = Index.FunAppEmbeddedError;
-// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-window.hrefClick = arg => Index.FunApp.hrefClick(arg as any);

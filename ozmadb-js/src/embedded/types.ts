@@ -56,49 +56,55 @@ export interface ICurrentValue {
   value: unknown;
 }
 
-export interface IUpdateValuePush {
-  type: "updateValue";
-  update: ICurrentValue;
-}
-
-export type PageClientMessage = ReadyRequest;
-export type PageServerMessage = ReadyResponse;
-
-export type ControlClientMessage = PageClientMessage | ChangeHeightRequest | UpdateValueRequest;
-export type ControlServerMessage = PageServerMessage | ChangeHeightResponse | UpdateValueResponse | IUpdateValuePush;
-
-export type AnyClientMessage = PageClientMessage | ControlClientMessage;
-export type AnyServerMessage = PageServerMessage | ControlServerMessage;
-
-export type QueryTargetType = "top" | "root" | "modal" | "blank" | "modal-auto";
+export type QueryTarget = "top" | "root" | "modal" | "blank" | "modal-auto";
 
 export interface IQueryLinkOpts {
   new?: boolean;
   args?: Record<string, unknown>;
   defaultValues?: Record<string, unknown>;
-  target?: QueryTargetType;
+  target?: QueryTarget;
 }
 
-export type QueryLink = (IQueryLinkOpts & IUserViewRef) | (IQueryLinkOpts & { ref: IUserViewRef });
+export interface IQueryLink extends IQueryLinkOpts {
+  ref: IUserViewRef;
+}
 
-export type HrefTargetType = "top" | "blank";
+export type RawQueryLink = (IQueryLinkOpts & IUserViewRef) | IQueryLink;
+
+export type HrefTarget = "top" | "blank";
 
 export interface IHrefLinkOpts {
-  target?: HrefTargetType;
+  target?: HrefTarget;
 }
 
 export interface IHrefLink extends IHrefLinkOpts {
   href: string;
 }
 
-export type HrefLink = IHrefLink | string;
+export type RawHrefLink = IHrefLink | string;
 
-export type Link = QueryLink | HrefLink;
+export type RawLink = RawQueryLink | RawHrefLink;
+
+export type Link = IQueryLink | IHrefLink;
 
 export interface IGotoRequestData {
   type: "goto";
   link: Link;
 }
 
+export interface IUpdateValuePush {
+  type: "updateValue";
+  update: ICurrentValue;
+}
+
 export type GotoRequest = IRequest<IGotoRequestData>;
 export type GotoResponse = Response<undefined, CommonError>;
+
+export type PageClientMessage = ReadyRequest | GotoRequest;
+export type PageServerMessage = ReadyResponse | GotoResponse;
+
+export type ControlClientMessage = PageClientMessage | ChangeHeightRequest | UpdateValueRequest;
+export type ControlServerMessage = PageServerMessage | ChangeHeightResponse | UpdateValueResponse | IUpdateValuePush;
+
+export type AnyClientMessage = PageClientMessage | ControlClientMessage;
+export type AnyServerMessage = PageServerMessage | ControlServerMessage;

@@ -12,7 +12,5 @@ export const redirectClick = (e: MouseEvent, allowControlKeys?: boolean): boolea
   if (e.button !== undefined && e.button !== 0) {
     return false;
   }
-
-  e.preventDefault();
   return true;
 };
