@@ -228,6 +228,13 @@ type Startup (config : IConfiguration) =
             | _ -> failwith "Invalid InstancesSource"
         ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
 
+let private isDebug =
+#if DEBUG
+    true
+#else
+    false
+#endif
+
 [<EntryPoint>]
 let main (args : string[]) : int =
     // Register a global converter to have nicer native F# types JSON conversion.
@@ -243,7 +250,7 @@ let main (args : string[]) : int =
     let configuration =
         ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile(configPath)
+            .AddJsonFile(configPath, false, isDebug)
             .AddEnvironmentVariables()
             .Build()
 
