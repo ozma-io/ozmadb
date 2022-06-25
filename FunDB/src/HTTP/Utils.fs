@@ -419,9 +419,11 @@ let private rateExceeded msg = requestError (RIRateExceeded msg)
 let private withContextLimited (prefix : string) (getLimits : IInstance -> RateLimit seq) (f : IFunDBAPI -> HttpHandler) : HttpHandler =
     let run = runWithApi true f
     lookupInstance <| fun inst next ctx ->
-        match ctx.User.FindFirstValue ClaimTypes.NameIdentifier with
-        | null -> requestError (RIRequest "No sub claim in security token") next ctx
-        | userId -> checkRateLimit (run inst) rateExceeded (prefix + userId) (getLimits inst.Instance) next ctx
+        let userId =
+            match ctx.User.FindFirstValue ClaimTypes.NameIdentifier with
+            | null -> "anonymous"
+            | userId -> userId
+        checkRateLimit (run inst) rateExceeded (prefix + userId) (getLimits inst.Instance) next ctx
 
 let withContextRead (f : IFunDBAPI -> HttpHandler) = withContextLimited "read." (fun inst -> inst.ReadRateLimitsPerUser) f
 let withContextWrite (f : IFunDBAPI -> HttpHandler) = withContextLimited "write." (fun inst -> inst.WriteRateLimitsPerUser) f
