@@ -181,12 +181,12 @@ let viewsApi : HttpHandler =
 
     let viewApi (viewRef : UserViewSource) (maybeReq : JToken option) =
         choose
-            [ route "/entries" >=> GET >=> withContext (getSelectFromView viewRef)
-              route "/entries" >=> POST >=> withContext (postSelectFromView viewRef maybeReq)
-              route "/info" >=> GET >=> withContext (getInfoView viewRef)
-              route "/info" >=> POST >=> withContext (postInfoView viewRef maybeReq)
-              route "/explain" >=> GET >=> withContext (getExplainView viewRef)
-              route "/explain" >=> POST >=> withContext (postExplainView viewRef maybeReq)
+            [ route "/entries" >=> GET >=> withContextRead (getSelectFromView viewRef)
+              route "/entries" >=> POST >=> withContextRead (postSelectFromView viewRef maybeReq)
+              route "/info" >=> GET >=> withContextRead (getInfoView viewRef)
+              route "/info" >=> POST >=> withContextRead (postInfoView viewRef maybeReq)
+              route "/explain" >=> GET >=> withContextRead (getExplainView viewRef)
+              route "/explain" >=> POST >=> withContextRead (postExplainView viewRef maybeReq)
             ]
 
     let postAnonymousView (rawData : JToken) =

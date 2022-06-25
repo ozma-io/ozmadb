@@ -1,6 +1,6 @@
-using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.ComponentModel;
+using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Npgsql.NameTranslation;
@@ -39,28 +39,42 @@ namespace FunWithFlags.FunDBSchema.Instances
         }
     }
 
+    public class RateLimit
+    {
+        public int Period { get; set; } // secs
+        public int Limit { get; set; }
+    }
+
     public class Instance
     {
         public int Id { get; set; }
         [Required]
         public string Name { get; set; } = null!;
-        public bool Enabled { get; set; }
-        public bool Published { get; set; } = true;
         [Required]
         public string Owner { get; set; } = null!;
         [Required]
         public string Host { get; set; } = null!;
-        public int Port { get; set; }
+        public int Port { get; set; } = 5432;
         [Required]
         public string Username { get; set; } = null!;
         [Required]
         public string Password { get; set; } = null!;
         [Required]
         public string Database { get; set; } = null!;
-        public bool DisableSecurity { get; set; }
-        public bool IsTemplate { get; set; }
-        [Required]
-        public Instant CreatedAt { get; set; }
-        public Nullable<Instant> AccessedAt { get; set; }
+
+        public bool Enabled { get; set; } = true;
+        public bool Published { get; set; } = true;
+        public bool DisableSecurity { get; set; } = false;
+        public bool AnyoneCanRead { get; set; } = false;
+
+        public Instant? AccessedAt { get; set; }
+
+        public int? MaxSize { get; set; }
+        public int? MaxUsers { get; set; }
+        public Duration? MaxRequestTime { get; set; }
+        [Column(TypeName = "jsonb")]
+        public List<RateLimit>? ReadRateLimitsPerUser { get; set; }
+        [Column(TypeName = "jsonb")]
+        public List<RateLimit>? WriteRateLimitsPerUser { get; set; }
     }
 }

@@ -37,6 +37,23 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 module SQL = FunWithFlags.FunDB.SQL.Query
 
+type IAPIError =
+    abstract member Message : string
+
+[<SerializeAsObject("error")>]
+type GenericErrorInfo =
+    | [<CaseName("quotaExceeded")>] GEQuotaExceeded of Details : string
+    | [<CaseName("commit")>] GECommit of Details : string
+    with
+        [<DataMember>]
+        member this.Message =
+            match this with
+            | GEQuotaExceeded msg -> sprintf  "Quota exceeded: %s" msg
+            | GECommit msg -> sprintf "Error during commit: %s" msg
+
+        interface IAPIError with
+            member this.Message = this.Message
+
 type IContext =
     inherit IDisposable
     inherit IAsyncDisposable
@@ -46,7 +63,6 @@ type IContext =
     abstract member TransactionId : int
     abstract member TransactionTime : Instant
     abstract member LoggerFactory : ILoggerFactory
-    abstract member CancellationToken : CancellationToken
     abstract member Runtime : IJSRuntime
 
     abstract member Layout : Layout
@@ -56,10 +72,12 @@ type IContext =
     abstract member Triggers : MergedTriggers
     abstract member Domains : LayoutDomains
 
+    abstract member CancellationToken : CancellationToken with get, set
+
     abstract member SetForceAllowBroken : unit -> unit
     abstract member ScheduleMigration : unit -> unit
-    abstract member ScheduleUpdateCustomEntities : SchemaCustomEntities -> unit
-    abstract member Commit : unit -> Task
+    abstract member ScheduleBeforeCommit : string -> (Layout -> Task<Result<unit, GenericErrorInfo>>) -> unit
+    abstract member Commit : unit -> Task<Result<unit, GenericErrorInfo>>
     abstract member CheckIntegrity : unit -> Task
     abstract member GetAnonymousView : bool -> string -> Task<PrefetchedUserView>
     abstract member GetAnonymousCommand : bool -> string -> Task<CompiledCommandExpr>
@@ -85,6 +103,11 @@ type RoleType =
             match this with
             | RTRoot -> true
             | _ -> false
+
+type RequestQuota =
+    { MaxSize : int option // MiB
+      MaxUsers : int option
+    }
 
 [<NoEquality; NoComparison>]
 type RequestUser =
@@ -117,6 +140,7 @@ type IRequestContext =
     abstract User : RequestUserInfo with get
     abstract GlobalArguments : LocalArgumentsMap with get
     abstract Source : EventSource with get
+    abstract Quota : RequestQuota with get
 
     abstract member WriteEvent : (EventEntry -> unit) -> unit
     abstract member WriteEventSync : (EventEntry -> unit) -> Task
@@ -125,9 +149,6 @@ type IRequestContext =
     abstract member PretendRoot : (unit -> Task<'a>) -> Task<'a>
     abstract member PretendUser : UserName -> (unit -> Task<'a>) -> Task<'a>
     abstract member IsPrivileged : bool
-
-type IAPIError =
-    abstract member Message : string
 
 [<SerializeAsObject("error")>]
 type UserViewErrorInfo =

@@ -112,10 +112,10 @@ let domainsApi : HttpHandler =
     let domainApi (schema, entity, name) =
         let ref = { Entity = { Schema = FunQLName schema; Name = FunQLName entity }; Name = FunQLName name }
         choose
-            [ route "/entries" >=> GET >=> withContext (getDomainValues ref)
-              route "/entries" >=> POST >=> withContext (postGetDomainValues ref)
-              route "/explain" >=> GET >=> withContext (getDomainExplain ref)
-              route "/explain" >=> POST >=> withContext (postGetDomainExplain ref)
+            [ route "/entries" >=> GET >=> withContextRead (getDomainValues ref)
+              route "/entries" >=> POST >=> withContextRead (postGetDomainValues ref)
+              route "/explain" >=> GET >=> withContextRead (getDomainExplain ref)
+              route "/explain" >=> POST >=> withContextRead (postGetDomainExplain ref)
             ]
 
     choose

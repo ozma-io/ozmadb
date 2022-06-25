@@ -1,11 +1,19 @@
 %{
 
+open System
+
 open FunWithFlags.FunDB.SQL.AST
+
+let private narrowInt (i : int64) =
+    if i <= Int32.MaxValue && i >= Int32.MinValue then
+        VInt (int i)
+    else
+        VBigInt i
 
 %}
 
 // Atoms
-%token <int> INT
+%token <int64> INT
 %token <decimal> DECIMAL
 %token <string> ID
 %token <string> QUOTED_ID
@@ -258,11 +266,11 @@ ScalarTypeParts:
     | ID                 { [ $1 ] }
 
 Value:
-    | INT           { VInt $1 }
+    | INT           { narrowInt $1 }
     | DECIMAL       { VDecimal $1 }
-    | PLUS INT      { VInt $2 }
+    | PLUS INT      { narrowInt $2 }
     | PLUS DECIMAL  { VDecimal $2 }
-    | MINUS INT     { VInt (-$2) }
+    | MINUS INT     { narrowInt (-$2) }
     | MINUS DECIMAL { VDecimal (-$2) }
     | STRING        { VString $1 }
     | BOOL          { VBool $1 }

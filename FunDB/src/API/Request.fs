@@ -41,10 +41,12 @@ type RequestParams =
       IsRoot : bool
       CanRead : bool
       Language : string
+      Quota : RequestQuota
     }
 
 type private RequestArguments =
     { CanRead : bool
+      Quota : RequestQuota
     }
 
 let private maxSourceDepth = 16
@@ -186,6 +188,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                 }
             let args =
                 { CanRead = opts.CanRead
+                  Quota = opts.Quota
                 }
             return RequestContext(ctx, userInfo, args, logger)
         }
@@ -282,6 +285,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         member this.Context = ctx
         member this.GlobalArguments = globalArguments
         member this.Source = source
+        member this.Quota = opts.Quota
 
         member this.WriteEvent addDetails = this.WriteEvent addDetails
         member this.WriteEventSync addDetails = this.WriteEventSync addDetails

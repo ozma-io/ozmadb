@@ -10,5 +10,5 @@ let permissionsApi : HttpHandler =
         Successful.ok (json api.Permissions.UserPermissions)
 
     choose
-        [ route "/permissions" >=> GET >=> withContext getPermissions
+        [ route "/permissions" >=> GET >=> withContextRead getPermissions
         ]

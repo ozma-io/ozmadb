@@ -52,8 +52,8 @@ let entitiesApi : HttpHandler =
               Name = FunQLName name
             }
         choose
-            [ route "/related" >=> POST >=> withContext (fun api -> safeBindJson (getRelatedEntities entityRef api))
-              route "/info" >=> GET >=> withContext (getEntityInfo entityRef)
+            [ route "/related" >=> POST >=> withContextRead (fun api -> safeBindJson (getRelatedEntities entityRef api))
+              route "/info" >=> GET >=> withContextRead (getEntityInfo entityRef)
             ]
 
     let runTransactionInner (api : IFunDBAPI) (transaction : TopLevelTransaction) =
@@ -84,5 +84,5 @@ let entitiesApi : HttpHandler =
 
     choose
         [ subRoutef "/entities/%s/%s" entityApi
-          route "/transaction" >=> POST >=> withContext runTransaction
+          route "/transaction" >=> POST >=> withContextWrite runTransaction
         ]

@@ -109,8 +109,9 @@ let saveRestoreApi : HttpHandler =
 
     let massSaveRestoreApi =
         choose
-            [ route "" >=> GET >=> withContext saveSchemas
-              route "" >=> PUT >=> withContext (fun api -> getRestoreFlags (restoreSchemas api))
+            [ // This query is quite expensive, so apply write rate limit.
+              route "" >=> GET >=> withContextWrite saveSchemas
+              route "" >=> PUT >=> withContextWrite (fun api -> getRestoreFlags (restoreSchemas api))
             ]
 
     choose

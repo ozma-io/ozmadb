@@ -32,8 +32,8 @@ let actionsApi : HttpHandler =
     let actionApi (schema, name) =
         let ref = { Schema = FunQLName schema; Name = FunQLName name }
         choose
-            [ route "" >=> POST >=> deprecated >=> withContext (runAction ref)
-              route "/run" >=> POST >=> withContext (runAction ref)
+            [ route "" >=> POST >=> deprecated >=> withContextWrite (runAction ref)
+              route "/run" >=> POST >=> withContextWrite (runAction ref)
             ]
 
     choose

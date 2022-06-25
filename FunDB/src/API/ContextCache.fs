@@ -141,6 +141,11 @@ type ContextCacheParams =
       EventLogger : EventLogger
     }
 
+type private CommitCallbackException (e : GenericErrorInfo) =
+    inherit Exception (e.Message)
+
+    member this.Info = e
+
 type ContextCacheStore (cacheParams : ContextCacheParams) =
     let preload = cacheParams.Preload.Preload
     let logger = cacheParams.LoggerFactory.CreateLogger<ContextCacheStore>()
@@ -580,30 +585,30 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
     member this.EventLogger = cacheParams.EventLogger
     member this.ConnectionString = cacheParams.ConnectionString
 
-    member this.GetCache (cancellationToken : CancellationToken) =
+    member this.GetCache (initialCancellationToken : CancellationToken) =
         task {
-            let! (transaction, oldState) = getCachedState cancellationToken
+            let! (transaction, oldState) = getCachedState initialCancellationToken
             try
                 let mutable isDisposed = false
-                let mutable newCustomEntities = None
 
                 let isolate = lazy ( jsIsolates.Get() )
 
-                let updateCustomEntities (layout : Layout) =
-                    task {
-                        match newCustomEntities with
-                        | None -> ()
-                        | Some customEntities ->
-                            try
-                                do! restoreCustomEntities layout transaction customEntities cancellationToken
-                            with
-                            | :? RestoreSchemaException as err -> return raisefWithInner ContextException err "Failed to restore custom entities"
-                    }
-
                 let mutable forceAllowBroken = false
 
+                let mutable scheduledBeforeCommit = OrderedMap.empty : OrderedMap<string, Layout -> Task<Result<unit, GenericErrorInfo>>>
+
+                let runCommitCallbacks layout =
+                    unitTask {
+                        for cb in OrderedMap.values scheduledBeforeCommit do
+                            match! cb layout with
+                            | Ok () -> ()
+                            | Error e -> raise <| CommitCallbackException e
+                    }
+                
+                let mutable cancellationToken = initialCancellationToken
+
                 let migrate () =
-                    task {
+                    unitTask {
                         let! localSuccess = cachedStateLock.WaitAsync(0)
                         if not localSuccess then
                             raisef ContextException "Another migration is in progress"
@@ -746,7 +751,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                         | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
                                 }
 
-                            do! updateCustomEntities layout
+                            do! runCommitCallbacks layout
 
                             // We update state now and check user views _after_ that.
                             // At this point we are sure there is a valid versionEntry because GetCache should have been called.
@@ -851,16 +856,23 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                 let mutable needMigration = false
                 let commit () =
-                    unitTask {
-                        if needMigration then
-                            do! migrate ()
-                        else
-                            do! updateCustomEntities oldState.Context.Layout
+                    task {
                             try
-                                let! _ = transaction.Commit (cancellationToken)
-                                ()
+                                if needMigration then
+                                    do! migrate ()
+                                    return Ok ()
+                                else
+                                    do! runCommitCallbacks oldState.Context.Layout
+                                    let! _ = transaction.Commit (cancellationToken)
+                                    return Ok ()
                             with
-                            | :? DbUpdateException as e -> return raisefUserWithInner ContextException e "Failed to commit"
+                            | :? ContextException
+                            | :? DbUpdateException as e ->
+                                logger.LogError(e, "Error during commit")
+                                return Error <| GECommit (exceptionString e)
+                            | :? CommitCallbackException as e ->
+                                logger.LogError(e, "Error during commit callback")
+                                return Error e.Info
                     }
 
                 let checkIntegrity () =
@@ -914,9 +926,13 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         member this.TransactionId = transactionId
                         member this.TransactionTime = transactionTime
                         member this.LoggerFactory = cacheParams.LoggerFactory
-                        member this.CancellationToken = cancellationToken
                         member this.Preload = preload
                         member this.Runtime = jsApi.Value :> IJSRuntime
+
+                        member this.CancellationToken
+                            with get () = cancellationToken
+                            and set value =
+                                cancellationToken <- value
 
                         member this.Layout = oldState.Context.Layout
                         member this.UserViews = oldState.Context.UserViews
@@ -928,8 +944,13 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         member this.Commit () = commit ()
                         member this.ScheduleMigration () =
                           needMigration <- true
-                        member this.ScheduleUpdateCustomEntities newRows =
-                            newCustomEntities <- Some newRows
+                        member this.ScheduleBeforeCommit name cb =
+                            match OrderedMap.tryFind name scheduledBeforeCommit with
+                            | None ->
+                                scheduledBeforeCommit <- OrderedMap.add name cb scheduledBeforeCommit
+                            | Some oldCb ->
+                                if not <| obj.ReferenceEquals(cb, oldCb) then
+                                    failwith "Clashing scheduled callbacks"
                         member this.SetForceAllowBroken () =
                             forceAllowBroken <- true
 

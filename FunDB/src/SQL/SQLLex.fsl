@@ -45,7 +45,7 @@ let z = ['Z' 'z']
 rule tokenizeSQL = parse
     // Atoms
     | ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parse.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
-    | ['0'-'9'] ['0'-'9']* { Parse.INT (lexbuf.Lexeme |> String |> int) }
+    | ['0'-'9'] ['0'-'9']* { Parse.INT (lexbuf.Lexeme |> String |> int64) }
     | "\"" ( [^ '"'] | "\"\"" )* "\"" { Parse.QUOTED_ID (escapedId 0 lexbuf) }
     | e "'" ( [^ '\\' '\''] | "\\" _ )* "'" { Parse.STRING (escapedString 1 lexbuf) }
     | "'" ( [^ '\''] | "''" )* "'" { Parse.STRING (sqlString 0 lexbuf) }

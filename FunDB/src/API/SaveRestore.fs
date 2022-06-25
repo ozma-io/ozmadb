@@ -41,6 +41,23 @@ type SaveRestoreAPI (api : IFunDBAPI) =
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<SaveRestoreAPI>()
 
+    let mutable newCustomEntities = None
+    let updateCustomEntities (layout : Layout) =
+        task {
+            match newCustomEntities with
+            | None -> return Ok ()
+            | Some customEntities ->
+                try
+                    do! restoreCustomEntities layout ctx.Transaction customEntities ctx.CancellationToken
+                    return Ok ()
+                with
+                | :? RestoreSchemaException as err -> return Error <| GECommit (sprintf "Failed to restore custom entities: %s" (exceptionString err))
+        }
+
+    let updateCustomEntities newEnts =
+        newCustomEntities <- Some newEnts
+        ctx.ScheduleBeforeCommit "update_custom_entities" updateCustomEntities
+
     member this.SaveSchemas (schemas : SaveSchemas) : Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>> =
         task {
             let names =
@@ -113,7 +130,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                         if modified || not (Set.isEmpty droppedSchemas) then
                             ctx.ScheduleMigration ()
                         let newCustomEntities = dumps |> Map.map (fun name dump -> dump.CustomEntities)
-                        ctx.ScheduleUpdateCustomEntities(newCustomEntities)
+                        updateCustomEntities newCustomEntities
                         do! rctx.WriteEventSync (fun event ->
                             event.Type <- "restoreSchemas"
                             event.Details <- sprintf "{\"dropOthers\":%b,\"dumps\":%s}" dropOthers (JsonConvert.SerializeObject dumps)

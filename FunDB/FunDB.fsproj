@@ -151,6 +151,7 @@
     <Compile Include="src/API/Domains.fs" />
     <Compile Include="src/API/API.fs" />
 
+    <Compile Include="src/HTTP/RateLimit.fs" />
     <Compile Include="src/HTTP/Utils.fs" />
     <Compile Include="src/HTTP/Info.fs" />
     <Compile Include="src/HTTP/Views.fs" />
@@ -187,6 +188,8 @@
     <PackageReference Include="System.Linq.Async" Version="6.0.*" />
     <PackageReference Include="NodaTime" Version="3.1.*" />
     <PackageReference Include="NodaTime.Serialization.JsonNet" Version="3.0.*" />
+    <PackageReference Include="AspNetCoreRateLimit" Version="4.0.*" />
+    <PackageReference Include="AspNetCoreRateLimit.Redis" Version="1.0.*" />
 
     <PackageReference Include="NetJs" Version="1.2.*" />
     <PackageReference Include="NetJs.Json" Version="1.2.*" />

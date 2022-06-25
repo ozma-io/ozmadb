@@ -199,7 +199,8 @@ type ValuePrettyConverter () =
 
         match value with
         | VInt i -> writer.WriteValue(i)
-        | VBigInt i -> writer.WriteValue(i)
+        // To avoid overflow in JavaScript.
+        | VBigInt i -> writer.WriteValue(string i)
         | VDecimal d -> writer.WriteValue(d)
         | VString s -> writer.WriteValue(s)
         | VBool b -> writer.WriteValue(b)
@@ -211,7 +212,7 @@ type ValuePrettyConverter () =
         | VRegclass rc -> writer.WriteValue(string rc)
         | VUuid u -> writer.WriteValue(u)
         | VIntArray vals -> serializeArray id vals
-        | VBigIntArray vals -> serializeArray id vals
+        | VBigIntArray vals -> serializeArray string vals
         | VDecimalArray vals -> serializeArray id vals
         | VStringArray vals -> serializeArray id vals
         | VBoolArray vals -> serializeArray id vals
@@ -1305,8 +1306,12 @@ and normalizeArray (constr : 'a -> Value) (arr : ArrayValue<'a>[]) : ValueExpr =
     VEArray (Array.map (normalizeArrayValue constr) arr)
 
 let parseIntValue = function
+    | VInt i -> int64 i
+    | VBigInt i -> i
+    | ret -> failwithf "Non-integer result: %O" ret
+
+let parseSmallIntValue = function
     | VInt i -> i
-    // FIXME FIXME: should use int64 everywhere instead!
     | VBigInt i -> int i
     | ret -> failwithf "Non-integer result: %O" ret
 

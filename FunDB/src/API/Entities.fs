@@ -6,6 +6,7 @@ open System.Collections.Generic
 open FSharpPlus
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
+open Microsoft.EntityFrameworkCore
 open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
@@ -97,11 +98,45 @@ let convertRawRowKey (entity : ResolvedEntity) = function
     | RRKId id -> RKId id
     | RRKAlt (name, rawArgs) -> RKAlt (name, convertEntityArguments entity rawArgs)
 
+let private usersEntityRef = { Schema = FunQLName "public"; Name = FunQLName "users" }
+
 type EntitiesAPI (api : IFunDBAPI) =
     let rctx = api.Request
     let ctx = rctx.Context
     let logger = ctx.LoggerFactory.CreateLogger<EntitiesAPI>()
     let query = ctx.Transaction.Connection.Query
+
+    let checkUsersQuota layout =
+        task {
+            match rctx.Quota.MaxUsers with
+            | None -> return Ok ()
+            | Some maxUsers ->
+                let! currUsers = ctx.Transaction.System.Users.CountAsync ctx.CancellationToken
+                if currUsers > maxUsers then
+                    return Error <| GEQuotaExceeded "Max number of users reached"
+                else 
+                    return Ok ()
+        }
+    let scheduleCheckUsersQuota () =
+        match rctx.Quota.MaxUsers with
+        | None -> ()
+        | Some maxUsers -> ctx.ScheduleBeforeCommit "check_max_users" checkUsersQuota
+
+    let checkSizeQuota layout =
+        task {
+            match rctx.Quota.MaxSize with
+            | None -> return Ok ()
+            | Some maxSize ->
+                let! currSize = getDatabaseSize ctx.Transaction.Connection.Query ctx.CancellationToken
+                if currSize > int64 maxSize * 1024L * 1024L then
+                    return Error <| GEQuotaExceeded "Max database size reached"
+                else 
+                    return Ok ()
+        }
+    let scheduleCheckSizeQuota () =
+        match rctx.Quota.MaxSize with
+        | None -> ()
+        | Some maxSize -> ctx.ScheduleBeforeCommit "check_max_size" checkSizeQuota
 
     let runArgsTrigger (run : TriggerScript -> Task<ArgsTriggerResult>) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : LocalArgumentsMap) (trigger : MergedTrigger) : Task<Result<LocalArgumentsMap, BeforeTriggerError<unit>>> =
         let ref =
@@ -215,7 +250,7 @@ type EntitiesAPI (api : IFunDBAPI) =
 
     member this.GetEntityInfo (entityRef : ResolvedEntityRef) : Task<Result<SerializedEntity, EntityErrorInfo>> =
         task {
-            match ctx.Layout.FindEntity(entityRef) with
+            match ctx.Layout.FindEntity entityRef with
             | Some entity ->
                 try
                     let res = getEntityInfo ctx.Layout ctx.Triggers (getReadRole rctx.User.Effective.Type) entityRef
@@ -236,7 +271,7 @@ type EntitiesAPI (api : IFunDBAPI) =
 
     member this.InsertEntities (entityRef : ResolvedEntityRef) (rawRowsArgs : RawArguments seq) : Task<Result<(int option)[], TransactionError>> =
         task {
-            match ctx.Layout.FindEntity(entityRef) with
+            match ctx.Layout.FindEntity entityRef with
             | None -> return Error { Details = EENotFound; Operation = 0 }
             | Some entity when entity.IsHidden -> return Error { Details = EENotFound; Operation = 0 }
             | Some entity when entity.IsFrozen -> return Error { Details = EEFrozen; Operation = 0 }
@@ -261,8 +296,6 @@ type EntitiesAPI (api : IFunDBAPI) =
                                     event.RowId <- Nullable newId
                                     event.Details <- JsonConvert.SerializeObject args
                                 )
-                                if entity.TriggersMigration then
-                                    ctx.ScheduleMigration ()
                                 match! Seq.foldResultTask (applyInsertTriggerAfter entityRef newId args) () afterTriggers with
                                 | Error e -> return Error { Details = e; Operation = i }
                                 | Ok () -> return Ok (Some newId)
@@ -280,25 +313,36 @@ type EntitiesAPI (api : IFunDBAPI) =
                     match Seq.traverseResult convertOne (Seq.indexed rawRowsArgs) with
                     | Error e -> return Error e
                     | Ok rowsArgs ->
-                        if not (Seq.isEmpty beforeTriggers && Seq.isEmpty afterTriggers) then
-                            let! ret = Seq.traverseResultTask runSingleId (Seq.indexed rowsArgs)
-                            if Result.isOk ret && entity.TriggersMigration then
-                                ctx.ScheduleMigration ()
-                            return Result.map Seq.toArray ret
-                        else
-                            let comments = massInsertEntityComments entityRef rctx.User.Effective.Type
-                            let cachedArgs = Seq.cache rowsArgs
-                            let! newIds = insertEntities query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef (Some comments) cachedArgs ctx.CancellationToken
-                            let details = Seq.map2 (fun args id -> { Args = args; Id = id }) cachedArgs newIds
-                            do! rctx.WriteEventSync (fun event ->
-                                event.Type <- "insertEntities"
-                                event.SchemaName <- entityRef.Schema.ToString()
-                                event.EntityName <- entityRef.Name.ToString()
-                                event.Details <- JsonConvert.SerializeObject details
-                            )
-                            if entity.TriggersMigration then
-                                ctx.ScheduleMigration ()
-                            return Ok (Array.map Some newIds)
+                        let! ret =
+                            task {
+                                if not (Seq.isEmpty beforeTriggers && Seq.isEmpty afterTriggers) then
+                                    let! ret = Seq.traverseResultTask runSingleId (Seq.indexed rowsArgs)
+                                    if Result.isOk ret && entity.TriggersMigration then
+                                        ctx.ScheduleMigration ()
+                                    return Result.map Seq.toArray ret
+                                else
+                                    let comments = massInsertEntityComments entityRef rctx.User.Effective.Type
+                                    let cachedArgs = Seq.cache rowsArgs
+                                    let! newIds = insertEntities query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef (Some comments) cachedArgs ctx.CancellationToken
+                                    let details = Seq.map2 (fun args id -> { Args = args; Id = id }) cachedArgs newIds
+                                    do! rctx.WriteEventSync (fun event ->
+                                        event.Type <- "insertEntities"
+                                        event.SchemaName <- entityRef.Schema.ToString()
+                                        event.EntityName <- entityRef.Name.ToString()
+                                        event.Details <- JsonConvert.SerializeObject details
+                                    )
+                                    return Ok (Array.map Some newIds)
+                            }
+                        match ret with
+                        | Error _ as e -> return e
+                        | Ok info ->
+                            if not <| Array.isEmpty info then
+                                if entity.TriggersMigration then
+                                    ctx.ScheduleMigration ()
+                                if entityRef = usersEntityRef then
+                                    scheduleCheckUsersQuota ()
+                                scheduleCheckSizeQuota ()
+                            return Ok info
                 with
                 | :? EntityArgumentsException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Invalid arguments for entity insert")
@@ -322,7 +366,7 @@ type EntitiesAPI (api : IFunDBAPI) =
 
     member this.UpdateEntity (entityRef : ResolvedEntityRef) (rawKey : RawRowKey) (rawArgs : RawArguments) : Task<Result<RowId, EntityErrorInfo>> =
         task {
-            match ctx.Layout.FindEntity(entityRef) with
+            match ctx.Layout.FindEntity entityRef with
             | None -> return Error EENotFound
             | Some entity when entity.IsHidden -> return Error EENotFound
             | Some entity when entity.IsFrozen -> return Error EEFrozen
@@ -385,7 +429,7 @@ type EntitiesAPI (api : IFunDBAPI) =
 
     member this.DeleteEntity (entityRef : ResolvedEntityRef) (rawKey : RawRowKey) : Task<Result<unit, EntityErrorInfo>> =
         task {
-            match ctx.Layout.FindEntity(entityRef) with
+            match ctx.Layout.FindEntity entityRef with
             | None -> return Error EENotFound
             | Some entity when entity.IsHidden -> return Error EENotFound
             | Some entity when entity.IsFrozen -> return Error EEFrozen
@@ -500,6 +544,16 @@ type EntitiesAPI (api : IFunDBAPI) =
                 let! cmd = ctx.GetAnonymousCommand rctx.IsPrivileged rawCommand
                 let comments = commandComments rawCommand rctx.User.Effective.Type rawArgs
                 do! executeCommand query ctx.Triggers rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) cmd (Some comments) rawArgs ctx.CancellationToken
+                for KeyValue(entityRef, usedEntity) in cmd.UsedDatabase do
+                    let anyChildren (f : UsedEntity -> bool) =
+                        usedEntity.Children |> Map.values |> Seq.exists f
+                    let entity = ctx.Layout.FindEntity entityRef |> Option.get
+                    if entity.TriggersMigration && anyChildren (fun ent -> ent.Insert || ent.Update || ent.Delete) then
+                        ctx.ScheduleMigration ()
+                    if anyChildren (fun ent -> ent.Insert) then
+                        if entityRef = usersEntityRef then
+                            scheduleCheckUsersQuota ()
+                        scheduleCheckSizeQuota ()
                 return Ok ()
             with
             | :? CommandArgumentsException as ex when ex.IsUserException ->

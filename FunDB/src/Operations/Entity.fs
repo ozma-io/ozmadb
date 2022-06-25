@@ -101,6 +101,26 @@ let private runOptionalStringQuery (connection : QueryConnection) query comments
         | Some (name, typ, ret) -> return Some (SQL.parseStringValue ret)
     }
 
+let private databaseArg = PLocal (FunQLName "database")
+
+let private databaseSizeQuery : Lazy<Query<SQL.SelectExpr>> =
+    lazy (
+        let (nameArg, arguments) = addArgument databaseArg (requiredArgument <| FTScalar SFTString) emptyArguments
+        let dbSizeExpr = SQL.VEFunc (SQL.SQLName "pg_database_size", [| SQL.VEPlaceholder nameArg.PlaceholderId |]) 
+        let dbSizeSelect =
+            { SQL.emptySingleSelectExpr with
+                Columns = [| SQL.SCExpr (None, dbSizeExpr) |]
+            }
+        let query = dbSizeSelect |> SQL.SSelect |> SQL.selectExpr
+        { Expression = query
+          Arguments = arguments
+        }
+    )
+
+let getDatabaseSize (connection : QueryConnection) (cancellationToken : CancellationToken) : Task<int64> =
+    let args = Map.singleton databaseArg (FString connection.Connection.Database)
+    runIntQuery connection databaseSizeQuery.Value None args cancellationToken
+
 let getEntityInfo (layout : Layout) (triggers : MergedTriggers) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) : SerializedEntity =
     match role with
     | None ->
@@ -163,7 +183,10 @@ let private runQueryAndGetId
                     | 0 -> return None
                     | 1 -> return Some id
                     | _ -> return failwith "Impossible"
-                | RKAlt (name, keys) -> return! runOptionalIntQuery connection query comments argumentValues cancellationToken
+                | RKAlt (name, keys) ->
+                    let! id = runOptionalIntQuery connection query comments argumentValues cancellationToken
+                    // FIXME: can overflow in future!
+                    return Option.map int id
             }
         match rowId with
         | None ->
@@ -349,7 +372,9 @@ let resolveAltKey
         | None ->
             do! countAndThrow connection applyRole opQuery.Table opQuery.WhereWithoutRole opQuery.ArgumentsWithoutRole argumentValues cancellationToken
             return failwith "Impossible"
-        | Some rawId -> return rawId
+        | Some rawId ->
+            // FIXME: will overflow in future.
+            return int rawId
     }
 
 let resolveKey
@@ -458,7 +483,9 @@ let insertEntities
               Arguments = arguments
             }
 
-        return! runIntsQuery connection query comments argumentValues cancellationToken
+        let! ret = runIntsQuery connection query comments argumentValues cancellationToken
+        // FIXME: will overflow in future.
+        return Array.map int ret
     }
 
 let updateEntity
@@ -677,7 +704,9 @@ let private getSubEntity
                     | [|(_, _, idValue); (_, _, subEntityValue)|] ->
                         let rawSubEntity = SQL.parseStringValue subEntityValue
                         let subEntity = parseTypeName entity.Root rawSubEntity
-                        return (SQL.parseIntValue idValue, subEntity)
+                        // FIXME: will overflow in future.
+                        let id = idValue |> SQL.parseIntValue |> int
+                        return (id, subEntity)
                     | _ -> return failwith "Impossible"
     }
 
@@ -730,13 +759,19 @@ let private getRelatedRowIds
                 | [|idValue; subEntityValue|] ->
                     let rawSubEntity = SQL.parseStringValue subEntityValue
                     let subEntity = parseTypeName entity.Root rawSubEntity
-                    (SQL.parseIntValue idValue, subEntity)
+                    // FIXME: will overflow in future.
+                    let id = idValue |> SQL.parseIntValue |> int
+                    (id, subEntity)
                 | _ -> failwith "Impossible"
             | Some subEntity -> function
-                | [|value|] -> (SQL.parseIntValue value, subEntity)
+                | [|idValue|] ->
+                    // FIXME: will overflow in future.
+                    let id = idValue |> SQL.parseIntValue |> int
+                    (id, subEntity)
                 | _ -> failwith "Impossible"
 
-        let execute query args cancellationToken = connection.ExecuteQuery query args cancellationToken <| fun columns rows -> task { return! rows.Select(processOne).ToArrayAsync(cancellationToken) }
+        let execute query args cancellationToken =
+            connection.ExecuteQuery query args cancellationToken <| fun columns rows -> task { return! rows.Select(processOne).ToArrayAsync(cancellationToken) }
         return! runQuery execute opQuery.Query comments argumentValues cancellationToken
     }
 

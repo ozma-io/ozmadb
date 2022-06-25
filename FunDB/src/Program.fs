@@ -1,6 +1,7 @@
 open System
 open System.IO
 open System.Threading
+open System.Collections.Generic
 open Newtonsoft.Json
 open Microsoft.AspNetCore
 open Microsoft.AspNetCore.Http
@@ -15,6 +16,9 @@ open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.Affine
 open Microsoft.IdentityModel.Tokens
 open Microsoft.EntityFrameworkCore
+open AspNetCoreRateLimit
+open AspNetCoreRateLimit.Redis
+open StackExchange
 open Giraffe
 open NodaTime
 open Npgsql
@@ -30,10 +34,15 @@ open FunWithFlags.FunDB.HTTP.SaveRestore
 open FunWithFlags.FunDB.HTTP.Actions
 open FunWithFlags.FunDB.HTTP.Permissions
 open FunWithFlags.FunDB.HTTP.Domains
+open FunWithFlags.FunDB.HTTP.RateLimit
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.API.InstancesCache
 open FunWithFlags.FunDB.EventLogger
+
+let private parseLimits : IList<FunWithFlags.FunDBSchema.Instances.RateLimit> -> RateLimit seq = function
+    | null -> Seq.empty
+    | limits -> limits |> Seq.map (fun limit -> { Period = limit.Period; Limit = limit.Limit })
 
 type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
     let connectionString =
@@ -56,6 +65,8 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString
                         do! instances.DisposeAsync ()
                         return None
                     | instance ->
+                        let parsedRead = parseLimits instance.ReadRateLimitsPerUser
+                        let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
                         let obj =
                             { new IInstance with
                                   member this.Name = instance.Name
@@ -65,10 +76,17 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString
                                   member this.Username = instance.Username
                                   member this.Password = instance.Password
                                   member this.Database = instance.Database
+
                                   member this.DisableSecurity = instance.DisableSecurity
-                                  member this.IsTemplate = instance.IsTemplate
-                                  member this.AccessedAt = Option.ofNullable instance.AccessedAt
+                                  member this.AnyoneCanRead = instance.AnyoneCanRead
                                   member this.Published = instance.Published
+                                  member this.AccessedAt = Option.ofNullable instance.AccessedAt
+
+                                  member this.MaxSize = Option.ofNullable instance.MaxSize
+                                  member this.MaxUsers = Option.ofNullable instance.MaxUsers
+                                  member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
+                                  member this.ReadRateLimitsPerUser = parsedRead
+                                  member this.WriteRateLimitsPerUser = parsedWrite
 
                                   member this.UpdateAccessedAt newTime =
                                       unitTask {
@@ -95,6 +113,8 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString
 type private StaticInstance (instance : Instance) =
     interface IInstancesSource with
         member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
+            let parsedRead = parseLimits instance.ReadRateLimitsPerUser
+            let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
             let obj =
                 { new IInstance with
                       member this.Name = instance.Name
@@ -104,10 +124,17 @@ type private StaticInstance (instance : Instance) =
                       member this.Username = instance.Username
                       member this.Password = instance.Password
                       member this.Database = instance.Database
+
                       member this.Published = instance.Published
                       member this.DisableSecurity = instance.DisableSecurity
-                      member this.IsTemplate = instance.IsTemplate
+                      member this.AnyoneCanRead = instance.AnyoneCanRead
                       member this.AccessedAt = Some <| SystemClock.Instance.GetCurrentInstant()
+
+                      member this.MaxSize = Option.ofNullable instance.MaxSize
+                      member this.MaxUsers = Option.ofNullable instance.MaxUsers
+                      member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
+                      member this.ReadRateLimitsPerUser = parsedRead
+                      member this.WriteRateLimitsPerUser = parsedWrite
 
                       member this.UpdateAccessedAt newTime = unitTask { () }
 
@@ -171,10 +198,13 @@ type Startup (config : IConfiguration) =
                 .UseHttpMethodOverride()
                 .UseCors(configureCors)
                 .UseAuthentication()
+                // We hack into AspNetCoreRateLimit later, don't add middleware here!
+                // .UseClientRateLimiting()
                 .UseGiraffeErrorHandler(errorHandler)
                 .UseGiraffe(webApp)
 
     member this.ConfigureServices (services : IServiceCollection) =
+        // Auth.
         ignore <|
             services
                 .AddGiraffe()
@@ -185,13 +215,36 @@ type Startup (config : IConfiguration) =
                     .AddAuthentication(authenticationOptions)
                     .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
 
+        // Rate limiting.
+        match config.GetValue("Redis") with
+        | null ->
+            ignore <|
+                services
+                    .AddMemoryCache()
+                    .AddInMemoryRateLimiting()
+        | redisStr ->
+            let redisOptions = Redis.ConfigurationOptions.Parse(redisStr)
+            let getRedisMultiplexer (sp : IServiceProvider) =
+                Redis.ConnectionMultiplexer.Connect(redisOptions) :> Redis.IConnectionMultiplexer
+            ignore <|
+                services
+                    .AddSingleton<Redis.IConnectionMultiplexer>(getRedisMultiplexer)
+                    .AddRedisRateLimiting()
+        // Needed for the strategy, but we ignore it in RateLimit.fs. Painful...
+        ignore <| services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+
+        // JSON.
         ignore <| services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer defaultJsonSettings)
+
+        // Logging.
         let getEventLogger (sp : IServiceProvider) =
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
             new EventLogger(logFactory)
         // https://stackoverflow.com/a/59089881
         ignore <| services.AddSingleton<EventLogger>(getEventLogger)
         ignore <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
+
+        // Instances cache.
         let allowAutoMark = fundbSection.GetValue("AllowAutoMark", false)
         let makeInstancesStore (sp : IServiceProvider) =
             let cacheParams =
@@ -209,21 +262,12 @@ type Startup (config : IConfiguration) =
                 let logFactory = sp.GetRequiredService<ILoggerFactory>()
                 DatabaseInstances(logFactory, instancesConnectionString) :> IInstancesSource
             | "static" ->
-                let instanceSection = config.GetSection("Instance")
-                let username = instanceSection.["Username"]
-                let instance =
-                    Instance(
-                        Name = "static",
-                        Host = instanceSection.["Host"],
-                        Port = instanceSection.GetValue("Port", 5432),
-                        Owner = "owner@example.com",
-                        Database = instanceSection.GetValue("Database", username),
-                        Username = username,
-                        Password = instanceSection.["Password"],
-                        DisableSecurity = instanceSection.GetValue("DisableSecurity", false),
-                        IsTemplate = instanceSection.GetValue("IsTemplate",false),
-                        CreatedAt = SystemClock.Instance.GetCurrentInstant()
-                    )
+                let instance = Instance(
+                    Owner = "owner@example.com"
+                )
+                config.GetSection("Instance").Bind(instance)
+                if isNull instance.Database then
+                    instance.Database <- instance.Username
                 StaticInstance(instance) :> IInstancesSource
             | _ -> failwith "Invalid InstancesSource"
         ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)

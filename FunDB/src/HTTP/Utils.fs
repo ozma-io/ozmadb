@@ -24,15 +24,17 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.API.Types
-open FunWithFlags.FunDB.API.ContextCache
 open FunWithFlags.FunDB.API.Request
 open FunWithFlags.FunDB.API.InstancesCache
 open FunWithFlags.FunDB.API.API
+open FunWithFlags.FunDB.HTTP.RateLimit
 
 [<SerializeAsObject("error")>]
 type RequestErrorInfo =
     | [<CaseName("internal")>] RIInternal of Message : string
     | [<CaseName("request")>] RIRequest of Message : string
+    | [<CaseName("quotaExceeded")>] RIQuotaExceeded of Message : string
+    | [<CaseName("rateExceeded")>] RIRateExceeded of Message : string
     | [<CaseName("noEndpoint")>] RINoEndpoint
     | [<CaseName("noInstance")>] RINoInstance
     | [<CaseName("accessDenied")>] RIAccessDenied
@@ -44,6 +46,8 @@ type RequestErrorInfo =
             match this with
             | RIInternal msg -> msg
             | RIRequest msg -> msg
+            | RIQuotaExceeded msg -> msg
+            | RIRateExceeded msg -> msg
             | RINoEndpoint -> "API endpoint doesn't exist"
             | RINoInstance -> "Instance not found"
             | RIAccessDenied -> "Database access denied"
@@ -58,6 +62,8 @@ let requestError e =
     let handler =
         match e with
         | RIInternal _ -> ServerErrors.internalError
+        | RIQuotaExceeded _ -> RequestErrors.forbidden
+        | RIRateExceeded _ -> RequestErrors.tooManyRequests
         | RIRequest _ -> RequestErrors.badRequest
         | RINoEndpoint -> RequestErrors.notFound
         | RINoInstance -> RequestErrors.notFound
@@ -143,16 +149,15 @@ let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) :
         | Ok ret -> return! f ret next ctx
     }
 
+let private generalToRequestError = function
+    | GECommit msg -> RIRequest msg
+    | GEQuotaExceeded msg -> RIQuotaExceeded msg
+
 let commitAndReturn (handler : HttpHandler) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {
-        try
-            do! api.Request.Context.Commit ()
-            return! Successful.ok handler next ctx
-        with
-        | :? ContextException as e ->
-            let logger = ctx.GetLogger("commitAndReturn")
-            logger.LogError(e, "Error during commit")
-            return! requestError (RIRequest (exceptionString e)) next ctx
+        match! api.Request.Context.Commit () with
+        | Error e -> return! requestError (generalToRequestError e) next ctx
+        | Ok () -> return! Successful.ok handler next ctx
     }
 
 let commitAndOk : IFunDBAPI -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
@@ -183,9 +188,14 @@ type IInstance =
     abstract member Password : string
     abstract member Database : string
     abstract member DisableSecurity : bool
-    abstract member IsTemplate : bool
+    abstract member AnyoneCanRead : bool
     abstract member AccessedAt : Instant option
     abstract member Published : bool
+    abstract member MaxSize : int option // MiB
+    abstract member MaxUsers : int option
+    abstract member MaxRequestTime : Duration option
+    abstract member ReadRateLimitsPerUser : RateLimit seq
+    abstract member WriteRateLimitsPerUser : RateLimit seq
 
     abstract member UpdateAccessedAt : Instant -> Task
 
@@ -225,11 +235,10 @@ type UserTokenInfo =
     }
 
 let resolveUser (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
-    let clientClaim = ctx.User.FindFirst "azp"
-    if isNull clientClaim then
+    let client = ctx.User.FindFirstValue "azp"
+    if isNull client then
         requestError (RIRequest "No azp claim in security token") next ctx
     else
-        let client = clientClaim.Value
         let emailClaim = ctx.User.FindFirst ClaimTypes.Email
         let email =
             if isNull emailClaim then None else Some emailClaim.Value
@@ -265,7 +274,7 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                   Instance = instance
                   UserName = anonymousUsername
                   IsRoot = instance.DisableSecurity
-                  CanRead = instance.IsTemplate
+                  CanRead = instance.AnyoneCanRead
                 }
             try
                 if instance.DisableSecurity then
@@ -280,18 +289,33 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                             { Source = instancesSource
                               Instance = instance
                               UserName = userName
-                              IsRoot = info.IsRoot
-                              CanRead = instance.IsTemplate
+                              IsRoot = userName.ToLowerInvariant() = instance.Owner.ToLowerInvariant() || info.IsRoot
+                              CanRead = instance.AnyoneCanRead
                             }
                         f ictx
                     let failHandler =
-                        if instance.IsTemplate then
+                        if instance.AnyoneCanRead then
                             f anonymousCtx
                         else
                             challenge JwtBearerDefaults.AuthenticationScheme
                     return! (requiresAuthentication failHandler >=> resolveUser getCtx) next ctx
             finally
                 instance.Dispose ()
+    }
+
+let setupRequestTimeout (f : CancellationToken -> HttpHandler) (inst : InstanceContext) (cancellationToken : CancellationToken) (next : HttpFunc) (ctx : HttpContext) =
+    task {
+        match inst.Instance.MaxRequestTime with
+        | None -> return! f cancellationToken next ctx
+        | Some maxTime ->
+            use newToken = new CancellationTokenSource()
+            ignore <| cancellationToken.Register(fun () -> newToken.Cancel())
+            newToken.CancelAfter(int maxTime.TotalMilliseconds)
+            try
+                return! f newToken.Token next ctx
+            with
+            | :? OperationCanceledException as e when not cancellationToken.IsCancellationRequested ->
+                return! requestError (RIQuotaExceeded "Max request time reached") next ctx
     }
 
 let private randomAccessedAtGen = new ThreadLocal<Random>(fun () -> Random())
@@ -301,60 +325,69 @@ let private randomAccessedAtLaxSpan () =
     let minutes = 1.0 + (2.0 * randomAccessedAtGen.Value.NextDouble() - 0.5) * 0.09
     Duration.FromMilliseconds(int64 (minutes * 60.0 * 1000.0))
 
-let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) : HttpHandler =
-    let makeContext (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
+let private runWithApi (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) : InstanceContext -> HttpHandler =
+    let runRequest (inst : InstanceContext) (dbCtx : IContext) (cancellationToken : CancellationToken) (next : HttpFunc) (ctx : HttpContext) =
         task {
-            let isRoot = inst.UserName = inst.Instance.Owner || inst.IsRoot
-            if not inst.Instance.Published && not isRoot then
+            dbCtx.CancellationToken <- cancellationToken
+            let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
+            let specifiedLang =
+                if isNull acceptLanguage then
+                    None
+                else
+                    acceptLanguage
+                    |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
+                    |> Seq.first
+            let lang =
+                match specifiedLang with
+                | Some l -> l.Value.Value
+                | None -> "en-US"
+            let! rctx =
+                RequestContext.Create
+                    { UserName = inst.UserName
+                      IsRoot = inst.IsRoot
+                      CanRead = inst.CanRead
+                      Language = lang
+                      Context = dbCtx
+                      Quota =
+                        { MaxUsers = inst.Instance.MaxUsers
+                          MaxSize = inst.Instance.MaxSize
+                        }
+                    }
+            if touchAccessedAt then
+                let currTime = SystemClock.Instance.GetCurrentInstant()
+                match inst.Instance.AccessedAt with
+                | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
+                | _ ->  do! inst.Instance.UpdateAccessedAt currTime
+            do! inst.Instance.DisposeAsync ()
+            return! f (FunDBAPI rctx) next ctx
+        }
+
+    fun  (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) ->
+        task {
+            if not inst.Instance.Published && not inst.IsRoot then
                 return! requestError RIAccessDenied next ctx
             else
-                let logger = ctx.GetLogger("withContext")
+                let logger = ctx.GetLogger("runWithApi")
                 use _ = logger.BeginScope("Creating context for instance {}, user {} (is root: {})", inst.Instance.Name, inst.UserName, inst.IsRoot)
                 let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
                 let instancesCache = ctx.GetService<InstancesCacheStore>()
                 let! cacheStore = instancesCache.GetContextCache(connectionString)
 
-                let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
-                let specifiedLang =
-                    if isNull acceptLanguage then
-                        None
+                let longRunning =
+                    if inst.IsRoot then
+                        tryBoolRequestArg "X-LongRunning" ctx |> Option.defaultValue false
                     else
-                        acceptLanguage
-                        |> Seq.sortByDescending (fun lang -> if lang.Quality.HasValue then lang.Quality.Value else 1.0)
-                        |> Seq.first
-                let lang =
-                    match specifiedLang with
-                    | Some l -> l.Value.Value
-                    | None -> "en-US"
+                        false
+                let initialCancellationToken =
+                    if longRunning then
+                        let lifetime = ctx.GetService<IHostApplicationLifetime>()
+                        lifetime.ApplicationStopping
+                    else
+                        ctx.RequestAborted
 
-                try
-                    let longRunning =
-                        if inst.IsRoot then
-                            tryBoolRequestArg "X-LongRunning" ctx |> Option.defaultValue false
-                        else
-                            false
-                    let cancellationToken =
-                        if longRunning then
-                            let lifetime = ctx.GetService<IHostApplicationLifetime>()
-                            lifetime.ApplicationStopping
-                        else
-                            ctx.RequestAborted
-                    use! dbCtx = cacheStore.GetCache cancellationToken
-                    let! rctx =
-                        RequestContext.Create
-                            { UserName = inst.UserName
-                              IsRoot = isRoot
-                              CanRead = inst.CanRead
-                              Language = lang
-                              Context = dbCtx
-                            }
-                    if touchAccessedAt then
-                        let currTime = SystemClock.Instance.GetCurrentInstant()
-                        match inst.Instance.AccessedAt with
-                        | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
-                        | _ ->  do! inst.Instance.UpdateAccessedAt currTime
-                    do! inst.Instance.DisposeAsync ()
-                    return! f (FunDBAPI rctx) next ctx
+                try                            
+                    use! dbCtx = cacheStore.GetCache initialCancellationToken
+                    return! setupRequestTimeout (runRequest inst dbCtx) inst initialCancellationToken next ctx
                 with
                 | :? ConcurrentUpdateException as e ->
                     logger.LogError(e, "Concurrent update exception")
@@ -378,10 +411,20 @@ let private withContextGeneric (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHa
                         return! requestError (RIStackOverflow allSources) next ctx
         }
 
-    lookupInstance makeContext
+let withContextHidden (f : IFunDBAPI -> HttpHandler) : HttpHandler =
+    lookupInstance (runWithApi false f)
 
-let withContext (f : IFunDBAPI -> HttpHandler) : HttpHandler = withContextGeneric true f
-let withContextHidden (f : IFunDBAPI -> HttpHandler) : HttpHandler = withContextGeneric false f
+let private rateExceeded msg = requestError (RIRateExceeded msg)
+
+let private withContextLimited (prefix : string) (getLimits : IInstance -> RateLimit seq) (f : IFunDBAPI -> HttpHandler) : HttpHandler =
+    let run = runWithApi true f
+    lookupInstance <| fun inst next ctx ->
+        match ctx.User.FindFirstValue ClaimTypes.NameIdentifier with
+        | null -> requestError (RIRequest "No sub claim in security token") next ctx
+        | userId -> checkRateLimit (run inst) rateExceeded (prefix + userId) (getLimits inst.Instance) next ctx
+
+let withContextRead (f : IFunDBAPI -> HttpHandler) = withContextLimited "read." (fun inst -> inst.ReadRateLimitsPerUser) f
+let withContextWrite (f : IFunDBAPI -> HttpHandler) = withContextLimited "write." (fun inst -> inst.WriteRateLimitsPerUser) f
 
 let deprecated (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     let logger = ctx.GetLogger("deprecated")
