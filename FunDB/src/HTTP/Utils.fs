@@ -416,12 +416,17 @@ let withContextHidden (f : IFunDBAPI -> HttpHandler) : HttpHandler =
 
 let private rateExceeded msg = requestError (RIRateExceeded msg)
 
+let private getIpAddress (ctx : HttpContext) =
+    match ctx.Request.Headers.TryGetValue("X-Real-IP") with
+    | (true, ip) -> Seq.last ip
+    | (false, _) -> string ctx.Connection.RemoteIpAddress
+
 let private withContextLimited (prefix : string) (getLimits : IInstance -> RateLimit seq) (f : IFunDBAPI -> HttpHandler) : HttpHandler =
     let run = runWithApi true f
     lookupInstance <| fun inst next ctx ->
         let userId =
             match ctx.User.FindFirstValue ClaimTypes.NameIdentifier with
-            | null -> "anonymous"
+            | null -> getIpAddress ctx
             | userId -> userId
         checkRateLimit (run inst) rateExceeded (prefix + userId) (getLimits inst.Instance) next ctx
 
