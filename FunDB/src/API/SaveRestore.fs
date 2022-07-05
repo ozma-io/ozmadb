@@ -42,18 +42,17 @@ type SaveRestoreAPI (api : IFunDBAPI) =
     let logger = ctx.LoggerFactory.CreateLogger<SaveRestoreAPI>()
 
     let mutable newCustomEntities = None
-    let updateCustomEntities =
-        fun layout ->
-            task {
-                match newCustomEntities with
-                | None -> return Ok ()
-                | Some customEntities ->
-                    try
-                        do! restoreCustomEntities layout ctx.Transaction customEntities ctx.CancellationToken
-                        return Ok ()
-                    with
-                    | :? RestoreSchemaException as err -> return Error <| GECommit (sprintf "Failed to restore custom entities: %s" (exceptionString err))
-            }
+    let updateCustomEntities (layout : Layout) =
+        task {
+            match newCustomEntities with
+            | None -> return Ok ()
+            | Some customEntities ->
+                try
+                    do! restoreCustomEntities layout ctx.Transaction customEntities ctx.CancellationToken
+                    return Ok ()
+                with
+                | :? RestoreSchemaException as err -> return Error <| GECommit (sprintf "Failed to restore custom entities: %s" (exceptionString err))
+        }
 
     let updateCustomEntities newEnts =
         newCustomEntities <- Some newEnts

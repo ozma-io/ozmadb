@@ -47,7 +47,7 @@ type private StaticRateLimitProcessor (limits : RateLimit seq, strategy : IProce
                 else
                     let reset = DateTime.Now + rule.PeriodTimespan.Value
                     (rule.Limit, reset)
-
+        
             RateLimitHeaders(
                 Limit = string rule.Limit,
                 Remaining = string remaining,
@@ -101,7 +101,7 @@ type private StaticRateLimitMiddleware (next : RequestDelegate, quotaExceeded : 
 
     override this.LogBlockedRequest (httpContext, identity, counter, rule) =
         logger.LogInformation("Request for {} has been blocked, quota {}/{} exceeded by {}", identity.ClientId, rule.Limit, rule.Period, counter.Count - rule.Limit)
-
+    
     override this.ReturnQuotaExceededResponse (httpContext, rule, retryAfter) =
         let msg = sprintf "Maximum %i per %s second(s)" (int rule.Limit) rule.Period
         quotaExceeded msg giraffeNext httpContext

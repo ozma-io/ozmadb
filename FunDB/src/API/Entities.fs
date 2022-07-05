@@ -106,35 +106,33 @@ type EntitiesAPI (api : IFunDBAPI) =
     let logger = ctx.LoggerFactory.CreateLogger<EntitiesAPI>()
     let query = ctx.Transaction.Connection.Query
 
-    let checkUsersQuota =
-        fun layout ->
-            task {
-                match rctx.Quota.MaxUsers with
-                | None -> return Ok ()
-                | Some maxUsers ->
-                    let! currUsers = ctx.Transaction.System.Users.CountAsync ctx.CancellationToken
-                    if currUsers > maxUsers then
-                        return Error <| GEQuotaExceeded "Max number of users reached"
-                    else
-                        return Ok ()
-            }
+    let checkUsersQuota layout =
+        task {
+            match rctx.Quota.MaxUsers with
+            | None -> return Ok ()
+            | Some maxUsers ->
+                let! currUsers = ctx.Transaction.System.Users.CountAsync ctx.CancellationToken
+                if currUsers > maxUsers then
+                    return Error <| GEQuotaExceeded "Max number of users reached"
+                else 
+                    return Ok ()
+        }
     let scheduleCheckUsersQuota () =
         match rctx.Quota.MaxUsers with
         | None -> ()
         | Some maxUsers -> ctx.ScheduleBeforeCommit "check_max_users" checkUsersQuota
 
-    let checkSizeQuota =
-        fun layout ->
-            task {
-                match rctx.Quota.MaxSize with
-                | None -> return Ok ()
-                | Some maxSize ->
-                    let! currSize = getDatabaseSize ctx.Transaction.Connection.Query ctx.CancellationToken
-                    if currSize > int64 maxSize * 1024L * 1024L then
-                        return Error <| GEQuotaExceeded "Max database size reached"
-                    else
-                        return Ok ()
-            }
+    let checkSizeQuota layout =
+        task {
+            match rctx.Quota.MaxSize with
+            | None -> return Ok ()
+            | Some maxSize ->
+                let! currSize = getDatabaseSize ctx.Transaction.Connection.Query ctx.CancellationToken
+                if currSize > int64 maxSize * 1024L * 1024L then
+                    return Error <| GEQuotaExceeded "Max database size reached"
+                else 
+                    return Ok ()
+        }
     let scheduleCheckSizeQuota () =
         match rctx.Quota.MaxSize with
         | None -> ()
