@@ -107,7 +107,7 @@ type EntitiesAPI (api : IFunDBAPI) =
     let query = ctx.Transaction.Connection.Query
 
     let checkUsersQuota =
-        fun layout ->
+        fun (layout : Layout) ->
             task {
                 match rctx.Quota.MaxUsers with
                 | None -> return Ok ()
@@ -124,7 +124,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         | Some maxUsers -> ctx.ScheduleBeforeCommit "check_max_users" checkUsersQuota
 
     let checkSizeQuota =
-        fun layout ->
+        fun (layout : Layout) ->
             task {
                 match rctx.Quota.MaxSize with
                 | None -> return Ok ()
