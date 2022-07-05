@@ -603,8 +603,9 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             | Ok () -> ()
                             | Error e -> raise <| CommitCallbackException e
                     }
-                
+
                 let mutable cancellationToken = initialCancellationToken
+                let mutable commitCancellationToken = initialCancellationToken
 
                 let migrate () =
                     unitTask {
@@ -856,6 +857,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                 let mutable needMigration = false
                 let commit () =
                     task {
+                        cancellationToken <- commitCancellationToken
                         try
                             if needMigration then
                                 do! migrate ()
@@ -932,6 +934,11 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             with get () = cancellationToken
                             and set value =
                                 cancellationToken <- value
+
+                        member this.CommitCancellationToken
+                            with get () = commitCancellationToken
+                            and set value =
+                                commitCancellationToken <- value
 
                         member this.Layout = oldState.Context.Layout
                         member this.UserViews = oldState.Context.UserViews

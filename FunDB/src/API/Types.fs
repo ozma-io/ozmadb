@@ -73,6 +73,10 @@ type IContext =
     abstract member Domains : LayoutDomains
 
     abstract member CancellationToken : CancellationToken with get, set
+    // Cancellation token that is used to commit all changes.
+    // Expected to be cancelled at the same time or after the primary cancellation token.
+    // Its purpose is to allow long migrations without bumping max request time for users.
+    abstract member CommitCancellationToken : CancellationToken with get, set
 
     abstract member SetForceAllowBroken : unit -> unit
     abstract member ScheduleMigration : unit -> unit

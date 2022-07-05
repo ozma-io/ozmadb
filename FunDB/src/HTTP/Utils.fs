@@ -313,11 +313,6 @@ let setupRequestTimeout (f : HttpHandler) (inst : InstanceContext) (dbCtx : ICon
             ignore <| oldToken.Register(fun () -> newToken.Cancel())
             newToken.CancelAfter(int maxTime.TotalMilliseconds)
             dbCtx.CancellationToken <- newToken.Token
-            // Revert to old token before commit to allow long migrations.
-            dbCtx.ScheduleBeforeCommit "set_request_cancellation_token" (fun layout ->
-                dbCtx.CancellationToken <- oldToken
-                Task.result (Ok ())
-            )
             try
                 return! f next ctx
             with
@@ -391,7 +386,7 @@ let private runWithApi (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) :
                     else
                         ctx.RequestAborted
 
-                try                            
+                try
                     use! dbCtx = cacheStore.GetCache initialCancellationToken
                     return! setupRequestTimeout (runRequest inst dbCtx) inst dbCtx next ctx
                 with

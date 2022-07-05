@@ -114,7 +114,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 let! currUsers = ctx.Transaction.System.Users.CountAsync ctx.CancellationToken
                 if currUsers > maxUsers then
                     return Error <| GEQuotaExceeded "Max number of users reached"
-                else 
+                else
                     return Ok ()
         }
     let scheduleCheckUsersQuota () =
@@ -130,7 +130,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 let! currSize = getDatabaseSize ctx.Transaction.Connection.Query ctx.CancellationToken
                 if currSize > int64 maxSize * 1024L * 1024L then
                     return Error <| GEQuotaExceeded "Max database size reached"
-                else 
+                else
                     return Ok ()
         }
     let scheduleCheckSizeQuota () =

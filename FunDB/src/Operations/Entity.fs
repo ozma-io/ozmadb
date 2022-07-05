@@ -106,7 +106,7 @@ let private databaseArg = PLocal (FunQLName "database")
 let private databaseSizeQuery : Lazy<Query<SQL.SelectExpr>> =
     lazy (
         let (nameArg, arguments) = addArgument databaseArg (requiredArgument <| FTScalar SFTString) emptyArguments
-        let dbSizeExpr = SQL.VEFunc (SQL.SQLName "pg_database_size", [| SQL.VEPlaceholder nameArg.PlaceholderId |]) 
+        let dbSizeExpr = SQL.VEFunc (SQL.SQLName "pg_database_size", [| SQL.VEPlaceholder nameArg.PlaceholderId |])
         let dbSizeSelect =
             { SQL.emptySingleSelectExpr with
                 Columns = [| SQL.SCExpr (None, dbSizeExpr) |]
