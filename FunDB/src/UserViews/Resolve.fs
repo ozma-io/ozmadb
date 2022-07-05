@@ -18,7 +18,7 @@ open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Attributes.Merge
 open FunWithFlags.FunDB.Objects.Types
 
-type UserViewResolveException (message : string, innerException : Exception) =
+type UserViewResolveException (message : string, innerException : exn) =
     inherit UserException(message, innerException)
 
     new (message : string) = UserViewResolveException (message, null)

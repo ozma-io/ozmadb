@@ -15,10 +15,10 @@ open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Objects.Types
 
-type UserViewGenerateException (message : string, innerException : Exception, isUserException : bool) =
+type UserViewGenerateException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         UserViewGenerateException (message, innerException, isUserException innerException)
 
     new (message : string) = UserViewGenerateException (message, null, true)

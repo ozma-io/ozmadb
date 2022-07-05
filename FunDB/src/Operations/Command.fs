@@ -24,34 +24,34 @@ open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type CommandResolveException (message : string, innerException : Exception, isUserException : bool) =
+type CommandResolveException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         CommandResolveException (message, innerException, isUserException innerException)
 
     new (message : string) = CommandResolveException (message, null, true)
 
-type CommandArgumentsException (message : string, innerException : Exception, isUserException : bool) =
+type CommandArgumentsException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         CommandArgumentsException (message, innerException, isUserException innerException)
 
     new (message : string) = CommandArgumentsException (message, null, true)
 
-type CommandDeniedException (message : string, innerException : Exception, isUserException : bool) =
+type CommandDeniedException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         CommandDeniedException (message, innerException, isUserException innerException)
 
     new (message : string) = CommandDeniedException (message, null, true)
 
-type CommandExecutionException (message : string, innerException : Exception, isUserException : bool) =
+type CommandExecutionException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         CommandExecutionException (message, innerException, isUserException innerException)
 
     new (message : string) = CommandExecutionException (message, null, true)

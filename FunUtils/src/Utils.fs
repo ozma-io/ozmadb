@@ -10,7 +10,6 @@ open System.Runtime.ExceptionServices
 open Microsoft.FSharp.Reflection
 
 type Void = private Void of unit
-type Exception = System.Exception
 
 let inline isRefNull (x : 'a) = obj.ReferenceEquals(x, null)
 
@@ -70,18 +69,6 @@ let isUnionCase<'t> (objectType : Type) : bool =
         not (isNull objectType.BaseType) && objectType.BaseType.IsGenericType && objectType.BaseType.GetGenericTypeDefinition() = typedefof<'t>
     else
         not (isNull objectType.BaseType) && objectType.BaseType = typeof<'t>
-
-let rec exceptionString (e : exn) : string =
-    if isNull e.InnerException then
-        e.Message
-    else
-        let inner = exceptionString e.InnerException
-        if e.Message = "" then
-            inner
-        else if inner = "" then
-            e.Message
-        else
-            sprintf "%s: %s" e.Message inner
 
 let inline unmaskableLock (k : 'Lock) (f : (unit -> unit) -> 'a) : 'a =
     let mutable lockWasTaken = false

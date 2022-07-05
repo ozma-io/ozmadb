@@ -403,7 +403,7 @@ let checkBrokenPermissions (logger :ILogger) (allowAutoMark : bool) (preload : P
                 | Ok role ->
                     for KeyValue(allowedSchemaName, allowedSchema) in role.Permissions.Schemas do
                         for KeyValue(allowedEntityName, maybeEntity) in allowedSchema.Entities do
-                            let markRole (e : Exception) =
+                            let markRole (e : exn) =
                                 let roleName = ({ Schema = schemaName; Name = roleName } : ResolvedRoleRef).ToString()
                                 let allowedName = ({ Schema = allowedSchemaName; Name = allowedEntityName } : ResolvedEntityRef).ToString()
                                 if isSystem || not allowAutoMark then

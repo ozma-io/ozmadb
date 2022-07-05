@@ -90,16 +90,16 @@ type UserViewsAPI (api : IFunDBAPI) =
                         | None -> return Error UVENotFound
                         | Some (Error e) ->
                             logger.LogError(e.Error, "Requested user view {uv} is broken", ref.ToString())
-                            return Error <| UVECompilation (exceptionString e.Error)
+                            return Error <| UVECompilation (Exn.fullMessage e.Error)
                         | Some (Ok cached) ->
                             return Ok <| applyFlags flags cached
             with
             | :? UserViewResolveException as ex when ex.IsUserException ->
                 logger.LogError(ex, "Failed to compile user view: {uv}", source)
-                return Error <| UVECompilation (exceptionString ex)
+                return Error <| UVECompilation (Exn.fullMessage ex)
             | :? UserViewDryRunException as ex when ex.IsUserException ->
                 logger.LogError(ex, "Failed to dry run user view: {uv}", source)
-                return Error <| UVEExecution (exceptionString ex)
+                return Error <| UVEExecution (Exn.fullMessage ex)
         }
 
     member this.GetUserViewInfo (source : UserViewSource) (flags : UserViewFlags) : Task<Result<UserViewInfoResult, UserViewErrorInfo>> =
@@ -123,7 +123,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getUserViewInfo"
                         event.Error <- "access_denied"
-                        event.Details <- exceptionString ex
+                        event.Details <- Exn.fullMessage ex
                     )
                     return Error UVEAccessDenied
         }
@@ -157,20 +157,20 @@ type UserViewsAPI (api : IFunDBAPI) =
                         return Ok res
                     with
                     | :? ChunkException as ex when ex.IsUserException ->
-                        return Error <| UVEArguments (exceptionString ex)
+                        return Error <| UVEArguments (Exn.fullMessage ex)
                     | :? ArgumentCheckException as ex when ex.IsUserException ->
-                        return Error <| UVEArguments (exceptionString ex)
+                        return Error <| UVEArguments (Exn.fullMessage ex)
                     | :? PermissionsApplyException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Access denied to user view")
                         rctx.WriteEvent (fun event ->
                             event.Type <- "getUserView"
                             event.Error <- "access_denied"
-                            event.Details <- exceptionString ex
+                            event.Details <- Exn.fullMessage ex
                         )
                         return Error UVEAccessDenied
                     | :? UserViewExecutionException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Failed to execute user view")
-                        let str = exceptionString ex
+                        let str = Exn.fullMessage ex
                         return Error (UVEExecution str)
         }
 
@@ -211,20 +211,20 @@ type UserViewsAPI (api : IFunDBAPI) =
                 with
                 | :? ChunkException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to parse chunk")
-                    return Error <| UVEArguments (exceptionString ex)
+                    return Error <| UVEArguments (Exn.fullMessage ex)
                 | :? ArgumentCheckException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to parse user view arguments")
-                    return Error <| UVEArguments (exceptionString ex)
+                    return Error <| UVEArguments (Exn.fullMessage ex)
                 | :? UserViewExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to execute user view")
-                    let str = exceptionString ex
+                    let str = Exn.fullMessage ex
                     return Error (UVEExecution str)
                 | :? PermissionsApplyException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Access denied to user view")
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getUserView"
                         event.Error <- "access_denied"
-                        event.Details <- exceptionString ex
+                        event.Details <- Exn.fullMessage ex
                     )
                     return Error UVEAccessDenied
         }

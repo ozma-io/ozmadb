@@ -128,7 +128,7 @@ let bindJsonToken (token : JToken) (f : 'a -> HttpHandler) : HttpHandler =
         try
             Ok <| token.ToObject()
         with
-        | :? JsonException as e -> Error <| exceptionString e
+        | :? JsonException as e -> Error <| Exn.fullMessage e
     match mobj with
     | Ok o -> f o
     | Error e -> RequestErrors.BAD_REQUEST e
@@ -144,7 +144,7 @@ let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) :
                 | :? JsonException as e -> return Error e
             }
         match model with
-        | Error e -> return! requestError (RIRequest <| exceptionString e) next ctx
+        | Error e -> return! requestError (RIRequest <| Exn.fullMessage e) next ctx
         | Ok ret when isRefNull ret -> return! requestError (RIRequest "Invalid JSON value") next ctx
         | Ok ret -> return! f ret next ctx
     }
@@ -303,18 +303,25 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                 instance.Dispose ()
     }
 
-let setupRequestTimeout (f : CancellationToken -> HttpHandler) (inst : InstanceContext) (cancellationToken : CancellationToken) (next : HttpFunc) (ctx : HttpContext) =
+let setupRequestTimeout (f : HttpHandler) (inst : InstanceContext) (dbCtx : IContext) (next : HttpFunc) (ctx : HttpContext) =
     task {
         match inst.Instance.MaxRequestTime with
-        | None -> return! f cancellationToken next ctx
+        | None -> return! f next ctx
         | Some maxTime ->
+            let oldToken = dbCtx.CancellationToken
             use newToken = new CancellationTokenSource()
-            ignore <| cancellationToken.Register(fun () -> newToken.Cancel())
+            ignore <| oldToken.Register(fun () -> newToken.Cancel())
             newToken.CancelAfter(int maxTime.TotalMilliseconds)
+            dbCtx.CancellationToken <- newToken.Token
+            // Revert to old token before commit to allow long migrations.
+            dbCtx.ScheduleBeforeCommit "set_request_cancellation_token" (fun layout ->
+                dbCtx.CancellationToken <- oldToken
+                Task.result (Ok ())
+            )
             try
-                return! f newToken.Token next ctx
+                return! f next ctx
             with
-            | :? OperationCanceledException as e when not cancellationToken.IsCancellationRequested ->
+            | Exn.Innermost (:? OperationCanceledException as e) when not oldToken.IsCancellationRequested ->
                 return! requestError (RIQuotaExceeded "Max request time reached") next ctx
     }
 
@@ -326,9 +333,8 @@ let private randomAccessedAtLaxSpan () =
     Duration.FromMilliseconds(int64 (minutes * 60.0 * 1000.0))
 
 let private runWithApi (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) : InstanceContext -> HttpHandler =
-    let runRequest (inst : InstanceContext) (dbCtx : IContext) (cancellationToken : CancellationToken) (next : HttpFunc) (ctx : HttpContext) =
+    let runRequest (inst : InstanceContext) (dbCtx : IContext) (next : HttpFunc) (ctx : HttpContext) =
         task {
-            dbCtx.CancellationToken <- cancellationToken
             let acceptLanguage = ctx.Request.GetTypedHeaders().AcceptLanguage
             let specifiedLang =
                 if isNull acceptLanguage then
@@ -387,7 +393,7 @@ let private runWithApi (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) :
 
                 try                            
                     use! dbCtx = cacheStore.GetCache initialCancellationToken
-                    return! setupRequestTimeout (runRequest inst dbCtx) inst initialCancellationToken next ctx
+                    return! setupRequestTimeout (runRequest inst dbCtx) inst dbCtx next ctx
                 with
                 | :? ConcurrentUpdateException as e ->
                     logger.LogError(e, "Concurrent update exception")

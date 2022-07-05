@@ -15,10 +15,10 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Actions.Types
 
-type ActionRunException (message : string, innerException : Exception, isUserException : bool) =
+type ActionRunException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ActionRunException (message, innerException, isUserException innerException)
 
     new (message : string) = ActionRunException (message, null, true)

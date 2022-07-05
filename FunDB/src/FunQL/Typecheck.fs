@@ -8,10 +8,10 @@ open FunWithFlags.FunDB.FunQL.Resolve
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Typecheck
 
-type ViewTypecheckException (message : string, innerException : Exception, isUserException : bool) =
+type ViewTypecheckException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ViewTypecheckException (message, innerException, isUserException innerException)
 
     new (message : string) = ViewTypecheckException (message, null, true)

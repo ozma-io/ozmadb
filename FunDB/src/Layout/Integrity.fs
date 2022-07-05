@@ -20,10 +20,10 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 module PLPgSQL = FunWithFlags.FunDB.SQL.PLPgSQL
 
-type LayoutIntegrityException (message : string, innerException : Exception, isUserException : bool) =
+type LayoutIntegrityException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         LayoutIntegrityException (message, innerException, isUserException innerException)
 
     new (message : string) = LayoutIntegrityException (message, null, true)

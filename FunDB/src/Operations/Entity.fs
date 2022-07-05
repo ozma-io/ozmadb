@@ -23,34 +23,34 @@ open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type EntityArgumentsException (message : string, innerException : Exception, isUserException : bool) =
+type EntityArgumentsException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         EntityArgumentsException (message, innerException, isUserException innerException)
 
     new (message : string) = EntityArgumentsException (message, null, true)
 
-type EntityExecutionException (message : string, innerException : Exception, isUserException : bool) =
+type EntityExecutionException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         EntityExecutionException (message, innerException, isUserException innerException)
 
     new (message : string) = EntityExecutionException (message, null, true)
 
-type EntityNotFoundException(message : string, innerException : Exception, isUserException : bool) =
+type EntityNotFoundException(message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         EntityNotFoundException (message, innerException, isUserException innerException)
 
     new (message : string) = EntityNotFoundException (message, null, true)
 
-type EntityDeniedException (message : string, innerException : Exception, isUserException : bool) =
+type EntityDeniedException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         EntityDeniedException (message, innerException, isUserException innerException)
 
     new (message : string) = EntityDeniedException (message, null, true)

@@ -17,10 +17,10 @@ module SQL = FunWithFlags.FunDB.SQL.Typecheck
 // and all further processing code can avoid any checks.
 // ...that is, except checking references to other views.
 
-type ViewResolveException (message : string, innerException : Exception, isUserException : bool) =
+type ViewResolveException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ViewResolveException (message, innerException, isUserException innerException)
 
     new (message : string) = ViewResolveException (message, null, true)

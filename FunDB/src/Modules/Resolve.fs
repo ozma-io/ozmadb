@@ -8,10 +8,10 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Modules.Source
 open FunWithFlags.FunDB.Modules.Types
 
-type ResolveModulesException (message : string, innerException : Exception, isUserException : bool) =
+type ResolveModulesException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ResolveModulesException (message, innerException, isUserException innerException)
 
     new (message : string) = ResolveModulesException (message, null, true)

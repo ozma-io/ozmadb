@@ -27,7 +27,6 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
-open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
@@ -55,10 +54,10 @@ open FunWithFlags.FunDB.Triggers.Update
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 
-type RestoreSchemaException (message : string, innerException : Exception, isUserException : bool) =
+type RestoreSchemaException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         RestoreSchemaException (message, innerException, isUserException innerException)
 
     new (message : string) = RestoreSchemaException (message, null, true)

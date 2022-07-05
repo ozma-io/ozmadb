@@ -10,10 +10,10 @@ open FunWithFlags.FunDB.Triggers.Merge
 open FunWithFlags.FunDB.Permissions.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type PermissionsEntityException (message : string, innerException : Exception, isUserException : bool) =
+type PermissionsEntityException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         PermissionsEntityException (message, innerException, isUserException innerException)
 
     new (message : string) = PermissionsEntityException (message, null, true)

@@ -17,10 +17,10 @@ open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Objects.Types
 
-type TriggerRunException (message : string, innerException : Exception, isUserException : bool) =
+type TriggerRunException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         TriggerRunException (message, innerException, isUserException innerException)
 
     new (message : string) = TriggerRunException (message, null, true)

@@ -8,10 +8,10 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Types
 
-type ResolveActionsException (message : string, innerException : Exception, isUserException : bool) =
+type ResolveActionsException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ResolveActionsException (message, innerException, isUserException innerException)
 
     new (message : string) = ResolveActionsException (message, null, true)

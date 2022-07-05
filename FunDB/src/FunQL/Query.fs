@@ -20,10 +20,10 @@ open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Misc
 
-type UserViewExecutionException (message : string, innerException : Exception, isUserException : bool) =
+type UserViewExecutionException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         UserViewExecutionException (message, innerException, isUserException innerException)
 
     new (message : string) = UserViewExecutionException (message, null, true)

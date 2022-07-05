@@ -28,7 +28,7 @@ type ActionsAPI (api : IFunDBAPI) =
                 with
                     | :? ActionRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in action {}", ref)
-                        let str = exceptionString ex
+                        let str = Exn.fullMessage ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "runAction"
                             event.Error <- "exception"
@@ -37,7 +37,7 @@ type ActionsAPI (api : IFunDBAPI) =
                         return Error (AEException str)
             | Some (Error e) ->
                 logger.LogError(e, "Requested action {action} is broken", ref.ToString())
-                return Error <| AECompilation (exceptionString e)
+                return Error <| AECompilation (Exn.fullMessage e)
             | None -> return Error AENotFound
         }
 

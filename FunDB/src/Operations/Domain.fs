@@ -23,18 +23,18 @@ open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type DomainDeniedException (message : string, innerException : Exception, isUserException : bool) =
+type DomainDeniedException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         DomainDeniedException (message, innerException, isUserException innerException)
 
     new (message : string) = DomainDeniedException (message, null, true)
 
-type DomainExecutionException (message : string, innerException : Exception, isUserException : bool) =
+type DomainExecutionException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         DomainExecutionException (message, innerException, isUserException innerException)
 
     new (message : string) = DomainExecutionException (message, null, true)

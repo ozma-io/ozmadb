@@ -11,10 +11,10 @@ open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.Triggers.Types
 open FunWithFlags.FunDB.Objects.Types
 
-type ResolveTriggersException (message : string, innerException : Exception, isUserException : bool) =
+type ResolveTriggersException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ResolveTriggersException (message, innerException, isUserException innerException)
 
     new (message : string) = ResolveTriggersException (message, null, true)

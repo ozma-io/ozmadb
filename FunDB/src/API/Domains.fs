@@ -63,10 +63,10 @@ type DomainsAPI (api : IFunDBAPI) =
                         }
                 with
                 | :? ChunkException as ex when ex.IsUserException ->
-                    return Error <| DEArguments (exceptionString ex)
+                    return Error <| DEArguments (Exn.fullMessage ex)
                 | :? DomainExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to get domain values")
-                    let str = exceptionString ex
+                    let str = Exn.fullMessage ex
                     return Error (DEExecution str)
                 | :? DomainDeniedException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Access denied")
@@ -76,7 +76,7 @@ type DomainsAPI (api : IFunDBAPI) =
                         event.EntityName <- fieldRef.Entity.Name.ToString()
                         event.FieldName <- fieldRef.Name.ToString()
                         event.Error <- "access_denied"
-                        event.Details <- exceptionString ex
+                        event.Details <- Exn.fullMessage ex
                     )
                     return Error DEAccessDenied
         }
@@ -105,10 +105,10 @@ type DomainsAPI (api : IFunDBAPI) =
                         return Ok ret
                     with
                     | :? ChunkException as ex when ex.IsUserException ->
-                        return Error <| DEArguments (exceptionString ex)
+                        return Error <| DEArguments (Exn.fullMessage ex)
                     | :? DomainExecutionException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Failed to get domain explain")
-                        let str = exceptionString ex
+                        let str = Exn.fullMessage ex
                         return Error (DEExecution str)
                     | :? DomainDeniedException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Access denied")
@@ -118,7 +118,7 @@ type DomainsAPI (api : IFunDBAPI) =
                             event.EntityName <- fieldRef.Entity.Name.ToString()
                             event.FieldName <- fieldRef.Name.ToString()
                             event.Error <- "access_denied"
-                            event.Details <- exceptionString ex
+                            event.Details <- Exn.fullMessage ex
                         )
                         return Error DEAccessDenied
         }

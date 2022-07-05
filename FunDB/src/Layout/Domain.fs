@@ -12,10 +12,10 @@ open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.Types
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type LayoutDomainException (message : string, innerException : Exception, isUserException : bool) =
+type LayoutDomainException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         LayoutDomainException (message, innerException, isUserException innerException)
 
     new (message : string) = LayoutDomainException (message, null, true)

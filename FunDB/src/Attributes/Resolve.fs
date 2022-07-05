@@ -9,10 +9,10 @@ open FunWithFlags.FunDB.Attributes.Parse
 open FunWithFlags.FunDB.Attributes.Types
 open FunWithFlags.FunDB.Objects.Types
 
-type ResolveAttributesException (message : string, innerException : Exception, isUserException : bool) =
+type ResolveAttributesException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ResolveAttributesException (message, innerException, isUserException innerException)
 
     new (message : string) = ResolveAttributesException (message, null, true)

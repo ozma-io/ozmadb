@@ -29,6 +29,7 @@
     <Compile Include="src/OrderedMap.fs" />
     <Compile Include="src/OrderedSet.fs" />
     <Compile Include="src/ObjectMap.fs" />
+    <Compile Include="src/Exn.fs" />
 
     <Compile Include="src/Serialization/Utils.fs" />
     <Compile Include="src/Serialization/Json.fs" />

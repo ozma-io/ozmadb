@@ -20,10 +20,10 @@ open FunWithFlags.FunDB.Objects.Types
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type ResolveLayoutException (message : string, innerException : Exception, isUserException : bool) =
+type ResolveLayoutException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ResolveLayoutException (message, innerException, isUserException innerException)
 
     new (message : string) = ResolveLayoutException (message, null, true)

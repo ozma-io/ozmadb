@@ -17,18 +17,18 @@ open FunWithFlags.FunDB.Permissions.Source
 open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.Objects.Types
 
-type ResolvePermissionsException (message : string, innerException : Exception, isUserException : bool) =
+type ResolvePermissionsException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ResolvePermissionsException (message, innerException, isUserException innerException)
 
     new (message : string) = ResolvePermissionsException (message, null, true)
 
-type ResolvePermissionsParentException (message : string, innerException : Exception, isUserException : bool) =
+type ResolvePermissionsParentException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ResolvePermissionsParentException (message, innerException, isUserException innerException)
 
     new (message : string) = ResolvePermissionsParentException (message, null, true)

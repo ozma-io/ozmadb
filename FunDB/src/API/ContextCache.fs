@@ -1,4 +1,4 @@
-module FunWithFlags.FunDB.API.ContextCache
+﻿module FunWithFlags.FunDB.API.ContextCache
 
 open FSharpPlus
 open System
@@ -64,15 +64,14 @@ module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 open FunWithFlags.FunDB.JavaScript.Runtime
 open FunWithFlags.FunDB.Operations.Preload
-open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.Operations.Command
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.JavaScript
 
-type ContextException (message : string, innerException : Exception, isUserException : bool) =
+type ContextException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : exn) =
         ContextException (message, innerException, isUserException innerException)
 
     new (message : string) = ContextException (message, null, true)
@@ -857,22 +856,22 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                 let mutable needMigration = false
                 let commit () =
                     task {
-                            try
-                                if needMigration then
-                                    do! migrate ()
-                                    return Ok ()
-                                else
-                                    do! runCommitCallbacks oldState.Context.Layout
-                                    let! _ = transaction.Commit (cancellationToken)
-                                    return Ok ()
-                            with
-                            | :? ContextException
-                            | :? DbUpdateException as e ->
-                                logger.LogError(e, "Error during commit")
-                                return Error <| GECommit (exceptionString e)
-                            | :? CommitCallbackException as e ->
-                                logger.LogError(e, "Error during commit callback")
-                                return Error e.Info
+                        try
+                            if needMigration then
+                                do! migrate ()
+                                return Ok ()
+                            else
+                                do! runCommitCallbacks oldState.Context.Layout
+                                let! _ = transaction.Commit(cancellationToken)
+                                return Ok ()
+                        with
+                        | :? ContextException
+                        | :? DbUpdateException as e ->
+                            logger.LogError(e, "Error during commit")
+                            return Error <| GECommit (Exn.fullMessage e)
+                        | :? CommitCallbackException as e ->
+                            logger.LogError(e, "Error during commit callback")
+                            return Error e.Info
                     }
 
                 let checkIntegrity () =
