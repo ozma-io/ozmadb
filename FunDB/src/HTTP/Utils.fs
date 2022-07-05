@@ -385,7 +385,7 @@ let private runWithApi (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) :
                     else
                         ctx.RequestAborted
 
-                try                            
+                try
                     use! dbCtx = cacheStore.GetCache initialCancellationToken
                     return! setupRequestTimeout (runRequest inst dbCtx) inst initialCancellationToken next ctx
                 with

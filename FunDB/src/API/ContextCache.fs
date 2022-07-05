@@ -604,7 +604,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             | Ok () -> ()
                             | Error e -> raise <| CommitCallbackException e
                     }
-                
+
                 let mutable cancellationToken = initialCancellationToken
 
                 let migrate () =
