@@ -1,4 +1,4 @@
-﻿module FunWithFlags.FunDB.API.ContextCache
+module FunWithFlags.FunDB.API.ContextCache
 
 open FSharpPlus
 open System
@@ -945,12 +945,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         member this.ScheduleMigration () =
                           needMigration <- true
                         member this.ScheduleBeforeCommit name cb =
-                            match OrderedMap.tryFind name scheduledBeforeCommit with
-                            | None ->
+                            if not <| OrderedMap.containsKey name scheduledBeforeCommit then
                                 scheduledBeforeCommit <- OrderedMap.add name cb scheduledBeforeCommit
-                            | Some oldCb ->
-                                if not <| obj.ReferenceEquals(cb, oldCb) then
-                                    failwith "Clashing scheduled callbacks"
                         member this.SetForceAllowBroken () =
                             forceAllowBroken <- true
 
