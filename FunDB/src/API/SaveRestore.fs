@@ -43,7 +43,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
 
     let mutable newCustomEntities = None
     let updateCustomEntities =
-        fun (layout : Layout) ->
+        fun layout ->
             task {
                 match newCustomEntities with
                 | None -> return Ok ()
