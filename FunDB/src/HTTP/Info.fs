@@ -4,8 +4,9 @@ open Microsoft.Extensions.Logging
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open System.Data
-open Giraffe
 open Npgsql
+open Giraffe
+open Giraffe.EndpointRouting
 
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.API.InstancesCache
@@ -17,7 +18,7 @@ type IsInitializedResponse =
     { IsInitialized : bool
     }
 
-let infoApi : HttpHandler =
+let infoApi : Endpoint list =
     let ping = Map.empty |> json |> Successful.ok
 
     let isInitialized (inst : InstanceContext) (next : HttpFunc) (ctx : HttpContext) =
@@ -48,10 +49,11 @@ let infoApi : HttpHandler =
             | RTRole _ -> return! requestError RIAccessDenied next ctx
         }
 
-    choose
-        [ route "/check_access" >=> GET >=> withContextHidden (fun _ -> ping)
-          route "/check_integrity" >=> POST >=> withContextHidden checkIntegrity
-          route "/is_initialized" >=> GET >=> lookupInstance isInitialized
-          route "/clear_instances_cache" >=> POST >=> resolveUser clearInstancesCache
-          route "/ping" >=> GET >=> ping
-        ]
+    [ GET [ route "/check_access" <| withContextHidden (fun _ -> ping)
+            route "/is_initialized" <| lookupInstance isInitialized
+            route "/ping" ping
+          ]
+      POST [ route "/check_integrity" <| withContextHidden checkIntegrity
+             route "/clear_instances_cache" <| resolveUser clearInstancesCache
+           ]
+    ]

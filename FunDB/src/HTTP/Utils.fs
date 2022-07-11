@@ -443,8 +443,3 @@ let private withContextLimited (prefix : string) (getLimits : IInstance -> RateL
 
 let withContextRead (f : IFunDBAPI -> HttpHandler) = withContextLimited "read." (fun inst -> inst.ReadRateLimitsPerUser) f
 let withContextWrite (f : IFunDBAPI -> HttpHandler) = withContextLimited "write." (fun inst -> inst.WriteRateLimitsPerUser) f
-
-let deprecated (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-    let logger = ctx.GetLogger("deprecated")
-    logger.LogWarning("Deprecated route used: {}", ctx.Request.Path)
-    next ctx

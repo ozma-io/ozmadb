@@ -4,6 +4,7 @@ open Newtonsoft.Json.Linq
 open Microsoft.AspNetCore.Http
 open Giraffe
 open FSharp.Control.Tasks.Affine
+open Giraffe.EndpointRouting
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.FunQL.AST
@@ -57,7 +58,7 @@ type UserViewInfoRequest =
     { ForceRecompile : bool
     }
 
-let viewsApi : HttpHandler =
+let viewsApi : Endpoint list =
     let returnView (viewRef : UserViewSource) (api : IFunDBAPI) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) next ctx =
         task {
             match! api.UserViews.GetUserView viewRef rawArgs chunk flags with
@@ -179,31 +180,42 @@ let viewsApi : HttpHandler =
         | None -> safeBindJson (doPostExplainView viewRef api)
         | Some req -> bindJsonToken req (doPostExplainView viewRef api)
 
-    let viewApi (viewRef : UserViewSource) (maybeReq : JToken option) =
-        choose
-            [ route "/entries" >=> GET >=> withContextRead (getSelectFromView viewRef)
-              route "/entries" >=> POST >=> withContextRead (postSelectFromView viewRef maybeReq)
-              route "/info" >=> GET >=> withContextRead (getInfoView viewRef)
-              route "/info" >=> POST >=> withContextRead (postInfoView viewRef maybeReq)
-              route "/explain" >=> GET >=> withContextRead (getExplainView viewRef)
-              route "/explain" >=> POST >=> withContextRead (postExplainView viewRef maybeReq)
-            ]
+    let withPostAnonymousView nextHandler =
+        safeBindJson <| fun rawData ->
+            bindJsonToken rawData <| fun anon ->
+                withContextRead (nextHandler (UVAnonymous anon.Query) (Some rawData))
 
-    let postAnonymousView (rawData : JToken) =
-        bindJsonToken rawData <| fun anon -> viewApi (UVAnonymous anon.Query) (Some rawData)
+    let withGetAnonymousView nextHandler (next : HttpFunc) (ctx : HttpContext) =
+        match ctx.GetQueryStringValue "__query" with
+        | Ok rawView -> withContextRead (nextHandler (UVAnonymous rawView)) next ctx
+        | Error _ -> RequestErrors.BAD_REQUEST "Query not specified" next ctx
 
-    let anonymousView (next : HttpFunc) (ctx : HttpContext) =
-        match ctx.Request.Method with
-        | "GET" ->
-            match ctx.GetQueryStringValue "__query" with
-            | Ok rawView -> viewApi (UVAnonymous rawView) None next ctx
-            | Error _ -> RequestErrors.BAD_REQUEST "Query not specified" next ctx
-        | "POST" -> safeBindJson postAnonymousView next ctx
-        | _ -> RequestErrors.METHOD_NOT_ALLOWED "Method not allowed" next ctx
+    let withNamedView next (schemaName, uvName) =
+        let ref = UVNamed { Schema = FunQLName schemaName; Name = FunQLName uvName }
+        withContextRead (next ref)
 
-    let namedView (schemaName, uvName) = viewApi (UVNamed { Schema = FunQLName schemaName; Name = FunQLName uvName }) None
+    let withPostNamedView next =
+        withNamedView (fun ref -> next ref None)
 
-    choose
-        [ subRoute "/views/anonymous" anonymousView
-          subRoutef "/views/by_name/%s/%s" namedView
+    let viewsApi =
+        [ GET [ route "/anonymous/entries" <| withGetAnonymousView getSelectFromView
+                route "/anonymous/info" <| withGetAnonymousView getInfoView
+                route "/anonymous/explain" <| withGetAnonymousView getExplainView
+              ]
+          POST [ route "/anonymous/entries" <| withPostAnonymousView postSelectFromView
+                 route "/anonymous/info" <| withPostAnonymousView postInfoView
+                 route "/anonymous/explain" <| withPostAnonymousView postExplainView
+               ]
+
+          GET [ routef "/by_name/%s/%s/entries" <| withNamedView getSelectFromView
+                routef "/by_name/%s/%s/info" <| withNamedView getInfoView
+                routef "/by_name/%s/%s/explain" <| withNamedView getExplainView
+              ]
+          POST [ routef "/by_name/%s/%s/entries" <| withPostNamedView postSelectFromView
+                 routef "/by_name/%s/%s/info" <| withPostNamedView postInfoView
+                 routef "/by_name/%s/%s/explain" <| withPostNamedView postExplainView
+               ]
         ]
+
+    [ subRoute "/views" viewsApi
+    ]

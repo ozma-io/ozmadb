@@ -5,6 +5,7 @@ open System.Data
 open System.Threading
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
+open Microsoft.EntityFrameworkCore.Diagnostics
 open Npgsql
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
@@ -67,20 +68,30 @@ let serializedSaveChangesAsync (db : DbContext) (cancellationToken : Cancellatio
             return changed > 0
         }
 
+let setupDbContextLogging (loggerFactory : ILoggerFactory) (builder : DbContextOptionsBuilder<'a>) =
+    let configureWarnings (warnings : WarningsConfigurationBuilder) =
+        ignore <| warnings.Log([|
+            struct (RelationalEventId.CommandExecuting, LogLevel.Debug)
+            struct (RelationalEventId.CommandExecuted, LogLevel.Debug)
+            struct (CoreEventId.ContextInitialized, LogLevel.Debug)
+        |])
+    ignore <| builder
+        .UseLoggerFactory(loggerFactory)
+        .ConfigureWarnings(configureWarnings)
+
 type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationLevel) =
     let transaction = conn.Connection.BeginTransaction(isolationLevel)
     let logger = conn.LoggerFactory.CreateLogger<DatabaseTransaction>()
     let mutable lastNameId = 0
 
     let system =
-        let systemOptions =
-            (DbContextOptionsBuilder<SystemContext> ())
-                .UseLoggerFactory(conn.LoggerFactory)
-                .UseNpgsql(conn.Connection, fun opts -> ignore <| opts.UseNodaTime())
+        let builder = DbContextOptionsBuilder<SystemContext> ()
+        setupDbContextLogging conn.LoggerFactory builder
+        ignore <| builder.UseNpgsql(conn.Connection, fun opts -> ignore <| opts.UseNodaTime())
 #if DEBUG
-        ignore <| systemOptions.EnableSensitiveDataLogging()
+        ignore <| builder.EnableSensitiveDataLogging()
 #endif
-        new SystemContext(systemOptions.Options)
+        new SystemContext(builder.Options)
     do
         system.ChangeTracker.QueryTrackingBehavior <- QueryTrackingBehavior.NoTracking
         ignore <| system.Database.UseTransaction(transaction)

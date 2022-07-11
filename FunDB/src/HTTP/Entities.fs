@@ -3,6 +3,7 @@
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open Giraffe
+open Giraffe.EndpointRouting
 
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
@@ -29,7 +30,7 @@ type RelatedEntitiesRequest =
     { Id : RawRowKey
     }
 
-let entitiesApi : HttpHandler =
+let entitiesApi : Endpoint list =
     let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             match! api.Entities.GetEntityInfo entityRef with
@@ -46,15 +47,14 @@ let entitiesApi : HttpHandler =
             | Error err -> return! errorHandler err (json err) next ctx
         }
 
-    let entityApi (schema : string, name : string) =
-        let entityRef =
-            { Schema = FunQLName schema
-              Name = FunQLName name
-            }
-        choose
-            [ route "/related" >=> POST >=> withContextRead (fun api -> safeBindJson (getRelatedEntities entityRef api))
-              route "/info" >=> GET >=> withContextRead (getEntityInfo entityRef)
-            ]
+    let withEntityRead next (schema, name) =
+        let entityRef = { Schema = FunQLName schema; Name = FunQLName name }
+        withContextRead (next entityRef)
+
+    let entityApi =
+        [ POST [ routef "/%s/%s/related" <| withEntityRead (fun ref api -> safeBindJson (getRelatedEntities ref api)) ]
+          GET [ routef "/%s/%s/info" <| withEntityRead getEntityInfo ]
+        ]
 
     let runTransactionInner (api : IFunDBAPI) (transaction : TopLevelTransaction) =
         task {
@@ -82,7 +82,10 @@ let entitiesApi : HttpHandler =
                         return! RequestErrors.badRequest (json err) next ctx
             }
 
-    choose
-        [ subRoutef "/entities/%s/%s" entityApi
-          route "/transaction" >=> POST >=> withContextWrite runTransaction
+    let transactionApi =
+        [ POST [route "/" <| withContextWrite runTransaction]
         ]
+
+    [ subRoute "/entities" entityApi
+      subRoute "/transaction" transactionApi
+    ]

@@ -4,6 +4,7 @@ open System.IO
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open Giraffe
+open Giraffe.EndpointRouting
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.HTTP.Utils
@@ -32,7 +33,7 @@ type private RestoreFlags =
       ForceAllowBroken : bool
     }
 
-let saveRestoreApi : HttpHandler =
+let saveRestoreApi : Endpoint list =
     let saveZipSchemas (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             let (schemas, api) = arg :?> (SaveSchemas * IFunDBAPI)
@@ -108,12 +109,10 @@ let saveRestoreApi : HttpHandler =
         }
 
     let massSaveRestoreApi =
-        choose
-            [ // This query is quite expensive, so apply write rate limit.
-              route "" >=> GET >=> withContextWrite saveSchemas
-              route "" >=> PUT >=> withContextWrite (fun api -> getRestoreFlags (restoreSchemas api))
-            ]
-
-    choose
-        [ subRoute "/layouts" massSaveRestoreApi
+        [ // This query is quite expensive, so apply write rate limit.
+          GET [route "" <| withContextWrite saveSchemas]
+          PUT [route "" <| withContextWrite (fun api -> getRestoreFlags (restoreSchemas api))]
         ]
+
+    [ subRoute "/layouts" massSaveRestoreApi
+    ]

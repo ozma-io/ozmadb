@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.HTTP.Domains
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open Giraffe
+open Giraffe.EndpointRouting
 
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.Permissions.Types
@@ -39,7 +40,7 @@ type DomainExplainRequest =
       Costs : bool option
     }
 
-let domainsApi : HttpHandler =
+let domainsApi : Endpoint list =
     let returnValues (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) next ctx =
         task {
             match! api.Domains.GetDomainValues ref rowId chunk flags with
@@ -109,15 +110,20 @@ let domainsApi : HttpHandler =
                 } : SQL.ExplainOptions
             setPretends api req.PretendUser req.PretendRole (fun () -> returnExplain api ref req.RowId chunk flags explainOpts next ctx)
 
-    let domainApi (schema, entity, name) =
+    let withDomainRead next (schema, entity, name) =
         let ref = { Entity = { Schema = FunQLName schema; Name = FunQLName entity }; Name = FunQLName name }
-        choose
-            [ route "/entries" >=> GET >=> withContextRead (getDomainValues ref)
-              route "/entries" >=> POST >=> withContextRead (postGetDomainValues ref)
-              route "/explain" >=> GET >=> withContextRead (getDomainExplain ref)
-              route "/explain" >=> POST >=> withContextRead (postGetDomainExplain ref)
-            ]
+        withContextRead (next ref)
 
-    choose
-        [ subRoutef "/domains/%s/%s/%s" domainApi
+    let domainApi =
+        [ GET
+            [ routef "/%s/%s/%s/entries" <| withDomainRead getDomainValues
+              routef "/%s/%s/%s/explain" <| withDomainRead getDomainExplain
+            ]
+          POST
+            [ routef "/%s/%s/%s/entries" <| withDomainRead postGetDomainValues
+              routef "/%s/%s/%s/explain" <| withDomainRead postGetDomainExplain
+            ]
         ]
+
+    [ subRoute "/domains" domainApi
+    ]

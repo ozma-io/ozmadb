@@ -1,9 +1,9 @@
 module FunWithFlags.FunDB.HTTP.Actions
 
-open Newtonsoft.Json.Linq
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open Giraffe
+open Giraffe.EndpointRouting
 
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
@@ -18,7 +18,7 @@ let private actionError e =
         | AEException _ -> ServerErrors.internalError
     handler (json e)
 
-let actionsApi : HttpHandler =
+let actionsApi : Endpoint list =
     let runAction (ref : ActionRef) (api : IFunDBAPI) =
         safeBindJson <| fun args (next : HttpFunc) (ctx : HttpContext) ->
             task {
@@ -29,13 +29,14 @@ let actionsApi : HttpHandler =
                     return! actionError err next ctx
             }
 
-    let actionApi (schema, name) =
+    let runActionRoute (schema, name) =
         let ref = { Schema = FunQLName schema; Name = FunQLName name }
-        choose
-            [ route "" >=> POST >=> deprecated >=> withContextWrite (runAction ref)
-              route "/run" >=> POST >=> withContextWrite (runAction ref)
-            ]
+        withContextWrite (runAction ref)
 
-    choose
-        [ subRoutef "/actions/%s/%s" actionApi
+    let actionApi =
+        [ POST [routef "/%s/%s" runActionRoute] // DEPRECATED
+          POST [routef "/%s/%s/run" runActionRoute]
         ]
+
+    [ subRoute "/actions" actionApi
+    ]

@@ -474,13 +474,10 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
     member this.FinishSchemaMeta = finishSchemaMeta
 
 let createPgCatalogContext (transaction : DatabaseTransaction) =
-        let dbOptions =
-            (DbContextOptionsBuilder<PgCatalogContext> ())
-                .UseNpgsql(transaction.Transaction.Connection, fun opts -> ignore <| opts.UseNodaTime())
-#if DEBUG
-        ignore <| dbOptions.UseLoggerFactory(transaction.Connection.LoggerFactory)
-#endif
-        let db = new PgCatalogContext(dbOptions.Options)
+        let builder = DbContextOptionsBuilder<PgCatalogContext> ()
+        setupDbContextLogging transaction.Connection.LoggerFactory builder
+        ignore <| builder.UseNpgsql(transaction.Transaction.Connection, fun opts -> ignore <| opts.UseNodaTime())
+        let db = new PgCatalogContext(builder.Options)
         try
             ignore <| db.Database.UseTransaction(transaction.Transaction)
         with

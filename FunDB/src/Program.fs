@@ -5,6 +5,7 @@ open System.Collections.Generic
 open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Builder
+open Microsoft.AspNetCore.Routing
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
@@ -18,14 +19,14 @@ open AspNetCoreRateLimit
 open AspNetCoreRateLimit.Redis
 open StackExchange
 open Giraffe
+open Giraffe.EndpointRouting
 open NodaTime
 open Npgsql
 open NetJs.Json
 open Serilog
-open Serilog.AspNetCore
 open Serilog.Events
-open Serilog.Formatting.Compact
 open Microsoft.Extensions.Logging
+open Prometheus
 
 open FunWithFlags.FunDB.FunQL.Json
 open FunWithFlags.FunDBSchema.Instances
@@ -150,8 +151,8 @@ type private StaticInstance (instance : Instance) =
             builder.CommandTimeout <- 0
             ()
 
-let private webApp : HttpHandler =
-    choose
+let private appEndpoints : Endpoint list =
+    List.concat
         [ viewsApi
           entitiesApi
           saveRestoreApi
@@ -159,7 +160,6 @@ let private webApp : HttpHandler =
           infoApi
           permissionsApi
           domainsApi
-          notFoundHandler
         ]
 
 let private isDebug =
@@ -304,15 +304,22 @@ let private setupApp (app : IApplicationBuilder) =
     let configureCors (cfg : CorsPolicyBuilder) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
 
+    let configureEndpoints (endpoints : IEndpointRouteBuilder) =
+        ignore <| endpoints.MapMetrics()
+        ignore <| endpoints.MapGiraffeEndpoints(appEndpoints)
+
     ignore <| app
         .UseSerilogRequestLogging()
+        .UseHttpMetrics()
         .UseHttpMethodOverride()
         .UseCors(configureCors)
         .UseAuthentication()
         // We hack into AspNetCoreRateLimit later, don't add middleware here!
         // .UseClientRateLimiting()
         .UseGiraffeErrorHandler(errorHandler)
-        .UseGiraffe(webApp)
+        .UseRouting()
+        .UseEndpoints(configureEndpoints)
+        .UseGiraffe(notFoundHandler)
 
 [<EntryPoint>]
 let main (args : string[]) : int =

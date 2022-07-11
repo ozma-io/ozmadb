@@ -1,14 +1,14 @@
 module FunWithFlags.FunDB.HTTP.Permissions
 
 open Giraffe
+open Giraffe.EndpointRouting
 
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.API.Types
 
-let permissionsApi : HttpHandler =
+let permissionsApi : Endpoint list =
     let getPermissions (api : IFunDBAPI) : HttpHandler =
         Successful.ok (json api.Permissions.UserPermissions)
 
-    choose
-        [ route "/permissions" >=> GET >=> withContextRead getPermissions
-        ]
+    [ GET [route "/permissions" <| withContextRead getPermissions]
+    ]
