@@ -93,7 +93,7 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
                 let! _ = conn.Query.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty cancellationToken
                 constraintsDeferred <- false
             with
-            | :? QueryException as ex -> raisefUserWithInner DeferredConstraintsException ex ""
+            | :? QueryExecutionException as ex -> raisefUserWithInner DeferredConstraintsException ex ""
         }
 
     new (conn : DatabaseConnection) =

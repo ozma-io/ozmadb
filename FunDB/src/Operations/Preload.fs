@@ -270,7 +270,7 @@ let buildFullSchemaLayout (systemContext : SystemContext) (preload : Preload) (c
         return unionSourceLayout (preloadLayout preload) sourceUserLayout
     }
 
-let buildUserDatabaseMeta (transaction : NpgsqlTransaction) (preload : Preload) (cancellationToken : CancellationToken) : Task<SQL.DatabaseMeta> =
+let buildUserDatabaseMeta (transaction : DatabaseTransaction) (preload : Preload) (cancellationToken : CancellationToken) : Task<SQL.DatabaseMeta> =
     task {
         let! meta = buildDatabaseMeta transaction cancellationToken |> Task.map correlateDatabaseMeta
         return SQL.filterDatabaseMeta (fun (SQL.SQLName name) -> not <| Map.containsKey (FunQLName name) preload.Schemas) meta
@@ -441,7 +441,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
         let sourcePreloadLayout = preloadLayout preload
         let preloadLayout = resolveLayout false sourcePreloadLayout
         let (_, newSystemMeta) = buildFullLayoutMeta preloadLayout preloadLayout
-        let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken |> Task.map correlateDatabaseMeta
+        let! currentMeta = buildDatabaseMeta conn cancellationToken |> Task.map correlateDatabaseMeta
         let currentSystemMeta = filterPreloadedMeta preload currentMeta
 
         let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
@@ -450,7 +450,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
         // Second migration shouldn't produce any changes.
         let sanityCheck () =
             task {
-                let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken |> Task.map correlateDatabaseMeta
+                let! currentMeta = buildDatabaseMeta conn cancellationToken |> Task.map correlateDatabaseMeta
                 let currentSystemMeta = filterPreloadedMeta preload currentMeta
                 let systemMigration = planDatabaseMigration currentSystemMeta newSystemMeta
                 if Array.isEmpty systemMigration then
@@ -548,7 +548,7 @@ let initialMigratePreload (logger :ILogger) (allowAutoMark : bool) (preload : Pr
 
         // Second migration shouldn't produce any changes.
         let sanityCheck () = task {
-            let! currentMeta = buildDatabaseMeta conn.Transaction cancellationToken |> Task.map correlateDatabaseMeta
+            let! currentMeta = buildDatabaseMeta conn cancellationToken |> Task.map correlateDatabaseMeta
             let currentUserMeta = filterUserMeta preload currentMeta
             let systemMigration = planDatabaseMigration currentUserMeta newUserMeta
             if Array.isEmpty systemMigration then

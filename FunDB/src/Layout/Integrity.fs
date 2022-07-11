@@ -1064,7 +1064,7 @@ let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) 
             | Some (name, typ, SQL.VBool true) -> ()
             | Some (name, typ, ret) -> raisef LayoutIntegrityException "Expected `true`, got %O" ret
         with
-        | :? QueryException as e -> raisefUserWithInner LayoutIntegrityException e "Query exception"
+        | :? QueryExecutionException as e -> raisefUserWithInner LayoutIntegrityException e "Query exception"
     }
 
 let checkAssertions (conn : QueryConnection) (layout : Layout) (assertions : LayoutAssertions) (cancellationToken : CancellationToken) : Task =

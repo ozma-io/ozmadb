@@ -25,13 +25,13 @@ type QueryException (message : string, innerException : Exception) =
 
     new (message : string) = QueryException (message, null)
 
-type QueryResultException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+type QueryExecutionException (message : string, innerException : Exception) =
+    inherit QueryException(message, innerException)
 
-    new (message : string) = QueryResultException (message, null)
+    new (message : string) = QueryExecutionException (message, null)
 
 type ConcurrentUpdateException (message : string, innerException : Exception) =
-    inherit Exception(message, innerException)
+    inherit QueryException(message, innerException)
 
     new (message : string) = ConcurrentUpdateException (message, null)
 
@@ -42,10 +42,10 @@ let private parseType typeStr =
     | Ok valType ->
         let coerceType typeName =
             match findSimpleType typeName with
-            | None -> raisef QueryResultException "Unknown database type: %O" typeName
+            | None -> raisef QueryException "Unknown database type: %O" typeName
             | Some t -> t
         mapValueType coerceType valType
-    | Error msg -> raisef QueryResultException "Cannot parse database type: %s" msg
+    | Error msg -> raisef QueryException "Cannot parse database type: %s" msg
 
 let private convertInt : obj -> int option = function
     | :? sbyte as value -> Some <| int value
@@ -73,12 +73,12 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
     | (VTScalar STInt, value) ->
         match convertInt value with
         | Some i -> VInt i
-        | None -> raisef QueryResultException "Failed to convert integer value"
+        | None -> raisef QueryException "Failed to convert integer value"
     | (VTScalar STBigInt, (:? int64 as value)) -> VBigInt value
     | (VTScalar STDecimal, value) ->
         match convertDecimal value with
         | Some i -> VDecimal i
-        | None -> raisef QueryResultException "Failed to convert decimal value"
+        | None -> raisef QueryException "Failed to convert decimal value"
     | (VTScalar STString, (:? string as value)) -> VString value
     | (VTScalar STBool, (:? bool as value)) -> VBool value
     | (VTScalar STDateTime, (:? Instant as value)) -> VDateTime value
@@ -88,7 +88,7 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
     | (VTScalar STJson, (:? string as value)) ->
         match tryJson value with
         | Some j -> VJson (ComparableJToken j)
-        | None -> raisef QueryResultException "Invalid JSON value"
+        | None -> raisef QueryException "Invalid JSON value"
     | (VTScalar STUuid, (:? Guid as value)) -> VUuid value
     | (VTArray scalarType, (:? Array as rootVals)) ->
         let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
@@ -98,7 +98,7 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
                 | value ->
                     match convFunc value with
                     | Some v -> AVValue v
-                    | None -> raisef QueryResultException "Cannot convert array value: %O" value
+                    | None -> raisef QueryException "Cannot convert array value: %O" value
             Seq.map convertOne (vals.Cast<obj>()) |> Array.ofSeq
 
         match scalarType with
@@ -111,16 +111,16 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
         | STLocalDateTime -> VLocalDateTimeArray (convertArray tryCast<LocalDateTime> rootVals)
         | STDate -> VDateArray (convertArray tryCast<LocalDate> rootVals)
         | STInterval -> VIntervalArray (convertArray tryCast<Period> rootVals)
-        | STRegclass -> raisef QueryResultException "Regclass arrays are not supported"
+        | STRegclass -> raisef QueryException "Regclass arrays are not supported"
         | STJson -> VJsonArray (convertArray (tryCast<string> >> Option.bind tryJson >> Option.map ComparableJToken) rootVals)
         | STUuid -> VUuidArray (convertArray tryCast<Guid> rootVals)
-    | (typ, value) -> raisef QueryResultException "Unknown value format"
+    | (typ, value) -> raisef QueryException "Unknown value format"
 
 let private convertValue (valType : SimpleValueType) (rawValue : obj) =
     try
         convertValueOrThrow valType rawValue
     with
-    | e -> raisefWithInner QueryResultException e "Value type %O, raw value type %s, raw value %O" valType (rawValue.GetType().FullName) rawValue
+    | e -> raisefWithInner QueryException e "Value type %O, raw value type %s, raw value %O" valType (rawValue.GetType().FullName) rawValue
 
 let rec private npgsqlArrayValue (vals : ArrayValue<'a> array) : obj =
     let convertOne : ArrayValue<'a> -> obj = function
@@ -137,7 +137,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VBigInt i -> (Some NpgsqlDbType.Bigint, upcast i)
     | VDecimal d -> (Some NpgsqlDbType.Numeric, upcast d)
     | VString s -> (Some NpgsqlDbType.Text, upcast s)
-    | VRegclass name -> raisef QueryResultException "Regclass arguments are not supported: %O" name
+    | VRegclass name -> raisef QueryException "Regclass arguments are not supported: %O" name
     | VBool b -> (Some NpgsqlDbType.Boolean, upcast b)
     | VDateTime dt -> (Some NpgsqlDbType.TimestampTz, upcast dt)
     | VLocalDateTime dt -> (Some NpgsqlDbType.Timestamp, upcast dt)
@@ -154,13 +154,13 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VLocalDateTimeArray vals -> npgsqlArray NpgsqlDbType.Timestamp vals
     | VDateArray vals -> npgsqlArray NpgsqlDbType.Date vals
     | VIntervalArray vals -> npgsqlArray NpgsqlDbType.Interval vals
-    | VRegclassArray vals -> raisef QueryResultException "Regclass arguments are not supported: %O" vals
+    | VRegclassArray vals -> raisef QueryException "Regclass arguments are not supported: %O" vals
     | VJsonArray vals -> npgsqlArray NpgsqlDbType.Jsonb vals
     | VUuidArray vals -> npgsqlArray NpgsqlDbType.Uuid vals
     | VNull -> (None, upcast DBNull.Value)
 
 type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnection) =
-    let logger = loggerFactory.CreateLogger<QueryConnection> ()
+    let logger = loggerFactory.CreateLogger<QueryConnection>()
 
     let withCommand (queryStr : string) (pars : ExprParameters) (runFunc : NpgsqlCommand -> Task<'a>) : Task<'a> =
         task {
@@ -179,7 +179,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             | :? PostgresException as e when e.SqlState = "40001" ->
                 return raisefWithInner ConcurrentUpdateException e "Concurrent update detected"
             | :? PostgresException as e ->
-                return raisefWithInner QueryException e "Error while executing"
+                return raisefWithInner QueryExecutionException e "Error while executing"
         }
 
     member this.Connection = connection
@@ -192,7 +192,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             match! this.ExecuteRowValuesQuery queryStr pars cancellationToken with
             | None -> return None
             | Some [|ret|] -> return Some ret
-            | _ -> return raisef QueryException "Not a single column"
+            | _ -> return raisef QueryExecutionException "Not a single column"
         }
 
     member this.ExecuteRowValuesQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) : Task<(SQLName * SimpleValueType * Value)[] option> =
@@ -202,32 +202,30 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             if not hasRow0 then
                 return None
             else
-                let rawRow = Array.create reader.FieldCount null
-
-                let getValue i rawValue =
+                let getValue i =
                     try
                         let name = SQLName <| reader.GetName(i)
                         let typ = parseType (reader.GetDataTypeName(i))
+                        let rawValue = reader.GetProviderSpecificValue(i)
                         let value = convertValue typ rawValue
                         (name, typ, value)
                     with
-                    | e -> raisefWithInner QueryResultException e "While reading column %i (\"%s\")" i  (reader.GetName(i))
+                    | e -> raisefWithInner QueryException e "While reading column %i (\"%s\")" i  (reader.GetName(i))
 
                 let mutable rowI = 0
                 let getRow () =
                     try
-                        ignore <| reader.GetProviderSpecificValues(rawRow)
-                        let res = Array.mapi getValue rawRow
+                        let res = Array.init reader.FieldCount getValue
                         rowI <- rowI + 1
                         res
                     with
-                    | e -> raisefWithInner QueryResultException e "While reading row %i" rowI
+                    | e -> raisefWithInner QueryException e "While reading row %i" rowI
 
                 let result = getRow ()
                 let! hasRow1 = reader.ReadAsync(cancellationToken)
                 if hasRow1 then
                     let secondResult = getRow ()
-                    raisef QueryException "Has a second row: %O" secondResult
+                    raisef QueryExecutionException "Has a second row: %O" secondResult
                 return Some result
         }
 
@@ -235,7 +233,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
         let processFunc' cols (rows : IAsyncEnumerable<Value[]>) =
             match cols with
                 | [|(name, typ)|] -> processFunc name typ (rows.Select(fun row -> row.[0]))
-                | _ -> raisef QueryException "Not a single column"
+                | _ -> raisef QueryExecutionException "Not a single column"
         this.ExecuteQuery queryStr pars cancellationToken processFunc'
 
     member this.ExecuteQuery (queryStr : string) (pars : ExprParameters) (cancellationToken : CancellationToken) (processFunc : (SQLName * SimpleValueType)[] -> IAsyncEnumerable<Value[]> -> Task<'a>) : Task<'a> =
@@ -245,26 +243,26 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                 let name = reader.GetName(i)
                 let typ = parseType (reader.GetDataTypeName(i))
                 (SQLName name, typ)
-            let columns = seq { 0 .. reader.FieldCount - 1 } |> Seq.map getColumn |> Seq.toArray
+            let columns = Array.init reader.FieldCount getColumn
 
-            let rawRow = Array.create reader.FieldCount null
-
-            let getValue i rawValue =
+            let getValue i =
                 try
                     let (name, typ) = columns.[i]
+                    let rawValue = reader.GetProviderSpecificValue(i)
                     convertValue typ rawValue
                 with
-                | e -> raisefWithInner QueryResultException e "While reading column %i (\"%s\")" i  (reader.GetName(i))
+                | e ->
+                    eprintfn "Foo: %f" (reader.GetDouble(i))
+                    raisefWithInner QueryException e "While reading column %i (\"%s\")" i  (reader.GetName(i))
 
             let mutable rowI = 0
             let getRow () =
                 try
-                    ignore <| reader.GetProviderSpecificValues(rawRow)
-                    let res = Array.mapi getValue rawRow
+                    let res = Array.init reader.FieldCount getValue
                     rowI <- rowI + 1
                     res
                 with
-                | e -> raisefWithInner QueryResultException e "While reading row %i" rowI
+                | e -> raisefWithInner QueryException e "While reading row %i" rowI
 
             let mutable currentValue = None
             let mutable tookOnce = false

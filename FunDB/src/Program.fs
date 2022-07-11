@@ -3,11 +3,9 @@ open System.IO
 open System.Threading
 open System.Collections.Generic
 open Newtonsoft.Json
-open Microsoft.AspNetCore
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Builder
-open Microsoft.AspNetCore.Hosting
-open Microsoft.Extensions.Logging
+open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Cors.Infrastructure
@@ -23,6 +21,11 @@ open Giraffe
 open NodaTime
 open Npgsql
 open NetJs.Json
+open Serilog
+open Serilog.AspNetCore
+open Serilog.Events
+open Serilog.Formatting.Compact
+open Microsoft.Extensions.Logging
 
 open FunWithFlags.FunDB.FunQL.Json
 open FunWithFlags.FunDBSchema.Instances
@@ -147,32 +150,58 @@ type private StaticInstance (instance : Instance) =
             builder.CommandTimeout <- 0
             ()
 
-type Startup (config : IConfiguration) =
-    let fundbSection = config.GetSection("FunDB")
+let private webApp : HttpHandler =
+    choose
+        [ viewsApi
+          entitiesApi
+          saveRestoreApi
+          actionsApi
+          infoApi
+          permissionsApi
+          domainsApi
+          notFoundHandler
+        ]
 
-    let sourcePreload =
-        match fundbSection.GetValue("Preloads") with
-        | null -> emptySourcePreloadFile
-        | path -> readSourcePreload path
-    let preload = resolvePreload sourcePreload
+let private isDebug =
+#if DEBUG
+    true
+#else
+    false
+#endif
 
-    let webApp =
-        choose
-            [ viewsApi
-              entitiesApi
-              saveRestoreApi
-              actionsApi
-              infoApi
-              permissionsApi
-              domainsApi
-              notFoundHandler
-            ]
+let private setupConfiguration (args : string[]) (webAppBuilder : WebApplicationBuilder) =
+    // Configuration.
+    let configPath = args.[0]
+    ignore <| webAppBuilder.Configuration
+        .SetBasePath(Directory.GetCurrentDirectory())
+        .AddJsonFile(configPath, false, isDebug)
+        .AddEnvironmentVariables()
 
-    let authenticationOptions (o : AuthenticationOptions) =
+let private setupLogging (webAppBuilder : WebApplicationBuilder) =
+    let config = webAppBuilder.Configuration
+
+    let configureSerilog (context : HostBuilderContext) (services : IServiceProvider) (configuration : LoggerConfiguration) =
+        ignore <| configuration
+            .ReadFrom.Configuration(config)
+            .ReadFrom.Services(services)
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+            .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+            .Enrich.FromLogContext()
+        if not <| config.GetSection("Serilog").GetSection("WriteTo").Exists() then
+            ignore <| configuration.WriteTo.Console()
+
+    ignore <| webAppBuilder.Host.UseSerilog(configureSerilog)
+
+let private setupAuthentication (webAppBuilder : WebApplicationBuilder) =
+    let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
+    let services = webAppBuilder.Services
+
+    // Auth.
+    let configureAuthentication (o : AuthenticationOptions) =
         o.DefaultAuthenticateScheme <- JwtBearerDefaults.AuthenticationScheme
         o.DefaultChallengeScheme <- JwtBearerDefaults.AuthenticationScheme
 
-    let jwtBearerOptions (cfg : JwtBearerOptions) =
+    let configureJwtBearer (cfg : JwtBearerOptions) =
         cfg.Authority <- fundbSection.["AuthAuthority"]
         cfg.TokenValidationParameters <- TokenValidationParameters (
             ValidateAudience = false
@@ -189,128 +218,140 @@ type Startup (config : IConfiguration) =
             })
             ctx.Response.WriteAsync(JsonConvert.SerializeObject(ret))
 
+    ignore <| services
+        .AddGiraffe()
+        .AddCors()
+    if not <| fundbSection.GetValue("DisableSecurity", false) then
+        ignore <| services
+            .AddAuthentication(configureAuthentication)
+            .AddJwtBearer(configureJwtBearer)
+
+let private setupRateLimiting (webAppBuilder : WebApplicationBuilder) =
+    let services = webAppBuilder.Services
+
+    match webAppBuilder.Configuration.GetValue("Redis") with
+    | null ->
+        ignore <| services
+            .AddMemoryCache()
+            .AddInMemoryRateLimiting()
+    | redisStr ->
+        let redisOptions = Redis.ConfigurationOptions.Parse(redisStr)
+        let getRedisMultiplexer (sp : IServiceProvider) =
+            Redis.ConnectionMultiplexer.Connect(redisOptions) :> Redis.IConnectionMultiplexer
+        ignore <| services
+            .AddSingleton<Redis.IConnectionMultiplexer>(getRedisMultiplexer)
+            .AddRedisRateLimiting()
+    // Needed for the strategy, but we ignore it in RateLimit.fs. Painful...
+    ignore <| services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+
+let private setupJSON (webAppBuilder : WebApplicationBuilder) =
+    ignore <| webAppBuilder.Services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer defaultJsonSettings)
+
+let private setupEventLogger (webAppBuilder : WebApplicationBuilder) =
+    let services = webAppBuilder.Services
+
+    let getEventLogger (sp : IServiceProvider) =
+        let logFactory = sp.GetRequiredService<ILoggerFactory>()
+        new EventLogger(logFactory)
+    // https://stackoverflow.com/a/59089881
+    ignore <| services.AddSingleton<EventLogger>(getEventLogger)
+    ignore <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
+
+let private setupInstancesCache (webAppBuilder : WebApplicationBuilder) =
+    let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
+    let config = webAppBuilder.Configuration
+    let services = webAppBuilder.Services
+
+    let sourcePreload =
+        match fundbSection.GetValue("Preloads") with
+        | null -> emptySourcePreloadFile
+        | path -> readSourcePreload path
+    let preload = resolvePreload sourcePreload
+
+    let makeInstancesStore (sp : IServiceProvider) =
+        let cacheParams =
+            { Preload = preload
+              LoggerFactory = sp.GetRequiredService<ILoggerFactory>()
+              EventLogger = sp.GetRequiredService<EventLogger>()
+              AllowAutoMark = fundbSection.GetValue("AllowAutoMark", false)
+            }
+        InstancesCacheStore cacheParams
+    ignore <| services.AddSingleton<InstancesCacheStore>(makeInstancesStore)
+
+let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
+    let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
+    let config = webAppBuilder.Configuration
+    let services = webAppBuilder.Services
+
+    let getInstancesSource (sp : IServiceProvider) : IInstancesSource =
+        match fundbSection.["InstancesSource"] with
+        | "database" ->
+            let instancesConnectionString = config.GetConnectionString("Instances")
+            let logFactory = sp.GetRequiredService<ILoggerFactory>()
+            DatabaseInstances(logFactory, instancesConnectionString) :> IInstancesSource
+        | "static" ->
+            let instance = Instance(
+                Owner = "owner@example.com"
+            )
+            config.GetSection("Instance").Bind(instance)
+            if isNull instance.Database then
+                instance.Database <- instance.Username
+            StaticInstance(instance) :> IInstancesSource
+        | _ -> failwith "Invalid InstancesSource"
+    ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
+
+let private setupApp (app : IApplicationBuilder) =
     let configureCors (cfg : CorsPolicyBuilder) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
 
-    member this.Configure (app : IApplicationBuilder, env : IWebHostEnvironment) =
-        ignore <|
-            app
-                .UseHttpMethodOverride()
-                .UseCors(configureCors)
-                .UseAuthentication()
-                // We hack into AspNetCoreRateLimit later, don't add middleware here!
-                // .UseClientRateLimiting()
-                .UseGiraffeErrorHandler(errorHandler)
-                .UseGiraffe(webApp)
-
-    member this.ConfigureServices (services : IServiceCollection) =
-        // Auth.
-        ignore <|
-            services
-                .AddGiraffe()
-                .AddCors()
-        if not <| fundbSection.GetValue("DisableSecurity", false) then
-            ignore <|
-                services
-                    .AddAuthentication(authenticationOptions)
-                    .AddJwtBearer(Action<JwtBearerOptions> jwtBearerOptions)
-
-        // Rate limiting.
-        match config.GetValue("Redis") with
-        | null ->
-            ignore <|
-                services
-                    .AddMemoryCache()
-                    .AddInMemoryRateLimiting()
-        | redisStr ->
-            let redisOptions = Redis.ConfigurationOptions.Parse(redisStr)
-            let getRedisMultiplexer (sp : IServiceProvider) =
-                Redis.ConnectionMultiplexer.Connect(redisOptions) :> Redis.IConnectionMultiplexer
-            ignore <|
-                services
-                    .AddSingleton<Redis.IConnectionMultiplexer>(getRedisMultiplexer)
-                    .AddRedisRateLimiting()
-        // Needed for the strategy, but we ignore it in RateLimit.fs. Painful...
-        ignore <| services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
-
-        // JSON.
-        ignore <| services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer defaultJsonSettings)
-
-        // Logging.
-        let getEventLogger (sp : IServiceProvider) =
-            let logFactory = sp.GetRequiredService<ILoggerFactory>()
-            new EventLogger(logFactory)
-        // https://stackoverflow.com/a/59089881
-        ignore <| services.AddSingleton<EventLogger>(getEventLogger)
-        ignore <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
-
-        // Instances cache.
-        let allowAutoMark = fundbSection.GetValue("AllowAutoMark", false)
-        let makeInstancesStore (sp : IServiceProvider) =
-            let cacheParams =
-                { Preload = preload
-                  LoggerFactory = sp.GetRequiredService<ILoggerFactory>()
-                  EventLogger = sp.GetRequiredService<EventLogger>()
-                  AllowAutoMark = allowAutoMark
-                }
-            InstancesCacheStore cacheParams
-        ignore <| services.AddSingleton<InstancesCacheStore>(makeInstancesStore)
-        let getInstancesSource (sp : IServiceProvider) : IInstancesSource =
-            match fundbSection.["InstancesSource"] with
-            | "database" ->
-                let instancesConnectionString = config.GetConnectionString("Instances")
-                let logFactory = sp.GetRequiredService<ILoggerFactory>()
-                DatabaseInstances(logFactory, instancesConnectionString) :> IInstancesSource
-            | "static" ->
-                let instance = Instance(
-                    Owner = "owner@example.com"
-                )
-                config.GetSection("Instance").Bind(instance)
-                if isNull instance.Database then
-                    instance.Database <- instance.Username
-                StaticInstance(instance) :> IInstancesSource
-            | _ -> failwith "Invalid InstancesSource"
-        ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
-
-let private isDebug =
-#if DEBUG
-    true
-#else
-    false
-#endif
+    ignore <| app
+        .UseSerilogRequestLogging()
+        .UseHttpMethodOverride()
+        .UseCors(configureCors)
+        .UseAuthentication()
+        // We hack into AspNetCoreRateLimit later, don't add middleware here!
+        // .UseClientRateLimiting()
+        .UseGiraffeErrorHandler(errorHandler)
+        .UseGiraffe(webApp)
 
 [<EntryPoint>]
 let main (args : string[]) : int =
-    // Register a global converter to have nicer native F# types JSON conversion.
-    JsonConvert.DefaultSettings <- fun () -> defaultJsonSettings
-    // Enable JSON and NodaTime for PostgreSQL.
-    ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
-    ignore <| NpgsqlConnection.GlobalTypeMapper.UseNodaTime()
-    // Use JavaScript Date objects.
-    V8SerializationSettings.Default.UseDate <- true
+    Log.Logger <-
+        LoggerConfiguration()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+            .Enrich.FromLogContext()
+            .WriteTo.Console()
+            .CreateBootstrapLogger()
 
-    let configPath = args.[0]
+    try
+        try
+            // Register a global converter to have nicer native F# types JSON conversion.
+            JsonConvert.DefaultSettings <- fun () -> defaultJsonSettings
+            // Enable JSON and NodaTime for PostgreSQL.
+            ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
+            ignore <| NpgsqlConnection.GlobalTypeMapper.UseNodaTime()
+            // Use JavaScript Date objects.
+            V8SerializationSettings.Default.UseDate <- true
 
-    let configuration =
-        ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile(configPath, false, isDebug)
-            .AddEnvironmentVariables()
-            .Build()
+            let webAppBuilder = WebApplication.CreateBuilder()
+            setupConfiguration args webAppBuilder
+            setupLogging webAppBuilder
+            setupAuthentication webAppBuilder
+            setupRateLimiting webAppBuilder
+            setupJSON webAppBuilder
+            setupEventLogger webAppBuilder
+            setupInstancesCache webAppBuilder
+            setupInstancesSource webAppBuilder
 
-    let configureLogging (logging : ILoggingBuilder) =
-        //ignore <| logging.ClearProviders()
-        //ignore <| logging.AddConsole()
-        ()
+            let app = webAppBuilder.Build()
+            setupApp app
 
-    // IdentityModelEventSource.ShowPII <- true
+            app.Run()
 
-    WebHost
-        .CreateDefaultBuilder()
-        .UseConfiguration(configuration)
-        .ConfigureLogging(configureLogging)
-        .UseStartup<Startup>()
-        .Build()
-        .Run()
-
-    0
+            0
+        with
+        | e ->
+            Log.Fatal(e, "Terminated unexpectedly")
+            1
+    finally
+        Log.CloseAndFlush()

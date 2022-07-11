@@ -125,7 +125,7 @@ type private CachedState =
 
 let instanceIsInitialized (conn : DatabaseTransaction) =
     task {
-        use pg = createPgCatalogContext conn.Transaction
+        use pg = createPgCatalogContext conn
         let! stateCount = pg.Classes.CountAsync(fun cl -> cl.RelName = "state" && cl.RelKind = 'r' && cl.Namespace.NspName = string funSchema)
         return stateCount > 0
     }
@@ -332,7 +332,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
             if newCurrentVersion <> Some currentVersion then
                 let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
                 let layout = resolveLayout false sourceLayout
-                let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
+                let! userMeta = buildUserDatabaseMeta transaction preload cancellationToken
                 return! finishColdRebuild transaction layout userMeta false cancellationToken
             else
                 try
@@ -460,7 +460,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                     let! sourceActions = buildSchemaActions transaction.System None cancellationToken
                     let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
-                    let! userMeta = buildUserDatabaseMeta transaction.Transaction preload cancellationToken
+                    let! userMeta = buildUserDatabaseMeta transaction preload cancellationToken
 
                     let! _ = transaction.Commit cancellationToken
 
@@ -473,7 +473,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let myIsolate = jsIsolates.Get ()
                         try
                             let jsApi = jsRuntime.GetValue myIsolate
-                            let actions= prepareActions jsApi false actions
+                            let actions = prepareActions jsApi false actions
                             let triggers = prepareTriggers jsApi false triggers
                             ()
                         finally
@@ -640,7 +640,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             try
                                 do! migrateDatabase transaction.Connection.Query migration cancellationToken
                             with
-                            | :? QueryException as e -> return raisefUserWithInner ContextException e "Migration error"
+                            | :? QueryExecutionException as e -> return raisefUserWithInner ContextException e "Migration error"
 
                             let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
                             let addedAssertions = differenceLayoutAssertions newAssertions oldAssertions

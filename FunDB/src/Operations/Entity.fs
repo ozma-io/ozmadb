@@ -69,7 +69,7 @@ let private runQuery (runFunc : string -> ExprParameters -> CancellationToken ->
             let prefix = SQL.convertComments comments
             return! runFunc (prefix + query.Expression.ToSQLString()) (prepareArguments query.Arguments placeholders) cancellationToken
         with
-            | :? QueryException as ex ->
+            | :? QueryExecutionException as ex ->
                 return raisefUserWithInner EntityExecutionException ex ""
     }
 

@@ -13,6 +13,7 @@ open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
+open Serilog.Context
 open Giraffe
 open NodaTime
 open Npgsql
@@ -234,27 +235,37 @@ type UserTokenInfo =
       IsRoot : bool
     }
 
+let continueResolveUser (client : string) (email : string option) (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+    let userRoles = ctx.User.FindFirst "realm_access"
+    let isRoot =
+        if not <| isNull userRoles then
+            let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
+            roles.Roles |> Seq.contains "fundb_admin"
+        else
+            false
+    let info =
+        { Client = client
+          Email = email
+          IsRoot = isRoot
+        }
+    f info next ctx
+
 let resolveUser (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
-    let client = ctx.User.FindFirstValue "azp"
-    if isNull client then
-        requestError (RIRequest "No azp claim in security token") next ctx
-    else
-        let emailClaim = ctx.User.FindFirst ClaimTypes.Email
-        let email =
-            if isNull emailClaim then None else Some emailClaim.Value
-        let userRoles = ctx.User.FindFirst "realm_access"
-        let isRoot =
-            if not <| isNull userRoles then
-                let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
-                roles.Roles |> Seq.contains "fundb_admin"
-            else
-                false
-        let info =
-            { Client = client
-              Email = email
-              IsRoot = isRoot
-            }
-        f info next ctx
+    task {
+        let client = ctx.User.FindFirstValue "azp"
+        if isNull client then
+            return! requestError (RIRequest "No azp claim in security token") next ctx
+        else
+            use _ = LogContext.PushProperty("Client", client)
+            let emailClaim = ctx.User.FindFirst ClaimTypes.Email
+            let email =
+                if isNull emailClaim then None else Some emailClaim.Value
+            match email with
+            | None -> return! continueResolveUser client email f next ctx
+            | Some emailValue ->
+                use _ = LogContext.PushProperty("Email", emailValue)
+                return! continueResolveUser client email f next ctx
+    }
 
 let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
     task {
@@ -265,10 +276,12 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                 ctx.Request.Host.Host
             else
                 xInstance.[0]
+        use _ = LogContext.PushProperty("Instance", instanceName)
         match! instancesSource.GetInstance instanceName ctx.RequestAborted with
         | None ->
             return! requestError RINoInstance next ctx
         | Some instance ->
+            use _ = instance
             let anonymousCtx =
                 { Source = instancesSource
                   Instance = instance
@@ -276,31 +289,28 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                   IsRoot = instance.DisableSecurity
                   CanRead = instance.AnyoneCanRead
                 }
-            try
-                if instance.DisableSecurity then
-                    return! f anonymousCtx next ctx
-                else
-                    let getCtx info =
-                        let userName =
-                            match info.Email with
-                            | Some e -> e
-                            | None -> sprintf "%s@%s" info.Client serviceDomain
-                        let ictx =
-                            { Source = instancesSource
-                              Instance = instance
-                              UserName = userName
-                              IsRoot = userName.ToLowerInvariant() = instance.Owner.ToLowerInvariant() || info.IsRoot
-                              CanRead = instance.AnyoneCanRead
-                            }
-                        f ictx
-                    let failHandler =
-                        if instance.AnyoneCanRead then
-                            f anonymousCtx
-                        else
-                            challenge JwtBearerDefaults.AuthenticationScheme
-                    return! (requiresAuthentication failHandler >=> resolveUser getCtx) next ctx
-            finally
-                instance.Dispose ()
+            if instance.DisableSecurity then
+                return! f anonymousCtx next ctx
+            else
+                let getCtx info =
+                    let userName =
+                        match info.Email with
+                        | Some e -> e
+                        | None -> sprintf "%s@%s" info.Client serviceDomain
+                    let ictx =
+                        { Source = instancesSource
+                          Instance = instance
+                          UserName = userName
+                          IsRoot = userName.ToLowerInvariant() = instance.Owner.ToLowerInvariant() || info.IsRoot
+                          CanRead = instance.AnyoneCanRead
+                        }
+                    f ictx
+                let failHandler =
+                    if instance.AnyoneCanRead then
+                        f anonymousCtx
+                    else
+                        challenge JwtBearerDefaults.AuthenticationScheme
+                return! (requiresAuthentication failHandler >=> resolveUser getCtx) next ctx
     }
 
 let setupRequestTimeout (f : HttpHandler) (inst : InstanceContext) (dbCtx : IContext) (next : HttpFunc) (ctx : HttpContext) =

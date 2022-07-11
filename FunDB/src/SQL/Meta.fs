@@ -10,6 +10,7 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Parsing
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunUtils.Serialization.Json
@@ -472,17 +473,16 @@ type private Phase2Resolver (schemaIds : PgSchemas) =
 
     member this.FinishSchemaMeta = finishSchemaMeta
 
-let createPgCatalogContext (transaction : NpgsqlTransaction) =
+let createPgCatalogContext (transaction : DatabaseTransaction) =
         let dbOptions =
             (DbContextOptionsBuilder<PgCatalogContext> ())
-                .UseNpgsql(transaction.Connection, fun opts -> ignore <| opts.UseNodaTime())
+                .UseNpgsql(transaction.Transaction.Connection, fun opts -> ignore <| opts.UseNodaTime())
 #if DEBUG
-        use loggerFactory = LoggerFactory.Create(fun builder -> ignore <| builder.AddConsole())
-        ignore <| dbOptions.UseLoggerFactory(loggerFactory)
+        ignore <| dbOptions.UseLoggerFactory(transaction.Connection.LoggerFactory)
 #endif
         let db = new PgCatalogContext(dbOptions.Options)
         try
-            ignore <| db.Database.UseTransaction(transaction)
+            ignore <| db.Database.UseTransaction(transaction.Transaction)
         with
         | _ ->
             db.Dispose ()
@@ -496,7 +496,7 @@ let private getExtensions (ns : Namespace) : ExtensionName seq =
         SQLName ext.ExtName
     ns.Extensions |> Seq.map getExt
 
-let buildDatabaseMeta (transaction : NpgsqlTransaction) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
+let buildDatabaseMeta (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<DatabaseMeta> =
     task {
         use db = createPgCatalogContext transaction
         let! namespaces = db.GetObjects(cancellationToken)

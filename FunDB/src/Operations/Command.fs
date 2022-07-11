@@ -149,6 +149,6 @@ let executeCommand
             do! unsetPragmas connection cmdExpr.Pragmas cancellationToken
             ()
         with
-        | :? QueryException as e -> raisefUserWithInner CommandExecutionException e ""
+        | :? QueryExecutionException as e -> raisefUserWithInner CommandExecutionException e ""
         ()
     }

@@ -401,7 +401,7 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
             do! unsetPragmas connection viewExpr.Pragmas cancellationToken
             return ret
         with
-        | :? QueryException as e -> return raisefUserWithInner UserViewExecutionException e ""
+        | :? QueryExecutionException as e -> return raisefUserWithInner UserViewExecutionException e ""
         | :? ArgumentCheckException as e -> return raisefUserWithInner UserViewExecutionException e "Arguments preparation failed"
     }
 
@@ -442,6 +442,6 @@ let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr)
                   Attributes = attrsResult
                 }
         with
-        | :? QueryException as e -> return raisefUserWithInner UserViewExecutionException e ""
+        | :? QueryExecutionException as e -> return raisefUserWithInner UserViewExecutionException e ""
         | :? ArgumentCheckException as e -> return raisefUserWithInner UserViewExecutionException e "Arguments preparation failed"
     }

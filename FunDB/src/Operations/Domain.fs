@@ -91,7 +91,7 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
                     return ret
                 }
         with
-            | :? QueryException as e -> return raisefUserWithInner DomainExecutionException e ""
+            | :? QueryExecutionException as e -> return raisefUserWithInner DomainExecutionException e ""
     }
 
 let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (role : ResolvedRole option) (maybeArguments : ArgumentValuesMap option) (chunk : SourceQueryChunk) (explainOpts : ExplainOptions) (cancellationToken : CancellationToken) : Task<ExplainedQuery> =
@@ -116,5 +116,5 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
             let! explanation = runExplainQuery connection query.Expression compiledArgs explainOpts cancellationToken
             return { Query = string query.Expression; Parameters = compiledArgs; Explanation = explanation }
         with
-            | :? QueryException as e -> return raisefUserWithInner DomainExecutionException e ""
+            | :? QueryExecutionException as e -> return raisefUserWithInner DomainExecutionException e ""
     }
