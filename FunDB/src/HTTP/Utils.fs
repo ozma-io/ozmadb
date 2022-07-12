@@ -282,7 +282,7 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                 xInstance.[0]
         let diagnostic = ctx.GetService<IDiagnosticContext>()
         use _ = LogContext.PushProperty("Instance", instanceName)
-        diagnostic.Set("Instnace", instanceName)
+        diagnostic.Set("Instance", instanceName)
         match! instancesSource.GetInstance instanceName ctx.RequestAborted with
         | None ->
             return! requestError RINoInstance next ctx
