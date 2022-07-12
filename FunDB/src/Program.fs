@@ -31,6 +31,7 @@ open Prometheus
 open FunWithFlags.FunDB.FunQL.Json
 open FunWithFlags.FunDBSchema.Instances
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.HTTP.Info
 open FunWithFlags.FunDB.HTTP.Views
 open FunWithFlags.FunDB.HTTP.Entities
@@ -58,11 +59,10 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString
         member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
             task {
                 let instances =
-                    let systemOptions =
-                        (DbContextOptionsBuilder<InstancesContext> ())
-                            .UseLoggerFactory(loggerFactory)
-                            .UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
-                    new InstancesContext(systemOptions.Options)
+                    let builder = DbContextOptionsBuilder<InstancesContext> ()
+                    setupDbContextLogging loggerFactory builder
+                    ignore <| builder.UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
+                    new InstancesContext(builder.Options)
                 try
                     match! instances.Instances.FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken) with
                     | null ->
