@@ -7,13 +7,14 @@ open System.Threading
 open System.Threading.Tasks
 open System.Security.Claims
 open Microsoft.Extensions.Primitives
-open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Hosting
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
 open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
+open Serilog
 open Serilog.Context
+open Microsoft.Extensions.Logging
 open Giraffe
 open NodaTime
 open Npgsql
@@ -256,7 +257,9 @@ let resolveUser (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : Http
         if isNull client then
             return! requestError (RIRequest "No azp claim in security token") next ctx
         else
+            let diagnostic = ctx.GetService<IDiagnosticContext>()
             use _ = LogContext.PushProperty("Client", client)
+            diagnostic.Set("Client", client)
             let emailClaim = ctx.User.FindFirst ClaimTypes.Email
             let email =
                 if isNull emailClaim then None else Some emailClaim.Value
@@ -264,6 +267,7 @@ let resolveUser (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : Http
             | None -> return! continueResolveUser client email f next ctx
             | Some emailValue ->
                 use _ = LogContext.PushProperty("Email", emailValue)
+                diagnostic.Set("Email", emailValue)
                 return! continueResolveUser client email f next ctx
     }
 
@@ -276,7 +280,9 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                 ctx.Request.Host.Host
             else
                 xInstance.[0]
+        let diagnostic = ctx.GetService<IDiagnosticContext>()
         use _ = LogContext.PushProperty("Instance", instanceName)
+        diagnostic.Set("Instnace", instanceName)
         match! instancesSource.GetInstance instanceName ctx.RequestAborted with
         | None ->
             return! requestError RINoInstance next ctx
