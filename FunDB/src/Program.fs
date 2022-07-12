@@ -177,16 +177,22 @@ let private setupConfiguration (args : string[]) (webAppBuilder : WebApplication
         .AddJsonFile(configPath, false, isDebug)
         .AddEnvironmentVariables()
 
+let private setupLoggerConfiguration (configuration : LoggerConfiguration) =
+    ignore <| configuration
+        .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+        .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+        // We really, really don't use DataProtection.
+        .MinimumLevel.Override("Microsoft.AspNetCore.DataProtection", LogEventLevel.Error)
+        .Enrich.FromLogContext()
+
 let private setupLogging (webAppBuilder : WebApplicationBuilder) =
     let config = webAppBuilder.Configuration
 
     let configureSerilog (context : HostBuilderContext) (services : IServiceProvider) (configuration : LoggerConfiguration) =
+        setupLoggerConfiguration configuration
         ignore <| configuration
             .ReadFrom.Configuration(config)
             .ReadFrom.Services(services)
-            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-            .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
-            .Enrich.FromLogContext()
         if not <| config.GetSection("Serilog").GetSection("WriteTo").Exists() then
             ignore <| configuration.WriteTo.Console()
 
@@ -323,10 +329,10 @@ let private setupApp (app : IApplicationBuilder) =
 
 [<EntryPoint>]
 let main (args : string[]) : int =
+    let loggerConfig = LoggerConfiguration()
+    setupLoggerConfiguration loggerConfig
     Log.Logger <-
-        LoggerConfiguration()
-            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-            .Enrich.FromLogContext()
+        loggerConfig
             .WriteTo.Console()
             .CreateBootstrapLogger()
 
