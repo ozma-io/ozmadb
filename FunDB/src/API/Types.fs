@@ -178,6 +178,11 @@ type UserViewErrorInfo =
 type UserViewSource =
     | [<CaseName("anonymous")>] UVAnonymous of Query : string
     | [<CaseName("named")>] UVNamed of Ref : ResolvedUserViewRef
+    with
+        override this.ToString () =
+            match this with
+            | UVNamed ref -> string ref
+            | UVAnonymous query -> sprintf "(anonymous: %s)" query
 
 [<NoEquality; NoComparison>]
 type ExecutedViewExpr =
