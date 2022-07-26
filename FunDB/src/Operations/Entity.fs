@@ -89,17 +89,13 @@ let private runOptionalIntQuery (connection : QueryConnection) query comments pl
         | Some (name, typ, ret) -> return Some (SQL.parseIntValue ret)
     }
 
+let private runOptionalValuesQuery (connection : QueryConnection) query comments placeholders cancellationToken =
+    runQuery connection.ExecuteRowValuesQuery query comments placeholders cancellationToken
+
 let private runIntsQuery (connection : QueryConnection) query comments placeholders cancellationToken =
     let execute query args cancellationToken =
         connection.ExecuteColumnValuesQuery query args cancellationToken <| fun name typ rows -> task { return! rows.Select(SQL.parseIntValue).ToArrayAsync(cancellationToken) }
     runQuery execute query comments placeholders cancellationToken
-
-let private runOptionalStringQuery (connection : QueryConnection) query comments placeholders cancellationToken =
-    task {
-        match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
-        | None -> return None
-        | Some (name, typ, ret) -> return Some (SQL.parseStringValue ret)
-    }
 
 let private databaseArg = PLocal (FunQLName "database")
 
@@ -167,33 +163,49 @@ let private runQueryAndGetId
         (connection : QueryConnection)
         (applyRole : ResolvedRole option)
         (tableRef : SQL.TableRef)
+        (entity : ResolvedEntity)
         (query : Query<'a>)
         (comments : string option)
         (argumentValues : ArgumentValuesMap)
         (whereExprWithoutRole : SQL.ValueExpr)
         (argumentsWithoutRole : QueryArguments)
         (key : RowKey)
-        (cancellationToken : CancellationToken) : Task<RowId> =
+        (knownSubEntity : ResolvedEntityRef option)
+        (cancellationToken : CancellationToken) : Task<RowId * ResolvedEntityRef> =
     task {
-        let! rowId =
+        let! rowInfo =
             task {
-                match key with
-                | RKId id ->
+                match (key, knownSubEntity) with
+                | (RKId id, Some subEntity) ->
                     match! runNonQuery connection query comments argumentValues cancellationToken with
                     | 0 -> return None
-                    | 1 -> return Some id
+                    | 1 -> return Some (id, subEntity)
                     | _ -> return failwith "Impossible"
-                | RKAlt (name, keys) ->
-                    let! id = runOptionalIntQuery connection query comments argumentValues cancellationToken
-                    // FIXME: can overflow in future!
-                    return Option.map int id
+                | _ ->
+                    match! runOptionalValuesQuery connection query comments argumentValues cancellationToken with
+                    | None -> return None
+                    | Some values ->
+                        let findValue wantedName =
+                            let (name, typ, value) = values |> Seq.find (fun (name, typ, value) -> name = wantedName)
+                            value
+
+                        let id =
+                            match key with
+                            | RKId id -> id
+                            // FIXME: can overflow in future!
+                            | RKAlt _ -> findValue sqlFunId |> SQL.parseIntValue |> int
+                        let subEntity =
+                            match knownSubEntity with
+                            | Some subEntity -> subEntity
+                            | None -> findValue sqlFunSubEntity |> SQL.parseStringValue |> parseTypeName entity.Root
+                        return Some (id, subEntity)
             }
-        match rowId with
+        match rowInfo with
         | None ->
             // Notice we don't pass `Where` with applied role -- our aim here is to check if the row exists at all.
             do! countAndThrow connection applyRole tableRef whereExprWithoutRole argumentsWithoutRole argumentValues cancellationToken
             return failwith "Impossible"
-        | Some id -> return id
+        | Some (id, subEntity) -> return (id, subEntity)
     }
 
 let private realEntityAnnotation (entityRef : ResolvedEntityRef) : RealEntityAnnotation =
@@ -343,6 +355,50 @@ let private buildSelectOperation
       ArgumentsWithoutRole = bits.Arguments
     }
 
+let private runCheckExpr
+        (connection : QueryConnection)
+        (globalArgs : LocalArgumentsMap)
+        (layout : Layout)
+        (entityRef : ResolvedEntityRef)
+        (checkExpr : ResolvedFieldExpr)
+        (ids : RowId[])
+        (cancellationToken : CancellationToken) : Task =
+    unitTask {
+        let aggExpr = FEAggFunc (FunQLName "bool_and", AEAll [| checkExpr |])
+
+        let idsPlaceholder = PLocal <| FunQLName "ids"
+        let idsArgumentInfo = requiredArgument <| FTArray (SFTReference (entityRef, None))
+        let (idsArg, arguments) = addArgument idsPlaceholder idsArgumentInfo emptyArguments
+
+        let result = queryColumnResult aggExpr
+        let myFromEntity = fromEntity <| relaxEntityRef entityRef
+        let idCol = resolvedRefFieldExpr <| VRColumn { Entity = Some <| relaxEntityRef entityRef; Name = funId } : ResolvedFieldExpr    
+        let arrayArg = resolvedRefFieldExpr <| VRArgument idsPlaceholder
+        let whereExpr = FEAny (idCol, BOEq, arrayArg)
+        let singleSelect =
+            { emptySingleSelectExpr with
+                Results = [| QRExpr result |]
+                From = Some (FEntity myFromEntity)
+                Where = Some whereExpr
+            }
+        let select = selectExpr (SSelect singleSelect)
+        let (exprInfo, compiledSelect) = compileSelectExpr layout arguments select
+
+        let localArgumentValues = Map.singleton idsPlaceholder <| FIntArray ids
+        let argumentValues = Map.union (Map.mapKeys PGlobal globalArgs) localArgumentValues
+        let query =
+            { Expression = compiledSelect
+              Arguments = exprInfo.Arguments
+            }
+
+        match! runQuery connection.ExecuteValueQuery query None argumentValues cancellationToken with
+        | None -> ()
+        | Some (name, typ, SQL.VNull) -> ()
+        | Some (name, typ, SQL.VBool true) -> ()
+        | Some (name, typ, SQL.VBool false) -> raisef EntityDeniedException "Failed a permissions check"
+        | Some (name, typ, ret) -> failwithf "Unexpected result of a permissions check: %O" ret
+    }
+
 let resolveAltKey
         (connection : QueryConnection)
         (globalArgs : LocalArgumentsMap)
@@ -355,8 +411,6 @@ let resolveAltKey
         (cancellationToken : CancellationToken) : Task<RowId> =
     task {
         let mutable argumentValues = Map.mapKeys PGlobal globalArgs
-
-        let entity = layout.FindEntity entityRef |> Option.get
 
         let opQuery = buildSelectOperation layout applyRole entityRef <| fun aliasRef ->
             let alt = altKeyCheck layout entityRef keyName keyArgs aliasRef
@@ -483,9 +537,18 @@ let insertEntities
               Arguments = arguments
             }
 
-        let! ret = runIntsQuery connection query comments argumentValues cancellationToken
+        let! rawIds = runIntsQuery connection query comments argumentValues cancellationToken
         // FIXME: will overflow in future.
-        return Array.map int ret
+        let ids = Array.map int rawIds
+        match applyRole with
+        | None -> ()
+        | Some role ->
+            let usedFields = dataFields |> Seq.map fst
+            match getSingleCheckExpression layout role entityRef usedFields with
+            | FUnfiltered -> ()
+            | FFiltered checkExpr ->
+                do! runCheckExpr connection globalArgs layout entityRef checkExpr ids cancellationToken
+        return ids
     }
 
 let updateEntity
@@ -497,7 +560,7 @@ let updateEntity
         (key : RowKey)
         (comments : string option)
         (updateArgs : LocalArgumentsMap)
-        (cancellationToken : CancellationToken) : Task<RowId> =
+        (cancellationToken : CancellationToken) : Task<RowId * ResolvedEntityRef> =
     task {
         let entity = layout.FindEntity entityRef |> Option.get
 
@@ -529,12 +592,21 @@ let updateEntity
         let whereExpr = Option.addWith (curry SQL.VEAnd) keyCheck.Where checkExpr
 
         let opTable = SQL.operationTable tableRef
-        let returning =
-            match key with
-            | RKId id -> [||]
-            | RKAlt (name, keys) ->
-                let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
-                [| SQL.SCExpr (None, entityId) |]
+        let (returningSubEntity, knownSubEntity) =
+            if hasSubType entity then
+                let subEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
+                (Seq.singleton <| SQL.SCExpr (None, subEntity), None)
+            else
+                (Seq.empty, Some entityRef)
+        let returningId =
+            seq {
+                match key with
+                | RKId id -> ()
+                | RKAlt (name, keys) ->
+                    let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
+                    yield SQL.SCExpr (None, entityId)
+            }
+        let returning = Seq.append returningSubEntity returningId |> Seq.toArray
 
         let expr =
             { SQL.updateExpr opTable with
@@ -571,7 +643,28 @@ let updateEntity
                         raisefWithInner EntityDeniedException e ""
                 applyRoleUpdateExpr layout appliedDb query
 
-        return! runQueryAndGetId connection applyRole tableRef query comments argumentValues whereExpr arguments key cancellationToken
+        let! (id, subEntity) =
+            runQueryAndGetId
+                connection
+                applyRole
+                tableRef
+                entity
+                query
+                comments
+                argumentValues
+                whereExpr
+                arguments
+                key
+                knownSubEntity
+                cancellationToken
+        match applyRole with
+        | None -> ()
+        | Some role ->
+            match getSingleCheckExpression layout role subEntity (Map.keys updateArgs) with
+            | FUnfiltered -> ()
+            | FFiltered checkExpr ->
+                do! runCheckExpr connection globalArgs layout subEntity checkExpr [|id|] cancellationToken
+        return (id, subEntity)
     }
 
 let deleteEntity
@@ -643,7 +736,21 @@ let deleteEntity
                         raisefWithInner EntityDeniedException e ""
                 applyRoleDeleteExpr layout appliedDb query
 
-        return! runQueryAndGetId connection applyRole tableRef query comments argumentValues whereExpr keyCheck.Arguments key cancellationToken
+        let! (id, subEntity) =
+            runQueryAndGetId
+                connection
+                applyRole
+                tableRef
+                entity
+                query
+                comments
+                argumentValues
+                whereExpr
+                keyCheck.Arguments
+                key
+                (Some entityRef)
+                cancellationToken
+        return id
     }
 
 let private getSubEntity

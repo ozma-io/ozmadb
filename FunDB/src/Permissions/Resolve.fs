@@ -146,11 +146,6 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, hasUserView
 
         let fields = allowedEntity.Fields |> Map.map mapField
 
-        match check with
-        | OFETrue
-        | OFEFalse -> ()
-        | expr -> raisef ResolvePermissionsException "Non-trivial check expressions are not currently supported"
-
         { AllowBroken = allowedEntity.AllowBroken
           Fields = fields
           Check = check
@@ -177,12 +172,12 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, hasUserView
             try
                 let noCheck = optimizedIsFalse allowedEntity.Check || optimizedIsFalse allowedField.Check
                 if allowedField.Insert && noCheck then
-                    raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
+                    raisef ResolvePermissionsException "Cannot allow to insert without providing a check expression"
                 match allowedField.Update with
                 | OFEFalse -> ()
                 | expr ->
                     if noCheck then
-                        raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
+                        raisef ResolvePermissionsException "Cannot allow to update without providing a check expression"
             with
             | e -> raisefWithInner ResolvePermissionsException e "In allowed field %O" name
 
@@ -199,7 +194,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, hasUserView
                         | _ -> raisef ResolvePermissionsException "Parent entity insert is forbidden"
                     // Check that we can change all required fields.
                     if optimizedIsFalse allowedEntity.Check then
-                        raisef ResolvePermissionsException "Cannot allow to insert without providing check expression"
+                        raisef ResolvePermissionsException "Cannot allow to insert without providing a check expression"
                     for KeyValue(fieldName, field) in entity.ColumnFields do
                         if Option.isNone field.InheritedFrom && not (fieldIsOptional field) then
                             match Map.tryFind fieldName allowedEntity.Fields with
@@ -215,17 +210,15 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, hasUserView
         if not (optimizedIsFalse allowedEntity.Update) then
             // Check that we can change all required fields.
             if optimizedIsFalse allowedEntity.Check then
-                raisef ResolvePermissionsException "Cannot allow to update without providing check expression"
+                raisef ResolvePermissionsException "Cannot allow to update without providing a check expression"
 
         let allowedEntity =
             if allowedEntity.Delete |> Result.defaultValue OFEFalse |> optimizedIsFalse |> not then
                 try
                     checkParentRowAccess entity <| function
                         | Some { Delete = Ok delete } when not <| optimizedIsFalse delete -> ()
-                        | _ -> raisef ResolvePermissionsException "Cannot delete from child entity when parent entity delete is forbidden"
+                        | _ -> raisef ResolvePermissionsException "Cannot delete from the child entity when parent entity delete is forbidden"
                     // Check that we can can view all column fields.
-                    if entity.IsAbstract then
-                        raisef ResolvePermissionsException "Cannot allow deletion of abstract entities"
                     for KeyValue(fieldName, field) in entity.ColumnFields do
                         if Option.isNone field.InheritedFrom then
                             match Map.tryFind fieldName allowedEntity.Fields with

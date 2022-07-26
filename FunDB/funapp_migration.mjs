@@ -1,11 +1,27 @@
 const commonViews = {
     // Internal APIs
     "settings": `
+WITH user_settings AS MATERIALIZED (
+  SELECT
+    name,
+    value
+  FROM
+    funapp.user_settings
+  WHERE
+    user_id = $$user_id
+)
 SELECT
   name,
   value
 FROM
-  funapp.settings`,
+  user_settings
+UNION ALL
+SELECT
+  name, value
+FROM
+  funapp.settings
+WHERE
+  name NOT IN (SELECT name FROM user_settings)`,
     "color_themes": `
 SELECT
   id,

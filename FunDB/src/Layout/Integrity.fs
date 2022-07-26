@@ -548,7 +548,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
             From = Some (FEntity myFromEntity)
         }
     let select = selectExpr (SSelect singleSelect)
-    let (arguments, compiled) = compileSelectExpr layout emptyArguments select
+    let (exprInfo, compiled) = compileSelectExpr layout emptyArguments select
 
     let replacer = ConstraintUseNewConverter(entity.Root)
     let compiled = replacer.UseNewInSelectExpr compiled
@@ -758,7 +758,7 @@ let private compileAggregateCheckConstraintCheck (layout : Layout) (constrRef : 
             From = Some (FEntity myFromEntity)
         }
     let select = selectExpr (SSelect singleSelect)
-    let (arguments, ret) = compileSelectExpr layout emptyArguments select
+    let (exprInfo, ret) = compileSelectExpr layout emptyArguments select
     ret
 
 let private compileCheckConstraintBulkCheck (layout : Layout) (constrRef : ResolvedConstraintRef) (check : ResolvedFieldExpr) : SQL.SelectExpr =
@@ -1062,7 +1062,8 @@ let private runIntegrityCheck (conn : QueryConnection) (query : SQL.SelectExpr) 
             | None -> ()
             | Some (name, typ, SQL.VNull) -> ()
             | Some (name, typ, SQL.VBool true) -> ()
-            | Some (name, typ, ret) -> raisef LayoutIntegrityException "Expected `true`, got %O" ret
+            | Some (name, typ, SQL.VBool false) -> raisef LayoutIntegrityException "Failed an integrity check"
+            | Some (name, typ, ret) -> failwithf "Unexpected result of an integrity check: %O" ret
         with
         | :? QueryExecutionException as e -> raisefUserWithInner LayoutIntegrityException e "Query exception"
     }

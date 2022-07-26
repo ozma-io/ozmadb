@@ -20,6 +20,24 @@
           "mainField": "name"
         },
 
+        "user_settings": {
+          "columnFields": {
+            "user_id": { "type": "reference(\"public\".\"users\")" },
+            "name": { "type": "string" },
+            "value": { "type": "string" }
+          },
+          "computedFields": {
+            "full_name": { "expression": "user_id=>__main || ' ' || name" }
+	  },
+          "uniqueConstraints": {
+            "name": { "columns": [ "user_id", "name" ], "isAlternateKey": true }
+          },
+          "checkConstraints": {
+            "non_empty_name": { "expression": "name <> ''" }
+          },
+          "mainField": "full_name"
+        },
+
         "iframe_markups": {
           "columnFields": {
             "schema_id": { "type": "reference(\"public\".\"schemas\")" },
@@ -137,6 +155,15 @@
                         "select": "true"
                       }
                     }
+                  },
+
+                  "users": {
+                    "select": "id = $$user_id",
+                    "fields": {
+                      "name": {
+                        "select": "true"
+                      }
+                    }
                   }
 
                 }
@@ -153,6 +180,34 @@
                       },
                       "value": {
                         "select": "true"
+                      }
+                    }
+                  },
+
+                  "user_settings": {
+                    "select": "user_id = $$user_id",
+                    "update": "true",
+                    "delete": "true",
+                    "check": "true",
+                    "insert": true,
+                    "fields": {
+                      "user_id": {
+                        "select": "true",
+                        "update": "true",
+                        "check": "user_id IS NOT DISTINCT FROM $$user_id",
+                        "insert": true
+                      },
+                      "name": {
+                        "select": "true",
+                        "update": "true",
+                        "check": "true",
+                        "insert": true
+                      },
+                      "value": {
+                        "select": "true",
+                        "update": "true",
+                        "check": "true",
+                        "insert": true
                       }
                     }
                   },

@@ -74,11 +74,13 @@ type private TriggerType =
     | TTUpdate of Set<FieldName>
     | TTDelete
 
-let private getTriggeredEntity = function
-    | SQL.DESelect sel -> None
+// TODO: Not complete: doesn't look for nested DML statements.
+// FunQL, though, doesn't support them as of now.
+let private getTriggeredEntities = function
+    | SQL.DESelect sel -> Seq.empty
     | SQL.DEInsert insert ->
         let tableInfo = insert.Table.Extra :?> RealEntityAnnotation
-        Some (TTInsert, tableInfo.RealEntity)
+        Seq.singleton (TTInsert, tableInfo.RealEntity)
     | SQL.DEUpdate update ->
         let tableInfo = update.Table.Extra :?> RealEntityAnnotation
 
@@ -91,10 +93,10 @@ let private getTriggeredEntity = function
             | SQL.UAESelect (cols, select) -> Seq.map getField cols
 
         let fields = update.Assignments |> Seq.collect getFields |> Set.ofSeq
-        Some (TTUpdate fields, tableInfo.RealEntity)
+        Seq.singleton (TTUpdate fields, tableInfo.RealEntity)
     | SQL.DEDelete delete ->
         let tableInfo = delete.Table.Extra :?> RealEntityAnnotation
-        Some (TTDelete, tableInfo.RealEntity)
+        Seq.singleton (TTDelete, tableInfo.RealEntity)
 
 let private hasTriggers (typ : TriggerType) (triggers : MergedTriggersTime) =
     match typ with
@@ -109,21 +111,17 @@ let executeCommand
         (triggers : MergedTriggers)
         (globalArgs : LocalArgumentsMap)
         (layout : Layout)
-        (role : ResolvedRole option)
+        (applyRole : ResolvedRole option)
         (cmdExpr : CompiledCommandExpr)
         (comments : string option)
         (rawArgs : RawArguments)
         (cancellationToken : CancellationToken) : Task =
     unitTask {
-        let triggersATrigger =
-            match getTriggeredEntity cmdExpr.Command.Expression with
-            | None -> false
-            | Some (typ, entityRef) ->
-                match triggers.FindEntity entityRef with
-                | None -> false
-                | Some entityTriggers -> hasTriggers typ entityTriggers.Before || hasTriggers typ entityTriggers.After
-        if triggersATrigger then
-            raisef CommandExecutionException "Mass modification on entities with triggers is not supported"
+        for (typ, entityRef) in getTriggeredEntities cmdExpr.Command.Expression do
+            match triggers.FindEntity entityRef with
+            | Some entityTriggers when hasTriggers typ entityTriggers.Before || hasTriggers typ entityTriggers.After ->
+                raisef CommandExecutionException "Mass modification on entities with triggers is not supported"
+            | _ -> ()
 
         let arguments =
             try
@@ -132,7 +130,7 @@ let executeCommand
             | :? ArgumentCheckException as e ->
                 raisefUserWithInner CommandArgumentsException e ""
         let query =
-            match role with
+            match applyRole with
             | None -> cmdExpr.Command
             | Some role ->
                 let appliedDb =
@@ -140,6 +138,11 @@ let executeCommand
                         applyPermissions layout role cmdExpr.UsedDatabase
                     with
                     | :? PermissionsApplyException as e -> raisefWithInner CommandDeniedException e ""
+                for KeyValue(rootRef, allowedEntity) in appliedDb do
+                    match allowedEntity.Check with
+                    | Some FUnfiltered
+                    | None -> ()
+                    | Some (FFiltered filter) -> raisef CommandExecutionException "Check restrictions are not supported for commands"
                 applyRoleDataExpr layout appliedDb cmdExpr.Command
 
         let prefix = SQL.convertComments comments

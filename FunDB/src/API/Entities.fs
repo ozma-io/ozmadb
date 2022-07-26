@@ -287,7 +287,16 @@ type EntitiesAPI (api : IFunDBAPI) =
                             | Error (BECancelled ()) -> return Ok None
                             | Ok args ->
                                 let comments = insertEntityComments entityRef rctx.User.Effective.Type args
-                                let! newIds = insertEntities query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef (Some comments) [args] ctx.CancellationToken
+                                let! newIds =
+                                    insertEntities
+                                        query
+                                        rctx.GlobalArguments
+                                        ctx.Layout
+                                        (getWriteRole rctx.User.Effective.Type)
+                                        entityRef
+                                        (Some comments)
+                                        [args]
+                                        ctx.CancellationToken
                                 let newId = newIds.[0]
                                 do! rctx.WriteEventSync (fun event ->
                                     event.Type <- "insertEntity"
@@ -323,7 +332,16 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 else
                                     let comments = massInsertEntityComments entityRef rctx.User.Effective.Type
                                     let cachedArgs = Seq.cache rowsArgs
-                                    let! newIds = insertEntities query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef (Some comments) cachedArgs ctx.CancellationToken
+                                    let! newIds =
+                                        insertEntities
+                                            query
+                                            rctx.GlobalArguments
+                                            ctx.Layout
+                                            (getWriteRole rctx.User.Effective.Type)
+                                            entityRef
+                                            (Some comments)
+                                            cachedArgs
+                                            ctx.CancellationToken
                                     let details = Seq.map2 (fun args id -> { Args = args; Id = id }) cachedArgs newIds
                                     do! rctx.WriteEventSync (fun event ->
                                         event.Type <- "insertEntities"
@@ -375,7 +393,16 @@ type EntitiesAPI (api : IFunDBAPI) =
                     let args = convertEntityArguments entity rawArgs
                     let key = convertRawRowKey entity rawKey
                     if Map.isEmpty args then
-                        let! id = resolveKey query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef None key ctx.CancellationToken
+                        let! id =
+                            resolveKey
+                                query
+                                rctx.GlobalArguments
+                                ctx.Layout
+                                (getWriteRole rctx.User.Effective.Type)
+                                entityRef
+                                None
+                                key
+                                ctx.CancellationToken
                         return Ok id
                     else
                         let beforeTriggers = findMergedTriggersUpdate entityRef TTBefore (Map.keys args) ctx.Triggers
@@ -384,7 +411,17 @@ type EntitiesAPI (api : IFunDBAPI) =
                         | Error (BECancelled id) -> return Ok id
                         | Ok (key, args) ->
                             let comments = updateEntityComments entityRef rctx.User.Effective.Type key args
-                            let! id = updateEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef key (Some comments) args ctx.CancellationToken
+                            let! (id, subEntityRef) =
+                                updateEntity
+                                    query
+                                    rctx.GlobalArguments
+                                    ctx.Layout
+                                    (getWriteRole rctx.User.Effective.Type)
+                                    entityRef
+                                    key
+                                    (Some comments)
+                                    args
+                                    ctx.CancellationToken
                             do! rctx.WriteEventSync (fun event ->
                                 event.Type <- "updateEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
@@ -442,7 +479,16 @@ type EntitiesAPI (api : IFunDBAPI) =
                     | Error (BECancelled id) -> return Ok ()
                     | Ok key ->
                             let comments = deleteEntityComments entityRef rctx.User.Effective.Type key
-                            let! id = deleteEntity query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef key (Some comments) ctx.CancellationToken
+                            let! id =
+                                deleteEntity
+                                    query
+                                    rctx.GlobalArguments
+                                    ctx.Layout
+                                    (getWriteRole rctx.User.Effective.Type)
+                                    entityRef
+                                    key
+                                    (Some comments)
+                                    ctx.CancellationToken
                             do! rctx.WriteEventSync (fun event ->
                                 event.Type <- "deleteEntity"
                                 event.SchemaName <- entityRef.Schema.ToString()
@@ -493,7 +539,17 @@ type EntitiesAPI (api : IFunDBAPI) =
                 try
                     let key = convertRawRowKey entity rawKey
                     let comments = getRelatedEntitiesComments entityRef rctx.User.Effective.Type key
-                    let! ret = getRelatedEntities query rctx.GlobalArguments ctx.Layout (getReadRole rctx.User.Effective.Type) (fun _ _ _ -> true) entityRef key (Some comments) ctx.CancellationToken
+                    let! ret =
+                        getRelatedEntities
+                            query
+                            rctx.GlobalArguments
+                            ctx.Layout
+                            (getReadRole rctx.User.Effective.Type)
+                            (fun _ _ _ -> true)
+                            entityRef
+                            key
+                            (Some comments)
+                            ctx.CancellationToken
                     return Ok ret
                 with
                 | :? EntityExecutionException as ex when ex.IsUserException ->
@@ -543,7 +599,17 @@ type EntitiesAPI (api : IFunDBAPI) =
             try
                 let! cmd = ctx.GetAnonymousCommand rctx.IsPrivileged rawCommand
                 let comments = commandComments rawCommand rctx.User.Effective.Type rawArgs
-                do! executeCommand query ctx.Triggers rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) cmd (Some comments) rawArgs ctx.CancellationToken
+                do!
+                    executeCommand
+                        query
+                        ctx.Triggers
+                        rctx.GlobalArguments
+                        ctx.Layout
+                        (getWriteRole rctx.User.Effective.Type)
+                        cmd
+                        (Some comments)
+                        rawArgs
+                        ctx.CancellationToken
                 for KeyValue(entityRef, usedEntity) in cmd.UsedDatabase do
                     let anyChildren (f : UsedEntity -> bool) =
                         usedEntity.Children |> Map.values |> Seq.exists f

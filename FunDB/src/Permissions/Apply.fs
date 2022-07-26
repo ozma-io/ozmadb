@@ -29,17 +29,26 @@ type PermissionsApplyException (message : string, innerExceptions : Exception se
     interface IUserException with
         member this.IsUserException = isUserException
 
+type EntityFilter<'e> =
+    | FUnfiltered
+    | FFiltered of 'e
+
+let filterToOption = function
+    | FUnfiltered -> None
+    | FFiltered e -> Some e
+
+type EntityFilterExpr = EntityFilter<ResolvedFieldExpr>
+
 // Out aim is to build a database view that is:
 // * Restricted (according to current user role);
 // * Consistent; that is, it it impossible to witness different views of the database from different sub-expressions,
 //   even if this would expose more allowed entries to the client;
 // * Full -- as small amount of restrictions should be applied as possible, given requirements above aren't violated.
 type AppliedAllowedEntity =
-    // FIXME: don't be lazy, make a custom type.
-    // External `option` = "did we compile an expression for this access type".
-    // Internal `option` = "is there a need to restrict".
-    { SelectUpdate : (ResolvedFieldExpr option) option // Filters out this entity and all its children.
-      Delete : (ResolvedFieldExpr option) option // Filters out only this entity, not propagated to children.
+    // option: "did we compile an expression for this access type".
+    { SelectUpdate : EntityFilterExpr option // Apply to SELECTs and UPDATEs. Filters out this entity and all its children.
+      Delete : EntityFilterExpr option // Apply to DELETEs. Filters out only this entity, not propagated to children.
+      Check : EntityFilterExpr option
     }
 
 type AppliedAllowedDatabase = Map<ResolvedEntityRef, AppliedAllowedEntity>
@@ -47,6 +56,7 @@ type AppliedAllowedDatabase = Map<ResolvedEntityRef, AppliedAllowedEntity>
 type private HalfAppliedAllowedEntity =
     { SelectUpdate : ResolvedOptimizedFieldExpr option
       Delete : ResolvedOptimizedFieldExpr option
+      Check : ResolvedOptimizedFieldExpr option
     }
 
 type private HalfAppliedAllowedDatabase = Map<ResolvedEntityRef, HalfAppliedAllowedEntity>
@@ -60,11 +70,20 @@ let private unionOptionalExprs (ma : ResolvedOptimizedFieldExpr option) (mb : Re
 let private unionHalfAppliedAllowedEntities (a : HalfAppliedAllowedEntity) (b : HalfAppliedAllowedEntity) : HalfAppliedAllowedEntity =
     { SelectUpdate = unionOptionalExprs a.SelectUpdate b.SelectUpdate
       Delete = unionOptionalExprs a.Delete b.Delete
+      Check = unionOptionalExprs a.Check b.Check
     }
 
 type private EntityAccessFilter =
     { Filter : ResolvedOptimizedFieldExpr
+      Check : ResolvedOptimizedFieldExpr
       UsedEntity : UsedEntity
+      // Flags are used to optimize building filters.
+      // If corresponding `Propagated` flag is set, we
+      // expect that all restrictions from parents
+      // have already been applied.
+      // Otherwise, we traverse parents and build the
+      // restriction from scratch.
+      PropagatedInsert : bool
       PropagatedSelect : bool
       PropagatedUpdate : bool
       PropagatedDelete : bool
@@ -72,7 +91,9 @@ type private EntityAccessFilter =
 
 let private emptyEntityAccessFilter : EntityAccessFilter =
     { Filter = OFETrue
+      Check = OFETrue
       UsedEntity = emptyUsedEntity
+      PropagatedInsert = false
       PropagatedSelect = false
       PropagatedUpdate = false
       PropagatedDelete = false
@@ -103,16 +124,25 @@ let inline private getAccessFilter
         match entity.Parent with
         | None -> OFETrue
         | Some parentRef -> getParent parentRef
-    let defaultParentAllowedEntity =
+    let defaultAllowedEntity =
         if Option.isNone entity.Parent then
             emptyFlatAllowedDerivedEntity
         else
             inheritedFlatAllowedDerivedEntity
-    let allowedEntity = Map.findWithDefault entityRef defaultParentAllowedEntity flatAllowedEntity.Children
+    let allowedEntity = Map.findWithDefault entityRef defaultAllowedEntity flatAllowedEntity.Children
     match accessor entityRef allowedEntity with
     | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
     | thisFilter -> andFieldExpr parentFilter thisFilter
 
+// This class builds _filter expressions_ for each allowed entity.
+// Filter expression is a WHERE expression that restricts given entity.
+// Filters do not include children and only include parent restrictions at nodes where first access happens.
+// For example, in hierarchy A -> B -> C, where B and C are selected:
+// * filter for A is `TRUE`;
+// * filter for B is `A.Select && B.Select`;
+// * filter for C is `C.Select`.
+// Expressions take into account all types of access to it. This way we restrict the access uniformly: for example,
+// if an entity is accessed for both UPDATE and DELETE, both operations will observe the same rows (restricted for both operations).
 type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : FlatAllowedRoleEntity, flatUsedEntity : FlatUsedEntity) =
     let addSelectFilter (usedEntity : UsedEntity) (entityRef : ResolvedEntityRef) (allowedEntity : FlatAllowedDerivedEntity) =
         let addFieldRestriction (name : FieldName, usedField : UsedField) : ResolvedOptimizedFieldExpr =
@@ -120,24 +150,35 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
             let ref = { Entity = entityRef; Name = name }
             match Map.tryFind ref flatAllowedEntity.Fields with
             | Some flatField ->
-                let selectFilter =
+                let filter =
                     if usedField.Select then
                         match flatField.Select with
                         | OFEFalse -> raisef PermissionsApplyException "Access denied to select field %O" ref
                         | newSelectFilter -> newSelectFilter
                     else
                         OFETrue
-                let updateFilter =
-                    if usedField.Update then
-                        match flatField.Update with
-                        | OFEFalse -> raisef PermissionsApplyException "Access denied to update field %O" ref
-                        | newSelectFilter -> newSelectFilter
-                    else
-                        OFETrue
-                andFieldExpr selectFilter updateFilter
+                if usedField.Update then
+                    match flatField.Update with
+                    | OFEFalse -> raisef PermissionsApplyException "Access denied to update field %O" ref
+                    | newUpdateFilter -> andFieldExpr filter newUpdateFilter
+                else
+                    filter
             | None -> raisef PermissionsApplyException "Access denied to field %O" ref
 
         usedEntity.Fields |> Map.toSeq |> Seq.map addFieldRestriction |> Seq.fold andFieldExpr allowedEntity.Select
+
+    let addCheckFilter (usedEntity : UsedEntity) (entityRef : ResolvedEntityRef) (allowedEntity : FlatAllowedDerivedEntity) =
+        let addFieldRestriction (name : FieldName, usedField : UsedField) : ResolvedOptimizedFieldExpr =
+            let ref = { Entity = entityRef; Name = name }
+            match Map.tryFind ref flatAllowedEntity.Fields with
+            | Some flatField ->
+                if usedField.Insert || usedField.Update then
+                    flatField.Check
+                else
+                    OFETrue
+            | None -> raisef PermissionsApplyException "Access denied to field %O" ref
+
+        usedEntity.Fields |> Map.toSeq |> Seq.map addFieldRestriction |> Seq.fold andFieldExpr allowedEntity.Check
 
     let addStandaloneSelectFilter (entityRef : ResolvedEntityRef) (allowedEntity : FlatAllowedDerivedEntity) =
         let usedEntity = Map.findWithDefault entityRef emptyUsedEntity flatUsedEntity.Children
@@ -150,6 +191,8 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
     let rec getUpdateAccessFilter = memoizeN (getAccessFilter (fun ent -> getUpdateAccessFilter ent) (fun entityRef allowedEntity -> allowedEntity.Update) layout flatAllowedEntity)
     // fsharplint:disable-next-line ReimplementsFunction
     let rec getDeleteAccessFilter = memoizeN (getAccessFilter (fun ent -> getDeleteAccessFilter ent) (fun entityRef allowedEntity -> allowedEntity.Delete) layout flatAllowedEntity)
+    // fsharplint:disable-next-line ReimplementsFunction
+    let rec getCheckAccessFilter = memoizeN (getAccessFilter (fun ent -> getCheckAccessFilter ent) (fun entityRef allowedEntity -> allowedEntity.Check) layout flatAllowedEntity)
 
     let rec buildFilter (entityRef : ResolvedEntityRef) : EntityAccessFilter =
         let entity = layout.FindEntity entityRef |> Option.get
@@ -205,7 +248,6 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                 match updateFilter with
                 | OFEFalse -> raisef PermissionsApplyException "Access denied to update entity %O" entityRef
                 | updateFilter -> andFieldExpr filterExpr updateFilter
-
             else
                 filterExpr
         let filterExpr =
@@ -220,10 +262,25 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                 | deleteFilter -> andFieldExpr filterExpr deleteFilter
             else
                 filterExpr
+        
+        let checkExpr =
+            if usedEntity.Insert || usedEntity.Update then
+                let checkExpr =
+                    if parentFilter.PropagatedInsert || parentFilter.PropagatedUpdate then
+                        addSelectFilter usedEntity entityRef allowedEntity
+                    else
+                        getCheckAccessFilter entityRef
+                match checkExpr with
+                | OFEFalse -> raisef PermissionsApplyException "Access denied to insert/update entity %O" entityRef
+                | selectFilter -> selectFilter
+            else
+                OFETrue
 
         { Filter = filterExpr
+          Check = checkExpr
           UsedEntity = usedEntity
           PropagatedSelect = parentFilter.PropagatedSelect || isSelect
+          PropagatedInsert = parentFilter.PropagatedInsert || usedEntity.Insert
           PropagatedUpdate = parentFilter.PropagatedUpdate || usedEntity.Update
           PropagatedDelete = parentFilter.PropagatedDelete || usedEntity.Delete
         }
@@ -232,12 +289,7 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
 
     member this.GetFilter entityRef = getFilter entityRef
 
-type private ChildrenCheck =
-    { IncludingChildren : bool
-      Check : ResolvedOptimizedFieldExpr
-    }
-
-type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef, getFilter : ResolvedEntityRef -> EntityAccessFilter) =
+type private EntityChecksCache (layout : Layout, rootRef : ResolvedEntityRef) =
     let subEntityFieldRef =
         lazy (
             let fieldRef = { Entity = Some <| relaxEntityRef rootRef; Name = funSubEntity } : FieldRef
@@ -272,25 +324,34 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
             optimizeFieldExpr <| FEInheritedFrom (subEntityFieldRef.Value, subEntityRef)
     and getInheritedFromCheck = memoizeN buildInheritedFromCheck
 
-    let rec buildParentCheck (entityRef : ResolvedEntityRef) =
+    member this.GetOfTypeCheck entityRef = getOfTypeCheck entityRef
+    member this.GetInheritedFromCheck entityRef = getInheritedFromCheck entityRef
+
+type private SubEntityCheck =
+    { AllowChildren : bool
+      Check : ResolvedOptimizedFieldExpr
+    }
+
+let private addTypecheck (checksCache : EntityChecksCache) (entityRef : ResolvedEntityRef) (check : SubEntityCheck) =
+    let typeCheckExpr =
+        if check.AllowChildren then
+            checksCache.GetInheritedFromCheck entityRef
+        else
+            checksCache.GetOfTypeCheck entityRef
+    andFieldExpr typeCheckExpr check.Check
+
+type private EntityFiltersCombiner (layout : Layout, checksCache : EntityChecksCache, getFilter : ResolvedEntityRef -> ResolvedOptimizedFieldExpr) =
+    let rec buildParentFilter (entityRef : ResolvedEntityRef) =
         let entity = layout.FindEntity entityRef |> Option.get
         let parentCheck =
             match entity.Parent with
             | None -> OFETrue
-            | Some parentRef -> getParentCheck parentRef
+            | Some parentRef -> getParentFilter parentRef
         let currentCheck = getFilter entityRef
-        andFieldExpr parentCheck currentCheck.Filter
-    and getParentCheck = memoizeN buildParentCheck
+        andFieldExpr parentCheck currentCheck
+    and getParentFilter = memoizeN buildParentFilter
 
-    let addTypecheck (entityRef : ResolvedEntityRef) (check : ChildrenCheck) =
-        let typeCheckExpr =
-            if check.IncludingChildren then
-                getInheritedFromCheck entityRef
-            else
-                getOfTypeCheck entityRef
-        andFieldExpr typeCheckExpr check.Check
-
-    let rec buildChildrenCheck (entityRef : ResolvedEntityRef) : ChildrenCheck =
+    let rec buildChildrenFilter (entityRef : ResolvedEntityRef) : SubEntityCheck =
         let entity = layout.FindEntity entityRef |> Option.get
 
         let getChild (childRef, child) =
@@ -298,9 +359,9 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
                 None
             else
                 let filter = getFilter childRef
-                let subchildrenCheck = getChildrenCheck childRef
+                let subchildrenCheck = getChildrenFilter childRef
                 let childrenCheck =
-                    { subchildrenCheck with Check = andFieldExpr filter.Filter subchildrenCheck.Check } : ChildrenCheck
+                    { subchildrenCheck with Check = andFieldExpr filter subchildrenCheck.Check } : SubEntityCheck
                 Some (childRef, childrenCheck)
 
         let children =
@@ -312,44 +373,36 @@ type private EntityFiltersCombiner (layout : Layout, rootRef : ResolvedEntityRef
         let singleExpr =
             match Seq.trySnoc children with
             | None -> Some OFETrue
-            | Some ((firstChildRef, { IncludingChildren = true; Check = firstExpr }), tailChildren)
-              when Seq.forall (fun (childRef, check) -> check.IncludingChildren) tailChildren
+            | Some ((firstChildRef, { AllowChildren = true; Check = firstExpr }), tailChildren)
+              when Seq.forall (fun (childRef, check) -> check.AllowChildren) tailChildren
                    && Seq.forall (fun (childRef, check) -> check.Check = firstExpr) tailChildren ->
                 Some firstExpr
             | _ -> None
 
         match singleExpr with
-        | Some expr -> { Check = expr; IncludingChildren = true }
+        | Some expr -> { Check = expr; AllowChildren = true }
         | None ->
-            let childExpr = children |> Seq.map (uncurry addTypecheck) |> Seq.fold orFieldExpr OFEFalse
-            { Check = childExpr; IncludingChildren = false }
+            let childExpr = children |> Seq.map (uncurry (addTypecheck checksCache)) |> Seq.fold orFieldExpr OFEFalse
+            { Check = childExpr; AllowChildren = false }
 
-    and getChildrenCheck = memoizeN buildChildrenCheck
+    and getChildrenFilter = memoizeN buildChildrenFilter
 
-    and getAppliedEntity (entityRef : ResolvedEntityRef) : HalfAppliedAllowedEntity =
-        let filter = getFilter entityRef
+    let getFullEntityCheck (entityRef : ResolvedEntityRef) =
+        let childrenCheck = getChildrenFilter entityRef
+        match andFieldExpr (getParentFilter entityRef) (addTypecheck checksCache entityRef childrenCheck) with
+        | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
+        | entityFilter -> entityFilter
 
-        let selectUpdateCheck =
-            if not (filter.UsedEntity.Select || filter.UsedEntity.Update) then
-                None
-            else
-                let childrenCheck = getChildrenCheck entityRef
-                match andFieldExpr (getParentCheck entityRef) (addTypecheck entityRef childrenCheck) with
-                | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
-                | entityCheck -> Some entityCheck
-        let deleteCheck =
-            if not filter.UsedEntity.Delete then
-                None
-            else
-                match andFieldExpr (getParentCheck entityRef) (getOfTypeCheck entityRef) with
-                | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
-                | entityCheck -> Some entityCheck
+    let getSelfEntityCheck (entityRef : ResolvedEntityRef) =
+        match getParentFilter entityRef with
+        | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
+        | entityFilter -> entityFilter
 
-        { SelectUpdate = selectUpdateCheck
-          Delete = deleteCheck
-        }
+    member this.GetFilter entityRef = getFilter entityRef
+    member this.ChecksCache = checksCache
 
-    member this.GetAppliedEntity entityRef = getAppliedEntity entityRef
+    member this.GetFullEntityCheck entityRef = getFullEntityCheck entityRef
+    member this.GetSelfEntityCheck entityRef = getSelfEntityCheck entityRef
 
 let private renameAllFieldExprEntities (toEntityRef : EntityRef) : ResolvedFieldExpr -> ResolvedFieldExpr =
     let mapReference : LinkedBoundFieldRef -> LinkedBoundFieldRef = function
@@ -360,21 +413,55 @@ let private renameAllFieldExprEntities (toEntityRef : EntityRef) : ResolvedField
         | { Ref = { Ref = VRArgument _ } } as ref -> ref
     mapFieldExpr { idFieldExprMapper with FieldReference = mapReference }
 
-let private buildFinalRestriction (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> ResolvedFieldExpr option = function
-    | OFETrue -> None
+let private buildFinalRestriction (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> EntityFilterExpr = function
+    | OFETrue -> FUnfiltered
     | expr ->
-        expr.ToFieldExpr() |> renameAllFieldExprEntities (relaxEntityRef entityRef) |> Some
+        expr.ToFieldExpr() |> renameAllFieldExprEntities (relaxEntityRef entityRef) |> FFiltered
+
+let private getAppliedEntity
+        (treeBuilder : EntityAccessFilterBuilder)
+        (filterBuilder : EntityFiltersCombiner)
+        (checkBuilder : EntityFiltersCombiner)
+        (entityRef : ResolvedEntityRef) : HalfAppliedAllowedEntity =
+    let filter = treeBuilder.GetFilter entityRef
+
+    let selectUpdateFilter =
+        if not (filter.UsedEntity.Select || filter.UsedEntity.Update) then
+            None
+        else
+            Some <| filterBuilder.GetFullEntityCheck entityRef
+    let deleteFilter =
+        if not filter.UsedEntity.Delete then
+            None
+        else
+            let expr =
+                andFieldExpr
+                    (filterBuilder.GetSelfEntityCheck entityRef)
+                    (filterBuilder.ChecksCache.GetOfTypeCheck entityRef)
+            Some expr
+    let checkExpr =
+        if not (filter.UsedEntity.Insert || filter.UsedEntity.Update) then
+            None
+        else
+            Some <| checkBuilder.GetFullEntityCheck entityRef
+
+    { SelectUpdate = selectUpdateFilter
+      Delete = deleteFilter
+      Check = checkExpr
+    }
 
 let private buildFinalAllowedEntity (entityRef : ResolvedEntityRef) (allowedEntity : HalfAppliedAllowedEntity) : AppliedAllowedEntity =
     { SelectUpdate = Option.map (buildFinalRestriction entityRef) allowedEntity.SelectUpdate
       Delete = Option.map (buildFinalRestriction entityRef) allowedEntity.Delete
+      Check = Option.map (buildFinalRestriction entityRef) allowedEntity.Check
     }
 
-let private applyPermissionsForEntity (layout : Layout) (rootRef : ResolvedEntityRef) (allowedEntity : FlatAllowedRoleEntity) (usedEntity : FlatUsedEntity) : HalfAppliedAllowedDatabase =
+let private applyPermissionsForEntity (layout : Layout) (checksCache : EntityChecksCache) (allowedEntity : FlatAllowedRoleEntity) (usedEntity : FlatUsedEntity) : HalfAppliedAllowedDatabase =
     let treeBuilder = EntityAccessFilterBuilder (layout, allowedEntity, usedEntity)
-    let filterBuilder = EntityFiltersCombiner (layout, rootRef, treeBuilder.GetFilter)
+    let filterBuilder = EntityFiltersCombiner (layout, checksCache, fun ref -> treeBuilder.GetFilter(ref).Filter)
+    let checkBuilder = EntityFiltersCombiner (layout, checksCache, fun ref -> treeBuilder.GetFilter(ref).Check)
 
-    usedEntity.EntryPoints |> Seq.map (fun ref -> (ref, filterBuilder.GetAppliedEntity ref)) |> Map.ofSeq
+    usedEntity.EntryPoints |> Seq.map (fun ref -> (ref, getAppliedEntity treeBuilder filterBuilder checkBuilder ref)) |> Map.ofSeq
 
 let inline private throwRoleExceptions (rootRef : ResolvedRoleRef) (exceptions : (ResolvedRoleRef * PermissionsApplyException) list) =
     let postfix = exceptions |> Seq.map (fun (roleRef, e) -> sprintf "for role %O: %O" roleRef e) |> String.concat ", "
@@ -383,16 +470,12 @@ let inline private throwRoleExceptions (rootRef : ResolvedRoleRef) (exceptions :
 
 let applyPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : FlatUsedDatabase) : AppliedAllowedDatabase =
     let applyToOne (rootRef, usedEntity) =
-        let rolesAllowedEntity =
-            match Map.tryFind rootRef role.Flattened.Entities with
-            | None -> raisef PermissionsApplyException "Access denied to entity %O" rootRef
-            | Some allowed -> allowed
-
         // FIXME: better implement it in a different way, exceptions are slow!
         let mutable exceptions = []
-        let tryRole maybeAppliedDb (roleRef, allowedEntity) =
+        let checksCache = EntityChecksCache (layout, rootRef)
+        let tryRole maybeAppliedDb (roleRef, allowedRoleEntity) =
             try
-                let newAppliedDb = applyPermissionsForEntity layout rootRef allowedEntity usedEntity
+                let newAppliedDb = applyPermissionsForEntity layout checksCache allowedRoleEntity usedEntity
                 match maybeAppliedDb with
                 | None -> Some newAppliedDb
                 | Some oldAppliedDb -> Some <| Map.unionWith unionHalfAppliedAllowedEntities oldAppliedDb newAppliedDb
@@ -401,7 +484,11 @@ let applyPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : Fla
                 exceptions <- (roleRef, e) :: exceptions
                 maybeAppliedDb
 
-        match rolesAllowedEntity.Roles |> Map.toSeq |> Seq.fold tryRole None with
+        let allowedEntity =
+            match Map.tryFind rootRef role.Flattened.Entities with
+            | None -> raisef PermissionsApplyException "Access denied to entity %O" rootRef
+            | Some allowed -> allowed
+        match allowedEntity.Roles |> Map.toSeq |> Seq.fold tryRole None with
         | None -> throwRoleExceptions rootRef exceptions
         | Some appliedDb -> Map.map buildFinalAllowedEntity appliedDb
 
@@ -414,22 +501,65 @@ let private checkPermissionsForEntity (layout : Layout) (allowedEntity : FlatAll
 
 let checkPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : FlatUsedDatabase) : unit =
     for KeyValue(rootRef, usedEntity) in usedDatabase do
-        let rolesAllowedEntity =
-            match Map.tryFind rootRef role.Flattened.Entities with
-            | None -> raisef PermissionsApplyException "Access denied to entity %O" rootRef
-            | Some allowed -> allowed
-
         let mutable exceptions = []
-        let tryRole _ (roleRef, allowedEntity) =
+        let tryRole _ (roleRef, allowedRoleEntity) =
             try
-                checkPermissionsForEntity layout allowedEntity usedEntity
+                checkPermissionsForEntity layout allowedRoleEntity usedEntity
                 None
             with
             | :? PermissionsApplyException as e ->
                 exceptions <- (roleRef, e) :: exceptions
                 Some ()
 
+        let allowedEntity =
+            match Map.tryFind rootRef role.Flattened.Entities with
+            | None -> raisef PermissionsApplyException "Access denied to entity %O" rootRef
+            | Some allowed -> allowed
         // Counter-intuitively we use `Some ()` here to signal failed check, and `None` to early drop when found at least one matching role.
-        match rolesAllowedEntity.Roles |> Map.toSeq |> Seq.foldOption tryRole () with
+        match allowedEntity.Roles |> Map.toSeq |> Seq.foldOption tryRole () with
         | None -> ()
         | Some () -> throwRoleExceptions rootRef exceptions
+
+let rec private getParentCheckExpression (layout : Layout) (allowedRoleEntity : FlatAllowedRoleEntity) =
+    getAccessFilter
+        (getParentCheckExpression layout allowedRoleEntity)
+        (fun entityRef allowedEntity -> allowedEntity.Check)
+        layout
+        allowedRoleEntity
+
+let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef : ResolvedEntityRef) (fields : FieldName seq) : EntityFilterExpr =
+    let entity = layout.FindEntity entityRef |> Option.get
+
+    let checksCache = EntityChecksCache (layout, entity.Root)
+
+    let getRoleCheck (roleRef, allowedRoleEntity : FlatAllowedRoleEntity) =
+        let getEntityCheck currRef =
+            match Map.tryFind currRef allowedRoleEntity.Children with
+            | None ->
+                let currEntity = layout.FindEntity currRef |> Option.get
+                if Option.isNone currEntity.Parent then
+                    OFEFalse
+                else
+                    OFETrue
+            | Some allowedEntity -> allowedEntity.Check
+
+        let filterBuilder = EntityFiltersCombiner (layout, checksCache, getEntityCheck)
+        let check = filterBuilder.GetSelfEntityCheck entityRef
+
+        let getFieldCheck name =
+            let fieldInfo = entity.ColumnFields.[name]
+            let fieldEntityRef = Option.defaultValue entityRef fieldInfo.InheritedFrom
+            let fieldRef = { Entity = fieldEntityRef; Name = name }
+            let allowedField = allowedRoleEntity.Fields.[fieldRef]
+            allowedField.Check
+        fields |> Seq.map getFieldCheck |> Seq.fold andFieldExpr check
+
+    let allowedEntity =
+        match Map.tryFind entity.Root role.Flattened.Entities with
+        | None -> raisef PermissionsApplyException "Access denied to entity %O" entity.Root
+        | Some allowed -> allowed
+    allowedEntity.Roles
+        |> Map.toSeq
+        |> Seq.map getRoleCheck
+        |> Seq.fold orFieldExpr OFEFalse
+        |> buildFinalRestriction entityRef

@@ -21,7 +21,7 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
 
     let rec buildSelectUpdateRestriction entityRef =
         let filter = Map.find entityRef allowedDatabase
-        filter.SelectUpdate |> Option.get |> Option.map (compileSingleRestriction entityRef)
+        filter.SelectUpdate |> Option.get |> filterToOption |> Option.map (compileSingleRestriction entityRef)
     and getSelectUpdateRestriction = memoizeN buildSelectUpdateRestriction
 
     let rec buildSelectRestriction entityRef =
@@ -33,7 +33,7 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
 
     let rec buildDeleteRestriction entityRef =
         let filter = Map.find entityRef allowedDatabase
-        filter.Delete |> Option.get |> Option.map (compileSingleRestriction entityRef)
+        filter.Delete |> Option.get |> filterToOption |> Option.map (compileSingleRestriction entityRef)
     and getDeleteRestriction = memoizeN buildDeleteRestriction
 
     let getDeleteValueRestriction entityRef newTableName =
