@@ -22,6 +22,7 @@ FROM
   funapp.settings
 WHERE
   name NOT IN (SELECT name FROM user_settings)`,
+    "my_user_id": "SELECT $$user_id",
     "color_themes": `
 SELECT
   id,
