@@ -253,8 +253,8 @@ type EntityErrorInfo =
 
 [<SerializeAsObject("type")>]
 type RawRowKey =
-    | [<CaseName("id", Type=CaseSerialization.InnerValue)>] RRKId of RowId
-    | [<CaseName(null)>] RRKAlt of Name : ConstraintName * Keys : RawArguments
+    | [<CaseName("primary", Type=CaseSerialization.InnerValue)>] RRKPrimary of RowId
+    | [<CaseName(null)>] RRKAlt of Alt : ConstraintName * Keys : RawArguments
 
 [<SerializeAsObject("type")>]
 [<NoEquality; NoComparison>]

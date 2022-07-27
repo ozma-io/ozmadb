@@ -58,8 +58,8 @@ type EntityDeniedException (message : string, innerException : exn, isUserExcept
 type RowId = int
 
 type RowKey =
-    | RKId of RowId
-    | RKAlt of Name : ConstraintName * Keys : LocalArgumentsMap
+    | RKPrimary of RowId
+    | RKAlt of Alt : ConstraintName * Keys : LocalArgumentsMap
 
 let private subEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
 
@@ -176,7 +176,7 @@ let private runQueryAndGetId
         let! rowInfo =
             task {
                 match (key, knownSubEntity) with
-                | (RKId id, Some subEntity) ->
+                | (RKPrimary id, Some subEntity) ->
                     match! runNonQuery connection query comments argumentValues cancellationToken with
                     | 0 -> return None
                     | 1 -> return Some (id, subEntity)
@@ -191,7 +191,7 @@ let private runQueryAndGetId
 
                         let id =
                             match key with
-                            | RKId id -> id
+                            | RKPrimary id -> id
                             // FIXME: can overflow in future!
                             | RKAlt _ -> findValue sqlFunId |> SQL.parseIntValue |> int
                         let subEntity =
@@ -267,7 +267,7 @@ let private rowKeyCheck
         (key : RowKey)
         (aliasRef : SQL.TableRef) : AltKeyResult =
     match key with
-    | RKId id ->
+    | RKPrimary id ->
         let entity = layout.FindEntity entityRef |> Option.get
         let (idArg, arguments) = addArgument (PLocal funId) funIdArg emptyArguments
         let argumentValues = Map.singleton (PLocal funId) (FInt id)
@@ -442,7 +442,7 @@ let resolveKey
         (cancellationToken : CancellationToken) : ValueTask<RowId> =
     vtask {
         match key with
-        | RKId id -> return id
+        | RKPrimary id -> return id
         | RKAlt (name, args) -> return! resolveAltKey connection globalArgs layout applyRole entityRef comments name args cancellationToken
     }
 
@@ -601,7 +601,7 @@ let updateEntity
         let returningId =
             seq {
                 match key with
-                | RKId id -> ()
+                | RKPrimary id -> ()
                 | RKAlt (name, keys) ->
                     let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
                     yield SQL.SCExpr (None, entityId)
@@ -698,7 +698,7 @@ let deleteEntity
         let opTable = SQL.operationTable tableRef
         let returning =
             match key with
-            | RKId id -> [||]
+            | RKPrimary id -> [||]
             | RKAlt (name, keys) ->
                 let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
                 [| SQL.SCExpr (None, entityId) |]
@@ -781,7 +781,7 @@ let private getSubEntity
 
                 let results =
                     match key with
-                    | RKId id -> seq { entitySubEntity }
+                    | RKPrimary id -> seq { entitySubEntity }
                     | RKAlt (name, args) ->
                         let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
                         seq { entityId; entitySubEntity }
@@ -799,7 +799,7 @@ let private getSubEntity
                 return failwith "Impossible"
             | Some row ->
                 match key with
-                | RKId id ->
+                | RKPrimary id ->
                     match row with
                     | [|(_, _, subEntityValue)|] ->
                         let rawSubEntity = SQL.parseStringValue subEntityValue

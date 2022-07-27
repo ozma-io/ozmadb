@@ -95,7 +95,7 @@ type private EarlyStopException<'a> (value : 'a) =
     member this.Value = value
 
 let convertRawRowKey (entity : ResolvedEntity) = function
-    | RRKId id -> RKId id
+    | RRKPrimary id -> RKPrimary id
     | RRKAlt (name, rawArgs) -> RKAlt (name, convertEntityArguments entity rawArgs)
 
 let private usersEntityRef = { Schema = FunQLName "public"; Name = FunQLName "users" }
@@ -451,8 +451,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                     logger.LogError(ex, "Access denied")
                     let (entityId, detailsPrefix) =
                         match rawKey with
-                        | RRKId id -> (Nullable id, "")
-                        | RRKAlt (name, args) -> (Nullable(), sprintf "Key name %O, args: %O\n" name args)
+                        | RRKPrimary id -> (Nullable id, "")
+                        | RRKAlt (name, args) -> (Nullable(), sprintf "Alternate key %O, args: %O\n" name args)
                     rctx.WriteEvent (fun event ->
                         event.Type <- "updateEntity"
                         event.SchemaName <- entityRef.Schema.ToString()
@@ -517,8 +517,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                     logger.LogError(ex, "Access denied")
                     let (entityId, detailsPrefix) =
                         match rawKey with
-                        | RRKId id -> (Nullable id, "")
-                        | RRKAlt (name, args) -> (Nullable(), sprintf "Key name %O, args: %O\n" name args)
+                        | RRKPrimary id -> (Nullable id, "")
+                        | RRKAlt (name, args) -> (Nullable(), sprintf "Alternate key %O, args: %O\n" name args)
                     rctx.WriteEvent (fun event ->
                         event.Type <- "deleteEntity"
                         event.SchemaName <- entityRef.Schema.ToString()
@@ -563,8 +563,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                     logger.LogError(ex, "Access denied")
                     let (entityId, detailsPrefix) =
                         match rawKey with
-                        | RRKId id -> (Nullable id, "")
-                        | RRKAlt (name, args) -> (Nullable(), sprintf "Key name %O, args: %O\n" name args)
+                        | RRKPrimary id -> (Nullable id, "")
+                        | RRKAlt (name, args) -> (Nullable(), sprintf "Alternate key %O, args: %O\n" name args)
                     rctx.WriteEvent (fun event ->
                         event.Type <- "getRelatedEntities"
                         event.SchemaName <- entityRef.Schema.ToString()
@@ -583,7 +583,7 @@ type EntitiesAPI (api : IFunDBAPI) =
             | Ok tree ->
                 let deleteOne entityRef id =
                     unitTask {
-                        match! this.DeleteEntity entityRef (RRKId id) with
+                        match! this.DeleteEntity entityRef (RRKPrimary id) with
                         | Error e -> return raise <| EarlyStopException(e)
                         | Ok () -> ()
                     }
