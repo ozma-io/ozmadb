@@ -206,7 +206,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         task {
             let! id = resolveKey query rctx.GlobalArguments ctx.Layout (getWriteRole rctx.User.Effective.Type) entityRef None key ctx.CancellationToken
             match! runArgsTrigger (fun script -> script.RunUpdateTriggerBefore entityRef id args ctx.CancellationToken) entityRef entity args trigger with
-            | Ok args -> return Ok (RKId id, args)
+            | Ok args -> return Ok (RKPrimary id, args)
             | Error (BECancelled ()) -> return Error (BECancelled id)
             | Error (BEError e) -> return Error (BEError e)
         }
@@ -224,7 +224,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 try
                     let! maybeContinue = preparedTrigger.Script.RunDeleteTriggerBefore entityRef id ctx.CancellationToken
                     if maybeContinue then
-                        return Ok (RKId id)
+                        return Ok (RKPrimary id)
                     else
                         return Error (BECancelled id)
                 with

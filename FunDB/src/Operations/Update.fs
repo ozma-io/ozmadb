@@ -88,11 +88,30 @@ let private cascadeDeleteDeferred
                     let mutable currentSet = deferredSet
                     while not <| Set.isEmpty currentSet do
                         let (entityRef, id) = currentSet |> Seq.first |> Option.get
-                        let! tree = getRelatedEntities connection.Connection.Query Map.empty layout None checkReference entityRef (RKId id) None cancellationToken
+                        let! tree =
+                            getRelatedEntities
+                                connection.Connection.Query
+                                Map.empty
+                                layout
+                                None
+                                checkReference
+                                entityRef
+                                (RKPrimary id)
+                                None
+                                cancellationToken
 
                         let deleteOne (entityRef : ResolvedEntityRef) (id : RowId) =
                             unitTask {
-                                let! _ = deleteEntity connection.Connection.Query Map.empty layout None entityRef (RKId id) None cancellationToken
+                                let! _ =
+                                    deleteEntity
+                                        connection.Connection.Query
+                                        Map.empty
+                                        layout
+                                        None
+                                        entityRef
+                                        (RKPrimary id)
+                                        None
+                                        cancellationToken
                                 ()
                             }
 
