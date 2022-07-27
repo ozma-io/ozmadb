@@ -309,7 +309,7 @@ export interface IViewInfoResult {
  */
 
 export interface IAltRowKey {
-  name: ConstraintName;
+  alt: ConstraintName;
   keys: Record<ArgumentName, any>;
 }
 
