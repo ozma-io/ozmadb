@@ -592,12 +592,6 @@ let updateEntity
         let whereExpr = Option.addWith (curry SQL.VEAnd) keyCheck.Where checkExpr
 
         let opTable = SQL.operationTable tableRef
-        let (returningSubEntity, knownSubEntity) =
-            if hasSubType entity then
-                let subEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
-                (Seq.singleton <| SQL.SCExpr (None, subEntity), None)
-            else
-                (Seq.empty, Some entityRef)
         let returningId =
             seq {
                 match key with
@@ -606,7 +600,13 @@ let updateEntity
                     let entityId = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunId }
                     yield SQL.SCExpr (None, entityId)
             }
-        let returning = Seq.append returningSubEntity returningId |> Seq.toArray
+        let (returningSubEntity, knownSubEntity) =
+            if hasSubType entity then
+                let subEntity = SQL.VEColumn { Table = Some aliasRef; Name = sqlFunSubEntity }
+                (Seq.singleton <| SQL.SCExpr (None, subEntity), None)
+            else
+                (Seq.empty, Some entityRef)
+        let returning = Seq.append returningId returningSubEntity |> Seq.toArray
 
         let expr =
             { SQL.updateExpr opTable with

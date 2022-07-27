@@ -142,7 +142,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             match source with
             | ESAction _ | ESTrigger _ -> ()
             | ESAPI ->
-                logger.LogError("This feature is only available for root users, not for {}", currentUser.Effective.Name)
+                logger.LogError("This feature is only available for root users, not for {user}", currentUser.Effective.Name)
                 raise <| RequestException RENoRole
 
     static member Create (opts : RequestParams) : Task<RequestContext> =
@@ -157,7 +157,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                     match maybeUser with
                     | None when opts.CanRead -> RTRole { Role = None; Ref = None; CanRead = true }
                     | None ->
-                        logger.LogError("User {} not found in users table", opts.UserName)
+                        logger.LogError("User {user} not found in users table", opts.UserName)
                         raise <| RequestException REUserNotFound
                     | Some user when user.IsRoot -> RTRoot
                     | Some user ->
@@ -166,14 +166,14 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                             if opts.CanRead then
                                 RTRole { Role = None; Ref = None; CanRead = true }
                             else
-                                logger.LogError("User {} has no role set", opts.UserName)
+                                logger.LogError("User {user} has no role set", opts.UserName)
                                 raise <| RequestException RENoRole
                         | Some roleRef ->
                             match ctx.Permissions.Find roleRef |> Option.get with
                             | Ok role -> RTRole { Role = Some role; Ref = Some roleRef; CanRead = opts.CanRead }
                             | Error _ when opts.CanRead -> RTRole { Role = None; Ref = Some roleRef; CanRead = true }
                             | Error e ->
-                                logger.LogError(e.Error, "Role for user {} is broken", opts.UserName)
+                                logger.LogError(e.Error, "Role for user {user} is broken", opts.UserName)
                                 raise <| RequestException RENoRole
             let userId = maybeUser |> Option.map (fun u -> u.Id)
             let initialUser =
@@ -231,7 +231,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             let roleType =
                 match maybeUser with
                     | None ->
-                        logger.LogError("User {} not found in users table", userName)
+                        logger.LogError("User {user} not found in users table", userName)
                         raise <| RequestException REUserNotFound
                     | Some user when user.IsRoot -> RTRoot
                         | Some user ->
@@ -240,13 +240,13 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                                 if opts.CanRead then
                                     RTRole { Role = None; Ref = None; CanRead = true }
                                 else
-                                    logger.LogError("User {} has no role set", userName)
+                                    logger.LogError("User {user} has no role set", userName)
                                     raise <| RequestException RENoRole
                             | Some roleRef ->
                                 match ctx.Permissions.Find roleRef |> Option.get with
                                 | Ok role -> RTRole { Role = Some role; Ref = Some roleRef; CanRead = opts.CanRead }
                                 | Error e ->
-                                    logger.LogError(e.Error, "Role for user {} is broken", userName)
+                                    logger.LogError(e.Error, "Role for user {user} is broken", userName)
                                     raise <| RequestException RENoRole
             let newUser =
                 { Id = maybeUser |> Option.map (fun u -> u.Id)
@@ -267,7 +267,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             match ctx.Permissions.Find newRole with
             | Some (Ok role) -> RTRole { Role = Some role; Ref = Some newRole; CanRead = opts.CanRead }
             | Some (Error e) ->
-                logger.LogError(e.Error, "Role {} is broken", newRole)
+                logger.LogError(e.Error, "Role {role} is broken", newRole)
                 raise <| RequestException RENoRole
             | None ->
                 raise <| RequestException RENoRole

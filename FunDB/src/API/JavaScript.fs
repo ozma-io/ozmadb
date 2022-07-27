@@ -355,7 +355,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let details = jsString context args.[0]
             let handle = Option.get currentHandle
-            handle.Logger.LogInformation("Source {} wrote event from JavaScript: {}", string handle.API.Request.Source, details)
+            handle.Logger.LogInformation("Source {source} wrote event from JavaScript: {details}", handle.API.Request.Source, details)
             handle.API.Request.WriteEvent (fun event ->
                 event.Type <- "jsEvent"
                 event.Details <- details
@@ -369,7 +369,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let details = jsString context args.[0]
             let handle = Option.get currentHandle
-            handle.Logger.LogInformation("Source {} wrote sync event from JavaScript: {}", string handle.API.Request.Source, details)
+            handle.Logger.LogInformation("Source {source} wrote sync event from JavaScript: {details}", handle.API.Request.Source, details)
             let run = runVoidApiCall handle context <| fun () ->
                 handle.API.Request.WriteEventSync (fun event ->
                     event.Type <- "jsEvent"

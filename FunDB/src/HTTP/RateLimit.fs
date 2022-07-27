@@ -100,7 +100,7 @@ type private StaticRateLimitMiddleware (next : RequestDelegate, quotaExceeded : 
     inherit RateLimitMiddleware<StaticRateLimitProcessor>(next, options, processor, config)
 
     override this.LogBlockedRequest (httpContext, identity, counter, rule) =
-        logger.LogInformation("Request for {} has been blocked, quota {}/{} exceeded by {}", identity.ClientId, rule.Limit, rule.Period, counter.Count - rule.Limit)
+        logger.LogInformation("Request for {client_id} has been blocked, quota {limit}/{period} exceeded by {excess}", identity.ClientId, rule.Limit, rule.Period, counter.Count - rule.Limit)
 
     override this.ReturnQuotaExceededResponse (httpContext, rule, retryAfter) =
         let msg = sprintf "Maximum %i per %s second(s)" (int rule.Limit) rule.Period

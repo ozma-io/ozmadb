@@ -385,7 +385,7 @@ let private runWithApi (touchAccessedAt : bool) (f : IFunDBAPI -> HttpHandler) :
                 return! requestError RIAccessDenied next ctx
             else
                 let logger = ctx.GetLogger("runWithApi")
-                use _ = logger.BeginScope("Creating context for instance {}, user {} (is root: {})", inst.Instance.Name, inst.UserName, inst.IsRoot)
+                use _ = logger.BeginScope("Creating context for instance {instance}, user {user} (is root: {is_root})", inst.Instance.Name, inst.UserName, inst.IsRoot)
                 let connectionString = instanceConnectionString inst.Instance inst.Source.SetExtraConnectionOptions
                 let instancesCache = ctx.GetService<InstancesCacheStore>()
                 let! cacheStore = instancesCache.GetContextCache(connectionString)

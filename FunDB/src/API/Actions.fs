@@ -27,7 +27,7 @@ type ActionsAPI (api : IFunDBAPI) =
                         }
                 with
                     | :? ActionRunException as ex when ex.IsUserException ->
-                        logger.LogError(ex, "Exception in action {}", ref)
+                        logger.LogError(ex, "Exception in action {action}", ref)
                         let str = Exn.fullMessage ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "runAction"

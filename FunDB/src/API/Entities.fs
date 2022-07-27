@@ -156,7 +156,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         return Ok newArgs
                 with
                 | :? ArgumentCheckException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Trigger {} returned invalid arguments", ref)
+                    logger.LogError(ex, "Trigger {name} returned invalid arguments", ref)
                     let str = Exn.fullMessage ex
                     rctx.WriteEvent (fun event ->
                         event.Type <- "triggerError"
@@ -165,7 +165,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     )
                     return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEArguments str))
                 | :? TriggerRunException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Exception in trigger {}", ref)
+                    logger.LogError(ex, "Exception in trigger {name}", ref)
                     let str = Exn.fullMessage ex
                     rctx.WriteEvent (fun event ->
                         event.Type <- "triggerError"
@@ -189,7 +189,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     return Ok ()
                 with
                 | :? TriggerRunException as ex when ex.IsUserException ->
-                        logger.LogError(ex, "Exception in trigger {}", ref)
+                        logger.LogError(ex, "Exception in trigger {name}", ref)
                         let str = Exn.fullMessage ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "triggerError"
@@ -229,7 +229,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         return Error (BECancelled id)
                 with
                 | :? TriggerRunException as ex when ex.IsUserException ->
-                        logger.LogError(ex, "Exception in trigger {}", ref)
+                        logger.LogError(ex, "Exception in trigger {name}", ref)
                         let str = Exn.fullMessage ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "triggerError"
@@ -705,7 +705,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 match! checkPendingInsert () with
                 | Ok newResults ->
                     let resultsArr = Array.ofSeq (Seq.append (Seq.concat resultLists) newResults)
-                    logger.LogInformation("Executed {} operations in a transaction", resultsArr.Length)
+                    logger.LogInformation("Executed {count} operations in a transaction", resultsArr.Length)
                     return Ok { Results = resultsArr }
                 | Error e -> return Error e
             | Error e -> return Error e
