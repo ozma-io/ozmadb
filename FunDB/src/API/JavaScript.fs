@@ -136,7 +136,7 @@ type APITemplate (isolate : Isolate) =
             try
                 V8JsonReader.Deserialize<'a>(v)
             with
-            | :? JsonReaderException as e -> throwCallError context "Failed to parse value: %s" e.Message
+            | :? JsonException as e -> throwCallError context "Failed to parse value: %s" e.Message
         if isRefNull ret then
             throwCallError context "Value must not be null"
         ret
