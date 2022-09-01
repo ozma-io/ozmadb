@@ -372,7 +372,7 @@ let private runCheckExpr
 
         let result = queryColumnResult aggExpr
         let myFromEntity = fromEntity <| relaxEntityRef entityRef
-        let idCol = resolvedRefFieldExpr <| VRColumn { Entity = Some <| relaxEntityRef entityRef; Name = funId } : ResolvedFieldExpr
+        let idCol = resolvedRefFieldExpr <| VRColumn { Entity = Some <| relaxEntityRef entityRef; Name = funId } : ResolvedFieldExpr    
         let arrayArg = resolvedRefFieldExpr <| VRArgument idsPlaceholder
         let whereExpr = FEAny (idCol, BOEq, arrayArg)
         let singleSelect =
@@ -544,14 +544,10 @@ let insertEntities
         | None -> ()
         | Some role ->
             let usedFields = dataFields |> Seq.map fst
-            try
-                match getSingleCheckExpression layout role entityRef usedFields with
-                | FUnfiltered -> ()
-                | FFiltered checkExpr ->
-                    do! runCheckExpr connection globalArgs layout entityRef checkExpr ids cancellationToken
-            with
-            | :? PermissionsApplyException as e ->
-                raisefUserWithInner EntityDeniedException e ""
+            match getSingleCheckExpression layout role entityRef usedFields with
+            | FUnfiltered -> ()
+            | FFiltered checkExpr ->
+                do! runCheckExpr connection globalArgs layout entityRef checkExpr ids cancellationToken
         return ids
     }
 
@@ -664,14 +660,10 @@ let updateEntity
         match applyRole with
         | None -> ()
         | Some role ->
-            try
-                match getSingleCheckExpression layout role subEntity (Map.keys updateArgs) with
-                | FUnfiltered -> ()
-                | FFiltered checkExpr ->
-                    do! runCheckExpr connection globalArgs layout subEntity checkExpr [|id|] cancellationToken
-            with
-            | :? PermissionsApplyException as e ->
-                raisefUserWithInner EntityDeniedException e ""
+            match getSingleCheckExpression layout role subEntity (Map.keys updateArgs) with
+            | FUnfiltered -> ()
+            | FFiltered checkExpr ->
+                do! runCheckExpr connection globalArgs layout subEntity checkExpr [|id|] cancellationToken
         return (id, subEntity)
     }
 

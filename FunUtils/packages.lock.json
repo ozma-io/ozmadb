@@ -4,15 +4,15 @@
     "net6.0": {
       "FSharp.Core": {
         "type": "Direct",
-        "requested": "[6.0.6, )",
-        "resolved": "6.0.6",
-        "contentHash": "ZSwKKw+q50wDYHNs12WkKKgZ5vJScN2+cbq6+4jvn8H/D2W8rGMlybGNLHSF96v/Igx680mV7fPTtQe3V/quxg=="
+        "requested": "[6.0.5, )",
+        "resolved": "6.0.5",
+        "contentHash": "FwdQVtpj34xt8vKyFUUeNIS+obWlEnSrSW7y1ivRVts/ZsrUsKyOd0bZehgFhWdnB/NBsa9DCWvNFMTO0XDFcg=="
       },
       "FSharpPlus": {
         "type": "Direct",
         "requested": "[1.2.*, )",
-        "resolved": "1.2.5",
-        "contentHash": "d4Nbm4MTE5fKY5tof6nY40GXrKxIQybwc16d1KPZtUPpeli9phwZgXaOJXcShf4PfBa8zwYfNRlWC/lMk2Ah7w==",
+        "resolved": "1.2.4",
+        "contentHash": "gWycs8cwmNPXS4n11nDEnc5KtS+Ppr0bj1BFKYEpKBoM0duqVshB52kUIvXBaOdWJbnjFEFO7UfSJLJz8SENHg==",
         "dependencies": {
           "FSharp.Core": "4.6.2"
         }

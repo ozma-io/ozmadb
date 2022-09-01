@@ -1,22 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
-
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
-
     <!-- Store generated parsers in intermediate build directory -->
     <RootIntermediateOutputPath>obj</RootIntermediateOutputPath>
     <FsLexOutputFolder>$(RootIntermediateOutputPath)/gen/</FsLexOutputFolder>
     <FsYaccOutputFolder>$(RootIntermediateOutputPath)/gen/</FsYaccOutputFolder>
     <OutputType>Exe</OutputType>
-
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
   </PropertyGroup>
-
   <ItemGroup>
+    <Compile Include="src/FunQL/Resolve.fs" />
     <Compile Include="src/Exception.fs" />
     <Compile Include="src/Parsing.fs" />
-
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/Parsing.fs" />
     <Compile Include="src/SQL/AST.fs" />
@@ -33,38 +29,30 @@
     <FsLex Include="src/SQL/ArrayLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/ArrayLex.fs" />
     <Compile Include="src/SQL/Query.fs" />
-
     <Compile Include="src/FunQL/Utils.fs" />
     <Compile Include="src/FunQL/AST.fs" />
     <FsYacc Include="src/FunQL/FunQLParse.fsy" OtherFlags="--module FunWithFlags.FunDB.FunQL.Parse -v" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLParse.fs" />
     <FsLex Include="src/FunQL/FunQLLex.fsl" OtherFlags="--unicode" />
     <Compile Include="$(RootIntermediateOutputPath)/gen/FunQLLex.fs" />
-
     <Compile Include="src/Connection.fs" />
     <Compile Include="src/EventLogger.fs" />
-
     <Compile Include="src/SQL/Migration.fs" />
     <Compile Include="src/SQL/Meta.fs" />
     <Compile Include="src/SQL/Chunk.fs" />
-
     <Compile Include="src/Objects/Types.fs" />
-
     <!-- Needed early for various other parts -->
     <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Types.fs" />
-
     <!-- Needed early for layout info -->
     <Compile Include="src/Triggers/Source.fs" />
     <Compile Include="src/Triggers/Types.fs" />
     <Compile Include="src/Triggers/Merge.fs" />
-
     <!-- Needed early for FunQL compilation -->
     <Compile Include="src/Attributes/Source.fs" />
     <Compile Include="src/Attributes/Types.fs" />
     <Compile Include="src/Attributes/Parse.fs" />
     <Compile Include="src/Attributes/Merge.fs" />
-
     <Compile Include="src/FunQL/Resolve.fs" />
     <Compile Include="src/FunQL/Typecheck.fs" />
     <Compile Include="src/FunQL/UsedReferences.fs" />
@@ -74,7 +62,6 @@
     <Compile Include="src/FunQL/Chunk.fs" />
     <Compile Include="src/FunQL/Query.fs" />
     <Compile Include="src/FunQL/Json.fs" />
-
     <Compile Include="src/Layout/Schema.fs" />
     <Compile Include="src/Layout/Info.fs" />
     <Compile Include="src/Layout/Resolve.fs" />
@@ -83,10 +70,8 @@
     <Compile Include="src/Layout/Correlate.fs" />
     <Compile Include="src/Layout/Integrity.fs" />
     <Compile Include="src/Layout/Domain.fs" />
-
     <Compile Include="src/Attributes/Resolve.fs" />
     <Compile Include="src/Attributes/Schema.fs" />
-
     <Compile Include="src/Permissions/Source.fs" />
     <Compile Include="src/Permissions/Types.fs" />
     <Compile Include="src/Permissions/Resolve.fs" />
@@ -95,39 +80,32 @@
     <Compile Include="src/Permissions/Compile.fs" />
     <Compile Include="src/Permissions/View.fs" />
     <Compile Include="src/Permissions/Entity.fs" />
-
     <Compile Include="src/JavaScript/Utils.fs" />
     <Compile Include="src/JavaScript/AST.fs" />
     <Compile Include="src/JavaScript/FunQL.fs" />
     <Compile Include="src/JavaScript/Runtime.fs" />
-
     <Compile Include="src/Modules/Source.fs" />
     <Compile Include="src/Modules/Types.fs" />
     <Compile Include="src/Modules/Resolve.fs" />
     <Compile Include="src/Modules/Schema.fs" />
-
     <Compile Include="src/Actions/Source.fs" />
     <Compile Include="src/Actions/Types.fs" />
     <Compile Include="src/Actions/Resolve.fs" />
     <Compile Include="src/Actions/Schema.fs" />
     <Compile Include="src/Actions/Run.fs" />
-
     <Compile Include="src/Triggers/Resolve.fs" />
     <Compile Include="src/Triggers/Run.fs" />
     <Compile Include="src/Triggers/Schema.fs" />
-
     <Compile Include="src/UserViews/Source.fs" />
     <Compile Include="src/UserViews/Types.fs" />
     <Compile Include="src/UserViews/Generate.fs" />
     <Compile Include="src/UserViews/Resolve.fs" />
     <Compile Include="src/UserViews/Schema.fs" />
     <Compile Include="src/UserViews/DryRun.fs" />
-
     <Compile Include="src/Operations/Entity.fs" />
     <Compile Include="src/Operations/Domain.fs" />
     <Compile Include="src/Operations/Command.fs" />
     <Compile Include="src/Operations/Update.fs" />
-
     <Compile Include="src/Layout/Update.fs" />
     <Compile Include="src/Attributes/Update.fs" />
     <Compile Include="src/Permissions/Update.fs" />
@@ -135,10 +113,8 @@
     <Compile Include="src/Actions/Update.fs" />
     <Compile Include="src/Triggers/Update.fs" />
     <Compile Include="src/UserViews/Update.fs" />
-
     <Compile Include="src/Operations/Preload.fs" />
     <Compile Include="src/Operations/SaveRestore.fs" />
-
     <Compile Include="src/API/Types.fs" />
     <Compile Include="src/API/JavaScript.fs" />
     <Compile Include="src/API/ContextCache.fs" />
@@ -151,7 +127,6 @@
     <Compile Include="src/API/Permissions.fs" />
     <Compile Include="src/API/Domains.fs" />
     <Compile Include="src/API/API.fs" />
-
     <Compile Include="src/HTTP/RateLimit.fs" />
     <Compile Include="src/HTTP/Utils.fs" />
     <Compile Include="src/HTTP/Info.fs" />
@@ -161,19 +136,15 @@
     <Compile Include="src/HTTP/SaveRestore.fs" />
     <Compile Include="src/HTTP/Permissions.fs" />
     <Compile Include="src/HTTP/Domains.fs" />
-
     <Compile Include="src/Program.fs" />
   </ItemGroup>
-
   <ItemGroup>
     <Content Include="funapp_migration.mjs" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="funapp_preload.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="../FunDBSchema/FunDBSchema.csproj" />
     <ProjectReference Include="../FunUtils/FunUtils.fsproj" />
-
     <PackageReference Include="FSharpPlus" Version="1.2.*" />
     <PackageReference Include="Npgsql" Version="6.0.*" />
     <PackageReference Include="Npgsql.Json.NET" Version="6.0.*" />
@@ -194,9 +165,7 @@
     <PackageReference Include="Serilog" Version="2.11.*" />
     <PackageReference Include="Serilog.AspNetCore" Version="5.0.*" />
     <PackageReference Include="prometheus-net.AspNetCore" Version="6.0.*" />
-
-    <PackageReference Include="NetJs" Version="1.3.*" />
-    <PackageReference Include="NetJs.Json" Version="1.3.*" />
+    <PackageReference Include="NetJs" Version="1.2.*" />
+    <PackageReference Include="NetJs.Json" Version="1.2.*" />
   </ItemGroup>
-
 </Project>

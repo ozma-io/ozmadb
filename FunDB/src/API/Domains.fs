@@ -5,7 +5,6 @@ open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.Operations.Domain
@@ -64,10 +63,10 @@ type DomainsAPI (api : IFunDBAPI) =
                         }
                 with
                 | :? ChunkException as ex when ex.IsUserException ->
-                    return Error <| DEArguments (fullUserMessage ex)
+                    return Error <| DEArguments (Exn.fullMessage ex)
                 | :? DomainExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to get domain values")
-                    let str = fullUserMessage ex
+                    let str = Exn.fullMessage ex
                     return Error (DEExecution str)
                 | :? DomainDeniedException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Access denied")
@@ -77,7 +76,7 @@ type DomainsAPI (api : IFunDBAPI) =
                         event.EntityName <- fieldRef.Entity.Name.ToString()
                         event.FieldName <- fieldRef.Name.ToString()
                         event.Error <- "access_denied"
-                        event.Details <- fullUserMessage ex
+                        event.Details <- Exn.fullMessage ex
                     )
                     return Error DEAccessDenied
         }
@@ -106,10 +105,10 @@ type DomainsAPI (api : IFunDBAPI) =
                         return Ok ret
                     with
                     | :? ChunkException as ex when ex.IsUserException ->
-                        return Error <| DEArguments (fullUserMessage ex)
+                        return Error <| DEArguments (Exn.fullMessage ex)
                     | :? DomainExecutionException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Failed to get domain explain")
-                        let str = fullUserMessage ex
+                        let str = Exn.fullMessage ex
                         return Error (DEExecution str)
                     | :? DomainDeniedException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Access denied")
@@ -119,7 +118,7 @@ type DomainsAPI (api : IFunDBAPI) =
                             event.EntityName <- fieldRef.Entity.Name.ToString()
                             event.FieldName <- fieldRef.Name.ToString()
                             event.Error <- "access_denied"
-                            event.Details <- fullUserMessage ex
+                            event.Details <- Exn.fullMessage ex
                         )
                         return Error DEAccessDenied
         }

@@ -9,7 +9,6 @@ open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
-open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
@@ -52,7 +51,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                     do! restoreCustomEntities layout ctx.Transaction customEntities ctx.CancellationToken
                     return Ok ()
                 with
-                | :? RestoreSchemaException as err -> return Error <| GECommit (sprintf "Failed to restore custom entities: %s" (fullUserMessage err))
+                | :? RestoreSchemaException as err -> return Error <| GECommit (sprintf "Failed to restore custom entities: %s" (Exn.fullMessage err))
         }
 
     let updateCustomEntities newEnts =
@@ -140,7 +139,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                     with
                     | :? RestoreSchemaException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Failed to restore schemas")
-                        return Error <| RREConsistency (fullUserMessage ex)
+                        return Error <| RREConsistency (Exn.fullMessage ex)
         }
 
     member this.RestoreZipSchemas (stream : Stream) (dropOthers : bool) : Task<Result<unit, RestoreErrorInfo>> =
@@ -149,7 +148,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                 try
                     Ok <| schemasFromZipFile stream
                 with
-                | :? RestoreSchemaException as e when e.IsUserException -> Error (RREInvalidFormat <| fullUserMessage e)
+                | :? RestoreSchemaException as e when e.IsUserException -> Error (RREInvalidFormat <| Exn.fullMessage e)
             match maybeDumps with
             | Error e -> return Error e
             | Ok dumps ->

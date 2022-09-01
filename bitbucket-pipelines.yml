@@ -1,0 +1,50 @@
+options:
+  max-time: 10
+pipelines:
+  default:
+    - step: &build_step
+        name: Build
+        image:
+          name: myprocessx/dotnet-build
+          username: $DOCKER_HUB_USER
+          password: $DOCKER_HUB_PASSWORD
+        caches:
+          - dotnetcore
+        script:
+          - git submodule update --init
+          - dotnet nuget add source -n ozma -u "$NUGET_USER" -p "$NUGET_PASSWORD" --store-password-in-clear-text https://nuget.services.ozma.io/v3/index.json
+          - cd FunDB && ./build.sh
+        artifacts:
+          - FunDB/publish/**
+  pull-requests:
+    '**':
+      - step: *build_step
+  branches:
+    master:
+      - step: *build_step
+      - step:
+          name: Deploy to test
+          deployment: test
+          caches:
+            - docker
+          script:
+            - docker login -u "$DOCKER_HUB_USER" -p "$DOCKER_HUB_PASSWORD"
+            # Workaround for pipes not supporting private docker repos.
+            - docker pull myprocessx/upload-artifact
+            - pipe: ozma-io/upload-artifact:master
+              variables:
+                LOCAL_PATH: FunDB/publish
+            - docker pull myprocessx/deploy-artifact
+            - pipe: ozma-io/deploy-artifact:master
+          artifacts:
+            - artifact.json
+      - step:
+          name: Deploy to production
+          deployment: production
+          trigger: manual
+          caches:
+            - docker
+          script:
+            - docker login -u "$DOCKER_HUB_USER" -p "$DOCKER_HUB_PASSWORD"
+            - docker pull myprocessx/deploy-artifact
+            - pipe: ozma-io/deploy-artifact:master

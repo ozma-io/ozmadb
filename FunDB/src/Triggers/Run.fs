@@ -48,7 +48,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
             runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
         with
         | :? JavaScriptRuntimeException as e ->
-            raisefUserWithInner TriggerRunException e ""
+            raisefUserWithInner TriggerRunException e "Couldn't initialize trigger"
 
     let runArgsTrigger (entity : ResolvedEntityRef) (source : SerializedTriggerSource) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
         task {
@@ -62,10 +62,10 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
             let! newArgs =
                 task {
                     try
-                        return! runAsyncFunctionInRuntime runtime func cancellationToken [|eventValue; oldArgs|]
+                        return! runFunctionInRuntime runtime func cancellationToken [|eventValue; oldArgs|]
                     with
                     | :? JavaScriptRuntimeException as e ->
-                        return raisefWithInner TriggerRunException e ""
+                        return raisefWithInner TriggerRunException e "Failed to run trigger"
                 }
             match newArgs.Data with
             | :? bool as ret -> return (if ret then ATUntouched else ATCancelled)
@@ -95,11 +95,11 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                     [|eventValue; oldArgs|]
                 | None -> [|eventValue|]
             try
-                let! _ = runAsyncFunctionInRuntime runtime func cancellationToken functionArgs
+                let! _ = runFunctionInRuntime runtime func cancellationToken functionArgs
                 return ()
             with
             | :? JavaScriptRuntimeException as e ->
-                return raisefWithInner TriggerRunException e ""
+                return raisefWithInner TriggerRunException e "Failed to run trigger"
         }
 
     member this.RunInsertTriggerBefore (entity : ResolvedEntityRef) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task<ArgsTriggerResult> =
@@ -119,10 +119,10 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
             let! maybeContinue =
                 task {
                     try
-                        return! runAsyncFunctionInRuntime runtime func cancellationToken [|eventValue|]
+                        return! runFunctionInRuntime runtime func cancellationToken [|eventValue|]
                     with
                     | :? JavaScriptRuntimeException as e ->
-                        return raisefWithInner TriggerRunException e ""
+                        return raisefWithInner TriggerRunException e "Failed to run trigger"
                 }
             try
                 return maybeContinue.GetBoolean ()
@@ -175,14 +175,12 @@ let private triggerName (triggerRef : TriggerRef) =
 type private PreparedTriggersBuilder (runtime : IJSRuntime, forceAllowBroken : bool) =
     let prepareTriggersEntity (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : PreparedTriggersEntity =
         let prepareOne name (trigger : ResolvedTrigger) =
-            let triggerRef = { Schema = schemaName; Entity = triggerEntity; Name = name }
             try
-                let script = TriggerScript(runtime, triggerName triggerRef, trigger.Procedure)
+                let script = TriggerScript(runtime, triggerName { Schema = schemaName; Entity = triggerEntity; Name = name }, trigger.Procedure)
                 Ok { Resolved = trigger; Script = script }
             with
             | :? TriggerRunException as e when trigger.AllowBroken || forceAllowBroken ->
                 Error { Error = e; AllowBroken = trigger.AllowBroken }
-            | e -> raisefWithInner TriggerRunException e "In trigger %O" triggerRef
 
         { Triggers = triggers.Triggers |> Map.map (fun name -> Result.bind (prepareOne name))
         }

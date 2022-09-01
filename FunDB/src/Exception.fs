@@ -8,14 +8,6 @@ open Printf
 type IUserException =
     abstract member IsUserException : bool
 
-// For most exceptions we build a final error string concatenating all nested exception messages together,
-// separated with `:`. However, for some exceptions we want to just use the current message,
-// without adding messages from inner exceptions. An example is JavaScript exceptions,
-// which we'd like to format with a JavaScript stack trace.
-type ICustomFormatException =
-    abstract member MessageContainsInnerError : bool
-    abstract member ShortMessage : string
-
 type UserException (message : string, innerException : Exception, isUserException : bool) =
     inherit Exception(message, innerException)
 
@@ -35,22 +27,6 @@ type UserException (message : string, innerException : Exception, isUserExceptio
 
     interface IUserException with
         member this.IsUserException = isUserException
-
-let rec fullUserMessage (e : exn) : string =
-    let containsInner =
-        match box e with
-        | :? ICustomFormatException as ce -> ce.MessageContainsInnerError
-        | _ -> false
-    if isNull e.InnerException || containsInner then
-        e.Message
-    else
-        let inner = fullUserMessage e.InnerException
-        if e.Message = "" then
-            inner
-        else if inner = "" then
-            e.Message
-        else
-            sprintf "%s: %s" e.Message inner
 
 let isUserException e = UserException.IsThatUserException e
 

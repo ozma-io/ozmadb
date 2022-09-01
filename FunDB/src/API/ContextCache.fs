@@ -165,9 +165,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
         let policy =
             { new IPooledObjectPolicy<Isolate> with
                   member this.Create () =
-                      let isolate = Isolate.NewWithHeapSize(4UL * 1024UL, 32UL * 1024UL * 1024UL)
+                      let isolate = Isolate.NewWithHeapSize(1UL * 1024UL * 1024UL, 32UL * 1024UL * 1024UL)
                       isolate.TerminateOnException <- true
-                      isolate.WrapCallbackExceptions <- true
                       isolate
                   member this.Return isolate =
                       assert (isNull isolate.CurrentContext)
@@ -871,7 +870,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         | :? ContextException
                         | :? DbUpdateException as e ->
                             logger.LogError(e, "Error during commit")
-                            return Error <| GECommit (fullUserMessage e)
+                            return Error <| GECommit (Exn.fullMessage e)
                         | :? CommitCallbackException as e ->
                             logger.LogError(e, "Error during commit callback")
                             return Error e.Info

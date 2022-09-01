@@ -252,6 +252,7 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                     convertValue typ rawValue
                 with
                 | e ->
+                    eprintfn "Foo: %f" (reader.GetDouble(i))
                     raisefWithInner QueryException e "While reading column %i (\"%s\")" i  (reader.GetName(i))
 
             let mutable rowI = 0
