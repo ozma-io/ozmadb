@@ -14,8 +14,9 @@ pipelines:
           - git submodule update --init
           - dotnet nuget add source -n ozma -u "$NUGET_USER" -p "$NUGET_PASSWORD" --store-password-in-clear-text https://nuget.services.ozma.io/v3/index.json
           - ./build.sh
+          - cp -ar FunDB/bin/*/*/publish publish
         artifacts:
-          - FunDB/bin/*/*/publish
+          - publish
   pull-requests:
     '**':
       - step: *build_step
@@ -33,7 +34,7 @@ pipelines:
             - docker pull myprocessx/upload-artifact
             - pipe: ozma-io/upload-artifact:master
               variables:
-                LOCAL_PATH: FunDB/bin/*/*/publish
+                LOCAL_PATH: publish
             - docker pull myprocessx/deploy-artifact
             - pipe: ozma-io/deploy-artifact:master
           artifacts:
