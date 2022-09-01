@@ -3,10 +3,14 @@
 
 set -ex
 
+pushd FunDB
 dotnet --info
-rm -rf bin publish
+rm -rf bin
 # Issue with lock files
 # dotnet restore --locked-mode
 dotnet restore
 dotnet publish -c Release
-cp -ar bin/*/*/publish publish
+popd
+
+rm -rf publish
+cp -ar FunDB/bin/*/*/publish publish
