@@ -10,7 +10,6 @@
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="src/FunQL/Resolve.fs" />
     <Compile Include="src/Exception.fs" />
     <Compile Include="src/Parsing.fs" />
     <Compile Include="src/SQL/Utils.fs" />
