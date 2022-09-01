@@ -13,7 +13,7 @@ pipelines:
         script:
           - git submodule update --init
           - dotnet nuget add source -n ozma -u "$NUGET_USER" -p "$NUGET_PASSWORD" --store-password-in-clear-text https://nuget.services.ozma.io/v3/index.json
-          - ./build.sh
+          - ./build.sh || (echo "bar"; sleep 1; echo "foo"; exit 1)
         artifacts:
           - FunDB/bin/*/*/publish
   pull-requests:
