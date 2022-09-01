@@ -11,6 +11,3 @@ rm -rf bin
 dotnet restore
 dotnet publish -c Release
 popd
-
-rm -rf publish
-cp -ar FunDB/bin/*/*/publish publish
