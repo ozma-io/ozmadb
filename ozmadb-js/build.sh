@@ -1,7 +1,7 @@
-#!/bin/sh -e
+#!/usr/bin/env bash
 # Build and publish the application.
 
-set -x
+set -ex
 
 test -f yarn.lock
 rm -rf dist bundle *.tsbuildinfo
