@@ -12,7 +12,7 @@ pipelines:
           - dotnetcore
         script:
           - git submodule update --init
-          - dotnet nuget add source -n ozma -u "$NUGET_USER" -p "$NUGET_PASSWORD" --store-password-in-clear-text https://nuget.services.ozma.io/v3/index.json
+          - dotnet nuget add source -n ozma -u "$NUGET_USER" -p "$NUGET_PASSWORD" --store-password-in-clear-text "$NUGET_URL"
           - ./build.sh
         artifacts:
           - FunDB/bin/*/*/publish/**
