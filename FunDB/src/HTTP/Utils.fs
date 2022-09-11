@@ -241,7 +241,7 @@ let continueResolveUser (client : string) (email : string option) (f : UserToken
     let isRoot =
         if not <| isNull userRoles then
             let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
-            roles.Roles |> Seq.contains "fundb_admin"
+            roles.Roles |> Seq.contains "fundb-admin"
         else
             false
     let info =
