@@ -372,7 +372,7 @@ let private runCheckExpr
 
         let result = queryColumnResult aggExpr
         let myFromEntity = fromEntity <| relaxEntityRef entityRef
-        let idCol = resolvedRefFieldExpr <| VRColumn { Entity = Some <| relaxEntityRef entityRef; Name = funId } : ResolvedFieldExpr    
+        let idCol = resolvedRefFieldExpr <| VRColumn { Entity = Some <| relaxEntityRef entityRef; Name = funId } : ResolvedFieldExpr
         let arrayArg = resolvedRefFieldExpr <| VRArgument idsPlaceholder
         let whereExpr = FEAny (idCol, BOEq, arrayArg)
         let singleSelect =

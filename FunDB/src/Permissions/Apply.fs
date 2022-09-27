@@ -262,7 +262,7 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                 | deleteFilter -> andFieldExpr filterExpr deleteFilter
             else
                 filterExpr
-        
+
         let checkExpr =
             if usedEntity.Insert || usedEntity.Update then
                 let checkExpr =
