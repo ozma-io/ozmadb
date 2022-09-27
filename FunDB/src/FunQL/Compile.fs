@@ -2060,9 +2060,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                                 Seq.append (Seq.singleton (CMId idCol, resultMetaColumn idExpr)) (Option.toSeq maybeSubEntityExpr)
                         (Some idCol, systemColumns)
 
-                if flags.IsTopLevel then
-                    eprintfn "Field %O, key: %O, maybe id col: %O" fieldRef.Name (string maybeIdExpr) maybeIdCol
-
                 let getNewDomain (domain : Domain) =
                     match Map.tryFind fieldRef.Name domain with
                     | Some info ->
@@ -2077,10 +2074,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let newDomains =
                     match fromInfo.FromType with
                     | FTEntity (domainId, domain) -> DSingle (domainId, getNewDomain domain)
-                    | FTSubquery info ->
-                        if flags.IsTopLevel then
-                            eprintfn "Field %O, item domain: %O" fieldRef.Name (mapDomainsTree (Map.tryFind fieldRef.Name) info.Domains)
-                        mapDomainsTree getNewDomain info.Domains
+                    | FTSubquery info -> mapDomainsTree getNewDomain info.Domains
 
                 let rec getDomainColumns = function
                     | DSingle (id, domain) -> Seq.empty
