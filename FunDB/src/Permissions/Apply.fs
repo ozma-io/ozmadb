@@ -340,7 +340,7 @@ let private addTypecheck (checksCache : EntityChecksCache) (entityRef : Resolved
             checksCache.GetOfTypeCheck entityRef
     andFieldExpr typeCheckExpr check.Check
 
-type private EntityFiltersCombiner (layout : Layout, checksCache : EntityChecksCache, getFilter : ResolvedEntityRef -> ResolvedOptimizedFieldExpr) =
+type private EntityFiltersCombiner (layout : Layout, checksCache : EntityChecksCache, filterName : string, getFilter : ResolvedEntityRef -> ResolvedOptimizedFieldExpr) =
     let rec buildParentFilter (entityRef : ResolvedEntityRef) =
         let entity = layout.FindEntity entityRef |> Option.get
         let parentCheck =
@@ -390,12 +390,12 @@ type private EntityFiltersCombiner (layout : Layout, checksCache : EntityChecksC
     let getFullEntityCheck (entityRef : ResolvedEntityRef) =
         let childrenCheck = getChildrenFilter entityRef
         match andFieldExpr (getParentFilter entityRef) (addTypecheck checksCache entityRef childrenCheck) with
-        | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
+        | OFEFalse -> raisef PermissionsApplyException "Access denied to %s for entity %O" filterName entityRef
         | entityFilter -> entityFilter
 
     let getSelfEntityCheck (entityRef : ResolvedEntityRef) =
         match getParentFilter entityRef with
-        | OFEFalse -> raisef PermissionsApplyException "Access denied to entity %O" entityRef
+        | OFEFalse -> raisef PermissionsApplyException "Access denied to %s for entity %O" filterName entityRef
         | entityFilter -> entityFilter
 
     member this.GetFilter entityRef = getFilter entityRef
@@ -458,14 +458,14 @@ let private buildFinalAllowedEntity (entityRef : ResolvedEntityRef) (allowedEnti
 
 let private applyPermissionsForEntity (layout : Layout) (checksCache : EntityChecksCache) (allowedEntity : FlatAllowedRoleEntity) (usedEntity : FlatUsedEntity) : HalfAppliedAllowedDatabase =
     let treeBuilder = EntityAccessFilterBuilder (layout, allowedEntity, usedEntity)
-    let filterBuilder = EntityFiltersCombiner (layout, checksCache, fun ref -> treeBuilder.GetFilter(ref).Filter)
-    let checkBuilder = EntityFiltersCombiner (layout, checksCache, fun ref -> treeBuilder.GetFilter(ref).Check)
+    let filterBuilder = EntityFiltersCombiner (layout, checksCache, "SELECT", fun ref -> treeBuilder.GetFilter(ref).Filter)
+    let checkBuilder = EntityFiltersCombiner (layout, checksCache, "CHECK", fun ref -> treeBuilder.GetFilter(ref).Check)
 
     usedEntity.EntryPoints |> Seq.map (fun ref -> (ref, getAppliedEntity treeBuilder filterBuilder checkBuilder ref)) |> Map.ofSeq
 
 let inline private throwRoleExceptions (rootRef : ResolvedRoleRef) (exceptions : (ResolvedRoleRef * PermissionsApplyException) list) =
     let postfix = exceptions |> Seq.map (fun (roleRef, e) -> sprintf "for role %O: %O" roleRef e) |> String.concat ", "
-    let msg = sprintf "Access denied to root entity %O: %s" rootRef postfix
+    let msg = sprintf "Access denied to the root entity %O: %s" rootRef postfix
     raise <| PermissionsApplyException(msg, List.map (fun (roleRef, e) -> upcast e) exceptions, true)
 
 let applyPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : FlatUsedDatabase) : AppliedAllowedDatabase =
@@ -486,7 +486,7 @@ let applyPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : Fla
 
         let allowedEntity =
             match Map.tryFind rootRef role.Flattened.Entities with
-            | None -> raisef PermissionsApplyException "Access denied to entity %O" rootRef
+            | None -> raisef PermissionsApplyException "Access denied to the root entity %O" rootRef
             | Some allowed -> allowed
         match allowedEntity.Roles |> Map.toSeq |> Seq.fold tryRole None with
         | None -> throwRoleExceptions rootRef exceptions
@@ -513,7 +513,7 @@ let checkPermissions (layout : Layout) (role : ResolvedRole) (usedDatabase : Fla
 
         let allowedEntity =
             match Map.tryFind rootRef role.Flattened.Entities with
-            | None -> raisef PermissionsApplyException "Access denied to entity %O" rootRef
+            | None -> raisef PermissionsApplyException "Access denied to the root entity %O" rootRef
             | Some allowed -> allowed
         // Counter-intuitively we use `Some ()` here to signal failed check, and `None` to early drop when found at least one matching role.
         match allowedEntity.Roles |> Map.toSeq |> Seq.foldOption tryRole () with
@@ -543,7 +543,7 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
                     OFETrue
             | Some allowedEntity -> allowedEntity.Check
 
-        let filterBuilder = EntityFiltersCombiner (layout, checksCache, getEntityCheck)
+        let filterBuilder = EntityFiltersCombiner (layout, checksCache, "CHECK", getEntityCheck)
         let check = filterBuilder.GetSelfEntityCheck entityRef
 
         let getFieldCheck name =
@@ -556,7 +556,7 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
 
     let allowedEntity =
         match Map.tryFind entity.Root role.Flattened.Entities with
-        | None -> raisef PermissionsApplyException "Access denied to entity %O" entity.Root
+        | None -> raisef PermissionsApplyException "Access denied to the root entity %O for entity %O" entity.Root entityRef
         | Some allowed -> allowed
     allowedEntity.Roles
         |> Map.toSeq

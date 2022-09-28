@@ -544,10 +544,14 @@ let insertEntities
         | None -> ()
         | Some role ->
             let usedFields = dataFields |> Seq.map fst
-            match getSingleCheckExpression layout role entityRef usedFields with
-            | FUnfiltered -> ()
-            | FFiltered checkExpr ->
-                do! runCheckExpr connection globalArgs layout entityRef checkExpr ids cancellationToken
+            try
+                match getSingleCheckExpression layout role entityRef usedFields with
+                | FUnfiltered -> ()
+                | FFiltered checkExpr ->
+                    do! runCheckExpr connection globalArgs layout entityRef checkExpr ids cancellationToken
+            with
+            | :? PermissionsApplyException as e ->
+                raisefUserWithInner EntityDeniedException e ""
         return ids
     }
 
@@ -660,10 +664,14 @@ let updateEntity
         match applyRole with
         | None -> ()
         | Some role ->
-            match getSingleCheckExpression layout role subEntity (Map.keys updateArgs) with
-            | FUnfiltered -> ()
-            | FFiltered checkExpr ->
-                do! runCheckExpr connection globalArgs layout subEntity checkExpr [|id|] cancellationToken
+            try
+                match getSingleCheckExpression layout role subEntity (Map.keys updateArgs) with
+                | FUnfiltered -> ()
+                | FFiltered checkExpr ->
+                    do! runCheckExpr connection globalArgs layout subEntity checkExpr [|id|] cancellationToken
+            with
+            | :? PermissionsApplyException as e ->
+                raisefUserWithInner EntityDeniedException e ""
         return (id, subEntity)
     }
 
