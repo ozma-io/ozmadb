@@ -59,13 +59,11 @@ type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scri
 
     let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
         try
-            let newViews = func.Call(cancellationToken, null, [|layout|])
+            let newViews = runFunctionInRuntime runtime func cancellationToken [|layout|]
             newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
         with
-        | :? JSException as e ->
-            raisefUserWithInner UserViewGenerateException e "Unhandled exception in user view generator %O:\n%s" (e.Value.ToJSString(runtime.Context)) (stackTraceString e)
-        | :? NetJsException as e ->
-            raisefUserWithInner UserViewGenerateException e "Couldn't generate user views"
+        | :? JavaScriptRuntimeException as e ->
+            raisefUserWithInner UserViewGenerateException e ""
 
     member this.Generate layout cancellationToken = generateUserViews layout cancellationToken
     member this.Runtime = runtime

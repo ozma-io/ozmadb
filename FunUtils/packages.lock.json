@@ -11,8 +11,8 @@
       "FSharpPlus": {
         "type": "Direct",
         "requested": "[1.2.*, )",
-        "resolved": "1.2.4",
-        "contentHash": "gWycs8cwmNPXS4n11nDEnc5KtS+Ppr0bj1BFKYEpKBoM0duqVshB52kUIvXBaOdWJbnjFEFO7UfSJLJz8SENHg==",
+        "resolved": "1.2.5",
+        "contentHash": "d4Nbm4MTE5fKY5tof6nY40GXrKxIQybwc16d1KPZtUPpeli9phwZgXaOJXcShf4PfBa8zwYfNRlWC/lMk2Ah7w==",
         "dependencies": {
           "FSharp.Core": "4.6.2"
         }
