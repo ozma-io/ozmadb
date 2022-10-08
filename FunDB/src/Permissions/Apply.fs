@@ -344,7 +344,7 @@ let private addTypecheck (checksCache : EntityChecksCache) (entityRef : Resolved
             checksCache.GetOfTypeCheck entityRef
     andFieldExpr typeCheckExpr check.Check
 
-type private EntityFiltersCombiner (layout : Layout, checksCache : EntityChecksCache, filterName : string, getFilter : ResolvedEntityRef -> ResolvedOptimizedFieldExpr) =
+type private EntityFiltersCombiner (layout : Layout, checksCache : EntityChecksCache, getFilter : ResolvedEntityRef -> ResolvedOptimizedFieldExpr) =
     let rec buildParentFilter (entityRef : ResolvedEntityRef) =
         let entity = layout.FindEntity entityRef |> Option.get
         let parentCheck =
@@ -393,14 +393,10 @@ type private EntityFiltersCombiner (layout : Layout, checksCache : EntityChecksC
 
     let getFullEntityCheck (entityRef : ResolvedEntityRef) =
         let childrenCheck = getChildrenFilter entityRef
-        match andFieldExpr (getParentFilter entityRef) (addTypecheck checksCache entityRef childrenCheck) with
-        | OFEFalse -> raisef PermissionsApplyException "Access denied to %s for entity %O" filterName entityRef
-        | entityFilter -> entityFilter
+        andFieldExpr (getParentFilter entityRef) (addTypecheck checksCache entityRef childrenCheck)
 
     let getSelfEntityCheck (entityRef : ResolvedEntityRef) =
-        match getParentFilter entityRef with
-        | OFEFalse -> raisef PermissionsApplyException "Access denied to %s for entity %O" filterName entityRef
-        | entityFilter -> entityFilter
+        getParentFilter entityRef
 
     member this.GetFilter entityRef = getFilter entityRef
     member this.ChecksCache = checksCache
@@ -417,7 +413,8 @@ let private renameAllFieldExprEntities (toEntityRef : EntityRef) : ResolvedField
         | { Ref = { Ref = VRArgument _ } } as ref -> ref
     mapFieldExpr { idFieldExprMapper with FieldReference = mapReference }
 
-let private buildFinalRestriction (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> EntityFilterExpr = function
+let private buildFinalRestriction (name: string) (entityRef : ResolvedEntityRef) : ResolvedOptimizedFieldExpr -> EntityFilterExpr = function
+    | OFEFalse -> raisef PermissionsApplyException "Access denied to %s for entity %O" name entityRef
     | OFETrue -> FUnfiltered
     | expr ->
         expr.ToFieldExpr() |> renameAllFieldExprEntities (relaxEntityRef entityRef) |> FFiltered
@@ -455,15 +452,15 @@ let private getAppliedEntity
     }
 
 let private buildFinalAllowedEntity (entityRef : ResolvedEntityRef) (allowedEntity : HalfAppliedAllowedEntity) : AppliedAllowedEntity =
-    { SelectUpdate = Option.map (buildFinalRestriction entityRef) allowedEntity.SelectUpdate
-      Delete = Option.map (buildFinalRestriction entityRef) allowedEntity.Delete
-      Check = Option.map (buildFinalRestriction entityRef) allowedEntity.Check
+    { SelectUpdate = Option.map (buildFinalRestriction "select/update" entityRef) allowedEntity.SelectUpdate
+      Delete = Option.map (buildFinalRestriction "delete" entityRef) allowedEntity.Delete
+      Check = Option.map (buildFinalRestriction "insert/update" entityRef) allowedEntity.Check
     }
 
 let private applyPermissionsForEntity (layout : Layout) (checksCache : EntityChecksCache) (allowedEntity : FlatAllowedRoleEntity) (usedEntity : FlatUsedEntity) : HalfAppliedAllowedDatabase =
     let treeBuilder = EntityAccessFilterBuilder (layout, allowedEntity, usedEntity)
-    let filterBuilder = EntityFiltersCombiner (layout, checksCache, "SELECT", fun ref -> treeBuilder.GetFilter(ref).Filter)
-    let checkBuilder = EntityFiltersCombiner (layout, checksCache, "CHECK", fun ref -> treeBuilder.GetFilter(ref).Check)
+    let filterBuilder = EntityFiltersCombiner (layout, checksCache, fun ref -> treeBuilder.GetFilter(ref).Filter)
+    let checkBuilder = EntityFiltersCombiner (layout, checksCache, fun ref -> treeBuilder.GetFilter(ref).Check)
 
     usedEntity.EntryPoints |> Seq.map (fun ref -> (ref, getAppliedEntity treeBuilder filterBuilder checkBuilder ref)) |> Map.ofSeq
 
@@ -547,7 +544,7 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
                     OFETrue
             | Some allowedEntity -> allowedEntity.Check
 
-        let filterBuilder = EntityFiltersCombiner (layout, checksCache, "CHECK", getEntityCheck)
+        let filterBuilder = EntityFiltersCombiner (layout, checksCache, getEntityCheck)
         let check = filterBuilder.GetSelfEntityCheck entityRef
 
         let getFieldCheck name =
@@ -566,4 +563,4 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
         |> Map.toSeq
         |> Seq.map getRoleCheck
         |> Seq.fold orFieldExpr OFEFalse
-        |> buildFinalRestriction entityRef
+        |> buildFinalRestriction "check" entityRef
