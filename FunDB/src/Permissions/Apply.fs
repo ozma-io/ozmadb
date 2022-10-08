@@ -184,6 +184,10 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
         let usedEntity = Map.findWithDefault entityRef emptyUsedEntity flatUsedEntity.Children
         addSelectFilter usedEntity entityRef allowedEntity
 
+    let addStandaloneCheckFilter (entityRef : ResolvedEntityRef) (allowedEntity : FlatAllowedDerivedEntity) =
+        let usedEntity = Map.findWithDefault entityRef emptyUsedEntity flatUsedEntity.Children
+        addCheckFilter usedEntity entityRef allowedEntity
+
     // Build combined parents filter for a given access type.
     // fsharplint:disable-next-line ReimplementsFunction
     let rec getSelectAccessFilter = memoizeN (getAccessFilter (fun ent -> getSelectAccessFilter ent) addStandaloneSelectFilter layout flatAllowedEntity)
@@ -192,7 +196,7 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
     // fsharplint:disable-next-line ReimplementsFunction
     let rec getDeleteAccessFilter = memoizeN (getAccessFilter (fun ent -> getDeleteAccessFilter ent) (fun entityRef allowedEntity -> allowedEntity.Delete) layout flatAllowedEntity)
     // fsharplint:disable-next-line ReimplementsFunction
-    let rec getCheckAccessFilter = memoizeN (getAccessFilter (fun ent -> getCheckAccessFilter ent) (fun entityRef allowedEntity -> allowedEntity.Check) layout flatAllowedEntity)
+    let rec getCheckAccessFilter = memoizeN (getAccessFilter (fun ent -> getCheckAccessFilter ent) addStandaloneCheckFilter layout flatAllowedEntity)
 
     let rec buildFilter (entityRef : ResolvedEntityRef) : EntityAccessFilter =
         let entity = layout.FindEntity entityRef |> Option.get
@@ -234,7 +238,7 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                     else
                         getSelectAccessFilter entityRef
                 match selectFilter with
-                | OFEFalse -> raisef PermissionsApplyException "Access denied to select entity %O" entityRef
+                | OFEFalse -> raisef PermissionsApplyException "Access denied to select for entity %O" entityRef
                 | selectFilter -> selectFilter
             else
                 OFETrue
@@ -246,7 +250,7 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                     else
                         getUpdateAccessFilter entityRef
                 match updateFilter with
-                | OFEFalse -> raisef PermissionsApplyException "Access denied to update entity %O" entityRef
+                | OFEFalse -> raisef PermissionsApplyException "Access denied to update for entity %O" entityRef
                 | updateFilter -> andFieldExpr filterExpr updateFilter
             else
                 filterExpr
@@ -258,7 +262,7 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                     else
                         getDeleteAccessFilter entityRef
                 match deleteFilter with
-                | OFEFalse -> raisef PermissionsApplyException "Access denied to delete entity %O" entityRef
+                | OFEFalse -> raisef PermissionsApplyException "Access denied to delete for entity %O" entityRef
                 | deleteFilter -> andFieldExpr filterExpr deleteFilter
             else
                 filterExpr
@@ -267,12 +271,12 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
             if usedEntity.Insert || usedEntity.Update then
                 let checkExpr =
                     if parentFilter.PropagatedInsert || parentFilter.PropagatedUpdate then
-                        addSelectFilter usedEntity entityRef allowedEntity
+                        addCheckFilter usedEntity entityRef allowedEntity
                     else
                         getCheckAccessFilter entityRef
                 match checkExpr with
-                | OFEFalse -> raisef PermissionsApplyException "Access denied to insert/update entity %O" entityRef
-                | selectFilter -> selectFilter
+                | OFEFalse -> raisef PermissionsApplyException "Access denied for insert/update check for entity %O" entityRef
+                | checkExpr -> checkExpr
             else
                 OFETrue
 
