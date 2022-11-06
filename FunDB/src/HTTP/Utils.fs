@@ -20,6 +20,7 @@ open NodaTime
 open Npgsql
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.FunQL.AST
@@ -130,7 +131,7 @@ let bindJsonToken (token : JToken) (f : 'a -> HttpHandler) : HttpHandler =
         try
             Ok <| token.ToObject()
         with
-        | :? JsonException as e -> Error <| Exn.fullMessage e
+        | :? JsonException as e -> Error <| fullUserMessage e
     match mobj with
     | Ok o -> f o
     | Error e -> RequestErrors.BAD_REQUEST e
@@ -146,7 +147,7 @@ let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) :
                 | :? JsonException as e -> return Error e
             }
         match model with
-        | Error e -> return! requestError (RIRequest <| Exn.fullMessage e) next ctx
+        | Error e -> return! requestError (RIRequest <| fullUserMessage e) next ctx
         | Ok ret when isRefNull ret -> return! requestError (RIRequest "Invalid JSON value") next ctx
         | Ok ret -> return! f ret next ctx
     }
@@ -241,7 +242,7 @@ let continueResolveUser (client : string) (email : string option) (f : UserToken
     let isRoot =
         if not <| isNull userRoles then
             let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
-            roles.Roles |> Seq.contains "fundb-admin"
+            roles.Roles |> Seq.contains "fundb_admin"
         else
             false
     let info =

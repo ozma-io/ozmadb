@@ -10,6 +10,7 @@ open Microsoft.EntityFrameworkCore
 open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
@@ -157,7 +158,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 with
                 | :? ArgumentCheckException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Trigger {name} returned invalid arguments", ref)
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     rctx.WriteEvent (fun event ->
                         event.Type <- "triggerError"
                         event.Error <- "arguments"
@@ -166,7 +167,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEArguments str))
                 | :? TriggerRunException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Exception in trigger {name}", ref)
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     rctx.WriteEvent (fun event ->
                         event.Type <- "triggerError"
                         event.Error <- "exception"
@@ -190,7 +191,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 with
                 | :? TriggerRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in trigger {name}", ref)
-                        let str = Exn.fullMessage ex
+                        let str = fullUserMessage ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "triggerError"
                             event.Error <- "exception"
@@ -230,7 +231,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 with
                 | :? TriggerRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in trigger {name}", ref)
-                        let str = Exn.fullMessage ex
+                        let str = fullUserMessage ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "triggerError"
                             event.Error <- "exception"
@@ -263,7 +264,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                             event.SchemaName <- entityRef.Schema.ToString()
                             event.EntityName <- entityRef.Name.ToString()
                             event.Error <- "access_denied"
-                            event.Details <- Exn.fullMessage ex
+                            event.Details <- fullUserMessage ex
                         )
                         return Error EEAccessDenied
             | _ -> return Error EENotFound
@@ -316,7 +317,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         with
                         | :? ArgumentCheckException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Invalid arguments for entity insert")
-                            let str = Exn.fullMessage ex
+                            let str = fullUserMessage ex
                             Error { Details = EEArguments str; Operation = i }
 
                     match Seq.traverseResult convertOne (Seq.indexed rawRowsArgs) with
@@ -364,11 +365,11 @@ type EntitiesAPI (api : IFunDBAPI) =
                 with
                 | :? EntityArgumentsException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Invalid arguments for entity insert")
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     return Error { Details = EEArguments str; Operation = 0 }
                 | :? EntityExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to insert entry")
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     return Error { Details = EEExecution str; Operation = 0 }
                 | :? EntityDeniedException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Access denied")
@@ -377,7 +378,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.SchemaName <- entityRef.Schema.ToString()
                         event.EntityName <- entityRef.Name.ToString()
                         event.Error <- "access_denied"
-                        event.Details <- Exn.fullMessage ex
+                        event.Details <- fullUserMessage ex
                     )
                     return Error { Details = EEAccessDenied; Operation = 0 }
         }
@@ -438,11 +439,11 @@ type EntitiesAPI (api : IFunDBAPI) =
                 with
                 | :? ArgumentCheckException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Invalid arguments for entity update")
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     return Error (EEArguments str)
                 | :? EntityExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to update entry")
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     return Error (EEExecution str)
                 | :? EntityNotFoundException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Not found")
@@ -459,7 +460,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.EntityName <- entityRef.Name.ToString()
                         event.RowId <- entityId
                         event.Error <- "access_denied"
-                        event.Details <- detailsPrefix + Exn.fullMessage ex
+                        event.Details <- detailsPrefix + fullUserMessage ex
                     )
                     return Error EEAccessDenied
         }
@@ -504,11 +505,11 @@ type EntitiesAPI (api : IFunDBAPI) =
                 with
                 | :? ArgumentCheckException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Invalid arguments for entity delete")
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     return Error (EEArguments str)
                 | :? EntityExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to delete entry")
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     return Error (EEExecution str)
                 | :? EntityNotFoundException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Not found")
@@ -525,7 +526,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.EntityName <- entityRef.Name.ToString()
                         event.RowId <- entityId
                         event.Error <- "access_denied"
-                        event.Details <- detailsPrefix + Exn.fullMessage ex
+                        event.Details <- detailsPrefix + fullUserMessage ex
                     )
                     return Error EEAccessDenied
         }
@@ -554,7 +555,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 with
                 | :? EntityExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to get related entities")
-                    let str = Exn.fullMessage ex
+                    let str = fullUserMessage ex
                     return Error (EEExecution str)
                 | :? EntityNotFoundException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Not found")
@@ -571,7 +572,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.EntityName <- entityRef.Name.ToString()
                         event.RowId <- entityId
                         event.Error <- "access_denied"
-                        event.Details <- detailsPrefix + Exn.fullMessage ex
+                        event.Details <- detailsPrefix + fullUserMessage ex
                     )
                     return Error EEAccessDenied
         }
@@ -624,22 +625,22 @@ type EntitiesAPI (api : IFunDBAPI) =
             with
             | :? CommandArgumentsException as ex when ex.IsUserException ->
                 logger.LogError(ex, "Invalid arguments for command")
-                let str = Exn.fullMessage ex
+                let str = fullUserMessage ex
                 return Error (EEArguments str)
             | :? CommandExecutionException as ex when ex.IsUserException ->
                 logger.LogError(ex, "Failed to update entry")
-                let str = Exn.fullMessage ex
+                let str = fullUserMessage ex
                 return Error (EEExecution str)
             | :? CommandResolveException as ex when ex.IsUserException ->
                 logger.LogError(ex, "Failed to resolve command")
-                let str = Exn.fullMessage ex
+                let str = fullUserMessage ex
                 return Error (EECompilation str)
             | :? CommandDeniedException as ex when ex.IsUserException ->
                 logger.LogError(ex, "Access denied")
                 rctx.WriteEvent (fun event ->
                     event.Type <- "runCommand"
                     event.Error <- "access_denied"
-                    event.Details <- Exn.fullMessage ex
+                    event.Details <- fullUserMessage ex
                 )
                 return Error EEAccessDenied
         }
@@ -719,7 +720,7 @@ type EntitiesAPI (api : IFunDBAPI) =
             with
             | :? DeferredConstraintsException as ex ->
                 logger.LogError(ex, "Deferred error")
-                let str = Exn.fullMessage ex
+                let str = fullUserMessage ex
                 rctx.WriteEvent (fun event ->
                     event.Type <- "deferConstraints"
                     event.Error <- "execution"

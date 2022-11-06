@@ -29,7 +29,7 @@ type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
             runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
         with
         | :? JavaScriptRuntimeException as e ->
-            raisefWithInner ActionRunException e "Couldn't initialize"
+            raisefWithInner ActionRunException e "Couldn't initialize action"
 
     member this.Run (args : JObject, cancellationToken : CancellationToken) : Task<JObject option> =
         task {
@@ -38,7 +38,7 @@ type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
                 args.WriteTo(writer)
                 writer.Result
             try
-                let! result =  runFunctionInRuntime runtime func cancellationToken [|argsValue|]
+                let! result =  runAsyncFunctionInRuntime runtime func cancellationToken [|argsValue|]
                 match result.Data with
                 | :? Undefined -> return None
                 | :? Object ->
@@ -47,7 +47,7 @@ type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
                     return Some result
                 | _ -> return raisef ActionRunException "Invalid return value"
             with
-            | :? JavaScriptRuntimeException as e -> return raisefWithInner ActionRunException e "Failed to run action"
+            | :? JavaScriptRuntimeException as e -> return raisefWithInner ActionRunException e ""
         }
 
     member this.Runtime = runtime

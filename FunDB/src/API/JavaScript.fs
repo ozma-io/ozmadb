@@ -14,6 +14,7 @@ open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
@@ -33,6 +34,14 @@ type APICallErrorInfo =
 
         interface IAPIError with
             member this.Message = this.Message
+
+type JavaScriptAPIException (message : string, innerException : Exception, isUserException : bool) =
+    inherit UserException(message, innerException, isUserException)
+
+    new (message : string, innerException : Exception) =
+        JavaScriptAPIException (message, innerException, isUserException innerException)
+
+    new (message : string) = JavaScriptAPIException (message, null, true)
 
 type private APIHandle (api : IFunDBAPI) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
@@ -99,7 +108,7 @@ let inline private runResultApiCall<'a, 'e when 'e :> IAPIError> (handle : APIHa
                 unmask ()
                 match res with
                 | Ok r -> return V8JsonWriter.Serialize(context, r)
-                | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
+                | Error e -> return raise <| JavaScriptAPIException(e.Message)
             }
     Func<_>(run)
 
@@ -111,7 +120,7 @@ let inline private runVoidResultApiCall<'e when 'e :> IAPIError> (handle : APIHa
                 unmask ()
                 match res with
                 | Ok r -> return Value.Undefined.New(context.Isolate)
-                | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
+                | Error e -> return raise <| JavaScriptAPIException(e.Message)
             }
     Func<_>(run)
 

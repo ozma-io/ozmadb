@@ -53,19 +53,20 @@ type GenericDomain<'e> when 'e : comparison = Map<'e, DomainField>
 type GlobalDomainId = int
 type DomainNamespaceId = int
 type LocalDomainId = int
-[<NoEquality; NoComparison>]
-type GenericDomains<'e> when 'e : comparison =
-    | DSingle of GlobalDomainId * GenericDomain<'e>
-    | DMulti of DomainNamespaceId * Map<LocalDomainId, GenericDomains<'e>>
 
+type DomainsTree<'a> =
+    | DSingle of GlobalDomainId * 'a
+    | DMulti of DomainNamespaceId * Map<LocalDomainId, DomainsTree<'a>>
+
+type GenericDomains<'e> when 'e : comparison = DomainsTree<GenericDomain<'e>>
 type Domain = GenericDomain<FieldName>
 type Domains = GenericDomains<FieldName>
 
-let rec private mapDomain (f : GenericDomain<'a> -> GenericDomain<'b>) : GenericDomains<'a> -> GenericDomains<'b> = function
+let rec private mapDomainsTree (f : 'a -> 'b) : DomainsTree<'a> -> DomainsTree<'b> = function
     | DSingle (id, dom) -> DSingle (id, f dom)
-    | DMulti (ns, doms) -> DMulti (ns, Map.map (fun name -> mapDomain f) doms)
+    | DMulti (ns, doms) -> DMulti (ns, Map.map (fun name -> mapDomainsTree f) doms)
 
-let private mapDomainsFields (f : 'e1 -> 'e2) = mapDomain (Map.mapKeys f)
+let private mapDomainsFields (f : 'e1 -> 'e2) = mapDomainsTree (Map.mapKeys f)
 
 let private renameDomainFields (names : Map<'e1, 'e2>) = mapDomainsFields (fun k -> Map.find k names)
 
@@ -929,6 +930,8 @@ type private CompileBoundRefArgs =
       CheckNullExpr : SQL.ValueExpr option
       TableRef : SQL.TableRef option
     }
+
+type private ExpandedFieldKey = DomainsTree<FromFieldKey>
 
 // Expects metadata:
 // * `FieldMeta` for all immediate FERefs in result expressions when meta columns are required;
@@ -1871,16 +1874,18 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let addMetaColumns = flags.MetaColumns && not extra.HasAggregates
 
-        let mutable idColumns = Map.empty : Map<FromFieldKey, DomainIdColumn>
+        let mutable idColumns = Map.empty : Map<string, DomainIdColumn>
         let mutable lastIdColumn = 1
-        let getIdColumn (key : FromFieldKey) : bool * DomainIdColumn =
+        let getIdColumn (key : string) : bool * DomainIdColumn =
             match Map.tryFind key idColumns with
-            | Some id -> (false, id)
+            | Some maybeId -> (false, maybeId)
             | None ->
-            let idCol = lastIdColumn
-            lastIdColumn <- lastIdColumn + 1
-            idColumns <- Map.add key idCol idColumns
-            (true, idCol)
+                let idCol = lastIdColumn
+                lastIdColumn <- lastIdColumn + 1
+                idColumns <- Map.add key idCol idColumns
+                (true, idCol)
+
+        let ownDomainId = newGlobalDomainId ()
 
         let getResultColumnEntry (i : int) (result : ResolvedQueryColumnResult) : ResultColumn =
             let (newPaths, resultColumn) = compileColumnResult ctx paths flags.IsTopLevel result
@@ -1917,7 +1922,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                             Some (attrCol, ret)
                     attrs |> Map.toSeq |> Seq.mapMaybe makeDefaultAttr
 
-
             let getDefaultArgumentAttributes (argExpr : ResolvedFieldExpr) (argInfo : CompiledArgument) =
                 let makeArgumentAttributeColumn (name : AttributeName, attr : ResolvedBoundAttribute) =
                     let mapping = boundAttributeToMapping attr.Expression
@@ -1943,7 +1947,6 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             | FERef resultRef when not (Array.isEmpty resultRef.Ref.Path) && addMetaColumns ->
                 let fieldInfo = ObjectMap.findType<FieldRefMeta> resultRef.Extra
                 assert (Array.length resultRef.Ref.Path = Array.length fieldInfo.Path)
-                let fromId = fieldRefFromId fieldInfo
 
                 let replacePath path boundPath =
                     assert (Array.length path = Array.length boundPath)
@@ -1957,42 +1960,38 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let finalRef = { Entity = finalEntityRef; Name = finalArrow.Name }
 
                 // Add system columns (id or sub_entity - this is a generic function).
-                let makeSystemColumn (columnConstr : int -> MetaType) (systemName : FieldName) =
+                let makeSystemColumn (systemName : FieldName) =
                     let systemArrow = { finalArrow with Name = systemName }
                     let systemPath = Seq.append (Seq.skipLast 1 resultRef.Ref.Path) (Seq.singleton systemArrow) |> Array.ofSeq
                     let systemRef = replacePath systemPath fieldInfo.Path
                     let (newPaths, systemExpr) = compileLinkedFieldRef emptyExprCompilationFlags RCTypeExpr paths systemRef
                     paths <- newPaths
-                    resultMetaColumn systemExpr
+                    systemExpr
 
-                let key =
-                    { FromId = fromId
-                      Path = resultRef.Ref.Path |> Seq.map (fun a -> a.Name) |> Seq.toList
-                    }
+                let idExpr = makeSystemColumn funId
 
-                let (systemName, systemColumns) =
-                    let (appendNew, idCol) = getIdColumn key
-                    if not appendNew then
-                        (idCol, Seq.empty)
+                let (createIdCol, idCol) = getIdColumn (string idExpr)
+                let systemColumns =
+                    if not createIdCol then
+                        Seq.empty
                     else
-                        let idColumn = (CMId idCol, makeSystemColumn CMId funId)
+                        let idColumn = (CMId idCol, resultMetaColumn idExpr)
                         let subEntityColumns =
                             // We don't need to select entity if there are no possible children.
                             if Seq.length (allPossibleEntitiesList layout finalEntityRef) <= 1 then
                                 Seq.empty
                             else
-                                Seq.singleton (CMSubEntity idCol, makeSystemColumn CMSubEntity funSubEntity)
-                        let cols = Seq.append (Seq.singleton idColumn) subEntityColumns
-                        (idCol, cols)
+                                Seq.singleton (CMSubEntity idCol, resultMetaColumn <| makeSystemColumn funSubEntity)
+                        Seq.append (Seq.singleton idColumn) subEntityColumns
 
                 let newDomains =
                     let newInfo =
                         { Ref = finalRef
                           RootEntity = finalEntity.Root
-                          IdColumn = systemName
+                          IdColumn = idCol
                           AsRoot = finalArrow.AsRoot
                         }
-                    DSingle (newGlobalDomainId (), Map.singleton resultColumn.Name newInfo )
+                    DSingle (ownDomainId, Map.singleton resultColumn.Name newInfo )
 
                 let punColumns =
                     if not flags.IsTopLevel then
@@ -2043,42 +2042,39 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     | SQL.VEValue SQL.VNull -> None
                     | systemExpr -> Some systemExpr
 
-                let key =
-                    { FromId = fieldRefFromId fieldInfo
-                      Path = []
-                    }
+                let maybeIdExpr = makeMaybeSystemColumn (fun _ -> true) CMId funId
 
-                let (idCol, systemColumns) =
-                    let (appendNew, idCol) = getIdColumn key
-                    if not appendNew then
-                        (idCol, Seq.empty)
-                    else
-                        let needsSubEntity (ref : ResolvedFieldRef) =
-                            Seq.length (allPossibleEntitiesList layout ref.Entity) > 1
+                let (maybeIdCol, systemColumns) =
+                    match maybeIdExpr with
+                    | None -> (None, Seq.empty)
+                    | Some idExpr ->
+                        let (createIdCol, idCol) = getIdColumn (string idExpr)
+                        let systemColumns =
+                            if not createIdCol then
+                                Seq.empty
+                            else
+                                let needsSubEntity (ref : ResolvedFieldRef) =
+                                    Seq.length (allPossibleEntitiesList layout ref.Entity) > 1
 
-                        let maybeIdCol = Option.map (fun x -> (CMId idCol, resultMetaColumn x)) <| makeMaybeSystemColumn (fun _ -> true) CMId funId
-                        let maybeSubEntityCol = Option.map (fun x -> (CMSubEntity idCol, resultMetaColumn x)) <|makeMaybeSystemColumn needsSubEntity CMSubEntity funSubEntity
-                        let cols = Seq.append (Option.toSeq maybeIdCol) (Option.toSeq maybeSubEntityCol)
-                        (idCol, cols)
+                                let maybeSubEntityExpr = Option.map (fun x -> (CMSubEntity idCol, resultMetaColumn x)) <| makeMaybeSystemColumn needsSubEntity CMSubEntity funSubEntity
+                                Seq.append (Seq.singleton (CMId idCol, resultMetaColumn idExpr)) (Option.toSeq maybeSubEntityExpr)
+                        (Some idCol, systemColumns)
 
                 let getNewDomain (domain : Domain) =
                     match Map.tryFind fieldRef.Name domain with
                     | Some info ->
                         let newInfo =
                             { info with
-                                IdColumn = idCol
+                                IdColumn = Option.get maybeIdCol
                                 AsRoot = info.AsRoot || resultRef.Ref.AsRoot
-                            }
+                             }
                         Map.singleton resultColumn.Name newInfo
                     | None -> Map.empty
-                let rec getNewDomains = function
-                    | DSingle (id, domain) -> DSingle (id, getNewDomain domain)
-                    | DMulti (ns, nested) -> DMulti (ns, nested |> Map.map (fun key domains -> getNewDomains domains))
 
                 let newDomains =
                     match fromInfo.FromType with
                     | FTEntity (domainId, domain) -> DSingle (domainId, getNewDomain domain)
-                    | FTSubquery info -> getNewDomains info.Domains
+                    | FTSubquery info -> mapDomainsTree getNewDomain info.Domains
 
                 let rec getDomainColumns = function
                     | DSingle (id, domain) -> Seq.empty
@@ -2218,7 +2214,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let resultEntries = Array.mapi getResultEntry select.Results
         let resultColumns = resultEntries |> Array.map (fun x -> x.Column)
-        let emptyDomains = DSingle (newGlobalDomainId (), Map.empty)
+        let emptyDomains = DSingle (ownDomainId, Map.empty)
 
         let checkSameMeta (a : ResultMetaColumn) (b : ResultMetaColumn) =
             assert (string a.Expression = string b.Expression)
@@ -2226,7 +2222,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
 
         let metaColumns = resultEntries |> Seq.map (fun c -> c.MetaColumns) |> Seq.fold (Map.unionWith checkSameMeta) Map.empty
         let (newDomains, metaColumns) =
-            if addMetaColumns then
+            if not addMetaColumns then
+                (emptyDomains, metaColumns)
+            else
                 let newDomains = resultEntries |> Seq.mapMaybe (fun entry -> entry.Domains) |> Seq.fold mergeDomains emptyDomains
 
                 let mainIdColumns =
@@ -2252,8 +2250,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let newMetaColumns = [ mainIdColumns; attributeColumns ] |> Seq.concat |> Map.ofSeq
                 let metaColumns = Map.unionUnique metaColumns newMetaColumns
                 (newDomains, metaColumns)
-            else
-                (emptyDomains, metaColumns)
+
         let orderLimit =
             let (newPaths, ret) = compileOrderLimitClause ctx paths select.OrderLimit
             paths <- newPaths

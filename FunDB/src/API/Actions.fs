@@ -5,10 +5,10 @@ open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json.Linq
 
-open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDB.Actions.Run
 open FunWithFlags.FunDB.API.Types
+open FunWithFlags.FunDB.Exception
 
 type ActionsAPI (api : IFunDBAPI) =
     let rctx = api.Request
@@ -28,7 +28,7 @@ type ActionsAPI (api : IFunDBAPI) =
                 with
                     | :? ActionRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in action {action}", ref)
-                        let str = Exn.fullMessage ex
+                        let str = fullUserMessage ex
                         rctx.WriteEvent (fun event ->
                             event.Type <- "runAction"
                             event.Error <- "exception"
@@ -37,7 +37,7 @@ type ActionsAPI (api : IFunDBAPI) =
                         return Error (AEException str)
             | Some (Error e) ->
                 logger.LogError(e, "Requested action {action} is broken", ref.ToString())
-                return Error <| AECompilation (Exn.fullMessage e)
+                return Error <| AECompilation (fullUserMessage e)
             | None -> return Error AENotFound
         }
 

@@ -991,7 +991,7 @@ let private boundEntityFieldInfo (typeCtxs : TypeContextsMap) (inner : BoundColu
         }
     ObjectMap.ofSeq (Seq.append commonExtras extras)
 
-let fieldRefFromId (fieldInfo : FieldRefMeta) : FromId =
+let private fieldRefFromId (fieldInfo : FieldRefMeta) : FromId =
     match fieldInfo.Bound with
     | Some (BMArgument arg) -> FIArgument arg.Ref
     | _ ->
