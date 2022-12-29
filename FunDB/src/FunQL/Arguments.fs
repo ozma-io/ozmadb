@@ -1,5 +1,7 @@
 module FunWithFlags.FunDB.FunQL.Arguments
 
+open Newtonsoft.Json.Linq
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
 open FunWithFlags.FunDB.Exception
@@ -203,6 +205,7 @@ let convertEntityArguments (entity : ResolvedEntity) (rawArgs : RawArguments) : 
     let getValue (fieldName : FieldName) (field : ResolvedColumnField) =
         match Map.tryFind (string fieldName) rawArgs with
         | None -> None
+        | Some value when value.Type = JTokenType.Undefined -> None
         | Some value ->
             match parseValueFromJson field.FieldType field.IsNullable value with
             | None -> raisef ArgumentCheckException "Cannot convert argument %O to type %O" fieldName field.FieldType
