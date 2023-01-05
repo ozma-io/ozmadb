@@ -22,7 +22,9 @@ FROM
   funapp.settings
 WHERE
   name NOT IN (SELECT name FROM user_settings)`,
+
     "my_user_id": "SELECT $$user_id",
+
     "color_themes": `
 SELECT
   id,
@@ -40,6 +42,7 @@ FROM
     background
   FROM
     funapp.color_variants`,
+
     "iframe_markup_by_name": `
 { $schema string, $name string }:
 SELECT
@@ -58,6 +61,18 @@ FROM
 WHERE
   schema_id=>name = $schema
   AND name = $name`,
+
+    "translations_by_language": `
+{ $language string }:
+SELECT
+  schema_id=>name as schema_name,
+  message,
+  translation
+FROM
+  "funapp"."translations"
+WHERE
+  language = $language`,
+
     // Public APIs
     "system_menu": `
 SELECT

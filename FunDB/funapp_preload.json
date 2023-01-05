@@ -124,6 +124,35 @@
           },
           "mainField": "full_name",
           "saveRestoreKey": "name"
+        },
+
+        "translations": {
+          "columnFields": {
+            "schema_id": { "type": "reference(\"public\".\"schemas\")" },
+            "message": { "type": "string" },
+            "language": { "type": "string" },
+            "translation": { "type": "string" }
+          },
+          "computedFields": {
+            "full_name": { "expression": "message || ' (' || schema_id=>__main || '.' || language || ')'" }
+	  },
+          "uniqueConstraints": {
+            "key": {
+              "columns": [
+                "schema_id", "language", "message"
+              ], "isAlternateKey": true
+            }
+          },
+          "checkConstraints": {
+            "non_empty_message": {
+              "expression": "message <> ''"
+            },
+            "non_empty_language": {
+              "expression": "language <> ''"
+            }
+          },
+          "mainField": "full_name",
+          "saveRestoreKey": "key"
         }
 
       },
@@ -273,6 +302,21 @@
                         "select": "true"
                       },
                       "border": {
+                        "select": "true"
+                      }
+                    }
+                  },
+
+                  "translations": {
+                    "select": "true",
+                    "fields": {
+                      "message": {
+                        "select": "true"
+                      },
+                      "language": {
+                        "select": "true"
+                      },
+                      "translation": {
                         "select": "true"
                       }
                     }
