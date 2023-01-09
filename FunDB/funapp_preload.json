@@ -310,6 +310,9 @@
                   "translations": {
                     "select": "true",
                     "fields": {
+                      "schema_id": {
+                        "select": "true"
+                      },
                       "message": {
                         "select": "true"
                       },
