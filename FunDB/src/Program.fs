@@ -74,23 +74,26 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString
                         let obj =
                             { new IInstance with
                                   member this.Name = instance.Name
-                                  member this.Owner = instance.Owner
+
                                   member this.Host = instance.Host
                                   member this.Port = instance.Port
                                   member this.Username = instance.Username
                                   member this.Password = instance.Password
                                   member this.Database = instance.Database
 
+                                  member this.Owner = instance.Owner
                                   member this.DisableSecurity = instance.DisableSecurity
                                   member this.AnyoneCanRead = instance.AnyoneCanRead
                                   member this.Published = instance.Published
-                                  member this.AccessedAt = Option.ofNullable instance.AccessedAt
+                                  member this.ShadowAdmins = instance.ShadowAdmins
 
                                   member this.MaxSize = Option.ofNullable instance.MaxSize
                                   member this.MaxUsers = Option.ofNullable instance.MaxUsers
                                   member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
                                   member this.ReadRateLimitsPerUser = parsedRead
                                   member this.WriteRateLimitsPerUser = parsedWrite
+
+                                  member this.AccessedAt = Option.ofNullable instance.AccessedAt
 
                                   member this.UpdateAccessedAt newTime =
                                       unitTask {

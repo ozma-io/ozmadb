@@ -50,8 +50,7 @@ namespace FunWithFlags.FunDBSchema.Instances
         public int Id { get; set; }
         [Required]
         public string Name { get; set; } = null!;
-        [Required]
-        public string Owner { get; set; } = null!;
+
         [Required]
         public string Host { get; set; } = null!;
         public int Port { get; set; } = 5432;
@@ -62,10 +61,14 @@ namespace FunWithFlags.FunDBSchema.Instances
         [Required]
         public string Database { get; set; } = null!;
 
+        [Required]
+        public string Owner { get; set; } = null!;
         public bool Enabled { get; set; } = true;
         public bool Published { get; set; } = true;
         public bool DisableSecurity { get; set; } = false;
         public bool AnyoneCanRead { get; set; } = false;
+        [Required]
+        public IList<string> ShadowAdmins { get; set; } = new List<string>();
 
         public Instant? AccessedAt { get; set; }
 

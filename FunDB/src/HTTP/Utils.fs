@@ -184,21 +184,26 @@ type IInstance =
     inherit IAsyncDisposable
 
     abstract member Name : string
-    abstract member Owner : string
+
     abstract member Host : string
     abstract member Port : int
     abstract member Username : string
     abstract member Password : string
     abstract member Database : string
+
+    abstract member Owner : string
     abstract member DisableSecurity : bool
     abstract member AnyoneCanRead : bool
-    abstract member AccessedAt : Instant option
     abstract member Published : bool
+    abstract member ShadowAdmins : string seq
+
     abstract member MaxSize : int option // MiB
     abstract member MaxUsers : int option
     abstract member MaxRequestTime : Duration option
     abstract member ReadRateLimitsPerUser : RateLimit seq
     abstract member WriteRateLimitsPerUser : RateLimit seq
+
+    abstract member AccessedAt : Instant option
 
     abstract member UpdateAccessedAt : Instant -> Task
 
@@ -304,11 +309,16 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                         match info.Email with
                         | Some e -> e
                         | None -> sprintf "%s@%s" info.Client serviceDomain
+                    let lowerUserName = userName.ToLowerInvariant()
+                    let isOwner = lowerUserName = instance.Owner.ToLowerInvariant()
+                    let isShadowAdmin =
+                        instance.ShadowAdmins
+                        |> Seq.exists (fun admin -> lowerUserName = admin.ToLowerInvariant())
                     let ictx =
                         { Source = instancesSource
                           Instance = instance
                           UserName = userName
-                          IsRoot = userName.ToLowerInvariant() = instance.Owner.ToLowerInvariant() || info.IsRoot
+                          IsRoot = info.IsRoot || isOwner || isShadowAdmin
                           CanRead = instance.AnyoneCanRead
                         }
                     f ictx
