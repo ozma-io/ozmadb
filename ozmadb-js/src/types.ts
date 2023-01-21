@@ -430,11 +430,13 @@ export interface IFrozenError extends IBasicError {
 }
 
 export interface IExceptionError extends IBasicError {
+  type: "exception";
   details: string;
   userData?: unknown;
 }
 
 export interface ITriggerError extends IBasicError {
+  type: "trigger";
   schema: SchemaName;
   name: TriggerName;
   inner: EntityError;
