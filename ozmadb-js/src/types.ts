@@ -448,7 +448,7 @@ export interface ITransactionError extends IBasicError {
   error: "transaction";
   message: string;
   operation: number;
-  details: EntityError;
+  inner: EntityError;
 }
 
 export type TransactionError = GenericError | ITransactionError;
