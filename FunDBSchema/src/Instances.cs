@@ -68,7 +68,7 @@ namespace FunWithFlags.FunDBSchema.Instances
         public bool DisableSecurity { get; set; } = false;
         public bool AnyoneCanRead { get; set; } = false;
         [Required]
-        public IList<string> ShadowAdmins { get; set; } = new List<string>();
+        public string[] ShadowAdmins { get; set; } = null!;
 
         public Instant? AccessedAt { get; set; }
 
