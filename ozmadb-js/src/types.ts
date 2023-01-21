@@ -366,77 +366,77 @@ export interface IBasicError {
 }
 
 export interface IInternalError extends IBasicError {
-  type: "internal";
+  error: "internal";
 }
 
 export interface IRequestError extends IBasicError {
-  type: "request";
+  error: "request";
 }
 
 export interface IQuotaExceededError extends IBasicError {
-  type: "quotaExceeded";
+  error: "quotaExceeded";
 }
 
 export interface IRateExceededError extends IBasicError {
-  type: "rateExceeded";
+  error: "rateExceeded";
 }
 
 export interface INoEndpointError extends IBasicError {
-  type: "noEndpoint";
+  error: "noEndpoint";
 }
 
 export interface INoInstanceError extends IBasicError {
-  type: "noInstance";
+  error: "noInstance";
 }
 
 export interface IAccessDeniedError extends IBasicError {
-  type: "accessDenied";
+  error: "accessDenied";
 }
 
 export interface IConcurrentUpdateError extends IBasicError {
-  type: "concurrentUpdate";
+  error: "concurrentUpdate";
 }
 
 export interface IStackOverflowError extends IBasicError {
-  type: "stackOverflow";
+  error: "stackOverflow";
   trace: EventSource[];
 }
 
 export type GenericError = IInternalError | IRequestError | IQuotaExceededError | IRateExceededError | INoEndpointError | INoInstanceError | IAccessDeniedError | IConcurrentUpdateError | IStackOverflowError;
 
 export interface INotFoundError extends IBasicError {
-  type: "notFound";
+  error: "notFound";
 }
 
 export interface ICompilationError extends IBasicError {
-  type: "compilation";
+  error: "compilation";
   details: string;
 }
 
 export interface IExecutionError extends IBasicError {
-  type: "execution";
+  error: "execution";
   details: string;
 }
 
 export interface IArgumentsError extends IBasicError {
-  type: "arguments";
+  error: "arguments";
   details: string;
 }
 
 export type UserViewError = GenericError | INotFoundError | ICompilationError | IExecutionError | IArgumentsError;
 
 export interface IFrozenError extends IBasicError {
-  type: "frozen";
+  error: "frozen";
 }
 
 export interface IExceptionError extends IBasicError {
-  type: "exception";
+  error: "exception";
   details: string;
   userData?: unknown;
 }
 
 export interface ITriggerError extends IBasicError {
-  type: "trigger";
+  error: "trigger";
   schema: SchemaName;
   name: TriggerName;
   inner: EntityError;
