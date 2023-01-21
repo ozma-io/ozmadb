@@ -81,7 +81,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               UniqueConstraints = uniqueConstraints |> Seq.map makeSourceUniqueConstraint |> Map.ofSeq
               CheckConstraints = checkConstraints |> Seq.map makeSourceCheckConstraint |> Map.ofSeq
               Indexes = indexes |> Seq.map makeSourceIndex |> Map.ofSeq
-              MainField = FunQLName entityAttr.MainField
+              MainField = Some <| FunQLName entityAttr.MainField
               InsertedInternally = entityAttr.InsertedInternally
               UpdatedInternally = entityAttr.UpdatedInternally
               DeletedInternally = entityAttr.DeletedInternally

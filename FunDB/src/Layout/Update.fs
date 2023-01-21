@@ -92,10 +92,7 @@ type private LayoutUpdater (db : SystemContext) as this =
         ignore <| updateCheckConstraints existingEntity entity.CheckConstraints checkConstraintsMap
         ignore <| updateIndexes existingEntity entity.Indexes indexesMap
 
-        if entity.MainField = funId then
-            existingEntity.MainField <- null
-        else
-            existingEntity.MainField <- string entity.MainField
+        existingEntity.MainField <- Option.map string entity.MainField |> Option.toObj
         existingEntity.IsAbstract <- entity.IsAbstract
         existingEntity.IsFrozen <- entity.IsFrozen
         match entity.SaveRestoreKey with

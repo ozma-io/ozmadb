@@ -109,6 +109,7 @@ type private HalfResolvedEntity =
       TypeName : string
       Root : ResolvedEntityRef
       Source : SourceEntity
+      MainField : FieldName
     } with
         // Half-dummy interface for `hasSubType` and maybe other utility functions to work.
         // Doesn't expose computed fields!
@@ -130,7 +131,7 @@ type private HalfResolvedEntity =
                 let columns = this.ColumnFields |> Map.toSeq |> Seq.map (fun (name, col) -> (name, RColumnField col))
                 Seq.concat [id; subentity; columns]
             member this.ColumnFields = Map.toSeq this.ColumnFields
-            member this.MainField = this.Source.MainField
+            member this.MainField = this.MainField
             member this.TypeName = this.TypeName
             member this.IsAbstract = this.Source.IsAbstract
             member this.IsHidden = this.Source.IsHidden
@@ -374,6 +375,24 @@ type private Phase1Resolver (layout : SourceLayout) =
 
         let getFlag f = Option.defaultValue false (Option.map f parent)
 
+        let mainField =
+            match entity.MainField with
+            | Some mainField ->
+                match parent with
+                | Some p when p.MainField <> mainField ->
+                    raisef ResolveLayoutException "Main field %O in parent entity differs from current" p.MainField
+                | Some p -> ()
+                | None ->
+                    if not (mainField = funId
+                            || Map.containsKey mainField columnFields
+                            || Map.containsKey mainField computedFields) then
+                        raisef ResolveLayoutException "Nonexistent or unsupported main field: %O" mainField
+                mainField
+            | None ->
+                match parent with
+                | None -> funId
+                | Some p -> p.MainField
+
         let ret =
             { ColumnFields = columnFields
               ComputedFields = computedFields
@@ -385,17 +404,12 @@ type private Phase1Resolver (layout : SourceLayout) =
               Children = Map.empty
               Root = root
               TypeName = typeName
+              MainField = mainField
               Source = entity
             }
 
         if ret.DeletedInternally then
             internallyDeletedEntities <- Set.add entityRef internallyDeletedEntities
-
-        if not (entity.MainField = funId
-                    || (entity.MainField = funSubEntity && hasSubType ret)
-                    || Map.containsKey entity.MainField columnFields
-                    || Map.containsKey entity.MainField computedFields) then
-                raisef ResolveLayoutException "Nonexistent main field: %O" entity.MainField
 
         ret
 
@@ -579,7 +593,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
                     let compFields = currEnt.ComputedFields |> Map.toSeq |> Seq.map (fun (name, comp) -> (name, RComputedField (comp :> IComputedFieldBits)))
                     Seq.concat [id; subentity; colFields; compFields]
                 member this.ColumnFields = Map.toSeq currEnt.ColumnFields
-                member this.MainField = currEnt.Source.MainField
+                member this.MainField = currEnt.MainField
                 member this.TypeName = currEnt.TypeName
                 member this.IsAbstract = currEnt.Source.IsAbstract
                 member this.IsHidden = currEnt.Source.IsHidden
@@ -790,22 +804,6 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         if Array.isEmpty index.Expressions then
             raise <| ResolveLayoutException "Empty index"
 
-        let entity = initialWrappedLayout.FindEntity entityRef |> Option.get
-        let resolveIncludedExpr x =
-            let (exprInfo, expr) = resolveLocalExpr entityRef (parseRelatedExpr x)
-            let isGood =
-                match expr with
-                | FERef { Ref = { Ref = VRColumn col } } ->
-                    match entity.FindField col.Name with
-                    | Some { Field = RColumnField _ }
-                    | Some { Field = RId }
-                    | Some { Field = RSubEntity } -> true
-                    | _ -> false
-                | _ -> false
-            if not isGood then
-                raisef ResolveLayoutException "Expressions are not supported as included index columns"
-            expr
-
         let exprs = Array.map (resolveIndexColumn entityRef index.Type) index.Expressions
         let includedExprs = Array.map (fun x -> resolveLocalExpr entityRef (parseRelatedExpr x) |> snd) index.IncludedExpressions
         let predicate = Option.map (fun x -> resolveLocalExpr entityRef (parseRelatedExpr x) |> snd) index.Predicate
@@ -933,7 +931,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           UniqueConstraints = entity.UniqueConstraints
           CheckConstraints = checkConstraints
           Indexes = indexes
-          MainField = entity.Source.MainField
+          MainField = entity.MainField
           InsertedInternally = entity.InsertedInternally
           UpdatedInternally = entity.UpdatedInternally
           DeletedInternally = false

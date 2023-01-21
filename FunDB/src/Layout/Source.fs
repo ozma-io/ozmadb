@@ -66,7 +66,7 @@ type SourceEntity =
       UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       Indexes : Map<IndexName, SourceIndex>
-      MainField : FieldName
+      MainField : FieldName option
       SaveRestoreKey : ConstraintName option
       [<JsonIgnore>]
       InsertedInternally : bool

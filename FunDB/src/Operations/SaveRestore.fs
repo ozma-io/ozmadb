@@ -84,7 +84,7 @@ type PrettyEntity =
       UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
       CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
       Indexes : Map<IndexName, SourceIndex>
-      MainField : FieldName
+      MainField : FieldName option
       SaveRestoreKey : ConstraintName option
       IsAbstract : bool
       IsFrozen : bool

@@ -59,10 +59,7 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
       UniqueConstraints = entity.UniqueConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceUniqueConstraint constr)) |> Map.ofSeqUnique
       CheckConstraints = entity.CheckConstraints |> Seq.map (fun constr -> (FunQLName constr.Name, makeSourceCheckConstraint constr)) |> Map.ofSeqUnique
       Indexes = entity.Indexes |> Seq.map (fun index -> (FunQLName index.Name, makeSourceIndex index)) |> Map.ofSeqUnique
-      MainField =
-        if isNull entity.MainField
-        then funId
-        else FunQLName entity.MainField
+      MainField = Option.ofObj entity.MainField |> Option.map FunQLName
       InsertedInternally = false
       UpdatedInternally = false
       DeletedInternally = false
