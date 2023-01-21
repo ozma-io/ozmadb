@@ -389,6 +389,10 @@ export interface INoInstanceError extends IBasicError {
   error: "noInstance";
 }
 
+export interface IUnauthorizedError extends IBasicError {
+  error: "unauthorized";
+}
+
 export interface IAccessDeniedError extends IBasicError {
   error: "accessDenied";
 }
@@ -402,7 +406,7 @@ export interface IStackOverflowError extends IBasicError {
   trace: EventSource[];
 }
 
-export type GenericError = IInternalError | IRequestError | IQuotaExceededError | IRateExceededError | INoEndpointError | INoInstanceError | IAccessDeniedError | IConcurrentUpdateError | IStackOverflowError;
+export type GenericError = IInternalError | IRequestError | IQuotaExceededError | IRateExceededError | INoEndpointError | INoInstanceError | IUnauthorizedError | IAccessDeniedError | IConcurrentUpdateError | IStackOverflowError;
 
 export interface INotFoundError extends IBasicError {
   error: "notFound";
