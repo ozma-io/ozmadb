@@ -28,6 +28,7 @@ type PermissionsApplyException (message : string, innerExceptions : Exception se
 
     interface IUserException with
         member this.IsUserException = isUserException
+        member this.UserData = None
 
 type EntityFilter<'e> =
     | FUnfiltered

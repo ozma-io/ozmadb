@@ -125,7 +125,7 @@ type private StaticInstance (instance : Instance) =
             let obj =
                 { new IInstance with
                       member this.Name = instance.Name
-                      member this.Owner = instance.Owner
+
                       member this.Host = instance.Host
                       member this.Port = instance.Port
                       member this.Username = instance.Username
@@ -133,9 +133,11 @@ type private StaticInstance (instance : Instance) =
                       member this.Database = instance.Database
 
                       member this.Published = instance.Published
+                      member this.Owner = instance.Owner
                       member this.DisableSecurity = instance.DisableSecurity
                       member this.AnyoneCanRead = instance.AnyoneCanRead
                       member this.AccessedAt = Some <| SystemClock.Instance.GetCurrentInstant()
+                      member this.ShadowAdmins = Seq.empty
 
                       member this.MaxSize = Option.ofNullable instance.MaxSize
                       member this.MaxUsers = Option.ofNullable instance.MaxUsers
@@ -221,11 +223,8 @@ let private setupAuthentication (webAppBuilder : WebApplicationBuilder) =
             ctx.HandleResponse ()
             ctx.Response.StatusCode <- StatusCodes.Status401Unauthorized
             ctx.Response.ContentType <- "application/json"
-            let ret = Map.ofSeq (seq {
-                ("error", "unauthorized")
-                ("message", "Failed to authorize using access token")
-            })
-            ctx.Response.WriteAsync(JsonConvert.SerializeObject(ret))
+            ctx.Response.Headers.WWWAuthenticate <- JwtBearerDefaults.AuthenticationScheme
+            ctx.Response.WriteAsync(JsonConvert.SerializeObject(RIUnauthorized))
 
     ignore <| services
         .AddGiraffe()

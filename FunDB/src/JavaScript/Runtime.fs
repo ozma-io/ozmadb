@@ -5,6 +5,7 @@ open System.Threading
 open System.Threading.Tasks
 open System.Runtime.CompilerServices
 open FSharp.Control.Tasks.Affine
+open Newtonsoft.Json.Linq
 open NetJs
 open NetJs.Value
 open NetJs.Template
@@ -32,13 +33,16 @@ let private longJSMessage (shortMessage : string) (innerException : Exception) =
                 sprintf "%s: %s" shortMessage innerMessage
         sprintf "%s\nJavaScript stack trace:\n%s" fullMessage (trace.ToPrettyString())
 
-type JavaScriptRuntimeException (message : string, innerException : Exception, isUserException : bool) =
-    inherit UserException(longJSMessage message innerException, innerException, isUserException)
+type JavaScriptRuntimeException (message : string, innerException : Exception, isUserException : bool, userData: JToken option) =
+    inherit UserException(longJSMessage message innerException, innerException, isUserException, userData)
+
+    new (message : string, innerException : Exception, isUserException : bool) =
+        JavaScriptRuntimeException (message, innerException, isUserException, userExceptionData innerException)
 
     new (message : string, innerException : Exception) =
-        JavaScriptRuntimeException (message, innerException, isUserException innerException)
+        JavaScriptRuntimeException (message, innerException, isUserException innerException, userExceptionData innerException)
 
-    new (message : string) = JavaScriptRuntimeException (message, null, true)
+    new (message : string) = JavaScriptRuntimeException (message, null, true, None)
 
     interface ICustomFormatException with
         member this.MessageContainsInnerError = message <> this.Message
@@ -216,7 +220,7 @@ let inline runFunctionInRuntime (runtime : IJSRuntime) (func : Function) (cancel
         func.Call(cancellationToken, null, args)
     with
     | :? CallbackException as e ->
-        raise <| JavaScriptRuntimeException("", e, isUserException e.InnerException)
+        raise <| JavaScriptRuntimeException("", e, isUserException e.InnerException, userExceptionData e.InnerException)
     | :? NetJsException as e ->
         raisefUserWithInner JavaScriptRuntimeException e ""
 
@@ -231,7 +235,7 @@ let inline runAsyncFunctionInRuntime (runtime : IJSRuntime) (func : Function) (c
                 }
         with
         | :? CallbackException as e ->
-            return raise <| JavaScriptRuntimeException("", e, isUserException e.InnerException)
+            return raise <| JavaScriptRuntimeException("", e, isUserException e.InnerException, userExceptionData e.InnerException)
         | :? NetJsException as e ->
             return raisefUserWithInner JavaScriptRuntimeException e ""
     }

@@ -2,11 +2,13 @@ module FunWithFlags.FunDB.Exception
 
 open System
 open Printf
+open Newtonsoft.Json.Linq
 
 // Exceptions which can be marked as "user exceptions" -- messages in them can be safely
 // sent back to client.
 type IUserException =
     abstract member IsUserException : bool
+    abstract member UserData : JToken option
 
 // For most exceptions we build a final error string concatenating all nested exception messages together,
 // separated with `:`. However, for some exceptions we want to just use the current message,
@@ -16,25 +18,34 @@ type ICustomFormatException =
     abstract member MessageContainsInnerError : bool
     abstract member ShortMessage : string
 
-type UserException (message : string, innerException : Exception, isUserException : bool) =
+let isUserException (e : exn) =
+    match box e with
+    | null -> true
+    | :? IUserException as e -> e.IsUserException
+    | _ -> false
+
+let userExceptionData (e : exn) =
+    match box e with
+    | :? IUserException as e -> e.UserData
+    | _ -> None
+
+type UserException (message : string, innerException : Exception, isUserException : bool, userData : JToken option) =
     inherit Exception(message, innerException)
 
+    new (message : string, innerException : Exception, isUserException : bool) =
+        UserException (message, innerException, isUserException, userExceptionData innerException)
+
     new (message : string, innerException : Exception) =
-        let isUserException = UserException.IsThatUserException innerException
-        UserException (message, innerException, isUserException)
+        UserException (message, innerException, isUserException innerException, userExceptionData innerException)
 
-    new (message : string) = UserException (message, null, true)
-
-    static member internal IsThatUserException (e : Exception) =
-        match box e with
-        | null -> true
-        | :? IUserException as e -> e.IsUserException
-        | _ -> false
+    new (message : string) = UserException (message, null, true, None)
 
     member this.IsUserException = isUserException
+    member this.UserData = userData
 
     interface IUserException with
         member this.IsUserException = isUserException
+        member this.UserData = userData
 
 let rec fullUserMessage (e : exn) : string =
     let containsInner =
@@ -51,8 +62,6 @@ let rec fullUserMessage (e : exn) : string =
             e.Message
         else
             sprintf "%s: %s" e.Message inner
-
-let isUserException e = UserException.IsThatUserException e
 
 let inline raisefUserWithInner<'a, 'b, 'e when 'e :> UserException> (constr : (string * Exception * bool) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
     kprintf <| fun str ->

@@ -233,7 +233,7 @@ type EntityErrorInfo =
     | [<CaseName("arguments")>] EEArguments of Details : string
     | [<CaseName("compilation")>] EECompilation of Details : string
     | [<CaseName("execution")>] EEExecution of Details : string
-    | [<CaseName("exception")>] EEException of Details : string
+    | [<CaseName("exception")>] EEException of Details : string * UserData : JToken option
     | [<CaseName("trigger")>] EETrigger of Schema : SchemaName * Name : TriggerName * Inner : EntityErrorInfo
     with
         [<DataMember>]
@@ -245,7 +245,7 @@ type EntityErrorInfo =
             | EECompilation msg -> sprintf "Command compilation failed: %s" msg
             | EEArguments msg -> sprintf "Invalid operation arguments: %s" msg
             | EEExecution msg -> sprintf "Operation execution failed: %s" msg
-            | EEException msg -> msg
+            | EEException (msg, userData) -> msg
             | EETrigger (schema, name, inner) -> sprintf "Error while running trigger %O.%O: %s" schema name inner.Message
 
         interface IAPIError with
@@ -280,13 +280,13 @@ type Transaction =
 
 type TransactionError =
     { Operation : int
-      Details : EntityErrorInfo
+      Inner : EntityErrorInfo
     } with
         [<DataMember>]
         member this.Error = "transaction"
 
         [<DataMember>]
-        member this.Message = this.Details.Message
+        member this.Message = this.Inner.Message
 
         interface IAPIError with
             member this.Message = this.Message
@@ -359,14 +359,14 @@ type ActionResult =
 type ActionErrorInfo =
     | [<CaseName("notFound")>] AENotFound
     | [<CaseName("compilation")>] AECompilation of Details : string
-    | [<CaseName("exception")>] AEException of Details : string
+    | [<CaseName("exception")>] AEException of Details : string * UserData : JToken option
     with
         [<DataMember>]
         member this.Message =
             match this with
             | AENotFound -> "Action not found"
             | AECompilation msg -> sprintf "Action compilation failed: %s" msg
-            | AEException msg -> msg
+            | AEException (msg, userData) -> msg
 
         interface IAPIError with
             member this.Message = this.Message

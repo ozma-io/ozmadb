@@ -173,7 +173,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.Error <- "exception"
                         event.Details <- str
                     )
-                    return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException str))
+                    return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (str, ex.UserData)))
             }
 
     let runAfterTrigger (run : TriggerScript -> Task) (entityRef : ResolvedEntityRef) (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
@@ -197,7 +197,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                             event.Error <- "exception"
                             event.Details <- str
                         )
-                        return Error <| EETrigger (ref.Schema, ref.Name, EEException str)
+                        return Error <| EETrigger (ref.Schema, ref.Name, EEException (str, ex.UserData))
             }
 
     let applyInsertTriggerBefore (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (args : LocalArgumentsMap) (trigger : MergedTrigger) : Task<Result<LocalArgumentsMap, BeforeTriggerError<unit>>> =
@@ -237,7 +237,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                             event.Error <- "exception"
                             event.Details <- str
                         )
-                        return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException str))
+                        return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (str, ex.UserData)))
             }
 
     let applyInsertTriggerAfter (entityRef : ResolvedEntityRef) (id : int) (args : LocalArgumentsMap) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
@@ -273,9 +273,9 @@ type EntitiesAPI (api : IFunDBAPI) =
     member this.InsertEntities (entityRef : ResolvedEntityRef) (rawRowsArgs : RawArguments seq) : Task<Result<(int option)[], TransactionError>> =
         task {
             match ctx.Layout.FindEntity entityRef with
-            | None -> return Error { Details = EENotFound; Operation = 0 }
-            | Some entity when entity.IsHidden -> return Error { Details = EENotFound; Operation = 0 }
-            | Some entity when entity.IsFrozen -> return Error { Details = EEFrozen; Operation = 0 }
+            | None -> return Error { Inner = EENotFound; Operation = 0 }
+            | Some entity when entity.IsHidden -> return Error { Inner = EENotFound; Operation = 0 }
+            | Some entity when entity.IsFrozen -> return Error { Inner = EEFrozen; Operation = 0 }
             | Some entity ->
                 try
                     let beforeTriggers = findMergedTriggersInsert entityRef TTBefore ctx.Triggers
@@ -284,7 +284,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     let runSingleId (i, rowArgs : LocalArgumentsMap) =
                         task {
                             match! Seq.foldResultTask (applyInsertTriggerBefore entityRef entity) rowArgs beforeTriggers with
-                            | Error (BEError e) -> return Error { Details = e; Operation = i }
+                            | Error (BEError e) -> return Error { Inner = e; Operation = i }
                             | Error (BECancelled ()) -> return Ok None
                             | Ok args ->
                                 let comments = insertEntityComments entityRef rctx.User.Effective.Type args
@@ -307,7 +307,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                     event.Details <- JsonConvert.SerializeObject args
                                 )
                                 match! Seq.foldResultTask (applyInsertTriggerAfter entityRef newId args) () afterTriggers with
-                                | Error e -> return Error { Details = e; Operation = i }
+                                | Error e -> return Error { Inner = e; Operation = i }
                                 | Ok () -> return Ok (Some newId)
                         }
 
@@ -318,7 +318,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         | :? ArgumentCheckException as ex when ex.IsUserException ->
                             logger.LogError(ex, "Invalid arguments for entity insert")
                             let str = fullUserMessage ex
-                            Error { Details = EEArguments str; Operation = i }
+                            Error { Inner = EEArguments str; Operation = i }
 
                     match Seq.traverseResult convertOne (Seq.indexed rawRowsArgs) with
                     | Error e -> return Error e
@@ -366,11 +366,11 @@ type EntitiesAPI (api : IFunDBAPI) =
                 | :? EntityArgumentsException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Invalid arguments for entity insert")
                     let str = fullUserMessage ex
-                    return Error { Details = EEArguments str; Operation = 0 }
+                    return Error { Inner = EEArguments str; Operation = 0 }
                 | :? EntityExecutionException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Failed to insert entry")
                     let str = fullUserMessage ex
-                    return Error { Details = EEExecution str; Operation = 0 }
+                    return Error { Inner = EEExecution str; Operation = 0 }
                 | :? EntityDeniedException as ex when ex.IsUserException ->
                     logger.LogError(ex, "Access denied")
                     rctx.WriteEvent (fun event ->
@@ -380,7 +380,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         event.Error <- "access_denied"
                         event.Details <- fullUserMessage ex
                     )
-                    return Error { Details = EEAccessDenied; Operation = 0 }
+                    return Error { Inner = EEAccessDenied; Operation = 0 }
         }
 
     member this.UpdateEntity (entityRef : ResolvedEntityRef) (rawKey : RawRowKey) (rawArgs : RawArguments) : Task<Result<RowId, EntityErrorInfo>> =
@@ -674,7 +674,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         | Ok prevRet ->
                             match! opFn () with
                             | Ok ret -> return Ok (Seq.append prevRet (Seq.singleton (resultFn ret)))
-                            | Error e -> return Error { Operation = i; Details = e }
+                            | Error e -> return Error { Operation = i; Inner = e }
                     }
 
                 let inline checkAndRunConst result = checkAndRun (fun _ -> result)

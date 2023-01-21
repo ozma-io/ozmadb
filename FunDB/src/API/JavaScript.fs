@@ -43,6 +43,9 @@ type JavaScriptAPIException (message : string, innerException : Exception, isUse
 
     new (message : string) = JavaScriptAPIException (message, null, true)
 
+type JavaScriptUserException (message : string, userData: JToken) =
+    inherit UserException(message, null, true, Some userData)
+
 type private APIHandle (api : IFunDBAPI) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
     let mutable lock = None
@@ -385,6 +388,19 @@ type APITemplate (isolate : Isolate) =
                     event.Details <- details
                 )
             runtime.EventLoop.NewPromise(context, run).Value
+        ))
+
+        fundbTemplate.Set("cancelWith", FunctionTemplate.New(isolate, fun args ->
+            let context = isolate.CurrentContext
+            if args.Length < 1 || args.Length > 2 then
+                throwCallError context "Number of arguments must be between 1 and 2"
+            let userData = jsDeserialize context args.[0] :> JToken
+            let message =
+                if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
+                    args.[1].GetString().Get()
+                else
+                    "Operation has been cancelled"
+            raise <| JavaScriptUserException(message, userData)
         ))
 
         template

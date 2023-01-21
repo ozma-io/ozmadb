@@ -40,6 +40,7 @@ type RequestErrorInfo =
     | [<CaseName("rateExceeded")>] RIRateExceeded of Message : string
     | [<CaseName("noEndpoint")>] RINoEndpoint
     | [<CaseName("noInstance")>] RINoInstance
+    | [<CaseName("unauthorized")>] RIUnauthorized
     | [<CaseName("accessDenied")>] RIAccessDenied
     | [<CaseName("concurrentUpdate")>] RIConcurrentUpdate
     | [<CaseName("stackOverflow")>] RIStackOverflow of Trace : EventSource list
@@ -53,6 +54,7 @@ type RequestErrorInfo =
             | RIRateExceeded msg -> msg
             | RINoEndpoint -> "API endpoint doesn't exist"
             | RINoInstance -> "Instance not found"
+            | RIUnauthorized -> "Failed to authorize using access token"
             | RIAccessDenied -> "Database access denied"
             | RIConcurrentUpdate -> "Concurrent update detected; try again"
             | RIStackOverflow sources ->
@@ -70,6 +72,7 @@ let requestError e =
         | RIRequest _ -> RequestErrors.badRequest
         | RINoEndpoint -> RequestErrors.notFound
         | RINoInstance -> RequestErrors.notFound
+        | RIUnauthorized -> RequestErrors.unauthorized JwtBearerDefaults.AuthenticationScheme "fundb"
         | RIAccessDenied _ -> RequestErrors.forbidden
         | RIConcurrentUpdate _ -> ServerErrors.serviceUnavailable
         | RIStackOverflow _ -> ServerErrors.internalError

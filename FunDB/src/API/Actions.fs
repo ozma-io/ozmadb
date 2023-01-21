@@ -34,7 +34,7 @@ type ActionsAPI (api : IFunDBAPI) =
                             event.Error <- "exception"
                             event.Details <- str
                         )
-                        return Error (AEException str)
+                        return Error (AEException (str, ex.UserData))
             | Some (Error e) ->
                 logger.LogError(e, "Requested action {action} is broken", ref.ToString())
                 return Error <| AECompilation (fullUserMessage e)
