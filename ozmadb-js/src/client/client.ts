@@ -12,10 +12,12 @@ export interface INetworkFailureError extends IBasicError {
   error: "networkFailure";
 }
 
-export class FunDBError extends Error {
-  body: ApiError | INetworkFailureError;
+export type ClientApiError = ApiError | INetworkFailureError;
 
-  constructor(body: ApiError | INetworkFailureError) {
+export class FunDBError extends Error {
+  body: ClientApiError;
+
+  constructor(body: ClientApiError) {
     super(body.message);
     this.body = body;
   }
