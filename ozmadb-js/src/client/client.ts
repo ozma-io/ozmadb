@@ -1,17 +1,21 @@
 import {
-  IEntityRef, IEntity, IUserViewRef, IQueryChunk, IApiError, IViewExprResult, IViewInfoResult,
+  IEntityRef, IEntity, IUserViewRef, IQueryChunk, ApiError, IViewExprResult, IViewInfoResult,
   IActionRef, IActionResult, ArgumentName, IFieldRef,
-  IDomainValuesResult, FieldName, IPermissionsInfo, RowKey, RowId,
+  IDomainValuesResult, FieldName, IPermissionsInfo, RowKey, RowId, IBasicError,
 } from "../types";
 
 /*
  * Low-level API client.
  */
 
-export class FunDBError extends Error {
-  body: IApiError;
+export interface INetworkFailureError extends IBasicError {
+  error: "networkFailure";
+}
 
-  constructor(body: IApiError) {
+export class FunDBError extends Error {
+  body: ApiError | INetworkFailureError;
+
+  constructor(body: ApiError | INetworkFailureError) {
     super(body.message);
     this.body = body;
   }
@@ -30,7 +34,7 @@ const fetchFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Respo
   }
   if (!response.ok) {
     const body = await response.json();
-    throw new FunDBError(body as IApiError);
+    throw new FunDBError(body as ApiError);
   }
   return response;
 };

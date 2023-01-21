@@ -1,6 +1,6 @@
 import {
   IEntityRef, IRoleRef, IEntity, UserViewSource, IViewExprResult, IViewInfoResult, IQueryChunk, ILayout, UserViewName,
-  IFieldRef, IDomainValuesResult, IApiError, RowId, RowKey, IReferencesTree,
+  IFieldRef, IDomainValuesResult, ApiError, RowId, RowKey, IReferencesTree,
 } from "../types";
 
 export declare const renderDate: (date : Date) => string;
@@ -23,14 +23,15 @@ export interface IFunDBAPI {
   getDomainValues: (ref: IFieldRef, chunk?: IQueryChunk) => Promise<IDomainValuesResult>;
   writeEvent: (message: string) => void;
   writeEventSync: (message: string) => Promise<void>;
+  cancelWith: (userData: any, message?: string) => any; // noreturn
 }
 
 export declare const FunDB: IFunDBAPI;
 
 export class FunDBError extends Error {
-  constructor(body: IApiError);
+  constructor(body: ApiError);
 
-  body: IApiError;
+  body: ApiError;
 }
 
 export interface ITriggerInsertSource {

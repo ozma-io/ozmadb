@@ -13,6 +13,7 @@ export type AttributeName = string;
 export type UserViewName = string;
 export type ActionName = string;
 export type ConstraintName = string;
+export type TriggerName = string;
 
 /*
  * References to various database objects.
@@ -360,14 +361,119 @@ export interface IDomainValuesResult {
  * Error types.
  */
 
-export type RequestErrorType = "internal" | "request" | "noEndpoint" | "noInstance" | "accessDenied" | "concurrentUpdate";
-
-export interface IApiError {
-  error: string;
+export interface IBasicError {
   message: string;
 }
 
-export type UserViewErrorType = RequestErrorType | "notFound" | "compilation" | "execution" | "arguments";
+export interface IInternalError extends IBasicError {
+  type: "internal";
+}
+
+export interface IRequestError extends IBasicError {
+  type: "request";
+}
+
+export interface IQuotaExceededError extends IBasicError {
+  type: "quotaExceeded";
+}
+
+export interface IRateExceededError extends IBasicError {
+  type: "rateExceeded";
+}
+
+export interface INoEndpointError extends IBasicError {
+  type: "noEndpoint";
+}
+
+export interface INoInstanceError extends IBasicError {
+  type: "noInstance";
+}
+
+export interface IAccessDeniedError extends IBasicError {
+  type: "accessDenied";
+}
+
+export interface IConcurrentUpdateError extends IBasicError {
+  type: "concurrentUpdate";
+}
+
+export interface IStackOverflowError extends IBasicError {
+  type: "stackOverflow";
+  trace: EventSource[];
+}
+
+export type GenericError = IInternalError | IRequestError | IQuotaExceededError | IRateExceededError | INoEndpointError | INoInstanceError | IAccessDeniedError | IConcurrentUpdateError | IStackOverflowError;
+
+export interface INotFoundError extends IBasicError {
+  type: "notFound";
+}
+
+export interface ICompilationError extends IBasicError {
+  type: "compilation";
+  details: string;
+}
+
+export interface IExecutionError extends IBasicError {
+  type: "execution";
+  details: string;
+}
+
+export interface IArgumentsError extends IBasicError {
+  type: "arguments";
+  details: string;
+}
+
+export type UserViewError = GenericError | INotFoundError | ICompilationError | IExecutionError | IArgumentsError;
+
+export interface IFrozenError extends IBasicError {
+  type: "frozen";
+}
+
+export interface IExceptionError extends IBasicError {
+  details: string;
+  userData?: unknown;
+}
+
+export interface ITriggerError extends IBasicError {
+  schema: SchemaName;
+  name: TriggerName;
+  inner: EntityError;
+}
+
+export type EntityError = GenericError | INotFoundError | IFrozenError | IAccessDeniedError | IArgumentsError | ICompilationError | IExecutionError | IExceptionError | ITriggerError;
+
+export interface ITransactionError extends IBasicError {
+  error: "transaction";
+  message: string;
+  operation: number;
+  details: EntityError;
+}
+
+export type TransactionError = GenericError | ITransactionError;
+
+export type SaveError = GenericError | IAccessDeniedError | INotFoundError;
+
+export interface IPreloadedError extends IBasicError {
+  error: "preloaded";
+}
+
+export interface IInvalidFormatError extends IBasicError {
+  error: "invalidFormat";
+  details: string;
+}
+
+export interface IConsistencyError extends IBasicError {
+  error: "consistency";
+  details: string;
+}
+
+export type RestoreError = GenericError | IAccessDeniedError | IPreloadedError | IInvalidFormatError | IConsistencyError;
+
+export type ActionError = GenericError | INotFoundError | ICompilationError | IExceptionError;
+
+export type DomainError = GenericError | INotFoundError | IAccessDeniedError | IArgumentsError | IExecutionError;
+
+export type ApiError = GenericError | UserViewError | EntityError | TransactionError | SaveError | RestoreError | ActionError | DomainError;
 
 /*
  * Extra types.
