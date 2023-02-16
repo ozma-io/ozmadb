@@ -52,10 +52,11 @@ let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEntity :
 
     let fields = entity.Fields |> Map.toSeq |> Seq.map (fun (name, field) -> ({ Entity = entityRef; Name = name }, field)) |> Map.ofSeq
 
-    let select = parentAllowed.CombinedSelect && not (optimizedIsFalse entity.Select)
-
-    let insert = Result.defaultValue false entity.Insert
     let delete = Result.defaultValue OFEFalse entity.Delete
+    let insert = Result.defaultValue false entity.Insert
+
+    let combinedSelect = parentAllowed.CombinedSelect && not (optimizedIsFalse entity.Select)
+    let combinedDelete = parentAllowed.CombinedDelete && combinedSelect && not (optimizedIsFalse delete)
 
     let ret =
         { Check = entity.Check
@@ -64,8 +65,8 @@ let private flattenAllowedEntity (entityRef : ResolvedEntityRef) (parentEntity :
           Update = entity.Update
           Delete = delete
           CombinedInsert = parentAllowed.Insert && insert
-          CombinedDelete = select && not (optimizedIsFalse delete)
-          CombinedSelect = select
+          CombinedDelete = combinedDelete
+          CombinedSelect = combinedSelect
         }
 
     (fields, ret)

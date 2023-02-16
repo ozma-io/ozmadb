@@ -152,7 +152,7 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
             match Map.tryFind ref flatAllowedEntity.Fields with
             | Some flatField ->
                 let filter =
-                    if usedField.Select then
+                    if usedField.Select || usedField.Update then
                         match flatField.Select with
                         | OFEFalse -> raisef PermissionsApplyException "Access denied to select field %O" ref
                         | newSelectFilter -> newSelectFilter
@@ -534,7 +534,7 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
 
     let checksCache = EntityChecksCache (layout, entity.Root)
 
-    let getRoleCheck (roleRef, allowedRoleEntity : FlatAllowedRoleEntity) =
+    let getRoleCheck (allowedRoleEntity : FlatAllowedRoleEntity) =
         let getEntityCheck currRef =
             match Map.tryFind currRef allowedRoleEntity.Children with
             | None ->
@@ -552,9 +552,17 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
             let fieldInfo = entity.ColumnFields.[name]
             let fieldEntityRef = Option.defaultValue entityRef fieldInfo.InheritedFrom
             let fieldRef = { Entity = fieldEntityRef; Name = name }
-            let allowedField = allowedRoleEntity.Fields.[fieldRef]
-            allowedField.Check
+            match Map.tryFind fieldRef allowedRoleEntity.Fields with
+            | None -> raisef PermissionsApplyException "Access denied to field %O" fieldRef
+            | Some allowedField -> allowedField.Check
         fields |> Seq.map getFieldCheck |> Seq.fold andFieldExpr check
+
+    let tryGetRoleCheck (roleRef, allowedRoleEntity : FlatAllowedRoleEntity) =
+        try
+            getRoleCheck allowedRoleEntity
+        with
+        | :? PermissionsApplyException ->
+            OFEFalse
 
     let allowedEntity =
         match Map.tryFind entity.Root role.Flattened.Entities with
@@ -562,6 +570,6 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
         | Some allowed -> allowed
     allowedEntity.Roles
         |> Map.toSeq
-        |> Seq.map getRoleCheck
+        |> Seq.map tryGetRoleCheck
         |> Seq.fold orFieldExpr OFEFalse
         |> buildFinalRestriction "check" entityRef
