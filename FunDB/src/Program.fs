@@ -291,7 +291,6 @@ let private setupEventLogger (webAppBuilder : WebApplicationBuilder) =
 
 let private setupInstancesCache (webAppBuilder : WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
-    let config = webAppBuilder.Configuration
     let services = webAppBuilder.Services
 
     let sourcePreload =

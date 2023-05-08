@@ -68,13 +68,12 @@ open FunWithFlags.FunDB.Operations.Command
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.API.JavaScript
 
-type ContextException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+type ContextException (details : GenericErrorInfo, innerException : exn) =
+    inherit UserException(details.LogMessage, innerException, true)
 
-    new (message : string, innerException : exn) =
-        ContextException (message, innerException, isUserException innerException)
+    new (details : GenericErrorInfo) = ContextException (details, null)
 
-    new (message : string) = ContextException (message, null, true)
+    member this.Details = details
 
 [<NoEquality; NoComparison>]
 type private AnonymousUserView =
@@ -139,11 +138,6 @@ type ContextCacheParams =
       ConnectionString : string
       EventLogger : EventLogger
     }
-
-type private CommitCallbackException (e : GenericErrorInfo) =
-    inherit Exception (e.Message)
-
-    member this.Info = e
 
 type ContextCacheStore (cacheParams : ContextCacheParams) =
     let preload = cacheParams.Preload.Preload
@@ -602,7 +596,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         for cb in OrderedMap.values scheduledBeforeCommit do
                             match! cb layout with
                             | Ok () -> ()
-                            | Error e -> raise <| CommitCallbackException e
+                            | Error e -> raise <| ContextException(e)
                     }
 
                 let mutable cancellationToken = initialCancellationToken
@@ -612,13 +606,13 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     unitTask {
                         let! localSuccess = cachedStateLock.WaitAsync(0)
                         if not localSuccess then
-                            raisef ContextException "Another migration is in progress"
+                            raise <| ContextException(GEMigrationConflict)
 
                         try
                             match! transaction.Connection.Query.ExecuteValueQuery "SELECT pg_try_advisory_xact_lock(@0)" migrationLockParams cancellationToken with
                             | None -> failwith "Impossible"
                             | Some (lockName, lockRet, SQL.VBool true) -> ()
-                            | _ -> raisef ContextException "Another migration is in progress"
+                            | _ -> raise <| ContextException(GEMigrationConflict)
 
                             logger.LogInformation("Starting migration")
                             // Careful here not to evaluate user views before we do migration.
@@ -626,12 +620,13 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             let! sourceLayout = buildSchemaLayout transaction.System None cancellationToken
                             let sourceLayout = applyHiddenLayoutData sourceLayout (preloadLayout preload)
                             if not <| preloadLayoutIsUnchanged sourceLayout preload then
-                                raisef ContextException "Cannot modify system layout"
+                                raise <| ContextException(GEMigration("Cannot modify preloaded layout"))
                             let layout =
                                 try
                                     resolveLayout forceAllowBroken sourceLayout
                                 with
-                                | :? ResolveLayoutException as e -> raisefWithInner ContextException e "Failed to resolve layout"
+                                | :? ResolveLayoutException as e when e.IsUserException ->
+                                    raise <| ContextException(GEMigration("Failed to resolve layout: " + fullUserMessage e), e)
                             if forceAllowBroken then
                                 do! checkBrokenLayout logger true preload transaction layout cancellationToken
 
@@ -641,85 +636,93 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             try
                                 do! migrateDatabase transaction.Connection.Query migration cancellationToken
                             with
-                            | :? QueryExecutionException as e -> return raisefUserWithInner ContextException e "Migration error"
+                            | :? QueryExecutionException as e -> raise <| ContextException(GEMigration("Failed to update the database: " + fullUserMessage e), e)
 
                             let oldAssertions = buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
                             let addedAssertions = differenceLayoutAssertions newAssertions oldAssertions
                             try
                                 do! checkAssertions transaction.Connection.Query layout addedAssertions cancellationToken
                             with
-                            | :? LayoutIntegrityException as e -> return raisefWithInner ContextException e "Failed to perform integrity checks"
+                            | :? LayoutIntegrityException as e -> raise <| ContextException(GEMigration(fullUserMessage e), e)
 
                             let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                             if not <| preloadModulesAreUnchanged sourceModules preload then
-                                raisef ContextException "Cannot modify system modules"
+                                raise <| ContextException(GEMigration("Cannot modify preloaded modules"))
                             let modules =
                                 try
                                     resolveModules layout sourceModules
                                 with
-                                | :? ResolveModulesException as e -> raisefWithInner ContextException e "Failed to resolve modules"
+                                | :? ResolveModulesException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve modules: " + fullUserMessage e), e)
 
                             let jsRuntime = makeRuntime (moduleFiles modules)
                             let jsApi = jsRuntime.GetValue isolate.Value
 
                             let! sourceActions = buildSchemaActions transaction.System None cancellationToken
                             if not <| preloadActionsAreUnchanged sourceActions preload then
-                                raisef ContextException "Cannot modify system actions"
+                                raise <| ContextException(GEMigration("Cannot modify preloaded actions"))
                             let actions =
                                 try
                                     resolveActions layout forceAllowBroken sourceActions
                                 with
-                                | :? ResolveActionsException as e -> raisefWithInner ContextException e "Failed to resolve actions"
+                                | :? ResolveActionsException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve actions: " + fullUserMessage e), e)
                             let preparedActions =
                                 try
                                     prepareActions jsApi forceAllowBroken actions
                                 with
-                                | :? ActionRunException as e -> raisefWithInner ContextException e "Failed to resolve actions"
+                                | :? ActionRunException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve actions: " + fullUserMessage e), e)
                             if forceAllowBroken then
                                 do! checkBrokenActions logger true preload transaction preparedActions cancellationToken
 
                             let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
                             if not <| preloadTriggersAreUnchanged sourceTriggers preload then
-                                raisef ContextException "Cannot modify system triggers"
+                                raise <| ContextException(GEMigration("Cannot modify preloaded triggers"))
                             let triggers =
                                 try
                                     resolveTriggers layout forceAllowBroken sourceTriggers
                                 with
-                                | :? ResolveTriggersException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
+                                | :? ResolveTriggersException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve triggers: " + fullUserMessage e), e)
                             let preparedTriggers =
                                 try
                                     prepareTriggers jsApi forceAllowBroken triggers
                                 with
-                                | :? TriggerRunException as err -> raisefWithInner ContextException err "Failed to resolve triggers"
+                                | :? TriggerRunException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve triggers: " + fullUserMessage e), e)
                             let mergedTriggers = mergeTriggers layout triggers
                             if forceAllowBroken then
                                 do! checkBrokenTriggers logger true preload transaction preparedTriggers cancellationToken
 
                             let! sourceUserViews = buildSchemaUserViews transaction.System None cancellationToken
                             if filterSystemViews sourceUserViews <> oldState.Context.SystemViews then
-                                raisef ContextException "Cannot modify system user views"
+                                raise <| ContextException(GEMigration("Cannot modify preloaded user views"))
                             logger.LogInformation("Updating generated user views")
                             let generatedUserViews =
                                 try
                                     generateUserViews jsApi layout mergedTriggers forceAllowBroken sourceUserViews cancellationToken
                                 with
-                                | :? UserViewGenerateException as err -> raisefWithInner ContextException err "Failed to generate user views"
+                                | :? UserViewGenerateException as e ->
+                                    raise <| ContextException(GEMigration("Failed to generate user views: " + fullUserMessage e), e)
                             let! userViewsUpdate = updateUserViews transaction.System (generatedUserViewsSource sourceUserViews generatedUserViews) cancellationToken
                             do! deleteDeferredFromUpdate layout transaction userViewsUpdate cancellationToken
 
                             let! sourceAttrs = buildSchemaAttributes transaction.System None cancellationToken
                             if not <| preloadAttributesAreUnchanged sourceAttrs preload then
-                                raisef ContextException "Cannot modify system default attributes"
+                                raise <| ContextException(GEMigration("Cannot modify preloaded default attributes"))
                             let parsedAttrs =
                                 try
                                     parseAttributes forceAllowBroken sourceAttrs
                                 with
-                                | :? ParseAttributesException as e -> raisefWithInner ContextException e "Failed to parse default attributes"
+                                | :? ParseAttributesException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve default attributes: " + fullUserMessage e), e)
                             let defaultAttrs =
                                 try
                                     resolveAttributes layout (generatedUserViews.Find >> Option.isSome) forceAllowBroken parsedAttrs
                                 with
-                                | :? ResolveAttributesException as e -> raisefWithInner ContextException e "Failed to resolve default attributes"
+                                | :? ResolveAttributesException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve default attributes: " + fullUserMessage e), e)
                             let mergedAttrs = mergeDefaultAttributes layout defaultAttrs
                             if forceAllowBroken then
                                 do! checkBrokenAttributes logger true preload transaction defaultAttrs cancellationToken
@@ -728,16 +731,18 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 try
                                     resolveUserViews layout mergedAttrs forceAllowBroken generatedUserViews
                                 with
-                                | :? UserViewResolveException as err -> raisefWithInner ContextException err "Failed to resolve user views"
+                                | :? UserViewResolveException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve user views: " + fullUserMessage e), e)
 
                             let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
                             if not <| preloadPermissionsAreUnchanged sourcePermissions preload then
-                                raisef ContextException "Cannot modify system permissions"
+                                raise <| ContextException(GEMigration("Cannot modify preloaded permissions"))
                             let permissions =
                                 try
                                     resolvePermissions layout (userViews.Find >> Option.bind Result.getOption >> Option.isSome) forceAllowBroken sourcePermissions
                                 with
-                                | :? ResolvePermissionsException as e -> raisefWithInner ContextException e "Failed to resolve permissions"
+                                | :? ResolvePermissionsException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve permissions: " + fullUserMessage e), e)
                             if forceAllowBroken then
                                 do! checkBrokenPermissions logger true preload transaction permissions cancellationToken
 
@@ -749,7 +754,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                         try
                                             return! dryRunUserViews transaction.Connection.Query layout mergedTriggers false (Some false) userViews cancellationToken
                                         with
-                                        | :? UserViewDryRunException as err -> return raisefWithInner ContextException err "Failed to resolve user views"
+                                        | :? UserViewDryRunException as e ->
+                                            return raise <| ContextException(GEMigration("Failed to resolve user views: " + fullUserMessage e), e)
                                 }
 
                             do! runCommitCallbacks layout
@@ -765,7 +771,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 let! _ = transaction.Commit(cancellationToken)
                                 ()
                             with
-                            | :? DbUpdateException as e -> raisefUserWithInner ContextException e "State update error"
+                            | :? DbUpdateException as e ->
+                                raise <| ContextException(GEMigration(fullUserMessage e), e)
 
                             let! prefetchedUserViews =
                                 task {
@@ -868,13 +875,12 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 let! _ = transaction.Commit(cancellationToken)
                                 return Ok ()
                         with
-                        | :? ContextException
+                        | :? ContextException as e ->
+                            logger.LogError(e, "Error during commit")
+                            return Error <| GECommit(e.Details)
                         | :? DbUpdateException as e ->
                             logger.LogError(e, "Error during commit")
-                            return Error <| GECommit (fullUserMessage e)
-                        | :? CommitCallbackException as e ->
-                            logger.LogError(e, "Error during commit callback")
-                            return Error e.Info
+                            return Error <| GECommit(GEOther(fullUserMessage e))
                     }
 
                 let checkIntegrity () =
@@ -883,7 +889,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         try
                             do! checkAssertions transaction.Connection.Query oldState.Context.Layout assertions cancellationToken
                         with
-                        | :? LayoutIntegrityException as e -> return raisefWithInner ContextException e "Failed to perform integrity checks"
+                        | :? LayoutIntegrityException as e ->
+                            raise <| ContextException(GEOther("Failed to perform integrity checks: " + fullUserMessage e))
                     }
 
                 let mutable maybeApi = None

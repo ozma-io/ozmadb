@@ -4,7 +4,6 @@ module FunWithFlags.FunDB.HTTP.RateLimit
 
 open System
 open System.Collections.Generic
-open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Options
 open Microsoft.AspNetCore.Http
@@ -96,7 +95,7 @@ type private StaticRateLimitConfiguration (clientId : string) =
         member this.RateIncrementer = rateIncrementer
         member this.RegisterResolvers () = ()
 
-type private StaticRateLimitMiddleware (next : RequestDelegate, quotaExceeded : string -> HttpHandler, giraffeNext : HttpFunc, options : RateLimitOptions, processor : StaticRateLimitProcessor, config : IRateLimitConfiguration, logger : ILogger) =
+type private StaticRateLimitMiddleware (next : RequestDelegate, quotaExceeded : string -> HttpHandler, options : RateLimitOptions, processor : StaticRateLimitProcessor, config : IRateLimitConfiguration, logger : ILogger) =
     inherit RateLimitMiddleware<StaticRateLimitProcessor>(next, options, processor, config)
 
     override this.LogBlockedRequest (httpContext, identity, counter, rule) =
@@ -104,26 +103,11 @@ type private StaticRateLimitMiddleware (next : RequestDelegate, quotaExceeded : 
 
     override this.ReturnQuotaExceededResponse (httpContext, rule, retryAfter) =
         let msg = sprintf "Maximum %i per %s second(s)" (int rule.Limit) rule.Period
-        quotaExceeded msg giraffeNext httpContext
+        quotaExceeded msg earlyReturn httpContext
 
-// Hacky! We need to merge ASP.NET-style middleware and Giraffe handlers here.
-let inline private wrapMiddleware (invokeMiddleware : RequestDelegate -> HttpContext -> Task) (guarded : HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
-    task {
-        let mutable result = None : HttpContext option option
-        let myNext ctx =
-            unitTask {
-                let! ret = guarded next ctx
-                result <- Some ret
-            }
-        do! invokeMiddleware myNext ctx
-        match result with
-        | None -> return! next ctx
-        | Some ret -> return ret
-    }
-
-let checkRateLimit (limited : HttpHandler) (quotaExceeded : string -> HttpHandler) (clientId : string) (limits : RateLimit seq) (next : HttpFunc) (ctx : HttpContext) =
+let checkRateLimit (quotaExceeded : string -> HttpHandler) (clientId : string) (limits : RateLimit seq) (next : HttpFunc) (ctx : HttpContext) =
     if Seq.isEmpty limits then
-        limited next ctx
+        next ctx
     else
         task {
             let options = ctx.GetService<IOptions<ClientRateLimitOptions>>()
@@ -131,8 +115,15 @@ let checkRateLimit (limited : HttpHandler) (quotaExceeded : string -> HttpHandle
             let config = StaticRateLimitConfiguration(clientId)
             let processor = StaticRateLimitProcessor(limits, strategy, options.Value)
             let logger = ctx.GetLogger<StaticRateLimitMiddleware>()
-            let invoke delNext ctx =
-                let middleware = StaticRateLimitMiddleware (delNext, quotaExceeded, next, options.Value, processor, config, logger)
-                middleware.Invoke ctx
-            return! wrapMiddleware invoke limited next ctx
+            let mutable result = None
+            let delegateNext (ctx : HttpContext) =
+                unitTask {
+                    let! ret = next ctx
+                    result <- Some ret
+                }
+            let middleware = StaticRateLimitMiddleware (delegateNext, quotaExceeded, options.Value, processor, config, logger)
+            do! middleware.Invoke ctx
+            match result with
+            | None -> return! earlyReturn ctx
+            | Some ret -> return ret
         }

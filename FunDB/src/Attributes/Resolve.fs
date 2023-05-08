@@ -45,7 +45,7 @@ type private Phase1Resolver (layout : Layout, forceAllowBroken : bool, hasUserVi
                 // TOOD: allow to specify `__self` as home schema.
                 resolveEntityAttributesMap defaultCallbacks attrResolutionFlags fieldRef.Entity fieldAttrs.Attributes
             with
-            | :? ViewResolveException as e -> raisefWithInner ResolveAttributesException e ""
+            | :? QueryResolveException as e -> raisefWithInner ResolveAttributesException e ""
 
         let attrsMap = Map.map (fun name -> convertBoundAttribute) resolvedMap
 

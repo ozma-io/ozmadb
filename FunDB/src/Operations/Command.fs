@@ -6,6 +6,7 @@ open FSharpPlus
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Serialization
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
 open FunWithFlags.FunDB.Layout.Types
@@ -24,49 +25,66 @@ open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type CommandResolveException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+[<SerializeAsObject("error")>]
+type CommandError =
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] CEExecution of FunQLExecutionError
+    | [<CaseKey("request", IgnoreFields=[|"Details"|])>] CERequest of Details : string
+    | [<CaseKey("accessDenied", IgnoreFields=[|"Details"|])>] CEAccessDenied of Details : string
+    | [<CaseKey("other", IgnoreFields=[|"Details"|])>] CEOther of Details : string
+    with
+    member this.LogMessage =
+        match this with
+        | CEExecution e -> e.LogMessage
+        | CERequest msg -> msg
+        | CEAccessDenied details -> details
+        | CEOther details -> details
 
-    new (message : string, innerException : exn) =
-        CommandResolveException (message, innerException, isUserException innerException)
+    member this.Message =
+        match this with
+        | CEExecution e -> e.Message
+        | CEAccessDenied details -> "Access denied"
+        | _ -> this.LogMessage
 
-    new (message : string) = CommandResolveException (message, null, true)
+    member this.HTTPResponseCode =
+        match this with
+        | CEExecution e -> e.HTTPResponseCode
+        | CERequest details -> 422
+        | CEAccessDenied details -> 403
+        | CEOther details -> 500
 
-type CommandArgumentsException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+    member this.ShouldLog =
+        match this with
+        | CEExecution e -> e.ShouldLog
+        | CERequest details -> false
+        | CEAccessDenied details -> true
+        | CEOther details -> false
 
-    new (message : string, innerException : exn) =
-        CommandArgumentsException (message, innerException, isUserException innerException)
+    interface ILoggableResponse with
+        member this.ShouldLog = this.ShouldLog
 
-    new (message : string) = CommandArgumentsException (message, null, true)
+    interface IErrorDetails with
+        member this.Message = this.Message
+        member this.LogMessage = this.LogMessage
+        member this.HTTPResponseCode = this.HTTPResponseCode
 
-type CommandDeniedException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+type CommandException (details : CommandError, innerException : exn) =
+    inherit UserException(details.Message, innerException, true)
+    new (details : CommandError) = CommandException (details, null)
 
-    new (message : string, innerException : exn) =
-        CommandDeniedException (message, innerException, isUserException innerException)
-
-    new (message : string) = CommandDeniedException (message, null, true)
-
-type CommandExecutionException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
-
-    new (message : string, innerException : exn) =
-        CommandExecutionException (message, innerException, isUserException innerException)
-
-    new (message : string) = CommandExecutionException (message, null, true)
+    member this.Details = details
 
 let resolveCommand (layout : Layout) (isPrivileged : bool) (rawCommand : string) : ResolvedCommandExpr =
     let parsed =
         match parse tokenizeFunQL commandExpr rawCommand with
-        | Error msg -> raisef CommandResolveException "Parse error: %s" msg
+        | Error msg -> raise <| CommandException (CERequest <| sprintf "Parse error: %s" msg)
         | Ok rawExpr -> rawExpr
     let callbacks = resolveCallbacks layout
     let resolved =
         try
             resolveCommandExpr callbacks { emptyExprResolutionFlags with Privileged = isPrivileged } parsed
         with
-        | :? ViewResolveException as e -> raisefWithInner CommandResolveException e "Resolve error"
+        | :? QueryResolveException as e when e.IsUserException ->
+            raise <| CommandException (CERequest (fullUserMessage e), e)
     resolved
 
 type private TriggerType =
@@ -120,7 +138,7 @@ let executeCommand
         for (typ, entityRef) in getTriggeredEntities cmdExpr.Command.Expression do
             match triggers.FindEntity entityRef with
             | Some entityTriggers when hasTriggers typ entityTriggers.Before || hasTriggers typ entityTriggers.After ->
-                raisef CommandExecutionException "Mass modification on entities with triggers is not supported"
+                raise <| CommandException(CEOther "Mass modification on entities with triggers is not supported")
             | _ -> ()
 
         let arguments =
@@ -128,7 +146,7 @@ let executeCommand
                 convertQueryArguments globalArgs Map.empty rawArgs cmdExpr.Command.Arguments
             with
             | :? ArgumentCheckException as e ->
-                raisefUserWithInner CommandArgumentsException e ""
+                raise <| CommandException (CEExecution (UVEArgument e.Details), e)
         let query =
             match applyRole with
             | None -> cmdExpr.Command
@@ -137,12 +155,14 @@ let executeCommand
                     try
                         applyPermissions layout role cmdExpr.UsedDatabase
                     with
-                    | :? PermissionsApplyException as e -> raisefWithInner CommandDeniedException e ""
+                    | :? PermissionsApplyException as e when e.IsUserException ->
+                        raise <| CommandException (CEAccessDenied (fullUserMessage e), e)
                 for KeyValue(rootRef, allowedEntity) in appliedDb do
                     match allowedEntity.Check with
                     | Some FUnfiltered
                     | None -> ()
-                    | Some (FFiltered filter) -> raisef CommandExecutionException "Check restrictions are not supported for commands"
+                    | Some (FFiltered filter) ->
+                        raise <| CommandException(CEOther "Check restrictions are not supported for commands")
                 applyRoleDataExpr layout appliedDb cmdExpr.Command
 
         let prefix = SQL.convertComments comments
@@ -152,6 +172,7 @@ let executeCommand
             do! unsetPragmas connection cmdExpr.Pragmas cancellationToken
             ()
         with
-        | :? QueryExecutionException as e -> raisefUserWithInner CommandExecutionException e ""
+        | :? QueryExecutionException as e ->
+            return raise <| CommandException(CEExecution <| convertQueryExecutionException layout e)
         ()
     }

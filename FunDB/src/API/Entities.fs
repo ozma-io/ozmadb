@@ -14,6 +14,7 @@ open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
+open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Triggers.Types
@@ -86,7 +87,7 @@ type MassInsertRow =
 
 type PendingMassInsert =
     { Entity : ResolvedEntityRef
-      Rows : List<RawArguments>
+      Entries : List<RawArguments>
       StartIndex : int
     }
 
@@ -156,24 +157,12 @@ type EntitiesAPI (api : IFunDBAPI) =
                         let newArgs = convertEntityArguments entity rawArgs
                         return Ok newArgs
                 with
-                | :? ArgumentCheckException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Trigger {name} returned invalid arguments", ref)
-                    let str = fullUserMessage ex
-                    rctx.WriteEvent (fun event ->
-                        event.Type <- "triggerError"
-                        event.Error <- "arguments"
-                        event.Details <- str
-                    )
-                    return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEArguments str))
-                | :? TriggerRunException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Exception in trigger {name}", ref)
-                    let str = fullUserMessage ex
-                    rctx.WriteEvent (fun event ->
-                        event.Type <- "triggerError"
-                        event.Error <- "exception"
-                        event.Details <- str
-                    )
-                    return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (str, ex.UserData)))
+                | :? ArgumentCheckException as e when e.IsUserException ->
+                    logger.LogError(e, "Trigger {name} returned invalid arguments", ref)
+                    return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEOperation (EOEExecution (UVEArgument e.Details))))
+                | :? TriggerRunException as e when e.IsUserException ->
+                    logger.LogError(e, "Exception in trigger {name}", ref)
+                    return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (fullUserMessage e, e.UserData)))
             }
 
     let runAfterTrigger (run : TriggerScript -> Task) (entityRef : ResolvedEntityRef) (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
@@ -249,89 +238,85 @@ type EntitiesAPI (api : IFunDBAPI) =
     let applyDeleteTriggerAfter (entityRef : ResolvedEntityRef) () (trigger : MergedTrigger) : Task<Result<unit, EntityErrorInfo>> =
         runAfterTrigger (fun script -> script.RunDeleteTriggerAfter entityRef ctx.CancellationToken) entityRef trigger
 
-    member this.GetEntityInfo (entityRef : ResolvedEntityRef) : Task<Result<SerializedEntity, EntityErrorInfo>> =
-        task {
-            match ctx.Layout.FindEntity entityRef with
+    member this.GetEntityInfo (req : GetEntityInfoRequest) : Task<Result<SerializedEntity, EntityErrorInfo>> =
+        wrapAPIResult rctx "getEntityInfo" req <| task {
+            match ctx.Layout.FindEntity req.Entity with
             | Some entity ->
                 try
-                    let res = getEntityInfo ctx.Layout ctx.Triggers (getReadRole rctx.User.Effective.Type) entityRef
+                    let res = getEntityInfo ctx.Layout ctx.Triggers (getReadRole rctx.User.Effective.Type) req.Entity
                     return Ok res
                 with
-                    | :? EntityDeniedException as ex when ex.IsUserException ->
-                        logger.LogError(ex, "Access denied")
-                        rctx.WriteEvent (fun event ->
-                            event.Type <- "getEntityInfo"
-                            event.SchemaName <- entityRef.Schema.ToString()
-                            event.EntityName <- entityRef.Name.ToString()
-                            event.Error <- "access_denied"
-                            event.Details <- fullUserMessage ex
-                        )
-                        return Error EEAccessDenied
-            | _ -> return Error EENotFound
+                    | :? EntityOperationException as ex when ex.IsUserException ->
+                        logger.LogError(ex, "Getting entity info failed")
+                        return Error (EEOperation ex.Details)
+            | _ ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error (EEOperation (EOERequest err))
         }
 
-    member this.InsertEntities (entityRef : ResolvedEntityRef) (rawRowsArgs : RawArguments seq) : Task<Result<(int option)[], TransactionError>> =
-        task {
-            match ctx.Layout.FindEntity entityRef with
-            | None -> return Error { Inner = EENotFound; Operation = 0 }
-            | Some entity when entity.IsHidden -> return Error { Inner = EENotFound; Operation = 0 }
-            | Some entity when entity.IsFrozen -> return Error { Inner = EEFrozen; Operation = 0 }
+    member this.InsertEntities (req : InsertEntitiesRequest) : Task<Result<InsertEntitiesResponse, TransactionError>> =
+        wrapAPIError rctx "insertEntities" req <| task {
+            match ctx.Layout.FindEntity req.Entity with
+            | None ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error { Inner = EEOperation (EOERequest err); Operation = 0 }
+            | Some entity when entity.IsHidden ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error { Inner = EEOperation (EOERequest err); Operation = 0 }
+            | Some entity when entity.IsFrozen ->
+                let err = sprintf "Entity %O is frozen" req.Entity
+                return Error { Inner = EEOperation (EOERequest err); Operation = 0 }
             | Some entity ->
                 try
-                    let beforeTriggers = findMergedTriggersInsert entityRef TTBefore ctx.Triggers
-                    let afterTriggers = findMergedTriggersInsert entityRef TTAfter ctx.Triggers
+                    let beforeTriggers = findMergedTriggersInsert req.Entity TTBefore ctx.Triggers
+                    let afterTriggers = findMergedTriggersInsert req.Entity TTAfter ctx.Triggers
 
-                    let runSingleId (i, rowArgs : LocalArgumentsMap) =
+                    let runSingleId (i, (rawArgs : RawArguments, rowArgs : LocalArgumentsMap)) : Task<Result<InsertEntityResponse, TransactionError>> =
                         task {
-                            match! Seq.foldResultTask (applyInsertTriggerBefore entityRef entity) rowArgs beforeTriggers with
+                            match! Seq.foldResultTask (applyInsertTriggerBefore req.Entity entity) rowArgs beforeTriggers with
                             | Error (BEError e) -> return Error { Inner = e; Operation = i }
-                            | Error (BECancelled ()) -> return Ok None
+                            | Error (BECancelled ()) -> return Ok { Id = None }
                             | Ok args ->
-                                let comments = insertEntityComments entityRef rctx.User.Effective.Type args
+                                let comments = insertEntityComments req.Entity rctx.User.Effective.Type args
                                 let! newIds =
                                     insertEntities
                                         query
                                         rctx.GlobalArguments
                                         ctx.Layout
                                         (getWriteRole rctx.User.Effective.Type)
-                                        entityRef
+                                        req.Entity
                                         (Some comments)
                                         [args]
                                         ctx.CancellationToken
                                 let newId = newIds.[0]
-                                do! rctx.WriteEventSync (fun event ->
-                                    event.Type <- "insertEntity"
-                                    event.SchemaName <- entityRef.Schema.ToString()
-                                    event.EntityName <- entityRef.Name.ToString()
-                                    event.RowId <- Nullable newId
-                                    event.Details <- JsonConvert.SerializeObject args
-                                )
-                                match! Seq.foldResultTask (applyInsertTriggerAfter entityRef newId args) () afterTriggers with
+                                let req = { Entity = req.Entity; Fields = rawArgs } : InsertEntityRequest
+                                let resp = { Id = Some newId } : InsertEntityResponse
+                                do! logAPIResponse rctx "insertEntity" req resp
+                                match! Seq.foldResultTask (applyInsertTriggerAfter req.Entity newId args) () afterTriggers with
                                 | Error e -> return Error { Inner = e; Operation = i }
-                                | Ok () -> return Ok (Some newId)
+                                | Ok () -> return Ok resp
                         }
 
                     let convertOne (i, rowArgs) =
                         try
                             Ok <| convertEntityArguments entity rowArgs
                         with
-                        | :? ArgumentCheckException as ex when ex.IsUserException ->
-                            logger.LogError(ex, "Invalid arguments for entity insert")
-                            let str = fullUserMessage ex
-                            Error { Inner = EEArguments str; Operation = i }
+                        | :? ArgumentCheckException as e when e.IsUserException ->
+                            logger.LogError(e, "Invalid arguments for entity insert")
+                            Error { Inner = EEOperation (EOEExecution (UVEArgument e.Details)); Operation = i }
 
-                    match Seq.traverseResult convertOne (Seq.indexed rawRowsArgs) with
+                    match Seq.traverseResult convertOne (Seq.indexed req.Entries) with
                     | Error e -> return Error e
                     | Ok rowsArgs ->
                         let! ret =
                             task {
                                 if not (Seq.isEmpty beforeTriggers && Seq.isEmpty afterTriggers) then
-                                    let! ret = Seq.traverseResultTask runSingleId (Seq.indexed rowsArgs)
+                                    let! ret = Seq.traverseResultTask runSingleId (Seq.indexed (Seq.zip req.Entries rowsArgs))
                                     if Result.isOk ret && entity.TriggersMigration then
                                         ctx.ScheduleMigration ()
                                     return Result.map Seq.toArray ret
                                 else
-                                    let comments = massInsertEntityComments entityRef rctx.User.Effective.Type
+                                    let comments = massInsertEntityComments req.Entity rctx.User.Effective.Type
                                     let cachedArgs = Seq.cache rowsArgs
                                     let! newIds =
                                         insertEntities
@@ -339,60 +324,48 @@ type EntitiesAPI (api : IFunDBAPI) =
                                             rctx.GlobalArguments
                                             ctx.Layout
                                             (getWriteRole rctx.User.Effective.Type)
-                                            entityRef
+                                            req.Entity
                                             (Some comments)
                                             cachedArgs
                                             ctx.CancellationToken
-                                    let details = Seq.map2 (fun args id -> { Args = args; Id = id }) cachedArgs newIds
-                                    do! rctx.WriteEventSync (fun event ->
-                                        event.Type <- "insertEntities"
-                                        event.SchemaName <- entityRef.Schema.ToString()
-                                        event.EntityName <- entityRef.Name.ToString()
-                                        event.Details <- JsonConvert.SerializeObject details
-                                    )
-                                    return Ok (Array.map Some newIds)
+                                    let responses = Array.map (fun id -> { Id = Some id } : InsertEntityResponse) newIds
+                                    for (reqArgs, resp) in Seq.zip req.Entries responses do
+                                        let singleReq = { Entity = req.Entity; Fields = reqArgs } : InsertEntityRequest
+                                        do! logAPIResponse rctx "insertEntity" singleReq resp
+                                    return Ok responses
                             }
                         match ret with
-                        | Error _ as e -> return e
-                        | Ok info ->
-                            if not <| Array.isEmpty info then
+                        | Error err -> return Error err
+                        | Ok responses ->
+                            if not <| Array.isEmpty responses then
                                 if entity.TriggersMigration then
                                     ctx.ScheduleMigration ()
-                                if entityRef = usersEntityRef then
+                                if req.Entity = usersEntityRef then
                                     scheduleCheckUsersQuota ()
                                 scheduleCheckSizeQuota ()
-                            return Ok info
+                            return Ok { Ids = responses }
                 with
-                | :? EntityArgumentsException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Invalid arguments for entity insert")
-                    let str = fullUserMessage ex
-                    return Error { Inner = EEArguments str; Operation = 0 }
-                | :? EntityExecutionException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Failed to insert entry")
-                    let str = fullUserMessage ex
-                    return Error { Inner = EEExecution str; Operation = 0 }
-                | :? EntityDeniedException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Access denied")
-                    rctx.WriteEvent (fun event ->
-                        event.Type <- "insertEntity"
-                        event.SchemaName <- entityRef.Schema.ToString()
-                        event.EntityName <- entityRef.Name.ToString()
-                        event.Error <- "access_denied"
-                        event.Details <- fullUserMessage ex
-                    )
-                    return Error { Inner = EEAccessDenied; Operation = 0 }
+                | :? EntityOperationException as e when e.IsUserException ->
+                    logger.LogError(e, "Failed to insert entry")
+                    return Error { Inner = EEOperation e.Details; Operation = 0 }
         }
 
-    member this.UpdateEntity (entityRef : ResolvedEntityRef) (rawKey : RawRowKey) (rawArgs : RawArguments) : Task<Result<RowId, EntityErrorInfo>> =
-        task {
-            match ctx.Layout.FindEntity entityRef with
-            | None -> return Error EENotFound
-            | Some entity when entity.IsHidden -> return Error EENotFound
-            | Some entity when entity.IsFrozen -> return Error EEFrozen
+    member this.UpdateEntity (req : UpdateEntityRequest) : Task<Result<UpdateEntityResponse, EntityErrorInfo>> =
+        wrapAPIError rctx "updateEntity" req <| task {
+            match ctx.Layout.FindEntity req.Entity with
+            | None ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error (EEOperation (EOERequest err))
+            | Some entity when entity.IsHidden ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error (EEOperation (EOERequest err))
+            | Some entity when entity.IsFrozen ->
+                let err = sprintf "Entity %O is frozen" req.Entity
+                return Error (EEOperation (EOERequest err))
             | Some entity ->
                 try
-                    let args = convertEntityArguments entity rawArgs
-                    let key = convertRawRowKey entity rawKey
+                    let args = convertEntityArguments entity req.Fields
+                    let key = convertRawRowKey entity req.Id
                     if Map.isEmpty args then
                         let! id =
                             resolveKey
@@ -400,146 +373,107 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 rctx.GlobalArguments
                                 ctx.Layout
                                 (getWriteRole rctx.User.Effective.Type)
-                                entityRef
+                                req.Entity
                                 None
                                 key
                                 ctx.CancellationToken
-                        return Ok id
+                        return Ok { Id = id }
                     else
-                        let beforeTriggers = findMergedTriggersUpdate entityRef TTBefore (Map.keys args) ctx.Triggers
-                        match! Seq.foldResultTask (applyUpdateTriggerBefore entityRef entity) (key, args) beforeTriggers with
+                        let beforeTriggers = findMergedTriggersUpdate req.Entity TTBefore (Map.keys args) ctx.Triggers
+                        match! Seq.foldResultTask (applyUpdateTriggerBefore req.Entity entity) (key, args) beforeTriggers with
                         | Error (BEError e) -> return Error e
-                        | Error (BECancelled id) -> return Ok id
+                        | Error (BECancelled id) ->
+                            return Ok { Id = id }
                         | Ok (key, args) ->
-                            let comments = updateEntityComments entityRef rctx.User.Effective.Type key args
+                            let comments = updateEntityComments req.Entity rctx.User.Effective.Type key args
                             let! (id, subEntityRef) =
                                 updateEntity
                                     query
                                     rctx.GlobalArguments
                                     ctx.Layout
                                     (getWriteRole rctx.User.Effective.Type)
-                                    entityRef
+                                    req.Entity
                                     key
                                     (Some comments)
                                     args
                                     ctx.CancellationToken
-                            do! rctx.WriteEventSync (fun event ->
-                                event.Type <- "updateEntity"
-                                event.SchemaName <- entityRef.Schema.ToString()
-                                event.EntityName <- entityRef.Name.ToString()
-                                event.RowId <- Nullable id
-                                event.Details <- JsonConvert.SerializeObject args
-                            )
+                            let resp = { Id = id }
+                            do! logAPIResponse rctx "updateEntity" req resp
                             if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
-                            let afterTriggers = findMergedTriggersUpdate entityRef TTAfter (Map.keys args) ctx.Triggers
-                            match! Seq.foldResultTask (applyUpdateTriggerAfter entityRef id args) () afterTriggers with
-                            | Ok () -> return Ok id
+                            let afterTriggers = findMergedTriggersUpdate req.Entity TTAfter (Map.keys args) ctx.Triggers
+                            match! Seq.foldResultTask (applyUpdateTriggerAfter req.Entity id args) () afterTriggers with
+                            | Ok () -> return Ok resp
                             | Error e -> return Error e
                 with
-                | :? ArgumentCheckException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Invalid arguments for entity update")
-                    let str = fullUserMessage ex
-                    return Error (EEArguments str)
-                | :? EntityExecutionException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Failed to update entry")
-                    let str = fullUserMessage ex
-                    return Error (EEExecution str)
-                | :? EntityNotFoundException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Not found")
-                    return Error EENotFound
-                | :? EntityDeniedException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Access denied")
-                    let (entityId, detailsPrefix) =
-                        match rawKey with
-                        | RRKPrimary id -> (Nullable id, "")
-                        | RRKAlt (name, args) -> (Nullable(), sprintf "Alternate key %O, args: %O\n" name args)
-                    rctx.WriteEvent (fun event ->
-                        event.Type <- "updateEntity"
-                        event.SchemaName <- entityRef.Schema.ToString()
-                        event.EntityName <- entityRef.Name.ToString()
-                        event.RowId <- entityId
-                        event.Error <- "access_denied"
-                        event.Details <- detailsPrefix + fullUserMessage ex
-                    )
-                    return Error EEAccessDenied
+                | :? ArgumentCheckException as e when e.IsUserException ->
+                    logger.LogError(e, "Invalid arguments for entity update")
+                    return Error (EEOperation (EOEExecution (UVEArgument e.Details)))
+                | :? EntityOperationException as e when e.IsUserException ->
+                    logger.LogError(e, "Failed to update entry")
+                    return Error (EEOperation e.Details)
         }
 
-    member this.DeleteEntity (entityRef : ResolvedEntityRef) (rawKey : RawRowKey) : Task<Result<unit, EntityErrorInfo>> =
-        task {
-            match ctx.Layout.FindEntity entityRef with
-            | None -> return Error EENotFound
-            | Some entity when entity.IsHidden -> return Error EENotFound
-            | Some entity when entity.IsFrozen -> return Error EEFrozen
+    member this.DeleteEntity (req : DeleteEntityRequest) : Task<Result<unit, EntityErrorInfo>> =
+        wrapAPIError rctx "deleteEntity" req <| task {
+            match ctx.Layout.FindEntity req.Entity with
+            | None ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error (EEOperation (EOERequest err))
+            | Some entity when entity.IsHidden ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error (EEOperation (EOERequest err))
+            | Some entity when entity.IsFrozen ->
+                let err = sprintf "Entity %O is frozen" req.Entity
+                return Error (EEOperation (EOERequest err))
             | Some entity ->
                 try
-                    let key = convertRawRowKey entity rawKey
-                    let beforeTriggers = findMergedTriggersDelete entityRef TTBefore ctx.Triggers
-                    match! Seq.foldResultTask (applyDeleteTriggerBefore entityRef) key beforeTriggers with
+                    let key = convertRawRowKey entity req.Id
+                    let beforeTriggers = findMergedTriggersDelete req.Entity TTBefore ctx.Triggers
+                    match! Seq.foldResultTask (applyDeleteTriggerBefore req.Entity) key beforeTriggers with
                     | Error (BEError e) -> return Error e
                     | Error (BECancelled id) -> return Ok ()
                     | Ok key ->
-                            let comments = deleteEntityComments entityRef rctx.User.Effective.Type key
+                            let comments = deleteEntityComments req.Entity rctx.User.Effective.Type key
                             let! id =
                                 deleteEntity
                                     query
                                     rctx.GlobalArguments
                                     ctx.Layout
                                     (getWriteRole rctx.User.Effective.Type)
-                                    entityRef
+                                    req.Entity
                                     key
                                     (Some comments)
                                     ctx.CancellationToken
-                            do! rctx.WriteEventSync (fun event ->
-                                event.Type <- "deleteEntity"
-                                event.SchemaName <- entityRef.Schema.ToString()
-                                event.EntityName <- entityRef.Name.ToString()
-                                event.RowId <- Nullable id
-                            )
+                            do! logAPISuccess rctx "deleteEntity" req
                             if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
-                            let afterTriggers = findMergedTriggersDelete entityRef TTAfter ctx.Triggers
-                            match! Seq.foldResultTask (applyDeleteTriggerAfter entityRef) () afterTriggers with
+                            let afterTriggers = findMergedTriggersDelete req.Entity TTAfter ctx.Triggers
+                            match! Seq.foldResultTask (applyDeleteTriggerAfter req.Entity) () afterTriggers with
                             | Error e -> return Error e
                             | Ok () -> return Ok ()
                 with
-                | :? ArgumentCheckException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Invalid arguments for entity delete")
-                    let str = fullUserMessage ex
-                    return Error (EEArguments str)
-                | :? EntityExecutionException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Failed to delete entry")
-                    let str = fullUserMessage ex
-                    return Error (EEExecution str)
-                | :? EntityNotFoundException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Not found")
-                    return Error EENotFound
-                | :? EntityDeniedException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Access denied")
-                    let (entityId, detailsPrefix) =
-                        match rawKey with
-                        | RRKPrimary id -> (Nullable id, "")
-                        | RRKAlt (name, args) -> (Nullable(), sprintf "Alternate key %O, args: %O\n" name args)
-                    rctx.WriteEvent (fun event ->
-                        event.Type <- "deleteEntity"
-                        event.SchemaName <- entityRef.Schema.ToString()
-                        event.EntityName <- entityRef.Name.ToString()
-                        event.RowId <- entityId
-                        event.Error <- "access_denied"
-                        event.Details <- detailsPrefix + fullUserMessage ex
-                    )
-                    return Error EEAccessDenied
+                | :? ArgumentCheckException as e when e.IsUserException ->
+                    logger.LogError(e, "Invalid arguments for entity delete")
+                    return Error (EEOperation (EOEExecution (UVEArgument e.Details)))
+                | :? EntityOperationException as e when e.IsUserException ->
+                    logger.LogError(e, "Failed to delete entry")
+                    return Error (EEOperation e.Details)
         }
 
-    member this.GetRelatedEntities (entityRef : ResolvedEntityRef) (rawKey : RawRowKey) : Task<Result<ReferencesTree, EntityErrorInfo>> =
-        task {
-            match ctx.Layout.FindEntity(entityRef) with
-            | None -> return Error EENotFound
-            | Some entity when entity.IsHidden -> return Error EENotFound
+    member this.GetRelatedEntities (req : GetRelatedEntitiesRequest) : Task<Result<ReferencesTree, EntityErrorInfo>> =
+        wrapAPIResult rctx "getRelatedEntities" req <| task {
+            match ctx.Layout.FindEntity(req.Entity) with
+            | None ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error (EEOperation (EOERequest err))
+            | Some entity when entity.IsHidden ->
+                let err = sprintf "Entity %O not found" req.Entity
+                return Error (EEOperation (EOERequest err))
             | Some entity ->
                 try
-                    let key = convertRawRowKey entity rawKey
-                    let comments = getRelatedEntitiesComments entityRef rctx.User.Effective.Type key
+                    let key = convertRawRowKey entity req.Id
+                    let comments = getRelatedEntitiesComments req.Entity rctx.User.Effective.Type key
                     let! ret =
                         getRelatedEntities
                             query
@@ -547,44 +481,25 @@ type EntitiesAPI (api : IFunDBAPI) =
                             ctx.Layout
                             (getReadRole rctx.User.Effective.Type)
                             (fun _ _ _ -> true)
-                            entityRef
+                            req.Entity
                             key
                             (Some comments)
                             ctx.CancellationToken
                     return Ok ret
                 with
-                | :? EntityExecutionException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Failed to get related entities")
-                    let str = fullUserMessage ex
-                    return Error (EEExecution str)
-                | :? EntityNotFoundException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Not found")
-                    return Error EENotFound
-                | :? EntityDeniedException as ex when ex.IsUserException ->
-                    logger.LogError(ex, "Access denied")
-                    let (entityId, detailsPrefix) =
-                        match rawKey with
-                        | RRKPrimary id -> (Nullable id, "")
-                        | RRKAlt (name, args) -> (Nullable(), sprintf "Alternate key %O, args: %O\n" name args)
-                    rctx.WriteEvent (fun event ->
-                        event.Type <- "getRelatedEntities"
-                        event.SchemaName <- entityRef.Schema.ToString()
-                        event.EntityName <- entityRef.Name.ToString()
-                        event.RowId <- entityId
-                        event.Error <- "access_denied"
-                        event.Details <- detailsPrefix + fullUserMessage ex
-                    )
-                    return Error EEAccessDenied
+                | :? EntityOperationException as e when e.IsUserException ->
+                    logger.LogError(e, "Failed to get related entities")
+                    return Error (EEOperation e.Details)
         }
 
-    member this.RecursiveDeleteEntity (entityRef : ResolvedEntityRef) (rawKey : RawRowKey) : Task<Result<ReferencesTree, EntityErrorInfo>> =
+    member this.RecursiveDeleteEntity (req : DeleteEntityRequest) : Task<Result<ReferencesTree, EntityErrorInfo>> =
         task {
-            match! this.GetRelatedEntities entityRef rawKey with
+            match! this.GetRelatedEntities { Entity = req.Entity; Id = req.Id } with
             | Error e -> return Error e
             | Ok tree ->
                 let deleteOne entityRef id =
                     unitTask {
-                        match! this.DeleteEntity entityRef (RRKPrimary id) with
+                        match! this.DeleteEntity { Entity = entityRef; Id = RRKPrimary id } with
                         | Error e -> return raise <| EarlyStopException(e)
                         | Ok () -> ()
                     }
@@ -595,11 +510,11 @@ type EntitiesAPI (api : IFunDBAPI) =
                 | :? EarlyStopException<EntityErrorInfo> as e -> return Error e.Value
         }
 
-    member this.RunCommand (rawCommand : string) (rawArgs : RawArguments) : Task<Result<unit, EntityErrorInfo>> =
-        task {
+    member this.RunCommand (req : CommandRequest) : Task<Result<unit, EntityErrorInfo>> =
+        wrapUnitAPIResult rctx "runCommand" req <| task {
             try
-                let! cmd = ctx.GetAnonymousCommand rctx.IsPrivileged rawCommand
-                let comments = commandComments rawCommand rctx.User.Effective.Type rawArgs
+                let! cmd = ctx.GetAnonymousCommand rctx.IsPrivileged req.Command
+                let comments = commandComments req.Command rctx.User.Effective.Type req.Args
                 do!
                     executeCommand
                         query
@@ -609,7 +524,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                         (getWriteRole rctx.User.Effective.Type)
                         cmd
                         (Some comments)
-                        rawArgs
+                        req.Args
                         ctx.CancellationToken
                 for KeyValue(entityRef, usedEntity) in cmd.UsedDatabase do
                     let anyChildren (f : UsedEntity -> bool) =
@@ -623,38 +538,21 @@ type EntitiesAPI (api : IFunDBAPI) =
                         scheduleCheckSizeQuota ()
                 return Ok ()
             with
-            | :? CommandArgumentsException as ex when ex.IsUserException ->
-                logger.LogError(ex, "Invalid arguments for command")
-                let str = fullUserMessage ex
-                return Error (EEArguments str)
-            | :? CommandExecutionException as ex when ex.IsUserException ->
-                logger.LogError(ex, "Failed to update entry")
-                let str = fullUserMessage ex
-                return Error (EEExecution str)
-            | :? CommandResolveException as ex when ex.IsUserException ->
-                logger.LogError(ex, "Failed to resolve command")
-                let str = fullUserMessage ex
-                return Error (EECompilation str)
-            | :? CommandDeniedException as ex when ex.IsUserException ->
-                logger.LogError(ex, "Access denied")
-                rctx.WriteEvent (fun event ->
-                    event.Type <- "runCommand"
-                    event.Error <- "access_denied"
-                    event.Details <- fullUserMessage ex
-                )
-                return Error EEAccessDenied
+            | :? CommandException as e when e.IsUserException ->
+                logger.LogError(e, "Command failed to execute")
+                return Error (EECommand e.Details)
         }
 
-    member this.RunTransaction (transaction : Transaction) : Task<Result<TransactionResult, TransactionError>> =
+    member this.RunTransaction (req : TransactionRequest) : Task<Result<TransactionResponse, TransactionError>> =
         task {
-            let mutable pendingInsert = None
-
             let inline runPendingInsert (pending : PendingMassInsert) =
                 task {
-                    match! this.InsertEntities pending.Entity pending.Rows with
+                    match! this.InsertEntities { Entity = pending.Entity; Entries = pending.Entries } with
                     | Error e -> return Error { e with Operation = pending.StartIndex + e.Operation }
-                    | Ok ids -> return ids |> Seq.map TRInsertEntity |> Ok
+                    | Ok resp -> return resp.Ids |> Seq.map TRInsertEntity |> Ok
                 }
+
+            let mutable pendingInsert = None
 
             let inline checkPendingInsert () =
                 task {
@@ -667,7 +565,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 }
 
             let handleOne (i, op) =
-                let inline checkAndRun (resultFn : 'a -> TransactionOpResult) (opFn : unit -> Task<Result<'a, EntityErrorInfo>>) =
+                let inline checkAndRun (resultFn : 'a -> TransactionOpResponse) (opFn : unit -> Task<Result<'a, EntityErrorInfo>>) =
                     task {
                         match! checkPendingInsert () with
                         | Error e -> return Error e
@@ -681,27 +579,27 @@ type EntitiesAPI (api : IFunDBAPI) =
 
                 task {
                     match op with
-                    | TInsertEntity (ref, entries) ->
+                    | TInsertEntity insert ->
                         match pendingInsert with
                         | None ->
-                            pendingInsert <- Some { Entity = ref; Rows = List(seq { entries }); StartIndex = i }
+                            pendingInsert <- Some { Entity = insert.Entity; Entries = List(seq { insert.Fields }); StartIndex = i }
                             return Ok Seq.empty
-                        | Some pending when pending.Entity = ref ->
-                            pending.Rows.Add(entries)
+                        | Some pending when pending.Entity = insert.Entity ->
+                            pending.Entries.Add(insert.Fields)
                             return Ok Seq.empty
                         | Some pending ->
                             match! runPendingInsert pending with
                             | Ok rets ->
-                                pendingInsert <- Some { Entity = ref; Rows = List(seq { entries }); StartIndex = i }
+                                pendingInsert <- Some { Entity = insert.Entity; Entries = List(seq { insert.Fields }); StartIndex = i }
                                 return Ok rets
                             | Error e -> return Error e
-                    | TUpdateEntity (ref, id, entries) -> return! checkAndRun TRUpdateEntity (fun () -> this.UpdateEntity ref id entries)
-                    | TDeleteEntity (ref, id) -> return! checkAndRunConst TRDeleteEntity (fun () -> this.DeleteEntity ref id)
-                    | TRecursiveDeleteEntity (ref, id) -> return! checkAndRun TRRecursiveDeleteEntity (fun () -> this.RecursiveDeleteEntity ref id)
-                    | TCommand (rawCmd, rawArgs) -> return! checkAndRunConst TRCommand (fun () -> this.RunCommand rawCmd rawArgs)
+                    | TUpdateEntity update -> return! checkAndRun TRUpdateEntity (fun () -> this.UpdateEntity update)
+                    | TDeleteEntity delete -> return! checkAndRunConst TRDeleteEntity (fun () -> this.DeleteEntity delete)
+                    | TRecursiveDeleteEntity delete -> return! checkAndRun TRRecursiveDeleteEntity (fun () -> this.RecursiveDeleteEntity delete)
+                    | TCommand cmd -> return! checkAndRunConst TRCommand (fun () -> this.RunCommand cmd)
                 }
 
-            match! transaction.Operations |> Seq.indexed |> Seq.traverseResultTask handleOne with
+            match! req.Operations |> Seq.indexed |> Seq.traverseResultTask handleOne with
             | Ok resultLists ->
                 match! checkPendingInsert () with
                 | Ok newResults ->
@@ -718,24 +616,21 @@ type EntitiesAPI (api : IFunDBAPI) =
                 let! ret = ctx.Transaction.DeferConstraints ctx.CancellationToken func
                 return Ok ret
             with
-            | :? DeferredConstraintsException as ex ->
-                logger.LogError(ex, "Deferred error")
-                let str = fullUserMessage ex
-                rctx.WriteEvent (fun event ->
-                    event.Type <- "deferConstraints"
-                    event.Error <- "execution"
-                    event.Details <- str
-                )
-                return Error (EEExecution str)
+            | :? DeferredConstraintsException as e when e.IsUserException ->
+                logger.LogError(e, "Deferred error")
+                let details = convertQueryExecutionException ctx.Layout e.QueryException
+                let resp = EEOperation (EOEExecution details)
+                logAPIError rctx "deferConstraints" emptyRequest resp
+                return Error resp
         }
 
     interface IEntitiesAPI with
-        member this.GetEntityInfo entityRef = this.GetEntityInfo entityRef
-        member this.InsertEntities entityRef entityRowArgs = this.InsertEntities entityRef entityRowArgs
-        member this.UpdateEntity entityRef id rawArgs = this.UpdateEntity entityRef id rawArgs
-        member this.DeleteEntity entityRef id = this.DeleteEntity entityRef id
-        member this.GetRelatedEntities entityRef id = this.GetRelatedEntities entityRef id
-        member this.RecursiveDeleteEntity entityRef id = this.RecursiveDeleteEntity entityRef id
-        member this.RunCommand rawCommand rawArgs = this.RunCommand rawCommand rawArgs
-        member this.RunTransaction transaction = this.RunTransaction transaction
-        member this.DeferConstraints func = this.DeferConstraints func
+        member this.GetEntityInfo req = this.GetEntityInfo req
+        member this.InsertEntities req = this.InsertEntities req
+        member this.UpdateEntity req = this.UpdateEntity req
+        member this.DeleteEntity req = this.DeleteEntity req
+        member this.GetRelatedEntities req = this.GetRelatedEntities req
+        member this.RecursiveDeleteEntity req = this.RecursiveDeleteEntity req
+        member this.RunCommand req = this.RunCommand req
+        member this.RunTransaction req = this.RunTransaction req
+        member this.DeferConstraints req = this.DeferConstraints req

@@ -34,30 +34,27 @@ open FunWithFlags.FunDB.HTTP.RateLimit
 
 [<SerializeAsObject("error")>]
 type RequestErrorInfo =
-    | [<CaseName("internal")>] RIInternal of Message : string
-    | [<CaseName("request")>] RIRequest of Message : string
-    | [<CaseName("quotaExceeded")>] RIQuotaExceeded of Message : string
-    | [<CaseName("rateExceeded")>] RIRateExceeded of Message : string
-    | [<CaseName("noEndpoint")>] RINoEndpoint
-    | [<CaseName("noInstance")>] RINoInstance
-    | [<CaseName("invalidRegion")>] RIWrongRegion of Region : string
-    | [<CaseName("unauthorized")>] RIUnauthorized
-    | [<CaseName("accessDenied")>] RIAccessDenied
-    | [<CaseName("concurrentUpdate")>] RIConcurrentUpdate
-    | [<CaseName("stackOverflow")>] RIStackOverflow of Trace : EventSource list
+    | [<CaseKey("internal")>] RIInternal
+    | [<CaseKey("request", IgnoreFields=[|"Details"|])>] RIRequest of Details : string
+    | [<CaseKey("rateExceeded", IgnoreFields=[|"Details"|])>] RIRateExceeded of Details : string
+    | [<CaseKey("noEndpoint")>] RINoEndpoint
+    | [<CaseKey("noInstance")>] RINoInstance
+    | [<CaseKey("invalidRegion")>] RIWrongRegion of Region : string
+    | [<CaseKey("unauthorized")>] RIUnauthorized
+    | [<CaseKey("accessDenied")>] RIAccessDenied
+    | [<CaseKey("concurrentUpdate")>] RIConcurrentUpdate
+    | [<CaseKey("stackOverflow")>] RIStackOverflow of Trace : EventSource[]
     with
-        [<DataMember>]
-        member this.Message =
+        member this.LogMessage =
             match this with
-            | RIInternal msg -> msg
+            | RIInternal -> "Internal server error"
             | RIRequest msg -> msg
-            | RIQuotaExceeded msg -> msg
             | RIRateExceeded msg -> msg
             | RINoEndpoint -> "API endpoint doesn't exist"
             | RINoInstance -> "Instance not found"
             | RIWrongRegion region -> sprintf "Wrong instance region, correct region: %s" region
-            | RIUnauthorized -> "Failed to authorize using access token"
-            | RIAccessDenied -> "Database access denied"
+            | RIUnauthorized -> "Failed to authorize using the access token"
+            | RIAccessDenied -> "Access denied"
             | RIConcurrentUpdate -> "Concurrent update detected; try again"
             | RIStackOverflow sources ->
                 sources
@@ -65,25 +62,40 @@ type RequestErrorInfo =
                     |> String.concat "\n"
                     |> sprintf "Stack depth exceeded:\n%s"
 
-let requestError e =
-    let handler =
-        match e with
-        | RIInternal _ -> ServerErrors.internalError
-        | RIQuotaExceeded _ -> RequestErrors.forbidden
-        | RIRateExceeded _ -> RequestErrors.tooManyRequests
-        | RIRequest _ -> RequestErrors.badRequest
-        | RINoEndpoint -> RequestErrors.notFound
-        | RINoInstance -> fun content -> setHttpHeader "X-FunDB-Error" "no-instance" >=> RequestErrors.notFound content
-        | RIWrongRegion _ -> fun content -> setHttpHeader "X-FunDB-Error" "wrong-region" >=> RequestErrors.notFound content
-        | RIUnauthorized -> RequestErrors.unauthorized JwtBearerDefaults.AuthenticationScheme "fundb"
-        | RIAccessDenied _ -> RequestErrors.forbidden
-        | RIConcurrentUpdate _ -> ServerErrors.serviceUnavailable
-        | RIStackOverflow _ -> ServerErrors.internalError
+        [<DataMember>]
+        member this.Message = this.LogMessage
+
+        member this.HTTPResponseCode =
+            match this with
+            | RIInternal _ -> 500
+            | RIRateExceeded _ -> 429
+            | RIRequest _ -> 400
+            | RINoEndpoint -> 404
+            | RINoInstance -> 404
+            | RIWrongRegion _ -> 422
+            | RIUnauthorized -> 401
+            | RIAccessDenied _ -> 403
+            | RIConcurrentUpdate _ -> 503
+            | RIStackOverflow _ -> 500
+
+        interface ILoggableResponse with
+            member this.ShouldLog = false
+
+        interface IErrorDetails with
+            member this.LogMessage = this.LogMessage
+            member this.Message = this.Message
+            member this.HTTPResponseCode = this.HTTPResponseCode
+
+let requestError<'Error when 'Error :> IErrorDetails> (e : 'Error) =
+    let handler body =
+        match e.HTTPResponseCode with
+        | 401 -> RequestErrors.unauthorized JwtBearerDefaults.AuthenticationScheme "fundb" body
+        | code -> setStatusCode code >=> body
     handler (json e)
 
-let errorHandler (ex : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
-    logger.LogError(EventId(), ex, "An unhandled exception has occurred while executing the request.")
-    clearResponse >=> requestError (RIInternal "Internal error")
+let errorHandler (e : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
+    logger.LogError(e, "An unhandled exception has occurred while executing the request.")
+    clearResponse >=> requestError RIInternal
 
 let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError RINoEndpoint
 
@@ -115,7 +127,7 @@ let flagIfDebug (flag : bool) : bool =
     false
 #endif
 
-let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyValuePair<string, StringValues> seq) : HttpHandler =
+let private processArgs (rawArgs : KeyValuePair<string, StringValues> seq) (f : Map<string, JToken> -> HttpHandler) : HttpHandler =
     let getArg (KeyValue(name : string, par)) =
         if name.StartsWith("__") then
             None
@@ -133,12 +145,12 @@ let private processArgs (f : Map<string, JToken> -> HttpHandler) (rawArgs : KeyV
     | Ok args2 -> f <| Map.ofSeq args2
 
 let queryArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-    processArgs f ctx.Request.Query next ctx
+    processArgs ctx.Request.Query f next ctx
 
 let formArgs (f : Map<string, JToken> -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {
         let! form = ctx.Request.ReadFormAsync ()
-        return! processArgs f form next ctx
+        return! processArgs form f next ctx
     }
 
 let bindJsonToken (token : JToken) (f : 'a -> HttpHandler) : HttpHandler =
@@ -167,28 +179,62 @@ let safeBindJson (f : 'a -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) :
         | Ok ret -> return! f ret next ctx
     }
 
-let private generalToRequestError = function
-    | GECommit msg -> RIRequest msg
-    | GEQuotaExceeded msg -> RIQuotaExceeded msg
-
 let commitAndReturn (handler : HttpHandler) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     task {
         match! api.Request.Context.Commit () with
-        | Error e -> return! requestError (generalToRequestError e) next ctx
+        | Error e -> return! requestError e next ctx
         | Ok () -> return! Successful.ok handler next ctx
     }
 
 let commitAndOk : IFunDBAPI -> HttpFunc -> HttpContext -> HttpFuncResult = commitAndReturn (json Map.empty)
 
-let inline private setPretendRole (api : IFunDBAPI) (pretendRole : ResolvedEntityRef option) (func : unit -> Task<'a>) : Task<'a> =
-    match pretendRole with
-    | None -> func ()
-    | Some roleType -> api.Request.PretendRole roleType func
+let handleRequestWithCommit<'Response, 'Error when 'Error :> IErrorDetails> (api : IFunDBAPI) (ret : Task<Result<'Response, 'Error>>) (next : HttpFunc) (ctx : HttpContext) =
+    task {
+        match! ret with
+        | Ok ret -> return! commitAndReturn (json ret) api next ctx
+        | Error e -> return! requestError e next ctx
+    }
 
-let inline setPretends (api : IFunDBAPI) (pretendUser : UserName option) (pretendRole : ResolvedEntityRef option) (func : unit -> Task<'a>) : Task<'a> =
+let handleRequest<'Response, 'Error when 'Error :> IErrorDetails> (ret : Task<Result<'Response, 'Error>>) (next : HttpFunc) (ctx : HttpContext) =
+    task {
+        match! ret with
+        | Ok ret -> return! Successful.ok (json ret) next ctx
+        | Error e -> return! requestError e next ctx
+    }
+
+let handleVoidRequestWithCommit<'Error when 'Error :> IErrorDetails> (api : IFunDBAPI) (ret : Task<Result<unit, 'Error>>) (next : HttpFunc) (ctx : HttpContext) =
+    task {
+        match! ret with
+        | Ok ret -> return! commitAndOk api next ctx
+        | Error e -> return! requestError e next ctx
+    }
+
+let handleVoidRequest<'Error when 'Error :> IErrorDetails> (ret : Task<Result<unit, 'Error>>) (next : HttpFunc) (ctx : HttpContext) =
+    task {
+        match! ret with
+        | Ok ret -> return! Successful.ok (json ret) next ctx
+        | Error e -> return! requestError e next ctx
+    }
+
+let setPretendRole (api : IFunDBAPI) (pretendRole : ResolvedEntityRef option) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    match pretendRole with
+    | None -> next ctx
+    | Some role ->
+        task {
+            match! api.Request.PretendRole { AsRole = PRRole role } (fun () -> next ctx) with
+            | Ok r -> return r
+            | Error e -> return! requestError e earlyReturn ctx
+        }
+
+let setPretendUser (api : IFunDBAPI) (pretendUser : UserName option) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
     match pretendUser with
-    | None -> setPretendRole api pretendRole func
-    | Some userName -> api.Request.PretendUser userName (fun () -> setPretendRole api pretendRole func)
+    | None -> next ctx
+    | Some userName ->
+        task {
+            match! api.Request.PretendUser { AsUser = userName } (fun () -> next ctx) with
+            | Ok r -> return r
+            | Error e -> return! requestError e earlyReturn ctx
+        }
 
 type RealmAccess =
     { Roles : string[]
@@ -386,7 +432,7 @@ let inline private setupRequestTimeout (inst : InstanceContext) (dbCtx : IContex
                 return! f next ctx
             with
             | Exn.Innermost (:? OperationCanceledException as e) when not oldToken.IsCancellationRequested ->
-                return! requestError (RIQuotaExceeded "Max request time reached") next ctx
+                return! requestError (GEQuotaExceeded "Max request time reached") next ctx
     }
 
 let private randomAccessedAtLaxSpan () =
@@ -472,22 +518,19 @@ let private runWithApi (touchAccessedAt : bool) (inst : InstanceContext) (f : IF
                 logger.LogError(e, "Concurrent update exception")
                 // We may want to retry here in future.
                 return! requestError RIConcurrentUpdate next ctx
-            | :? RequestException as e ->
-                logger.LogError(e, "Request error")
-                match e.Info with
-                | REUserNotFound
-                | RENoRole -> return! requestError RIAccessDenied next ctx
-                | REStackOverflow firstSource ->
-                    let rec findAllSources (inner : exn) =
-                        match inner with
-                        | :? RequestException as e ->
-                            match e.Info with
-                            | REStackOverflow source -> source :: findAllSources e.InnerException
-                            | _ -> []
-                        | _ -> []
-
-                    let allSources = firstSource :: findAllSources e.InnerException
-                    return! requestError (RIStackOverflow allSources) next ctx
+            | :? DatabaseAccessDeniedException as e ->
+                logger.LogError(e, "Database access denied")
+                return! requestError RIAccessDenied next ctx
+            | :? RequestStackOverflowException as topE ->
+                let rec findAllSources (e : RequestStackOverflowException) =
+                    seq {
+                        yield e.Source
+                        match e.InnerException with
+                        | :? RequestStackOverflowException as e -> yield! findAllSources e
+                        | _ -> ()
+                    }
+                let allSources = findAllSources topE |> Seq.toArray
+                return! requestError (RIStackOverflow allSources) next ctx
     }
 
 let withContextHidden (f : IFunDBAPI -> HttpHandler) : HttpHandler =
@@ -507,7 +550,7 @@ let private withContextLimited (prefix : string) (getLimits : IInstance -> RateL
             match ctx.User.FindFirstValue ClaimTypes.NameIdentifier with
             | null -> getIpAddress ctx
             | userId -> userId
-        checkRateLimit (run inst) rateExceeded (prefix + userId) (getLimits inst.Instance) next ctx
+        checkRateLimit rateExceeded (prefix + userId) (getLimits inst.Instance) (runWithApi true inst f next) ctx
 
-let withContextRead (f : IFunDBAPI -> HttpHandler) = withContextLimited "read." (fun inst -> inst.ReadRateLimitsPerUser) f
-let withContextWrite (f : IFunDBAPI -> HttpHandler) = withContextLimited "write." (fun inst -> inst.WriteRateLimitsPerUser) f
+let withContextRead (f : IFunDBAPI -> HttpHandler) = withContextLimited "read|" (fun inst -> inst.ReadRateLimitsPerUser) f
+let withContextWrite (f : IFunDBAPI -> HttpHandler) = withContextLimited "write|" (fun inst -> inst.WriteRateLimitsPerUser) f

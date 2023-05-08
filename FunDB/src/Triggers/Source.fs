@@ -10,10 +10,10 @@ open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.FunQL.AST
 
 type TriggerTime =
-    | [<CaseName("BEFORE")>] TTBefore
-    | [<CaseName("AFTER")>] TTAfter
+    | [<CaseKey("BEFORE")>] TTBefore
+    | [<CaseKey("AFTER")>] TTAfter
     with
-        static member private Fields = caseNames (unionCases typeof<TriggerTime>) |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
+        static member private Fields = caseNames typeof<TriggerTime> |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
 
         override this.ToString () = this.ToFunQLString()
 

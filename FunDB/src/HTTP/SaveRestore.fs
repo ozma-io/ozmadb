@@ -11,24 +11,8 @@ open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.API.Types
 
-let private saveError e =
-    let handler =
-        match e with
-        | RSENotFound -> RequestErrors.notFound
-        | RSEAccessDenied -> RequestErrors.forbidden
-    handler (json e)
-
-let private restoreError e =
-    let handler =
-        match e with
-        | RREAccessDenied -> RequestErrors.forbidden
-        | RREPreloaded -> RequestErrors.unprocessableEntity
-        | RREInvalidFormat _ -> RequestErrors.unprocessableEntity
-        | RREConsistency _ -> RequestErrors.badRequest
-    handler (json e)
-
 [<NoEquality; NoComparison>]
-type private RestoreFlags =
+type RestoreSchemasHTTPFlags =
     { DropOthers : bool
       ForceAllowBroken : bool
     }
@@ -37,20 +21,16 @@ let saveRestoreApi : Endpoint list =
     let saveZipSchemas (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             let (schemas, api) = arg :?> (SaveSchemas * IFunDBAPI)
-            match! api.SaveRestore.SaveZipSchemas schemas with
+            match! api.SaveRestore.SaveZipSchemas { Schemas = schemas } with
             | Ok dumpStream ->
                 ctx.SetHttpHeader("Content-Type", "application/zip")
                 return! ctx.WriteStreamAsync(false, dumpStream, None, None)
-            | Error err -> return! saveError err next ctx
+            | Error err -> return! requestError err next ctx
         }
 
-    let saveJsonSchemas (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        task {
-            let (schemas, api) = arg :?> (SaveSchemas * IFunDBAPI)
-            match! api.SaveRestore.SaveSchemas schemas with
-            | Ok dump -> return! Successful.ok (json dump) next ctx
-            | Error err -> return! saveError err next ctx
-        }
+    let saveJsonSchemas (arg: obj) : HttpHandler =
+        let (schemas, api) = arg :?> (SaveSchemas * IFunDBAPI)
+        handleRequest (api.SaveRestore.SaveSchemas { Schemas = schemas })
 
     let saveSchemaNegotiationRules =
         dict [
@@ -73,32 +53,32 @@ let saveRestoreApi : Endpoint list =
             return! negotiateWith saveSchemaNegotiationRules negotiateConfig.UnacceptableHandler (schemas, api) next ctx
         }
 
-    let getRestoreFlags (nextOp : RestoreFlags -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let getRestoreFlags (nextOp : RestoreSchemasHTTPFlags -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         let flags =
             { DropOthers = boolRequestArg "drop_others" ctx
               ForceAllowBroken = boolRequestArg "force_allow_broken" ctx
             }
         nextOp flags next ctx
 
-    let restoreJsonSchemas (api : IFunDBAPI) (flags : RestoreFlags) =
-        safeBindJson <| fun dump (next : HttpFunc) (ctx : HttpContext) ->
-            task {
-                match! api.SaveRestore.RestoreSchemas dump flags.DropOthers with
-                | Ok () -> return! commitAndOk api next ctx
-                | Error err -> return! restoreError err next ctx
-            }
+    let restoreJsonSchemas (api : IFunDBAPI) (flags : RestoreSchemasHTTPFlags) =
+        safeBindJson <| fun dump ->
+            let req =
+                { Schemas = dump
+                  Flags = Some { DropOthers = flags.DropOthers }
+                }
+            handleRequestWithCommit api (api.SaveRestore.RestoreSchemas req)
 
-    let restoreZipSchemas (api : IFunDBAPI) (flags : RestoreFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let restoreZipSchemas (api : IFunDBAPI) (flags : RestoreSchemasHTTPFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
+            // Used because the ZipArchive API is synchronous.
             use stream = new MemoryStream()
             do! ctx.Request.Body.CopyToAsync(stream)
             ignore <| stream.Seek(0L, SeekOrigin.Begin)
-            match! api.SaveRestore.RestoreZipSchemas stream flags.DropOthers with
-            | Ok () -> return! commitAndOk api next ctx
-            | Error err -> return! restoreError err next ctx
+            let req = { Flags = Some { DropOthers = flags.DropOthers } }
+            return! handleRequestWithCommit api (api.SaveRestore.RestoreZipSchemas ctx.Request.Body req) next ctx
         }
 
-    let restoreSchemas (api : IFunDBAPI) (flags : RestoreFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let restoreSchemas (api : IFunDBAPI) (flags : RestoreSchemasHTTPFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             if flags.ForceAllowBroken then
                 api.Request.Context.SetForceAllowBroken ()

@@ -5,6 +5,7 @@ open System.Linq
 open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
+open System.Runtime.Serialization
 open Microsoft.Extensions.Logging
 open NodaTime
 open Npgsql
@@ -292,8 +293,11 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
         }
 
 type ExplainOptions =
-    { Analyze : bool option
+    { [<DataMember(EmitDefaultValue = false)>]
+      Analyze : bool option
+      [<DataMember(EmitDefaultValue = false)>]
       Costs : bool option
+      [<DataMember(EmitDefaultValue = false)>]
       Verbose : bool option
     }
 

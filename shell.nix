@@ -15,6 +15,7 @@ let
       lttng-ust
       libunwind
       kerberos
+      lldb
     ];
     extraOutputsToInstall = [ "dev" ];
     profile = ''

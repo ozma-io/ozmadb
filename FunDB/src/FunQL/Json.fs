@@ -43,6 +43,7 @@ let defaultJsonSettings =
     let converters : JsonConverter seq =
         seq {
             yield FunQL.FieldValuePrettyConverter ()
+            yield FunQL.ArgumentRefConverter ()
             yield SQL.ValuePrettyConverter ()
             yield InstantDateTimeConverter ()
         }

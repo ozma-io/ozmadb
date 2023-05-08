@@ -9,18 +9,8 @@ open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.API.Types
 
-let private errorHandler = function
-    | EENotFound -> RequestErrors.badRequest
-    | EEFrozen -> RequestErrors.forbidden
-    | EEAccessDenied -> RequestErrors.forbidden
-    | EEArguments _ -> RequestErrors.notFound
-    | EECompilation _ -> RequestErrors.badRequest
-    | EEExecution _ -> RequestErrors.unprocessableEntity
-    | EEException _ -> ServerErrors.internalError
-    | EETrigger _ -> ServerErrors.internalError
-
 [<NoEquality; NoComparison>]
-type TopLevelTransaction =
+type HTTPTransaction =
     { Operations : TransactionOp[]
       DeferConstraints : bool
       ForceAllowBroken : bool
@@ -31,21 +21,11 @@ type RelatedEntitiesRequest =
     }
 
 let entitiesApi : Endpoint list =
-    let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        task {
-            match! api.Entities.GetEntityInfo entityRef with
-            | Ok info ->
-                return! Successful.ok (json info) next ctx
-            | Error err -> return! errorHandler err (json err) next ctx
-        }
+    let getEntityInfo (entityRef : ResolvedEntityRef) (api : IFunDBAPI) : HttpHandler =
+        handleRequest (api.Entities.GetEntityInfo { Entity = entityRef })
 
-    let getRelatedEntities (entityRef : ResolvedEntityRef) (api : IFunDBAPI) (req : RelatedEntitiesRequest) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        task {
-            match! api.Entities.GetRelatedEntities entityRef req.Id with
-            | Ok info ->
-                return! Successful.ok (json info) next ctx
-            | Error err -> return! errorHandler err (json err) next ctx
-        }
+    let getRelatedEntities (entityRef : ResolvedEntityRef) (api : IFunDBAPI) (req : RelatedEntitiesRequest) : HttpHandler =
+        handleRequest (api.Entities.GetRelatedEntities { Entity = entityRef; Id = req.Id })
 
     let withEntityRead next (schema, name) =
         let entityRef = { Schema = FunQLName schema; Name = FunQLName name }
@@ -56,7 +36,7 @@ let entitiesApi : Endpoint list =
           GET [ routef "/%s/%s/info" <| withEntityRead getEntityInfo ]
         ]
 
-    let runTransactionInner (api : IFunDBAPI) (transaction : TopLevelTransaction) =
+    let runTransactionInner (api : IFunDBAPI) (transaction : HTTPTransaction) =
         task {
             if transaction.ForceAllowBroken then
                 api.Request.Context.SetForceAllowBroken ()
@@ -64,7 +44,7 @@ let entitiesApi : Endpoint list =
         }
 
     let runTransaction (api : IFunDBAPI) =
-        safeBindJson <| fun (transaction : TopLevelTransaction) (next : HttpFunc) (ctx : HttpContext) ->
+        safeBindJson <| fun (transaction : HTTPTransaction) (next : HttpFunc) (ctx : HttpContext) ->
             task {
                 if not transaction.DeferConstraints then
                     match! runTransactionInner api transaction with

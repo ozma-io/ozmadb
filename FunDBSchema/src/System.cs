@@ -122,8 +122,15 @@ namespace FunWithFlags.FunDBSchema.System
         [Attributes.Index("type", new [] {"\"type\""})]
         [Attributes.Index("timestamp", new [] {"\"timestamp\""})]
         [Attributes.Index("user_name", new [] {"\"user_name\""})]
+        [Attributes.Index("request_user_view", new [] {"\"request\"->'source'->'schema'", "\"request\"->'source'->'name'"})]
+        [Attributes.Index("request_entity", new [] {"\"request\"->'entity'->'schema'", "\"request\"->'entity'->'name'", "\"request\"->'id'"})]
+        // TODO BEGIN: Remove all these along with the old fields
         [Attributes.Index("field", new [] {"\"schema_name\"", "\"entity_name\"", "\"field_name\""})]
         [Attributes.Index("row", new [] {"\"schema_name\"", "\"entity_name\"", "\"row_id\""})]
+        [Attributes.Index("error_type", new [] {"\"schema_name\"", "\"entity_name\"", "\"row_id\""})]
+        // TODO END
+        // TODO: Uncomment when the field is converted to JSON later.
+        // [Attributes.Index("error_type", new [] {"\"error\"->'error'"})]
         public DbSet<EventEntry> Events { get; set; } = null!;
 
         public SystemContext()
@@ -676,6 +683,32 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string", IsImmutable=true)]
         public string? UserName { get; set; }
 
+        [ColumnField("json", IsImmutable=true, Default="{\"type\": 'api'}")]
+        [Column(TypeName = "jsonb")]
+        [Required]
+        public string Source { get; set; } = "";
+
+        [ColumnField("json", IsImmutable=true)]
+        [Column(TypeName = "jsonb")]
+        // TODO: Remove old entries and declare required after a month.
+        // [Required]
+        public string? Request { get; set; } = "";
+
+        [ColumnField("json", IsImmutable=true)]
+        [Column(TypeName = "jsonb")]
+        public string? Response { get; set; }
+
+        // TODO: Replace with "json" after a month
+        [ColumnField("string", IsImmutable=true)]
+        public string? Error { get; set; }
+
+        //
+        // TODO BEGIN: Legacy, remove after a month
+        //
+        [ColumnField("string", IsImmutable=true)]
+        [Required]
+        public string Details { get; set; } = "";
+
         [ColumnField("string", IsImmutable=true)]
         public string? SchemaName { get; set; }
 
@@ -687,17 +720,8 @@ namespace FunWithFlags.FunDBSchema.System
 
         [ColumnField("int", IsImmutable=true)]
         public int? RowId { get; set; }
-
-        [ColumnField("json", IsImmutable=true, Default="{\"type\": 'api'}")]
-        [Column(TypeName = "jsonb")]
-        [Required]
-        public string Source { get; set; } = "";
-
-        [ColumnField("string", IsImmutable=true)]
-        public string? Error { get; set; }
-
-        [ColumnField("string", IsImmutable=true)]
-        [Required]
-        public string Details { get; set; } = "";
+        //
+        // END: Legacy, remove after a month
+        //
      }
 }

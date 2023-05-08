@@ -12,16 +12,7 @@ open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.API.Types
 module SQL = FunWithFlags.FunDB.SQL.Query
 
-let private domainError e =
-    let handler =
-        match e with
-        | DEArguments _ -> RequestErrors.badRequest
-        | DENotFound -> RequestErrors.notFound
-        | DEAccessDenied -> RequestErrors.forbidden
-        | DEExecution _ -> RequestErrors.unprocessableEntity
-    handler (json e)
-
-type DomainRequest =
+type DomainHTTPRequest =
     { Chunk : SourceQueryChunk option
       PretendUser : UserName option
       PretendRole : ResolvedEntityRef option
@@ -29,7 +20,7 @@ type DomainRequest =
       ForceRecompile : bool
     }
 
-type DomainExplainRequest =
+type DomainExplainHTTPRequest =
     { Chunk : SourceQueryChunk option
       PretendUser : UserName option
       PretendRole : ResolvedEntityRef option
@@ -41,41 +32,33 @@ type DomainExplainRequest =
     }
 
 let domainsApi : Endpoint list =
-    let returnValues (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) next ctx =
-        task {
-            match! api.Domains.GetDomainValues ref rowId chunk flags with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! domainError err next ctx
-        }
+    let returnValues (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) =
+        let req = { Field = ref; Id = Option.map RRKPrimary rowId; Chunk = Some chunk; Flags = Some flags } : GetDomainValuesRequest
+        handleRequest (api.Domains.GetDomainValues req)
 
     let getDomainValues (ref : ResolvedFieldRef) (api : IFunDBAPI) next ctx =
-        task {
-            let rowId = intRequestArg "id" ctx
-            let chunk =
-                { Offset = intRequestArg "__offset" ctx
-                  Limit = intRequestArg "__limit" ctx
-                  Where = None
-                } : SourceQueryChunk
-            let flags =
-                { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
-                } : DomainFlags
-            return! returnValues api ref rowId chunk flags next ctx
-        }
+        let rowId = intRequestArg "id" ctx
+        let chunk =
+            { Offset = intRequestArg "__offset" ctx
+              Limit = intRequestArg "__limit" ctx
+              Where = None
+            } : SourceQueryChunk
+        let flags =
+            { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+            } : DomainFlags
+        returnValues api ref rowId chunk flags next ctx
 
     let postGetDomainValues (ref : ResolvedFieldRef) (api : IFunDBAPI) =
-        safeBindJson <| fun (req : DomainRequest) (next : HttpFunc) (ctx : HttpContext) ->
+        safeBindJson <| fun (req : DomainHTTPRequest) (next : HttpFunc) (ctx : HttpContext) ->
             let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
             let flags =
                 { ForceRecompile = flagIfDebug <| req.ForceRecompile
                 } : DomainFlags
-            setPretends api req.PretendUser req.PretendRole (fun () -> returnValues api ref req.RowId chunk flags next ctx)
+            (setPretendRole api req.PretendRole >=> setPretendUser api req.PretendUser >=> returnValues api ref req.RowId chunk flags) next ctx
 
-    let returnExplain (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) (explainOpts : SQL.ExplainOptions) next ctx =
-        task {
-            match! api.Domains.GetDomainExplain ref rowId chunk flags explainOpts with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! domainError err next ctx
-        }
+    let returnExplain (api : IFunDBAPI) (ref : ResolvedFieldRef) (rowId : int option) (chunk : SourceQueryChunk) (flags : DomainFlags) (explainOpts : SQL.ExplainOptions) =
+        let req = { Field = ref; Id = Option.map RRKPrimary rowId; Chunk = Some chunk; Flags = Some flags; ExplainFlags = Some explainOpts } : GetDomainExplainRequest
+        handleRequest (api.Domains.GetDomainExplain req)
 
     let getDomainExplain (ref : ResolvedFieldRef) (api : IFunDBAPI) =
         queryArgs <| fun rawArgs next ctx ->
@@ -98,7 +81,7 @@ let domainsApi : Endpoint list =
             }
 
     let postGetDomainExplain (ref : ResolvedFieldRef) (api : IFunDBAPI) =
-        safeBindJson <| fun (req : DomainExplainRequest) (next : HttpFunc) (ctx : HttpContext) ->
+        safeBindJson <| fun (req : DomainExplainHTTPRequest) (next : HttpFunc) (ctx : HttpContext) ->
             let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
             let flags =
                 { ForceRecompile = flagIfDebug <| req.ForceRecompile
@@ -108,7 +91,11 @@ let domainsApi : Endpoint list =
                   Costs = req.Costs
                   Verbose = req.Verbose
                 } : SQL.ExplainOptions
-            setPretends api req.PretendUser req.PretendRole (fun () -> returnExplain api ref req.RowId chunk flags explainOpts next ctx)
+            let handler =
+                setPretendUser api req.PretendUser >=>
+                    setPretendRole api req.PretendRole >=>
+                    returnExplain api ref req.RowId chunk flags explainOpts
+            handler next ctx
 
     let withDomainRead next (schema, entity, name) =
         let ref = { Entity = { Schema = FunQLName schema; Name = FunQLName entity }; Name = FunQLName name }

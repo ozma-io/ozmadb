@@ -16,23 +16,17 @@ open FunWithFlags.FunDB.Permissions.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.API.Types
 
-type RequestErrorInfo =
-    | REUserNotFound
-    | RENoRole
-    | REStackOverflow of Source : EventSource
-    with
-        member this.Message =
-            match this with
-            | REUserNotFound -> "User not found"
-            | RENoRole -> "Access denied"
-            | REStackOverflow source -> sprintf "Stack depth exceeded in %O" source
+type DatabaseAccessDeniedException (message : string, innerException : exn) =
+    inherit UserException(message, innerException, true)
 
-type RequestException (info : RequestErrorInfo, innerException : exn) =
-    inherit UserException(info.Message, innerException)
+    new (message : string) = DatabaseAccessDeniedException (message, null)
 
-    new (info : RequestErrorInfo) = RequestException (info, null)
+type RequestStackOverflowException (source : EventSource, innerException : exn) =
+    inherit UserException("Request stack overflow", innerException, true)
 
-    member this.Info = info
+    new (source : EventSource) = RequestStackOverflowException (source, null)
+
+    member this.Source = source
 
 [<NoEquality; NoComparison>]
 type RequestParams =
@@ -135,15 +129,13 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         addDetails event
         event
 
-    let checkPrivileged () =
+    let isPrivileged () =
         match currentUser.Saved.Type with
-        | RTRoot -> ()
+        | RTRoot -> true
         | _ ->
             match source with
-            | ESAction _ | ESTrigger _ -> ()
-            | ESAPI ->
-                logger.LogError("This feature is only available for root users, not for {user}", currentUser.Effective.Name)
-                raise <| RequestException RENoRole
+            | ESAction _ | ESTrigger _ -> true
+            | ESAPI -> false
 
     static member Create (opts : RequestParams) : Task<RequestContext> =
         task {
@@ -157,8 +149,8 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                     match maybeUser with
                     | None when opts.CanRead -> RTRole { Role = None; Ref = None; CanRead = true }
                     | None ->
-                        logger.LogError("User {user} not found in users table", opts.UserName)
-                        raise <| RequestException REUserNotFound
+                        logger.LogError("User {user} was not found in the users table", opts.UserName)
+                        raisef DatabaseAccessDeniedException ""
                     | Some user when user.IsRoot -> RTRoot
                     | Some user ->
                         match user.Role with
@@ -167,14 +159,14 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                                 RTRole { Role = None; Ref = None; CanRead = true }
                             else
                                 logger.LogError("User {user} has no role set", opts.UserName)
-                                raise <| RequestException RENoRole
+                                raisef DatabaseAccessDeniedException ""
                         | Some roleRef ->
                             match ctx.Permissions.Find roleRef |> Option.get with
                             | Ok role -> RTRole { Role = Some role; Ref = Some roleRef; CanRead = opts.CanRead }
                             | Error _ when opts.CanRead -> RTRole { Role = None; Ref = Some roleRef; CanRead = true }
                             | Error e ->
                                 logger.LogError(e.Error, "Role for user {user} is broken", opts.UserName)
-                                raise <| RequestException RENoRole
+                                raisef DatabaseAccessDeniedException ""
             let userId = maybeUser |> Option.map (fun u -> u.Id)
             let initialUser =
                 { Id = userId
@@ -207,7 +199,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
     member this.RunWithSource (newSource : EventSource) (func : unit -> Task<'a>) : Task<'a> =
         task {
             if sourceDepth >= maxSourceDepth then
-                raise <| RequestException (REStackOverflow newSource)
+                raise <| RequestStackOverflowException(newSource)
             let oldSource = source
             source <- newSource
             sourceDepth <- sourceDepth + 1
@@ -215,64 +207,71 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
                 try
                     return! func ()
                 with
-                | :? RequestException as e ->
-                    match e.Info with
-                    | REStackOverflow source -> return raise <| RequestException(REStackOverflow oldSource, e)
-                    | _ -> return reraise' e
+                | :? RequestStackOverflowException as e ->
+                    return raise <| RequestStackOverflowException(oldSource, e)
             finally
                 sourceDepth <- sourceDepth - 1
                 source <- oldSource
         }
 
-    member this.PretendUser (userName : UserName) (func : unit -> Task<'a>) : Task<'a> =
+    member this.PretendUser (req : PretendUserRequest) (func : unit -> Task<'a>) : Task<Result<'a, PretendErrorInfo>> =
         task {
-            checkPrivileged ()
-            let! maybeUser = fetchUser ctx.Transaction.System userName true ctx.CancellationToken
-            let roleType =
-                match maybeUser with
-                    | None ->
-                        logger.LogError("User {user} not found in users table", userName)
-                        raise <| RequestException REUserNotFound
-                    | Some user when user.IsRoot -> RTRoot
+            if not <| isPrivileged () then
+                return Error PEAccessDenied
+            else
+                let! maybeUser = fetchUser ctx.Transaction.System req.AsUser true ctx.CancellationToken
+                let maybeRoleType =
+                    match maybeUser with
+                        | None -> Error PEUserNotFound
+                        | Some user when user.IsRoot -> Ok RTRoot
                         | Some user ->
                             match user.Role with
                             | None ->
                                 if opts.CanRead then
-                                    RTRole { Role = None; Ref = None; CanRead = true }
+                                    Ok <| RTRole { Role = None; Ref = None; CanRead = true }
                                 else
-                                    logger.LogError("User {user} has no role set", userName)
-                                    raise <| RequestException RENoRole
+                                    Error PENoUserRole
                             | Some roleRef ->
                                 match ctx.Permissions.Find roleRef |> Option.get with
-                                | Ok role -> RTRole { Role = Some role; Ref = Some roleRef; CanRead = opts.CanRead }
+                                | Ok role -> Ok <| RTRole { Role = Some role; Ref = Some roleRef; CanRead = opts.CanRead }
                                 | Error e ->
-                                    logger.LogError(e.Error, "Role for user {user} is broken", userName)
-                                    raise <| RequestException RENoRole
-            let newUser =
-                { Id = maybeUser |> Option.map (fun u -> u.Id)
-                  Name = userName
-                  Type = roleType
-                }
-            return! setCurrentUser newUser func
+                                    logger.LogError(e.Error, "Role for user {user} is broken", req.AsUser)
+                                    Error PENoUserRole
+                match maybeRoleType with
+                | Error e -> return Error e
+                | Ok roleType ->
+                    let user = Option.get maybeUser
+                    let newUser =
+                        { Id = Some user.Id
+                          Name = req.AsUser
+                          Type = roleType
+                        }
+                    let! ret = setCurrentUser newUser func
+                    return Ok ret
         }
 
-    member this.PretendRoot (func : unit -> Task<'a>) : Task<'a> =
-        checkPrivileged ()
-        let newUser = { currentUser.Effective with Type = RTRoot }
-        setCurrentUser newUser func
-
-    member this.PretendRole (newRole : ResolvedRoleRef) (func : unit -> Task<'a>) : Task<'a> =
-        checkPrivileged ()
-        let effectiveRole =
-            match ctx.Permissions.Find newRole with
-            | Some (Ok role) -> RTRole { Role = Some role; Ref = Some newRole; CanRead = opts.CanRead }
-            | Some (Error e) ->
-                logger.LogError(e.Error, "Role {role} is broken", newRole)
-                raise <| RequestException RENoRole
-            | None ->
-                raise <| RequestException RENoRole
-        let newUser = { currentUser.Effective with Type = effectiveRole }
-        setCurrentUser newUser func
+    member this.PretendRole (req : PretendRoleRequest) (func : unit -> Task<'a>) : Task<Result<'a, PretendErrorInfo>> =
+        task {
+            if not <| isPrivileged () then
+                return Error PEAccessDenied
+            else
+                let maybeEffectiveRole =
+                    match req.AsRole with
+                    | PRRoot -> Ok RTRoot
+                    | PRRole roleRef ->
+                        match ctx.Permissions.Find roleRef with
+                        | None -> Error PENoUserRole
+                        | Some (Ok role) -> Ok (RTRole { Role = Some role; Ref = Some roleRef; CanRead = opts.CanRead })
+                        | Some (Error e) ->
+                            logger.LogError(e.Error, "Role {role} is broken", roleRef)
+                            Error PENoUserRole
+                match maybeEffectiveRole with
+                | Error e -> return Error e
+                | Ok effectiveRole ->
+                    let newUser = { currentUser.Effective with Type = effectiveRole }
+                    let! ret = setCurrentUser newUser func
+                    return Ok ret
+        }
 
     member this.IsPrivileged =
         match source with
@@ -290,7 +289,6 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         member this.WriteEvent addDetails = this.WriteEvent addDetails
         member this.WriteEventSync addDetails = this.WriteEventSync addDetails
         member this.RunWithSource newSource func = this.RunWithSource newSource func
-        member this.PretendRoot func = this.PretendRoot func
-        member this.PretendRole newRole func = this.PretendRole newRole func
-        member this.PretendUser newUserName func = this.PretendUser newUserName func
+        member this.PretendRole req func = this.PretendRole req func
+        member this.PretendUser req func = this.PretendUser req func
         member this.IsPrivileged = this.IsPrivileged

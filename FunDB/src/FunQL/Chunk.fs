@@ -1,6 +1,8 @@
 module FunWithFlags.FunDB.FunQL.Chunk
 
 open Newtonsoft.Json.Linq
+open System.Runtime.Serialization
+
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.Parsing
@@ -33,8 +35,11 @@ type SourceChunkWhere =
     }
 
 type SourceQueryChunk =
-    { Offset : int option
+    { [<DataMember(EmitDefaultValue = false)>]
+      Offset : int option
+      [<DataMember(EmitDefaultValue = false)>]
       Limit : int option
+      [<DataMember(EmitDefaultValue = false)>]
       Where : SourceChunkWhere option
     }
 
@@ -117,7 +122,7 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
         try
             resolveSingleFieldExpr callbacks parsedArguments emptyExprResolutionFlags (SFCustom customMapping) parsedExpr
         with
-        | :? ViewResolveException as e -> raisefWithInner ChunkException e ""
+        | :? QueryResolveException as e -> raisefWithInner ChunkException e ""
     if not <| exprIsLocal info.Flags then
         raisef ChunkException "Expression is required to be local"
     if info.Flags.HasAggregates then

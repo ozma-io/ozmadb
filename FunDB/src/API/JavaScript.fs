@@ -16,24 +16,25 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.Utils
-open FunWithFlags.FunDB.FunQL.AST
-open FunWithFlags.FunDB.FunQL.Arguments
-open FunWithFlags.FunDB.Permissions.Types
-open FunWithFlags.FunDB.FunQL.Chunk
 open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.JavaScript.Runtime
 
 [<SerializeAsObject("error")>]
 type APICallErrorInfo =
-    | [<CaseName("call")>] ACECall of Details : string
+    | [<CaseKey("call")>] ACECall of Details : string
     with
         [<DataMember>]
         member this.Message =
             match this with
             | ACECall msg -> msg
 
-        interface IAPIError with
+        interface ILoggableResponse with
+            member this.ShouldLog = false
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.Message
+            member this.HTTPResponseCode = 500
 
 type JavaScriptAPIException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
@@ -45,6 +46,15 @@ type JavaScriptAPIException (message : string, innerException : Exception, isUse
 
 type JavaScriptUserException (message : string, userData: JToken) =
     inherit UserException(message, null, true, Some userData)
+
+type WriteEventRequest =
+    { Details : string
+    }
+
+type CancelWithRequest =
+    { UserData : JToken option
+      Message : string option
+    }
 
 type private APIHandle (api : IFunDBAPI) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
@@ -70,13 +80,13 @@ type private APIHandle (api : IFunDBAPI) =
                 lock <- oldLock
         }
 
-let inline private wrapApiCall (handle : APIHandle) (wrap : (unit -> Task<'a>) -> Task<'b>) (f : unit -> Task<'a>) : Task<'b> =
+let inline private wrapApiCall<'Result, 'Error when 'Error :> IErrorDetails> (handle : APIHandle) (wrap : (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>) (f : unit -> Task<'Result>) : Task<'Result> =
     task {
         let mutable lockTaken = false
         do! handle.Lock.WaitAsync()
         lockTaken <- true
         try
-            return! wrap <| fun () ->
+            let! res = wrap <| fun () ->
                 task {
                     handle.Lock.Release()
                     lockTaken <- false
@@ -85,6 +95,9 @@ let inline private wrapApiCall (handle : APIHandle) (wrap : (unit -> Task<'a>) -
                     lockTaken <- true
                     return r
                 }
+            match res with
+            | Ok r -> return r
+            | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
         finally
             if lockTaken then
                 handle.Lock.Release()
@@ -103,7 +116,7 @@ let inline private runVoidApiCall (handle : APIHandle) (context : Context)  (f :
             }
     Func<_>(run)
 
-let inline private runResultApiCall<'a, 'e when 'e :> IAPIError> (handle : APIHandle) (context : Context) (f : unit -> Task<Result<'a, 'e>>) : Func<Task<Value.Value>> =
+let inline private runResultApiCall<'a, 'e when 'e :> IErrorDetails> (handle : APIHandle) (context : Context) (f : unit -> Task<Result<'a, 'e>>) : Func<Task<Value.Value>> =
     let run () =
         Task.unmaskableLock handle.Lock <| fun unmask ->
             task {
@@ -115,7 +128,7 @@ let inline private runResultApiCall<'a, 'e when 'e :> IAPIError> (handle : APIHa
             }
     Func<_>(run)
 
-let inline private runVoidResultApiCall<'e when 'e :> IAPIError> (handle : APIHandle) (context : Context) (f : unit -> Task<Result<unit, 'e>>) : Func<Task<Value.Value>> =
+let inline private runVoidResultApiCall<'e when 'e :> IErrorDetails> (handle : APIHandle) (context : Context) (f : unit -> Task<Result<unit, 'e>>) : Func<Task<Value.Value>> =
     let run () =
         Task.unmaskableLock handle.Lock <| fun unmask ->
             task {
@@ -132,7 +145,7 @@ type APITemplate (isolate : Isolate) =
     let mutable errorConstructor = None : Value.Function option
     let mutable runtime = Unchecked.defaultof<IJSRuntime>
 
-    let throwError (context : Context) (e : 'a when 'a :> IAPIError) : 'b =
+    let throwError (context : Context) (e : 'a when 'a :> IErrorDetails) : 'b =
         let body = V8JsonWriter.Serialize(context, e)
         let constructor = Option.get errorConstructor
         let exc = constructor.NewInstance(body)
@@ -166,7 +179,10 @@ type APITemplate (isolate : Isolate) =
     let template =
         let template = ObjectTemplate.New(isolate)
 
-        template.Set("renderFunQLName", FunctionTemplate.New(template.Isolate, fun args ->
+        let fundbTemplate = ObjectTemplate.New(isolate)
+        template.Set("internal", fundbTemplate)
+
+        fundbTemplate.Set("formatFunQLName", FunctionTemplate.New(template.Isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then
                 throwCallError context "Number of arguments must be 1"
@@ -174,7 +190,7 @@ type APITemplate (isolate : Isolate) =
             Value.String.New(template.Isolate, ret).Value
         ))
 
-        template.Set("renderFunQLValue", FunctionTemplate.New(template.Isolate, fun args ->
+        fundbTemplate.Set("formatFunQLValue", FunctionTemplate.New(template.Isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then
                 throwCallError context "Number of arguments must be 1"
@@ -192,119 +208,27 @@ type APITemplate (isolate : Isolate) =
             Value.String.New(template.Isolate, ret).Value
         ))
 
-        let fundbTemplate = ObjectTemplate.New(isolate)
-        template.Set("FunDB", fundbTemplate)
+        let simpleApiCallTemplate (f : APIHandle -> 'Request -> Task<Result<'Response, 'Error>>) =
+            FunctionTemplate.New(isolate, fun args ->
+                let context = isolate.CurrentContext
+                if args.Length <> 1 then
+                    throwCallError context "Number of arguments must be 1"
+                let req = jsDeserialize context args.[0] : 'Request
+                let handle = Option.get currentHandle
+                let run = runResultApiCall handle context <| fun () -> f handle req
+                runtime.EventLoop.NewPromise(context, run).Value
+            )
 
-        fundbTemplate.Set("getUserView", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length < 1 || args.Length > 3 then
-                throwCallError context "Number of arguments must be between 1 and 3"
-            let source = jsDeserialize context args.[0] : UserViewSource
-            let uvArgs =
-                if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
-                    jsDeserialize context args.[1] : RawArguments
-                else
-                    Map.empty
-            let chunk =
-                if args.Length >= 3 && args.[2].ValueType <> Value.ValueType.Undefined then
-                    jsDeserialize context args.[2] : SourceQueryChunk
-                else
-                    emptyQueryChunk
-            let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.UserViews.GetUserView source uvArgs chunk emptyUserViewFlags
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
+        fundbTemplate.Set("getUserView", simpleApiCallTemplate (fun handle -> handle.API.UserViews.GetUserView))
+        fundbTemplate.Set("getUserViewInfo", simpleApiCallTemplate (fun handle -> handle.API.UserViews.GetUserViewInfo))
 
-        fundbTemplate.Set("getUserViewInfo", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 1 then
-                throwCallError context "Number of arguments must be 1"
-            let source = jsDeserialize context args.[0] : UserViewSource
-            let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.UserViews.GetUserViewInfo source emptyUserViewFlags
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
-
-        fundbTemplate.Set("getEntityInfo", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 1 then
-                throwCallError context "Number of arguments must be 1"
-            let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.GetEntityInfo ref
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
-
-        fundbTemplate.Set("insertEntities", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 2 then
-                throwCallError context "Number of arguments must be 2"
-            let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let rowsArgs = jsDeserialize context args.[1] : RawArguments[]
-            let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.InsertEntities ref rowsArgs
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
-
-        fundbTemplate.Set("updateEntity", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 3 then
-                throwCallError context "Number of arguments must be 3"
-            let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let id = jsDeserialize context args.[1] : RawRowKey
-            let rawArgs = jsDeserialize context args.[2] : RawArguments
-            let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.UpdateEntity ref id rawArgs
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
-
-        fundbTemplate.Set("deleteEntity", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 2 then
-                throwCallError context "Number of arguments must be 2"
-            let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let id = jsDeserialize context args.[1] : RawRowKey
-            let handle = Option.get currentHandle
-            let run = runVoidResultApiCall handle context <| fun () -> handle.API.Entities.DeleteEntity ref id
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
-
-        fundbTemplate.Set("getRelatedEntities", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 2 then
-                throwCallError context "Number of arguments must be 2"
-            let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let id = jsDeserialize context args.[1] : RawRowKey
-            let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.GetRelatedEntities ref id
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
-
-        fundbTemplate.Set("recursiveDeleteEntity", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 2 then
-                throwCallError context "Number of arguments must be 2"
-            let ref = jsDeserialize context args.[0] : ResolvedEntityRef
-            let id = jsDeserialize context args.[1] : RawRowKey
-            let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Entities.RecursiveDeleteEntity ref id
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
-
-        fundbTemplate.Set("runCommand", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length < 1 || args.Length > 2 then
-                throwCallError context "Number of arguments must be between 1 and 2"
-            let cmd = jsString context args.[0]
-            let cmdArgs =
-                if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
-                    jsDeserialize context args.[1] : RawArguments
-                else
-                    Map.empty
-            let handle = Option.get currentHandle
-            let run = runVoidResultApiCall handle context <| fun () -> handle.API.Entities.RunCommand cmd cmdArgs
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
+        fundbTemplate.Set("getEntityInfo", simpleApiCallTemplate (fun handle -> handle.API.Entities.GetEntityInfo))
+        fundbTemplate.Set("insertEntities", simpleApiCallTemplate (fun handle -> handle.API.Entities.InsertEntities))
+        fundbTemplate.Set("updateEntity", simpleApiCallTemplate (fun handle -> handle.API.Entities.UpdateEntity))
+        fundbTemplate.Set("deleteEntity", simpleApiCallTemplate (fun handle -> handle.API.Entities.DeleteEntity))
+        fundbTemplate.Set("getRelatedEntities", simpleApiCallTemplate (fun handle -> handle.API.Entities.GetRelatedEntities))
+        fundbTemplate.Set("recursiveDeleteEntity", simpleApiCallTemplate (fun handle -> handle.API.Entities.RecursiveDeleteEntity))
+        fundbTemplate.Set("runCommand", simpleApiCallTemplate (fun handle -> handle.API.Entities.RunCommand))
 
         fundbTemplate.Set("deferConstraints", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
@@ -312,13 +236,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let func = args.[0].GetFunction()
             let handle = Option.get currentHandle
-            let run () =
-                task {
-                    let! res =  wrapApiCall handle handle.API.Entities.DeferConstraints (fun () -> func.CallAsync(null))
-                    match res with
-                    | Ok r -> return r
-                    | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
-                }
+            let run () = wrapApiCall handle handle.API.Entities.DeferConstraints (fun () -> func.CallAsync(null))
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
 
@@ -326,51 +244,25 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length <> 2 then
                 throwCallError context "Number of arguments must be 2"
-            let asRole =
-                match args.[0].Data with
-                | :? Value.Object -> Some <| (jsDeserialize context args.[0] : ResolvedRoleRef)
-                | :? Value.String as str when str.Get() = "root" -> None
-                | _ -> throwCallError context "Invalid argument `role`"
+            let req = jsDeserialize context args.[0] : PretendRoleRequest
             let func = args.[1].GetFunction()
             let handle = Option.get currentHandle
-            let wrapper =
-                match asRole with
-                | None -> handle.API.Request.PretendRoot
-                | Some ref -> handle.API.Request.PretendRole ref
-            let run () = wrapApiCall handle wrapper (fun () -> func.CallAsync(null))
+            let run () = wrapApiCall handle (handle.API.Request.PretendRole req) (fun () -> func.CallAsync(null))
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
 
-        fundbTemplate.Set("getDomainValues", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length < 1 || args.Length > 3 then
-                throwCallError context "Number of arguments must be between 1 and 3"
-            let ref = jsDeserialize context args.[0] : ResolvedFieldRef
-            let rowId =
-                if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
-                    Some <| int (args.[1].GetNumber())
-                else
-                    None
-            let chunk =
-                if args.Length >= 3 && args.[2].ValueType <> Value.ValueType.Undefined then
-                    jsDeserialize context args.[2] : SourceQueryChunk
-                else
-                    emptyQueryChunk
-            let handle = Option.get currentHandle
-            let run = runResultApiCall handle context <| fun () -> handle.API.Domains.GetDomainValues ref rowId chunk emptyDomainFlags
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
+        fundbTemplate.Set("getDomainValues", simpleApiCallTemplate (fun handle -> handle.API.Domains.GetDomainValues))
 
         fundbTemplate.Set("writeEvent", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
             if args.Length <> 1 then
                 throwCallError context "Number of arguments must be 1"
-            let details = jsString context args.[0]
+            let req = jsDeserialize context args.[0] : WriteEventRequest
             let handle = Option.get currentHandle
-            handle.Logger.LogInformation("Source {source} wrote event from JavaScript: {details}", handle.API.Request.Source, details)
+            handle.Logger.LogInformation("Source {source} wrote event from JavaScript: {details}", handle.API.Request.Source, req.Details)
             handle.API.Request.WriteEvent (fun event ->
                 event.Type <- "jsEvent"
-                event.Details <- details
+                event.Details <- req.Details
             )
             Value.Undefined.New(isolate)
         ))
@@ -379,33 +271,33 @@ type APITemplate (isolate : Isolate) =
             let context = isolate.CurrentContext
             if args.Length <> 1 then
                 throwCallError context "Number of arguments must be 1"
-            let details = jsString context args.[0]
+            let req = jsDeserialize context args.[0] : WriteEventRequest
             let handle = Option.get currentHandle
-            handle.Logger.LogInformation("Source {source} wrote sync event from JavaScript: {details}", handle.API.Request.Source, details)
+            handle.Logger.LogInformation("Source {source} wrote sync event from JavaScript: {details}", handle.API.Request.Source, req.Details)
             let run = runVoidApiCall handle context <| fun () ->
                 handle.API.Request.WriteEventSync (fun event ->
                     event.Type <- "jsEvent"
-                    event.Details <- details
+                    event.Details <- req.Details
                 )
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
         fundbTemplate.Set("cancelWith", FunctionTemplate.New(isolate, fun args ->
             let context = isolate.CurrentContext
-            if args.Length < 1 || args.Length > 2 then
-                throwCallError context "Number of arguments must be between 1 and 2"
-            let userData = jsDeserialize context args.[0] :> JToken
-            let message =
-                if args.Length >= 2 && args.[1].ValueType <> Value.ValueType.Undefined then
-                    args.[1].GetString().Get()
-                else
-                    "Operation has been cancelled"
+            if args.Length <> 1 then
+                throwCallError context "Number of arguments must be 1"
+            let req = jsDeserialize context args.[0] : CancelWithRequest
+            let message = Option.defaultValue "Operation has been cancelled" req.Message
+            let userData = Option.defaultWith (fun () -> JValue.CreateUndefined() :> JToken) req.UserData
             raise <| JavaScriptUserException(message, userData)
         ))
 
         template
 
     let preludeScriptSource = "
+const internal = global.internal;
+delete global.internal;
+
 class FunDBError extends Error {
   constructor(body) {
     super(body.message);
@@ -415,21 +307,98 @@ class FunDBError extends Error {
 global.FunDBError = FunDBError;
 
 global.formatDate = (date) => date.toISOString().split('T')[0];
+global.formatFunQLName = internal.formatFunQLName;
+global.formatFunQLValue = internal.formatFunQLValue;
 
+// TODO: deprecated, remove.
 global.renderDate = global.formatDate;
+global.renderFunQLName = global.formatFunQLName;
+global.renderFunQLValue = global.formatFunQLValue;
 
-global.FunDB.insertEntity = async (entityRef, rowArgs) => {
-    try {
-        const retIds = await FunDB.insertEntities(entityRef, [rowArgs]);
-        return retIds[0];
-    } catch (e) {
-        if (e.body.error === 'transaction') {
-            throw new FunDBError(e.body.details);
-        } else {
-            throw e;
-        }
+const normalizeSource = (source) => {
+    if (source.ref) {
+        return { ...source, ...source.ref };
+    } else {
+        return source;
     }
 };
+
+class FunDB1 {
+    getUserView(source, args, chunk) {
+        return internal.getUserView({ source: normalizeSource(source), args, chunk });
+    };
+
+    getUserViewInfo(source) {
+        return internal.getUserViewInfo({ source: normalizeSource(source) });
+    };
+
+    getEntityInfo(entity) {
+        return internal.getEntityInfo({ entity });
+    };
+
+    async insertEntity(entity, entry) {
+        try {
+            const retIds = await this.insertEntities(entity, [entry]);
+            return retIds[0];
+        } catch (e) {
+            if (e.body.error === 'transaction') {
+                throw new FunDBError(e.body.details);
+            } else {
+                throw e;
+            }
+        }
+    };
+
+    insertEntities(entity, entries) {
+        return internal.insertEntities({ entity, entries });
+    };
+
+    updateEntity(entity, id, args) {
+        return internal.updateEntity({ entity, id, args });
+    };
+
+    deleteEntity(entity, id) {
+        return internal.deleteEntity({ entity, id });
+    };
+
+    getRelatedEntities(entity, id) {
+        return internal.getRelatedEntities({ entity, id });
+    };
+
+    recursiveDeleteEntity(entity, id) {
+        return internal.recursiveDeleteEntity({ entity, id });
+    };
+
+    runCommand(command, args) {
+        return internal.runCommand({ command, args });
+    };
+
+    deferConstraints(func) {
+        return internal.deferConstraints(func);
+    };
+
+    pretendRole(asRole, func) {
+        return internal.pretendRole(asRole, func);
+    };
+
+    getDomainValues(entity, id, chunk) {
+        return internal.getDomainValues({ entity, id, chunk });
+    };
+
+    writeEvent(details) {
+        return internal.writeEvent(details);
+    };
+
+    writeEventSync(details) {
+        return internal.writeEventSync(details);
+    };
+
+    cancelWith(userData, message) {
+        return internal.cancelWith({ userData, message });
+    };
+};
+
+global.FunDB = new FunDB1();
     "
     let preludeScript = UnboundScript.Compile(Value.String.New(isolate, preludeScriptSource.Trim()), ScriptOrigin("prelude.js"))
 

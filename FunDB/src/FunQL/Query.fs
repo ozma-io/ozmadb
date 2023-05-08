@@ -8,25 +8,61 @@ open System.Runtime.Serialization
 open FSharpPlus
 open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json.Linq
+open Npgsql
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Serialization
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
+open FunWithFlags.FunDB.Layout.Errors
 open FunWithFlags.FunDB.SQL.Utils
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Misc
 
-type UserViewExecutionException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+[<SerializeAsObject("error")>]
+type FunQLExecutionError =
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] UVEIntegrity of IntegrityQueryError
+    | [<CaseKey("argument", Type=CaseSerialization.InnerObject)>] UVEArgument of ArgumentCheckError
+    | [<CaseKey("execution", IgnoreFields=[|"Details"|])>] UVEExecution of Details : string
+    with
+    member this.LogMessage =
+        match this with
+        | UVEIntegrity e -> e.LogMessage
+        | UVEArgument e -> e.LogMessage
+        | UVEExecution details -> details
 
-    new (message : string, innerException : exn) =
-        UserViewExecutionException (message, innerException, isUserException innerException)
+    member this.Message =
+        match this with
+        | UVEIntegrity e -> e.Message
+        | UVEArgument e -> e.Message
+        | UVEExecution details -> details
 
-    new (message : string) = UserViewExecutionException (message, null, true)
+    member this.HTTPResponseCode =
+        match this with
+        | UVEIntegrity e -> 422
+        | UVEArgument e -> 422
+        | UVEExecution details -> 500
+
+    member this.ShouldLog = false
+
+    interface ILoggableResponse with
+        member this.ShouldLog = this.ShouldLog
+
+    interface IErrorDetails with
+        member this.LogMessage = this.LogMessage
+        member this.Message = this.Message
+        member this.HTTPResponseCode = this.HTTPResponseCode
+
+type UserViewExecutionException (details : FunQLExecutionError, innerException : exn) =
+    inherit UserException(details.Message, innerException, true)
+
+    member this.Details = details
+
+    new (details : FunQLExecutionError) = UserViewExecutionException (details, null)
 
 type ExecutedAttributesMap = Map<AttributeName, SQL.Value>
 type ExecutedAttributeTypesMap = Map<AttributeName, SQL.SimpleValueType>
@@ -346,7 +382,23 @@ let private parseResult
     let rows' = rows.Select(parseRow)
     processFunc info rows'
 
-let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (comments : string option) (arguments : ArgumentValuesMap) (cancellationToken : CancellationToken) (processFunc : ExecutedViewInfo -> ExecutingViewExpr -> Task<'a>) : Task<'a> =
+let convertQueryExecutionException (layout : Layout) (e : QueryExecutionException) =
+    let known =
+        match e.InnerException with
+        | :? PostgresException as inner -> extractIntegrityQueryError layout inner
+        | _ -> None
+    match known with
+    | None -> UVEExecution (fullUserMessage e)
+    | Some e -> UVEIntegrity e
+
+let runViewExpr
+        (connection : QueryConnection)
+        (layout : Layout)
+        (viewExpr : CompiledViewExpr)
+        (comments : string option)
+        (arguments : ArgumentValuesMap)
+        (cancellationToken : CancellationToken)
+        (processFunc : ExecutedViewInfo -> ExecutingViewExpr -> Task<'a>) : Task<'a> =
     task {
         try
             let parameters = prepareArguments viewExpr.Query.Arguments arguments
@@ -401,22 +453,39 @@ let runViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (co
             do! unsetPragmas connection viewExpr.Pragmas cancellationToken
             return ret
         with
-        | :? QueryExecutionException as e -> return raisefUserWithInner UserViewExecutionException e ""
-        | :? ArgumentCheckException as e -> return raisefUserWithInner UserViewExecutionException e "Arguments preparation failed"
+        | :? QueryExecutionException as e ->
+            let details = convertQueryExecutionException layout e
+            return raise <| UserViewExecutionException(details, e)
+        | :? ArgumentCheckException as e -> return raise <| UserViewExecutionException(UVEArgument e.Details, e)
     }
 
 type ExplainedQuery =
     { Query : string
       Parameters : ExprParameters
       Explanation : JToken
-    }
+    } with
+        member this.ShouldLog = false
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
 
 type ExplainedViewExpr =
     { Rows : ExplainedQuery
       Attributes : ExplainedQuery option
-    }
+    } with
+        member this.ShouldLog = false
 
-let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr) (maybeArguments : ArgumentValuesMap option) (explainOpts : ExplainOptions) (cancellationToken : CancellationToken) : Task<ExplainedViewExpr> =
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+let explainViewExpr
+        (connection : QueryConnection)
+        (layout : Layout)
+        (viewExpr : CompiledViewExpr)
+        (maybeArguments : ArgumentValuesMap option)
+        (explainOpts : ExplainOptions)
+        (cancellationToken : CancellationToken) : Task<ExplainedViewExpr> =
     task {
         try
             let arguments = Option.defaultWith (fun () -> viewExpr.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)) maybeArguments
@@ -442,6 +511,8 @@ let explainViewExpr (connection : QueryConnection) (viewExpr : CompiledViewExpr)
                   Attributes = attrsResult
                 }
         with
-        | :? QueryExecutionException as e -> return raisefUserWithInner UserViewExecutionException e ""
-        | :? ArgumentCheckException as e -> return raisefUserWithInner UserViewExecutionException e "Arguments preparation failed"
+        | :? QueryExecutionException as e ->
+            let details = convertQueryExecutionException layout e
+            return raise <| UserViewExecutionException(details, e)
+        | :? ArgumentCheckException as e -> return raise <| UserViewExecutionException(UVEArgument e.Details, e)
     }

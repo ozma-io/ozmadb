@@ -10,10 +10,64 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Utils
+open FunWithFlags.FunUtils.Serialization
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type ArgumentCheckException (message : string) =
-    inherit UserException(message)
+[<SerializeAsObject("error")>]
+type ArgumentCheckErrorInfo =
+    | [<CaseKey("required")>] ACERequired
+    | [<CaseKey("invalidType")>] ACEInvalidType
+    with
+    member this.LogMessage =
+        match this with
+        | ACERequired -> "Required argument not found"
+        | ACEInvalidType -> "Invalid value for the argument type"
+
+    member this.Message = this.LogMessage
+
+    member this.IsUserException = true
+
+    member this.HTTPResponseCode = 422
+
+    member this.ShouldLog = false
+
+    interface ILoggableResponse with
+        member this.ShouldLog = this.ShouldLog
+
+    interface IErrorDetails with
+        member this.LogMessage = this.LogMessage
+        member this.Message = this.Message
+        member this.HTTPResponseCode = this.HTTPResponseCode
+
+type ArgumentCheckError =
+    { Argument : ArgumentName
+      Inner : ArgumentCheckErrorInfo
+    } with
+    member this.Message =
+        sprintf "Error in argument %O: %s" (PLocal this.Argument) this.Inner.Message
+
+    member this.LogMessage =
+        sprintf "Error in argument %O: %s" (PLocal this.Argument) this.Inner.LogMessage
+
+    member this.HTTPResponseCode = this.Inner.HTTPResponseCode
+
+    member this.ShouldLog = this.Inner.ShouldLog
+
+    interface ILoggableResponse with
+        member this.ShouldLog = this.ShouldLog
+
+    interface IErrorDetails with
+        member this.LogMessage = this.LogMessage
+        member this.Message = this.Message
+        member this.HTTPResponseCode = this.HTTPResponseCode
+
+type ArgumentCheckException (details : ArgumentCheckError) =
+    inherit UserException(details.Message, null, true)
+
+    member this.Details = details
+
+type ArgumentCheckUnknownException (message : string) =
+    inherit System.Exception(message)
 
 type PlaceholderId = int
 
@@ -130,35 +184,40 @@ let compileArguments (args : ResolvedArgumentsMap) : QueryArguments =
       NextAnonymousId = 0
     }
 
-let private typecheckArgument (fieldType : FieldType<_>) (value : FieldValue) : unit =
+let inline private raiseArgumentCheckException (ref : ArgumentRef) (inner : ArgumentCheckErrorInfo) =
+    match ref with
+    | PLocal name -> raise <| ArgumentCheckException { Argument = name; Inner = ACEInvalidType }
+    | PGlobal name -> raise <| ArgumentCheckUnknownException (sprintf "Error in global argument %O: %s" ref inner.Message)
+
+let private typecheckArgument (ref : ArgumentRef) (fieldType : FieldType<_>) (value : FieldValue) : unit =
     match fieldType with
     | FTScalar (SFTEnum vals) ->
         match value with
         | FString str when OrderedSet.contains str vals -> ()
         | FNull -> ()
-        | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
+        | _ -> raiseArgumentCheckException ref ACEInvalidType
     | FTArray (SFTEnum vals) ->
         match value with
         | FStringArray strs when Seq.forall (fun str -> OrderedSet.contains str vals) strs -> ()
         | FNull -> ()
-        | _ -> raisef ArgumentCheckException "Argument is not from allowed values of a enum: %O" value
+        | _ -> raiseArgumentCheckException ref ACEInvalidType
     // Most casting/typechecking will be done by database or Npgsql
     | _ -> ()
 
 let prepareArguments (args : QueryArguments) (values : ArgumentValuesMap) : ExprParameters =
-    let makeParameter (name : ArgumentRef) (mapping : CompiledArgument) =
+    let makeParameter (ref : ArgumentRef) (mapping : CompiledArgument) =
         let (notFound, value) =
-            match Map.tryFind name values with
+            match Map.tryFind ref values with
             | None ->
                 let defValue =
                     match mapping.DefaultValue with
                     | Some def -> def
                     | None when mapping.Optional -> FNull
-                    | None -> raisef ArgumentCheckException "Argument not found: %O" name
+                    | None -> raiseArgumentCheckException ref ACERequired
                 (true, defValue)
             | Some value -> (false, value)
         if not (mapping.Optional && notFound) then
-            typecheckArgument mapping.FieldType value
+            typecheckArgument ref mapping.FieldType value
         (mapping.PlaceholderId, compileFieldValue value)
     args.Types |> Map.mapWithKeys makeParameter
 
@@ -186,16 +245,16 @@ let modifyArgumentsInNamespace (changeNames : ArgumentRef -> ArgumentRef option)
 
 // We don't check that all required arguments are provided; it happens later.
 let convertQueryArguments (globalArgValues : LocalArgumentsMap) (extraArgValues : ArgumentValuesMap) (rawArgValues : RawArguments) (arguments : QueryArguments) : ArgumentValuesMap =
-    let findArgument (name : ArgumentRef) (arg : CompiledArgument) =
-        match Map.tryFind name extraArgValues with
+    let findArgument (ref : ArgumentRef) (arg : CompiledArgument) =
+        match Map.tryFind ref extraArgValues with
         | Some arg -> Some arg
         | None ->
-            match name with
+            match ref with
             | PLocal (FunQLName lname) ->
                 match Map.tryFind lname rawArgValues with
                 | Some argStr ->
                     match parseValueFromJson arg.FieldType arg.Optional argStr with
-                    | None ->  raisef ArgumentCheckException "Cannot convert argument %O to type %O" name arg.FieldType
+                    | None ->  raiseArgumentCheckException ref ACEInvalidType
                     | Some arg -> Some arg
                 | None -> None
             | PGlobal gname -> Some <| Map.find gname globalArgValues
@@ -208,6 +267,6 @@ let convertEntityArguments (entity : ResolvedEntity) (rawArgs : RawArguments) : 
         | Some value when value.Type = JTokenType.Undefined -> None
         | Some value ->
             match parseValueFromJson field.FieldType field.IsNullable value with
-            | None -> raisef ArgumentCheckException "Cannot convert argument %O to type %O" fieldName field.FieldType
+            | None ->  raise <| ArgumentCheckException { Argument = fieldName; Inner = ACEInvalidType }
             | Some arg -> Some arg
     entity.ColumnFields |> Map.mapMaybe getValue

@@ -54,6 +54,7 @@
     <!-- Needed early for various other parts -->
     <Compile Include="src/Layout/Source.fs" />
     <Compile Include="src/Layout/Types.fs" />
+    <Compile Include="src/Layout/Errors.fs" />
 
     <!-- Needed early for layout info -->
     <Compile Include="src/Triggers/Source.fs" />

@@ -109,7 +109,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, hasUserView
                 // TODO: allow to specify `__self` as home schema.
                 resolveSingleFieldExpr defaultCallbacks OrderedMap.empty emptyExprResolutionFlags entityInfo whereExpr
             with
-            | :? ViewResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"
+            | :? QueryResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"
         let usedReferences = fieldExprUsedReferences layout expr
         if exprInfo.Flags.HasAggregates then
             raisef ResolvePermissionsException "Forbidden aggregate function in a restriction"

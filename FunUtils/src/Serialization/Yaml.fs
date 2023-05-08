@@ -3,6 +3,7 @@ module FunWithFlags.FunUtils.Serialization.Yaml
 open System
 open System.Globalization
 open System.Collections.Generic
+open System.Collections.Concurrent
 open Newtonsoft.Json.Linq
 open YamlDotNet.Core
 open YamlDotNet.Core.Events
@@ -98,7 +99,7 @@ type CrutchTypeConverter () =
 [<AbstractClass>]
 type GenericTypeConverter () =
     inherit CrutchTypeConverter ()
-    let convertersCache = Dictionary<Type, IYamlTypeConverter>()
+    let convertersCache = ConcurrentDictionary<Type, IYamlTypeConverter>()
 
     abstract member GetConverterType : Type -> Type
 
@@ -106,11 +107,11 @@ type GenericTypeConverter () =
         match convertersCache.TryGetValue(someType) with
         | (true, c) -> c
         | (false, _) ->
-            let convType = this.GetConverterType someType
-            let constr = convType.GetConstructor([|typeof<CrutchTypeConverter>|])
-            let c = constr.Invoke([|this|]) :?> IYamlTypeConverter
-            convertersCache.Add(someType, c)
-            c
+            let addOne someType =
+                let convType = this.GetConverterType someType
+                let constr = convType.GetConstructor([|typeof<CrutchTypeConverter>|])
+                constr.Invoke([|this|]) :?> IYamlTypeConverter
+            convertersCache.AddOrUpdate(someType, addOne, fun key c -> c)
 
     override this.ReadYaml (parser : IParser) (someType : Type) : obj =
         let converter = this.GetConverter someType
@@ -148,22 +149,22 @@ type SpecializedUnionConverter<'a> (converter : CrutchTypeConverter) =
     let cases = unionCases typeof<'a>
 
     let (readYaml, writeYaml) =
-        match isNewtype cases with
+        match getNewtype cases with
         | Some info ->
             let read =
                 fun (reader : IParser) ->
                     let arg = converter.Deserialize(reader, info.Type.PropertyType)
                     if not info.ValueIsNullable && isNull arg then
                         raisef YamlException "Attempted to set null to non-nullable value"
-                    FSharpValue.MakeUnion(info.Case, [|arg|])
+                    info.ConvertTo arg
             let write =
                 fun value (writer : IEmitter) ->
-                    let (case, args) = FSharpValue.GetUnionFields(value, typeof<'a>)
-                    converter.Serialize(writer, args.[0])
+                    let arg = info.ConvertFrom value
+                    converter.Serialize(writer, arg)
             (read, write)
         | None ->
             // XXX: We do lose information here is we serialize e.g. ('a option option).
-            match isOption cases with
+            match getOption cases with
             | Some option ->
                 let nullDeserializer = NullNodeDeserializer() :> INodeDeserializer
                 let read =
@@ -174,31 +175,30 @@ type SpecializedUnionConverter<'a> (converter : CrutchTypeConverter) =
                             let arg = converter.Deserialize(reader, option.SomeType.PropertyType)
                             if not option.ValueIsNullable && isNull arg then
                                 raisef YamlException "Attempted to set null to non-nullable value"
-                            FSharpValue.MakeUnion(option.SomeCase, [|arg|])
+                            option.ConvertToSome arg
                 let write =
                     fun value (writer : IEmitter) ->
                         if value = option.NoneValue then
                             writer.Emit(Scalar("null"))
                         else
-                            let (case, args) = FSharpValue.GetUnionFields(value, typeof<'a>)
-                            assert (case = option.SomeCase)
-                            assert (Array.length args = 1)
-                            converter.Serialize(writer, args.[0])
+                            let arg = option.ConvertFromSome value
+                            converter.Serialize(writer, arg)
                 (read, write)
             | None ->
-                match isUnionEnum cases with
-                | Some options ->
+                match getUnionEnum typeof<'a> with
+                | Some enumInfo ->
+                    let optionsMap = enumInfo.Cases |> Map.mapWithKeys (fun tag case -> (case.Name, case.Value))
                     let read =
                         fun (reader : IParser) ->
                             let name = converter.Deserialize<string>(reader)
-                            match Map.tryFind (Option.ofObj name) options with
-                            | Some (_, v) -> v
+                            match Map.tryFind (Option.ofObj name) optionsMap with
+                            | Some v -> v
                             | None -> raisef YamlException "Unknown enum case %s" name
-                    let reverseOptions = options |> Map.mapWithKeys (fun name (case, v) -> (case.Name, name))
                     let write =
                         fun value (writer : IEmitter) ->
-                            let (case, args) = FSharpValue.GetUnionFields(value, typeof<'a>)
-                            match Map.find case.Name reverseOptions with
+                            let tag = enumInfo.GetTag value
+                            let case = enumInfo.Cases.[tag]
+                            match case.Name with
                             | None -> writer.Emit(Scalar("null"))
                             | Some cn -> writer.Emit(Scalar(cn))
                     (read, write)
@@ -219,11 +219,13 @@ type UnionTypeConverter () =
 type SpecializedRecordConverter<'a> (converter : CrutchTypeConverter) =
     let getFieldInfo prop =
         let field = serializableField prop
-        (converter.NamingConvention.Apply field.Name, field)
+        let name = converter.NamingConvention.Apply field.Name
+        (name, field)
 
     let fields = FSharpType.GetRecordFields(typeof<'a>) |> Array.map getFieldInfo
     let fieldsMap = Map.ofSeq fields
     let defaultValuesMap = fields |> Seq.mapMaybe (fun (name, field) -> Option.map (fun def -> (name, def)) field.DefaultValue) |> Map.ofSeq
+    let makeRecord = FSharpValue.PreComputeRecordConstructor typeof<'a>
 
     let readYaml (parser : IParser) : obj =
         match parser.Current with
@@ -238,8 +240,8 @@ type SpecializedRecordConverter<'a> (converter : CrutchTypeConverter) =
             | :? Scalar as scalar ->
                 ignore <| parser.MoveNext()
                 match Map.tryFind scalar.Value fieldsMap with
-                | Some field ->
-                    let value = converter.Deserialize(parser, field.Property.PropertyType)
+                | Some field when not field.Ignore ->
+                    let value = converter.Deserialize(parser, field.InnerType)
                     if not field.IsNullable && isNull value then
                         raisef YamlException "Attempted to set null to non-nullable field \"%s\"" scalar.Value
                     let values = Map.add scalar.Value value values
@@ -255,12 +257,12 @@ type SpecializedRecordConverter<'a> (converter : CrutchTypeConverter) =
             | None -> raisef YamlException "Field \"%s\" not found" name
             | Some o -> o
         let values = fields |> Array.map lookupField
-        FSharpValue.MakeRecord(typeof<'a>, values)
+        makeRecord values
 
     let writeYaml (value : obj) (writer : IEmitter) : unit =
         writer.Emit(MappingStart())
         let emitValue (name, field) =
-            let value = field.Property.GetValue(value, null)
+            let value = field.GetValue(value, null)
             match field.DefaultValue with
             | Some d when not (Option.defaultValue true field.EmitDefaultValue) && d = value -> ()
             | _ ->

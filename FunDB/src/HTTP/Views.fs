@@ -15,17 +15,7 @@ open FunWithFlags.FunDB.API.Types
 open FunWithFlags.FunDB.HTTP.Utils
 module SQL = FunWithFlags.FunDB.SQL.Query
 
-let private uvError e =
-    let handler =
-        match e with
-        | UVEArguments _ -> RequestErrors.badRequest
-        | UVEAccessDenied -> RequestErrors.forbidden
-        | UVENotFound -> RequestErrors.notFound
-        | UVECompilation _ -> RequestErrors.badRequest
-        | UVEExecution _ -> RequestErrors.unprocessableEntity
-    handler (json e)
-
-type UserViewRequest =
+type UserViewHTTPRequest =
     { Args: RawArguments
       ForceRecompile : bool
       NoAttributes : bool
@@ -36,7 +26,7 @@ type UserViewRequest =
       PretendUser : UserName option
     }
 
-type UserViewExplainRequest =
+type UserViewExplainHTTPRequest =
     { Args: RawArguments option
       ForceRecompile : bool
       NoAttributes : bool
@@ -50,23 +40,25 @@ type UserViewExplainRequest =
       Costs : bool option
     }
 
-type AnonymousUserViewRequest =
+type AnonymousUserViewHTTPRequest =
     { Query : string
     }
 
-type UserViewInfoRequest =
+type UserViewInfoHTTPRequest =
     { ForceRecompile : bool
     }
 
 let viewsApi : Endpoint list =
-    let returnView (viewRef : UserViewSource) (api : IFunDBAPI) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) next ctx =
-        task {
-            match! api.UserViews.GetUserView viewRef rawArgs chunk flags with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! uvError err next ctx
-        }
+    let returnView (source : UserViewSource) (api : IFunDBAPI) (rawArgs : RawArguments) (chunk : SourceQueryChunk) (flags : UserViewFlags) =
+        let req =
+            { Source = source
+              Args = rawArgs
+              Chunk = Some chunk
+              Flags = Some flags
+            }
+        handleRequest (api.UserViews.GetUserView req)
 
-    let getSelectFromView (viewRef : UserViewSource) (api : IFunDBAPI) =
+    let getSelectFromView (source : UserViewSource) (api : IFunDBAPI) =
         queryArgs <| fun rawArgs next ctx ->
             task {
                 let flags =
@@ -80,10 +72,10 @@ let viewsApi : Endpoint list =
                       Limit = intRequestArg "__limit" ctx
                       Where = None
                     } : SourceQueryChunk
-                return! returnView viewRef api rawArgs chunk flags next ctx
+                return! returnView source api rawArgs chunk flags next ctx
             }
 
-    let doPostSelectFromView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewRequest) (next : HttpFunc) (ctx : HttpContext) =
+    let doPostSelectFromView (source : UserViewSource) (api : IFunDBAPI) (req : UserViewHTTPRequest) =
         let flags =
             { ForceRecompile = flagIfDebug req.ForceRecompile
               NoAttributes = req.NoAttributes
@@ -91,52 +83,57 @@ let viewsApi : Endpoint list =
               NoPuns = req.NoPuns
             } : UserViewFlags
         let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
-        setPretends api req.PretendUser req.PretendRole (fun () -> returnView viewRef api req.Args chunk flags next ctx)
+        setPretendUser api req.PretendUser
+            >=> setPretendRole api req.PretendRole
+            >=> returnView source api req.Args chunk flags
 
-    let postSelectFromView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
+    let postSelectFromView (source : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
         match maybeReq with
-        | None -> safeBindJson (doPostSelectFromView viewRef api)
-        | Some req -> bindJsonToken req (doPostSelectFromView viewRef api)
+        | None -> safeBindJson (doPostSelectFromView source api)
+        | Some req -> bindJsonToken req (doPostSelectFromView source api)
 
-    let getInfoView (viewRef : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        task {
-            let flags =
-                { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
-                  NoAttributes = false
-                  NoTracking = false
-                  NoPuns = false
-                } : UserViewFlags
-            match! api.UserViews.GetUserViewInfo viewRef flags with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! uvError err next ctx
-        }
+    let getInfoView (source : UserViewSource) (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+        let flags =
+            { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
+              NoAttributes = false
+              NoTracking = false
+              NoPuns = false
+            } : UserViewFlags
+        let req =
+            { Source = source
+              Flags = Some flags
+            }
+        handleRequest (api.UserViews.GetUserViewInfo req) next ctx
 
-    let doPostInfoView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewInfoRequest) (next : HttpFunc) (ctx : HttpContext) =
-        task {
+    let doPostInfoView (source : UserViewSource) (api : IFunDBAPI) (req : UserViewInfoHTTPRequest) =
             let flags =
                 { ForceRecompile = flagIfDebug req.ForceRecompile
                   NoAttributes = false
                   NoTracking = false
                   NoPuns = false
                 } : UserViewFlags
-            match! api.UserViews.GetUserViewInfo viewRef flags with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! uvError err next ctx
-        }
+            let req =
+                { Source = source
+                  Flags = Some flags
+                }
+            handleRequest (api.UserViews.GetUserViewInfo req)
 
-    let postInfoView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
+    let postInfoView (source : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
         match maybeReq with
-        | None -> safeBindJson (doPostInfoView viewRef api)
-        | Some req -> bindJsonToken req (doPostSelectFromView viewRef api)
+        | None -> safeBindJson (doPostInfoView source api)
+        | Some req -> bindJsonToken req (doPostSelectFromView source api)
 
-    let returnExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (maybeArgs : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : SQL.ExplainOptions) next ctx =
-        task {
-            match! api.UserViews.GetUserViewExplain viewRef maybeArgs chunk flags explainOpts with
-            | Ok res -> return! Successful.ok (json res) next ctx
-            | Error err -> return! uvError err next ctx
-        }
+    let returnExplainView (source : UserViewSource) (api : IFunDBAPI) (maybeArgs : RawArguments option) (chunk : SourceQueryChunk) (flags : UserViewFlags) (explainOpts : SQL.ExplainOptions) =
+        let req =
+            { Source = source
+              Args = maybeArgs
+              Flags = Some flags
+              Chunk = Some chunk
+              ExplainFlags = Some explainOpts
+            } : UserViewExplainRequest
+        handleRequest (api.UserViews.GetUserViewExplain req)
 
-    let getExplainView (viewRef : UserViewSource) (api : IFunDBAPI) =
+    let getExplainView (source : UserViewSource) (api : IFunDBAPI) =
         queryArgs <| fun rawArgs next ctx ->
             task {
                 let flags =
@@ -157,10 +154,10 @@ let viewsApi : Endpoint list =
                     } : SQL.ExplainOptions
                 let maybeArgs =
                     if Map.isEmpty rawArgs then None else Some rawArgs
-                return! returnExplainView viewRef api maybeArgs chunk flags explainOpts next ctx
+                return! returnExplainView source api maybeArgs chunk flags explainOpts next ctx
             }
 
-    let doPostExplainView (viewRef : UserViewSource) (api : IFunDBAPI) (req : UserViewExplainRequest) (next : HttpFunc) (ctx : HttpContext) =
+    let doPostExplainView (source : UserViewSource) (api : IFunDBAPI) (req : UserViewExplainHTTPRequest) =
         let flags =
             { ForceRecompile = flagIfDebug req.ForceRecompile
               NoAttributes = req.NoAttributes
@@ -173,12 +170,14 @@ let viewsApi : Endpoint list =
               Costs = req.Costs
               Verbose = req.Verbose
             } : SQL.ExplainOptions
-        setPretends api req.PretendUser req.PretendRole (fun () -> returnExplainView viewRef api req.Args chunk flags explainOpts next ctx)
+        setPretendUser api req.PretendUser
+            >=> setPretendRole api req.PretendRole
+            >=> returnExplainView source api req.Args chunk flags explainOpts
 
-    let postExplainView (viewRef : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
+    let postExplainView (source : UserViewSource) (maybeReq : JToken option) (api : IFunDBAPI) =
         match maybeReq with
-        | None -> safeBindJson (doPostExplainView viewRef api)
-        | Some req -> bindJsonToken req (doPostExplainView viewRef api)
+        | None -> safeBindJson (doPostExplainView source api)
+        | Some req -> bindJsonToken req (doPostExplainView source api)
 
     let withPostAnonymousView nextHandler =
         safeBindJson <| fun rawData ->

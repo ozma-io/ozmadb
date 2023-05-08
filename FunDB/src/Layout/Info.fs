@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Layout.Info
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Layout.Types
@@ -102,7 +103,12 @@ type SerializedEntity =
       CascadeDeleted : bool
       HasInsertTriggers : bool
       HasDeleteTriggers : bool
-    }
+    } with
+    member this.ShouldLog = false
+
+    interface ILoggableResponse with
+        member this.ShouldLog = this.ShouldLog
+
 
 [<NoEquality; NoComparison>]
 type SerializedSchema =

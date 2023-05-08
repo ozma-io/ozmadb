@@ -169,6 +169,25 @@ type ArgumentRef =
         interface IFunQLName with
             member this.ToName () = this.ToName ()
 
+type ArgumentRefConverter () =
+    inherit JsonConverter<ArgumentRef> ()
+
+    override this.CanRead = false
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : ArgumentRef =
+        raise <| NotImplementedException()
+
+    override this.WriteJson (writer : JsonWriter, value : ArgumentRef, serializer : JsonSerializer) : unit =
+        let serialize value = serializer.Serialize(writer, value)
+
+        match value with
+        | PLocal name -> writer.WriteValue("$" + string name)
+        | PGlobal name -> writer.WriteValue("$$" + string name)
+
+let argumentIsLocal = function
+    | PLocal name -> true
+    | PGlobal name -> false
+
 type [<StructuralEquality; NoComparison>] FieldValue =
     | FInt of int
     | FDecimal of decimal
@@ -262,10 +281,10 @@ type FieldValuePrettyConverter () =
         | FNull -> writer.WriteNull()
 
 type [<StructuralEquality; NoComparison>] ReferenceDeleteAction =
-    | [<CaseName("noAction")>] RDANoAction
-    | [<CaseName("cascade")>] RDACascade
-    | [<CaseName("setNull")>] RDASetNull
-    | [<CaseName("setDefault")>] RDASetDefault
+    | [<CaseKey("noAction")>] RDANoAction
+    | [<CaseKey("cascade")>] RDACascade
+    | [<CaseKey("setNull")>] RDASetNull
+    | [<CaseKey("setDefault")>] RDASetDefault
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -280,18 +299,18 @@ type [<StructuralEquality; NoComparison>] ReferenceDeleteAction =
             member this.ToFunQLString () = this.ToFunQLString()
 
 type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarFieldType<'e> when 'e :> IFunQLName =
-    | [<CaseName("int")>] SFTInt
-    | [<CaseName("decimal")>] SFTDecimal
-    | [<CaseName("string")>] SFTString
-    | [<CaseName("bool")>] SFTBool
-    | [<CaseName("datetime")>] SFTDateTime
-    | [<CaseName("date")>] SFTDate
-    | [<CaseName("interval")>] SFTInterval
-    | [<CaseName("json")>] SFTJson
-    | [<CaseName("uvref")>] SFTUserViewRef
-    | [<CaseName("uuid")>] SFTUuid
-    | [<CaseName("reference")>] SFTReference of Entity : 'e * OnDelete : ReferenceDeleteAction option
-    | [<CaseName("enum")>] SFTEnum of Values : OrderedSet<string>
+    | [<CaseKey("int")>] SFTInt
+    | [<CaseKey("decimal")>] SFTDecimal
+    | [<CaseKey("string")>] SFTString
+    | [<CaseKey("bool")>] SFTBool
+    | [<CaseKey("datetime")>] SFTDateTime
+    | [<CaseKey("date")>] SFTDate
+    | [<CaseKey("interval")>] SFTInterval
+    | [<CaseKey("json")>] SFTJson
+    | [<CaseKey("uvref")>] SFTUserViewRef
+    | [<CaseKey("uuid")>] SFTUuid
+    | [<CaseKey("reference")>] SFTReference of Entity : 'e * OnDelete : ReferenceDeleteAction option
+    | [<CaseKey("enum")>] SFTEnum of Values : OrderedSet<string>
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -320,8 +339,8 @@ type [<StructuralEquality; NoComparison; SerializeAsObject("type")>] ScalarField
 
 [<StructuralEquality; NoComparison; SerializeAsObject("type", AllowUnknownType=true)>]
 type FieldType<'e> when 'e :> IFunQLName =
-    | [<CaseName(null, Type=CaseSerialization.InnerObject)>] FTScalar of Type : ScalarFieldType<'e>
-    | [<CaseName("array")>] FTArray of Subtype : ScalarFieldType<'e>
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] FTScalar of Type : ScalarFieldType<'e>
+    | [<CaseKey("array")>] FTArray of Subtype : ScalarFieldType<'e>
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -368,8 +387,8 @@ type SetOperation =
             member this.ToFunQLString () = this.ToFunQLString()
 
 type SortOrder =
-    | [<CaseName("asc")>] Asc
-    | [<CaseName("desc")>] Desc
+    | [<CaseKey("asc")>] Asc
+    | [<CaseKey("desc")>] Desc
     with
         override this.ToString () = this.ToFunQLString()
 
@@ -382,8 +401,8 @@ type SortOrder =
             member this.ToFunQLString () = this.ToFunQLString()
 
 type NullsOrder =
-    | [<CaseName("first")>] NullsFirst
-    | [<CaseName("last")>] NullsLast
+    | [<CaseKey("first")>] NullsFirst
+    | [<CaseKey("last")>] NullsLast
     with
         override this.ToString () = this.ToFunQLString()
 

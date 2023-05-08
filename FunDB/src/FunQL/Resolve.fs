@@ -17,13 +17,13 @@ module SQL = FunWithFlags.FunDB.SQL.Typecheck
 // and all further processing code can avoid any checks.
 // ...that is, except checking references to other views.
 
-type ViewResolveException (message : string, innerException : exn, isUserException : bool) =
+type QueryResolveException (message : string, innerException : exn, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
     new (message : string, innerException : exn) =
-        ViewResolveException (message, innerException, isUserException innerException)
+        QueryResolveException (message, innerException, isUserException innerException)
 
-    new (message : string) = ViewResolveException (message, null, true)
+    new (message : string) = QueryResolveException (message, null, true)
 
 let private allowedPragmas : Set<PragmaName> =
     Set.ofList
@@ -508,7 +508,7 @@ let private mapRecursiveValue (f : 'a -> 'b) = function
 
 let private renameFields (names : FieldName[]) (fields : SubqueryFields) : SubqueryFields =
     if Array.length names <> Array.length fields then
-        raisef ViewResolveException "Inconsistent number of columns"
+        raisef QueryResolveException "Inconsistent number of columns"
     Array.map2 (fun newName (oldName, info) -> (Some newName, info)) names fields
 
 let private renameFieldsInSubquery (names : FieldName[]) (info : SubqueryInfo) : SubqueryInfo =
@@ -589,7 +589,7 @@ let private unionSubqueryField (a : SubqueryField) (b : SubqueryField) : Subquer
 
 let private unionSubqueryInfo (a : SubqueryInfo) (b : SubqueryInfo) =
     if Array.length a.Fields <> Array.length b.Fields then
-        raisef ViewResolveException "Different number of columns in a set operation expression"
+        raisef QueryResolveException "Different number of columns in a set operation expression"
     let newFields = Array.map2 (fun (name1, info1) (name2, info2) -> (name1, unionSubqueryField info1 info2)) a.Fields b.Fields
     { Fields = newFields
       ExprInfo = unionSubqueryExprInfo a.ExprInfo b.ExprInfo
@@ -598,7 +598,7 @@ let private unionSubqueryInfo (a : SubqueryInfo) (b : SubqueryInfo) =
 
 let private checkName (FunQLName name) : unit =
     if not (goodName name) || String.length name > SQL.sqlIdentifierLength then
-        raisef ViewResolveException "Invalid name: %s" name
+        raisef QueryResolveException "Invalid name: %s" name
 
 let private selfSchema : SchemaName = FunQLName "__self"
 
@@ -619,7 +619,7 @@ let tryResolveEntityRef (homeSchema : SchemaName option) (forceSchema : bool) (r
 let private resolveEntityRef (homeSchema : SchemaName option) (ref : EntityRef) : ResolvedEntityRef =
     match tryResolveEntityRef homeSchema false ref with
     | Some newRef -> newRef
-    | None -> raisef ViewResolveException "Unspecified schema in reference: %O" ref
+    | None -> raisef QueryResolveException "Unspecified schema in reference: %O" ref
 
 let resolveScalarFieldType (layout : IEntitiesSet) (homeSchema : SchemaName option) (allowReferenceOptions : bool) : ParsedScalarFieldType -> ResolvedScalarFieldType = function
     | SFTInt -> SFTInt
@@ -634,15 +634,15 @@ let resolveScalarFieldType (layout : IEntitiesSet) (homeSchema : SchemaName opti
     | SFTUuid -> SFTUuid
     | SFTReference (entityRef, mopts) ->
         match mopts with
-        | Some opts when not allowReferenceOptions -> raisef ViewResolveException "Reference delete options are not allowed here"
+        | Some opts when not allowReferenceOptions -> raisef QueryResolveException "Reference delete options are not allowed here"
         | _ -> ()
         let resolvedRef = resolveEntityRef homeSchema entityRef
         if not <| layout.HasVisibleEntity resolvedRef then
-            raisef ViewResolveException "Cannot find entity %O from reference type" resolvedRef
+            raisef QueryResolveException "Cannot find entity %O from reference type" resolvedRef
         SFTReference (resolvedRef, mopts)
     | SFTEnum vals ->
         if OrderedSet.isEmpty vals then
-            raisef ViewResolveException "Enums must not be empty"
+            raisef QueryResolveException "Enums must not be empty"
         SFTEnum vals
 
 let resolveFieldType (layout : IEntitiesSet) (homeSchema : SchemaName option) (allowReferenceOptions : bool) : ParsedFieldType -> ResolvedFieldType = function
@@ -696,8 +696,8 @@ let resolveCastScalarFieldType : ScalarFieldType<_> -> ScalarFieldType<_> = func
     | SFTJson -> SFTJson
     | SFTUserViewRef -> SFTUserViewRef
     | SFTUuid -> SFTUuid
-    | SFTReference (entityRef, opts) -> raisef ViewResolveException "Cannot cast to reference type"
-    | SFTEnum vals -> raisef ViewResolveException "Cannot cast to enum type"
+    | SFTReference (entityRef, opts) -> raisef QueryResolveException "Cannot cast to reference type"
+    | SFTEnum vals -> raisef QueryResolveException "Cannot cast to enum type"
 
 let resolveCastFieldType : FieldType<_> -> FieldType<_> = function
     | FTArray typ -> FTArray <| resolveCastScalarFieldType typ
@@ -930,7 +930,7 @@ type private FromEntityIdMeta =
     }
 
 let private failCte (name : EntityName) =
-    raisef ViewResolveException "Table %O not found" name
+    raisef QueryResolveException "Table %O not found" name
 
 let private emptyContext : Context =
     { ResolveCTE = failCte
@@ -1064,7 +1064,7 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
                 if Array.isEmpty field.Ref.Path then
                     match fieldInfo.Bound with
                     | Some (BMColumn boundInfo) -> boundInfo.Ref
-                    | _ -> raisef ViewResolveException "Unbound field in a type assertion"
+                    | _ -> raisef QueryResolveException "Unbound field in a type assertion"
                 else
                     let entityRef = Array.last fieldInfo.Path
                     let fieldArrow = Array.last field.Ref.Path
@@ -1072,7 +1072,7 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
             (fieldRef, typeCtxKey)
         | VRArgument arg ->
             if Array.isEmpty field.Ref.Path then
-                raisef ViewResolveException "Unbound field in a type assertion"
+                raisef QueryResolveException "Unbound field in a type assertion"
             let typeCtxKey =
                 { FromId = FIArgument arg
                   Path = arrowNames |> Seq.exceptLast |> Seq.toList
@@ -1086,11 +1086,11 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
     let fields = layout.FindEntity fieldRef.Entity |> Option.get
     match fields.FindField fieldRef.Name with
     | Some { Field = RSubEntity } -> ()
-    | _ -> raisef ViewResolveException "Bound field in a type assertion is not a 'sub_entity' field: %O" field
+    | _ -> raisef QueryResolveException "Bound field in a type assertion is not a 'sub_entity' field: %O" field
     let subEntityRef = { Schema = Option.defaultValue fieldRef.Entity.Schema subEntityInfo.Ref.Schema; Name = subEntityInfo.Ref.Name }
     let subEntity =
         match layout.FindEntity subEntityRef with
-        | None -> raisef ViewResolveException "Couldn't find subentity %O" subEntityInfo.Ref
+        | None -> raisef QueryResolveException "Couldn't find subentity %O" subEntityInfo.Ref
         | Some r -> r
 
     let neededTypes =
@@ -1101,16 +1101,16 @@ let private resolveSubEntity (layout : ILayoutBits) (outerTypeCtxs : TypeContext
             else if checkInheritance layout fieldRef.Entity subEntityRef then
                 allPossibleEntities layout subEntityRef |> mapPossibleEntities (Seq.map fst >> Set.ofSeq)
             else
-                raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
+                raisef QueryResolveException "Entities in a type assertion are not in the same hierarchy"
         | SECOfType ->
             if subEntity.IsAbstract then
-                raisef ViewResolveException "Instances of abstract entity %O do not exist" subEntityRef
+                raisef QueryResolveException "Instances of abstract entity %O do not exist" subEntityRef
             if subEntityRef = fieldRef.Entity then
                 PEAny
             else if checkInheritance layout fieldRef.Entity subEntityRef then
                 PEList (Set.singleton subEntityRef)
             else
-                raisef ViewResolveException "Entities in a type assertion are not in the same hierarchy"
+                raisef QueryResolveException "Entities in a type assertion are not in the same hierarchy"
 
     let checkForTypes =
         match neededTypes with
@@ -1262,22 +1262,22 @@ let private detectMainEntity (fields : SubqueryFieldsMap) (query : ResolvedSelec
 
 let private resolveMainEntity (layout : ILayoutBits) (homeSchema : SchemaName option) (fields : SubqueryFieldsMap) (query : ResolvedSelectExpr) (main : ParsedMainEntity) : ResolvedMainEntity option =
     match tryFindMainEntity query with
-    | None -> raisef ViewResolveException "Main entity not matched in the expression"
+    | None -> raisef QueryResolveException "Main entity not matched in the expression"
     | Some found ->
         let requestedRef = resolveEntityRef homeSchema main.Entity
         if found.Entity <> requestedRef then
-            raisef ViewResolveException "Main entity %O is specified, but %O is detected" requestedRef ref
+            raisef QueryResolveException "Main entity %O is specified, but %O is detected" requestedRef ref
 
         let meta = mainEntityColumnsMeta fields found.Entity found.Results
 
         if main.ForInsert then
             let entity = layout.FindEntity found.Entity |> Option.get
             if entity.IsAbstract then
-                raisef ViewResolveException "Entity is abstract: %O" main.Entity
+                raisef QueryResolveException "Entity is abstract: %O" main.Entity
             let checkField (fieldName, field : ResolvedColumnField) =
                 if Option.isNone field.DefaultValue && not field.IsNullable then
                     if not (Map.containsKey fieldName meta.ColumnsToFields) then
-                        raisef ViewResolveException "Required inserted entity field is not in the view expression: %O" fieldName
+                        raisef QueryResolveException "Required inserted entity field is not in the view expression: %O" fieldName
             entity.ColumnFields |> Seq.iter checkField
 
         Some
@@ -1349,7 +1349,7 @@ let private unionFromExprInfo (a : FromExprInfo) (b : FromExprInfo) =
         try
             Map.unionUnique a.Entities b.Entities
         with
-        | Failure msg -> raisef ViewResolveException "Clashing entity names: %s" msg
+        | Failure msg -> raisef QueryResolveException "Clashing entity names: %s" msg
     { Fields = unionNameMapping a.Fields b.Fields
       Entities = entities
       Types = Map.unionUnique a.Types b.Types
@@ -1439,7 +1439,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
 
     let getArgument arg =
         match findArgument arg with
-        | None -> raisef ViewResolveException "Unknown argument: %O" arg
+        | None -> raisef QueryResolveException "Unknown argument: %O" arg
         | Some argInfo -> argInfo
 
     let notTypeContext (ctx : TypeContext) : PossibleEntities<TypeContext> =
@@ -1496,12 +1496,12 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
     let findEntityByRef (entityRef : ResolvedEntityRef) (allowHidden : bool) : IEntityBits =
         match layout.FindEntity entityRef with
         | Some entity when not entity.IsHidden || allowHidden -> entity
-        | _ -> raisef ViewResolveException "Entity not found: %O" ref
+        | _ -> raisef QueryResolveException "Entity not found: %O" ref
 
     let createFromMapping (fromEntityId : FromEntityId) (entityRef : ResolvedEntityRef) (alias : (EntityRef option) option) (flags : FromMappingFlags) : FieldMapping =
         let entity = findEntityByRef entityRef flags.AllowHidden
         if flags.WithoutChildren && entity.IsAbstract then
-            raisef ViewResolveException "Abstract entity cannot be selected as ONLY"
+            raisef QueryResolveException "Abstract entity cannot be selected as ONLY"
 
         let key =
             { FromId = FIEntity fromEntityId
@@ -1566,7 +1566,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
     let domainFromInfo (fromEntityId : FromEntityId) (boundValue : BoundValue option) (fieldType : ResolvedFieldType) (tableName : EntityName) (flags : DomainExprInfo) : FromExprInfo =
         if flags.AsRoot then
             if not resolveFlags.Privileged then
-                raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                raisef QueryResolveException "Cannot specify roles in non-privileged user views"
             isPrivileged <- true
 
         let fields =
@@ -1581,7 +1581,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                     }
                 Map.singleton enumDomainValuesColumn fieldInfo
 
-            | typ -> raisef ViewResolveException "Field %O doesn't have a domain" typ
+            | typ -> raisef QueryResolveException "Field %O doesn't have a domain" typ
 
         let alias = { Schema = None; Name = tableName } : EntityRef
         let mapping = fieldsToFieldMapping fromEntityId (Some alias) None fields
@@ -1604,7 +1604,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 | UBCHeader header -> header
             match findFieldWithContext layout typeCtxs header.Key header.ParentEntity header.Name with
             | None ->
-                raisef ViewResolveException "Field not found: %O" { Entity = header.ParentEntity; Name = header.Name }
+                raisef QueryResolveException "Field not found: %O" { Entity = header.ParentEntity; Name = header.Name }
             | Some (entityRef, entity, field) ->
                 // It's important to inherit `ForceRename` from the unresolved field,
                 // as it may already have a proper name.
@@ -1624,7 +1624,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             | (ref :: refs) ->
                 if ref.AsRoot then
                     if not resolveFlags.Privileged then
-                        raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                        raisef QueryResolveException "Cannot specify roles in non-privileged user views"
                     isPrivileged <- true
                 match boundField.Field with
                 | RColumnField { FieldType = FTScalar (SFTReference (entityRef, opts)) } ->
@@ -1643,7 +1643,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                     let nextBoundField = getBoundField (UBCHeader refHeader)
                     let boundFields = traverse nextBoundField refs
                     boundField :: boundFields
-                | _ -> raisef ViewResolveException "Invalid dereference: %O" ref
+                | _ -> raisef QueryResolveException "Invalid dereference: %O" ref
 
         traverse (getBoundField firstHeader) fullPath
 
@@ -1651,7 +1651,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         let parentEntity =
             match fieldType with
             | FTScalar (SFTReference (parentEntity, opts)) -> parentEntity
-            | _ -> raisef ViewResolveException "Value is not a reference"
+            | _ -> raisef QueryResolveException "Value is not a reference"
         let (firstArrow, remainingPath) =
             match Array.toList path with
             | head :: tail -> (head, tail)
@@ -1673,24 +1673,24 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
     let resolveReference (ctx : Context) (typeCtxs : TypeContextsMap) (f : LinkedFieldRef) : ReferenceInfo * LinkedBoundFieldRef =
         if f.AsRoot then
             if not resolveFlags.Privileged then
-                raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                raisef QueryResolveException "Cannot specify roles in non-privileged user views"
             isPrivileged <- true
 
         let (refInfo, newRef) =
             match f.Ref with
             | VRColumn ref ->
                 let rec findInMappings = function
-                    | [] -> raisef ViewResolveException "Unknown field: %O" ref
+                    | [] -> raisef QueryResolveException "Unknown field: %O" ref
                     | mapping :: mappings ->
                         match Map.tryFind ref mapping with
                         | Some (FVResolved info) -> info
-                        | Some (FVAmbiguous entities) -> raisef ViewResolveException "Ambiguous reference %O. Possible values: %O" ref entities
+                        | Some (FVAmbiguous entities) -> raisef QueryResolveException "Ambiguous reference %O. Possible values: %O" ref entities
                         | None -> findInMappings mappings
                 let info = findInMappings ctx.FieldMaps
 
                 let isExternal = not <| Set.contains info.EntityId ctx.LocalEntities
                 if not (Array.isEmpty f.Path) && isExternal then
-                    raisef ViewResolveException "Arrows for external fields are currently not supported"
+                    raisef QueryResolveException "Arrows for external fields are currently not supported"
 
                 let getFromCurrentBoundField bound =
                     let (outer, remaining) = resolvePath typeCtxs bound (Array.toList f.Path) |> List.snoc
@@ -1719,7 +1719,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                             let fieldType =
                                 match info.Type with
                                 | Some typ -> typ
-                                | None -> raisef ViewResolveException "Dereference of an unbound field in %O" f
+                                | None -> raisef QueryResolveException "Dereference of an unbound field in %O" f
                             let path = resolvePathByType typeCtxs (FIEntity info.EntityId) fieldType f.Path
                             (None, Some (BVColumn <| List.last path), path)
 
@@ -1784,7 +1784,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 (refInfo, newRef)
             | VRArgument argRef ->
                 if ctx.NoArguments then
-                    raisef ViewResolveException "Arguments are not allowed here: %O" argRef
+                    raisef QueryResolveException "Arguments are not allowed here: %O" argRef
                 let argInfo = getArgument argRef
                 let hasSubquery = not <| Array.isEmpty f.Path
                 let boundMeta =
@@ -1845,8 +1845,8 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             | { Ref = VRArgument name; Path = [||] } as ref ->
                 let argInfo = getArgument name
                 { Ref = ref; Extra = ObjectMap.empty }
-            | ref -> raisef ViewResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
-        let voidSubEntity field subEntity = raisef ViewResolveException "Forbidden type assertion in LIMIT or OFFSET"
+            | ref -> raisef QueryResolveException "Invalid reference in LIMIT or OFFSET: %O" ref
+        let voidSubEntity field subEntity = raisef QueryResolveException "Forbidden type assertion in LIMIT or OFFSET"
         let mapper =
             { onlyFieldExprMapper resolveRef with
                 SubEntity = voidSubEntity
@@ -1854,7 +1854,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         try
             mapFieldExpr mapper expr
         with
-        | :? UnexpectedExprException as e -> raisefWithInner ViewResolveException e ""
+        | :? UnexpectedExprException as e -> raisefWithInner QueryResolveException e ""
 
     let resolveMyEntityRef = resolveEntityRef callbacks.HomeSchema
     let resolveMyFieldType = resolveFieldType layout callbacks.HomeSchema false
@@ -1862,7 +1862,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
     let resolveUserViewRef (ref : UserViewRef) : UserViewRef =
         let fullRef = resolveMyEntityRef ref
         if not <| callbacks.HasUserView fullRef then
-            raisef ViewResolveException "Referenced user view not found: %O" fullRef
+            raisef QueryResolveException "Referenced user view not found: %O" fullRef
         relaxEntityRef fullRef
 
     let resolveFieldValue : FieldValue -> FieldValue = function
@@ -1879,7 +1879,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             try
                 fieldNames |> Set.ofSeqUnique |> ignore
             with
-                | Failure msg -> raisef ViewResolveException "Clashing names: %s" msg
+                | Failure msg -> raisef QueryResolveException "Clashing names: %s" msg
             renameFields fieldNames results
 
     let fromEntityMapping (ctx : Context) (isInner : bool) (entity : ParsedFromEntity) : FromEntityMappingInfo =
@@ -1888,7 +1888,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         let getEntityInfo schemaName entityName =
             if entity.AsRoot then
                 if not resolveFlags.Privileged then
-                    raisef ViewResolveException "Cannot specify roles in non-privileged user views"
+                    raisef QueryResolveException "Cannot specify roles in non-privileged user views"
                 isPrivileged <- true
             let resRef = { Schema = schemaName; Name = entityName }
             let punRef =
@@ -1926,9 +1926,9 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 match ctx.ResolveCTE entityName with
                 | Some cteInfo ->
                     if entity.AsRoot then
-                        raisef ViewResolveException "Roles can only be specified for entities"
+                        raisef QueryResolveException "Roles can only be specified for entities"
                     if entity.Only then
-                        raisef ViewResolveException "ONLY can only be specified for entities"
+                        raisef QueryResolveException "ONLY can only be specified for entities"
                     let newName = Option.defaultValue entityName entity.Alias
                     let mappingRef = { Schema = None; Name = newName } : EntityRef
                     let mapping = fieldsToFieldMapping fromEntityId (Some mappingRef) None (getFieldsMap cteInfo.Fields)
@@ -1936,7 +1936,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 | None ->
                     match callbacks.HomeSchema with
                     | Some schemaName -> getEntityInfo schemaName entityName
-                    | None -> raisef ViewResolveException "Entity not found: %O" entity.Ref
+                    | None -> raisef QueryResolveException "Entity not found: %O" entity.Ref
 
         let (name, maybeSchema) =
             match entity.Alias with
@@ -1959,14 +1959,14 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         }
 
     let rec resolveResult (flags : SelectFlags) (ctx : Context) : ParsedQueryResult -> ResultInfo * ResolvedQueryResult = function
-        | QRAll alias -> raisef ViewResolveException "Wildcard SELECTs are not yet supported"
+        | QRAll alias -> raisef QueryResolveException "Wildcard SELECTs are not yet supported"
         | QRExpr result ->
             let (exprInfo, newResult) = resolveResultColumn flags ctx result
             (exprInfo, QRExpr newResult)
 
     and resolveResultColumn (flags : SelectFlags) (ctx : Context) (result : ParsedQueryColumnResult) : ResultInfo * ResolvedQueryColumnResult =
         if not (Map.isEmpty result.Attributes) && flags.NoAttributes then
-            raisef ViewResolveException "Attributes are not allowed in query expressions"
+            raisef QueryResolveException "Attributes are not allowed in query expressions"
         let (resultInfo, expr) = resolveResultExpr flags ctx result.Alias result.Result
         let (attrRefs, attributes) = resolveBoundAttributesMap ctx resultInfo.ExprInfo result.Attributes
         let ret =
@@ -1993,7 +1993,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                     (Some (BVArgument newArg), Some argInfo.ArgType)
                 | Some (BVColumn field) ->
                     if field.ForceRename && Option.isNone name && flags.RequireNames then
-                        raisef ViewResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
+                        raisef QueryResolveException "Field should be explicitly named in result expression: %s" (f.ToFunQLString())
                     match field.Field with
                     // We erase field information for computed fields from results, as they would be expanded at this point.
                     | RComputedField comp ->
@@ -2018,7 +2018,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         | e ->
             match name with
             | Some n -> checkName n
-            | None when flags.RequireNames -> raisef ViewResolveException "Unnamed results are allowed only inside expression queries"
+            | None when flags.RequireNames -> raisef QueryResolveException "Unnamed results are allowed only inside expression queries"
             | None -> ()
             let (exprInfo, expr) = resolveFieldExpr ctx e
             let info =
@@ -2031,7 +2031,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
     and resolveAttributeExpr (ctx : Context) (expr : ParsedFieldExpr) : ResolvedExprInfo * ResolvedFieldExpr =
         let (info, newExpr) = resolveFieldExpr ctx expr
         if info.Info.Flags.HasAggregates then
-            raisef ViewResolveException "Aggregate functions are not allowed here"
+            raisef QueryResolveException "Aggregate functions are not allowed here"
         (info.Info, newExpr)
 
     and resolveAttribute (ctx : Context) (attr : ParsedAttribute) : ResolvedExprInfo * ResolvedAttribute =
@@ -2081,15 +2081,15 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
     and resolveNonaggrFieldExpr (ctx : Context) (expr : ParsedFieldExpr) : InnerResolvedExprInfo * ResolvedFieldExpr =
         let (info, res) = resolveFieldExpr ctx expr
         if info.Info.Flags.HasAggregates then
-            raisef ViewResolveException "Aggregate functions are not allowed here"
+            raisef QueryResolveException "Aggregate functions are not allowed here"
         (info, res)
 
     and resolveEntityReference (ctx : Context) (entityRef : EntityRef) : FromEntityInfo * EntityRef =
         match Map.tryFind entityRef.Name ctx.Entities with
-        | None -> raisef ViewResolveException "Entity %O not found" entityRef
+        | None -> raisef QueryResolveException "Entity %O not found" entityRef
         | Some entityInfo ->
             match entityRef.Schema with
-            | Some _ as schema when entityInfo.Schema <> schema -> raisef ViewResolveException "Entity %O not found" entityRef
+            | Some _ as schema when entityInfo.Schema <> schema -> raisef QueryResolveException "Entity %O not found" entityRef
             | _ -> ()
             let newRef = { Schema = entityInfo.Schema; Name = entityRef.Name } : EntityRef
             (entityInfo, newRef)
@@ -2146,14 +2146,14 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             | FEEntityAttr (eref, attr) ->
                 let (entityInfo, newEref) = resolveEntityReference ctx eref
                 if not <| Set.contains attr entityInfo.EntityAttributes then
-                    raisef ViewResolveException "Entity attribute %O is not specified for %O" attr eref
+                    raisef QueryResolveException "Entity attribute %O is not specified for %O" attr eref
                 // We consider entity attribute references non-local because they can change based on inner parts of the query and default attributes.
                 exprInfo <- { exprInfo with Flags = unionResolvedExprFlags exprInfo.Flags unknownResolvedExprFlags }
                 (emptyCondTypeContexts, FEEntityAttr (newEref, attr))
             | FEFieldAttr (fref, attr) ->
                 let (refInfo, newRef) = resolveExprReference outerTypeCtxs.Map fref
                 if not <| fieldAttributeExists refInfo attr then
-                    raisef ViewResolveException "Field attribute %O is not specified for field %O" attr newRef
+                    raisef QueryResolveException "Field attribute %O is not specified for field %O" attr newRef
                 // We consider field attribute references non-local because they can change based on inner parts of the query and default attributes.
                 // That is, unless reference is an argument, in which case it's basically a subquery and this is already accounted for
                 // in argument flags.
@@ -2304,7 +2304,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         let resolveOrderBy (ord : ParsedOrderColumn) =
             let (info, ret) = resolveFieldExpr ctx ord.Expr
             if info.Info.Flags.HasAggregates then
-                raisef ViewResolveException "Aggregates are not allowed here"
+                raisef QueryResolveException "Aggregates are not allowed here"
             exprInfo <- unionResolvedExprInfo exprInfo info.Info
             { Expr = ret
               Order = ord.Order
@@ -2380,7 +2380,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             try
                 Map.ofSeqUnique ctes.Exprs
             with
-            | Failure msg -> raisef ViewResolveException "Clashing names in WITH binding: %s" msg
+            | Failure msg -> raisef QueryResolveException "Clashing names in WITH binding: %s" msg
         let mutable resultsMap : Map<EntityName, SubqueryInfo * ResolvedCommonTableExpr> = Map.empty
         let mutable resolved : (EntityName * ResolvedCommonTableExpr) list = []
         let mutable exprInfo = emptySubqueryExprInfo
@@ -2395,9 +2395,9 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                     | None when ctes.Recursive ->
                         match Map.tryFind currName exprsMap with
                         | Some expr when name = currName ->
-                            raisef ViewResolveException "Invalid recursive statement"
+                            raisef QueryResolveException "Invalid recursive statement"
                         | Some expr when Set.contains currName processing ->
-                            raisef ViewResolveException "Mutual recursion in WITH statement"
+                            raisef QueryResolveException "Mutual recursion in WITH statement"
                         | Some cte ->
                             processing <- Set.add currName processing
                             let (results, newCte) = resolveCommonTableExpr tmpCtx flags true currName cte
@@ -2455,7 +2455,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         if flags.RequireNames then
             for (name, info) in results1.Fields do
                 if Option.isNone name then
-                    raisef ViewResolveException "Name is required for column"
+                    raisef QueryResolveException "Name is required for column"
         let newResults = unionSubqueryInfo results1 results2
         // Bogus entity id for incompatible fields that are merged together.
         let setOpEntityId = nextFromEntityId ()
@@ -2479,7 +2479,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         let orderLimitCtx = { ctx with FieldMaps = orderLimitMapping :: ctx.FieldMaps }
         let (limitsInfo, resolvedLimits) = resolveOrderLimitClause orderLimitCtx setOp.OrderLimit
         if limitsInfo.Flags.HasArrows then
-            raisef ViewResolveException "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.OrderBy
+            raisef QueryResolveException "Dereferences are not allowed in ORDER BY clauses for set expressions: %O" resolvedLimits.OrderBy
         let newResults = { newResults with ExprInfo = unionSubqueryExprInfo newResults.ExprInfo (resolvedToSubqueryExprInfo limitsInfo) }
         let ret =
             { Operation = setOp.Operation
@@ -2496,19 +2496,19 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             (results, SSelect res)
         | SValues values ->
             if flags.RequireNames then
-                raisef ViewResolveException "Column aliases are required for this VALUES entry"
+                raisef QueryResolveException "Column aliases are required for this VALUES entry"
             let valuesLength = Array.length values.[0]
 
             let mutable exprInfo = emptySubqueryExprInfo
             let mapValue = function
-                | VVDefault -> raisef ViewResolveException "DEFAULT is not allowed here"
+                | VVDefault -> raisef QueryResolveException "DEFAULT is not allowed here"
                 | VVExpr expr ->
                     let (info, newExpr) = resolveFieldExpr ctx expr
                     exprInfo <- unionSubqueryExprInfo exprInfo (resolvedToSubqueryExprInfo info.Info)
                     VVExpr newExpr
             let mapEntry entry =
                 if Array.length entry <> valuesLength then
-                    raisef ViewResolveException "Invalid number of items in VALUES entry: %i" (Array.length entry)
+                    raisef QueryResolveException "Invalid number of items in VALUES entry: %i" (Array.length entry)
                 entry |> Array.map mapValue
 
             let newValues = values |> Array.map mapEntry
@@ -2526,7 +2526,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
 
     and resolveSingleSelectExpr (ctx : Context) (flags : SelectFlags) (query : ParsedSingleSelectExpr) : SubqueryInfo * ResolvedSingleSelectExpr =
         if flags.NoAttributes && not (Map.isEmpty query.Attributes) then
-            raisef ViewResolveException "Attributes are not allowed in query expressions"
+            raisef QueryResolveException "Attributes are not allowed in query expressions"
 
         let mutable exprInfo = emptySubqueryExprInfo
 
@@ -2576,7 +2576,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         try
             newFields |> Seq.mapMaybe fst |> Set.ofSeqUnique |> ignore
         with
-            | Failure msg -> raisef ViewResolveException "Clashing result names: %s" msg
+            | Failure msg -> raisef QueryResolveException "Clashing result names: %s" msg
 
         let extra =
             { HasAggregates = hasAggregates
@@ -2605,7 +2605,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
     and resolveFromExpr (ctx : Context) (fromInfo : FromExprInfo) (isInner : bool) (flags : SelectFlags) : ParsedFromExpr -> FromExprInfo * ResolvedFromExpr = function
         | FEntity entity ->
             if ctx.NoFetches then
-                raisef ViewResolveException "Fetches are not allowed here"
+                raisef QueryResolveException "Fetches are not allowed here"
             let entityInfo = fromEntityMapping ctx isInner entity
             let fromInfo = unionFromExprInfo fromInfo entityInfo.SingleFrom
             let extra =
@@ -2653,9 +2653,9 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                     let fieldType =
                         match info.Type with
                         | Some typ -> typ
-                        | _ -> raisef ViewResolveException "Field %O has unknown type" fieldRef
+                        | _ -> raisef QueryResolveException "Field %O has unknown type" fieldRef
                     if Option.isSome tab.Alias.Fields then
-                        raisef ViewResolveException "Can't rename fields from domain"
+                        raisef QueryResolveException "Can't rename fields from domain"
                     let myFromInfo = domainFromInfo fromEntityId info.InnerValue fieldType tab.Alias.Name flags
                     let fromInfo = unionFromExprInfo fromInfo myFromInfo
                     (fromInfo, TEDomain (newRef, flags))
@@ -2664,12 +2664,12 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                     let entity = findEntityByRef resRef false
                     let field =
                         match entity.FindField fieldName with
-                        | None -> raisef ViewResolveException "Field doesn't exist in %O: %O" resRef fieldName
+                        | None -> raisef QueryResolveException "Field doesn't exist in %O: %O" resRef fieldName
                         | Some f -> f
                     let fieldType =
                         match field.Field with
                         | RColumnField { FieldType = typ } -> typ
-                        | _ -> raisef ViewResolveException "Field %O has unknown type" { Entity = resRef; Name = fieldName }
+                        | _ -> raisef QueryResolveException "Field %O has unknown type" { Entity = resRef; Name = fieldName }
                     let key =
                         { FromId = FIEntity <| nextFromEntityId ()
                           Path = []
@@ -2714,7 +2714,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             let localCtx = addFromToContext infoB ctx
             let (innerInfo, newFieldExpr) = resolveFieldExpr localCtx join.Condition
             if innerInfo.Info.Flags.HasAggregates then
-                raisef ViewResolveException "Cannot use aggregate functions in join expression"
+                raisef QueryResolveException "Cannot use aggregate functions in join expression"
             let retInfo =
                 { infoB with ExprInfo = unionSubqueryExprInfo infoB.ExprInfo (resolvedToSubqueryExprInfo innerInfo.Info)
                 }
@@ -2748,20 +2748,20 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         let entityRef = resolveMyEntityRef insert.Entity.Ref
         let entity = findEntityByRef entityRef false
         if entity.IsAbstract then
-            raisef ViewResolveException "Entity %O is abstract" entityRef
+            raisef QueryResolveException "Entity %O is abstract" entityRef
 
         let fields =
             try
                 Set.ofSeqUnique insert.Fields
             with
-            | Failure err -> raisef ViewResolveException "Clashing insert field: %s" err
+            | Failure err -> raisef QueryResolveException "Clashing insert field: %s" err
         for fieldName in insert.Fields do
             match entity.FindField fieldName with
             | Some { ForceRename = false; Field = RColumnField field } -> ()
-            | _ -> raisef ViewResolveException "Field not found: %O" { Entity = entityRef; Name = fieldName }
+            | _ -> raisef QueryResolveException "Field not found: %O" { Entity = entityRef; Name = fieldName }
         for (fieldName, field) in entity.ColumnFields do
             if not (fieldIsOptional field) && not (Set.contains fieldName fields) then
-                raisef ViewResolveException "Required field not provided: %O" fieldName
+                raisef QueryResolveException "Required field not provided: %O" fieldName
 
         let myresolveInsertValue value =
             let (info, newValue) = resolveInsertValue ctx value
@@ -2770,7 +2770,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
 
         let resolveInsertValues vals =
             if Array.length vals <> Array.length insert.Fields then
-                raisef ViewResolveException "Number of values is not consistent"
+                raisef QueryResolveException "Number of values is not consistent"
             Array.map myresolveInsertValue vals
 
         let source =
@@ -2782,7 +2782,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             | ISSelect select ->
                 let (selInfo, resSelect) = resolveSelectExpr ctx subExprSelectFlags select
                 if Array.length selInfo.Fields <> Array.length insert.Fields then
-                    raisef ViewResolveException "Queries in INSERT must have the same number of columns as number of inserted columns"
+                    raisef QueryResolveException "Queries in INSERT must have the same number of columns as number of inserted columns"
                 exprInfo <- unionSubqueryExprInfo exprInfo selInfo.ExprInfo
                 ISSelect resSelect
         let newExpr =
@@ -2830,10 +2830,10 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             match entity.FindField fieldName with
             | Some { ForceRename = false; Field = RColumnField field } ->
                 if field.IsImmutable then
-                    raisef ViewResolveException "Field %O is immutable" fieldName
-            | _ -> raisef ViewResolveException "Field not found: %O" { Entity = entityRef; Name = fieldName }
+                    raisef QueryResolveException "Field %O is immutable" fieldName
+            | _ -> raisef QueryResolveException "Field not found: %O" { Entity = entityRef; Name = fieldName }
             if Set.contains fieldName columns then
-                raisef ViewResolveException "Field %O is assigned multiple times" fieldName
+                raisef QueryResolveException "Field %O is assigned multiple times" fieldName
             columns <- Set.add fieldName columns
 
         let resolveFieldUpdate = function
@@ -2848,7 +2848,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 let (selectInfo, newSelect) = resolveSelectExpr ctx subExprSelectFlags select
                 exprInfo <- unionSubqueryExprInfo exprInfo selectInfo.ExprInfo
                 if Array.length selectInfo.Fields <> Array.length cols then
-                    raisef ViewResolveException "Queries in UPDATE must have the same number of columns as number of updated columns"
+                    raisef QueryResolveException "Queries in UPDATE must have the same number of columns as number of updated columns"
                 UAESelect (cols, newSelect)
         let assigns = Array.map resolveFieldUpdate update.Assignments
 
@@ -3151,10 +3151,10 @@ let private resolveArgument (callbacks : ResolveCallbacks) (arg : ParsedArgument
     | Some def ->
         match def with
         | FNull when not arg.Optional ->
-            raisef ViewResolveException "Invalid default value, expected %O" argType
+            raisef QueryResolveException "Invalid default value, expected %O" argType
         | _ -> ()
         if not (isValueOfSubtype argType def) then
-            raisef ViewResolveException "Invalid default value, expected %O" argType
+            raisef QueryResolveException "Invalid default value, expected %O" argType
     { ArgType = argType
       Optional = arg.Optional
       DefaultValue = arg.DefaultValue
@@ -3192,7 +3192,7 @@ let resolveSelectExpr (callbacks : ResolveCallbacks) (arguments : ParsedArgument
     let (localArguments, qualifier) = getArgumentsQualifier callbacks arguments flags
     let (info, qQuery) = qualifier.ResolveSelectExpr subExprSelectFlags select
     if Array.length info.Fields <> 1 then
-        raisef ViewResolveException "Expression queries must have only one resulting column"
+        raisef QueryResolveException "Expression queries must have only one resulting column"
     (localArguments, relabelSelectExpr qQuery)
 
 type SingleFieldExprInfo =

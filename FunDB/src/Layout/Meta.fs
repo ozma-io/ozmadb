@@ -102,7 +102,7 @@ type private MetaBuilder (layout : Layout) =
                     let refEntity = layout.FindEntity entityRef |> Option.get
                     let tableRef = compileResolvedEntityRef refEntity.Root
                     let constrKey = sprintf "__foreign__%O__%O__%O" ref.Entity.Schema ref.Entity.Name ref.Name
-                    let constrName = SQL.SQLName <| sprintf "__foreign__%s__%s"  entity.HashName field.HashName
+                    let constrName = foreignConstraintSQLName entity.HashName field.HashName
                     let deleteOpt =
                         match opts with
                         | None
@@ -174,7 +174,7 @@ type private MetaBuilder (layout : Layout) =
             let expr = modifyExpr <| compileRelatedExpr constr.Expression
             let meta = SQL.CMCheck (String.comparable expr)
             let sqlKey = sprintf "__check__%O__%O__%O" entityRef.Schema entityRef.Name name
-            let sqlName = SQL.SQLName <| sprintf "__check__%s__%s" entity.HashName constr.HashName
+            let sqlName = checkConstraintSQLName entity.HashName constr.HashName
             Seq.singleton (sqlName, (Set.singleton sqlKey, meta))
 
     let makeEntityMeta (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) : SQL.TableObjectsMeta * (SQL.SQLName * SQL.RelationMeta) seq =
@@ -323,13 +323,13 @@ type private MetaBuilder (layout : Layout) =
 
         let makeUniqueConstraint (name, constr : ResolvedUniqueConstraint) =
             let key = sprintf "__unique__%O__%O__%O" entityRef.Schema entityRef.Name name
-            let sqlName = SQL.SQLName <| sprintf "__unique__%s__%s" entity.HashName constr.HashName
+            let sqlName = uniqueConstraintSQLName entity.HashName constr.HashName
             (sqlName, (Set.singleton key, makeUniqueConstraintMeta entity constr))
         let uniqueConstraints = entity.UniqueConstraints |> Map.toSeq |> Seq.map makeUniqueConstraint
 
         let makeIndex (name, index : ResolvedIndex) =
             let key = sprintf "__index__%O__%O__%O" entityRef.Schema entityRef.Name name
-            let sqlName = SQL.SQLName <| sprintf "__index__%s__%s" entity.HashName index.HashName
+            let sqlName = indexSQLName entity.HashName index.HashName
             (sqlName, (Set.singleton key, makeIndexMeta entityRef entity index))
         let indexes = entity.Indexes |> Map.toSeq |> Seq.map makeIndex
 

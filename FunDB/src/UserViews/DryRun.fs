@@ -10,7 +10,6 @@ open Newtonsoft.Json
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.UserViews.Types
-open FunWithFlags.FunDB.UserViews.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
@@ -408,7 +407,7 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
             let arguments = uv.Compiled.Query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)
 
             try
-                return! runViewExpr conn limited comment arguments cancellationToken <| fun info res ->
+                return! runViewExpr conn layout limited comment arguments cancellationToken <| fun info res ->
                     let nonpureCompiled =
                         { uv.Compiled with
                               SingleRowQuery = { uv.Compiled.SingleRowQuery with ConstColumns = [||] }

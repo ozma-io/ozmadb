@@ -6,10 +6,13 @@ open System.Runtime.Serialization
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
+open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open NodaTime
+open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDBSchema.System
 open FunWithFlags.FunDB.Connection
 open FunWithFlags.FunDB.FunQL.AST
@@ -33,26 +36,56 @@ open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.Operations.SaveRestore
 open FunWithFlags.FunDB.Operations.Domain
 open FunWithFlags.FunDB.Operations.Entity
+open FunWithFlags.FunDB.Operations.Command
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
 module SQL = FunWithFlags.FunDB.SQL.Query
 
-type IAPIError =
-    abstract member Message : string
-
 [<SerializeAsObject("error")>]
 type GenericErrorInfo =
-    | [<CaseName("quotaExceeded")>] GEQuotaExceeded of Details : string
-    | [<CaseName("commit")>] GECommit of Details : string
+    | [<CaseKey("quotaExceeded", IgnoreFields=[|"Details"|])>] GEQuotaExceeded of Details : string
+    | [<CaseKey("commit")>] GECommit of Inner : IErrorDetails
+    | [<CaseKey("migrationConflict")>] GEMigrationConflict
+    | [<CaseKey("migration", IgnoreFields=[|"Details"|])>] GEMigration of Details : string
+    | [<CaseKey("other", IgnoreFields=[|"Details"|])>] GEOther of Details : string
     with
+        member this.LogMessage =
+            match this with
+            | GEQuotaExceeded details -> sprintf  "Quota exceeded: %s" details
+            | GEMigrationConflict -> "Another migration is in progress"
+            | GEMigration details -> sprintf "Failed to validate or perform the migration: %s" details
+            | GECommit inner -> inner.LogMessage
+            | GEOther details -> details
+
         [<DataMember>]
         member this.Message =
             match this with
-            | GEQuotaExceeded msg -> sprintf  "Quota exceeded: %s" msg
-            | GECommit msg -> sprintf "Error during commit: %s" msg
+            | GECommit inner -> inner.Message
+            | _ -> this.LogMessage
 
-        interface IAPIError with
+        member this.HTTPResponseCode =
+            match this with
+            | GEQuotaExceeded details -> 403
+            | GEMigrationConflict -> 503
+            | GEMigration details -> 422
+            | GECommit inner -> inner.HTTPResponseCode
+            | GEOther details -> 500
+
+        member this.ShouldLog =
+            match this with
+            | GEQuotaExceeded details -> false
+            | GEMigrationConflict -> false
+            | GEMigration details -> false
+            | GECommit inner -> inner.ShouldLog
+            | GEOther details -> false
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.LogMessage
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
 type IContext =
     inherit IDisposable
@@ -129,15 +162,84 @@ type RequestUserInfo =
 
 [<SerializeAsObject("type")>]
 type EventSource =
-    | [<CaseName("api")>] ESAPI
-    | [<CaseName("trigger", Type=CaseSerialization.InnerObject)>] ESTrigger of TriggerRef
-    | [<CaseName("action", Type=CaseSerialization.InnerObject)>] ESAction of ActionRef
+    | [<CaseKey("api")>] ESAPI
+    | [<CaseKey("trigger", Type=CaseSerialization.InnerObject)>] ESTrigger of TriggerRef
+    | [<CaseKey("action", Type=CaseSerialization.InnerObject)>] ESAction of ActionRef
     with
         override this.ToString () =
             match this with
             | ESAPI -> "API"
             | ESTrigger trig -> sprintf "(trigger %O)" trig
             | ESAction ref -> sprintf "(action %O)" ref
+
+type [<JsonConverter(typeof<PretendRoleConverter>)>] PretendRole =
+    | PRRole of ResolvedRoleRef
+    | PRRoot
+
+and PretendRoleConverter () =
+    inherit JsonConverter<PretendRole> ()
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : PretendRole =
+        match reader.TokenType with
+        | JsonToken.String ->
+            match reader.ReadAsString() with
+            | "root" -> PRRoot
+            | _ -> raise <| JsonSerializationException("Invalid value for PretendRole")
+        | _ ->
+            let ref = serializer.Deserialize<ResolvedRoleRef>(reader)
+            PRRole ref
+
+    override this.WriteJson (writer : JsonWriter, value : PretendRole, serializer : JsonSerializer) : unit =
+        match value with
+        | PRRole role -> serializer.Serialize(writer, role)
+        | PRRoot -> writer.WriteValue "root"
+
+type PretendRoleRequest =
+    { AsRole : PretendRole
+    } with
+        interface ILoggableResponse with
+            member this.ShouldLog = false
+
+type PretendUserRequest =
+    { AsUser : UserName
+    }
+
+type PretendErrorInfo =
+    | PEUserNotFound
+    | PERoleNotFound
+    | PEAccessDenied
+    | PENoUserRole
+    with
+        member this.LogMessage =
+            match this with
+            | PEUserNotFound -> "User not found"
+            | PERoleNotFound -> "Role not found"
+            | PEAccessDenied -> "Access denied"
+            | PENoUserRole -> "User has no role"
+
+        member this.Message = this.LogMessage
+
+        member this.ShouldLog =
+            match this with
+            | PEUserNotFound -> false
+            | PERoleNotFound -> false
+            | PEAccessDenied -> true
+            | PENoUserRole -> false
+
+        member this.HTTPResponseCode =
+            match this with
+            | PEUserNotFound -> 404
+            | PERoleNotFound -> 404
+            | PEAccessDenied -> 403
+            | PENoUserRole -> 422
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
+            member this.LogMessage = this.LogMessage
+            member this.Message = this.Message
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
 type IRequestContext =
     abstract Context : IContext with get
@@ -149,35 +251,57 @@ type IRequestContext =
     abstract member WriteEvent : (EventEntry -> unit) -> unit
     abstract member WriteEventSync : (EventEntry -> unit) -> Task
     abstract member RunWithSource : EventSource -> (unit -> Task<'a>) -> Task<'a>
-    abstract member PretendRole : ResolvedRoleRef -> (unit -> Task<'a>) -> Task<'a>
-    abstract member PretendRoot : (unit -> Task<'a>) -> Task<'a>
-    abstract member PretendUser : UserName -> (unit -> Task<'a>) -> Task<'a>
+    abstract member PretendRole : PretendRoleRequest -> (unit -> Task<'a>) -> Task<Result<'a, PretendErrorInfo>>
+    abstract member PretendUser : PretendUserRequest -> (unit -> Task<'a>) -> Task<Result<'a, PretendErrorInfo>>
     abstract member IsPrivileged : bool
 
 [<SerializeAsObject("error")>]
 type UserViewErrorInfo =
-    | [<CaseName("notFound")>] UVENotFound
-    | [<CaseName("accessDenied")>] UVEAccessDenied
-    | [<CaseName("compilation")>] UVECompilation of Details : string
-    | [<CaseName("execution")>] UVEExecution of Details : string
-    | [<CaseName("arguments")>] UVEArguments of Details : string
+    | [<CaseKey("accessDenied", IgnoreFields=[|"Details"|])>] UVEAccessDenied of Details : string
+    | [<CaseKey("request", IgnoreFields=[|"Details"|])>] UVERequest of Details : string
+    | [<CaseKey("other", IgnoreFields=[|"Details"|])>] UVEOther of Details : string
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] UVEExecution of FunQLExecutionError
     with
+        member this.LogMessage =
+            match this with
+            | UVEAccessDenied msg -> sprintf  "User view access denied: %s" msg
+            | UVERequest msg -> msg
+            | UVEOther msg -> msg
+            | UVEExecution inner -> sprintf "User view execution failed: %s" inner.LogMessage
+
         [<DataMember>]
         member this.Message =
             match this with
-            | UVENotFound -> "User view not found"
-            | UVEAccessDenied -> "User view access denied"
-            | UVECompilation msg -> sprintf  "User view compilation failed: %s" msg
-            | UVEExecution msg -> sprintf "User view execution failed: %s" msg
-            | UVEArguments msg -> sprintf "Invalid user view arguments: %s" msg
+            | UVEAccessDenied msg -> "User view access denied"
+            | UVEExecution inner -> sprintf "User view execution failed: %s" inner.Message
+            | _ -> this.LogMessage
 
-        interface IAPIError with
+        member this.HTTPResponseCode =
+            match this with
+            | UVEAccessDenied msg -> 403
+            | UVERequest msg -> 422
+            | UVEOther msg -> 500
+            | UVEExecution inner -> inner.HTTPResponseCode
+
+        member this.ShouldLog =
+            match this with
+            | UVEAccessDenied msg -> true
+            | UVERequest msg -> false
+            | UVEOther msg -> false
+            | UVEExecution inner -> inner.ShouldLog
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.LogMessage
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
 [<SerializeAsObject("type")>]
 type UserViewSource =
-    | [<CaseName("anonymous")>] UVAnonymous of Query : string
-    | [<CaseName("named")>] UVNamed of Ref : ResolvedUserViewRef
+    | [<CaseKey("anonymous")>] UVAnonymous of Query : string
+    | [<CaseKey("named", Type=CaseSerialization.InnerObject)>] UVNamed of ResolvedUserViewRef
     with
         override this.ToString () =
             match this with
@@ -193,23 +317,31 @@ type ExecutedViewExpr =
     }
 
 [<NoEquality; NoComparison>]
-type UserViewEntriesResult =
+type UserViewEntriesResponse =
     { Info : UserViewInfo
       Result : ExecutedViewExpr
-    }
+    } with
+        interface ILoggableResponse with
+            member this.ShouldLog = false
 
 [<NoEquality; NoComparison>]
-type UserViewInfoResult =
+type UserViewInfoResponse =
     { Info : UserViewInfo
       ConstAttributes : ExecutedAttributesMap
       ConstColumnAttributes : ExecutedAttributesMap[]
       ConstArgumentAttributes : Map<ArgumentName, ExecutedAttributesMap>
-    }
+    } with
+        interface ILoggableResponse with
+            member this.ShouldLog = false
 
 type UserViewFlags =
-    { ForceRecompile : bool
+    { [<DataMember(EmitDefaultValue = false)>]
+      ForceRecompile : bool
+      [<DataMember(EmitDefaultValue = false)>]
       NoAttributes : bool
+      [<DataMember(EmitDefaultValue = false)>]
       NoTracking : bool
+      [<DataMember(EmitDefaultValue = false)>]
       NoPuns : bool
     }
 
@@ -220,64 +352,157 @@ let emptyUserViewFlags =
       NoPuns = false
     } : UserViewFlags
 
+type UserViewInfoRequest =
+    { Source : UserViewSource
+      [<DataMember(EmitDefaultValue = false)>]
+      Flags : UserViewFlags option
+    }
+
+type UserViewExplainRequest =
+    { Source : UserViewSource
+      [<DataMember(EmitDefaultValue = false)>]
+      Args : RawArguments option
+      [<DataMember(EmitDefaultValue = false)>]
+      Chunk : SourceQueryChunk option
+      [<DataMember(EmitDefaultValue = false)>]
+      Flags : UserViewFlags option
+      [<DataMember(EmitDefaultValue = false)>]
+      ExplainFlags : SQL.ExplainOptions option
+    }
+
+type UserViewRequest =
+    { Source : UserViewSource
+      [<DataMember(EmitDefaultValue = false)>]
+      Args : RawArguments
+      [<DataMember(EmitDefaultValue = false)>]
+      Chunk : SourceQueryChunk option
+      [<DataMember(EmitDefaultValue = false)>]
+      Flags : UserViewFlags option
+    }
+
 type IUserViewsAPI =
-    abstract member GetUserViewInfo : UserViewSource -> UserViewFlags -> Task<Result<UserViewInfoResult, UserViewErrorInfo>>
-    abstract member GetUserViewExplain :  UserViewSource -> RawArguments option -> SourceQueryChunk -> UserViewFlags -> SQL.ExplainOptions -> Task<Result<ExplainedViewExpr, UserViewErrorInfo>>
-    abstract member GetUserView : UserViewSource -> RawArguments -> SourceQueryChunk -> UserViewFlags -> Task<Result<UserViewEntriesResult, UserViewErrorInfo>>
+    abstract member GetUserViewInfo : UserViewInfoRequest -> Task<Result<UserViewInfoResponse, UserViewErrorInfo>>
+    abstract member GetUserViewExplain :  UserViewExplainRequest -> Task<Result<ExplainedViewExpr, UserViewErrorInfo>>
+    abstract member GetUserView : UserViewRequest -> Task<Result<UserViewEntriesResponse, UserViewErrorInfo>>
 
 [<SerializeAsObject("error")>]
 type EntityErrorInfo =
-    | [<CaseName("notFound")>] EENotFound
-    | [<CaseName("frozen")>] EEFrozen
-    | [<CaseName("accessDenied")>] EEAccessDenied
-    | [<CaseName("arguments")>] EEArguments of Details : string
-    | [<CaseName("compilation")>] EECompilation of Details : string
-    | [<CaseName("execution")>] EEExecution of Details : string
-    | [<CaseName("exception")>] EEException of Details : string * UserData : JToken option
-    | [<CaseName("trigger")>] EETrigger of Schema : SchemaName * Name : TriggerName * Inner : EntityErrorInfo
+    | [<CaseKey("exception", IgnoreFields=[|"Details"|])>] EEException of Details : string * UserData : JToken option
+    | [<CaseKey("trigger")>] EETrigger of Schema : SchemaName * Name : TriggerName * Inner : IErrorDetails
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] EEOperation of EntityOperationError
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] EECommand of CommandError
     with
+        member this.LogMessage =
+            match this with
+            | EEException (msg, data) -> msg
+            | EETrigger (schema, name, inner) -> sprintf "Error while running trigger %O.%O: %s" schema name inner.Message
+            | EEOperation err -> err.LogMessage
+            | EECommand err -> err.LogMessage
+
         [<DataMember>]
         member this.Message =
             match this with
-            | EENotFound -> "Entity not found"
-            | EEFrozen -> "Entity is frozen"
-            | EEAccessDenied -> "Entity access denied"
-            | EECompilation msg -> sprintf "Command compilation failed: %s" msg
-            | EEArguments msg -> sprintf "Invalid operation arguments: %s" msg
-            | EEExecution msg -> sprintf "Operation execution failed: %s" msg
-            | EEException (msg, userData) -> msg
-            | EETrigger (schema, name, inner) -> sprintf "Error while running trigger %O.%O: %s" schema name inner.Message
+            | EEOperation err -> err.Message
+            | EECommand err -> err.Message
+            | _ -> this.LogMessage
 
-        interface IAPIError with
+        member this.HTTPResponseCode =
+            match this with
+            | EEException (details, data) -> 500
+            | EETrigger (schema, name, inner) -> 500
+            | EEOperation inner -> inner.HTTPResponseCode
+            | EECommand inner -> inner.HTTPResponseCode
+
+        member this.ShouldLog =
+            match this with
+            | EEException (details, data) -> Option.isNone data
+            // Better to log any errors from triggers.
+            | EETrigger (schema, name, inner) -> inner.ShouldLog
+            | EEOperation inner -> inner.ShouldLog
+            | EECommand inner -> inner.ShouldLog
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.LogMessage
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
 [<SerializeAsObject("type")>]
 type RawRowKey =
-    | [<CaseName("primary", Type=CaseSerialization.InnerValue)>] RRKPrimary of RowId
-    | [<CaseName(null)>] RRKAlt of Alt : ConstraintName * Keys : RawArguments
+    | [<CaseKey("primary", Type=CaseSerialization.InnerValue)>] RRKPrimary of RowId
+    | [<CaseKey(null)>] RRKAlt of Alt : ConstraintName * Keys : RawArguments
+
+[<NoEquality; NoComparison>]
+type InsertEntityRequest =
+    { Entity : ResolvedEntityRef
+      mutable Fields : RawArguments
+    } with
+        [<System.ComponentModel.DefaultValue(null)>]
+        [<JsonProperty(Required=Required.DisallowNull, DefaultValueHandling=DefaultValueHandling.Ignore)>]
+        member private this.Entries with set fields =
+            this.Fields <- fields
+
+[<NoEquality; NoComparison>]
+type UpdateEntityRequest =
+    { Entity : ResolvedEntityRef
+      Id : RawRowKey
+      mutable Fields : RawArguments
+    } with
+        [<System.ComponentModel.DefaultValue(null)>]
+        [<JsonProperty(Required=Required.DisallowNull, DefaultValueHandling=DefaultValueHandling.Ignore)>]
+        member private this.Entries with set fields =
+            this.Fields <- fields
+
+[<NoEquality; NoComparison>]
+type DeleteEntityRequest =
+    { Entity : ResolvedEntityRef
+      Id : RawRowKey
+    }
+
+[<NoEquality; NoComparison>]
+type CommandRequest =
+    { Command : string
+      [<DataMember(EmitDefaultValue = false)>]
+      Args : RawArguments
+    }
 
 [<SerializeAsObject("type")>]
 [<NoEquality; NoComparison>]
 type TransactionOp =
-    | [<CaseName("insert")>] TInsertEntity of Entity : ResolvedEntityRef * Entries : RawArguments
-    | [<CaseName("update")>] TUpdateEntity of Entity : ResolvedEntityRef * Id : RawRowKey * Entries : RawArguments
-    | [<CaseName("delete")>] TDeleteEntity of Entity : ResolvedEntityRef * Id : RawRowKey
-    | [<CaseName("recursiveDelete")>] TRecursiveDeleteEntity of Entity : ResolvedEntityRef * Id : RawRowKey
-    | [<CaseName("command")>] TCommand of Command : string * Arguments : RawArguments
+    | [<CaseKey("insert", Type=CaseSerialization.InnerObject)>] TInsertEntity of InsertEntityRequest
+    | [<CaseKey("update", Type=CaseSerialization.InnerObject)>] TUpdateEntity of UpdateEntityRequest
+    | [<CaseKey("delete", Type=CaseSerialization.InnerObject)>] TDeleteEntity of DeleteEntityRequest
+    | [<CaseKey("recursiveDelete", Type=CaseSerialization.InnerObject)>] TRecursiveDeleteEntity of DeleteEntityRequest
+    | [<CaseKey("command", Type=CaseSerialization.InnerObject)>] TCommand of CommandRequest
+
+type InsertEntityResponse =
+    { Id : RowId option
+    } with
+        interface ILoggableResponse with
+            member this.ShouldLog = true
+
+type UpdateEntityResponse =
+    { Id : RowId
+    } with
+        interface ILoggableResponse with
+            member this.ShouldLog = true
 
 [<SerializeAsObject("type")>]
-type TransactionOpResult =
-    | [<CaseName("insert")>] TRInsertEntity of Id : RowId option
-    | [<CaseName("update")>] TRUpdateEntity of Id : RowId
-    | [<CaseName("delete")>] TRDeleteEntity
-    | [<CaseName("recursiveDelete")>] TRRecursiveDeleteEntity of Deleted : ReferencesTree
-    | [<CaseName("command")>] TRCommand
+type TransactionOpResponse =
+    | [<CaseKey("insert", Type=CaseSerialization.InnerObject)>] TRInsertEntity of InsertEntityResponse
+    | [<CaseKey("update", Type=CaseSerialization.InnerObject)>] TRUpdateEntity of UpdateEntityResponse
+    | [<CaseKey("delete", Type=CaseSerialization.InnerObject)>] TRDeleteEntity
+    | [<CaseKey("recursiveDelete", Type=CaseSerialization.InnerObject)>] TRRecursiveDeleteEntity of Deleted : ReferencesTree
+    | [<CaseKey("command", Type=CaseSerialization.InnerObject)>] TRCommand
 
 [<NoEquality; NoComparison>]
-type Transaction =
+type TransactionRequest =
     { Operations : TransactionOp[]
     }
 
+[<NoEquality; NoComparison>]
 type TransactionError =
     { Operation : int
       Inner : EntityErrorInfo
@@ -285,94 +510,242 @@ type TransactionError =
         [<DataMember>]
         member this.Error = "transaction"
 
+        member this.LogMessage = this.Inner.LogMessage
+
         [<DataMember>]
         member this.Message = this.Inner.Message
 
-        interface IAPIError with
+        member this.HTTPResponseCode = this.Inner.HTTPResponseCode
+
+        member this.ShouldLog = this.Inner.ShouldLog
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.LogMessage
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
 [<NoEquality; NoComparison>]
-type TransactionResult =
-    { Results : TransactionOpResult[]
+type TransactionResponse =
+    { Results : TransactionOpResponse[]
+    } with
+        interface ILoggableResponse with
+            member this.ShouldLog = true
+
+[<NoEquality; NoComparison>]
+type GetEntityInfoRequest =
+    { Entity : ResolvedEntityRef   
+    }
+
+[<NoEquality; NoComparison>]
+type GetRelatedEntitiesRequest =
+    { Entity : ResolvedEntityRef
+      Id : RawRowKey
+    }
+
+[<NoEquality; NoComparison>]
+type InsertEntitiesRequest =
+    { Entity : ResolvedEntityRef
+      Entries : RawArguments seq
+    }
+
+type InsertEntitiesResponse =
+    { Ids : InsertEntityResponse[]
     }
 
  type IEntitiesAPI =
-    abstract member GetEntityInfo : ResolvedEntityRef -> Task<Result<SerializedEntity, EntityErrorInfo>>
-    abstract member InsertEntities : ResolvedEntityRef -> RawArguments seq -> Task<Result<(RowId option)[], TransactionError>>
-    abstract member UpdateEntity : ResolvedEntityRef -> RawRowKey -> RawArguments -> Task<Result<RowId, EntityErrorInfo>>
-    abstract member DeleteEntity : ResolvedEntityRef -> RawRowKey -> Task<Result<unit, EntityErrorInfo>>
-    abstract member GetRelatedEntities : ResolvedEntityRef -> RawRowKey -> Task<Result<ReferencesTree, EntityErrorInfo>>
-    abstract member RecursiveDeleteEntity : ResolvedEntityRef -> RawRowKey -> Task<Result<ReferencesTree, EntityErrorInfo>>
-    abstract member RunCommand : string -> RawArguments -> Task<Result<unit, EntityErrorInfo>>
-    abstract member RunTransaction : Transaction -> Task<Result<TransactionResult, TransactionError>>
+    abstract member GetEntityInfo : GetEntityInfoRequest -> Task<Result<SerializedEntity, EntityErrorInfo>>
+    abstract member InsertEntities : InsertEntitiesRequest -> Task<Result<InsertEntitiesResponse, TransactionError>>
+    abstract member UpdateEntity : UpdateEntityRequest -> Task<Result<UpdateEntityResponse, EntityErrorInfo>>
+    abstract member DeleteEntity : DeleteEntityRequest -> Task<Result<unit, EntityErrorInfo>>
+    abstract member GetRelatedEntities : GetRelatedEntitiesRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
+    abstract member RecursiveDeleteEntity : DeleteEntityRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
+    abstract member RunCommand : CommandRequest -> Task<Result<unit, EntityErrorInfo>>
+    abstract member RunTransaction : TransactionRequest -> Task<Result<TransactionResponse, TransactionError>>
     abstract member DeferConstraints : (unit -> Task<'a>) -> Task<Result<'a, EntityErrorInfo>>
 
 [<SerializeAsObject("error")>]
 type SaveErrorInfo =
-    | [<CaseName("accessDenied")>] RSEAccessDenied
-    | [<CaseName("notFound")>] RSENotFound
+    | [<CaseKey("accessDenied")>] RSEAccessDenied
+    | [<CaseKey("request", IgnoreFields=[|"Details"|])>] RSERequest of Details : string
     with
-        [<DataMember>]
-        member this.Message =
+        member this.LogMessage =
             match this with
             | RSEAccessDenied -> "Dump access denied"
-            | RSENotFound -> "Schema not found"
+            | RSERequest msg -> msg
 
-        interface IAPIError with
+        [<DataMember>]
+        member this.Message = this.LogMessage
+
+        member this.HTTPResponseCode =
+            match this with
+            | RSEAccessDenied -> 403
+            | RSERequest msg -> 422
+
+        member this.ShouldLog =
+            match this with
+            | RSEAccessDenied -> true
+            | RSERequest msg -> false
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.LogMessage
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
 [<SerializeAsObject("error")>]
 type RestoreErrorInfo =
-    | [<CaseName("accessDenied")>] RREAccessDenied
-    | [<CaseName("preloaded")>] RREPreloaded
-    | [<CaseName("invalidFormat")>] RREInvalidFormat of Details : string
-    | [<CaseName("consistency")>] RREConsistency of Details : string
+    | [<CaseKey("accessDenied")>] RREAccessDenied
+    | [<CaseKey("request", IgnoreFields=[|"Details"|])>] RRERequest of Details : string
     with
-        [<DataMember>]
-        member this.Message =
+        member this.LogMessage =
             match this with
             | RREAccessDenied -> "Restore access denied"
-            | RREPreloaded -> "Cannot restore preloaded schemas"
-            | RREInvalidFormat msg -> sprintf "Invalid data format: %s" msg
-            | RREConsistency msg -> sprintf "Inconsistent dump: %s" msg
+            | RRERequest msg -> msg
 
-        interface IAPIError with
+        [<DataMember>]
+        member this.Message = this.LogMessage
+
+        member this.HTTPResponseCode =
+            match this with
+            | RREAccessDenied -> 403
+            | RRERequest msg -> 422
+
+        member this.ShouldLog =
+            match this with
+            | RREAccessDenied -> true
+            | RRERequest msg -> false
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.LogMessage
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
-type SaveSchemas =
+type [<JsonConverter(typeof<SaveSchemasConverter>)>] SaveSchemas =
     | SSNames of SchemaName[]
     | SSAll
     | SSNonPreloaded
 
-type ISaveRestoreAPI =
-    abstract member SaveSchemas : SaveSchemas -> Task<Result<Map<SchemaName, SchemaDump>, SaveErrorInfo>>
-    abstract member SaveZipSchemas : SaveSchemas -> Task<Result<Stream, SaveErrorInfo>>
-    abstract member RestoreSchemas : Map<SchemaName, SchemaDump> -> bool -> Task<Result<unit, RestoreErrorInfo>>
-    abstract member RestoreZipSchemas : Stream -> bool -> Task<Result<unit, RestoreErrorInfo>>
+and SaveSchemasConverter () =
+    inherit JsonConverter<SaveSchemas> ()
+
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : SaveSchemas =
+        match reader.TokenType with
+        | JsonToken.String ->
+            match reader.ReadAsString() with
+            | "all" -> SSAll
+            | "nonPreloaded" -> SSNonPreloaded
+            | _ -> raise <| JsonSerializationException("Invalid value for SaveSchemas")
+        | _ ->
+            let names = serializer.Deserialize<SchemaName[]>(reader)
+            SSNames names
+
+    override this.WriteJson (writer : JsonWriter, value : SaveSchemas, serializer : JsonSerializer) : unit =
+        match value with
+        | SSNames names -> serializer.Serialize(writer, names)
+        | SSAll -> writer.WriteValue "all"
+        | SSNonPreloaded -> writer.WriteValue "nonPreloaded"
 
 [<NoEquality; NoComparison>]
-type ActionResult =
-    { Result : JObject option
+type SaveSchemasRequest =
+    { Schemas : SaveSchemas
     }
 
-[<SerializeAsObject("error")>]
-type ActionErrorInfo =
-    | [<CaseName("notFound")>] AENotFound
-    | [<CaseName("compilation")>] AECompilation of Details : string
-    | [<CaseName("exception")>] AEException of Details : string * UserData : JToken option
-    with
-        [<DataMember>]
-        member this.Message =
-            match this with
-            | AENotFound -> "Action not found"
-            | AECompilation msg -> sprintf "Action compilation failed: %s" msg
-            | AEException (msg, userData) -> msg
+[<NoEquality; NoComparison>]
+type SaveSchemasResponse =
+    { Schemas : Map<SchemaName, SchemaDump>
+    } with
+        interface ILoggableResponse with
+            member this.ShouldLog = false
 
-        interface IAPIError with
+[<NoEquality; NoComparison>]
+type RestoreSchemasFlags =
+    { [<DataMember(EmitDefaultValue = false)>]
+      DropOthers : bool
+    }
+
+let emptyRestoreSchemasFlags =
+    { DropOthers = false
+    } : RestoreSchemasFlags
+
+[<NoEquality; NoComparison>]
+type RestoreSchemasRequest =
+    { Schemas : Map<SchemaName, SchemaDump>
+      [<DataMember(EmitDefaultValue = false)>]
+      Flags : RestoreSchemasFlags option
+    }
+
+[<NoEquality; NoComparison>]
+type RestoreStreamSchemasRequest =
+    { [<DataMember(EmitDefaultValue = false)>]
+      Flags : RestoreSchemasFlags option
+    }
+
+type ISaveRestoreAPI =
+    abstract member SaveSchemas : SaveSchemasRequest -> Task<Result<SaveSchemasResponse, SaveErrorInfo>>
+    abstract member SaveZipSchemas : SaveSchemasRequest -> Task<Result<Stream, SaveErrorInfo>>
+    abstract member RestoreSchemas : RestoreSchemasRequest -> Task<Result<unit, RestoreErrorInfo>>
+    abstract member RestoreZipSchemas : Stream -> RestoreStreamSchemasRequest -> Task<Result<unit, RestoreErrorInfo>>
+
+[<NoEquality; NoComparison>]
+type RunActionRequest =
+    { Action : ActionRef
+      [<DataMember(EmitDefaultValue = false)>]
+      Args : JObject option
+    }
+
+[<NoEquality; NoComparison>]
+type ActionResponse =
+    { Result : JObject option
+    } with
+    interface ILoggableResponse with
+        member this.ShouldLog = false
+
+[<SerializeAsObject("error")>]
+[<NoEquality; NoComparison>]
+type ActionErrorInfo =
+    | [<CaseKey("request", IgnoreFields=[|"Details"|])>] AERequest of Details : string
+    | [<CaseKey("exception", IgnoreFields=[|"Details"|])>] AEException of Details : string * UserData : JToken option
+    | [<CaseKey("other", IgnoreFields=[|"Details"|])>] AEOther of Details : string
+    with
+        member this.LogMessage =
+            match this with
+            | AERequest msg -> msg
+            | AEException (msg, userData) -> msg
+            | AEOther msg -> msg
+
+        [<DataMember>]
+        member this.Message = this.LogMessage
+
+        member this.HTTPResponseCode =
+            match this with
+            | AERequest msg -> 412
+            | AEException (details, userData) -> 500
+            | AEOther msg -> 500
+
+        member this.ShouldLog =
+            match this with
+            | AERequest msg -> false
+            | AEException (details, data) -> Option.isNone data
+            | AEOther details -> false
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.LogMessage
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
 type IActionsAPI =
-    abstract member RunAction : ActionRef -> JObject -> Task<Result<ActionResult, ActionErrorInfo>>
+    abstract member RunAction : RunActionRequest -> Task<Result<ActionResponse, ActionErrorInfo>>
 
 [<NoEquality; NoComparison>]
 type UserPermissions =
@@ -383,29 +756,47 @@ type IPermissionsAPI =
     abstract member UserPermissions : UserPermissions
 
 [<NoEquality; NoComparison>]
-type DomainValuesResult =
+type DomainValuesResponse =
     { Values : DomainValue[]
       PunType : SQL.SimpleValueType
       Hash : string
-    }
+    } with
+        interface ILoggableResponse with
+            member this.ShouldLog = false
 
 [<SerializeAsObject("error")>]
 type DomainErrorInfo =
-    | [<CaseName("notFound")>] DENotFound
-    | [<CaseName("accessDenied")>] DEAccessDenied
-    | [<CaseName("arguments")>] DEArguments of Details : string
-    | [<CaseName("execution")>] DEExecution of Details : string
+    | [<CaseKey("request", IgnoreFields=[|"Details"|])>] DERequest of Details : string
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] DEDomain of DomainError
     with
+        member this.LogMessage =
+            match this with
+            | DERequest msg -> msg
+            | DEDomain inner -> inner.LogMessage
+
         [<DataMember>]
         member this.Message =
             match this with
-            | DENotFound -> "Field not found"
-            | DEAccessDenied -> "Field access denied"
-            | DEArguments msg -> sprintf "Invalid operation arguments: %s" msg
-            | DEExecution msg -> sprintf "Operation execution failed: %s" msg
+            | DEDomain inner -> inner.Message
+            | _ -> this.LogMessage
 
-        interface IAPIError with
+        member this.HTTPResponseCode =
+            match this with
+            | DERequest details -> 422
+            | DEDomain inner -> inner.HTTPResponseCode
+
+        member this.ShouldLog =
+            match this with
+            | DERequest details -> false
+            | DEDomain inner -> inner.ShouldLog
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+
+        interface IErrorDetails with
             member this.Message = this.Message
+            member this.LogMessage = this.LogMessage
+            member this.HTTPResponseCode = this.HTTPResponseCode
 
 type DomainFlags =
     { ForceRecompile : bool
@@ -415,9 +806,31 @@ let emptyDomainFlags =
     { ForceRecompile = false
     } : DomainFlags
 
+type GetDomainValuesRequest =
+    { Field : ResolvedFieldRef
+      [<DataMember(EmitDefaultValue = false)>]
+      Id : RawRowKey option
+      [<DataMember(EmitDefaultValue = false)>]
+      Chunk : SourceQueryChunk option
+      [<DataMember(EmitDefaultValue = false)>]
+      Flags : DomainFlags option
+    }
+
+type GetDomainExplainRequest =
+    { Field : ResolvedFieldRef
+      [<DataMember(EmitDefaultValue = false)>]
+      Id : RawRowKey option
+      [<DataMember(EmitDefaultValue = false)>]
+      Chunk : SourceQueryChunk option
+      [<DataMember(EmitDefaultValue = false)>]
+      Flags : DomainFlags option
+      [<DataMember(EmitDefaultValue = false)>]
+      ExplainFlags : SQL.ExplainOptions option
+    }
+
 type IDomainsAPI =
-    abstract member GetDomainValues : ResolvedFieldRef -> int option -> SourceQueryChunk -> DomainFlags -> Task<Result<DomainValuesResult, DomainErrorInfo>>
-    abstract member GetDomainExplain : ResolvedFieldRef -> int option -> SourceQueryChunk -> DomainFlags -> SQL.ExplainOptions -> Task<Result<ExplainedQuery, DomainErrorInfo>>
+    abstract member GetDomainValues : GetDomainValuesRequest -> Task<Result<DomainValuesResponse, DomainErrorInfo>>
+    abstract member GetDomainExplain : GetDomainExplainRequest -> Task<Result<ExplainedQuery, DomainErrorInfo>>
 
 type IFunDBAPI =
     abstract member Request : IRequestContext
@@ -439,6 +852,11 @@ let dummyFunDBAPI =
           member this.Domains = failwith "Attempted to access dummy API"
     }
 
+type EmptyRequest =
+    new () = { }
+
+let emptyRequest = EmptyRequest()
+
 let getReadRole = function
     | RTRoot -> None
     | RTRole role when role.CanRead -> None
@@ -447,3 +865,111 @@ let getReadRole = function
 let getWriteRole = function
     | RTRoot -> None
     | RTRole role -> Some (Option.defaultValue emptyResolvedRole role.Role)
+
+let logAPIResponse<'Request, 'Response when 'Response :> ILoggableResponse>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request)
+        (response : 'Response) =
+    task {
+        if response.ShouldLog then
+            do! rctx.WriteEventSync (fun event ->
+                event.Type <- name
+                event.Request <- JsonConvert.SerializeObject request
+                event.Response <- JsonConvert.SerializeObject response
+            )
+    }
+
+let logAPISuccess<'Request>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request) =
+    rctx.WriteEventSync (fun event ->
+        event.Type <- name
+        event.Request <- JsonConvert.SerializeObject request
+        event.Response <- "{}"
+    )
+
+let logAPIError<'Request, 'Error when 'Error :> IErrorDetails>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request)
+        (error : 'Error) =
+    if error.ShouldLog then
+        rctx.WriteEvent (fun event ->
+            let json = JObject.FromObject error
+            json.["error"] <- error.LogMessage
+            event.Type <- name
+            event.Request <- JsonConvert.SerializeObject request
+            event.Error <- json.ToString()
+        )
+
+let logAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggableResponse and 'Error :> IErrorDetails>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request)
+        (result : Result<'Response, 'Error>) =
+    unitTask {
+        match result with
+        | Ok response -> do! logAPIResponse rctx name request response
+        | Error error -> logAPIError rctx name request error
+    }
+
+let logUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request)
+        (result : Result<unit, 'Error>) =
+    unitTask {
+        match result with
+        | Ok () -> do! logAPISuccess rctx name request
+        | Error error -> logAPIError rctx name request error
+    }
+
+
+let logAPIIfError<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request)
+        (result : Result<'Response, 'Error>) =
+    unitTask {
+        match result with
+        | Ok response -> ()
+        | Error error -> logAPIError rctx name request error
+    }
+
+let inline wrapAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggableResponse and 'Error :> IErrorDetails>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request)
+        (resultTask : Task<Result<'Response, 'Error>>)
+        : Task<Result<'Response, 'Error>> =
+    task {
+        let! result = resultTask
+        do! logAPIResult rctx name request result
+        return result
+    }
+
+let inline wrapUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request)
+        (resultTask : Task<Result<unit, 'Error>>)
+        : Task<Result<unit, 'Error>> =
+    task {
+        let! result = resultTask
+        do! logUnitAPIResult rctx name request result
+        return result
+    }
+
+let inline wrapAPIError<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
+        (rctx : IRequestContext)
+        (name : string)
+        (request : 'Request)
+        (resultTask : Task<Result<'Response, 'Error>>)
+        : Task<Result<'Response, 'Error>> =
+    task {
+        let! result = resultTask
+        do! logAPIIfError rctx name request result
+        return result
+    }

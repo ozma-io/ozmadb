@@ -21,13 +21,13 @@ module SQL = FunWithFlags.FunDB.SQL.Rename
 
 type DomainIdColumn = int
 
-type CompileException (message : string, innerException : Exception, isUserException : bool) =
+type QueryCompileException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
     new (message : string, innerException : Exception) =
-        CompileException (message, innerException, isUserException innerException)
+        QueryCompileException (message, innerException, isUserException innerException)
 
-    new (message : string) = CompileException (message, null, true)
+    new (message : string) = QueryCompileException (message, null, true)
 
 // These are not the same domains as in Layout!
 //
@@ -977,7 +977,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
 
     let getEntityByRef (entityRef : ResolvedEntityRef) =
         match layout.FindEntity entityRef with
-        | None -> raisef CompileException "Failed to find entity %O" entityRef
+        | None -> raisef QueryCompileException "Failed to find entity %O" entityRef
         | Some e -> e
 
     let columnName : ColumnType -> SQL.SQLName = function
@@ -1219,7 +1219,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
         let entity = getEntityByRef boundRef.Entity
         let fieldInfo =
             match entity.FindField boundRef.Name with
-            | None -> raisef CompileException "Failed to find field: %O" boundRef
+            | None -> raisef QueryCompileException "Failed to find field: %O" boundRef
             | Some f -> f
 
         match fieldInfo.Field with

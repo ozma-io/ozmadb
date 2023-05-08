@@ -8,6 +8,7 @@ open FSharpPlus
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Serialization
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Chunk
@@ -23,21 +24,45 @@ open FunWithFlags.FunDB.SQL.Query
 open FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type DomainDeniedException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+[<SerializeAsObject("error")>]
+type DomainError =
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] DEExecution of FunQLExecutionError
+    | [<CaseKey("accessDenied", IgnoreFields=[|"Details"|])>] DEAccessDenied of Details : string
+    with
+    member this.LogMessage =
+        match this with
+        | DEExecution e -> e.LogMessage
+        | DEAccessDenied details -> details
 
-    new (message : string, innerException : exn) =
-        DomainDeniedException (message, innerException, isUserException innerException)
+    member this.Message =
+        match this with
+        | DEExecution e -> e.Message
+        | DEAccessDenied details -> "Access denied"
 
-    new (message : string) = DomainDeniedException (message, null, true)
+    member this.HTTPResponseCode =
+        match this with
+        | DEExecution e -> e.HTTPResponseCode
+        | DEAccessDenied details -> 403
 
-type DomainExecutionException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+    member this.ShouldLog =
+        match this with
+        | DEExecution e -> e.ShouldLog
+        | DEAccessDenied details -> true
 
-    new (message : string, innerException : exn) =
-        DomainExecutionException (message, innerException, isUserException innerException)
+    interface ILoggableResponse with
+        member this.ShouldLog = this.ShouldLog
 
-    new (message : string) = DomainExecutionException (message, null, true)
+    interface IErrorDetails with
+        member this.Message = this.Message
+        member this.LogMessage = this.LogMessage
+        member this.HTTPResponseCode = this.HTTPResponseCode
+
+type DomainRequestException (details : DomainError, innerException : exn) =
+    inherit UserException(details.LogMessage, innerException, true)
+
+    new (details : DomainError) = DomainRequestException (details, null)
+
+    member this.Details = details
 
 let private domainColumns =
     Map.ofList
@@ -73,7 +98,8 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
                     try
                         applyPermissions layout r domain.UsedDatabase
                     with
-                    | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
+                    | :? PermissionsApplyException as e when e.IsUserException ->
+                        raise <| DomainRequestException(DEAccessDenied (fullUserMessage e), e)
                 applyRoleSelectExpr layout appliedDb domain.Query
         let resolvedChunk = genericResolveChunk layout domainColumns chunk
         let (argValues, query) = queryExprChunk layout resolvedChunk query
@@ -91,7 +117,8 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
                     return ret
                 }
         with
-            | :? QueryExecutionException as e -> return raisefUserWithInner DomainExecutionException e ""
+            | :? QueryExecutionException as e ->
+                return raise <| DomainRequestException(DEExecution <| convertQueryExecutionException layout e)
     }
 
 let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (role : ResolvedRole option) (maybeArguments : ArgumentValuesMap option) (chunk : SourceQueryChunk) (explainOpts : ExplainOptions) (cancellationToken : CancellationToken) : Task<ExplainedQuery> =
@@ -104,7 +131,8 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
                     try
                         applyPermissions layout r domain.UsedDatabase
                     with
-                    | :? PermissionsApplyException as e -> raisefWithInner DomainDeniedException e ""
+                    | :? PermissionsApplyException as e ->
+                        raise <| DomainRequestException(DEAccessDenied (fullUserMessage e), e)
                 applyRoleSelectExpr layout appliedDb domain.Query
         let resolvedChunk = genericResolveChunk layout domainColumns chunk
         let (argValues, query) = queryExprChunk layout resolvedChunk query
@@ -116,5 +144,6 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
             let! explanation = runExplainQuery connection query.Expression compiledArgs explainOpts cancellationToken
             return { Query = string query.Expression; Parameters = compiledArgs; Explanation = explanation }
         with
-            | :? QueryExecutionException as e -> return raisefUserWithInner DomainExecutionException e ""
+            | :? QueryExecutionException as e ->
+                return raise <| DomainRequestException(DEExecution <| convertQueryExecutionException layout e)
     }

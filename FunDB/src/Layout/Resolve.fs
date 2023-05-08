@@ -108,8 +108,9 @@ type private HalfResolvedEntity =
       SaveRestoreKey : ConstraintName option
       TypeName : string
       Root : ResolvedEntityRef
-      Source : SourceEntity
       MainField : FieldName
+      HashName : HashName
+      Source : SourceEntity
     } with
         // Half-dummy interface for `hasSubType` and maybe other utility functions to work.
         // Doesn't expose computed fields!
@@ -137,7 +138,6 @@ type private HalfResolvedEntity =
             member this.IsHidden = this.Source.IsHidden
             member this.Parent = this.Source.Parent
             member this.Children = this.Children
-
 
 type private HalfResolvedEntitiesMap = Map<ResolvedEntityRef, HalfResolvedEntity>
 
@@ -178,12 +178,32 @@ type private ReferencingEntitiesMap = Map<ResolvedEntityRef, Map<ResolvedFieldRe
 // PHASE 1: Building column fields. Also collect several useful maps.
 //
 
+type private SchemaObjectNames =
+      { ForeignConstraintNames : Map<SQL.SQLName, ResolvedFieldRef>
+        UniqueConstraintNames : Map<SQL.SQLName, ResolvedConstraintRef>
+        CheckConstraintNames : Map<SQL.SQLName, ResolvedConstraintRef>
+        IndexNames : Map<SQL.SQLName, ResolvedIndexRef>
+      }
+
+let private emptySchemaObjectNames =
+    { ForeignConstraintNames = Map.empty
+      UniqueConstraintNames = Map.empty
+      CheckConstraintNames = Map.empty
+      IndexNames = Map.empty
+    }
+
 type private Phase1Resolver (layout : SourceLayout) =
     let mutable cachedEntities : HalfResolvedEntitiesMap = Map.empty
     let mutable referencingFields : ReferencingEntitiesMap = Map.empty
+    let mutable objectNames : Map<SchemaName, SchemaObjectNames> = Map.empty
     let mutable rootEntities : Set<ResolvedEntityRef> = Set.empty
     let mutable internallyDeletedEntities : Set<ResolvedEntityRef> = Set.empty
     let mutable cascadeDeletedEntities : Set<ResolvedEntityRef> = Set.empty
+
+    let mapSchemaNames (f : SchemaObjectNames -> SchemaObjectNames) (name : SchemaName) =
+        let schemaNames = Map.findWithDefault name emptySchemaObjectNames objectNames
+        let schemaNames = f schemaNames
+        objectNames <- Map.add name schemaNames objectNames
 
     let unionComputedField (name : FieldName) (parent : HalfResolvedComputedField) (child : HalfResolvedComputedField) =
         match (parent.Virtual, child.Virtual) with
@@ -226,11 +246,13 @@ type private Phase1Resolver (layout : SourceLayout) =
                         raisef ResolveLayoutException "Can't declare reference field with no default value SET DEFAULT"
                     if field.IsImmutable then
                         raisef ResolveLayoutException "Can't declare immutable reference field SET DEFAULT"
+
                 referencingFields <- Map.addWith Map.unionUnique refEntityRef (Map.singleton fieldRef deleteAction) referencingFields
+
                 t
             | t -> t
         with
-        | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
+        | :? QueryResolveException as e -> raisefWithInner ResolveLayoutException e ""
 
     let resolveColumnField (entityRef : ResolvedEntityRef) (entity : SourceEntity) (fieldName : FieldName) (col : SourceColumnField) : ResolvedColumnField =
         let fieldRef = { Entity = entityRef; Name = fieldName }
@@ -268,6 +290,14 @@ type private Phase1Resolver (layout : SourceLayout) =
         }
 
     let resolveEntity (parent : HalfResolvedEntity option) (entityRef : ResolvedEntityRef) (entity : SourceEntity) : HalfResolvedEntity =
+        let root =
+            match parent with
+            | None ->
+                rootEntities <- Set.add entityRef rootEntities
+                entityRef
+            | Some p -> p.Root
+        let hashName = makeHashName entityRef.Name
+
         let mapColumnField name field =
             try
                 checkFieldName name
@@ -323,6 +353,15 @@ type private Phase1Resolver (layout : SourceLayout) =
         with
         | Failure msg -> raisef ResolveLayoutException "Field names hash clash: %s" msg
 
+        let foreignConstraintNames =
+            let makeName (name, c : ResolvedColumnField) =
+                match c.FieldType with
+                | FTScalar (SFTReference (e, _))
+                | FTArray (SFTReference (e, _)) ->
+                    Some (foreignConstraintSQLName hashName c.HashName, { Entity = entityRef; Name = name })
+                | _ -> None
+            selfColumnFields |> Map.toList |> Seq.mapMaybe makeName |> Map.ofSeqUnique
+
         let mapUniqueConstraint name constr =
             try
                 checkName name
@@ -347,17 +386,19 @@ type private Phase1Resolver (layout : SourceLayout) =
                 with
                 | Failure msg -> raisef ResolveLayoutException "Column field names clash: %s" msg
 
-        try
-            selfUniqueConstraints |> Map.values |> Seq.map (fun c -> c.HashName) |> Set.ofSeqUnique |> ignore
-        with
-        | Failure msg -> raisef ResolveLayoutException "Unique constraint names clash (first %i characters): %s" hashNameLength msg
+        let uniqueConstraintNames =
+            let makeName (name, c : ResolvedUniqueConstraint) = (uniqueConstraintSQLName hashName c.HashName, { Entity = entityRef; Name = name })
+            try
+                selfUniqueConstraints |> Map.toList |> Seq.map makeName |> Map.ofSeqUnique
+            with
+            | Failure msg -> raisef ResolveLayoutException "Unique constraint names clash (first %i characters): %s" hashNameLength msg
 
-        let root =
-            match parent with
-            | None ->
-                rootEntities <- Set.add entityRef rootEntities
-                entityRef
-            | Some p -> p.Root
+        let addNames (schemaNames : SchemaObjectNames) =
+            { schemaNames with
+                UniqueConstraintNames = Map.union schemaNames.UniqueConstraintNames uniqueConstraintNames
+                ForeignConstraintNames = Map.union schemaNames.ForeignConstraintNames foreignConstraintNames
+            }
+        mapSchemaNames addNames root.Schema
 
         let parentSaveRestoreKey =
             match parent with
@@ -405,6 +446,7 @@ type private Phase1Resolver (layout : SourceLayout) =
               Root = root
               TypeName = typeName
               MainField = mainField
+              HashName = hashName
               Source = entity
             }
 
@@ -480,6 +522,7 @@ type private Phase1Resolver (layout : SourceLayout) =
         cachedEntities
 
     member this.RootEntities = rootEntities
+    member this.ObjectNames = objectNames
     member this.ReferencingFields = referencingFields
     member this.InternallyDeletedEntities = internallyDeletedEntities
     member this.CascadeDeletedEntities = cascadeDeletedEntities
@@ -557,10 +600,23 @@ let private sortSaveRestoredEntities (saveRestoredParents : (ResolvedEntityRef *
         yield! sortSaveRestoredEntities' rootSet (Seq.map (fun (ref, parentRef) -> (ref, Option.get parentRef)) nextGen)
     }
 
-type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntitiesMap, referencingFields : ReferencingEntitiesMap, cascadeDeletedEntities : Set<ResolvedEntityRef>, forceAllowBroken : bool) =
+type private Phase2Resolver (
+        layout : SourceLayout,
+        entities : HalfResolvedEntitiesMap,
+        halfObjectNames : Map<SchemaName, SchemaObjectNames>,
+        referencingFields : ReferencingEntitiesMap,
+        cascadeDeletedEntities : Set<ResolvedEntityRef>,
+        forceAllowBroken : bool
+    ) =
     let mutable cachedComputedFields : Map<ResolvedFieldRef, PossiblyBroken<ResolvedComputedField>> = Map.empty
     let mutable cachedCaseExpressions : Map<ResolvedFieldRef, VirtualFieldCase array> = Map.empty
     let mutable cachedSaveRestoredEntities : Map<ResolvedEntityRef, ResolvedEntityRef option> = Map.empty
+    let mutable objectNames = halfObjectNames
+
+    let mapSchemaNames (f : SchemaObjectNames -> SchemaObjectNames) (name : SchemaName) =
+        let schemaNames = Map.find name objectNames
+        let schemaNames = f schemaNames
+        objectNames <- Map.add name schemaNames objectNames
 
     let rec makeWrappedLayout (stack : Set<ResolvedFieldRef>) : ILayoutBits =
         // We "lazily" instance wrapped entities, which in turn lazily instance computed fields.
@@ -631,7 +687,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             try
                 resolveSingleFieldExpr callbacks OrderedMap.empty relatedResolutionFlags entityInfo expr
             with
-            | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
+            | :? QueryResolveException as e -> raisefWithInner ResolveLayoutException e ""
         if exprInfo.Flags.HasAggregates then
             raisef ResolveLayoutException "Aggregate functions are not allowed here"
         (exprInfo, expr)
@@ -894,10 +950,12 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | e -> raisefWithInner ResolveLayoutException e "In check constraint %O" name
         let checkConstraints = Map.map mapCheckConstraint entity.Source.CheckConstraints
 
-        try
-            checkConstraints |> Map.values |> Seq.map (fun c -> c.HashName) |> Set.ofSeqUnique |> ignore
-        with
-        | Failure msg -> raisef ResolveLayoutException "Check constraint names clash (first %i characters): %s" hashNameLength msg
+        let checkConstraintNames =
+            let makeName (name, c : ResolvedCheckConstraint) = (checkConstraintSQLName entity.HashName c.HashName, { Entity = entityRef; Name = name })
+            try
+                checkConstraints |> Map.toSeq |> Seq.map makeName |> Map.ofSeqUnique
+            with
+            | Failure msg -> raisef ResolveLayoutException "Check constraint names clash (first %i characters): %s" hashNameLength msg
 
         let mapIndex name index =
             try
@@ -907,10 +965,12 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | e -> raisefWithInner ResolveLayoutException e "In index %O" name
         let indexes = Map.map mapIndex entity.Source.Indexes
 
-        try
-            indexes |> Map.values |> Seq.map (fun c -> c.HashName) |> Set.ofSeqUnique |> ignore
-        with
-        | Failure msg -> raisef ResolveLayoutException "Index names clash (first %i characters): %s" hashNameLength msg
+        let indexNames =
+            let makeName (name, i : ResolvedIndex) = (indexSQLName entity.HashName i.HashName, { Entity = entityRef; Name = name })
+            try
+                indexes |> Map.toSeq |> Seq.map makeName |> Map.ofSeqUnique
+            with
+            | Failure msg -> raisef ResolveLayoutException "Index names clash (first %i characters): %s" hashNameLength msg
 
         let wrappedEntity = initialWrappedLayout.FindEntity entityRef |> Option.get
         // Check that main field is valid.
@@ -925,6 +985,13 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         match entity.Source.SaveRestoreKey with
         | None -> ()
         | Some saveRestoreKey -> checkSaveRestoreKey Set.empty entityRef entity saveRestoreKey
+
+        let addNames (schemaNames : SchemaObjectNames) =
+            { schemaNames with
+                CheckConstraintNames = Map.union schemaNames.CheckConstraintNames checkConstraintNames
+                IndexNames = Map.union schemaNames.IndexNames indexNames
+            }
+        mapSchemaNames addNames entity.Root.Schema
 
         { ColumnFields = entity.ColumnFields
           ComputedFields = computedFields
@@ -944,7 +1011,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
           TypeName = entity.TypeName
           IsAbstract = entity.Source.IsAbstract
           IsFrozen = entity.Source.IsFrozen
-          HashName = makeHashName entityRef.Name
+          HashName = entity.HashName
           RequiredFields = requiredFields
           ReferencingFields = Map.findWithDefault entityRef Map.empty referencingFields
           CascadeDeleted = Set.contains entityRef cascadeDeletedEntities
@@ -967,6 +1034,10 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
         | Failure msg -> raisef ResolveLayoutException "Entity names hash clash: %s" msg
 
         { Entities = entities
+          ForeignConstraintNames = Map.empty
+          UniqueConstraintNames = Map.empty
+          CheckConstraintNames = Map.empty
+          IndexNames = Map.empty
         }
 
     let resolveLayout () : Layout =
@@ -977,6 +1048,17 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             | e -> raisefWithInner ResolveLayoutException e "In schema %O" name
 
         let schemas = Map.map mapSchema layout.Schemas
+
+        let addRootEntities name (schema : ResolvedSchema) =
+            let names = Map.findWithDefault name emptySchemaObjectNames objectNames
+            { schema with
+                ForeignConstraintNames = names.ForeignConstraintNames
+                UniqueConstraintNames = names.UniqueConstraintNames
+                CheckConstraintNames = names.CheckConstraintNames
+                IndexNames = names.IndexNames
+            }
+
+        let schemas = Map.map addRootEntities schemas
         let saveRestoredEntities = sortSaveRestoredEntities (Map.toSeq cachedSaveRestoredEntities) |> Seq.toArray
 
         { Schemas = schemas
@@ -1082,7 +1164,8 @@ type private Phase3Resolver (layout : Layout, internallyDeletedEntities : Set<Re
 
     let resolveSchema (schemaName : SchemaName) (schema : ResolvedSchema) : ResolvedSchema =
         let mapEntity name entity = resolveEntity { Schema = schemaName; Name = name } entity
-        { Entities = Map.map mapEntity schema.Entities
+        { schema with
+            Entities = Map.map mapEntity schema.Entities
         }
 
     let resolveLayout () : Layout =
@@ -1098,7 +1181,7 @@ let resolveLayout (forceAllowBroken : bool) (layout : SourceLayout) : Layout =
     let entities = phase1.ResolveLayout ()
     let referencingFields = fillReferencingFields phase1.RootEntities entities phase1.ReferencingFields
     let cascadeDeletedEntities = fillCascadeDeletedEntities entities phase1.CascadeDeletedEntities
-    let phase2 = Phase2Resolver (layout, entities, referencingFields, cascadeDeletedEntities, forceAllowBroken)
+    let phase2 = Phase2Resolver (layout, entities, phase1.ObjectNames, referencingFields, cascadeDeletedEntities, forceAllowBroken)
     let layout2 = phase2.ResolveLayout ()
     let internallyDeletedEntities = fillInternallyDeletedEntities layout2 referencingFields phase1.InternallyDeletedEntities
     let phase3 = Phase3Resolver (layout2, internallyDeletedEntities)

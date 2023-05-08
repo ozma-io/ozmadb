@@ -3,9 +3,7 @@ module FunWithFlags.FunDB.SQL.AST
 // SQL module does not attempt to restrict SQL in any way apart from type safety for values (explicit strings, integers etc.).
 
 open System
-open NpgsqlTypes
 open Newtonsoft.Json
-open Newtonsoft.Json.Linq
 open NodaTime
 
 open FunWithFlags.FunUtils
@@ -229,18 +227,18 @@ type ValuePrettyConverter () =
 // Used when interpreting query results and for compiling FunQL.
 [<SerializeAsObject("type")>]
 type SimpleType =
-    | [<CaseName("int")>] STInt
-    | [<CaseName("bigint")>] STBigInt
-    | [<CaseName("string")>] STString
-    | [<CaseName("decimal")>] STDecimal
-    | [<CaseName("bool")>] STBool
-    | [<CaseName("datetime")>] STDateTime
-    | [<CaseName("localdatetime")>] STLocalDateTime
-    | [<CaseName("date")>] STDate
-    | [<CaseName("interval")>] STInterval
-    | [<CaseName("regclass")>] STRegclass
-    | [<CaseName("json")>] STJson
-    | [<CaseName("uuid")>] STUuid
+    | [<CaseKey("int")>] STInt
+    | [<CaseKey("bigint")>] STBigInt
+    | [<CaseKey("string")>] STString
+    | [<CaseKey("decimal")>] STDecimal
+    | [<CaseKey("bool")>] STBool
+    | [<CaseKey("datetime")>] STDateTime
+    | [<CaseKey("localdatetime")>] STLocalDateTime
+    | [<CaseKey("date")>] STDate
+    | [<CaseKey("interval")>] STInterval
+    | [<CaseKey("regclass")>] STRegclass
+    | [<CaseKey("json")>] STJson
+    | [<CaseKey("uuid")>] STUuid
     with
         override this.ToString () = this.ToSQLString()
 
@@ -293,8 +291,8 @@ let findSimpleType (str : TypeName) : SimpleType option =
 
 [<SerializeAsObject("type", AllowUnknownType=true)>]
 type ValueType<'t> when 't :> ISQLString =
-    | [<CaseName(null, Type=CaseSerialization.InnerObject)>] VTScalar of Type : 't
-    | [<CaseName("array")>] VTArray of Subtype : 't
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] VTScalar of Type : 't
+    | [<CaseKey("array")>] VTArray of Subtype : 't
     with
         override this.ToString () = this.ToSQLString()
 

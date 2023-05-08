@@ -4,6 +4,7 @@ module FunWithFlags.FunUtils.Serialization.Utils
 open System
 open System.Globalization
 open System.Runtime.Serialization
+open System.Text.Json.Serialization
 open System.Reflection
 open System.ComponentModel
 open Microsoft.FSharp.Reflection
@@ -13,6 +14,8 @@ open FunWithFlags.FunUtils
 type UnionCase =
     { Info : UnionCaseInfo
       Fields : PropertyInfo[]
+      ConvertFrom : obj -> obj[]
+      ConvertTo : obj[] -> obj
     }
 
 [<AllowNullLiteral>]
@@ -29,22 +32,31 @@ type CaseSerialization =
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Method)>]
-type CaseNameAttribute (caseName : string) =
+type CaseKeyAttribute (caseKey : string) =
     inherit Attribute ()
-    member this.CaseName = caseName
+    member this.CaseKey = caseKey
     member val Type = CaseSerialization.Normal with get, set
+    // Work around https://github.com/fsharp/fslang-suggestions/issues/684
+    member val IgnoreFields : string[] = [||] with get, set
 
 [<AllowNullLiteral>]
 [<AttributeUsage(AttributeTargets.Method)>]
 type DefaultCaseAttribute () =
     inherit Attribute ()
 
-type CaseName = string option
+type CaseTag = int
+type CaseKey = string option
 
 let memberInnerType (memberInfo : MemberInfo) =
-    match memberInfo.MemberType with
-    | MemberTypes.Property -> Some (memberInfo :?> PropertyInfo).PropertyType
-    | MemberTypes.Field -> Some (memberInfo :?> FieldInfo).FieldType
+    match memberInfo with
+    | :? PropertyInfo as info -> Some info.PropertyType
+    | :? FieldInfo as info -> Some info.FieldType
+    | _ -> None
+
+let getMemberValue (memberInfo : MemberInfo) : (obj -> obj) option =
+    match memberInfo with
+    | :? PropertyInfo as info -> Some info.GetValue
+    | :? FieldInfo as info -> Some info.GetValue
     | _ -> None
 
 // https://stackoverflow.com/questions/56600268/how-do-i-check-t-for-types-not-being-allowed-to-be-null
@@ -70,21 +82,20 @@ let unionCases (objectType : Type) : UnionCase[] =
         let fields = info.GetFields()
         { Info = info
           Fields = fields
+          ConvertFrom = FSharpValue.PreComputeUnionReader info
+          ConvertTo = FSharpValue.PreComputeUnionConstructor info
         }
 
     cases |> Array.map unionCase
 
-let parseCaseName (case : UnionCaseInfo) (attribute : CaseNameAttribute option) : CaseName =
+let parseCaseName (case : UnionCaseInfo) (attribute : CaseKeyAttribute option) : CaseKey =
     match attribute with
     | None -> Some case.Name
-    | Some (nameAttr : CaseNameAttribute) when isNull nameAttr.CaseName -> None
-    | Some nameAttr -> Some nameAttr.CaseName
+    | Some (nameAttr : CaseKeyAttribute) when isNull nameAttr.CaseKey -> None
+    | Some nameAttr -> Some nameAttr.CaseKey
 
-let caseName (case : UnionCaseInfo) : CaseName =
-    case.GetCustomAttributes typeof<CaseNameAttribute> |> Seq.cast |> Seq.first |> parseCaseName case
-
-let caseNames (cases : UnionCase seq) : Map<CaseName, UnionCase> =
-    cases |> Seq.map (fun case -> (caseName case.Info, case)) |> Map.ofSeqUnique
+let caseKey (case : UnionCaseInfo) : CaseKey =
+    case.GetCustomAttributes typeof<CaseKeyAttribute> |> Seq.cast |> Seq.first |> parseCaseName case
 
 let defaultUnionCase (cases : UnionCase seq) : obj option =
     let getDefaultCase case =
@@ -94,15 +105,38 @@ let defaultUnionCase (cases : UnionCase seq) : obj option =
         | Some defaultAttr -> Some <| FSharpValue.MakeUnion(case.Info, [||])
     cases |> Seq.mapMaybe getDefaultCase |> Seq.first
 
-let isUnionEnum (cases : UnionCase seq) : Map<CaseName, UnionCaseInfo * obj> option =
+type UnionEnumCase =
+    { Info : UnionCaseInfo
+      Value : obj
+      Name : CaseKey
+    }
+
+type UnionEnumInfo =
+    { Cases : Map<CaseTag, UnionEnumCase>
+      GetTag : obj -> CaseTag
+    }
+
+let getUnionEnum (objectType : Type) : UnionEnumInfo option =
+    let cases = unionCases objectType
     let enumCase case =
         if Array.isEmpty case.Fields then
-            Some (caseName case.Info, (case.Info, FSharpValue.MakeUnion(case.Info, [||])))
+            let caseInfo =
+                { Info = case.Info
+                  Value = FSharpValue.MakeUnion(case.Info, [||])
+                  Name = caseKey case.Info
+                }
+            Some (case.Info.Tag, caseInfo)
         else
             None
-    cases |> Seq.traverseOption enumCase |> Option.map Map.ofSeq
+    match cases |> Seq.traverseOption enumCase with
+    | None -> None
+    | Some enumCases ->
+        Some
+            { Cases = Map.ofSeq enumCases
+              GetTag = FSharpValue.PreComputeUnionTagReader objectType
+            }
 
-let getNewtype (case : UnionCase) : (UnionCaseInfo * PropertyInfo) option =
+let private getNewtypeCase (case : UnionCase) : (UnionCaseInfo * PropertyInfo) option =
     if Array.length case.Fields = 1 then
         Some (case.Info, case.Fields.[0])
     else
@@ -111,23 +145,38 @@ let getNewtype (case : UnionCase) : (UnionCaseInfo * PropertyInfo) option =
 type NewtypeInfo =
     { Case : UnionCaseInfo
       Type : PropertyInfo
+      ConvertFrom : obj -> obj
+      ConvertTo : obj -> obj
       ValueIsNullable : bool
     }
 
-let isNewtype (map : UnionCase[]) : NewtypeInfo option =
+let getNewtype (map : UnionCase[]) : NewtypeInfo option =
     if Array.length map = 1 then
-        getNewtype map.[0] |> Option.map (fun (case, typ) -> { Case = case; Type = typ; ValueIsNullable = isNullableType typ.PropertyType })
+        match getNewtypeCase map.[0] with
+        | None -> None
+        | Some (case, typ) ->
+            let convertFrom = FSharpValue.PreComputeUnionReader case
+            let convertTo = FSharpValue.PreComputeUnionConstructor case
+            Some
+                { Case = case
+                  Type = typ
+                  ConvertFrom = fun obj -> (convertFrom obj).[0]
+                  ConvertTo = fun arg -> convertTo [|arg|]
+                  ValueIsNullable = isNullableType typ.PropertyType
+                }
     else
         None
 
 type OptionInfo =
     { SomeCase : UnionCaseInfo
       SomeType : PropertyInfo
+      ConvertFromSome : obj -> obj
+      ConvertToSome : obj -> obj
       NoneValue : obj
       ValueIsNullable : bool
     }
 
-let isOption (map : UnionCase[]) : OptionInfo option =
+let getOption (map : UnionCase[]) : OptionInfo option =
     let checkNone case =
         if Array.isEmpty case.Fields then
             Some case.Info
@@ -135,18 +184,22 @@ let isOption (map : UnionCase[]) : OptionInfo option =
             None
     if Array.length map = 2 then
         let types =
-            match (getNewtype map.[0], checkNone map.[1]) with
+            match (getNewtypeCase map.[0], checkNone map.[1]) with
             | (Some (someCase, someType), Some none) -> Some (someCase, someType, none)
             | _ ->
-                match (getNewtype map.[1], checkNone map.[0]) with
+                match (getNewtypeCase map.[1], checkNone map.[0]) with
                 | (Some (someCase, someType), Some none) -> Some (someCase, someType, none)
                 | _ -> None
         match types with
         | None -> None
         | Some (someCase, someType, noneCase) ->
+            let convertFrom = FSharpValue.PreComputeUnionReader someCase
+            let convertTo = FSharpValue.PreComputeUnionConstructor someCase
             Some
                 { SomeCase = someCase
                   SomeType = someType
+                  ConvertFromSome = fun obj -> (convertFrom obj).[0]
+                  ConvertToSome = fun arg -> convertTo [|arg|]
                   NoneValue = FSharpValue.MakeUnion(noneCase, [||])
                   ValueIsNullable = isNullableType someType.PropertyType
                 }
@@ -160,7 +213,7 @@ let getTypeDefaultValue (objectType : Type) : obj option =
         Some null
     else if FSharpType.IsUnion objectType then
         let cases = unionCases objectType
-        match isOption cases with
+        match getOption cases with
         | Some option ->
             Some option.NoneValue
         | None when objectType.IsGenericType && objectType.GetGenericTypeDefinition () = typedefof<_ list> ->
@@ -190,35 +243,52 @@ let getTypeDefaultValue (objectType : Type) : obj option =
 let getPropertyDefaultValue (info : MemberInfo) : obj option =
     match Attribute.GetCustomAttribute(info, typeof<DefaultValueAttribute>) with
     | null -> getTypeDefaultValue (memberInnerType info |> Option.get)
-    | attr -> Some (attr :?> DefaultValueAttribute).Value
+    | attrObj ->
+        let attr = attrObj :?> DefaultValueAttribute
+        match attr.Value with
+        | null -> None
+        | v -> Some v
 
 type SerializableField =
-    { Property : PropertyInfo
+    { Member : MemberInfo
+      InnerType : Type
+      GetValue : obj -> obj
       DefaultValue : obj option
       Name : string
       IsNullable : bool
       EmitDefaultValue : bool option
+      Ignore : bool
     }
 
-let serializableField (prop : PropertyInfo) =
+let serializableField (prop : MemberInfo) : SerializableField =
+    let objectType = memberInnerType prop |> Option.get
+    let ignore =
+        match Attribute.GetCustomAttribute(prop, typeof<JsonIgnoreAttribute>) with
+        | null ->
+            // Ignore internal F# fields if encountered.
+            prop.Name.EndsWith("@")
+        | attrObj ->
+            let attr = attrObj :?> JsonIgnoreAttribute
+            attr.Condition = JsonIgnoreCondition.Always
     let defaultValue = getPropertyDefaultValue prop
-    let isNullable = isNullableType prop.PropertyType
-    match Attribute.GetCustomAttribute(prop, typeof<DataMemberAttribute>) with
-    | null ->
-        { Property = prop
-          DefaultValue = defaultValue
-          Name = prop.Name
-          IsNullable = isNullable
-          EmitDefaultValue = None
-        }
-    | attrObj ->
-        let attr = attrObj :?> DataMemberAttribute
-        { Property = prop
-          DefaultValue = defaultValue
-          Name = if attr.IsNameSetExplicitly then attr.Name else prop.Name
-          IsNullable = isNullable
-          EmitDefaultValue = Some attr.EmitDefaultValue
-        }
+    let isNullable = isNullableType objectType
+    let (name, emitDefaultValue) =
+        match Attribute.GetCustomAttribute(prop, typeof<DataMemberAttribute>) with
+        | null -> (prop.Name, None)
+        | attrObj ->
+            let attr = attrObj :?> DataMemberAttribute
+            let name = if attr.IsNameSetExplicitly then attr.Name else prop.Name
+            (name, Some attr.EmitDefaultValue)
+    let getValue = getMemberValue prop |> Option.get
+    { Member = prop
+      InnerType = objectType
+      GetValue = getValue
+      DefaultValue = defaultValue
+      Name = name
+      IsNullable = isNullable
+      EmitDefaultValue = emitDefaultValue
+      Ignore = ignore
+    }
 
 type CaseSerializationType =
     | CSTNormal
@@ -226,38 +296,51 @@ type CaseSerializationType =
     | CSTInnerValue
 
 type CaseAsObjectInfo =
-    { Info : UnionCaseInfo
+    { Name : CaseKey
+      Info : UnionCaseInfo
       Fields : SerializableField[]
       Type : CaseSerializationType
+      ConvertFrom : obj -> obj[]
+      ConvertTo : obj[] -> obj
     }
 
 type UnionAsObjectInfo =
     { CaseField : string
       AllowUnknownType : bool
-      ValueCase : CaseName option
-      Cases : Map<CaseName, CaseAsObjectInfo>
+      ValueCase : CaseTag option
+      Cases : Map<CaseTag, CaseAsObjectInfo>
+      GetTag : obj -> CaseTag
     }
 
 let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
-    match Attribute.GetCustomAttribute(objectType, typeof<SerializeAsObjectAttribute>) with
+    match  Attribute.GetCustomAttribute(objectType, typeof<SerializeAsObjectAttribute>) with
     | null -> None
-    | :? SerializeAsObjectAttribute as asObject ->
+    | asObjectObj ->
+        let asObject = asObjectObj :?> SerializeAsObjectAttribute
         let mutable valueCase = None
 
         let caseInfo (case : UnionCase) =
-            let attr = case.Info.GetCustomAttributes(typeof<CaseNameAttribute>) |> Seq.cast |> Seq.first
-            let name = parseCaseName case.Info attr
+            let maybeAttr = case.Info.GetCustomAttributes(typeof<CaseKeyAttribute>) |> Seq.cast |> Seq.first
+            let name = parseCaseName case.Info maybeAttr
+            let getField (prop : PropertyInfo) =
+                let field = serializableField prop
+                match maybeAttr with
+                | Some caseKey when Array.contains field.Member.Name caseKey.IgnoreFields ->
+                    { field with Ignore = true }
+                | _ -> field
+            let fields = case.Fields |> Array.map getField
+            let serializedCount = fields |> Seq.filter (fun f -> not f.Ignore) |> Seq.length
             let serType =
-                match attr with
-                | Some caseName when caseName.Type = CaseSerialization.InnerValue ->
+                match maybeAttr with
+                | Some caseKey when caseKey.Type = CaseSerialization.InnerValue ->
                     if Option.isSome valueCase then
                         failwithf "Only one case can be declared as inner value case: %O" case.Info.Name
-                    if Array.length case.Fields > 1 then
+                    if serializedCount > 1 then
                         failwithf "Serialization as inner object requires no more than one field in a union case %s" case.Info.Name
-                    valueCase <- Some name
+                    valueCase <- Some case.Info.Tag
                     CSTInnerValue
-                | Some caseName when caseName.Type = CaseSerialization.InnerObject ->
-                    if Array.length case.Fields > 1 then
+                | Some caseKey when caseKey.Type = CaseSerialization.InnerObject ->
+                    if serializedCount > 1 then
                         failwithf "Serialization as inner object requires no more than one field in a union case %s" case.Info.Name
                     CSTInnerObject
                 | _ ->
@@ -267,11 +350,14 @@ let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
                                 failwithf "Field name %s of case %s clashes with case field name" field.Name case.Info.Name
                     CSTNormal
             let ret =
-                { Info = case.Info
-                  Fields = case.Fields |> Array.map serializableField
+                { Name = name
+                  Info = case.Info
+                  Fields = fields
                   Type = serType
+                  ConvertFrom = FSharpValue.PreComputeUnionReader case.Info
+                  ConvertTo = FSharpValue.PreComputeUnionConstructor case.Info
                 }
-            (name, ret)
+            (case.Info.Tag, ret)
 
         let cases = unionCases objectType |> Seq.map caseInfo |> Map.ofSeq
         let ret =
@@ -279,25 +365,30 @@ let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
               AllowUnknownType = asObject.AllowUnknownType
               ValueCase = valueCase
               Cases = cases
+              GetTag = FSharpValue.PreComputeUnionTagReader objectType
             }
         Some ret
-    | _ -> failwith "Impossible"
 
 // Needed for dictionary keys.
 type NewtypeConverter<'nt> () =
     inherit TypeConverter ()
 
-    let info = unionCases typeof<'nt> |> isNewtype |> Option.get
+    let info = unionCases typeof<'nt> |> getNewtype |> Option.get
+    let convertFrom = info.ConvertFrom
+    let convertTo = info.ConvertTo
+    let memberType = info.Type.PropertyType
 
     override this.CanConvertFrom (context : ITypeDescriptorContext, sourceType : Type) : bool =
-        info.Type.PropertyType = sourceType
+        memberType = sourceType
 
     override this.CanConvertTo (context : ITypeDescriptorContext, destinationType : Type) : bool =
         typeof<'nt> = destinationType
 
     override this.ConvertTo (context : ITypeDescriptorContext, culture: CultureInfo, value : obj, destinationType : Type) : obj =
-        let (case, args) = FSharpValue.GetUnionFields(value, typeof<'nt>)
-        args.[0]
+        convertFrom value
 
     override this.ConvertFrom (context : ITypeDescriptorContext, culture : CultureInfo, value : obj) : obj =
-        FSharpValue.MakeUnion(info.Case, [|value|])
+        convertTo value
+
+let caseNames (unionType : Type) : Map<CaseKey, UnionCase> =
+    unionCases unionType |> Seq.map (fun case -> (caseKey case.Info, case)) |> Map.ofSeqUnique

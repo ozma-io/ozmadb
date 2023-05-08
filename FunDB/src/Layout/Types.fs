@@ -10,6 +10,7 @@ open FunWithFlags.FunDB.Layout.Source
 open FunWithFlags.FunDB.Objects.Types
 
 type ResolvedConstraintRef = ResolvedFieldRef
+type ResolvedIndexRef = ResolvedFieldRef
 
 type ReferenceRef =
     | RThis of FieldName
@@ -286,9 +287,25 @@ let parseTypeName (root : ResolvedEntityRef) (typeName : string) : ResolvedEntit
     | [| schemaName; entityName |] -> { Schema = FunQLName schemaName; Name = FunQLName entityName }
     | _ -> failwith "Invalid type name"
 
+let uniqueConstraintSQLName (entityName : HashName) (constrName : HashName) =
+    SQL.SQLName <| sprintf "__unique__%s__%s" entityName constrName
+
+let checkConstraintSQLName (entityName : HashName) (constrName : HashName) =
+    SQL.SQLName <| sprintf "__check__%s__%s" entityName constrName
+
+let indexSQLName (entityName : HashName) (indexName : HashName) =
+    SQL.SQLName <| sprintf "__index__%s__%s" entityName indexName
+
+let foreignConstraintSQLName (entityName : HashName) (fieldName : HashName) =
+    SQL.SQLName <| sprintf "__foreign__%s__%s"  entityName fieldName
+
 [<NoEquality; NoComparison>]
 type ResolvedSchema =
     { Entities : Map<EntityName, ResolvedEntity>
+      ForeignConstraintNames : Map<SQL.SQLName, ResolvedFieldRef>
+      UniqueConstraintNames : Map<SQL.SQLName, ResolvedConstraintRef>
+      CheckConstraintNames : Map<SQL.SQLName, ResolvedConstraintRef>
+      IndexNames : Map<SQL.SQLName, ResolvedIndexRef>
     }
 
 type IEntitiesSet = Source.IEntitiesSet

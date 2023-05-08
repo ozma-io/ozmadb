@@ -7,11 +7,13 @@ open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Serialization
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.UsedReferences
+open FunWithFlags.FunDB.FunQL.Query
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Info
 open FunWithFlags.FunDB.Permissions.Types
@@ -23,37 +25,54 @@ open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type EntityArgumentsException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+[<SerializeAsObject("error")>]
+type EntityOperationError =
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] EOEExecution of FunQLExecutionError
+    | [<CaseKey("request", IgnoreFields=[|"Details"|])>] EOERequest of Details : string
+    | [<CaseKey("entryNotFound")>] EOEEntryNotFound
+    | [<CaseKey("accessDenied", IgnoreFields=[|"Details"|])>] EOEAccessDenied of Details : string
+    with
+    member this.LogMessage =
+        match this with
+        | EOEExecution e -> e.LogMessage
+        | EOERequest msg -> msg
+        | EOEEntryNotFound -> "Entry not found"
+        | EOEAccessDenied details -> details
 
-    new (message : string, innerException : exn) =
-        EntityArgumentsException (message, innerException, isUserException innerException)
+    member this.Message =
+        match this with
+        | EOEExecution e -> e.Message
+        | EOEAccessDenied details -> "Access denied"
+        | _ -> this.Message
 
-    new (message : string) = EntityArgumentsException (message, null, true)
+    member this.HTTPResponseCode =
+        match this with
+        | EOEExecution e -> e.HTTPResponseCode
+        | EOERequest msg -> 422
+        | EOEEntryNotFound -> 404
+        | EOEAccessDenied details -> 403
 
-type EntityExecutionException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+    member this.ShouldLog =
+        match this with
+        | EOEExecution e -> e.ShouldLog
+        | EOERequest msg -> false
+        | EOEEntryNotFound -> false
+        | EOEAccessDenied details -> true
 
-    new (message : string, innerException : exn) =
-        EntityExecutionException (message, innerException, isUserException innerException)
+    interface ILoggableResponse with
+        member this.ShouldLog = this.ShouldLog
 
-    new (message : string) = EntityExecutionException (message, null, true)
+    interface IErrorDetails with
+        member this.LogMessage = this.LogMessage
+        member this.Message = this.Message
+        member this.HTTPResponseCode = this.HTTPResponseCode
 
-type EntityNotFoundException(message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
+type EntityOperationException (details : EntityOperationError, innerException : exn) =
+    inherit UserException(details.Message, innerException, true)
 
-    new (message : string, innerException : exn) =
-        EntityNotFoundException (message, innerException, isUserException innerException)
+    new (details : EntityOperationError) = EntityOperationException (details, null)
 
-    new (message : string) = EntityNotFoundException (message, null, true)
-
-type EntityDeniedException (message : string, innerException : exn, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
-
-    new (message : string, innerException : exn) =
-        EntityDeniedException (message, innerException, isUserException innerException)
-
-    new (message : string) = EntityDeniedException (message, null, true)
+    member this.Details = details
 
 type RowId = int
 
@@ -63,39 +82,49 @@ type RowKey =
 
 let private subEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
 
-let private runQuery (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>) (query : Query<'q>) (comments : string option) (placeholders : ArgumentValuesMap) (cancellationToken : CancellationToken) : Task<'a> =
+let private runQuery
+        (runFunc : string -> ExprParameters -> CancellationToken -> Task<'a>)
+        (maybeLayout : Layout option)
+        (query : Query<'q>)
+        (comments : string option)
+        (placeholders : ArgumentValuesMap)
+        (cancellationToken : CancellationToken) : Task<'a> =
     task {
         try
             let prefix = SQL.convertComments comments
             return! runFunc (prefix + query.Expression.ToSQLString()) (prepareArguments query.Arguments placeholders) cancellationToken
         with
-            | :? QueryExecutionException as ex ->
-                return raisefUserWithInner EntityExecutionException ex ""
+            | :? QueryExecutionException as e ->
+            let details =
+                match maybeLayout with
+                | None -> EOEExecution <| UVEExecution (fullUserMessage e)
+                | Some layout -> EOEExecution (convertQueryExecutionException layout e)
+            return raise <| EntityOperationException(details, e)
     }
 
 let private runNonQuery (connection : QueryConnection) = runQuery connection.ExecuteNonQuery
 
-let private runIntQuery (connection : QueryConnection) query comments placeholders cancellationToken =
+let private runIntQuery (connection : QueryConnection) maybeLayout query comments placeholders cancellationToken =
     task {
-        match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
+        match! runQuery connection.ExecuteValueQuery maybeLayout query comments placeholders cancellationToken with
         | None -> return failwith "Unexpected empty result"
         | Some (name, typ, ret) -> return SQL.parseIntValue ret
     }
 
-let private runOptionalIntQuery (connection : QueryConnection) query comments placeholders cancellationToken =
+let private runOptionalIntQuery (connection : QueryConnection) maybeLayout query comments placeholders cancellationToken =
     task {
-        match! runQuery connection.ExecuteValueQuery query comments placeholders cancellationToken with
+        match! runQuery connection.ExecuteValueQuery maybeLayout query comments placeholders cancellationToken with
         | None -> return None
         | Some (name, typ, ret) -> return Some (SQL.parseIntValue ret)
     }
 
-let private runOptionalValuesQuery (connection : QueryConnection) query comments placeholders cancellationToken =
-    runQuery connection.ExecuteRowValuesQuery query comments placeholders cancellationToken
+let private runOptionalValuesQuery (connection : QueryConnection) query maybeLayout comments placeholders cancellationToken =
+    runQuery connection.ExecuteRowValuesQuery query maybeLayout comments placeholders cancellationToken
 
-let private runIntsQuery (connection : QueryConnection) query comments placeholders cancellationToken =
+let private runIntsQuery (connection : QueryConnection) maybeLayout query comments placeholders cancellationToken =
     let execute query args cancellationToken =
         connection.ExecuteColumnValuesQuery query args cancellationToken <| fun name typ rows -> task { return! rows.Select(SQL.parseIntValue).ToArrayAsync(cancellationToken) }
-    runQuery execute query comments placeholders cancellationToken
+    runQuery execute maybeLayout query comments placeholders cancellationToken
 
 let private databaseArg = PLocal (FunQLName "database")
 
@@ -115,7 +144,7 @@ let private databaseSizeQuery : Lazy<Query<SQL.SelectExpr>> =
 
 let getDatabaseSize (connection : QueryConnection) (cancellationToken : CancellationToken) : Task<int64> =
     let args = Map.singleton databaseArg (FString connection.Connection.Database)
-    runIntQuery connection databaseSizeQuery.Value None args cancellationToken
+    runIntQuery connection None databaseSizeQuery.Value None args cancellationToken
 
 let getEntityInfo (layout : Layout) (triggers : MergedTriggers) (role : ResolvedRole option) (entityRef : ResolvedEntityRef) : SerializedEntity =
     match role with
@@ -127,8 +156,8 @@ let getEntityInfo (layout : Layout) (triggers : MergedTriggers) (role : Resolved
         try
             serializeEntityRestricted layout triggers role entityRef
         with
-        | :? PermissionsEntityException as e ->
-            raisefWithInner EntityDeniedException e ""
+        | :? PermissionsEntityException as e when isUserException e ->
+            raise <| EntityOperationException(EOEAccessDenied (fullUserMessage e), e)
 
 let private countAndThrow
         (connection : QueryConnection)
@@ -140,7 +169,7 @@ let private countAndThrow
         (cancellationToken : CancellationToken) =
     unitTask {
         if Option.isNone applyRole then
-            raisef EntityNotFoundException "Entry not found"
+            raise <| EntityOperationException(EOEEntryNotFound)
         else
             let testExpr =
                 { SQL.emptySingleSelectExpr with
@@ -152,15 +181,16 @@ let private countAndThrow
                 { Expression = SQL.SSelect testExpr
                   Arguments = arguments
                 }
-            let! count = runIntQuery connection testQuery None argumentValues cancellationToken
+            let! count = runIntQuery connection None testQuery None argumentValues cancellationToken
             if count > 0 then
-                raisef EntityDeniedException "Access denied"
+                raise <| EntityOperationException (EOEAccessDenied "The entry is not accessible")
             else
-                raisef EntityNotFoundException "Entry not found"
+                raise <| EntityOperationException EOEEntryNotFound
     }
 
 let private runQueryAndGetId
         (connection : QueryConnection)
+        (layout : Layout)
         (applyRole : ResolvedRole option)
         (tableRef : SQL.TableRef)
         (entity : ResolvedEntity)
@@ -177,12 +207,12 @@ let private runQueryAndGetId
             task {
                 match (key, knownSubEntity) with
                 | (RKPrimary id, Some subEntity) ->
-                    match! runNonQuery connection query comments argumentValues cancellationToken with
+                    match! runNonQuery connection (Some layout) query comments argumentValues cancellationToken with
                     | 0 -> return None
                     | 1 -> return Some (id, subEntity)
                     | _ -> return failwith "Impossible"
                 | _ ->
-                    match! runOptionalValuesQuery connection query comments argumentValues cancellationToken with
+                    match! runOptionalValuesQuery connection (Some layout) query comments argumentValues cancellationToken with
                     | None -> return None
                     | Some values ->
                         let findValue wantedName =
@@ -231,8 +261,12 @@ let private altKeyCheck
     let entity = layout.FindEntity entityRef |> Option.get
     let constr =
         match Map.tryFind keyName entity.UniqueConstraints with
-        | None -> raisef EntityArgumentsException "Unique constraint %O does not exist" keyName
-        | Some constr when not constr.IsAlternateKey -> raisef EntityArgumentsException "Unique constraint %O is not an alternate key" keyName
+        | None ->
+            let err = sprintf "Unique constraint %O not found" keyName
+            raise <| EntityOperationException(EOERequest err)
+        | Some constr when not constr.IsAlternateKey ->
+            let err = sprintf "Unique constraint %O is not an alternative key" keyName
+            raise <| EntityOperationException(EOERequest err)
         | Some constr -> constr
 
     let mutable arguments = emptyArguments
@@ -241,7 +275,7 @@ let private altKeyCheck
 
     let getCheck (fieldName : FieldName) =
         match Map.tryFind fieldName keyArgs with
-        | None -> raisef EntityArgumentsException "Key column %O is not specified" fieldName
+        | None -> raise <| EntityOperationException(EOEExecution (UVEArgument { Argument = fieldName; Inner = ACERequired }))
         | Some arg ->
             let field = Map.find fieldName entity.ColumnFields
             let argName = PLocal fieldName
@@ -345,8 +379,8 @@ let private buildSelectOperation
                 try
                     applyPermissions layout role usedDatabase
                 with
-                | :? PermissionsApplyException as e ->
-                    raisefWithInner EntityDeniedException e ""
+                | :? PermissionsApplyException as e when e.IsUserException ->
+                    raise <| EntityOperationException(EOEAccessDenied (fullUserMessage e), e)
             applyRoleSelectExpr layout appliedDb query
 
     { Query = query
@@ -391,11 +425,11 @@ let private runCheckExpr
               Arguments = exprInfo.Arguments
             }
 
-        match! runQuery connection.ExecuteValueQuery query None argumentValues cancellationToken with
+        match! runQuery connection.ExecuteValueQuery (Some layout) query None argumentValues cancellationToken with
         | None -> ()
         | Some (name, typ, SQL.VNull) -> ()
         | Some (name, typ, SQL.VBool true) -> ()
-        | Some (name, typ, SQL.VBool false) -> raisef EntityDeniedException "Failed a permissions check"
+        | Some (name, typ, SQL.VBool false) -> raise <| EntityOperationException(EOEAccessDenied "Access to the entries is denied")
         | Some (name, typ, ret) -> failwithf "Unexpected result of a permissions check: %O" ret
     }
 
@@ -422,7 +456,7 @@ let resolveAltKey
               Arguments = alt.Arguments
             }
 
-        match! runOptionalIntQuery connection opQuery.Query comments argumentValues cancellationToken with
+        match! runOptionalIntQuery connection (Some layout) opQuery.Query comments argumentValues cancellationToken with
         | None ->
             do! countAndThrow connection applyRole opQuery.Table opQuery.WhereWithoutRole opQuery.ArgumentsWithoutRole argumentValues cancellationToken
             return failwith "Impossible"
@@ -460,7 +494,8 @@ let insertEntities
 
         // We only check database consistency here; user restriction flags like IsHidden and IsFrozen are checked at API level.
         if entity.IsAbstract then
-            raisef EntityExecutionException "Entity %O is abstract" entityRef
+            let msg = sprintf "Entity %O is abstract" entityRef
+            raise <| EntityOperationException(EOERequest msg)
 
         let mutable arguments = emptyArguments
         let mutable argumentValues = Map.mapKeys PGlobal globalArgs
@@ -501,7 +536,7 @@ let insertEntities
 
             for requiredName in entity.RequiredFields do
                 if not <| Map.containsKey requiredName rowArgs then
-                    raisef EntityArgumentsException "Required field not provided: %O" requiredName
+                    raise <| EntityOperationException(EOEExecution (UVEArgument { Argument = requiredName; Inner = ACERequired }))
 
             let rowValues = dataFields |> Seq.map getValue
             Seq.append prefixValues rowValues |> Seq.toArray
@@ -531,15 +566,15 @@ let insertEntities
             try
                 checkPermissions layout role usedDatabase
             with
-            | :? PermissionsApplyException as e ->
-                raisefWithInner EntityDeniedException e ""
+            | :? PermissionsApplyException as e when e.IsUserException ->
+                raise <| EntityOperationException(EOEAccessDenied (fullUserMessage e), e)
 
         let query =
             { Expression = expr
               Arguments = arguments
             }
 
-        let! rawIds = runIntsQuery connection query comments argumentValues cancellationToken
+        let! rawIds = runIntsQuery connection (Some layout) query comments argumentValues cancellationToken
         // FIXME: will overflow in future.
         let ids = Array.map int rawIds
         match applyRole with
@@ -552,8 +587,8 @@ let insertEntities
                 | FFiltered checkExpr ->
                     do! runCheckExpr connection globalArgs layout entityRef checkExpr ids cancellationToken
             with
-            | :? PermissionsApplyException as e ->
-                raisefUserWithInner EntityDeniedException e ""
+            | :? PermissionsApplyException as e when e.IsUserException ->
+                raise <| EntityOperationException(EOEAccessDenied (fullUserMessage e), e)
         return ids
     }
 
@@ -580,7 +615,8 @@ let updateEntity
         let getValue (fieldName : FieldName, fieldValue : FieldValue) =
             let field = Map.find fieldName entity.ColumnFields
             if field.IsImmutable then
-                raisef EntityDeniedException "Field %O is immutable" fieldName
+                let msg = sprintf "Field %O is immutable" fieldName
+                raise <| EntityOperationException(EOERequest msg)
             let argument = { requiredArgument field.FieldType with Optional = fieldIsOptional field }
             let (argInfo, newArguments) = addArgument (PLocal fieldName) argument arguments
             arguments <- newArguments
@@ -647,13 +683,14 @@ let updateEntity
                     try
                         applyPermissions layout role usedDatabase
                     with
-                    | :? PermissionsApplyException as e ->
-                        raisefWithInner EntityDeniedException e ""
+                    | :? PermissionsApplyException as e when e.IsUserException ->
+                        raise <| EntityOperationException(EOEAccessDenied (fullUserMessage e), e)
                 applyRoleUpdateExpr layout appliedDb query
 
         let! (id, subEntity) =
             runQueryAndGetId
                 connection
+                layout
                 applyRole
                 tableRef
                 entity
@@ -674,8 +711,8 @@ let updateEntity
                 | FFiltered checkExpr ->
                     do! runCheckExpr connection globalArgs layout subEntity checkExpr [|id|] cancellationToken
             with
-            | :? PermissionsApplyException as e ->
-                raisefUserWithInner EntityDeniedException e ""
+            | :? PermissionsApplyException as e when e.IsUserException ->
+                raise <| EntityOperationException(EOEAccessDenied (fullUserMessage e), e)
         return (id, subEntity)
     }
 
@@ -697,7 +734,8 @@ let deleteEntity
         let argumentValues = Map.unionUnique (Map.mapKeys PGlobal globalArgs) keyCheck.ArgumentValues
 
         if entity.IsAbstract then
-            raisef EntityExecutionException "Entity %O is abstract" entityRef
+            let msg = sprintf "Entity %O is abstract" entityRef
+            raise <| EntityOperationException(EOERequest msg)
 
         let whereExpr =
             if hasSubType entity then
@@ -746,13 +784,14 @@ let deleteEntity
                     try
                         applyPermissions layout role usedDatabase
                     with
-                    | :? PermissionsApplyException as e ->
-                        raisefWithInner EntityDeniedException e ""
+                    | :? PermissionsApplyException as e when isUserException e ->
+                        raise <| EntityOperationException(EOEAccessDenied (fullUserMessage e), e)
                 applyRoleDeleteExpr layout appliedDb query
 
         let! (id, subEntity) =
             runQueryAndGetId
                 connection
+                layout
                 applyRole
                 tableRef
                 entity
@@ -779,7 +818,7 @@ let private getSubEntity
     task {
         let possibleTypes = allPossibleEntitiesList layout entityRef |> Seq.toArray
         match possibleTypes with
-        | [||] -> return raisef EntityNotFoundException "Entry not found"
+        | [||] -> return raise <| EntityOperationException(EOEEntryNotFound)
         | [|(realRef, bits)|] ->
             let! id = resolveKey connection globalArgs layout applyRole entityRef comments key cancellationToken
             return (id, realRef)
@@ -807,7 +846,7 @@ let private getSubEntity
                 }
 
             let execute query args cancellationToken = connection.ExecuteRowValuesQuery query args cancellationToken
-            match! runQuery execute opQuery.Query comments argumentValues cancellationToken with
+            match! runQuery execute (Some layout) opQuery.Query comments argumentValues cancellationToken with
             | None ->
                 do! countAndThrow connection applyRole opQuery.Table opQuery.WhereWithoutRole opQuery.ArgumentsWithoutRole argumentValues cancellationToken
                 return failwith "Impossible"
@@ -848,7 +887,7 @@ let private getRelatedRowIds
         let possibleTypes = allPossibleEntitiesList layout fieldRef.Entity |> Seq.toArray
         let singleSubEntity =
             match possibleTypes with
-            | [||] -> raisef EntityNotFoundException "Entry not found"
+            | [||] -> raise <| EntityOperationException(EOEEntryNotFound)
             | [|(realRef, bits)|] -> Some realRef
             | _ -> None
 
@@ -893,10 +932,8 @@ let private getRelatedRowIds
 
         let execute query args cancellationToken =
             connection.ExecuteQuery query args cancellationToken <| fun columns rows -> task { return! rows.Select(processOne).ToArrayAsync(cancellationToken) }
-        return! runQuery execute opQuery.Query comments argumentValues cancellationToken
+        return! runQuery execute (Some layout) opQuery.Query comments argumentValues cancellationToken
     }
-
-type private ProcessedMap = Map<ResolvedEntityRef * RowId, int>
 
 type ReferencesRowIndex = int
 
@@ -915,7 +952,11 @@ and ReferencesNode =
 type ReferencesTree =
     { Nodes : ReferencesNode[]
       Root : ReferencesRowIndex
-    }
+    } with
+        member this.ShouldLog = false
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
 
 let iterDeleteReferences (f : ResolvedEntityRef -> RowId -> Task) (tree : ReferencesTree) : Task<Set<ReferencesRowIndex>> =
     task {

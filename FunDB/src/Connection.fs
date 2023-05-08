@@ -17,13 +17,13 @@ open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 
-type DeferredConstraintsException (message : string, innerException : Exception, isUserException : bool) =
+type DeferredConstraintsException (message : string, innerException : QueryExecutionException, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : Exception) =
+    new (message : string, innerException : QueryExecutionException) =
         DeferredConstraintsException (message, innerException, isUserException innerException)
 
-    new (message : string) = DeferredConstraintsException (message, null, true)
+    member this.QueryException = innerException
 
 type DatabaseConnection (loggerFactory : ILoggerFactory, connectionString : string) =
     let connection = new NpgsqlConnection(connectionString)
@@ -104,7 +104,7 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
                 let! _ = conn.Query.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty cancellationToken
                 constraintsDeferred <- false
             with
-            | :? QueryExecutionException as ex -> raisefUserWithInner DeferredConstraintsException ex ""
+            | :? QueryExecutionException as e -> raise <| DeferredConstraintsException("", e, true)
         }
 
     new (conn : DatabaseConnection) =

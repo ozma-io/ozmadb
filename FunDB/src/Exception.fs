@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Exception
 open System
 open Printf
 open Newtonsoft.Json.Linq
+open System.Runtime.Serialization
 
 // Exceptions which can be marked as "user exceptions" -- messages in them can be safely
 // sent back to client.
@@ -66,3 +67,13 @@ let rec fullUserMessage (e : exn) : string =
 let inline raisefUserWithInner<'a, 'b, 'e when 'e :> UserException> (constr : (string * Exception * bool) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
     kprintf <| fun str ->
         raise  <| constr (str, inner, true)
+
+type ILoggableResponse =
+    abstract ShouldLog : bool
+
+type IErrorDetails =
+    inherit ILoggableResponse
+
+    abstract LogMessage : string
+    [<DataMember>] abstract Message : string
+    abstract HTTPResponseCode : int

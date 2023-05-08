@@ -66,7 +66,7 @@ type private Phase1Resolver (layout : Layout, defaultAttrs : MergedDefaultAttrib
             try
                 resolveViewExpr callbacks flags parsed
             with
-            | :? ViewResolveException as e ->
+            | :? QueryResolveException as e ->
                 raisefWithInner UserViewResolveException e "Resolve error"
         let compiled = compileViewExpr layout defaultAttrs resolved
 
