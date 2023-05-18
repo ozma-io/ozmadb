@@ -165,6 +165,9 @@ let sqlKnownFunctions : Map<FunctionName, FunctionSignaturesMap> =
           (SQLName "rtrim", funScalarsToSignatures [([STString], STString); ([STString; STString], STString)])
           (SQLName "btrim", funScalarsToSignatures [([STString], STString); ([STString; STString], STString)])
           (SQLName "split_part", funScalarsToSignatures [([STString; STString; STInt], STString)])
+          (SQLName "replace", funScalarsToSignatures [([STString; STString; STString], STString)])
+          (SQLName "left", funScalarsToSignatures [([STString; STInt], STString)])
+          (SQLName "strpos", funScalarsToSignatures [([STString; STString], STInt)])
           // Dates
           (SQLName "age", funScalarsToSignatures [([STDateTime; STDateTime], STInterval); ([STDateTime], STInterval)])
           (SQLName "date_part", funScalarsToSignatures [([STString; STDateTime], STDecimal); ([STString; STInterval], STDecimal)])
