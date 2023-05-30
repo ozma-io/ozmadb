@@ -17,6 +17,7 @@ open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Attributes.Merge
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
+module SQL = FunWithFlags.FunDB.SQL.Rename
 
 type DomainIdColumn = int
 
@@ -787,12 +788,10 @@ let private buildInternalJoins (layout : Layout) (initialFromMap : FromMap) (ini
     let newFromMap = Map.unionUnique initialFromMap addedFromMap
     (newFromMap, newFrom)
 
-type RenamesMap = Map<SQL.TableName, SQL.TableName>
-
 // Returned join paths sequence are only those paths that need to be added to an existing FROM expression
 // with `oldPaths` added.
 // Also returned are new `JoinPaths` with everything combined.
-let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : RenamesMap * JoinPathsPair seq * JoinPaths =
+let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : SQL.RenamesMap * JoinPathsPair seq * JoinPaths =
     let mutable lastId = oldPaths.NextJoinId
     let mutable addedPaths = []
     let mutable renamesMap = Map.empty
@@ -829,19 +828,6 @@ let augmentJoinPaths (oldPaths : JoinPaths) (newPaths : JoinPaths) : RenamesMap 
         }
 
     (renamesMap, Seq.rev (List.toSeq addedPaths), ret)
-
-let private genericRenameValueExprTables (failOnNoFind : bool) (renamesMap : RenamesMap) : SQL.ValueExpr -> SQL.ValueExpr =
-    let mapColumn : SQL.ColumnRef -> SQL.ColumnRef = function
-        | { Table = Some { Schema = None; Name = tableName }; Name = colName } as ref ->
-            match Map.tryFind tableName renamesMap with
-            | None when failOnNoFind -> failwithf "Unknown table name during rename: %O" tableName
-            | None -> ref
-            | Some newName -> { Table = Some { Schema = None; Name = newName }; Name = colName }
-        | ref -> failwithf "Unexpected column ref during rename: %O" ref
-    SQL.mapValueExpr { SQL.idValueExprMapper with ColumnReference = mapColumn }
-
-let renameAllValueExprTables = genericRenameValueExprTables true
-let renameValueExprTables = genericRenameValueExprTables false
 
 let rec private prependColumnsToSelectTree (cols : SQL.SelectedColumn seq) : SQL.SelectTreeExpr -> SQL.SelectTreeExpr = function
     | SQL.SSelect query ->
@@ -1415,9 +1401,12 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     if flags.ForceNoTableRef then
                         None
                     else
-                        match ref.Entity with
-                        | Some renamedTable -> Some <| compileRenamedEntityRef renamedTable
-                        | None -> Some <| compileRenamedResolvedEntityRef boundInfo.Ref.Entity
+                        match refInfo.Column with
+                        | Some { ForceSQLTable = Some table } -> Some table
+                        | _ ->
+                            match ref.Entity with
+                            | Some renamedTable -> Some <| compileRenamedEntityRef renamedTable
+                            | None -> Some <| compileRenamedResolvedEntityRef boundInfo.Ref.Entity
                 let columnName = getFieldName refInfo ref.Name
                 let checkNullRef =
                     if boundInfo.IsInner then
@@ -1438,7 +1427,9 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                     if flags.ForceNoTableRef then
                         None
                     else
-                        Option.map compileRenamedEntityRef ref.Entity
+                        match refInfo.Column with
+                        | Some { ForceSQLTable = Some table } -> Some table
+                        | _ -> Option.map compileRenamedEntityRef ref.Entity
                 let columnName = getFieldName refInfo ref.Name
                 match pathWithEntities with
                 | [] ->

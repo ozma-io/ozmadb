@@ -270,6 +270,9 @@ type private FieldMappingInfo =
       Type : ResolvedFieldType option
       FieldAttributes : Set<AttributeName>
       Mapping : ResolvedFieldMapping
+      // Used for injected expressions which need to be compiled with specific table refs.
+      // For example, restrictions use "__restricted" as the SQL table ref to ease renaming.
+      ForceSQLTable : SQL.TableRef option
       // Used for injected expressions which need to use existing column names.
       // For example, chunk WHERE expressions use column names from original user view,
       // but need to use SQL column names from it.
@@ -307,13 +310,30 @@ type CustomFromBound =
 
 type CustomFromField =
     { Bound : CustomFromBound
+      ForceSQLTable : SQL.TableRef option
       ForceSQLName : SQL.ColumnName option
     }
 
+let customFromField (bound : CustomFromBound) =
+    { Bound = bound
+      ForceSQLTable = None
+      ForceSQLName = None
+    } : CustomFromField
+
 type CustomFromMapping = Map<FieldRef, CustomFromField>
 
+type CustomEntityMapping =
+    { Ref : ResolvedEntityRef
+      ForceSQLTable : SQL.TableRef option
+    }
+
+let customEntityMapping (ref : ResolvedEntityRef) =
+    { Ref = ref
+      ForceSQLTable = None
+    } : CustomEntityMapping
+
 type SingleFromMapping =
-    | SFEntity of ResolvedEntityRef
+    | SFEntity of CustomEntityMapping
     | SFCustom of CustomFromMapping
 
 let private explodeFieldRef (fieldRef : FieldRef) : FieldRef seq =
@@ -351,7 +371,7 @@ let private boundValueForcedSQLName : BoundValue -> SQL.ColumnName option = func
     | BVColumn { Field = field; Header = { Immediate = true; Single = false } } -> resolvedFieldForcedSQLName field
     | _ -> None
 
-let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef : EntityRef option) (fields : SubqueryFieldsMap) : FieldMapping =
+let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef : EntityRef option) (forceSQLTable : SQL.TableRef option) (fields : SubqueryFieldsMap) : FieldMapping =
     let explodeVariations (fieldName, subqueryField : SubqueryField) =
         let mapping = boundValueToMapping subqueryField.Bound
         let info =
@@ -359,6 +379,7 @@ let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef :
               EntityId = fromEntityId
               Type = subqueryField.Type
               Mapping = mapping
+              ForceSQLTable = forceSQLTable
               ForceSQLName = subqueryField.Bound |> Option.bind boundValueForcedSQLName
               FieldAttributes = subqueryField.FieldAttributes
             }
@@ -396,6 +417,7 @@ let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntit
                   EntityId = fromEntityId
                   Type = resolvedFieldBitsType field
                   Mapping = FMTypeRestricted header
+                  ForceSQLTable = None
                   ForceSQLName = resolvedFieldForcedSQLName field
                   FieldAttributes = Set.empty
                 }
@@ -438,6 +460,7 @@ let private customToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEnti
               EntityId = fromEntityId
               Mapping = fieldMapping
               Type = typ
+              ForceSQLTable = info.ForceSQLTable
               ForceSQLName = info.ForceSQLName
               FieldAttributes = Set.empty
             }
@@ -718,6 +741,7 @@ type ColumnMeta =
     { EntityId : FromEntityId
       // Use specific SQL name (often ColumnField's `ColumnName`).
       ForceSQLName : SQL.ColumnName option
+      ForceSQLTable : SQL.TableRef option
     }
 
 type FieldRefMeta =
@@ -1329,6 +1353,7 @@ type private FromMappingFlags =
     { WithoutChildren : bool
       AllowHidden : bool
       IsInner : bool
+      ForceSQLTable : SQL.TableRef option
     }
 
 let rec private relabelFromExprType (typeContexts : TypeContextsMap) = function
@@ -1510,7 +1535,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             match alias with
             | None -> Some <| relaxEntityRef entityRef
             | Some aliasRef -> aliasRef
-        let mapping = fieldsToFieldMapping fromEntityId mappingRef fields
+        let mapping = fieldsToFieldMapping fromEntityId mappingRef flags.ForceSQLTable fields
         if flags.WithoutChildren then
             mapping
         else
@@ -1538,7 +1563,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             | typ -> raisef ViewResolveException "Field %O doesn't have a domain" typ
 
         let alias = { Schema = None; Name = tableName } : EntityRef
-        let mapping = fieldsToFieldMapping fromEntityId (Some alias) fields
+        let mapping = fieldsToFieldMapping fromEntityId (Some alias) None fields
         let entityInfo =
             { Schema = None
               EntityAttributes = Set.empty
@@ -1692,6 +1717,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 let columnInfo =
                     { EntityId = info.EntityId
                       ForceSQLName = info.ForceSQLName
+                      ForceSQLTable = info.ForceSQLTable
                     }
                 let fieldInfo =
                     { Path = boundFields |> Seq.map (fun x -> x.Ref.Entity) |> Array.ofSeq
@@ -1852,6 +1878,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 { WithoutChildren = entity.Only
                   AllowHidden = false
                   IsInner = isInner
+                  ForceSQLTable = None
                 }
             let mapping = createFromMapping fromEntityId resRef (Option.map Some punRef) mappingFlags
             let mappingRef = Option.defaultValue entity.Ref punRef
@@ -1883,7 +1910,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                         raisef ViewResolveException "ONLY can only be specified for entities"
                     let newName = Option.defaultValue entityName entity.Alias
                     let mappingRef = { Schema = None; Name = newName } : EntityRef
-                    let mapping = fieldsToFieldMapping fromEntityId (Some mappingRef) (getFieldsMap cteInfo.Fields)
+                    let mapping = fieldsToFieldMapping fromEntityId (Some mappingRef) None (getFieldsMap cteInfo.Fields)
                     (mapping, Map.empty, entity.Ref, mappingRef, cteInfo.ExprInfo)
                 | None ->
                     match callbacks.HomeSchema with
@@ -2417,6 +2444,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                 { Entity = None
                   Mapping = boundValueToMapping fieldInfo.Bound
                   Type = fieldInfo.Type
+                  ForceSQLTable = None
                   ForceSQLName = None
                   EntityId = setOpEntityId
                   FieldAttributes = fieldInfo.FieldAttributes
@@ -2584,7 +2612,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                     let fields = applyAlias tab.Alias info.Fields
                     let fieldsMap = getFieldsMap fields
                     let mappingRef = { Schema = None; Name = tab.Alias.Name } : EntityRef
-                    let newMapping = fieldsToFieldMapping fromEntityId (Some mappingRef) fieldsMap
+                    let newMapping = fieldsToFieldMapping fromEntityId (Some mappingRef) None fieldsMap
                     let entityInfo =
                         { Schema = None
                           EntityAttributes = info.EntityAttributes
@@ -2896,13 +2924,14 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
     member this.ResolveSingleFieldExpr (fromEntityId : FromEntityId) (fromMapping : SingleFromMapping) expr =
         let mapping =
             match fromMapping with
-            | SFEntity ref ->
+            | SFEntity entity ->
                 let flags =
                     { IsInner = true
                       AllowHidden = true
                       WithoutChildren = false
+                      ForceSQLTable = entity.ForceSQLTable
                     }
-                createFromMapping fromEntityId ref None flags
+                createFromMapping fromEntityId entity.Ref None flags
             | SFCustom custom -> customToFieldMapping layout fromEntityId true custom
         let context =
             { emptyContext with
@@ -2927,6 +2956,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
             { IsInner = true
               AllowHidden = true
               WithoutChildren = false
+              ForceSQLTable = None
             }
         let mapping = createFromMapping localExprFromEntityId entityRef None flags
         let context =
@@ -3194,6 +3224,7 @@ type SimpleColumnMeta =
       EntityId : FromEntityId
       Path : PathArrow[]
       PathEntities : ResolvedEntityRef[]
+      ForceSQLTable : SQL.TableRef option
     }
 
 let simpleColumnMeta (boundEntity : ResolvedEntityRef) : SimpleColumnMeta =
@@ -3202,6 +3233,7 @@ let simpleColumnMeta (boundEntity : ResolvedEntityRef) : SimpleColumnMeta =
       EntityId = localExprFromEntityId
       Path = [||]
       PathEntities = [||]
+      ForceSQLTable = None
     }
 
 let makeColumnReference (layout : Layout) (meta : SimpleColumnMeta) (fieldRef : FieldRef) : LinkedBoundFieldRef =
@@ -3218,6 +3250,7 @@ let makeColumnReference (layout : Layout) (meta : SimpleColumnMeta) (fieldRef : 
         } : BoundColumnMeta
     let columnInfo =
         { ForceSQLName = resolvedFieldForcedSQLName field.Field
+          ForceSQLTable = meta.ForceSQLTable
           EntityId = meta.EntityId
         } : ColumnMeta
     let fieldInfo =

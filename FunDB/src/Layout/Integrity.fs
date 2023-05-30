@@ -18,6 +18,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.DDL
+module SQL = FunWithFlags.FunDB.SQL.Rename
 module PLPgSQL = FunWithFlags.FunDB.SQL.PLPgSQL
 
 type LayoutIntegrityException (message : string, innerException : exn, isUserException : bool) =
@@ -487,7 +488,7 @@ type private ConstraintUseNewConverter (constrEntityRef : ResolvedEntityRef) =
 
     and useNewInValueExpr =
         let renamesMap = Map.singleton compiledConstrTableName sqlNewName
-        renameValueExprTables renamesMap
+        SQL.naiveRenameTablesExpr renamesMap
 
     // ValueExpr returned is a piece that goes into WHERE clause.
     and useNewInFromExpr : SQL.FromExpr -> (SQL.ValueExpr option * SQL.TableName option * SQL.FromExpr option) = function

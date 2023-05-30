@@ -622,7 +622,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
     and initialWrappedLayout = makeWrappedLayout Set.empty
 
     and resolveRelatedExpr (wrappedLayout : ILayoutBits) (entityRef : ResolvedEntityRef) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
-        let entityInfo = SFEntity entityRef
+        let entityInfo = SFEntity (customEntityMapping entityRef)
         let callbacks =
             { resolveCallbacks wrappedLayout with
                 HomeSchema = Some entityRef.Schema

@@ -13,6 +13,7 @@ open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Types
+open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.FunQL.AST
 module SQL = FunWithFlags.FunDB.SQL.AST
 
@@ -298,7 +299,11 @@ type private EntityChecksCache (layout : Layout, rootRef : ResolvedEntityRef) =
     let subEntityFieldRef =
         lazy (
             let fieldRef = { Entity = Some <| relaxEntityRef rootRef; Name = funSubEntity } : FieldRef
-            makeColumnReference layout (simpleColumnMeta rootRef) fieldRef
+            let meta =
+                { simpleColumnMeta rootRef with
+                    ForceSQLTable = Some restrictedTableRef
+                }
+            makeColumnReference layout meta fieldRef
         )
 
     let rec buildOfTypeCheck (entityRef : ResolvedEntityRef) =

@@ -5,7 +5,9 @@ open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.FunQL.AST
+open FunWithFlags.FunDB.Permissions.Resolve
 module SQL = FunWithFlags.FunDB.SQL.AST
+module SQL = FunWithFlags.FunDB.SQL.Rename
 
 type CompiledRestriction =
     { From : SQL.FromExpr
@@ -21,7 +23,7 @@ let compileRestriction (layout : Layout) (entityRef : ResolvedEntityRef) (argume
     // Hence, a hack: we pretend to use root entity instead, but add an alias so that expression properly binds.
     let fEntity =
         { fromEntity (relaxEntityRef entity.Root) with
-              Alias = renameResolvedEntityRef entityRef |> decompileName |> Some
+              Alias = Some restrictedEntityRef.Name
         }
     let (info, from) = compileSingleFromExpr layout arguments (FEntity fEntity) (Some restr)
     let ret =
@@ -34,7 +36,7 @@ let compileRestriction (layout : Layout) (entityRef : ResolvedEntityRef) (argume
 let restrictionToSelect (ref : ResolvedEntityRef) (restr : CompiledRestriction) : SQL.SelectExpr =
     let select =
         { SQL.emptySingleSelectExpr with
-              Columns = [| SQL.SCAll (Some <| compileRenamedResolvedEntityRef ref) |]
+              Columns = [| SQL.SCAll (Some restrictedTableRef) |]
               From = Some restr.From
               Where = Some restr.Where
         }
@@ -51,7 +53,7 @@ let restrictionToValueExpr (entityRef : ResolvedEntityRef) (newTableName : SQL.T
         // We can make expression simpler in this case, just using `WHERE`.
         // `(table.Extra :?> RealEntityAnnotation).RealEntity` is always `rootRef` here, see above.
         let renamesMap = Map.singleton (fromTableName table) newTableName
-        renameAllValueExprTables renamesMap restr.Where
+        SQL.naiveRenameAllTablesExpr renamesMap restr.Where
     | _ ->
         let select =
             { SQL.emptySingleSelectExpr with

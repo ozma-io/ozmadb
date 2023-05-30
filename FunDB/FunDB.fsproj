@@ -20,6 +20,7 @@
     <Compile Include="src/SQL/Utils.fs" />
     <Compile Include="src/SQL/Parsing.fs" />
     <Compile Include="src/SQL/AST.fs" />
+    <Compile Include="src/SQL/Rename.fs" />
     <Compile Include="src/SQL/DDL.fs" />
     <Compile Include="src/SQL/Misc.fs" />
     <Compile Include="src/SQL/PLPgSQL.fs" />

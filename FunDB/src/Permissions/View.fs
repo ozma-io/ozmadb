@@ -4,10 +4,12 @@ open FSharpPlus
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.SQL.AST
+open FunWithFlags.FunDB.SQL.Rename
 open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Permissions.Apply
+open FunWithFlags.FunDB.Permissions.Resolve
 open FunWithFlags.FunDB.Permissions.Compile
 module FunQL = FunWithFlags.FunDB.FunQL.AST
 
@@ -98,17 +100,16 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                             (from, newWhere, joins)
                         | Some restr ->
                             // Rename old table reference in restriction joins and expression.
-                            let oldTableName = renameResolvedEntityRef entityInfo.Ref
                             let renameJoinKey (key : JoinKey) =
-                                if key.Table = oldTableName then
+                                if key.Table = restrictedTableRef.Name then
                                     { key with Table = tableName }
                                 else
                                     key
                             let restrJoinsMap = Map.mapKeys renameJoinKey restr.Joins.Map
                             let (renamesMap, addedJoins, joins) = augmentJoinPaths joins { restr.Joins with Map = restrJoinsMap }
                             let (entitiesMap, from) = buildJoins layout info.Entities from addedJoins
-                            let renamesMap = Map.add oldTableName tableName renamesMap
-                            let check = renameAllValueExprTables renamesMap restr.Where
+                            let renamesMap = Map.add restrictedTableRef.Name tableName renamesMap
+                            let check = naiveRenameAllTablesExpr renamesMap restr.Where
                             // We flip here so that check is added to the right. It is important to put user conditions first,
                             // so that we won't slow down the query when PostgreSQL can't find out priority by itself.
                             // For example:

@@ -10,6 +10,7 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Lex
 open FunWithFlags.FunDB.FunQL.Parse
 open FunWithFlags.FunDB.FunQL.Resolve
+open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.FunQL.UsedReferences
 open FunWithFlags.FunDB.FunQL.Optimize
 open FunWithFlags.FunDB.Layout.Types
@@ -32,6 +33,10 @@ type ResolvePermissionsParentException (message : string, innerException : exn, 
         ResolvePermissionsParentException (message, innerException, isUserException innerException)
 
     new (message : string) = ResolvePermissionsParentException (message, null, true)
+
+// Name for the restricted table in the restriction expressions. Used to simplify the renaming later.
+let restrictedEntityRef = { Schema = None; Name = FunQLName "__restricted" } : EntityRef
+let restrictedTableRef = compileEntityRef restrictedEntityRef
 
 let private checkName (FunQLName name) : unit =
     if not <| goodName name then
@@ -94,10 +99,14 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, hasUserView
             | Ok r -> r
             | Error msg -> raisef ResolvePermissionsException "Error parsing: %s" msg
 
-        let entityInfo = SFEntity entityRef
+        let entityInfo =
+            SFEntity
+                { customEntityMapping entityRef with
+                    ForceSQLTable = Some restrictedTableRef
+                }
         let (exprInfo, expr) =
             try
-                // TOOD: allow to specify `__self` as home schema.
+                // TODO: allow to specify `__self` as home schema.
                 resolveSingleFieldExpr defaultCallbacks OrderedMap.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"

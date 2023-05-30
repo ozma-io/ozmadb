@@ -107,8 +107,8 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
 
     let makeCustomMapping (name : FieldName) (colName : SQL.ColumnName) =
         let info =
-            { Bound = CFUnbound
-              ForceSQLName = Some colName
+            { customFromField CFUnbound with
+                ForceSQLName = Some colName
             } : CustomFromField
         let ref = { Entity = None; Name = name } : FieldRef
         (ref, info)
