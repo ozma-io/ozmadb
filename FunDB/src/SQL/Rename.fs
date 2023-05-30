@@ -4,7 +4,7 @@ open FunWithFlags.FunDB.SQL.AST
 
 type RenamesMap = Map<TableName, TableName>
 
-type private Renamer (failOnNoFind : bool, renamesMap : RenamesMap) =
+type private NaiveRenamer (renamesMap : RenamesMap) =
     let rec renameSelectTreeExpr : SelectTreeExpr -> SelectTreeExpr = function
         | SSelect query -> SSelect <| renameSingleSelectExpr query
         | SSetOp setOp ->
@@ -64,10 +64,9 @@ type private Renamer (failOnNoFind : bool, renamesMap : RenamesMap) =
         let mapColumn : ColumnRef -> ColumnRef = function
             | { Table = Some { Schema = None; Name = tableName }; Name = colName } as ref ->
                 match Map.tryFind tableName renamesMap with
-                | None when failOnNoFind -> failwithf "Unknown table name during rename: %O" tableName
                 | None -> ref
                 | Some newName -> { Table = Some { Schema = None; Name = newName }; Name = colName }
-            | ref -> failwithf "Unexpected column ref during rename: %O" ref
+            | ref -> ref
         mapValueExpr
             { idValueExprMapper with
                 ColumnReference = mapColumn
@@ -163,9 +162,6 @@ type private Renamer (failOnNoFind : bool, renamesMap : RenamesMap) =
 // This is called "naive" because it doesn't take aliasing into account. So if a table
 // has been bound under the renamed name in an inner SELECT, it will still be renamed.
 // Use with caution!
-let private genericNaiveRenameTablesExpr (failOnNoFind : bool) (renamesMap : RenamesMap) (expr : ValueExpr) =
-    let renamer = Renamer (failOnNoFind, renamesMap)
+let naiveRenameTablesExpr (renamesMap : RenamesMap) (expr : ValueExpr) =
+    let renamer = NaiveRenamer (renamesMap)
     renamer.RenameValueExpr expr
-
-let naiveRenameAllTablesExpr = genericNaiveRenameTablesExpr true
-let naiveRenameTablesExpr = genericNaiveRenameTablesExpr false

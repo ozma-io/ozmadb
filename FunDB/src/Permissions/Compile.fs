@@ -53,11 +53,11 @@ let restrictionToValueExpr (entityRef : ResolvedEntityRef) (newTableName : SQL.T
         // We can make expression simpler in this case, just using `WHERE`.
         // `(table.Extra :?> RealEntityAnnotation).RealEntity` is always `rootRef` here, see above.
         let renamesMap = Map.singleton (fromTableName table) newTableName
-        SQL.naiveRenameAllTablesExpr renamesMap restr.Where
+        SQL.naiveRenameTablesExpr renamesMap restr.Where
     | _ ->
         let select =
             { SQL.emptySingleSelectExpr with
-                  Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = Some <| compileRenamedResolvedEntityRef entityRef; Name = sqlFunId }) |]
+                  Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = Some restrictedTableRef; Name = sqlFunId }) |]
                   From = Some restr.From
                   Where = Some restr.Where
             }

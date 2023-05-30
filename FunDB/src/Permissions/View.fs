@@ -109,7 +109,7 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                             let (renamesMap, addedJoins, joins) = augmentJoinPaths joins { restr.Joins with Map = restrJoinsMap }
                             let (entitiesMap, from) = buildJoins layout info.Entities from addedJoins
                             let renamesMap = Map.add restrictedTableRef.Name tableName renamesMap
-                            let check = naiveRenameAllTablesExpr renamesMap restr.Where
+                            let check = naiveRenameTablesExpr renamesMap restr.Where
                             // We flip here so that check is added to the right. It is important to put user conditions first,
                             // so that we won't slow down the query when PostgreSQL can't find out priority by itself.
                             // For example:
