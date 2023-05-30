@@ -508,12 +508,14 @@ let insertEntities
 
         let insertValues = entitiesArgs |> Seq.map getRow |> Seq.toArray
 
-        let opTable = SQL.operationTable <| compileResolvedEntityRef entity.Root
+        let opTable =
+            { SQL.operationTable (compileResolvedEntityRef entity.Root) with
+                Extra = realEntityAnnotation entityRef
+            }
         let expr =
             { SQL.insertExpr opTable (SQL.ISValues insertValues) with
                 Columns = insertColumns
                 Returning = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
-                Extra = realEntityAnnotation entityRef
             }
         match applyRole with
         | None -> ()
@@ -595,7 +597,10 @@ let updateEntity
         let checkExpr = makeCheckExpr subEntityColumn layout entityRef
         let whereExpr = Option.addWith (curry SQL.VEAnd) keyCheck.Where checkExpr
 
-        let opTable = SQL.operationTable tableRef
+        let opTable =
+            { SQL.operationTable tableRef with
+                Extra = realEntityAnnotation entityRef
+            }
         let returningId =
             seq {
                 match key with
@@ -617,7 +622,6 @@ let updateEntity
                   Assignments = assigns
                   Where = Some whereExpr
                   Returning = returning
-                  Extra = realEntityAnnotation entityRef
             }
         let query =
             { Expression = expr
@@ -703,7 +707,10 @@ let deleteEntity
             else
                 keyCheck.Where
 
-        let opTable = SQL.operationTable tableRef
+        let opTable =
+            { SQL.operationTable tableRef with
+                Extra = realEntityAnnotation entityRef
+            }
         let returning =
             match key with
             | RKPrimary id -> [||]
@@ -713,9 +720,8 @@ let deleteEntity
 
         let expr =
             { SQL.deleteExpr opTable with
-                  Where = Some whereExpr
-                  Returning = returning
-                  Extra = realEntityAnnotation entityRef
+                Where = Some whereExpr
+                Returning = returning
             }
         let query =
             { Expression = expr

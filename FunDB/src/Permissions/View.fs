@@ -68,7 +68,7 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
         | :? RealEntityAnnotation as ann when not ann.AsRoot ->
             match getSelectRestriction ann.RealEntity with
             | None -> select
-            | Some newSelect -> select
+            | Some newSelect -> newSelect
         | _ ->
             { CTEs = Option.map applyToCommonTableExprs select.CTEs
               Tree = applyToSelectTreeExpr select.Tree
@@ -124,9 +124,10 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
                 let where = Option.map applyToValueExpr info.WhereWithoutSubentities
                 let (fromVal, where, joins) = info.Entities |> Map.toSeq |> Seq.fold restrictOne (fromVal, where, info.Joins)
                 (Some fromVal, where)
-            | _ ->
+            | :? NoSelectFromInfo ->
                 let where = Option.map applyToValueExpr query.Where
                 (from, where)
+            | _ -> failwith "SELECT annotation is required"
 
         { Columns = Array.map applyToSelectedColumn query.Columns
           From = from
@@ -168,14 +169,18 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
         }
 
     and applyToFromExpr : FromExpr -> FromExpr = function
-        | FTable ({ Extra = :? RealEntityAnnotation as ann } as fTable) when not ann.IsInner && not ann.AsRoot ->
-            match getSelectRestriction ann.RealEntity with
-            | None -> FTable fTable
-            | Some newSelect ->
-                // `Alias` is guaranteed to be there for all table queries.
-                let newExpr = subSelectExpr (Option.get fTable.Alias) newSelect
-                FTableExpr newExpr
-        | FTable fTable -> FTable fTable
+        | FTable ({ Extra = :? RealEntityAnnotation as ann } as fTable) ->
+            if ann.IsInner || ann.AsRoot then
+                FTable fTable
+            else
+                match getSelectRestriction ann.RealEntity with
+                | None -> FTable fTable
+                | Some newSelect ->
+                    // `Alias` is guaranteed to be there for all table queries.
+                    let newExpr = subSelectExpr (Option.get fTable.Alias) newSelect
+                    FTableExpr newExpr
+        | FTable ({ Extra = :? NoEntityAnnotation } as fTable) -> FTable fTable
+        | FTable fTable -> failwith "Entity annotation is required"
         | FTableExpr expr -> FTableExpr <| applyToFromTableExpr expr
         | FJoin join ->
             FJoin
@@ -227,10 +232,10 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
         let newWhere =
             match query.Table.Extra with
             | :? RealEntityAnnotation as tableInfo ->
-                // All compiled tables always get an alias.
-                let newTableName = Option.get query.Table.Alias
+                let newTableName = (operationTableRef query.Table).Name
                 getUpdateValueRestriction tableInfo.RealEntity newTableName
-            | _ -> None
+            | :? NoEntityAnnotation -> None
+            | _ -> failwith "Entity annotation is required"
         let oldWhere =
             match query.Extra with
             | :? UpdateFromInfo as tableInfo -> tableInfo.WhereWithoutSubentities
@@ -250,9 +255,10 @@ type private PermissionsApplier (layout : Layout, allowedDatabase : AppliedAllow
         let newWhere =
             match query.Table.Extra with
             | :? RealEntityAnnotation as tableInfo ->
-                let newTableName = Option.get query.Table.Alias
+                let newTableName = (operationTableRef query.Table).Name
                 getDeleteValueRestriction tableInfo.RealEntity newTableName
-            | _ -> None
+            | :? NoEntityAnnotation -> None
+            | _ -> failwith "Entity annotation is required"
         let oldWhere =
             match query.Extra with
             | :? UpdateFromInfo as tableInfo -> tableInfo.WhereWithoutSubentities

@@ -250,6 +250,8 @@ type SelectFromInfo =
       WhereWithoutSubentities : SQL.ValueExpr option
     }
 
+type NoSelectFromInfo = NoSelectFromInfo
+
 [<NoEquality; NoComparison>]
 type UpdateFromInfo =
     { WhereWithoutSubentities : SQL.ValueExpr option
@@ -606,6 +608,8 @@ type RealEntityAnnotation =
       IsInner : bool
       AsRoot : bool
     }
+
+type NoEntityAnnotation = NoEntityAnnotation
 
 type RealFieldAnnotation =
     { Name : FieldName
@@ -1064,7 +1068,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
         let columns = signatureColumns skipNames sign half |> Array.ofSeq
         let extra =
             match half.FromInfo with
-            | None -> null
+            | None -> NoSelectFromInfo :> obj
             | Some info -> info :> obj
         SQL.SSelect { sel with Columns = columns; Extra = extra }
     | SQL.SSetOp setOp ->
@@ -1637,6 +1641,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             { SQL.emptySingleSelectExpr with
                 Columns = [|SQL.SCExpr (None, resExpr)|]
                 From = Some (SQL.FTableExpr fromExpr)
+                Extra = NoSelectFromInfo
             }
         let expr = singleSelectExpr |> SQL.SSelect |> SQL.selectExpr |> SQL.VESubquery
         (paths, expr)
@@ -2477,7 +2482,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
             let newName = Option.defaultValue name pun
             let fromInfo = subentityFromInfo mainEntity selectSig
             let fTable =
-                { Extra = null
+                { Extra = NoEntityAnnotation
                   Alias = compiledAlias
                   Table = { Schema = None; Name = name' }
                 } : SQL.FromTable
@@ -2706,7 +2711,7 @@ type private QueryCompiler (layout : Layout, defaultAttrs : MergedDefaultAttribu
                 let fromTable =
                     { Table = opTable.Table
                       Alias = Some { Name = selfTableName; Columns = None }
-                      Extra = null
+                      Extra = NoEntityAnnotation
                     } : SQL.FromTable
                 let (where, fromExpr) =
                     match from with

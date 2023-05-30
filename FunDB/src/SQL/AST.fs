@@ -1407,3 +1407,8 @@ let fromTableExpr (expr : TableExpr) : FromTableExpr =
       Alias = None
       Lateral = false
     }
+
+let operationTableRef (opTable : OperationTable) : TableRef =
+    match opTable.Alias with
+    | Some alias -> { Schema = None; Name = alias }
+    | None -> opTable.Table
