@@ -408,7 +408,14 @@ let private fieldsToFieldMapping (fromEntityId : FromEntityId) (maybeEntityRef :
         explodeFieldRef { Entity = maybeEntityRef; Name = fieldName } |> Seq.map (fun x -> (x, value))
     fields |> Map.toSeq |> Seq.collect explodeVariations |> Map.ofSeq
 
-let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEntityId) (isInner : bool) (maybeEntityRef : EntityRef option) (parentRef : ResolvedEntityRef) (children : ResolvedEntityRef seq) : FieldMapping =
+type private FromMappingFlags =
+    { WithoutChildren : bool
+      AllowHidden : bool
+      IsInner : bool
+      ForceSQLTable : SQL.TableRef option
+    }
+
+let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEntityId) (flags : FromMappingFlags) (maybeEntityRef : EntityRef option) (parentRef : ResolvedEntityRef) (children : ResolvedEntityRef seq) : FieldMapping =
     let filterField (name : FieldName, field : ResolvedFieldBits) =
         match field with
         | RColumnField { InheritedFrom = None } -> true
@@ -431,14 +438,14 @@ let private typeRestrictedFieldsToFieldMapping (layout : ILayoutBits) (fromEntit
                   Key = key
                   Immediate = true
                   Single = false
-                  IsInner = isInner
+                  IsInner = flags.IsInner
                 }
             let info =
                 { Entity = maybeEntityRef
                   EntityId = fromEntityId
                   Type = resolvedFieldBitsType field
                   Mapping = FMTypeRestricted header
-                  ForceSQLTable = None
+                  ForceSQLTable = flags.ForceSQLTable
                   ForceSQLName = resolvedFieldForcedSQLName field
                   FieldAttributes = Set.empty
                 }
@@ -1370,13 +1377,6 @@ type FromEntityMeta =
       IsInner : bool
     }
 
-type private FromMappingFlags =
-    { WithoutChildren : bool
-      AllowHidden : bool
-      IsInner : bool
-      ForceSQLTable : SQL.TableRef option
-    }
-
 let rec private relabelFromExprType (typeContexts : TypeContextsMap) = function
     | FEntity entity ->
         let idMeta = ObjectMap.findType<FromEntityIdMeta> entity.Extra
@@ -1560,7 +1560,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
         if flags.WithoutChildren then
             mapping
         else
-            let extraMapping = typeRestrictedFieldsToFieldMapping layout fromEntityId flags.IsInner mappingRef entityRef (entity.Children |> Map.keys)
+            let extraMapping = typeRestrictedFieldsToFieldMapping layout fromEntityId flags mappingRef entityRef (entity.Children |> Map.keys)
             Map.unionUnique extraMapping mapping
 
     let domainFromInfo (fromEntityId : FromEntityId) (boundValue : BoundValue option) (fieldType : ResolvedFieldType) (tableName : EntityName) (flags : DomainExprInfo) : FromExprInfo =
