@@ -48,7 +48,7 @@ let primaryConstraintKey = "__primary"
 
 type private MetaBuilder (layout : Layout) =
     let compileRelatedExpr (expr : ResolvedFieldExpr) : SQL.ValueExpr =
-        let (arguments, ret) = compileSingleFieldExpr layout relatedCompilationFlags emptyArguments expr
+        let (arguments, ret) = compileSingleFieldExpr defaultCompilationFlags layout relatedCompilationFlags emptyArguments expr
         ret
 
     let makeUniqueConstraintMeta (entity : ResolvedEntity) (constr : ResolvedUniqueConstraint) : SQL.ConstraintMeta =
@@ -145,7 +145,7 @@ type private MetaBuilder (layout : Layout) =
             if exprIsLocal rootInfo.Flags then
                 let meta = simpleColumnMeta ref.Entity
                 let resolved = makeSingleFieldExpr layout meta { Entity = None; Name = ref.Name }
-                let (arguments, compiled) = compileSingleFieldExpr layout materializedCompilationFlags emptyArguments resolved
+                let (arguments, compiled) = compileSingleFieldExpr defaultCompilationFlags layout materializedCompilationFlags emptyArguments resolved
                 SQL.CTGeneratedStored compiled
             else
                 SQL.CTPlain { DefaultExpr = None }

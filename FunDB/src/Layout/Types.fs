@@ -383,8 +383,6 @@ let allPossibleEntities (layout : ILayoutBits) (parentRef : ResolvedEntityRef) :
     else
         PEList <| allPossibleEntitiesList' layout parentRef parentEntity
 
-let localExprFromEntityId = 0
-
 let allowedOpClasses =
     Map.ofSeq
         [ (FunQLName "trgm", Map.ofSeq [(ITGIST, SQL.SQLName "gist_trgm_ops"); (ITGIN, SQL.SQLName "gin_trgm_ops")])

@@ -2942,7 +2942,8 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
 
     member this.ResolveDataExpr flags dataExpr = resolveDataExpr emptyContext flags dataExpr
 
-    member this.ResolveSingleFieldExpr (fromEntityId : FromEntityId) (fromMapping : SingleFromMapping) expr =
+    member this.ResolveSingleFieldExpr (fromMapping : SingleFromMapping) expr =
+        let localEntityId = -1
         let mapping =
             match fromMapping with
             | SFEntity entity ->
@@ -2952,12 +2953,12 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                       WithoutChildren = false
                       ForceSQLTable = entity.ForceSQLTable
                     }
-                createFromMapping fromEntityId entity.Ref None flags
-            | SFCustom custom -> customToFieldMapping layout fromEntityId true custom
+                createFromMapping localEntityId entity.Ref None flags
+            | SFCustom custom -> customToFieldMapping layout localEntityId true custom
         let context =
             { emptyContext with
                   FieldMaps = [mapping]
-                  LocalEntities = Set.singleton fromEntityId
+                  LocalEntities = Set.singleton localEntityId
             }
         resolveFieldExpr context expr
 
@@ -2979,11 +2980,12 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
               WithoutChildren = false
               ForceSQLTable = None
             }
-        let mapping = createFromMapping localExprFromEntityId entityRef None flags
+        let localEntityId = -1
+        let mapping = createFromMapping localEntityId entityRef None flags
         let context =
             { emptyContext with
                   FieldMaps = [mapping]
-                  LocalEntities = Set.singleton localExprFromEntityId
+                  LocalEntities = Set.singleton localEntityId
             }
         let (info, ret) = resolveBoundAttributesMap context fieldResolvedExprInfo attrs
         ret
@@ -3198,9 +3200,9 @@ type SingleFieldExprInfo =
       Flags : ResolvedExprFlags
     }
 
-let resolveSingleFieldExpr (callbacks : ResolveCallbacks) (arguments : ParsedArgumentsMap) (fromEntityId : FromEntityId) (flags : ExprResolutionFlags) (fromMapping : SingleFromMapping) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
+let resolveSingleFieldExpr (callbacks : ResolveCallbacks) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) (fromMapping : SingleFromMapping) (expr : ParsedFieldExpr) : SingleFieldExprInfo * ResolvedFieldExpr =
     let (localArguments, qualifier) = getArgumentsQualifier callbacks arguments flags
-    let (exprInfo, qExpr) = qualifier.ResolveSingleFieldExpr fromEntityId fromMapping expr
+    let (exprInfo, qExpr) = qualifier.ResolveSingleFieldExpr fromMapping expr
     let singleInfo =
         { LocalArguments = localArguments
           Flags = exprInfo.Info.Flags
@@ -3251,7 +3253,7 @@ type SimpleColumnMeta =
 let simpleColumnMeta (boundEntity : ResolvedEntityRef) : SimpleColumnMeta =
     { IsInner = true
       BoundEntity = boundEntity
-      EntityId = localExprFromEntityId
+      EntityId = -1
       Path = [||]
       PathEntities = [||]
       ForceSQLTable = None

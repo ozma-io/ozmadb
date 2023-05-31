@@ -107,7 +107,7 @@ type private RoleResolver (layout : Layout, forceAllowBroken : bool, hasUserView
         let (exprInfo, expr) =
             try
                 // TODO: allow to specify `__self` as home schema.
-                resolveSingleFieldExpr defaultCallbacks OrderedMap.empty localExprFromEntityId emptyExprResolutionFlags entityInfo whereExpr
+                resolveSingleFieldExpr defaultCallbacks OrderedMap.empty emptyExprResolutionFlags entityInfo whereExpr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolvePermissionsException e "Failed to resolve restriction expression"
         let usedReferences = fieldExprUsedReferences layout expr

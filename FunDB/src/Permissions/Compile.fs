@@ -17,6 +17,10 @@ type CompiledRestriction =
 
 let private defaultWhere : SQL.ValueExpr = SQL.VEValue (SQL.VBool true)
 
+let private restrictionJoinNamespace = FunQLName "restr"
+
+let private restrictionCompilationFlags = { defaultCompilationFlags with SubExprJoinNamespace = restrictionJoinNamespace }
+
 let compileRestriction (layout : Layout) (entityRef : ResolvedEntityRef) (arguments : QueryArguments) (restr : ResolvedFieldExpr) : QueryArguments * CompiledRestriction =
     let entity = layout.FindEntity entityRef |> Option.get
     // We don't want compiler to add type check to the result, because our own typecheck is built into the restriction.
@@ -25,7 +29,7 @@ let compileRestriction (layout : Layout) (entityRef : ResolvedEntityRef) (argume
         { fromEntity (relaxEntityRef entity.Root) with
               Alias = Some restrictedEntityRef.Name
         }
-    let (info, from) = compileSingleFromExpr layout arguments (FEntity fEntity) (Some restr)
+    let (info, from) = compileSingleFromExpr restrictionCompilationFlags layout arguments (FEntity fEntity) (Some restr)
     let ret =
         { From = from.From
           Joins = from.Joins

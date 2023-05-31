@@ -87,11 +87,9 @@ let private compileWhereExpr (layout : Layout) (initialArguments : QueryArgument
             | None -> None
             | Some realName -> Some (PLocal realName)
     let compileExpr (args : QueryArguments) =
-        let (info, expr) = compileSingleFieldExpr layout emptyExprCompilationFlags args expr
+        let (info, expr) = compileSingleFieldExpr defaultCompilationFlags layout emptyExprCompilationFlags args expr
         (info.Arguments, expr)
     modifyArgumentsInNamespace convertArgument compileExpr initialArguments
-
-let private chunkFromEntityId = -1
 
 let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (chunk : SourceChunkWhere) : ResolvedChunkWhere =
     let parsedExpr =
@@ -117,7 +115,7 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
     let callbacks = resolveCallbacks layout
     let (info, resolvedExpr) =
         try
-            resolveSingleFieldExpr callbacks parsedArguments chunkFromEntityId emptyExprResolutionFlags (SFCustom customMapping) parsedExpr
+            resolveSingleFieldExpr callbacks parsedArguments emptyExprResolutionFlags (SFCustom customMapping) parsedExpr
         with
         | :? ViewResolveException as e -> raisefWithInner ChunkException e ""
     if not <| exprIsLocal info.Flags then

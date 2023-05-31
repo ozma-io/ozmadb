@@ -629,7 +629,7 @@ type private Phase2Resolver (layout : SourceLayout, entities : HalfResolvedEntit
             }
         let (exprInfo, expr) =
             try
-                resolveSingleFieldExpr callbacks OrderedMap.empty localExprFromEntityId relatedResolutionFlags entityInfo expr
+                resolveSingleFieldExpr callbacks OrderedMap.empty relatedResolutionFlags entityInfo expr
             with
             | :? ViewResolveException as e -> raisefWithInner ResolveLayoutException e ""
         if exprInfo.Flags.HasAggregates then
