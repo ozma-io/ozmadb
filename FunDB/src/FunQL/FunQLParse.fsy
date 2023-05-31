@@ -138,12 +138,10 @@ let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
     | Some vals -> vals |> Seq.map JToken.FromObject |> jsonArray :> JToken |> ComparableJToken |> FJson |> FEValue
 
 let private makeFunc (name : FunQLName) (exprs : ParsedFieldExpr array) : ParsedFieldExpr =
-    if Map.containsKey name allowedFunctions then
-        FEFunc (name, exprs)
-    else if Map.containsKey name allowedAggregateFunctions && Array.length exprs > 0 then
+    if Map.containsKey name allowedAggregateFunctions && Array.length exprs > 0 then
         FEAggFunc (name, AEAll exprs)
     else
-        failwithf "Unknown or applied incorrectly function %O" name
+        FEFunc (name, exprs)
 
 let private makeAggFunc (name : FunQLName) (expr : ParsedAggExpr) : ParsedFieldExpr =
     if Map.containsKey name allowedAggregateFunctions then

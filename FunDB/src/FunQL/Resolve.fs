@@ -25,6 +25,27 @@ type ViewResolveException (message : string, innerException : exn, isUserExcepti
 
     new (message : string) = ViewResolveException (message, null, true)
 
+let private allowedPragmas : Set<PragmaName> =
+    Set.ofList
+        [ FunQLName "enable_bitmapscan"
+          FunQLName "enable_gathermerge"
+          FunQLName "enable_hashagg"
+          FunQLName "enable_hashjoin"
+          FunQLName "enable_indexscan"
+          FunQLName "enable_indexonlyscan"
+          FunQLName "enable_material"
+          FunQLName "enable_mergejoin"
+          FunQLName "enable_nestloop"
+          FunQLName "enable_parallel_append"
+          FunQLName "enable_parallel_hash"
+          FunQLName "enable_partition_pruning"
+          FunQLName "enable_partitionwise_join"
+          FunQLName "enable_partitionwise_aggregate"
+          FunQLName "enable_seqscan"
+          FunQLName "enable_sort"
+          FunQLName "enable_tidscan"
+        ]
+
 let fieldValueType : FieldValue -> ResolvedFieldType option = function
     | FInt _ -> Some <| FTScalar SFTInt
     | FDecimal _ -> Some <| FTScalar SFTDecimal

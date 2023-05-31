@@ -20,21 +20,63 @@ let private optionTypeToString : ResolvedFieldType option -> string = function
     | Some t -> string t
     | None -> "<unknown>"
 
+type FunctionRepr =
+    | FRFunction of SQL.SQLName
+    | FRSpecial of SQL.SpecialFunction
+
+let allowedFunctions : Map<FunctionName, FunctionRepr> =
+    Map.ofList
+        [ // Common
+          (FunQLName "to_char", FRFunction <| SQL.SQLName "to_char")
+          // Numbers
+          (FunQLName "abs", FRFunction <| SQL.SQLName "abs")
+          (FunQLName "round", FRFunction <| SQL.SQLName "round")
+          // Strings
+          (FunQLName "upper", FRFunction <| SQL.SQLName "upper")
+          (FunQLName "lower", FRFunction <| SQL.SQLName "lower")
+          (FunQLName "length", FRFunction <| SQL.SQLName "length")
+          (FunQLName "substr", FRFunction <| SQL.SQLName "substr")
+          (FunQLName "ltrim", FRFunction <| SQL.SQLName "ltrim")
+          (FunQLName "rtrim", FRFunction <| SQL.SQLName "rtrim")
+          (FunQLName "btrim", FRFunction <| SQL.SQLName "btrim")
+          (FunQLName "split_part", FRFunction <| SQL.SQLName "split_part")
+          (FunQLName "replace", FRFunction <| SQL.SQLName "replace")
+          (FunQLName "left", FRFunction <| SQL.SQLName "left")
+          (FunQLName "strpos", FRFunction <| SQL.SQLName "strpos")
+          // Dates
+          (FunQLName "age", FRFunction <| SQL.SQLName "age")
+          (FunQLName "date_part", FRFunction <| SQL.SQLName "date_part")
+          (FunQLName "date_trunc", FRFunction <| SQL.SQLName "date_trunc")
+          (FunQLName "isfinite", FRFunction <| SQL.SQLName "isfinite")
+          // Special
+          (FunQLName "coalesce", FRSpecial SQL.SFCoalesce)
+          (FunQLName "least", FRSpecial SQL.SFLeast)
+          (FunQLName "greatest", FRSpecial SQL.SFGreatest)
+        ]
+
+let private checkAllowedFunctions () =
+    allowedFunctions
+    |> Map.values |> Seq.mapMaybe (function | FRFunction name -> Some name; | _ -> None)
+    |> Seq.forall (fun name -> Map.containsKey name SQL.sqlKnownFunctions)
+
+assert checkAllowedFunctions ()
+
 let private checkFunc (name : FunctionName) (args : (ResolvedFieldType option) seq) : ResolvedFieldType =
     try
-        match Map.find name allowedFunctions with
-        | FRFunction name ->
+        match Map.tryFind name allowedFunctions with
+        | Some (FRFunction name) ->
             let overloads = Map.find name SQL.sqlKnownFunctions
             let sqlArgs = args |> Seq.map (Option.map compileFieldType) |> Seq.toArray
             match SQL.findFunctionOverloads overloads sqlArgs with
             | None -> raisef ViewTypecheckException "Couldn't deduce function overload"
             | Some (typs, ret) -> decompileFieldType ret
-        | FRSpecial SQL.SFLeast
-        | FRSpecial SQL.SFGreatest
-        | FRSpecial SQL.SFCoalesce ->
+        | Some (FRSpecial SQL.SFLeast)
+        | Some (FRSpecial SQL.SFGreatest)
+        | Some (FRSpecial SQL.SFCoalesce) ->
             match unionTypes args with
             | Some ret -> ret
             | None -> raisef ViewTypecheckException "Cannot unify values of different types"
+        | None -> raisef ViewTypecheckException "Unknown function"
     with
     | e -> raisefWithInner ViewTypecheckException e "In function call %O(%s)" name (args |> Seq.map optionTypeToString |> String.concat ", ")
 
