@@ -824,6 +824,8 @@ FieldExprMisc:
     | Value                                     { FEValue $1 }
     | Name ParenedExprList                      { makeFunc $1 $2 }
     | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN   { makeAggFunc $1 $3 }
+    // Special case for supporting `lest` SQL function.
+    | LEFT ParenedExprList                      { FEFunc (FunQLName "left", $2) }
     | JsonObject                                { $1 }
     | JsonArray                                 { $1 }
     | SelectWithParens                          { FESubquery $1 }
