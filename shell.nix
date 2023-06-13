@@ -1,10 +1,12 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
+  dotnet = pkgs.dotnet-sdk_7;
+
   env = pkgs.buildFHSUserEnv {
     name = "fundb";
     targetPkgs = pkgs: with pkgs; [
-      dotnet-sdk_6
+      dotnet
       zlib
       mono
       gcc
@@ -16,7 +18,7 @@ let
     ];
     extraOutputsToInstall = [ "dev" ];
     profile = ''
-      export DOTNET_ROOT=${pkgs.dotnet-sdk_6}
+      export DOTNET_ROOT=${dotnet}
     '';
     runScript = pkgs.writeScript "env-shell" ''
       #!${pkgs.stdenv.shell}
