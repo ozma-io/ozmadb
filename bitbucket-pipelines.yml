@@ -4,10 +4,7 @@ pipelines:
   default:
     - step: &build_step
         name: Build
-        image:
-          name: myprocessx/dotnet-build
-          username: $DOCKER_HUB_USER
-          password: $DOCKER_HUB_PASSWORD
+        image: myprocessx/dotnet-build
         caches:
           - dotnetcore
         script:
@@ -23,10 +20,7 @@ pipelines:
     master:
       - step:
           name: Build and upload
-          image:
-            name: myprocessx/dotnet-build
-            username: $DOCKER_HUB_USER
-            password: $DOCKER_HUB_PASSWORD
+          image: myprocessx/dotnet-build
           caches:
             - dotnetcore
             - docker
