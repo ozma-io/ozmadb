@@ -1,16 +1,14 @@
 module FunWithFlags.FunDB.SQL.Utils
 
-// NpgsqlInterval
-#nowarn "44"
-
 open System
 open System.Text
 open System.Globalization
 open Npgsql.NameTranslation
-open NpgsqlTypes
 open NodaTime
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
+
+open FunDBSchema.Npgsql
 
 let escapeSqlDoubleQuotes (str : string) : string = sprintf "\"%s\"" (str.Replace("\"", "\"\""))
 
@@ -150,10 +148,10 @@ let private tryGenericSqlDateTime (allowTz : bool) (dateTimeStr : string) : (int
                 if tz <> 0 then
                     failwith "Invalid format"
             let totalTicks =
-                int64 usecs * NpgsqlTimeSpan.TicksPerMicrosecond +
-                int64 seconds * NpgsqlTimeSpan.TicksPerSecond +
-                int64 minutes * NpgsqlTimeSpan.TicksPerMinute +
-                int64 hours * NpgsqlTimeSpan.TicksPerHour
+                int64 usecs * TimeSpan.TicksPerMicrosecond +
+                int64 seconds * TimeSpan.TicksPerSecond +
+                int64 minutes * TimeSpan.TicksPerMinute +
+                int64 hours * TimeSpan.TicksPerHour
             Some (date.Year, date.Month, date.Day, totalTicks)
     with
     | _ -> None
@@ -172,13 +170,13 @@ let renderSqlDate = datePattern.Format
 let trySqlDate (s : string) : LocalDate option = datePattern.Parse(s) |> ofNodaParseResult
 
 let renderSqlInterval (p : Period) : string =
-    let months = p.Years * NpgsqlTimeSpan.MonthsPerYear + p.Months
+    let months = p.Years * 12 + p.Months
     let days = p.Days
     let ticks =
-        p.Hours * NpgsqlTimeSpan.TicksPerHour +
-        p.Minutes * NpgsqlTimeSpan.TicksPerMinute +
-        p.Seconds * NpgsqlTimeSpan.TicksPerSecond +
-        p.Milliseconds * NpgsqlTimeSpan.TicksPerMillsecond +
+        p.Hours * TimeSpan.TicksPerHour +
+        p.Minutes * TimeSpan.TicksPerMinute +
+        p.Seconds * TimeSpan.TicksPerSecond +
+        p.Milliseconds * TimeSpan.TicksPerMillisecond +
         p.Ticks +
         p.Nanoseconds / 100L
     NpgsqlTimeSpan(months, days, ticks) |> string

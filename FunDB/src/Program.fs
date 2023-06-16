@@ -45,6 +45,9 @@ open FunWithFlags.FunDB.Operations.Preload
 open FunWithFlags.FunDB.API.InstancesCache
 open FunWithFlags.FunDB.EventLogger
 
+// Npgsql global type mapping is deprecated, but we are not sure how to make it better now.
+#nowarn "44"
+
 let private parseLimits : IList<FunWithFlags.FunDBSchema.Instances.RateLimit> -> RateLimit seq = function
     | null -> Seq.empty
     | limits -> limits |> Seq.map (fun limit -> { Period = limit.Period; Limit = limit.Limit })

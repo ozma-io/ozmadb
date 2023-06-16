@@ -1,27 +1,27 @@
 {
   "version": 1,
   "dependencies": {
-    "net6.0": {
+    "net7.0": {
       "FSharp.Core": {
         "type": "Direct",
-        "requested": "[6.0.7, )",
-        "resolved": "6.0.7",
-        "contentHash": "e6wGrq5smV3Yk2fBE/Y0nBG5oFyF59k5Je0a0QDydUpg6liyaafGjD3xvutciKepCP2knspZ/sWViC/F1OyyQQ=="
+        "requested": "[7.0.300, )",
+        "resolved": "7.0.300",
+        "contentHash": "8vvItREJ1l5lcp3vBCSJ1mFevVAhR48I34DuF/EoUa7o1KlFpQpagyuZkVYMAsHPIjdp47ZxM9sI4eqeXaeWkA=="
       },
       "FSharpPlus": {
         "type": "Direct",
-        "requested": "[1.2.*, )",
-        "resolved": "1.2.5",
-        "contentHash": "d4Nbm4MTE5fKY5tof6nY40GXrKxIQybwc16d1KPZtUPpeli9phwZgXaOJXcShf4PfBa8zwYfNRlWC/lMk2Ah7w==",
+        "requested": "[1.4.*, )",
+        "resolved": "1.4.1",
+        "contentHash": "LIIWzVytD3cHx4CG95oTWdQx2dwjWeoseZrN6h/2rXeE5bZ7vtBBojAg0iMIMi1I27BHkFlQsNEg/4kDs1kZKA==",
         "dependencies": {
-          "FSharp.Core": "4.6.2"
+          "FSharp.Core": "6.0.6"
         }
       },
       "Newtonsoft.Json": {
         "type": "Direct",
         "requested": "[13.0.*, )",
-        "resolved": "13.0.2",
-        "contentHash": "R2pZ3B0UjeyHShm9vG+Tu0EBb2lC8b0dFzV9gVn50ofHXh9Smjk6kTn7A/FdAsC8B5cKib1OnGYOXxRBz5XQDg=="
+        "resolved": "13.0.3",
+        "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
       "Ply": {
         "type": "Direct",
@@ -35,9 +35,9 @@
       },
       "YamlDotNet": {
         "type": "Direct",
-        "requested": "[11.2.*, )",
-        "resolved": "11.2.1",
-        "contentHash": "tBt8K+korVfrjH9wyDEhiLKxbs8qoLCLIFwvYgkSUuMC9//w3z0cFQ8LQAI/5MCKq+BMil0cfRTRvPeE7eXhQw=="
+        "requested": "[13.1.*, )",
+        "resolved": "13.1.0",
+        "contentHash": "S4tzJjofMDx8PKtbnwkaMznbPD1aUffVKW+ClhfOGAYFIPuY9sSrArcFQOcRkbwRP1kYIaMbXk4Vsnfk3dE3dQ=="
       },
       "System.Threading.Tasks.Extensions": {
         "type": "Transitive",

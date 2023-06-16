@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net7.0</TargetFramework>
 
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
@@ -38,9 +38,9 @@
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.*" />
-    <PackageReference Include="YamlDotNet" Version="11.2.*" />
+    <PackageReference Include="YamlDotNet" Version="13.1.*" />
     <PackageReference Include="Ply" Version="0.3.*" />
-    <PackageReference Include="FSharpPlus" Version="1.2.*" />
+    <PackageReference Include="FSharpPlus" Version="1.4.*" />
   </ItemGroup>
 
 </Project>

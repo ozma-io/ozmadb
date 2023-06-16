@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net7.0</TargetFramework>
 
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -15,9 +15,9 @@
 
   <ItemGroup>
     <PackageReference Include="System.Linq.Async" Version="6.0.*" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="6.0.*" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="6.0.*" />
-    <PackageReference Include="Npgsql" Version="6.0.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="7.0.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="7.0.*" />
+    <PackageReference Include="Npgsql" Version="7.0.*" />
     <PackageReference Include="NodaTime" Version="3.1.*" />
   </ItemGroup>
 
