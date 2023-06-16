@@ -8,7 +8,6 @@ pipelines:
         caches:
           - dotnetcore
         script:
-          - git submodule update --init
           - dotnet nuget add source -n ozma -u "$NUGET_USER" -p "$NUGET_PASSWORD" --store-password-in-clear-text "$NUGET_URL"
           - ./build.sh
         artifacts:
@@ -25,7 +24,6 @@ pipelines:
             - dotnetcore
             - docker
           script:
-            - git submodule update --init
             - dotnet nuget add source -n ozma -u "$NUGET_USER" -p "$NUGET_PASSWORD" --store-password-in-clear-text "$NUGET_URL"
             - ./build.sh
             - docker login -u "$DOCKER_HUB_USER" -p "$DOCKER_HUB_PASSWORD"
