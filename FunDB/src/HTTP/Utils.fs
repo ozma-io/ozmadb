@@ -87,11 +87,20 @@ let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError R
 let tryBoolRequestArg (name : string) (ctx: HttpContext) : bool option =
     match ctx.Request.Query.TryGetValue name with
     | (true, values) when values.Count = 0 -> Some true
-    | (true, values) -> Some <| Option.defaultValue false (Parsing.tryBool values.[0])
+    | (true, values) -> Some <| Option.defaultValue false (Parsing.tryBool (Seq.last values))
     | (false, _) -> None
 
 let boolRequestArg (name : string) (ctx: HttpContext) : bool =
     Option.defaultValue false (tryBoolRequestArg name ctx)
+
+let tryBoolHeaderArg (name : string) (ctx : HttpContext) : bool option =
+    match ctx.Request.Headers.TryGetValue name with
+    | (true, values) when values.Count = 0 -> None
+    | (true, values) -> Some <| Option.defaultValue false (Parsing.tryBool (Seq.last values))
+    | (false, _) -> None
+
+let boolHeaderArg (name : string) (ctx: HttpContext) : bool =
+    Option.defaultValue false (tryBoolHeaderArg name ctx)
 
 let intRequestArg (name : string) (ctx: HttpContext) : int option =
     ctx.TryGetQueryStringValue name |> Option.bind Parsing.tryIntInvariant
@@ -418,12 +427,11 @@ let private getDbContext (inst : InstanceContext) (ctx : HttpContext) =
 
         let longRunning =
             if inst.IsRoot then
-                tryBoolRequestArg "X-LongRunning" ctx |> Option.defaultValue false
+                boolHeaderArg "X-LongRunning" ctx
             else
                 false
         let initialCancellationToken =
             if longRunning then
-                logger.LogInformation("Starting a long running request")
                 let lifetime = ctx.GetService<IHostApplicationLifetime>()
                 lifetime.ApplicationStopping
             else
