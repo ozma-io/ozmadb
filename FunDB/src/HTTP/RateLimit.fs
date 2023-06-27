@@ -107,7 +107,7 @@ type private StaticRateLimitMiddleware (next : RequestDelegate, quotaExceeded : 
         quotaExceeded msg giraffeNext httpContext
 
 // Hacky! We need to merge ASP.NET-style middleware and Giraffe handlers here.
-let inline wrapMiddleware (invokeMiddleware : RequestDelegate -> HttpContext -> Task) (guarded : HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
+let inline private wrapMiddleware (invokeMiddleware : RequestDelegate -> HttpContext -> Task) (guarded : HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
     task {
         let mutable result = None : HttpContext option option
         let myNext ctx =
