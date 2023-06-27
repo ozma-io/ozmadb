@@ -87,7 +87,7 @@ let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError R
 let tryBoolRequestArg (name : string) (ctx: HttpContext) : bool option =
     match ctx.Request.Query.TryGetValue name with
     | (true, values) when values.Count = 0 -> Some true
-    | (true, values) -> Some <| Option.defaultValue false (Parsing.tryBool (Seq.last values))
+    | (true, values) -> Parsing.tryBool (Seq.last values)
     | (false, _) -> None
 
 let boolRequestArg (name : string) (ctx: HttpContext) : bool =
@@ -96,7 +96,7 @@ let boolRequestArg (name : string) (ctx: HttpContext) : bool =
 let tryBoolHeaderArg (name : string) (ctx : HttpContext) : bool option =
     match ctx.Request.Headers.TryGetValue name with
     | (true, values) when values.Count = 0 -> None
-    | (true, values) -> Some <| Option.defaultValue false (Parsing.tryBool (Seq.last values))
+    | (true, values) -> Parsing.tryBool (Seq.last values)
     | (false, _) -> None
 
 let boolHeaderArg (name : string) (ctx: HttpContext) : bool =
@@ -231,6 +231,7 @@ type InstanceContext =
       Instance : IInstance
       UserName : string
       IsRoot : bool
+      IsGlobalAdmin : bool
       CanRead : bool
     }
 
@@ -251,7 +252,7 @@ let instanceConnectionString (instance : IInstance) (modify : NpgsqlConnectionSt
 type UserTokenInfo =
     { Client : string
       Email : string option
-      IsRoot : bool
+      IsGlobalAdmin : bool
     }
 
 let inline addContext (name : string) (value : string) ([<InlineIfLambda>] f : HttpHandler) (next : HttpFunc) (ctx: HttpContext) =
@@ -269,7 +270,7 @@ let inline addContext (name : string) (value : string) ([<InlineIfLambda>] f : H
 
 let private getUserTokenInfo (client : string) (email : string option) (ctx : HttpContext) : UserTokenInfo =
     let userRoles = ctx.User.FindFirst "realm_access"
-    let isRoot =
+    let isGlobalAdmin =
         if not <| isNull userRoles then
             let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
             roles.Roles |> Seq.contains "fundb-admin"
@@ -277,7 +278,7 @@ let private getUserTokenInfo (client : string) (email : string option) (ctx : Ht
             false
     { Client = client
       Email = email
-      IsRoot = isRoot
+      IsGlobalAdmin = isGlobalAdmin
     }
 
 let resolveUser (f : UserTokenInfo -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
@@ -313,7 +314,8 @@ let private getInstanceContext (instancesSource : IInstancesSource) (instance : 
     { Source = instancesSource
       Instance = instance
       UserName = userName
-      IsRoot = info.IsRoot || isOwner || isShadowAdmin
+      IsRoot = info.IsGlobalAdmin || isOwner || isShadowAdmin
+      IsGlobalAdmin = info.IsGlobalAdmin
       CanRead = instance.AnyoneCanRead
     }
 
@@ -322,6 +324,7 @@ let private getAnonymousInstanceContext (instancesSource : IInstancesSource) (in
       Instance = instance
       UserName = anonymousUsername
       IsRoot = instance.DisableSecurity
+      IsGlobalAdmin = false
       CanRead = instance.AnyoneCanRead
     }
 
@@ -426,7 +429,7 @@ let private getDbContext (inst : InstanceContext) (ctx : HttpContext) =
         let! cacheStore = instancesCache.GetContextCache(connectionString)
 
         let longRunning =
-            if inst.IsRoot then
+            if inst.IsGlobalAdmin then
                 boolHeaderArg "X-LongRunning" ctx
             else
                 false
