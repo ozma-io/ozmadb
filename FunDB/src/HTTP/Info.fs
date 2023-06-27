@@ -32,7 +32,7 @@ let infoApi : Endpoint list =
             }
 
     let clearInstancesCache (info : UserTokenInfo) (next : HttpFunc) (ctx : HttpContext) =
-        if not info.IsRoot then
+        if not info.IsGlobalAdmin then
             requestError RIAccessDenied next ctx
         else
             let instancesCache = ctx.GetService<InstancesCacheStore>()
