@@ -1,6 +1,8 @@
 open System
 open System.IO
 open System.Threading
+open System.Linq
+open System.Linq.Expressions
 open System.Collections.Generic
 open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
@@ -52,66 +54,82 @@ let private parseLimits : IList<FunWithFlags.FunDBSchema.Instances.RateLimit> ->
     | null -> Seq.empty
     | limits -> limits |> Seq.map (fun limit -> { Period = limit.Period; Limit = limit.Limit })
 
-type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string) =
-    let connectionString =
-        let builder = NpgsqlConnectionStringBuilder(connectionString)
-        builder.Enlist <- false
-        string builder
+let private deenlistConnectionString (str : string) =
+    let builder = NpgsqlConnectionStringBuilder(str)
+    builder.Enlist <- false
+    string builder
+
+type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string, readOnlyConnectionString : string) =
+    let connectionString = deenlistConnectionString connectionString
+    let readOnlyConnectionString = deenlistConnectionString readOnlyConnectionString
+
+    new (loggerFactory : ILoggerFactory, connectionString : string) = DatabaseInstances (loggerFactory, connectionString, connectionString)
 
     interface IInstancesSource with
         member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
             task {
-                let instances =
+                let readOnlyInstances =
                     let builder = DbContextOptionsBuilder<InstancesContext> ()
                     setupDbContextLogging loggerFactory builder
-                    ignore <| builder.UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
+                    ignore <| builder.UseNpgsql(readOnlyConnectionString, fun opts -> ignore <| opts.UseNodaTime())
                     new InstancesContext(builder.Options)
                 try
-                    match! instances.Instances.FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken) with
-                    | null ->
-                        do! instances.DisposeAsync ()
-                        return None
+                    let! result = readOnlyInstances.Instances.AsNoTracking().FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken)
+                    do! readOnlyInstances.DisposeAsync ()
+                    match result with
+                    | null -> return None
                     | instance ->
                         let parsedRead = parseLimits instance.ReadRateLimitsPerUser
                         let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
                         let obj =
                             { new IInstance with
-                                  member this.Name = instance.Name
+                                member this.Name = instance.Name
 
-                                  member this.Host = instance.Host
-                                  member this.Port = instance.Port
-                                  member this.Username = instance.Username
-                                  member this.Password = instance.Password
-                                  member this.Database = instance.Database
+                                member this.Host = instance.Host
+                                member this.Port = instance.Port
+                                member this.Username = instance.Username
+                                member this.Password = instance.Password
+                                member this.Database = instance.Database
 
-                                  member this.Owner = instance.Owner
-                                  member this.DisableSecurity = instance.DisableSecurity
-                                  member this.AnyoneCanRead = instance.AnyoneCanRead
-                                  member this.Published = instance.Published
-                                  member this.ShadowAdmins = instance.ShadowAdmins
+                                member this.Owner = instance.Owner
+                                member this.DisableSecurity = instance.DisableSecurity
+                                member this.AnyoneCanRead = instance.AnyoneCanRead
+                                member this.Published = instance.Published
+                                member this.ShadowAdmins = instance.ShadowAdmins
 
-                                  member this.MaxSize = Option.ofNullable instance.MaxSize
-                                  member this.MaxUsers = Option.ofNullable instance.MaxUsers
-                                  member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
-                                  member this.ReadRateLimitsPerUser = parsedRead
-                                  member this.WriteRateLimitsPerUser = parsedWrite
+                                member this.MaxSize = Option.ofNullable instance.MaxSize
+                                member this.MaxUsers = Option.ofNullable instance.MaxUsers
+                                member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
+                                member this.ReadRateLimitsPerUser = parsedRead
+                                member this.WriteRateLimitsPerUser = parsedWrite
 
-                                  member this.AccessedAt = Option.ofNullable instance.AccessedAt
+                                member this.AccessedAt = Option.ofNullable instance.AccessedAt
 
-                                  member this.UpdateAccessedAt newTime =
-                                      unitTask {
-                                          instance.AccessedAt <- newTime
-                                          let! _ = instances.SaveChangesAsync ()
-                                          ()
-                                      }
+                                member this.UpdateAccessedAtAndDispose newTime =
+                                    ignore <|
+                                        unitTask {
+                                            let instances =
+                                                let builder = DbContextOptionsBuilder<InstancesContext> ()
+                                                setupDbContextLogging loggerFactory builder
+                                                ignore <| builder.UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
+                                                new InstancesContext(builder.Options)
+                                            let! _ =
+                                                (instances.Instances :> IQueryable<Instance>)
+                                                    .Where(fun inst -> inst.Id = instance.Id && (not inst.AccessedAt.HasValue || inst.AccessedAt.Value < newTime))
+                                                    .UpdateFromQueryAsync(fun (inst : Instance) ->
+                                                        inst.AccessedAt <- newTime
+                                                        inst
+                                                    )
+                                            do! instances.DisposeAsync ()
+                                            ()
+                                        }
 
-                                  member this.Dispose () = instances.Dispose ()
-                                  member this.DisposeAsync () = instances.DisposeAsync ()
+                                  member this.Dispose () = ()
                             }
                         return Some obj
                 with
                 | e ->
-                    do! instances.DisposeAsync ()
+                    do! readOnlyInstances.DisposeAsync ()
                     return reraise' e
             }
 
@@ -127,31 +145,30 @@ type private StaticInstance (instance : Instance) =
             let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
             let obj =
                 { new IInstance with
-                      member this.Name = instance.Name
+                    member this.Name = instance.Name
 
-                      member this.Host = instance.Host
-                      member this.Port = instance.Port
-                      member this.Username = instance.Username
-                      member this.Password = instance.Password
-                      member this.Database = instance.Database
+                    member this.Host = instance.Host
+                    member this.Port = instance.Port
+                    member this.Username = instance.Username
+                    member this.Password = instance.Password
+                    member this.Database = instance.Database
 
-                      member this.Published = instance.Published
-                      member this.Owner = instance.Owner
-                      member this.DisableSecurity = instance.DisableSecurity
-                      member this.AnyoneCanRead = instance.AnyoneCanRead
-                      member this.AccessedAt = Some <| SystemClock.Instance.GetCurrentInstant()
-                      member this.ShadowAdmins = Seq.empty
+                    member this.Published = instance.Published
+                    member this.Owner = instance.Owner
+                    member this.DisableSecurity = instance.DisableSecurity
+                    member this.AnyoneCanRead = instance.AnyoneCanRead
+                    member this.AccessedAt = Some <| SystemClock.Instance.GetCurrentInstant()
+                    member this.ShadowAdmins = Seq.empty
 
-                      member this.MaxSize = Option.ofNullable instance.MaxSize
-                      member this.MaxUsers = Option.ofNullable instance.MaxUsers
-                      member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
-                      member this.ReadRateLimitsPerUser = parsedRead
-                      member this.WriteRateLimitsPerUser = parsedWrite
+                    member this.MaxSize = Option.ofNullable instance.MaxSize
+                    member this.MaxUsers = Option.ofNullable instance.MaxUsers
+                    member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
+                    member this.ReadRateLimitsPerUser = parsedRead
+                    member this.WriteRateLimitsPerUser = parsedWrite
 
-                      member this.UpdateAccessedAt newTime = unitTask { () }
+                    member this.UpdateAccessedAtAndDispose newTime = ()
 
-                      member this.Dispose () = ()
-                      member this.DisposeAsync () = unitVtask { () }
+                    member this.Dispose () = ()
                 }
             Task.result (Some obj)
 
@@ -298,8 +315,9 @@ let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
         match fundbSection.["InstancesSource"] with
         | "database" ->
             let instancesConnectionString = config.GetConnectionString("Instances")
+            let instancesReadOnlyConnectionString = config.GetConnectionString("InstancesReadOnly")
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
-            DatabaseInstances(logFactory, instancesConnectionString) :> IInstancesSource
+            DatabaseInstances(logFactory, instancesConnectionString, instancesReadOnlyConnectionString) :> IInstancesSource
         | "static" ->
             let instance = Instance(
                 Owner = "owner@example.com"

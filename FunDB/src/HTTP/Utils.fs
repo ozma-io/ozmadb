@@ -193,7 +193,6 @@ type RealmAccess =
 
 type IInstance =
     inherit IDisposable
-    inherit IAsyncDisposable
 
     abstract member Name : string
 
@@ -217,7 +216,7 @@ type IInstance =
 
     abstract member AccessedAt : Instant option
 
-    abstract member UpdateAccessedAt : Instant -> Task
+    abstract member UpdateAccessedAtAndDispose : Instant -> unit
 
 type IInstancesSource =
     abstract member GetInstance : string -> CancellationToken -> Task<IInstance option>
@@ -415,9 +414,10 @@ let private getFunDBAPI (touchAccessedAt : bool) (inst : InstanceContext) (dbCtx
         if touchAccessedAt then
             let currTime = SystemClock.Instance.GetCurrentInstant()
             match inst.Instance.AccessedAt with
-            | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () -> ()
-            | _ ->  do! inst.Instance.UpdateAccessedAt currTime
-        do! inst.Instance.DisposeAsync ()
+            | Some prevTime when currTime - prevTime < randomAccessedAtLaxSpan () ->
+                inst.Instance.Dispose ()
+            | _ ->
+                inst.Instance.UpdateAccessedAtAndDispose currTime
         return FunDBAPI rctx
     }
 
