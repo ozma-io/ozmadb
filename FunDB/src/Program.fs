@@ -261,7 +261,7 @@ let private setupAuthentication (webAppBuilder : WebApplicationBuilder) =
 let private setupRateLimiting (webAppBuilder : WebApplicationBuilder) =
     let services = webAppBuilder.Services
 
-    match webAppBuilder.Configuration.GetValue("Redis") with
+    match webAppBuilder.Configuration.GetSection("FunDB").GetValue("Redis") with
     | null ->
         ignore <| services
             .AddMemoryCache()
@@ -312,22 +312,21 @@ let private setupInstancesCache (webAppBuilder : WebApplicationBuilder) =
 
 let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
-    let config = webAppBuilder.Configuration
     let services = webAppBuilder.Services
 
     let getInstancesSource (sp : IServiceProvider) : IInstancesSource =
-        let homeRegion = Option.ofObj <| config.GetValue("HomeRegion", null)
+        let homeRegion = Option.ofObj <| fundbSection.GetValue("HomeRegion", null)
         match fundbSection.["InstancesSource"] with
         | "database" ->
-            let instancesConnectionString = config.GetConnectionString("Instances")
-            let instancesReadOnlyConnectionString = config.GetConnectionString("InstancesReadOnly")
+            let instancesConnectionString = fundbSection.GetConnectionString("Instances")
+            let instancesReadOnlyConnectionString = fundbSection.GetConnectionString("InstancesReadOnly")
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
             DatabaseInstances(logFactory, homeRegion, instancesConnectionString, instancesReadOnlyConnectionString) :> IInstancesSource
         | "static" ->
             let instance = Instance(
                 Owner = "owner@example.com"
             )
-            config.GetSection("Instance").Bind(instance)
+            fundbSection.GetSection("Instance").Bind(instance)
             if isNull instance.Database then
                 instance.Database <- instance.Username
             StaticInstance(instance, homeRegion) :> IInstancesSource
