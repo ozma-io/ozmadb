@@ -59,13 +59,14 @@ let private deenlistConnectionString (str : string) =
     builder.Enlist <- false
     string builder
 
-type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString : string, readOnlyConnectionString : string) =
+type private DatabaseInstances (loggerFactory : ILoggerFactory, homeRegion: string option, connectionString : string, readOnlyConnectionString : string) =
     let connectionString = deenlistConnectionString connectionString
     let readOnlyConnectionString = deenlistConnectionString readOnlyConnectionString
 
-    new (loggerFactory : ILoggerFactory, connectionString : string) = DatabaseInstances (loggerFactory, connectionString, connectionString)
+    new (loggerFactory : ILoggerFactory, homeRegion: string option, connectionString : string) = DatabaseInstances (loggerFactory, homeRegion, connectionString, connectionString)
 
     interface IInstancesSource with
+        member this.Region = homeRegion
         member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
             task {
                 let readOnlyInstances =
@@ -85,6 +86,7 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString
                             { new IInstance with
                                 member this.Name = instance.Name
 
+                                member this.Region = Option.ofObj instance.Region
                                 member this.Host = instance.Host
                                 member this.Port = instance.Port
                                 member this.Username = instance.Username
@@ -138,8 +140,9 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, connectionString
             builder.ConnectionIdleLifetime <- 30
             builder.MaxAutoPrepare <- 50
 
-type private StaticInstance (instance : Instance) =
+type private StaticInstance (instance : Instance, homeRegion: string option) =
     interface IInstancesSource with
+        member this.Region = homeRegion
         member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
             let parsedRead = parseLimits instance.ReadRateLimitsPerUser
             let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
@@ -147,6 +150,7 @@ type private StaticInstance (instance : Instance) =
                 { new IInstance with
                     member this.Name = instance.Name
 
+                    member this.Region = Option.ofObj instance.Region
                     member this.Host = instance.Host
                     member this.Port = instance.Port
                     member this.Username = instance.Username
@@ -312,12 +316,13 @@ let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
     let services = webAppBuilder.Services
 
     let getInstancesSource (sp : IServiceProvider) : IInstancesSource =
+        let homeRegion = Option.ofObj <| config.GetValue("HomeRegion", null)
         match fundbSection.["InstancesSource"] with
         | "database" ->
             let instancesConnectionString = config.GetConnectionString("Instances")
             let instancesReadOnlyConnectionString = config.GetConnectionString("InstancesReadOnly")
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
-            DatabaseInstances(logFactory, instancesConnectionString, instancesReadOnlyConnectionString) :> IInstancesSource
+            DatabaseInstances(logFactory, homeRegion, instancesConnectionString, instancesReadOnlyConnectionString) :> IInstancesSource
         | "static" ->
             let instance = Instance(
                 Owner = "owner@example.com"
@@ -325,7 +330,7 @@ let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
             config.GetSection("Instance").Bind(instance)
             if isNull instance.Database then
                 instance.Database <- instance.Username
-            StaticInstance(instance) :> IInstancesSource
+            StaticInstance(instance, homeRegion) :> IInstancesSource
         | _ -> failwith "Invalid InstancesSource"
     ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
 

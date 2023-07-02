@@ -51,6 +51,7 @@ namespace FunWithFlags.FunDBSchema.Instances
         [Required]
         public string Name { get; set; } = null!;
 
+        public string Region { get; set; } = null!;
         [Required]
         public string Host { get; set; } = null!;
         public int Port { get; set; } = 5432;

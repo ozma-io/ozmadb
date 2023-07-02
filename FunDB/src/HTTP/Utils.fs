@@ -40,6 +40,7 @@ type RequestErrorInfo =
     | [<CaseName("rateExceeded")>] RIRateExceeded of Message : string
     | [<CaseName("noEndpoint")>] RINoEndpoint
     | [<CaseName("noInstance")>] RINoInstance
+    | [<CaseName("invalidRegion")>] RIWrongRegion of Region : string
     | [<CaseName("unauthorized")>] RIUnauthorized
     | [<CaseName("accessDenied")>] RIAccessDenied
     | [<CaseName("concurrentUpdate")>] RIConcurrentUpdate
@@ -54,6 +55,7 @@ type RequestErrorInfo =
             | RIRateExceeded msg -> msg
             | RINoEndpoint -> "API endpoint doesn't exist"
             | RINoInstance -> "Instance not found"
+            | RIWrongRegion region -> sprintf "Wrong instance region, correct region: %s" region
             | RIUnauthorized -> "Failed to authorize using access token"
             | RIAccessDenied -> "Database access denied"
             | RIConcurrentUpdate -> "Concurrent update detected; try again"
@@ -71,7 +73,8 @@ let requestError e =
         | RIRateExceeded _ -> RequestErrors.tooManyRequests
         | RIRequest _ -> RequestErrors.badRequest
         | RINoEndpoint -> RequestErrors.notFound
-        | RINoInstance -> RequestErrors.notFound
+        | RINoInstance -> fun content -> setHttpHeader "X-FunDB-Error" "no-instance" >=> RequestErrors.notFound content
+        | RIWrongRegion _ -> fun content -> setHttpHeader "X-FunDB-Error" "wrong-region" >=> RequestErrors.notFound content
         | RIUnauthorized -> RequestErrors.unauthorized JwtBearerDefaults.AuthenticationScheme "fundb"
         | RIAccessDenied _ -> RequestErrors.forbidden
         | RIConcurrentUpdate _ -> ServerErrors.serviceUnavailable
@@ -195,7 +198,7 @@ type IInstance =
     inherit IDisposable
 
     abstract member Name : string
-
+    abstract member Region : string option
     abstract member Host : string
     abstract member Port : int
     abstract member Username : string
@@ -221,6 +224,7 @@ type IInstance =
 type IInstancesSource =
     abstract member GetInstance : string -> CancellationToken -> Task<IInstance option>
     abstract member SetExtraConnectionOptions : NpgsqlConnectionStringBuilder -> unit
+    abstract member Region : string option
 
 let private anonymousUsername = "anonymous@example.com"
 let private serviceDomain = "service"
@@ -328,13 +332,11 @@ let private getAnonymousInstanceContext (instancesSource : IInstancesSource) (in
     }
 
 let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
-    let xInstance = ctx.Request.Headers.["X-Instance"]
     let instanceName =
-        if xInstance.Count = 0 then
-            ctx.Request.Host.Host
-        else
-            xInstance.[0]
-    
+        match ctx.Request.Headers.TryGetValue("X-FunDB-Instance") with
+        | (true, xInstance) when not <| Seq.isEmpty xInstance -> Seq.last xInstance
+        | _ -> ctx.Request.Host.Host
+
     let doLookup (next : HttpFunc) (ctx : HttpContext) =
         task {
             let instancesSource = ctx.GetService<IInstancesSource>()
@@ -343,22 +345,27 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                 return! requestError RINoInstance next ctx
             | Some instance ->
                 use _ = instance
-                if instance.DisableSecurity then
-                    let ictx = getAnonymousInstanceContext instancesSource instance
-                    return! f ictx next ctx
-                else
-                    let failHandler =
-                        if instance.AnyoneCanRead then
-                            let ictx = getAnonymousInstanceContext instancesSource instance
+                ctx.SetHttpHeader("X-FunDB-Region", instance.Region)
+                match (instancesSource.Region, instance.Region) with
+                | (Some homeRegion, Some instanceRegion) when homeRegion <> instanceRegion ->
+                    return! requestError (RIWrongRegion instanceRegion) next ctx
+                | _ ->
+                    if instance.DisableSecurity then
+                        let ictx = getAnonymousInstanceContext instancesSource instance
+                        return! f ictx next ctx
+                    else
+                        let failHandler =
+                            if instance.AnyoneCanRead then
+                                let ictx = getAnonymousInstanceContext instancesSource instance
+                                f ictx
+                            else
+                                challenge JwtBearerDefaults.AuthenticationScheme
+
+                        let proceed (info : UserTokenInfo) =
+                            let ictx = getInstanceContext instancesSource instance info
                             f ictx
-                        else
-                            challenge JwtBearerDefaults.AuthenticationScheme
 
-                    let proceed (info : UserTokenInfo) =
-                        let ictx = getInstanceContext instancesSource instance info
-                        f ictx
-
-                    return! (requiresAuthentication failHandler >=> resolveUser proceed) next ctx
+                        return! (requiresAuthentication failHandler >=> resolveUser proceed) next ctx
         }
 
     addContext "Instance" instanceName doLookup next ctx
@@ -430,7 +437,7 @@ let private getDbContext (inst : InstanceContext) (ctx : HttpContext) =
 
         let longRunning =
             if inst.IsGlobalAdmin then
-                boolHeaderArg "X-LongRunning" ctx
+                boolHeaderArg "X-FunDB-LongRunning" ctx
             else
                 false
         let initialCancellationToken =
