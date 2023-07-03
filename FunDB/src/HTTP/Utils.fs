@@ -345,7 +345,9 @@ let lookupInstance (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx :
                 return! requestError RINoInstance next ctx
             | Some instance ->
                 use _ = instance
-                ctx.SetHttpHeader("X-FunDB-Region", instance.Region)
+                match instance.Region with
+                | Some instanceRegion -> ctx.SetHttpHeader("X-FunDB-Region", instanceRegion)
+                | _ -> ()
                 match (instancesSource.Region, instance.Region) with
                 | (Some homeRegion, Some instanceRegion) when homeRegion <> instanceRegion ->
                     return! requestError (RIWrongRegion instanceRegion) next ctx
