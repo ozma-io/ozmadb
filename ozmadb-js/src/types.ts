@@ -365,73 +365,65 @@ export interface IBasicError {
   message: string;
 }
 
-export interface IInternalError extends IBasicError {
-  error: "internal";
+export interface IQuotaExceededError extends IBasicError {
+  error: "quotaExceeded";
+}
+
+export interface ICommitError extends IBasicError {
+  error: "commit";
+  inner: ApiError;
+}
+
+export interface IMigrationConflictError extends IBasicError {
+  error: "migrationConflict";
+}
+
+export interface IMigrationError extends IBasicError {
+  error: "migration";
+}
+
+export interface IOtherError extends IBasicError {
+  error: "other";
+}
+
+export type GenericError = IQuotaExceededError | ICommitError | IMigrationConflictError | IMigrationError | IOtherError;
+
+export interface IForeignKeyError extends IBasicError {
+  error: "foreignKey";
+  field: IFieldRef;
+}
+
+export interface IArgumentRequiredError extends IBasicError {
+  error: "required";
+}
+
+export interface IInvalidArgumentTypeError extends IBasicError {
+  error: "invalidType";
+}
+
+export type ArgumentCheckError = IArgumentRequiredError | IInvalidArgumentTypeError;
+
+export interface IArgumentError extends IBasicError {
+  error: "argument";
+  argument: ArgumentName;
+  inner: ArgumentCheckError;
+}
+
+export interface IExecutionError extends IBasicError {
+  error: "execution";
+}
+
+export type FunQLExecutionError = IForeignKeyError | IArgumentError | IExecutionError;
+
+export interface IAccessDeniedError extends IBasicError {
+  error: "accessDenied";
 }
 
 export interface IRequestError extends IBasicError {
   error: "request";
 }
 
-export interface IQuotaExceededError extends IBasicError {
-  error: "quotaExceeded";
-}
-
-export interface IRateExceededError extends IBasicError {
-  error: "rateExceeded";
-}
-
-export interface INoEndpointError extends IBasicError {
-  error: "noEndpoint";
-}
-
-export interface INoInstanceError extends IBasicError {
-  error: "noInstance";
-}
-
-export interface IUnauthorizedError extends IBasicError {
-  error: "unauthorized";
-}
-
-export interface IAccessDeniedError extends IBasicError {
-  error: "accessDenied";
-}
-
-export interface IConcurrentUpdateError extends IBasicError {
-  error: "concurrentUpdate";
-}
-
-export interface IStackOverflowError extends IBasicError {
-  error: "stackOverflow";
-  trace: EventSource[];
-}
-
-export type GenericError = IInternalError | IRequestError | IQuotaExceededError | IRateExceededError | INoEndpointError | INoInstanceError | IUnauthorizedError | IAccessDeniedError | IConcurrentUpdateError | IStackOverflowError;
-
-export interface INotFoundError extends IBasicError {
-  error: "notFound";
-}
-
-export interface ICompilationError extends IBasicError {
-  error: "compilation";
-  details: string;
-}
-
-export interface IExecutionError extends IBasicError {
-  error: "execution";
-  details: string;
-}
-
-export interface IArgumentsError extends IBasicError {
-  error: "arguments";
-  details: string;
-}
-
-export type UserViewError = GenericError | INotFoundError | ICompilationError | IExecutionError | IArgumentsError;
-
-export interface IFrozenError extends IBasicError {
-  error: "frozen";
-}
+export type UserViewError = GenericError | IAccessDeniedError | IRequestError | FunQLExecutionError;
 
 export interface IExceptionError extends IBasicError {
   error: "exception";
@@ -443,41 +435,36 @@ export interface ITriggerError extends IBasicError {
   error: "trigger";
   schema: SchemaName;
   name: TriggerName;
-  inner: EntityError;
+  inner: ApiError;
 }
 
-export type EntityError = GenericError | INotFoundError | IFrozenError | IAccessDeniedError | IArgumentsError | ICompilationError | IExecutionError | IExceptionError | ITriggerError;
+export interface IEntryNotFoundError extends IBasicError {
+  error: "entryNotFound";
+}
+
+export type EntityError = GenericError | IExceptionError | ITriggerError | FunQLExecutionError | IRequestError | IAccessDeniedError | IEntryNotFoundError | IOtherError;
 
 export interface ITransactionError extends IBasicError {
   error: "transaction";
-  message: string;
   operation: number;
   inner: EntityError;
 }
 
 export type TransactionError = GenericError | ITransactionError;
 
-export type SaveError = GenericError | IAccessDeniedError | INotFoundError;
+export type SaveError = GenericError | IAccessDeniedError | IRequestError;
 
-export interface IPreloadedError extends IBasicError {
-  error: "preloaded";
-}
-
-export interface IInvalidFormatError extends IBasicError {
-  error: "invalidFormat";
-  details: string;
-}
 
 export interface IConsistencyError extends IBasicError {
   error: "consistency";
   details: string;
 }
 
-export type RestoreError = GenericError | IAccessDeniedError | IPreloadedError | IInvalidFormatError | IConsistencyError;
+export type RestoreError = GenericError | IAccessDeniedError | IRequestError;
 
-export type ActionError = GenericError | INotFoundError | ICompilationError | IExceptionError;
+export type ActionError = GenericError | IRequestError | IExceptionError | IOtherError;
 
-export type DomainError = GenericError | INotFoundError | IAccessDeniedError | IArgumentsError | IExecutionError;
+export type DomainError = GenericError | IRequestError | FunQLExecutionError | IAccessDeniedError;
 
 export type ApiError = GenericError | UserViewError | EntityError | TransactionError | SaveError | RestoreError | ActionError | DomainError;
 

@@ -1,6 +1,6 @@
 import {
   IEntityRef, IEntity, IUserViewRef, IQueryChunk, ApiError, IViewExprResult, IViewInfoResult,
-  IActionRef, IActionResult, ArgumentName, IFieldRef,
+  IActionRef, IActionResult, ArgumentName, IFieldRef, IAccessDeniedError, IRequestError,
   IDomainValuesResult, FieldName, IPermissionsInfo, RowKey, RowId, IBasicError,
 } from "../types";
 
@@ -12,7 +12,47 @@ export interface INetworkFailureError extends IBasicError {
   error: "networkFailure";
 }
 
-export type ClientApiError = ApiError | INetworkFailureError;
+export interface IInternalError extends IBasicError {
+  error: "internal";
+}
+
+export interface IRateExceededError extends IBasicError {
+  error: "rateExceeded";
+}
+
+export interface INoEndpointError extends IBasicError {
+  error: "noEndpoint";
+}
+
+export interface INoInstanceError extends IBasicError {
+  error: "noInstance";
+}
+
+export interface IUnauthorizedError extends IBasicError {
+  error: "unauthorized";
+}
+
+export interface IConcurrentUpdateError extends IBasicError {
+  error: "concurrentUpdate";
+}
+
+export interface IStackOverflowError extends IBasicError {
+  error: "stackOverflow";
+  trace: EventSource[];
+}
+
+export type ClientHttpError = INetworkFailureError
+                            | IInternalError
+                            | IRequestError
+                            | IRateExceededError
+                            | INoEndpointError
+                            | INoInstanceError
+                            | IUnauthorizedError
+                            | IAccessDeniedError
+                            | IConcurrentUpdateError
+                            | IStackOverflowError;
+
+export type ClientApiError = ApiError | ClientHttpError;
 
 export class FunDBError extends Error {
   body: ClientApiError;
@@ -104,14 +144,14 @@ export interface IEntriesExplainOpts extends IEntriesRequestOpts, IExplainFlags 
 export interface IInsertEntityOp {
   type: "insert";
   entity: IEntityRef;
-  entries: Record<FieldName, unknown>;
+  fields: Record<FieldName, unknown>;
 }
 
 export interface IUpdateEntityOp {
   type: "update";
   entity: IEntityRef;
   id: RowKey;
-  entries: Record<FieldName, unknown>;
+  fields: Record<FieldName, unknown>;
 }
 
 export interface IDeleteEntityOp {
