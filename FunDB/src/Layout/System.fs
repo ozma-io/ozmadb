@@ -16,7 +16,7 @@ let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * Sourc
     if property.DeclaringType <> property.ReflectedType || isNull field
     then None
     else
-        let name = FunQLName (snakeCaseKey property.Name)
+        let name = FunQLName (snakeCaseName property.Name)
         let requiredAttr = Attribute.GetCustomAttribute(property, typeof<RequiredAttribute>) :?> RequiredAttribute
         let res =
             { Type = field.Type
@@ -66,7 +66,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
     match Attribute.GetCustomAttribute(prop, typeof<EntityAttribute>) with
     | null -> None
     | :? EntityAttribute as entityAttr ->
-        let name = FunQLName (snakeCaseKey prop.Name)
+        let name = FunQLName (snakeCaseName prop.Name)
         // Should be DbSet<Foo>
         let entityClass = prop.PropertyType.GetGenericArguments().[0]
         let columnFields = entityClass.GetProperties() |> Seq.mapMaybe makeSourceColumnField |> Map.ofSeq
