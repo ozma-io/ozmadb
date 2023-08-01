@@ -1,5 +1,3 @@
-options:
-  max-time: 5
 pipelines:
   default:
     - step: &build
@@ -10,7 +8,7 @@ pipelines:
           - yarn
         script:
           - ./build.sh
-          - yarn lint
+          - ./lint.sh
         artifacts:
           - dist/**
           - bundle/**
@@ -21,18 +19,37 @@ pipelines:
     master:
       - step: *build
       - step:
-          name: Deploy to test
-          image: atlassian/default-image:2
-          deployment: test
+          name: Upload
+          caches:
+            - docker
           script:
-            - dev/deploy.sh bitbucket@manager.services.ozma.io development
+            - docker login -u "$DOCKER_HUB_USER" -p "$DOCKER_HUB_PASSWORD"
+            # Workaround for pipes not supporting private docker repos.
+            - docker pull myprocessx/upload-artifact
+            - pipe: ozma-io/upload-artifact:master
+              variables:
+                LOCAL_PATH: bundle
+          artifacts:
+            - artifact.json
+      - step:
+          name: Deploy to test
+          deployment: test
+          caches:
+            - docker
+          script:
+            - docker login -u "$DOCKER_HUB_USER" -p "$DOCKER_HUB_PASSWORD"
+            - docker pull myprocessx/deploy-artifact
+            - pipe: ozma-io/deploy-artifact:master
       - step:
           name: Deploy to production
-          image: atlassian/default-image:2
           deployment: production
           trigger: manual
+          caches:
+            - docker
           script:
-            - dev/deploy.sh bitbucket@manager.services.ozma.io production
+            - docker login -u "$DOCKER_HUB_USER" -p "$DOCKER_HUB_PASSWORD"
+            - docker pull myprocessx/deploy-artifact
+            - pipe: ozma-io/deploy-artifact:master
 
 definitions:
   caches:
