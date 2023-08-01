@@ -35,6 +35,7 @@ type FunQLExecutionError =
         | UVEArgument e -> e.LogMessage
         | UVEExecution details -> details
 
+    [<DataMember>]
     member this.Message =
         match this with
         | UVEIntegrity e -> e.Message
@@ -49,6 +50,12 @@ type FunQLExecutionError =
 
     member this.ShouldLog = false
 
+    static member private LookupKey = prepareLookupCaseKey<FunQLExecutionError>
+    member this.Error =
+        match this with
+        | UVEIntegrity e -> e.Error
+        | _ -> FunQLExecutionError.LookupKey this |> Option.get
+
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
 
@@ -56,6 +63,7 @@ type FunQLExecutionError =
         member this.LogMessage = this.LogMessage
         member this.Message = this.Message
         member this.HTTPResponseCode = this.HTTPResponseCode
+        member this.Error = this.Error
 
 type UserViewExecutionException (details : FunQLExecutionError, innerException : exn) =
     inherit UserException(details.Message, innerException, true)

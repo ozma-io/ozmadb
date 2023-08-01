@@ -28,6 +28,10 @@ type APICallErrorInfo =
             match this with
             | ACECall msg -> msg
 
+        static member private LookupKey = prepareLookupCaseKey<APICallErrorInfo>
+        member this.Error =
+            APICallErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = false
 
@@ -35,6 +39,7 @@ type APICallErrorInfo =
             member this.Message = this.Message
             member this.LogMessage = this.Message
             member this.HTTPResponseCode = 500
+            member this.Error = this.Error
 
 type JavaScriptAPIException (message : string, innerException : Exception, isUserException : bool) =
     inherit UserException(message, innerException, isUserException)

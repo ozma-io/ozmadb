@@ -13,6 +13,12 @@ type Void = private Void of unit
 
 let inline isRefNull (x : 'a) = obj.ReferenceEquals(x, null)
 
+let inline (|RefNull|_|) (value : 'a) =
+    if isRefNull value then
+        Some RefNull
+    else
+        None
+
 let inline raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
     kprintf <| fun str ->
         raise  <| constr (str, inner)

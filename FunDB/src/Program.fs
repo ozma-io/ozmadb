@@ -259,9 +259,10 @@ let private setupAuthentication (webAppBuilder : WebApplicationBuilder) =
             .AddJwtBearer(configureJwtBearer)
 
 let private setupRateLimiting (webAppBuilder : WebApplicationBuilder) =
+    let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
     let services = webAppBuilder.Services
 
-    match webAppBuilder.Configuration.GetSection("FunDB").GetValue("Redis") with
+    match fundbSection.["Redis"] with
     | null ->
         ignore <| services
             .AddMemoryCache()
@@ -318,7 +319,10 @@ let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
         match fundbSection.["InstancesSource"] with
         | "database" ->
             let instancesConnectionString = fundbSection.GetConnectionString("Instances")
-            let instancesReadOnlyConnectionString = fundbSection.GetConnectionString("InstancesReadOnly")
+            let instancesReadOnlyConnectionString =
+                fundbSection.GetConnectionString("InstancesReadOnly")
+                |> Option.ofObj
+                |> Option.defaultValue instancesConnectionString
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
             DatabaseInstances(logFactory, homeRegion, instancesConnectionString, instancesReadOnlyConnectionString) :> IInstancesSource
         | "static" ->

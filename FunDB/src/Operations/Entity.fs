@@ -5,6 +5,7 @@ open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
+open System.Runtime.Serialization
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization
@@ -39,6 +40,7 @@ type EntityOperationError =
         | EOEEntryNotFound -> "Entry not found"
         | EOEAccessDenied details -> details
 
+    [<DataMember>]
     member this.Message =
         match this with
         | EOEExecution e -> e.Message
@@ -59,6 +61,12 @@ type EntityOperationError =
         | EOEEntryNotFound -> false
         | EOEAccessDenied details -> true
 
+    static member private LookupKey = prepareLookupCaseKey<EntityOperationError>
+    member this.Error =
+        match this with
+        | EOEExecution e -> e.Error
+        | _ -> EntityOperationError.LookupKey this |> Option.get
+
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
 
@@ -66,6 +74,7 @@ type EntityOperationError =
         member this.LogMessage = this.LogMessage
         member this.Message = this.Message
         member this.HTTPResponseCode = this.HTTPResponseCode
+        member this.Error = this.Error
 
 type EntityOperationException (details : EntityOperationError, innerException : exn) =
     inherit UserException(details.Message, innerException, true)

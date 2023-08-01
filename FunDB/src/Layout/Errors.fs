@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.Layout.Errors
 
 open Npgsql
+open System.Runtime.Serialization
 
 open FunWithFlags.FunUtils.Serialization
 open FunWithFlags.FunDB.FunQL.AST
@@ -16,11 +17,16 @@ type IntegrityQueryError =
         match this with
         | LQEForeignKey ref -> sprintf "Foreign key %O is violated" ref
 
+    [<DataMember>]
     member this.Message = this.LogMessage
 
     member this.HTTPResponseCode = 422
 
     member this.ShouldLog = false
+
+    static member private LookupKey = prepareLookupCaseKey<IntegrityQueryError>
+    member this.Error =
+        IntegrityQueryError.LookupKey this |> Option.get
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
@@ -29,6 +35,7 @@ type IntegrityQueryError =
         member this.LogMessage = this.LogMessage
         member this.Message = this.Message
         member this.HTTPResponseCode = this.HTTPResponseCode
+        member this.Error = this.Error
 
 let extractIntegrityQueryError (layout : Layout) (e : PostgresException) : IntegrityQueryError option =
     match e.SqlState with

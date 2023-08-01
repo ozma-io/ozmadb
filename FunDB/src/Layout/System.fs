@@ -11,13 +11,13 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDBSchema.Attributes
 
 let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * SourceColumnField) option =
-    let field = Attribute.GetCustomAttribute(property, typeof<ColumnFieldAttribute>) :?> ColumnFieldAttribute
+    let field = property.GetCustomAttribute<ColumnFieldAttribute>()
     // Check also that property is not inherited.
     if property.DeclaringType <> property.ReflectedType || isNull field
     then None
     else
         let name = FunQLName (snakeCaseName property.Name)
-        let requiredAttr = Attribute.GetCustomAttribute(property, typeof<RequiredAttribute>) :?> RequiredAttribute
+        let requiredAttr = property.GetCustomAttribute<RequiredAttribute>()
         let res =
             { Type = field.Type
               DefaultValue =
@@ -55,7 +55,7 @@ let private makeSourceIndex (index : IndexAttribute) : FunQLName * SourceIndex =
           IncludedExpressions = if isNull index.IncludedExpressions then [||] else index.IncludedExpressions
           IsUnique = index.IsUnique
           Predicate = Option.ofObj index.Predicate
-          Type = index.Type |> Option.ofObj |> Option.map (fun typ -> Map.find typ indexTypesMap) |> Option.defaultValue ITBTree
+          Type = index.Type |> Option.ofObj |> Option.map (fun typ -> indexTypesMap.[typ]) |> Option.defaultValue ITBTree
         }
     (FunQLName index.Name, res)
 
@@ -63,9 +63,9 @@ let private getAttributes<'t when 't :> Attribute> (prop : MemberInfo) =
     Attribute.GetCustomAttributes(prop, typeof<'t>) |> Array.map (fun x -> x :?> 't)
 
 let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceEntity) option =
-    match Attribute.GetCustomAttribute(prop, typeof<EntityAttribute>) with
+    match prop.GetCustomAttribute<EntityAttribute>() with
     | null -> None
-    | :? EntityAttribute as entityAttr ->
+    | entityAttr ->
         let name = FunQLName (snakeCaseName prop.Name)
         // Should be DbSet<Foo>
         let entityClass = prop.PropertyType.GetGenericArguments().[0]
@@ -93,7 +93,6 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               IsAbstract = entityClass.IsAbstract
             }
         Some (name, entityClass, res)
-    | _ -> failwith "Impossible"
 
 // Build entities map using mish-mash of our custom attributes and Entity Framework Core declarations.
 let buildSystemSchema (contextClass : Type) : SourceSchema =

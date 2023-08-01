@@ -1,7 +1,6 @@
 module FunWithFlags.FunDB.Triggers.Source
 
 open FSharpPlus
-open Microsoft.FSharp.Reflection
 open System.ComponentModel
 
 open FunWithFlags.FunUtils
@@ -13,13 +12,10 @@ type TriggerTime =
     | [<CaseKey("BEFORE")>] TTBefore
     | [<CaseKey("AFTER")>] TTAfter
     with
-        static member private Fields = caseNames typeof<TriggerTime> |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
+        static member private LookupKey = prepareLookupCaseKey<TriggerTime>
 
         override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            let (case, _) = FSharpValue.GetUnionFields(this, typeof<TriggerTime>)
-            Map.find case.Name TriggerTime.Fields
+        member this.ToFunQLString () = TriggerTime.LookupKey this |> Option.get
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()

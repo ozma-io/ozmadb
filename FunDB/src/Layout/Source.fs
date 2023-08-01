@@ -1,8 +1,7 @@
 module FunWithFlags.FunDB.Layout.Source
 
 open FSharpPlus
-open Microsoft.FSharp.Reflection
-open Newtonsoft.Json
+open System.Runtime.Serialization
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
@@ -25,18 +24,18 @@ type IndexType =
     | [<CaseKey("gist")>] ITGIST
     | [<CaseKey("gin")>] ITGIN
     with
-        static member private Fields = caseNames typeof<IndexType> |> Map.mapWithKeys (fun name case -> (case.Info.Name, Option.get name))
+        static member private LookupKey = prepareLookupCaseKey<IndexType>
 
         override this.ToString () = this.ToFunQLString()
-
-        member this.ToFunQLString () =
-            let (case, _) = FSharpValue.GetUnionFields(this, typeof<IndexType>)
-            Map.find case.Name IndexType.Fields
+        member this.ToFunQLString () = IndexType.LookupKey this |> Option.get
 
         interface IFunQLString with
             member this.ToFunQLString () = this.ToFunQLString()
 
-let indexTypesMap = caseNames typeof<IndexType> |> Map.mapWithKeys (fun name case -> (Option.get name, FSharpValue.MakeUnion(case.Info, [||]) :?> IndexType))
+let indexTypesMap =
+    enumCases<IndexType>
+    |> Seq.map (fun (case, value) -> (Option.get (caseKey case.Info), value))
+    |> dict
 
 type SourceIndex =
     { Expressions : string[]
@@ -68,15 +67,15 @@ type SourceEntity =
       Indexes : Map<IndexName, SourceIndex>
       MainField : FieldName option
       SaveRestoreKey : ConstraintName option
-      [<JsonIgnore>]
+      [<IgnoreDataMember>]
       InsertedInternally : bool
-      [<JsonIgnore>]
+      [<IgnoreDataMember>]
       UpdatedInternally : bool
-      [<JsonIgnore>]
+      [<IgnoreDataMember>]
       DeletedInternally : bool
-      [<JsonIgnore>]
+      [<IgnoreDataMember>]
       TriggersMigration : bool
-      [<JsonIgnore>]
+      [<IgnoreDataMember>]
       IsHidden : bool
       IsAbstract : bool
       IsFrozen : bool

@@ -34,6 +34,7 @@ type DomainError =
         | DEExecution e -> e.LogMessage
         | DEAccessDenied details -> details
 
+    [<DataMember>]
     member this.Message =
         match this with
         | DEExecution e -> e.Message
@@ -49,6 +50,12 @@ type DomainError =
         | DEExecution e -> e.ShouldLog
         | DEAccessDenied details -> true
 
+    static member private LookupKey = prepareLookupCaseKey<DomainError>
+    member this.Error =
+        match this with
+        | DEExecution e -> e.Error
+        | _ -> DomainError.LookupKey this |> Option.get
+
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
 
@@ -56,6 +63,7 @@ type DomainError =
         member this.Message = this.Message
         member this.LogMessage = this.LogMessage
         member this.HTTPResponseCode = this.HTTPResponseCode
+        member this.Error = this.Error
 
 type DomainRequestException (details : DomainError, innerException : exn) =
     inherit UserException(details.LogMessage, innerException, true)

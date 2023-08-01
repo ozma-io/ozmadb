@@ -79,6 +79,10 @@ type GenericErrorInfo =
             | GECommit inner -> inner.ShouldLog
             | GEOther details -> false
 
+        static member private LookupKey = prepareLookupCaseKey<GenericErrorInfo>
+        member this.Error =
+            GenericErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
@@ -86,6 +90,7 @@ type GenericErrorInfo =
             member this.Message = this.Message
             member this.LogMessage = this.LogMessage
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 type IContext =
     inherit IDisposable
@@ -217,6 +222,7 @@ type PretendErrorInfo =
             | PEAccessDenied -> "Access denied"
             | PENoUserRole -> "User has no role"
 
+        [<DataMember>]
         member this.Message = this.LogMessage
 
         member this.ShouldLog =
@@ -233,6 +239,10 @@ type PretendErrorInfo =
             | PEAccessDenied -> 403
             | PENoUserRole -> 422
 
+        static member private LookupKey = prepareLookupCaseKey<PretendErrorInfo>
+        member this.Error =
+            PretendErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
@@ -240,6 +250,7 @@ type PretendErrorInfo =
             member this.LogMessage = this.LogMessage
             member this.Message = this.Message
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 type IRequestContext =
     abstract Context : IContext with get
@@ -290,6 +301,12 @@ type UserViewErrorInfo =
             | UVEOther msg -> false
             | UVEExecution inner -> inner.ShouldLog
 
+        static member private LookupKey = prepareLookupCaseKey<UserViewErrorInfo>
+        member this.Error =
+            match this with
+            | UVEExecution inner -> inner.Error
+            | _ -> UserViewErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
@@ -297,6 +314,7 @@ type UserViewErrorInfo =
             member this.Message = this.Message
             member this.LogMessage = this.LogMessage
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 [<SerializeAsObject("type")>]
 type UserViewSource =
@@ -421,6 +439,13 @@ type EntityErrorInfo =
             | EEOperation inner -> inner.ShouldLog
             | EECommand inner -> inner.ShouldLog
 
+        static member private LookupKey = prepareLookupCaseKey<EntityErrorInfo>
+        member this.Error =
+            match this with
+            | EEOperation inner -> inner.Error
+            | EECommand inner -> inner.Error
+            | _ -> EntityErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
@@ -428,6 +453,7 @@ type EntityErrorInfo =
             member this.Message = this.Message
             member this.LogMessage = this.LogMessage
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 [<SerializeAsObject("type")>]
 type RawRowKey =
@@ -507,9 +533,6 @@ type TransactionError =
     { Operation : int
       Inner : EntityErrorInfo
     } with
-        [<DataMember>]
-        member this.Error = "transaction"
-
         member this.LogMessage = this.Inner.LogMessage
 
         [<DataMember>]
@@ -522,10 +545,14 @@ type TransactionError =
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
+        [<DataMember>]
+        member this.Error = "transaction"
+
         interface IErrorDetails with
             member this.Message = this.Message
             member this.LogMessage = this.LogMessage
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 [<NoEquality; NoComparison>]
 type TransactionResponse =
@@ -589,6 +616,10 @@ type SaveErrorInfo =
             | RSEAccessDenied -> true
             | RSERequest msg -> false
 
+        static member private LookupKey = prepareLookupCaseKey<SaveErrorInfo>
+        member this.Error =
+            SaveErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
@@ -596,6 +627,7 @@ type SaveErrorInfo =
             member this.Message = this.Message
             member this.LogMessage = this.LogMessage
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 [<SerializeAsObject("error")>]
 type RestoreErrorInfo =
@@ -620,6 +652,10 @@ type RestoreErrorInfo =
             | RREAccessDenied -> true
             | RRERequest msg -> false
 
+        static member private LookupKey = prepareLookupCaseKey<RestoreErrorInfo>
+        member this.Error =
+            RestoreErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
@@ -627,6 +663,7 @@ type RestoreErrorInfo =
             member this.Message = this.Message
             member this.LogMessage = this.LogMessage
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 type [<JsonConverter(typeof<SaveSchemasConverter>)>] SaveSchemas =
     | SSNames of SchemaName[]
@@ -736,6 +773,10 @@ type ActionErrorInfo =
             | AEException (details, data) -> Option.isNone data
             | AEOther details -> false
 
+        static member private LookupKey = prepareLookupCaseKey<ActionErrorInfo>
+        member this.Error =
+            ActionErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
@@ -743,6 +784,7 @@ type ActionErrorInfo =
             member this.Message = this.Message
             member this.LogMessage = this.LogMessage
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 type IActionsAPI =
     abstract member RunAction : RunActionRequest -> Task<Result<ActionResponse, ActionErrorInfo>>
@@ -790,6 +832,12 @@ type DomainErrorInfo =
             | DERequest details -> false
             | DEDomain inner -> inner.ShouldLog
 
+        static member private LookupKey = prepareLookupCaseKey<DomainErrorInfo>
+        member this.Error =
+            match this with
+            | DEDomain inner -> inner.Error
+            | _ -> DomainErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
 
@@ -797,6 +845,7 @@ type DomainErrorInfo =
             member this.Message = this.Message
             member this.LogMessage = this.LogMessage
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 type DomainFlags =
     { ForceRecompile : bool

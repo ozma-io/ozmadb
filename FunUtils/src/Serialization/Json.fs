@@ -28,15 +28,31 @@ let private getInnerObject (token : JToken) (serializer : JsonSerializer) (field
     else
         token.ToObject(field.InnerType, serializer)
 
-type UnionConverter (objectType : Type) =
+let private getJsonSerializableOpts (prop : JsonProperty) =
+    { DefaultIgnore = Some prop.Ignored
+      DefaultName = Some prop.PropertyName
+    }
+
+type UnionConverter (objectType : Type, resolver : ConverterContractResolver, contract : JsonContract) =
     inherit JsonConverter ()
 
     let cases = unionCases objectType
 
+    let getSerializableOpts (prop : PropertyInfo) =
+        let p = resolver.BaseCreateProperty(prop, MemberSerialization.OptOut)
+        getJsonSerializableOpts p
+
     let (readJson, writeJson) =
-        match unionAsObject objectType with
+        match unionAsObject getSerializableOpts objectType with
         | Some objInfo ->
-            let casesMap = objInfo.Cases |> Map.values |> Seq.map (fun i -> (i.Name, i)) |> Map.ofSeq
+            let casesMap =
+                objInfo.Cases
+                |> Map.values
+                |> Seq.map (fun i -> (i.Name, i))
+                |> Map.ofSeq
+
+            let objectContract = contract :?> JsonObjectContract
+
             let read =
                 if Map.count casesMap < Map.count objInfo.Cases then
                     fun (reader : JsonReader) (serializer : JsonSerializer) ->
@@ -66,27 +82,22 @@ type UnionConverter (objectType : Type) =
                                 | CSTInnerObject ->
                                     case.Fields |> Array.map (getInnerObject obj serializer)
                                 | CSTNormal ->
-                                    let resolver =
-                                        match serializer.ContractResolver with
-                                        | :? DefaultContractResolver as r -> r
-                                        | _ -> null
                                     let getField (field : SerializableField) =
-                                        let name = if isNull resolver then field.Name else resolver.GetResolvedPropertyName(field.Name)
                                         if field.Ignore then
                                             match field.DefaultValue with
                                             | Some def -> def
-                                            | None -> raisef JsonException "Field \"%s\" is ignored and no default value is set" name
+                                            | None -> raisef JsonException "Field \"%s\" is ignored and no default value is set" field.Name
                                         else
-                                            match obj.TryGetValue(name) with
+                                            match obj.TryGetValue(field.Name) with
                                             | (true, valueToken) ->
                                                 let value = valueToken.ToObject(field.InnerType, serializer)
                                                 if not field.IsNullable && isNull value then
-                                                    raisef JsonException "Attempted to set null to non-nullable field \"%s\"" name
+                                                    raisef JsonException "Attempted to set null to non-nullable field \"%s\"" field.Name
                                                 value
                                             | (false, _) ->
                                                 match field.DefaultValue with
                                                 | Some def -> def
-                                                | None -> raisef JsonException "Couldn't find required field \"%s\"" name
+                                                | None -> raisef JsonException "Couldn't find required field \"%s\"" field.Name
                                     Seq.map getField case.Fields |> Array.ofSeq
                             case.ConvertTo args
                         | token ->
@@ -96,6 +107,7 @@ type UnionConverter (objectType : Type) =
                                 let case = objInfo.Cases.[name]
                                 let args = case.Fields |> Array.map (getInnerObject token serializer)
                                 case.ConvertTo args
+
             let write =
                 fun value (writer : JsonWriter) (serializer : JsonSerializer) ->
                     let tag = objInfo.GetTag value
@@ -130,26 +142,24 @@ type UnionConverter (objectType : Type) =
                             writer.WritePropertyName(objInfo.CaseField)
                             writer.WriteValue(cn)
                         | None -> ()
-                        let resolver =
-                            match serializer.ContractResolver with
-                            | :? DefaultContractResolver as r -> r
-                            | _ -> null
                         for (field, arg) in Seq.zip case.Fields args do
                             match field.DefaultValue with
                             | _ when field.Ignore -> ()
                             | Some d when not (Option.defaultValue true field.EmitDefaultValue) && d = arg -> ()
                             | _ ->
-                                let name = if isNull resolver then field.Name else resolver.GetResolvedPropertyName(field.Name)
-                                writer.WritePropertyName(name)
+                                writer.WritePropertyName(field.Name)
                                 serializer.Serialize(writer, arg)
                         // Add extra properties -- stuff from `with` block.
-                        let contract = serializer.ContractResolver.ResolveContract (value.GetType()) :?> JsonObjectContract
-                        for prop in contract.Properties do
-                            let fieldValue = prop.ValueProvider.GetValue(value)
-                            let skipDefaultValue = prop.DefaultValueHandling.GetValueOrDefault(DefaultValueHandling.Populate) &&& DefaultValueHandling.Ignore = DefaultValueHandling.Ignore
-                            if not (skipDefaultValue && prop.DefaultValue = fieldValue) then
-                                writer.WritePropertyName(prop.PropertyName)
-                                serializer.Serialize(writer, fieldValue)
+                        // We just use properties from the contract, as
+                        // they are built for the "base" union type, and only contain
+                        // these shared fields.
+                        for prop in objectContract.Properties do
+                            if not prop.Ignored then
+                                let fieldValue = prop.ValueProvider.GetValue(value)
+                                let skipDefaultValue = prop.DefaultValueHandling.GetValueOrDefault(DefaultValueHandling.Populate) &&& DefaultValueHandling.Ignore = DefaultValueHandling.Ignore
+                                if not (skipDefaultValue && prop.DefaultValue = fieldValue) then
+                                    writer.WritePropertyName(prop.PropertyName)
+                                    serializer.Serialize(writer, fieldValue)
                         writer.WriteEndObject()
             (read, write)
         | None ->
@@ -245,7 +255,7 @@ type UnionConverter (objectType : Type) =
         writeJson value writer serializer
 
 // Default converters for several types
-type ConverterContractResolver (converterConstructors : (Type -> JsonConverter option) array) =
+and ConverterContractResolver (converterConstructors : (Type -> JsonConverter option) array) =
     inherit DefaultContractResolver ()
 
     override this.CreateContract (objectType : Type) : JsonContract =
@@ -262,15 +272,20 @@ type ConverterContractResolver (converterConstructors : (Type -> JsonConverter o
 
         if isNull contract.Converter then
             if FSharpType.IsUnion objectType then
-                contract.Converter <- UnionConverter objectType
+                contract.Converter <- UnionConverter (objectType, this, contract)
 
         contract
+
+    member this.BaseCreateProperty (memberInfo : MemberInfo, serialization : MemberSerialization) =
+        base.CreateProperty (memberInfo, serialization)
 
     override this.CreateProperty (memberInfo : MemberInfo, serialization : MemberSerialization) : JsonProperty =
         let prop = base.CreateProperty (memberInfo, serialization)
 
         if FSharpType.IsRecord memberInfo.DeclaringType || FSharpType.IsUnion memberInfo.DeclaringType then
-            let fieldInfo = serializableField memberInfo
+            let serializableOpts = getJsonSerializableOpts prop
+            let fieldInfo = serializableField serializableOpts memberInfo
+            let fieldInfo = { fieldInfo with Name = this.ResolvePropertyName fieldInfo.Name }
             prop.Ignored <- fieldInfo.Ignore
             match fieldInfo.DefaultValue with
             | Some v when isNull prop.DefaultValue ->

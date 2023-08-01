@@ -1,6 +1,7 @@
 module FunWithFlags.FunDB.FunQL.Arguments
 
 open Newtonsoft.Json.Linq
+open System.Runtime.Serialization
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Json
@@ -23,6 +24,7 @@ type ArgumentCheckErrorInfo =
         | ACERequired -> "Required argument not found"
         | ACEInvalidType -> "Invalid value for the argument type"
 
+    [<DataMember>]
     member this.Message = this.LogMessage
 
     member this.IsUserException = true
@@ -31,6 +33,10 @@ type ArgumentCheckErrorInfo =
 
     member this.ShouldLog = false
 
+    static member private LookupKey = prepareLookupCaseKey<ArgumentCheckErrorInfo>
+    member this.Error =
+        ArgumentCheckErrorInfo.LookupKey this |> Option.get
+
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
 
@@ -38,11 +44,13 @@ type ArgumentCheckErrorInfo =
         member this.LogMessage = this.LogMessage
         member this.Message = this.Message
         member this.HTTPResponseCode = this.HTTPResponseCode
+        member this.Error = this.Error
 
 type ArgumentCheckError =
     { Argument : ArgumentName
       Inner : ArgumentCheckErrorInfo
     } with
+    [<DataMember>]
     member this.Message =
         sprintf "Error in argument %O: %s" (PLocal this.Argument) this.Inner.Message
 
@@ -53,6 +61,8 @@ type ArgumentCheckError =
 
     member this.ShouldLog = this.Inner.ShouldLog
 
+    member this.Error = "argument"
+
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
 
@@ -60,6 +70,7 @@ type ArgumentCheckError =
         member this.LogMessage = this.LogMessage
         member this.Message = this.Message
         member this.HTTPResponseCode = this.HTTPResponseCode
+        member this.Error = this.Error
 
 type ArgumentCheckException (details : ArgumentCheckError) =
     inherit UserException(details.Message, null, true)

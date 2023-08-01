@@ -3,6 +3,7 @@ module FunWithFlags.FunUtils.Serialization.Utils
 
 open System
 open System.Globalization
+open System.Collections.Generic
 open System.Runtime.Serialization
 open System.Text.Json.Serialization
 open System.Reflection
@@ -64,15 +65,16 @@ let isNullableType (objectType : Type) =
     if FSharpType.IsRecord objectType then
         false
     else if FSharpType.IsUnion objectType then
-        match Attribute.GetCustomAttribute(objectType, typeof<CompilationRepresentationAttribute>) with
-        | null -> false
-        | representation -> (representation :?> CompilationRepresentationAttribute).Flags.HasFlag(CompilationRepresentationFlags.UseNullAsTrueValue)
+        match objectType.GetCustomAttribute<CompilationRepresentationAttribute>() with
+        | RefNull -> false
+        | representation -> representation.Flags.HasFlag(CompilationRepresentationFlags.UseNullAsTrueValue)
     else if objectType = typeof<string> then
         false
     else
-        match Attribute.GetCustomAttribute(objectType, typeof<CompilationMappingAttribute>) with
-        | :? CompilationMappingAttribute as mapping when mapping.SourceConstructFlags.HasFlag(SourceConstructFlags.ObjectType) ->
-            not (isNull <| Attribute.GetCustomAttribute(objectType, typeof<AllowNullLiteralAttribute>))
+        match objectType.GetCustomAttribute<CompilationMappingAttribute>() with
+        | mapping
+            when not (isRefNull mapping) && mapping.SourceConstructFlags.HasFlag(SourceConstructFlags.ObjectType) ->
+                not (isRefNull <| objectType.GetCustomAttribute<AllowNullLiteralAttribute>())
         | _ -> not objectType.IsValueType || not (isNull <| Nullable.GetUnderlyingType(objectType))
 
 let unionCases (objectType : Type) : UnionCase[] =
@@ -241,10 +243,9 @@ let getTypeDefaultValue (objectType : Type) : obj option =
         None
 
 let getPropertyDefaultValue (info : MemberInfo) : obj option =
-    match Attribute.GetCustomAttribute(info, typeof<DefaultValueAttribute>) with
+    match info.GetCustomAttribute<DefaultValueAttribute>() with
     | null -> getTypeDefaultValue (memberInnerType info |> Option.get)
-    | attrObj ->
-        let attr = attrObj :?> DefaultValueAttribute
+    | attr ->
         match attr.Value with
         | null -> None
         | v -> Some v
@@ -260,27 +261,45 @@ type SerializableField =
       Ignore : bool
     }
 
-let serializableField (prop : MemberInfo) : SerializableField =
-    let objectType = memberInnerType prop |> Option.get
+type SerializableFieldOptions =
+    { DefaultIgnore : bool option
+      DefaultName : string option
+    }
+
+let emptySerializableFieldOptions =
+    { DefaultIgnore = None
+      DefaultName = None
+    }
+
+let serializableField (opts : SerializableFieldOptions) (memberInfo : MemberInfo) : SerializableField =
+    let objectType = memberInnerType memberInfo |> Option.get
+    let defaultName = Option.defaultValue memberInfo.Name opts.DefaultName
+    let (name, emitDefaultValue, hasDataMember) =
+        match memberInfo.GetCustomAttribute<DataMemberAttribute>() with
+        | null -> (defaultName, None, false)
+        | attr ->
+            let name = if attr.IsNameSetExplicitly then attr.Name else defaultName
+            (name, Some attr.EmitDefaultValue, true)
+    let hasIgnoreAlways =
+        match memberInfo.GetCustomAttribute<IgnoreDataMemberAttribute>() with
+        | null -> false
+        | attr -> true
     let ignore =
-        match Attribute.GetCustomAttribute(prop, typeof<JsonIgnoreAttribute>) with
-        | null ->
-            // Ignore internal F# fields if encountered.
-            prop.Name.EndsWith("@")
-        | attrObj ->
-            let attr = attrObj :?> JsonIgnoreAttribute
-            attr.Condition = JsonIgnoreCondition.Always
-    let defaultValue = getPropertyDefaultValue prop
+        if hasIgnoreAlways then
+            true
+        else if hasDataMember then
+            false
+        else if FSharpType.IsRecord memberInfo.DeclaringType || FSharpType.IsUnion memberInfo.DeclaringType then
+            // Ignore non-fields.
+            match memberInfo.GetCustomAttribute<CompilationMappingAttribute>() with
+            | RefNull -> true
+            | attr -> attr.SourceConstructFlags <> SourceConstructFlags.Field
+        else
+            Option.defaultValue false opts.DefaultIgnore
+    let defaultValue = getPropertyDefaultValue memberInfo
     let isNullable = isNullableType objectType
-    let (name, emitDefaultValue) =
-        match Attribute.GetCustomAttribute(prop, typeof<DataMemberAttribute>) with
-        | null -> (prop.Name, None)
-        | attrObj ->
-            let attr = attrObj :?> DataMemberAttribute
-            let name = if attr.IsNameSetExplicitly then attr.Name else prop.Name
-            (name, Some attr.EmitDefaultValue)
-    let getValue = getMemberValue prop |> Option.get
-    { Member = prop
+    let getValue = getMemberValue memberInfo |> Option.get
+    { Member = memberInfo
       InnerType = objectType
       GetValue = getValue
       DefaultValue = defaultValue
@@ -312,18 +331,17 @@ type UnionAsObjectInfo =
       GetTag : obj -> CaseTag
     }
 
-let unionAsObject (objectType : Type) : UnionAsObjectInfo option =
-    match  Attribute.GetCustomAttribute(objectType, typeof<SerializeAsObjectAttribute>) with
+let unionAsObject (getOpts : PropertyInfo -> SerializableFieldOptions) (objectType : Type) : UnionAsObjectInfo option =
+    match objectType.GetCustomAttribute<SerializeAsObjectAttribute>() with
     | null -> None
-    | asObjectObj ->
-        let asObject = asObjectObj :?> SerializeAsObjectAttribute
+    | asObject ->
         let mutable valueCase = None
 
         let caseInfo (case : UnionCase) =
             let maybeAttr = case.Info.GetCustomAttributes(typeof<CaseKeyAttribute>) |> Seq.cast |> Seq.first
             let name = parseCaseName case.Info maybeAttr
             let getField (prop : PropertyInfo) =
-                let field = serializableField prop
+                let field = serializableField (getOpts prop) prop
                 match maybeAttr with
                 | Some caseKey when Array.contains field.Member.Name caseKey.IgnoreFields ->
                     { field with Ignore = true }
@@ -390,5 +408,37 @@ type NewtypeConverter<'nt> () =
     override this.ConvertFrom (context : ITypeDescriptorContext, culture : CultureInfo, value : obj) : obj =
         convertTo value
 
-let caseNames (unionType : Type) : Map<CaseKey, UnionCase> =
-    unionCases unionType |> Seq.map (fun case -> (caseKey case.Info, case)) |> Map.ofSeqUnique
+let enumCases<'a> : (UnionCase * 'a) seq =
+    let processOne (case : UnionCase) =
+        (case, FSharpValue.MakeUnion(case.Info, [||]) :?> 'a)
+    unionCases typeof<'a> |> Seq.map processOne
+
+type private LookupCaseEnum<'a> when 'a : equality =
+    static member Table =
+        enumCases<'a>
+        |> Seq.map (fun (case, v) -> (v, caseKey case.Info))
+        |> dict
+
+let typeHasEquality (typ : Type) =
+    typ.GetCustomAttributes<NoEqualityAttribute>() |> Seq.isEmpty
+
+let prepareLookupCaseKey<'a> : 'a -> CaseKey =
+    let typ = typeof<'a>
+    match getUnionEnum typ with
+    | Some enumInfo when typeHasEquality typ ->
+        // This trickery is because we can't guarantee we satisfy the constraints statically,
+        // even though we check them in runtime.
+        let lookupInstance = typedefof<LookupCaseEnum<_>>.MakeGenericType([|typ|])
+        let table =
+            lookupInstance
+                .GetProperty("Table", BindingFlags.NonPublic ||| BindingFlags.Public ||| BindingFlags.Static)
+                .GetValue(null)
+            :?> IDictionary<'a, CaseKey>
+        fun v -> table.[v]
+    | _ ->
+        let table =
+            unionCases typ
+            |> Seq.map (fun case -> (case.Info.Tag, caseKey case.Info))
+            |> dict
+        let lookupTag = FSharpValue.PreComputeUnionTagReader typ
+        fun v -> table.[lookupTag v]

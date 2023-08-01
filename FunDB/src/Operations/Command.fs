@@ -4,6 +4,7 @@ open System.Threading
 open System.Threading.Tasks
 open FSharpPlus
 open FSharp.Control.Tasks.Affine
+open System.Runtime.Serialization
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization
@@ -39,6 +40,7 @@ type CommandError =
         | CEAccessDenied details -> details
         | CEOther details -> details
 
+    [<DataMember>]
     member this.Message =
         match this with
         | CEExecution e -> e.Message
@@ -59,6 +61,12 @@ type CommandError =
         | CEAccessDenied details -> true
         | CEOther details -> false
 
+    static member private LookupKey = prepareLookupCaseKey<CommandError>
+    member this.Error =
+        match this with
+        | CEExecution e -> e.Error
+        | _ -> CommandError.LookupKey this |> Option.get
+
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
 
@@ -66,6 +74,7 @@ type CommandError =
         member this.Message = this.Message
         member this.LogMessage = this.LogMessage
         member this.HTTPResponseCode = this.HTTPResponseCode
+        member this.Error = this.Error
 
 type CommandException (details : CommandError, innerException : exn) =
     inherit UserException(details.Message, innerException, true)

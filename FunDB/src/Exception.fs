@@ -3,7 +3,6 @@ module FunWithFlags.FunDB.Exception
 open System
 open Printf
 open Newtonsoft.Json.Linq
-open System.Runtime.Serialization
 
 // Exceptions which can be marked as "user exceptions" -- messages in them can be safely
 // sent back to client.
@@ -75,5 +74,6 @@ type IErrorDetails =
     inherit ILoggableResponse
 
     abstract LogMessage : string
-    [<DataMember>] abstract Message : string
+    abstract Message : string
     abstract HTTPResponseCode : int
+    abstract Error : string

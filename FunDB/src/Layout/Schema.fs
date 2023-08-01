@@ -50,7 +50,7 @@ let private makeSourceIndex (index : Index) : SourceIndex =
       IncludedExpressions = index.IncludedExpressions
       IsUnique = index.IsUnique
       Predicate = Option.ofObj index.Predicate
-      Type = Map.find index.Type indexTypesMap
+      Type = indexTypesMap.[index.Type]
     }
 
 let private makeSourceEntity (entity : Entity) : SourceEntity =

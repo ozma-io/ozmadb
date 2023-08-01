@@ -15,12 +15,15 @@ open FunWithFlags.FunDB.Triggers.Source
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDBSchema.System
 
-let private timeCasesMap = caseNames typeof<TriggerTime> |> Map.mapWithKeys (fun name case -> (Option.get name, FSharpValue.MakeUnion(case.Info, [||]) :?> TriggerTime))
+let timeCasesMap =
+    enumCases<TriggerTime>
+    |> Seq.map (fun (case, value) -> (Option.get (caseKey case.Info), value))
+    |> dict
 
 let private makeSourceAttributeField (trig : Trigger) : SourceTrigger =
     { AllowBroken = trig.AllowBroken
       Priority = trig.Priority
-      Time = Map.find trig.Time timeCasesMap
+      Time = timeCasesMap.[trig.Time]
       OnInsert = trig.OnInsert
       OnUpdateFields = Array.map FunQLName trig.OnUpdateFields
       OnDelete = trig.OnDelete

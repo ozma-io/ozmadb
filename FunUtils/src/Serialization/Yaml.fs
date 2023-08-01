@@ -218,7 +218,7 @@ type UnionTypeConverter () =
 
 type SpecializedRecordConverter<'a> (converter : CrutchTypeConverter) =
     let getFieldInfo prop =
-        let field = serializableField prop
+        let field = serializableField emptySerializableFieldOptions prop
         let name = converter.NamingConvention.Apply field.Name
         (name, field)
 

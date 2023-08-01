@@ -78,6 +78,10 @@ type RequestErrorInfo =
             | RIConcurrentUpdate _ -> 503
             | RIStackOverflow _ -> 500
 
+        static member private LookupKey = prepareLookupCaseKey<RequestErrorInfo>
+        member this.Error =
+            RequestErrorInfo.LookupKey this |> Option.get
+
         interface ILoggableResponse with
             member this.ShouldLog = false
 
@@ -85,13 +89,14 @@ type RequestErrorInfo =
             member this.LogMessage = this.LogMessage
             member this.Message = this.Message
             member this.HTTPResponseCode = this.HTTPResponseCode
+            member this.Error = this.Error
 
 let requestError<'Error when 'Error :> IErrorDetails> (e : 'Error) =
     let handler body =
         match e.HTTPResponseCode with
         | 401 -> RequestErrors.unauthorized JwtBearerDefaults.AuthenticationScheme "fundb" body
         | code -> setStatusCode code >=> body
-    handler (json e)
+    setHttpHeader "X-FunDB-Error" e.Error >=> handler (json e)
 
 let errorHandler (e : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
     logger.LogError(e, "An unhandled exception has occurred while executing the request.")
@@ -544,13 +549,13 @@ let private getIpAddress (ctx : HttpContext) =
     | (false, _) -> string ctx.Connection.RemoteIpAddress
 
 let private withContextLimited (prefix : string) (getLimits : IInstance -> RateLimit seq) (f : IFunDBAPI -> HttpHandler) : HttpHandler =
-    let run inst = runWithApi true inst f
     lookupInstance <| fun inst next ctx ->
         let userId =
             match ctx.User.FindFirstValue ClaimTypes.NameIdentifier with
             | null -> getIpAddress ctx
             | userId -> userId
-        checkRateLimit rateExceeded (prefix + userId) (getLimits inst.Instance) (runWithApi true inst f next) ctx
+        let run = runWithApi true inst f next
+        checkRateLimit rateExceeded (prefix + userId) (getLimits inst.Instance) run ctx
 
-let withContextRead (f : IFunDBAPI -> HttpHandler) = withContextLimited "read|" (fun inst -> inst.ReadRateLimitsPerUser) f
-let withContextWrite (f : IFunDBAPI -> HttpHandler) = withContextLimited "write|" (fun inst -> inst.WriteRateLimitsPerUser) f
+let withContextRead (f : IFunDBAPI -> HttpHandler) = withContextLimited "rate_limit|read|" (fun inst -> inst.ReadRateLimitsPerUser) f
+let withContextWrite (f : IFunDBAPI -> HttpHandler) = withContextLimited "rate_limit|write|" (fun inst -> inst.WriteRateLimitsPerUser) f
