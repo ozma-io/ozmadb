@@ -466,6 +466,7 @@ type InsertEntityRequest =
       mutable Fields : RawArguments
     } with
         [<System.ComponentModel.DefaultValue(null)>]
+        [<DataMember>]
         [<JsonProperty(Required=Required.DisallowNull, DefaultValueHandling=DefaultValueHandling.Ignore)>]
         member private this.Entries with set fields =
             this.Fields <- fields
@@ -477,6 +478,7 @@ type UpdateEntityRequest =
       mutable Fields : RawArguments
     } with
         [<System.ComponentModel.DefaultValue(null)>]
+        [<DataMember>]
         [<JsonProperty(Required=Required.DisallowNull, DefaultValueHandling=DefaultValueHandling.Ignore)>]
         member private this.Entries with set fields =
             this.Fields <- fields
