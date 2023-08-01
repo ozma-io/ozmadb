@@ -454,7 +454,6 @@ export type TransactionError = GenericError | ITransactionError;
 
 export type SaveError = GenericError | IAccessDeniedError | IRequestError;
 
-
 export interface IConsistencyError extends IBasicError {
   error: "consistency";
   details: string;

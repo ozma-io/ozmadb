@@ -20,7 +20,7 @@
   ],
   "rules": {
     "indent": "off",
-    "@typescript-eslint/indent": ["warn", 2],
+    "@typescript-eslint/indent": "off",
     "semi": "off",
     "@typescript-eslint/semi": "warn",
     "@typescript-eslint/member-delimiter-style": "warn",
