@@ -52,11 +52,11 @@ type JavaScriptAPIException (message : string, innerException : Exception, isUse
 type JavaScriptUserException (message : string, userData: JToken) =
     inherit UserException(message, null, true, Some userData)
 
-type WriteEventRequest =
+type private WriteEventRequest =
     { Details : string
     }
 
-type CancelWithRequest =
+type private CancelWithRequest =
     { UserData : JToken option
       Message : string option
     }
@@ -391,11 +391,11 @@ class FunDB1 {
     };
 
     writeEvent(details) {
-        return internal.writeEvent(details);
+        return internal.writeEvent({ details });
     };
 
     writeEventSync(details) {
-        return internal.writeEventSync(details);
+        return internal.writeEventSync({ details });
     };
 
     cancelWith(userData, message) {
