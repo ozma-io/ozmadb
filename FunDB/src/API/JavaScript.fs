@@ -52,11 +52,11 @@ type JavaScriptAPIException (message : string, innerException : Exception, isUse
 type JavaScriptUserException (message : string, userData: JToken) =
     inherit UserException(message, null, true, Some userData)
 
-type private WriteEventRequest =
+type WriteEventRequest =
     { Details : string
     }
 
-type private CancelWithRequest =
+type CancelWithRequest =
     { UserData : JToken option
       Message : string option
     }
