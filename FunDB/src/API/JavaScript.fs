@@ -52,6 +52,8 @@ type JavaScriptAPIException (message : string, innerException : Exception, isUse
 type JavaScriptUserException (message : string, userData: JToken) =
     inherit UserException(message, null, true, Some userData)
 
+// We don't declare these public because we need to fix JSON serialization for these first.
+// See https://stackoverflow.com/questions/54169707/f-internal-visibility-changes-record-constructor-behavior
 type WriteEventRequest =
     { Details : string
     }
@@ -266,8 +268,8 @@ type APITemplate (isolate : Isolate) =
             let handle = Option.get currentHandle
             handle.Logger.LogInformation("Source {source} wrote event from JavaScript: {details}", handle.API.Request.Source, req.Details)
             handle.API.Request.WriteEvent (fun event ->
-                event.Type <- "jsEvent"
-                event.Details <- req.Details
+                event.Type <- "writeEvent"
+                event.Request <- JsonConvert.SerializeObject req
             )
             Value.Undefined.New(isolate)
         ))
@@ -281,8 +283,8 @@ type APITemplate (isolate : Isolate) =
             handle.Logger.LogInformation("Source {source} wrote sync event from JavaScript: {details}", handle.API.Request.Source, req.Details)
             let run = runVoidApiCall handle context <| fun () ->
                 handle.API.Request.WriteEventSync (fun event ->
-                    event.Type <- "jsEvent"
-                    event.Details <- req.Details
+                    event.Type <- "writeEvent"
+                    event.Request <- JsonConvert.SerializeObject req
                 )
             runtime.EventLoop.NewPromise(context, run).Value
         ))
