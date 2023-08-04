@@ -5,10 +5,12 @@ open System.Threading
 open System.Threading.Tasks
 open System.Runtime.CompilerServices
 open FSharp.Control.Tasks.Affine
+open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open NetJs
 open NetJs.Value
 open NetJs.Template
+open NetJs.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
@@ -96,10 +98,25 @@ type JSEnvironment =
     }
 
 let private convertPath (p : Path) =
-        let normalized = POSIXPath.normalize p
-        if POSIXPath.isAbsolute normalized then
-            failwithf "Absolute path is not expected: %s" p
-        normalized
+    let normalized = POSIXPath.normalize p
+    if POSIXPath.isAbsolute normalized then
+        failwithf "Absolute path is not expected: %s" p
+    normalized
+
+let getJSExceptionUserData (e : JSException) : JToken option =
+    match e.Value.Data with
+    | :? Value.Object as obj ->
+        let userData = obj.Get("userData")
+        match userData.Data with
+        | :? Value.Undefined
+        | :? Value.Null -> None
+        | _ ->
+            use reader = new V8JsonReader(userData)
+            try
+                Some <| JToken.Load(reader)
+            with
+            | :? JsonReaderException as e -> raisefWithInner JavaScriptRuntimeException e "Failed to parse user data"
+    | _ -> None
 
 type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateConstructor : Isolate -> 'a, env : JSEnvironment) as this =
     let mutable currentEventLoop = None : EventLoop option
@@ -221,6 +238,8 @@ let inline runFunctionInRuntime (runtime : IJSRuntime) (func : Function) (cancel
     with
     | :? CallbackException as e ->
         raise <| JavaScriptRuntimeException("", e, isUserException e.InnerException, userExceptionData e.InnerException)
+    | :? JSException as e ->
+        raise <| JavaScriptRuntimeException("", e, true, getJSExceptionUserData e)
     | :? NetJsException as e ->
         raisefUserWithInner JavaScriptRuntimeException e ""
 
@@ -236,6 +255,8 @@ let inline runAsyncFunctionInRuntime (runtime : IJSRuntime) (func : Function) (c
         with
         | :? CallbackException as e ->
             return raise <| JavaScriptRuntimeException("", e, isUserException e.InnerException, userExceptionData e.InnerException)
+        | :? JSException as e ->
+            return raise <| JavaScriptRuntimeException("", e, true, getJSExceptionUserData e)
         | :? NetJsException as e ->
             return raisefUserWithInner JavaScriptRuntimeException e ""
     }

@@ -182,7 +182,7 @@ type UnionConverter (objectType : Type, resolver : ConverterContractResolver, co
                 | Some option ->
                     let read =
                         fun (reader : JsonReader) (serializer : JsonSerializer) ->
-                            if reader.TokenType = JsonToken.Null then
+                            if reader.TokenType = JsonToken.Null || reader.TokenType = JsonToken.Undefined then
                                 reader.Skip()
                                 option.NoneValue
                             else

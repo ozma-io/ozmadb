@@ -49,21 +49,20 @@ type JavaScriptAPIException (message : string, innerException : Exception, isUse
 
     new (message : string) = JavaScriptAPIException (message, null, true)
 
-type JavaScriptUserException (message : string, userData: JToken) =
-    inherit UserException(message, null, true, Some userData)
-
 // We don't declare these public because we need to fix JSON serialization for these first.
 // See https://stackoverflow.com/questions/54169707/f-internal-visibility-changes-record-constructor-behavior
 type WriteEventRequest =
-    { Details : string
+    { Details : JToken
     }
 
 type CancelWithRequest =
-    { UserData : JToken option
+    { [<DataMember(EmitDefaultValue = false)>]
+      UserData : JToken option
+      [<DataMember(EmitDefaultValue = false)>]
       Message : string option
     }
 
-type private APIHandle (api : IFunDBAPI) =
+type private APIHandle (api : IFunDBAPI, errorConstructor : Value.Function) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
     let mutable lock = None
 
@@ -87,7 +86,17 @@ type private APIHandle (api : IFunDBAPI) =
                 lock <- oldLock
         }
 
-let inline private wrapApiCall<'Result, 'Error when 'Error :> IErrorDetails> (handle : APIHandle) (wrap : (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>) (f : unit -> Task<'Result>) : Task<'Result> =
+    member this.ErrorConstructor = errorConstructor
+
+let inline private throwErrorWithInner (handle : APIHandle) (context : Context) (e : 'a when 'a :> IErrorDetails) (innerException : exn) : 'b =
+    let body = V8JsonWriter.Serialize(context, e)
+    let exc = handle.ErrorConstructor.NewInstance(body)
+    raise <| JSException(e.Message, exc.Value, innerException)
+
+let inline private throwError (handle : APIHandle) (context : Context) (e : 'a when 'a :> IErrorDetails) : 'b =
+    throwErrorWithInner handle context e null
+
+let inline private wrapApiCall<'Result, 'Error when 'Error :> IErrorDetails> (handle : APIHandle) (context : Context) (wrap : (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>) (f : unit -> Task<'Result>) : Task<'Result> =
     task {
         let mutable lockTaken = false
         do! handle.Lock.WaitAsync()
@@ -104,7 +113,7 @@ let inline private wrapApiCall<'Result, 'Error when 'Error :> IErrorDetails> (ha
                 }
             match res with
             | Ok r -> return r
-            | Error e -> return raise <| JavaScriptRuntimeException(e.Message)
+            | Error e -> return throwError handle context e
         finally
             if lockTaken then
                 handle.Lock.Release()
@@ -131,7 +140,7 @@ let inline private runResultApiCall<'a, 'e when 'e :> IErrorDetails> (handle : A
                 unmask ()
                 match res with
                 | Ok r -> return V8JsonWriter.Serialize(context, r)
-                | Error e -> return raise <| JavaScriptAPIException(e.Message)
+                | Error e -> return throwError handle context e
             }
     Func<_>(run)
 
@@ -143,7 +152,7 @@ let inline private runVoidResultApiCall<'e when 'e :> IErrorDetails> (handle : A
                 unmask ()
                 match res with
                 | Ok r -> return Value.Undefined.New(context.Isolate)
-                | Error e -> return raise <| JavaScriptAPIException(e.Message)
+                | Error e -> return throwError handle context e
             }
     Func<_>(run)
 
@@ -152,23 +161,21 @@ type APITemplate (isolate : Isolate) =
     let mutable errorConstructor = None : Value.Function option
     let mutable runtime = Unchecked.defaultof<IJSRuntime>
 
-    let throwError (context : Context) (e : 'a when 'a :> IErrorDetails) : 'b =
-        let body = V8JsonWriter.Serialize(context, e)
-        let constructor = Option.get errorConstructor
-        let exc = constructor.NewInstance(body)
-        raise <| JSException(e.Message, exc.Value)
-
-    let throwCallError (context : Context) : StringFormat<'a, 'b> -> 'a =
+    let throwCallErrorWithInner (context : Context) (innerException : exn) : StringFormat<'a, 'b> -> 'a =
         let thenRaise str =
-            throwError context (ACECall str)
+            let handle = Option.get currentHandle
+            throwErrorWithInner handle context (ACECall str) innerException
         kprintf thenRaise
+
+    let throwCallError (context : Context) = throwCallErrorWithInner context null
 
     let jsDeserialize (context : Context) (v : Value.Value) : 'a =
         let ret =
             try
                 V8JsonReader.Deserialize<'a>(v)
             with
-            | :? JsonException as e -> throwCallError context "Failed to parse value: %s" e.Message
+            | :? JsonException as e ->
+                throwCallErrorWithInner context e "Failed to parse value: %s" e.Message
         if isRefNull ret then
             throwCallError context "Value must not be null"
         ret
@@ -243,7 +250,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let func = args.[0].GetFunction()
             let handle = Option.get currentHandle
-            let run () = wrapApiCall handle handle.API.Entities.DeferConstraints (fun () -> func.CallAsync(null))
+            let run () = wrapApiCall handle context handle.API.Entities.DeferConstraints (fun () -> func.CallAsync(null))
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
 
@@ -254,7 +261,7 @@ type APITemplate (isolate : Isolate) =
             let req = jsDeserialize context args.[0] : PretendRoleRequest
             let func = args.[1].GetFunction()
             let handle = Option.get currentHandle
-            let run () = wrapApiCall handle (handle.API.Request.PretendRole req) (fun () -> func.CallAsync(null))
+            let run () = wrapApiCall handle context (handle.API.Request.PretendRole req) (fun () -> func.CallAsync(null))
             runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
         ))
 
@@ -289,28 +296,41 @@ type APITemplate (isolate : Isolate) =
             runtime.EventLoop.NewPromise(context, run).Value
         ))
 
-        fundbTemplate.Set("cancelWith", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 1 then
-                throwCallError context "Number of arguments must be 1"
-            let req = jsDeserialize context args.[0] : CancelWithRequest
-            let message = Option.defaultValue "Operation has been cancelled" req.Message
-            let userData = Option.defaultWith (fun () -> JValue.CreateUndefined() :> JToken) req.UserData
-            raise <| JavaScriptUserException(message, userData)
-        ))
-
         template
 
     let preludeScriptSource = "
 const internal = global.internal;
 delete global.internal;
 
+const findInnerByKey = (object, key) => {
+    for (value of Object.values(object)) {
+        if (typeof value === 'object' && value) {
+            const currValue = object[key];
+            if (currValue !== undefined) {
+                return currValue;
+            }
+            const nestedValue = findInnerByKey(value, key);
+            if (nestedValue !== undefined) {
+                return nestedValue;
+            }
+        }
+    }
+};
+
 class FunDBError extends Error {
   constructor(body) {
     super(body.message);
-    this.body = body;
+    Object.assign(this, body);
+    // Find `userData` and bring it to the top-level.
+    if (!('userData' in body)) {
+        const userData = findInnerByKey(body, 'userData');
+        if (userData !== undefined) {
+            this.userData = userData;
+        }
+    }
   }
 };
+
 global.FunDBError = FunDBError;
 
 global.formatDate = (date) => date.toISOString().split('T')[0];
@@ -356,12 +376,12 @@ class FunDB1 {
         }
     };
 
-    insertEntities(entity, entries) {
-        return internal.insertEntities({ entity, entries });
+    insertEntities(entity, fields) {
+        return internal.insertEntities({ entity, fields });
     };
 
-    updateEntity(entity, id, args) {
-        return internal.updateEntity({ entity, id, args });
+    updateEntity(entity, id, fields) {
+        return internal.updateEntity({ entity, id, fields });
     };
 
     deleteEntity(entity, id) {
@@ -401,7 +421,7 @@ class FunDB1 {
     };
 
     cancelWith(userData, message) {
-        return internal.cancelWith({ userData, message });
+        throw new FunDBError({ message, userData });
     };
 };
 
@@ -413,7 +433,7 @@ global.FunDB = new FunDB1();
 
     member this.SetAPI (api : IFunDBAPI) =
         assert (Option.isNone currentHandle)
-        currentHandle <- Some <| APIHandle(api)
+        currentHandle <- Some <| APIHandle(api, Option.get errorConstructor)
 
     member this.ResetAPI api =
         currentHandle <- None
