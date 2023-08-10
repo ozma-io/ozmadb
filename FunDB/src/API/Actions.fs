@@ -33,7 +33,7 @@ type ActionsAPI (api : IFunDBAPI) =
                         logger.LogError(e, "Exception in action {action}", ref)
                         return Error (AEException (fullUserMessage e, e.UserData))
             | Some (Error e) ->
-                logger.LogError(e, "Requested action {action} is broken", ref.ToString())
+                logger.LogError(e, "Requested action {action} is broken", ref)
                 let msg = sprintf "Requested action %O is broken: %s" ref (fullUserMessage e)
                 return Error <| AEOther msg
         }

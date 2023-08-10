@@ -36,8 +36,8 @@
       "YamlDotNet": {
         "type": "Direct",
         "requested": "[13.1.*, )",
-        "resolved": "13.1.0",
-        "contentHash": "S4tzJjofMDx8PKtbnwkaMznbPD1aUffVKW+ClhfOGAYFIPuY9sSrArcFQOcRkbwRP1kYIaMbXk4Vsnfk3dE3dQ=="
+        "resolved": "13.1.1",
+        "contentHash": "3AS0fEwxOucP0h68JXMxfj3NyfgX9EOVE29NlKqKxWMHfKMAuZ7MWw5u362Bs6OALtnBTzi/JYIiMidQXoKVWw=="
       },
       "System.Threading.Tasks.Extensions": {
         "type": "Transitive",

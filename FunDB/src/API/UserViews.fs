@@ -90,7 +90,7 @@ type UserViewsAPI (api : IFunDBAPI) =
                         match ctx.UserViews.Find ref with
                         | None -> return Error <| UVERequest (sprintf "User view %O not found" ref)
                         | Some (Error e) ->
-                            logger.LogError(e.Error, "Requested user view {uv} is broken", ref.ToString())
+                            logger.LogError(e.Error, "Requested user view {uv} is broken", ref)
                             let msg = sprintf "User view %O is broken: %s" ref (fullUserMessage e.Error)
                             return Error <| UVEOther msg
                         | Some (Ok cached) ->
@@ -152,7 +152,14 @@ type UserViewsAPI (api : IFunDBAPI) =
                         let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
                         let extraArgValues = Map.mapKeys PLocal extraLocalArgs
                         let compiled = { compiled with Query = query }
-                        let maybeArgs = Option.map (fun args -> convertQueryArguments rctx.GlobalArguments extraArgValues args compiled.Query.Arguments) req.Args
+                        let maybeArgs =
+                            Option.map (fun args ->
+                                convertQueryArguments
+                                    rctx.GlobalArguments
+                                    extraArgValues
+                                    args
+                                    compiled.Query.Arguments
+                            ) req.Args
                         let explainFlags = Option.defaultValue SQL.defaultExplainOptions req.ExplainFlags
                         let! res = explainViewExpr ctx.Transaction.Connection.Query ctx.Layout compiled maybeArgs explainFlags ctx.CancellationToken
                         return Ok res
@@ -187,7 +194,12 @@ type UserViewsAPI (api : IFunDBAPI) =
                     let (extraLocalArgs, query) = queryExprChunk ctx.Layout resolvedChunk compiled.Query
                     let extraArgValues = Map.mapKeys PLocal extraLocalArgs
                     let compiled = { compiled with Query = query }
-                    let arguments = convertQueryArguments rctx.GlobalArguments extraArgValues req.Args compiled.Query.Arguments
+                    let arguments =
+                        convertQueryArguments
+                            rctx.GlobalArguments
+                            extraArgValues
+                            req.Args
+                            compiled.Query.Arguments
 
                     let getResult info (res : ExecutingViewExpr) =
                         task {

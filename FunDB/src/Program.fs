@@ -2,7 +2,6 @@ open System
 open System.IO
 open System.Threading
 open System.Linq
-open System.Linq.Expressions
 open System.Collections.Generic
 open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
@@ -110,20 +109,22 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, homeRegion: stri
                                 member this.UpdateAccessedAtAndDispose newTime =
                                     ignore <|
                                         unitTask {
-                                            let instances =
+                                            use instances =
                                                 let builder = DbContextOptionsBuilder<InstancesContext> ()
                                                 setupDbContextLogging loggerFactory builder
                                                 ignore <| builder.UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
                                                 new InstancesContext(builder.Options)
-                                            let! _ =
-                                                (instances.Instances :> IQueryable<Instance>)
-                                                    .Where(fun inst -> inst.Id = instance.Id && (not inst.AccessedAt.HasValue || inst.AccessedAt.Value < newTime))
-                                                    .UpdateFromQueryAsync(fun (inst : Instance) ->
-                                                        inst.AccessedAt <- newTime
-                                                        inst
-                                                    )
-                                            do! instances.DisposeAsync ()
-                                            ()
+                                            try
+                                                let! _ =
+                                                    (instances.Instances :> IQueryable<Instance>)
+                                                        .Where(fun inst -> inst.Id = instance.Id && (not inst.AccessedAt.HasValue || inst.AccessedAt.Value < newTime))
+                                                        .UpdateFromQueryAsync(fun (inst : Instance) ->
+                                                            inst.AccessedAt <- newTime
+                                                            inst
+                                                        )
+                                                ()
+                                            finally
+                                                ignore <| instances.DisposeAsync ()
                                         }
 
                                   member this.Dispose () = ()
@@ -180,15 +181,15 @@ type private StaticInstance (instance : Instance, homeRegion: string option) =
             builder.CommandTimeout <- 0
             ()
 
-let private appEndpoints : Endpoint list =
+let private appEndpoints (serviceProvider : IServiceProvider) : Endpoint list =
     List.concat
-        [ viewsApi
-          entitiesApi
-          saveRestoreApi
-          actionsApi
-          infoApi
-          permissionsApi
-          domainsApi
+        [ viewsApi serviceProvider
+          entitiesApi serviceProvider
+          saveRestoreApi serviceProvider
+          actionsApi serviceProvider
+          infoApi serviceProvider
+          permissionsApi serviceProvider
+          domainsApi serviceProvider
         ]
 
 let private isDebug =
@@ -258,24 +259,34 @@ let private setupAuthentication (webAppBuilder : WebApplicationBuilder) =
             .AddAuthentication(configureAuthentication)
             .AddJwtBearer(configureJwtBearer)
 
+let private setupRedis (webAppBuilder : WebApplicationBuilder) =
+    let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
+    let services = webAppBuilder.Services
+    match fundbSection.["Redis"] with
+    | null -> ()
+    | redisStr ->
+        let redisOptions = Redis.ConfigurationOptions.Parse(redisStr)
+        let getRedisMultiplexer (sp : IServiceProvider) =
+            let connection =
+                Redis.ConnectionMultiplexer.Connect(redisOptions) :> Redis.IConnectionMultiplexer
+            let db = connection.GetDatabase()
+            connection
+        ignore <| services
+            .AddSingleton<Redis.IConnectionMultiplexer>(getRedisMultiplexer)
+
 let private setupRateLimiting (webAppBuilder : WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
     let services = webAppBuilder.Services
-
     match fundbSection.["Redis"] with
     | null ->
         ignore <| services
             .AddMemoryCache()
             .AddInMemoryRateLimiting()
     | redisStr ->
-        let redisOptions = Redis.ConfigurationOptions.Parse(redisStr)
-        let getRedisMultiplexer (sp : IServiceProvider) =
-            Redis.ConnectionMultiplexer.Connect(redisOptions) :> Redis.IConnectionMultiplexer
         ignore <| services
-            .AddSingleton<Redis.IConnectionMultiplexer>(getRedisMultiplexer)
             .AddRedisRateLimiting()
     // Needed for the strategy, but we ignore it in RateLimit.fs. Painful...
-    ignore <| services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+    addRateLimiter services    
 
 let private setupJSON (webAppBuilder : WebApplicationBuilder) =
     ignore <| webAppBuilder.Services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer defaultJsonSettings)
@@ -336,13 +347,20 @@ let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
         | _ -> failwith "Invalid InstancesSource"
     ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
 
+let private setupHttpUtils (webAppBuilder : WebApplicationBuilder) =
+    let fundbSection = webAppBuilder.Configuration.GetSection("FunDB")
+    let services = webAppBuilder.Services
+
+    ignore <| services.Configure<HttpJobSettings>(fundbSection.GetSection("Jobs"))
+    ignore <| services.AddSingleton<HttpJobUtils>()
+
 let private setupApp (app : IApplicationBuilder) =
     let configureCors (cfg : CorsPolicyBuilder) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
 
     let configureEndpoints (endpoints : IEndpointRouteBuilder) =
         ignore <| endpoints.MapMetrics()
-        ignore <| endpoints.MapGiraffeEndpoints(appEndpoints)
+        ignore <| endpoints.MapGiraffeEndpoints(appEndpoints endpoints.ServiceProvider)
 
     ignore <| app
         .UseSerilogRequestLogging()
@@ -380,11 +398,13 @@ let main (args : string[]) : int =
             setupConfiguration args webAppBuilder
             setupLogging webAppBuilder
             setupAuthentication webAppBuilder
+            setupRedis webAppBuilder
             setupRateLimiting webAppBuilder
             setupJSON webAppBuilder
             setupEventLogger webAppBuilder
             setupInstancesCache webAppBuilder
             setupInstancesSource webAppBuilder
+            setupHttpUtils webAppBuilder
 
             let app = webAppBuilder.Build()
             setupApp app

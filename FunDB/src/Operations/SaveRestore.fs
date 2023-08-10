@@ -1,5 +1,6 @@
 module FunWithFlags.FunDB.Operations.SaveRestore
 
+open System
 open System.Collections.Generic
 open System.Linq
 open System.ComponentModel
@@ -1156,12 +1157,14 @@ let private keepEntry = ".keep"
 let private userViewsGeneratorMetaEntry = "user_views_generator.yaml"
 let private userViewsGeneratorEntry = "user_views_generator.mjs"
 
-let private maxFilesSize = 32L * 1024L * 1024L // 32MB
+let private maxSaveRestoreSize = 32L * 1024L * 1024L // 32MB
 
 let myYamlSerializer = makeYamlSerializer { defaultYamlSerializerSettings with NamingConvention = CamelCaseNamingConvention.Instance }
 
 let myYamlDeserializer = makeYamlDeserializer { defaultYamlDeserializerSettings with NamingConvention = CamelCaseNamingConvention.Instance }
 
+// This should be called only with a `MemoryStream` or a compatible stream,
+// as `ZipArchive` is synchronous!
 let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
     use zip = new ZipArchive(stream, ZipArchiveMode.Create, true)
     let mutable totalSize = 0L
@@ -1232,12 +1235,15 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
                 if not <| Array.isEmpty customEntries then
                     dumpToEntry (sprintf "custom/%O/%O.yaml" customRef.Schema customRef.Name) customEntries
 
-    if totalSize > maxFilesSize then
+    if totalSize > maxSaveRestoreSize then
         failwithf "Total files size in archive is %i, which is too large" totalSize
 
-let schemasFromZipFile (stream: Stream) : Map<SchemaName, SchemaDump> =
+// This should be called only with a `MemoryStream` or a compatible stream,
+// as `ZipArchive` is synchronous!
+let schemasFromZipFile (stream : Stream) : Map<SchemaName, SchemaDump> =
+
     use zip = new ZipArchive(stream, ZipArchiveMode.Read)
-    let mutable leftSize = maxFilesSize
+    let mutable leftSize = maxSaveRestoreSize
 
     let readEntry (entry : ZipArchiveEntry) (fn : StreamReader -> 'a) : 'a =
         if leftSize - entry.Length < 0L then

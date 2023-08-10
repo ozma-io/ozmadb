@@ -1,7 +1,6 @@
 module rec FunWithFlags.FunDB.API.Types
 
 open System
-open System.IO
 open System.Runtime.Serialization
 open System.Threading
 open System.Threading.Tasks
@@ -531,7 +530,7 @@ type TransactionRequest =
     }
 
 [<NoEquality; NoComparison>]
-type TransactionError =
+type TransactionErrorInfo =
     { Operation : int
       Inner : EntityErrorInfo
     } with
@@ -586,13 +585,13 @@ type InsertEntitiesResponse =
 
  type IEntitiesAPI =
     abstract member GetEntityInfo : GetEntityInfoRequest -> Task<Result<SerializedEntity, EntityErrorInfo>>
-    abstract member InsertEntities : InsertEntitiesRequest -> Task<Result<InsertEntitiesResponse, TransactionError>>
+    abstract member InsertEntities : InsertEntitiesRequest -> Task<Result<InsertEntitiesResponse, TransactionErrorInfo>>
     abstract member UpdateEntity : UpdateEntityRequest -> Task<Result<UpdateEntityResponse, EntityErrorInfo>>
     abstract member DeleteEntity : DeleteEntityRequest -> Task<Result<unit, EntityErrorInfo>>
     abstract member GetRelatedEntities : GetRelatedEntitiesRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
     abstract member RecursiveDeleteEntity : DeleteEntityRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
     abstract member RunCommand : CommandRequest -> Task<Result<unit, EntityErrorInfo>>
-    abstract member RunTransaction : TransactionRequest -> Task<Result<TransactionResponse, TransactionError>>
+    abstract member RunTransaction : TransactionRequest -> Task<Result<TransactionResponse, TransactionErrorInfo>>
     abstract member DeferConstraints : (unit -> Task<'a>) -> Task<Result<'a, EntityErrorInfo>>
 
 [<SerializeAsObject("error")>]
@@ -729,9 +728,7 @@ type RestoreStreamSchemasRequest =
 
 type ISaveRestoreAPI =
     abstract member SaveSchemas : SaveSchemasRequest -> Task<Result<SaveSchemasResponse, SaveErrorInfo>>
-    abstract member SaveZipSchemas : SaveSchemasRequest -> Task<Result<Stream, SaveErrorInfo>>
     abstract member RestoreSchemas : RestoreSchemasRequest -> Task<Result<unit, RestoreErrorInfo>>
-    abstract member RestoreZipSchemas : Stream -> RestoreStreamSchemasRequest -> Task<Result<unit, RestoreErrorInfo>>
 
 [<NoEquality; NoComparison>]
 type RunActionRequest =

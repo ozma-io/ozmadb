@@ -60,11 +60,13 @@ type EventLogger (loggerFactory : ILoggerFactory) =
                             with
                             | ex ->
                                 logger.LogError(ex, "Exception while commiting logged event")
-                        logger.LogInformation("Logged {0} events into databases", totalChanged)
+                        logger.LogInformation("Logged {count} events into databases", totalChanged)
                     finally
-                        for KeyValue(connectionString, transaction) in databaseConnections do
-                            (transaction :> IDisposable).Dispose ()
-                            (transaction.Connection :> IDisposable).Dispose ()
+                        ignore <| unitTask {
+                            for KeyValue(connectionString, transaction) in databaseConnections do
+                                do! (transaction :> IAsyncDisposable).DisposeAsync ()
+                                do! (transaction.Connection :> IAsyncDisposable).DisposeAsync ()
+                        }
         } :> Task
 
     member this.WriteEvent (connectionString : string, entry : EventEntry) =

@@ -2,12 +2,22 @@ module FunWithFlags.FunUtils.IO
 
 open System
 open System.IO
+open FSharp.Control.Tasks.NonAffine
+
+let getMemoryStreamMemory (stream : MemoryStream) =
+    let length = stream.Seek(0L, SeekOrigin.Current)
+    let buffer = stream.GetBuffer()
+    ReadOnlyMemory(buffer, 0, int length)
 
 // https://www.meziantou.net/prevent-zip-bombs-in-dotnet.htm
 type MaxLengthStream (stream : Stream, maxLength : int64) =
     inherit Stream()
 
     let mutable length = 0L
+
+    let checkLength () =
+        if length > maxLength then
+            raise <| IOException("File is too large")
 
     member this.BytesRead = length
 
@@ -22,9 +32,37 @@ type MaxLengthStream (stream : Stream, maxLength : int64) =
     override this.Read (buffer, offset, count) =
         let result = stream.Read(buffer, offset, count)
         length <- length + int64 result
-        if length > maxLength then
-            raise <| IOException("File is too large")
+        checkLength ()
         result
+
+    override this.Read span =
+        let result = stream.Read(span)
+        length <- length + int64 result
+        checkLength ()
+        result
+
+    override this.ReadByte () =
+        let result = stream.ReadByte ()
+        if result >= 0 then
+            length <- length + 1L
+            checkLength ()
+        result
+
+    override this.ReadAsync (buffer, cancellationToken) =
+        vtask {
+            let! result = stream.ReadAsync (buffer, cancellationToken)
+            length <- length + int64 result
+            checkLength ()
+            return result
+        }
+
+    override this.ReadAsync (buffer, offset, count, cancellationToken) =
+        task {
+            let! result = stream.ReadAsync (buffer, offset, count, cancellationToken)
+            length <- length + int64 result
+            checkLength ()
+            return result
+        }
 
     override this.Flush () = raise <| NotSupportedException()
     override this.Seek (offset, origin) = raise <| NotSupportedException()

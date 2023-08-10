@@ -254,7 +254,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 return Error (EEOperation (EOERequest err))
         }
 
-    member this.InsertEntities (req : InsertEntitiesRequest) : Task<Result<InsertEntitiesResponse, TransactionError>> =
+    member this.InsertEntities (req : InsertEntitiesRequest) : Task<Result<InsertEntitiesResponse, TransactionErrorInfo>> =
         wrapAPIError rctx "insertEntities" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
@@ -271,7 +271,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     let beforeTriggers = findMergedTriggersInsert req.Entity TTBefore ctx.Triggers
                     let afterTriggers = findMergedTriggersInsert req.Entity TTAfter ctx.Triggers
 
-                    let runSingleId (i, (rawArgs : RawArguments, rowArgs : LocalArgumentsMap)) : Task<Result<InsertEntityResponse, TransactionError>> =
+                    let runSingleId (i, (rawArgs : RawArguments, rowArgs : LocalArgumentsMap)) : Task<Result<InsertEntityResponse, TransactionErrorInfo>> =
                         task {
                             match! Seq.foldResultTask (applyInsertTriggerBefore req.Entity entity) rowArgs beforeTriggers with
                             | Error (BEError e) -> return Error { Inner = e; Operation = i }
@@ -543,7 +543,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 return Error (EECommand e.Details)
         }
 
-    member this.RunTransaction (req : TransactionRequest) : Task<Result<TransactionResponse, TransactionError>> =
+    member this.RunTransaction (req : TransactionRequest) : Task<Result<TransactionResponse, TransactionErrorInfo>> =
         task {
             let inline runPendingInsert (pending : PendingMassInsert) =
                 task {

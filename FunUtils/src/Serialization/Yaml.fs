@@ -259,10 +259,10 @@ type SpecializedRecordConverter<'a> (converter : CrutchTypeConverter) =
         let values = fields |> Array.map lookupField
         makeRecord values
 
-    let writeYaml (value : obj) (writer : IEmitter) : unit =
+    let writeYaml (obj : obj) (writer : IEmitter) : unit =
         writer.Emit(MappingStart())
         let emitValue (name, field) =
-            let value = field.GetValue(value, null)
+            let value = field.GetValue(obj)
             match field.DefaultValue with
             | Some d when not (Option.defaultValue true field.EmitDefaultValue) && d = value -> ()
             | _ ->

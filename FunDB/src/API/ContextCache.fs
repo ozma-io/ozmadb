@@ -521,9 +521,11 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     do! next ()
                     return true
                 finally
-                    ignore <| cachedStateLock.Release()
-                    (transaction :> IDisposable).Dispose()
-                    (transaction.Connection :> IDisposable).Dispose()
+                    ignore <| unitTask {
+                        ignore <| cachedStateLock.Release()
+                        do! (transaction :> IAsyncDisposable).DisposeAsync()
+                        do! (transaction.Connection :> IAsyncDisposable).DisposeAsync()
+                    }
         }
 
     let rec getCachedState (cancellationToken : CancellationToken) : Task<DatabaseTransaction * CachedState> =

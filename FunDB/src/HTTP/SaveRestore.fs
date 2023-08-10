@@ -1,45 +1,67 @@
 module FunWithFlags.FunDB.HTTP.SaveRestore
 
+open System
 open System.IO
+open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Http
 open FSharp.Control.Tasks.Affine
 open Giraffe
 open Giraffe.EndpointRouting
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunDB.HTTP.LongRunning
 open FunWithFlags.FunDB.HTTP.Utils
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.API.Types
+open FunWithFlags.FunDB.API.SaveRestore
+open FunWithFlags.FunDB.Operations.SaveRestore
 
+// TODO: make it private after we fix JSON serialization for the private F# types.
 [<NoEquality; NoComparison>]
 type RestoreSchemasHTTPFlags =
     { DropOthers : bool
       ForceAllowBroken : bool
     }
 
-let saveRestoreApi : Endpoint list =
-    let saveZipSchemas (arg: obj) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        task {
-            let (schemas, api) = arg :?> (SaveSchemas * IFunDBAPI)
-            match! api.SaveRestore.SaveZipSchemas { Schemas = schemas } with
-            | Ok dumpStream ->
-                ctx.SetHttpHeader("Content-Type", "application/zip")
-                return! ctx.WriteStreamAsync(false, dumpStream, None, None)
-            | Error err -> return! requestError err next ctx
-        }
+let saveRestoreApi (serviceProvider : IServiceProvider) : Endpoint list =
+    let utils = serviceProvider.GetRequiredService<HttpJobUtils>()
 
-    let saveJsonSchemas (arg: obj) : HttpHandler =
-        let (schemas, api) = arg :?> (SaveSchemas * IFunDBAPI)
-        handleRequest (api.SaveRestore.SaveSchemas { Schemas = schemas })
+    let saveZipSchemas (schemas : SaveSchemas) : HttpHandler =
+        let job (api : IFunDBAPI) =
+            task {
+                match! api.SaveRestore.SaveSchemas { Schemas = schemas } with
+                | Ok dump ->
+                    let header =
+                        { ResponseCode = 200
+                          Headers =
+                            dict <| seq {
+                                ("Content-Type", "application/zip")
+                            }
+                        }
+                    let writer stream cancellationToken =
+                        schemasToZipFile dump.Schemas stream
+                    return (header, JOSync writer)
+                | Error err -> return jobError err
+            }
+        // This query is quite expensive, so apply write rate limit.
+        utils.PerformWriteJob job
+
+    let saveJsonSchemas (schemas : SaveSchemas) : HttpHandler =
+        let job (api : IFunDBAPI) = 
+            task {
+                let! ret = api.SaveRestore.SaveSchemas { Schemas = schemas }
+                return jobReply ret
+            }
+        utils.PerformWriteJob job
 
     let saveSchemaNegotiationRules =
         dict [
-            "*/*"             , saveZipSchemas
-            "application/json", saveJsonSchemas
-            "application/zip" , saveZipSchemas
+            "*/*"             , (fun (o : obj) -> saveZipSchemas (o :?> SaveSchemas))
+            "application/json", (fun (o : obj) -> saveJsonSchemas (o :?> SaveSchemas))
+            "application/zip" , (fun (o : obj) -> saveZipSchemas (o :?> SaveSchemas))
         ]
 
-    let saveSchemas (api : IFunDBAPI) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let saveSchemas (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             let schemas =
                 match ctx.Request.Query.TryGetValue "schema" with
@@ -49,49 +71,58 @@ let saveRestoreApi : Endpoint list =
                         SSNonPreloaded
                     else
                         SSAll
-            let negotiateConfig = ctx.GetService<INegotiationConfig>()
-            return! negotiateWith saveSchemaNegotiationRules negotiateConfig.UnacceptableHandler (schemas, api) next ctx
+            return! negotiateWith saveSchemaNegotiationRules (requestError RIUnacceptable) schemas next ctx
         }
 
-    let getRestoreFlags (nextOp : RestoreSchemasHTTPFlags -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
-        let flags =
-            { DropOthers = boolRequestArg "drop_others" ctx
-              ForceAllowBroken = boolRequestArg "force_allow_broken" ctx
-            }
-        nextOp flags next ctx
-
-    let restoreJsonSchemas (api : IFunDBAPI) (flags : RestoreSchemasHTTPFlags) =
+    let restoreJsonSchemas (flags : RestoreSchemasHTTPFlags) =
         safeBindJson <| fun dump ->
-            let req =
-                { Schemas = dump
-                  Flags = Some { DropOthers = flags.DropOthers }
+            let job (api : IFunDBAPI) =
+                task {
+                    let req =
+                        { Schemas = dump
+                          Flags = Some { DropOthers = flags.DropOthers }
+                        }
+                    let! ret = api.SaveRestore.RestoreSchemas req
+                    return! jobReplyWithCommit api ret
                 }
-            handleRequestWithCommit api (api.SaveRestore.RestoreSchemas req)
+            utils.PerformWriteJob job
 
-    let restoreZipSchemas (api : IFunDBAPI) (flags : RestoreSchemasHTTPFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let restoreZipSchemas (flags : RestoreSchemasHTTPFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
             // Used because the ZipArchive API is synchronous.
             use stream = new MemoryStream()
             do! ctx.Request.Body.CopyToAsync(stream)
-            ignore <| stream.Seek(0L, SeekOrigin.Begin)
-            let req = { Flags = Some { DropOthers = flags.DropOthers } }
-            return! handleRequestWithCommit api (api.SaveRestore.RestoreZipSchemas ctx.Request.Body req) next ctx
+            let job (api : IFunDBAPI) =
+                task {
+                    ignore <| stream.Seek(0L, SeekOrigin.Begin)
+                    match trySchemasFromZipFile stream with
+                    | Error e -> return jobError e
+                    | Ok dump ->
+                        let req =
+                            { Schemas = dump
+                              Flags = Some { DropOthers = flags.DropOthers }
+                            }
+                        let! ret = api.SaveRestore.RestoreSchemas req
+                        return! jobReplyWithCommit api ret
+                }
+            return! utils.PerformWriteJob job next ctx
         }
 
-    let restoreSchemas (api : IFunDBAPI) (flags : RestoreSchemasHTTPFlags) (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
+    let restoreSchemas (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
-            if flags.ForceAllowBroken then
-                api.Request.Context.SetForceAllowBroken ()
+            let flags =
+                { DropOthers = boolRequestArg "drop_others" ctx
+                  ForceAllowBroken = boolRequestArg "force_allow_broken" ctx
+                }
             match ctx.TryGetRequestHeader "Content-Type" with
-            | Some "application/json" -> return! restoreJsonSchemas api flags next ctx
-            | Some "application/zip" -> return! restoreZipSchemas api flags next ctx
-            | _ -> return! RequestErrors.unsupportedMediaType (json (RIRequest "Unsupported media type")) next ctx
+            | Some "application/json" -> return! restoreJsonSchemas flags next ctx
+            | Some "application/zip" -> return! restoreZipSchemas flags next ctx
+            | _ -> return! requestError RIUnsupportedMediaType next ctx
         }
 
     let massSaveRestoreApi =
-        [ // This query is quite expensive, so apply write rate limit.
-          GET [route "" <| withContextWrite saveSchemas]
-          PUT [route "" <| withContextWrite (fun api -> getRestoreFlags (restoreSchemas api))]
+        [ GET [route "" <| saveSchemas]
+          PUT [route "" <| restoreSchemas]
         ]
 
     [ subRoute "/layouts" massSaveRestoreApi

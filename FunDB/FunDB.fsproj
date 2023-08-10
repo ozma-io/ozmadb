@@ -155,6 +155,7 @@
     <Compile Include="src/API/API.fs" />
 
     <Compile Include="src/HTTP/RateLimit.fs" />
+    <Compile Include="src/HTTP/LongRunning.fs" />
     <Compile Include="src/HTTP/Utils.fs" />
     <Compile Include="src/HTTP/Info.fs" />
     <Compile Include="src/HTTP/Views.fs" />

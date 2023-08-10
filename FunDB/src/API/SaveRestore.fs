@@ -21,6 +21,13 @@ let private canRestore : RoleType -> bool = function
     | RTRoot -> true
     | RTRole _ -> false
 
+let trySchemasFromZipFile (stream : Stream) =
+    try
+        Ok <| schemasFromZipFile stream
+    with
+    | :? RestoreSchemaException as e when e.IsUserException ->
+        Error (RRERequest <| fullUserMessage e)
+
 type SaveRestoreAPI (api : IFunDBAPI) =
     let rctx = api.Request
     let ctx = rctx.Context
@@ -71,18 +78,6 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                 return Result.map (fun schemas -> { Schemas = schemas }) result
         }
 
-    member this.SaveZipSchemas (req : SaveSchemasRequest) : Task<Result<Stream, SaveErrorInfo>> =
-        task {
-            match! this.SaveSchemas req with
-            | Error e -> return Error e
-            | Ok dump ->
-                // Used as a buffer because the ZipArchive API is synchronous.
-                let stream = new MemoryStream()
-                schemasToZipFile dump.Schemas stream
-                ignore <| stream.Seek(0L, SeekOrigin.Begin)
-                return Ok (stream :> Stream)
-        }
-
     member this.RestoreSchemas (req : RestoreSchemasRequest) : Task<Result<unit, RestoreErrorInfo>> =
         wrapUnitAPIResult rctx "restoreSchemas" req <| task {
             let flags = Option.defaultValue emptyRestoreSchemasFlags req.Flags
@@ -114,25 +109,6 @@ type SaveRestoreAPI (api : IFunDBAPI) =
                         return Error <| RRERequest (fullUserMessage e)
         }
 
-    member this.RestoreZipSchemas (stream : Stream) (req : RestoreStreamSchemasRequest) : Task<Result<unit, RestoreErrorInfo>> =
-        task {
-            let maybeDumps =
-                try
-                    Ok <| schemasFromZipFile stream
-                with
-                | :? RestoreSchemaException as e when e.IsUserException ->
-                    Error (RRERequest <| fullUserMessage e)
-            match maybeDumps with
-            | Error e ->
-                logAPIError rctx "restoreZipSchemas" req e
-                return Error e
-            | Ok dumps ->
-                let newReq = { Schemas = dumps; Flags = req.Flags }
-                return! this.RestoreSchemas newReq
-        }
-
     interface ISaveRestoreAPI with
         member this.SaveSchemas req = this.SaveSchemas req
-        member this.SaveZipSchemas req = this.SaveZipSchemas req
         member this.RestoreSchemas req = this.RestoreSchemas req
-        member this.RestoreZipSchemas stream req = this.RestoreZipSchemas stream req

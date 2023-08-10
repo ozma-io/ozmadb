@@ -1,11 +1,10 @@
 module FunWithFlags.FunDB.HTTP.RateLimit
 
-// All this is hacky as hell, because AspNetCoreRateLimit is too rigid for us and we try to use it anyway.
-
 open System
 open System.Collections.Generic
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Options
+open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Http
 open AspNetCoreRateLimit
 open FSharp.Control.Tasks.Affine
@@ -18,11 +17,34 @@ type RateLimit =
       Limit : int
     }
 
+type RateLimits =
+    { Limits : RateLimit seq
+      ClientId : string
+    }
+
 let private counterKeyBuilder = ClientCounterKeyBuilder (ClientRateLimitOptions ())
 
-type private ConstClientResolveContributor (clientId : string) =
+type private ContextClientResolveContributor () =
     interface IClientResolveContributor with
-        member this.ResolveClientAsync httpContext = Task.result clientId
+        member this.ResolveClientAsync httpContext =
+            let rateLimits = httpContext.Features.Get<RateLimits>()
+            if isRefNull rateLimits then
+                Task.result null
+            else
+                Task.result rateLimits.ClientId
+let private rateIncrementer = Func<float>(fun _ -> 1.0)
+
+type private ContextRateLimitConfiguration () =
+    let contributor = ContextClientResolveContributor () :> IClientResolveContributor
+    let clientResolvers = List(seq { contributor }) : IList<IClientResolveContributor>
+    let ipResolvers = List() : IList<IIpResolveContributor>
+
+    interface IRateLimitConfiguration with
+        member this.ClientResolvers = clientResolvers
+        member this.IpResolvers = ipResolvers
+        member this.EndpointCounterKeyBuilder = counterKeyBuilder
+        member this.RateIncrementer = rateIncrementer
+        member this.RegisterResolvers () = ()
 
 let private convertRateLimit (rate : RateLimit) : RateLimitRule =
     RateLimitRule(
@@ -32,10 +54,18 @@ let private convertRateLimit (rate : RateLimit) : RateLimitRule =
         PeriodTimespan = TimeSpan.FromSeconds(rate.Period)
     )
 
-type private StaticRateLimitProcessor (limits : RateLimit seq, strategy : IProcessingStrategy, options : RateLimitOptions) =
+type ContextRateLimitProcessor (
+            options : IOptions<ClientRateLimitOptions>,
+            strategy : IProcessingStrategy,
+            contextAccessor : IHttpContextAccessor
+        ) =
     interface IRateLimitProcessor with
         member this.GetMatchingRulesAsync (identity, cancellationToken) =
-            limits |> Seq.map convertRateLimit |> Task.result
+            let rateLimits = contextAccessor.HttpContext.Features.Get<RateLimits>()
+            if isRefNull rateLimits then
+                Task.result Seq.empty
+            else
+                rateLimits.Limits |> Seq.map convertRateLimit |> Task.result
 
         member this.GetRateLimitHeaders (counter, rule, cancellationToken) =
             let (remaining, reset) =
@@ -54,49 +84,13 @@ type private StaticRateLimitProcessor (limits : RateLimit seq, strategy : IProce
             )
 
         member this.ProcessRequestAsync (requestIdentity, rule, cancellationToken) =
-            strategy.ProcessRequestAsync (requestIdentity, rule, counterKeyBuilder, options, cancellationToken)
+            strategy.ProcessRequestAsync (requestIdentity, rule, counterKeyBuilder, options.Value, cancellationToken)
 
         member this.IsWhitelisted requestIdentity = false
 
-let private emptyIpResolvers = List() : IList<IIpResolveContributor>
-let private rateIncrementer = Func<float>(fun _ -> 1.0)
-
-type private StaticRateLimitConfiguration (clientId : string) =
-    let single = ConstClientResolveContributor clientId :> IClientResolveContributor
-    let contribs = Seq.singleton single
-    let clientResolvers =
-        // Don't ask
-        { new IList<IClientResolveContributor> with
-            member this.Item
-                with get key = raise <| NotSupportedException ()
-                and set key value = raise <| NotSupportedException ()
-            member this.IndexOf item = raise <| NotSupportedException ()
-            member this.Insert (index, item) = raise <| NotSupportedException ()
-            member this.RemoveAt idex = raise <| NotSupportedException ()
-            member this.Count = 1
-            member this.IsReadOnly = true
-            member this.Add item = raise <| NotSupportedException ()
-            member this.Clear () = raise <| NotSupportedException ()
-            member this.Contains item = raise <| NotSupportedException ()
-            member this.CopyTo (array, arrayIndex) = raise <| NotSupportedException ()
-            member this.Remove item = raise <| NotSupportedException ()
-
-          interface IEnumerable<IClientResolveContributor> with
-            member this.GetEnumerator () = contribs.GetEnumerator ()
-
-          interface Collections.IEnumerable with
-            member this.GetEnumerator () = contribs.GetEnumerator () :> Collections.IEnumerator
-        }
-
-    interface IRateLimitConfiguration with
-        member this.ClientResolvers = clientResolvers
-        member this.IpResolvers = emptyIpResolvers
-        member this.EndpointCounterKeyBuilder = counterKeyBuilder
-        member this.RateIncrementer = rateIncrementer
-        member this.RegisterResolvers () = ()
-
-type private StaticRateLimitMiddleware (next : RequestDelegate, quotaExceeded : string -> HttpHandler, options : RateLimitOptions, processor : StaticRateLimitProcessor, config : IRateLimitConfiguration, logger : ILogger) =
-    inherit RateLimitMiddleware<StaticRateLimitProcessor>(next, options, processor, config)
+// We create the middleware anew each time, because we have no way to use dynamic `RequestDelegate`s otherwise.
+type private ContextRateLimitMiddleware (next : RequestDelegate, quotaExceeded : string -> HttpHandler, options : RateLimitOptions, processor : ContextRateLimitProcessor, config : IRateLimitConfiguration, logger : ILogger) =
+    inherit RateLimitMiddleware<ContextRateLimitProcessor>(next, options, processor, config)
 
     override this.LogBlockedRequest (httpContext, identity, counter, rule) =
         logger.LogInformation("Request for {client_id} has been blocked, quota {limit}/{period} exceeded by {excess}", identity.ClientId, rule.Limit, rule.Period, counter.Count - rule.Limit)
@@ -105,25 +99,28 @@ type private StaticRateLimitMiddleware (next : RequestDelegate, quotaExceeded : 
         let msg = sprintf "Maximum %i per %s second(s)" (int rule.Limit) rule.Period
         quotaExceeded msg earlyReturn httpContext
 
-let checkRateLimit (quotaExceeded : string -> HttpHandler) (clientId : string) (limits : RateLimit seq) (next : HttpFunc) (ctx : HttpContext) =
-    if Seq.isEmpty limits then
-        next ctx
-    else
+type RateLimiter (
+            logger : ILogger<RateLimiter>,
+            processor : ContextRateLimitProcessor,
+            options : IOptions<RateLimitOptions>,
+            config : IRateLimitConfiguration
+        ) =
+    member this.CheckRateLimit (quotaExceeded : string -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =
         task {
-            let options = ctx.GetService<IOptions<ClientRateLimitOptions>>()
-            let strategy = ctx.GetService<IProcessingStrategy>()
-            let config = StaticRateLimitConfiguration(clientId)
-            let processor = StaticRateLimitProcessor(limits, strategy, options.Value)
-            let logger = ctx.GetLogger<StaticRateLimitMiddleware>()
             let mutable result = None
             let delegateNext (ctx : HttpContext) =
                 unitTask {
                     let! ret = next ctx
-                    result <- Some ret
+                    result <- ret
                 }
-            let middleware = StaticRateLimitMiddleware (delegateNext, quotaExceeded, options.Value, processor, config, logger)
+            let middleware = ContextRateLimitMiddleware (delegateNext, quotaExceeded, options.Value, processor, config, logger)
             do! middleware.Invoke ctx
-            match result with
-            | None -> return! earlyReturn ctx
-            | Some ret -> return ret
+            return result
         }
+
+let addRateLimiter (services : IServiceCollection) =
+    ignore <| services
+        .AddSingleton<ContextRateLimitProcessor>()
+        .AddSingleton<IRateLimitConfiguration, ContextRateLimitConfiguration>()
+        .AddSingleton<RateLimiter, RateLimiter>()
+        .AddHttpContextAccessor()
