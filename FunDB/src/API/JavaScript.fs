@@ -237,11 +237,11 @@ type APITemplate (isolate : Isolate) =
         fundbTemplate.Set("getUserViewInfo", simpleApiCallTemplate (fun handle -> handle.API.UserViews.GetUserViewInfo))
 
         fundbTemplate.Set("getEntityInfo", simpleApiCallTemplate (fun handle -> handle.API.Entities.GetEntityInfo))
-        fundbTemplate.Set("insertEntities", simpleApiCallTemplate (fun handle -> handle.API.Entities.InsertEntities))
-        fundbTemplate.Set("updateEntity", simpleApiCallTemplate (fun handle -> handle.API.Entities.UpdateEntity))
-        fundbTemplate.Set("deleteEntity", simpleApiCallTemplate (fun handle -> handle.API.Entities.DeleteEntity))
-        fundbTemplate.Set("getRelatedEntities", simpleApiCallTemplate (fun handle -> handle.API.Entities.GetRelatedEntities))
-        fundbTemplate.Set("recursiveDeleteEntity", simpleApiCallTemplate (fun handle -> handle.API.Entities.RecursiveDeleteEntity))
+        fundbTemplate.Set("insertEntries", simpleApiCallTemplate (fun handle -> handle.API.Entities.InsertEntries))
+        fundbTemplate.Set("updateEntry", simpleApiCallTemplate (fun handle -> handle.API.Entities.UpdateEntry))
+        fundbTemplate.Set("deleteEntry", simpleApiCallTemplate (fun handle -> handle.API.Entities.DeleteEntry))
+        fundbTemplate.Set("getRelatedEntries", simpleApiCallTemplate (fun handle -> handle.API.Entities.GetRelatedEntries))
+        fundbTemplate.Set("recursiveDeleteEntry", simpleApiCallTemplate (fun handle -> handle.API.Entities.RecursiveDeleteEntry))
         fundbTemplate.Set("runCommand", simpleApiCallTemplate (fun handle -> handle.API.Entities.RunCommand))
 
         fundbTemplate.Set("deferConstraints", FunctionTemplate.New(isolate, fun args ->
@@ -337,7 +337,7 @@ global.formatDate = (date) => date.toISOString().split('T')[0];
 global.formatFunQLName = internal.formatFunQLName;
 global.formatFunQLValue = internal.formatFunQLValue;
 
-// TODO: deprecated, remove.
+// DEPRECATED
 global.renderDate = global.formatDate;
 global.renderFunQLName = global.formatFunQLName;
 global.renderFunQLValue = global.formatFunQLValue;
@@ -363,37 +363,67 @@ class FunDB1 {
         return internal.getEntityInfo({ entity });
     };
 
-    async insertEntity(entity, entry) {
+    // DEPRECATED
+    insertEntity(entity, fields) {
+        return this.insertEntry(entity, fields);
+    }
+
+    async insertEntry(entity, fields) {
         try {
-            const retIds = await this.insertEntities(entity, [entry]);
+            const retIds = await this.insertEntries(entity, [fields]);
             return retIds[0];
         } catch (e) {
-            if (e.body.error === 'transaction') {
-                throw new FunDBError(e.body.details);
+            if (e.error === 'transaction') {
+                throw new FunDBError(e.inner);
             } else {
                 throw e;
             }
         }
     };
 
-    insertEntities(entity, fields) {
-        return internal.insertEntities({ entity, fields });
+    // DEPRECATED
+    insertEntities(entity, entries) {
+        return this.insertEntries(entity, entries);
+    }
+
+    insertEntries(entity, entries) {
+        return internal.insertEntries({ entity, entries });
     };
 
+    // DEPRECATED
     updateEntity(entity, id, fields) {
-        return internal.updateEntity({ entity, id, fields });
+        return this.updateEntry(entity, id, fields);
     };
 
+    updateEntry(entity, id, fields) {
+        return internal.updateEntry({ entity, id, fields });
+    };
+
+    // DEPRECATED
     deleteEntity(entity, id) {
-        return internal.deleteEntity({ entity, id });
+        return this.deleteEntry(entity, id);
     };
 
+    deleteEntry(entity, id) {
+        return internal.deleteEntry({ entity, id });
+    };
+
+    // DEPRECATED
     getRelatedEntities(entity, id) {
-        return internal.getRelatedEntities({ entity, id });
+        return this.getRelatedEntries(entity, id);
     };
 
+    getRelatedEntries(entity, id) {
+        return internal.getRelatedEntries({ entity, id });
+    };
+
+    // DEPRECATED
     recursiveDeleteEntity(entity, id) {
-        return internal.recursiveDeleteEntity({ entity, id });
+        return this.recursiveDeleteEntry(entity, id);
+    };
+
+    recursiveDeleteEntry(entity, id) {
+        return internal.recursiveDeleteEntry({ entity, id });
     };
 
     runCommand(command, args) {

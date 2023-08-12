@@ -89,7 +89,7 @@ let private cascadeDeleteDeferred
                     while not <| Set.isEmpty currentSet do
                         let (entityRef, id) = currentSet |> Seq.first |> Option.get
                         let! tree =
-                            getRelatedEntities
+                            getRelatedEntries
                                 connection.Connection.Query
                                 Map.empty
                                 layout
@@ -103,7 +103,7 @@ let private cascadeDeleteDeferred
                         let deleteOne (entityRef : ResolvedEntityRef) (id : RowId) =
                             unitTask {
                                 let! _ =
-                                    deleteEntity
+                                    deleteEntry
                                         connection.Connection.Query
                                         Map.empty
                                         layout

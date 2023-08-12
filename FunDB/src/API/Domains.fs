@@ -82,10 +82,6 @@ type DomainsAPI (api : IFunDBAPI) =
         wrapAPIResult rctx "getDomainExplain" req <| task {
             if not (canExplain rctx.User.Saved.Type) then
                 logger.LogError("Explain access denied")
-                rctx.WriteEvent (fun event ->
-                    event.Type <- "getDomainExplain"
-                    event.Error <- "access_denied"
-                )
                 return Error (DEDomain (DEAccessDenied "Explain access denied"))
             else
                 let flags = Option.defaultValue emptyDomainFlags req.Flags

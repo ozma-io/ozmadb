@@ -489,7 +489,7 @@ let resolveKey
         | RKAlt (name, args) -> return! resolveAltKey connection globalArgs layout applyRole entityRef comments name args cancellationToken
     }
 
-let insertEntities
+let insertEntries
         (connection : QueryConnection)
         (globalArgs : LocalArgumentsMap)
         (layout : Layout)
@@ -601,7 +601,7 @@ let insertEntities
         return ids
     }
 
-let updateEntity
+let updateEntry
         (connection : QueryConnection)
         (globalArgs : LocalArgumentsMap)
         (layout : Layout)
@@ -725,7 +725,7 @@ let updateEntity
         return (id, subEntity)
     }
 
-let deleteEntity
+let deleteEntry
         (connection : QueryConnection)
         (globalArgs : LocalArgumentsMap)
         (layout : Layout)
@@ -991,7 +991,7 @@ let iterDeleteReferences (f : ResolvedEntityRef -> RowId -> Task) (tree : Refere
         return visited
     }
 
-let getRelatedEntities
+let getRelatedEntries
         (connection : QueryConnection)
         (globalArgs : LocalArgumentsMap)
         (layout : Layout)

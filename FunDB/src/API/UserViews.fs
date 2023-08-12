@@ -130,10 +130,6 @@ type UserViewsAPI (api : IFunDBAPI) =
         wrapAPIResult rctx "getUserViewExplain" req <| task {
             if not (canExplain rctx.User.Saved.Type) then
                 logger.LogError("Explain access denied")
-                rctx.WriteEvent (fun event ->
-                    event.Type <- "getUserViewExplain"
-                    event.Error <- "access_denied"
-                )
                 return Error (UVEAccessDenied "Explain access denied")
             else
                 let flags = Option.defaultValue emptyUserViewFlags req.Flags

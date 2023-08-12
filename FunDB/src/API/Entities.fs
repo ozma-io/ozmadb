@@ -25,7 +25,7 @@ open FunWithFlags.FunDB.Operations.Entity
 open FunWithFlags.FunDB.Operations.Command
 open FunWithFlags.FunDB.API.Types
 
-let private insertEntityComments (ref : ResolvedEntityRef) (role : RoleType) (arguments : LocalArgumentsMap) =
+let private insertEntryComments (ref : ResolvedEntityRef) (role : RoleType) (arguments : LocalArgumentsMap) =
     let refStr = sprintf "insert into %O" ref
     let argumentsStr = sprintf ", arguments %s" (JsonConvert.SerializeObject arguments)
     let roleStr =
@@ -34,7 +34,7 @@ let private insertEntityComments (ref : ResolvedEntityRef) (role : RoleType) (ar
         | RTRole role -> sprintf ", role %O" role.Ref
     String.concat "" [refStr; argumentsStr; roleStr]
 
-let private massInsertEntityComments (ref : ResolvedEntityRef) (role : RoleType) =
+let private massInsertEntryComments (ref : ResolvedEntityRef) (role : RoleType) =
     let refStr = sprintf "mass insert into %O" ref
     let roleStr =
         match role with
@@ -42,7 +42,7 @@ let private massInsertEntityComments (ref : ResolvedEntityRef) (role : RoleType)
         | RTRole role -> sprintf ", role %O" role.Ref
     String.concat "" [refStr; roleStr]
 
-let private updateEntityComments (ref : ResolvedEntityRef) (role : RoleType) (key : RowKey) (arguments : LocalArgumentsMap) =
+let private updateEntryComments (ref : ResolvedEntityRef) (role : RoleType) (key : RowKey) (arguments : LocalArgumentsMap) =
     let refStr = sprintf "update %O, id %O" ref key
     let argumentsStr = sprintf ", arguments %s" (JsonConvert.SerializeObject arguments)
     let roleStr =
@@ -51,7 +51,7 @@ let private updateEntityComments (ref : ResolvedEntityRef) (role : RoleType) (ke
         | RTRole role -> sprintf ", role %O" role.Ref
     String.concat "" [refStr; argumentsStr; roleStr]
 
-let private deleteEntityComments (ref : ResolvedEntityRef) (role : RoleType) (key : RowKey) =
+let private deleteEntryComments (ref : ResolvedEntityRef) (role : RoleType) (key : RowKey) =
     let refStr = sprintf "delete from %O, id %O" ref key
     let roleStr =
         match role with
@@ -59,7 +59,7 @@ let private deleteEntityComments (ref : ResolvedEntityRef) (role : RoleType) (ke
         | RTRole role -> sprintf ", role %O" role.Ref
     String.concat "" [refStr; roleStr]
 
-let private getRelatedEntitiesComments (ref : ResolvedEntityRef) (role : RoleType) (key : RowKey) =
+let private getRelatedEntriesComments (ref : ResolvedEntityRef) (role : RoleType) (key : RowKey) =
     let refStr = sprintf "getting related for %O, id %O" ref key
     let roleStr =
         match role with
@@ -254,8 +254,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                 return Error (EEOperation (EOERequest err))
         }
 
-    member this.InsertEntities (req : InsertEntitiesRequest) : Task<Result<InsertEntitiesResponse, TransactionErrorInfo>> =
-        wrapAPIError rctx "insertEntities" req <| task {
+    member this.InsertEntries (req : InsertEntriesRequest) : Task<Result<InsertEntitiesResponse, TransactionErrorInfo>> =
+        wrapAPIError rctx "insertEntries" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -277,9 +277,9 @@ type EntitiesAPI (api : IFunDBAPI) =
                             | Error (BEError e) -> return Error { Inner = e; Operation = i }
                             | Error (BECancelled ()) -> return Ok { Id = None }
                             | Ok args ->
-                                let comments = insertEntityComments req.Entity rctx.User.Effective.Type args
+                                let comments = insertEntryComments req.Entity rctx.User.Effective.Type args
                                 let! newIds =
-                                    insertEntities
+                                    insertEntries
                                         query
                                         rctx.GlobalArguments
                                         ctx.Layout
@@ -291,7 +291,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 let newId = newIds.[0]
                                 let req = { Entity = req.Entity; Fields = rawArgs } : InsertEntityRequest
                                 let resp = { Id = Some newId } : InsertEntityResponse
-                                do! logAPIResponse rctx "insertEntity" req resp
+                                do! logAPIResponse rctx "insertEntry" req resp
                                 match! Seq.foldResultTask (applyInsertTriggerAfter req.Entity newId args) () afterTriggers with
                                 | Error e -> return Error { Inner = e; Operation = i }
                                 | Ok () -> return Ok resp
@@ -316,10 +316,10 @@ type EntitiesAPI (api : IFunDBAPI) =
                                         ctx.ScheduleMigration ()
                                     return Result.map Seq.toArray ret
                                 else
-                                    let comments = massInsertEntityComments req.Entity rctx.User.Effective.Type
+                                    let comments = massInsertEntryComments req.Entity rctx.User.Effective.Type
                                     let cachedArgs = Seq.cache rowsArgs
                                     let! newIds =
-                                        insertEntities
+                                        insertEntries
                                             query
                                             rctx.GlobalArguments
                                             ctx.Layout
@@ -331,7 +331,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                     let responses = Array.map (fun id -> { Id = Some id } : InsertEntityResponse) newIds
                                     for (reqArgs, resp) in Seq.zip req.Entries responses do
                                         let singleReq = { Entity = req.Entity; Fields = reqArgs } : InsertEntityRequest
-                                        do! logAPIResponse rctx "insertEntity" singleReq resp
+                                        do! logAPIResponse rctx "insertEntry" singleReq resp
                                     return Ok responses
                             }
                         match ret with
@@ -350,8 +350,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                     return Error { Inner = EEOperation e.Details; Operation = 0 }
         }
 
-    member this.UpdateEntity (req : UpdateEntityRequest) : Task<Result<UpdateEntityResponse, EntityErrorInfo>> =
-        wrapAPIError rctx "updateEntity" req <| task {
+    member this.UpdateEntry (req : UpdateEntryRequest) : Task<Result<UpdateEntityResponse, EntityErrorInfo>> =
+        wrapAPIError rctx "updateEntry" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -385,9 +385,9 @@ type EntitiesAPI (api : IFunDBAPI) =
                         | Error (BECancelled id) ->
                             return Ok { Id = id }
                         | Ok (key, args) ->
-                            let comments = updateEntityComments req.Entity rctx.User.Effective.Type key args
+                            let comments = updateEntryComments req.Entity rctx.User.Effective.Type key args
                             let! (id, subEntityRef) =
-                                updateEntity
+                                updateEntry
                                     query
                                     rctx.GlobalArguments
                                     ctx.Layout
@@ -398,7 +398,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                     args
                                     ctx.CancellationToken
                             let resp = { Id = id }
-                            do! logAPIResponse rctx "updateEntity" req resp
+                            do! logAPIResponse rctx "updateEntry" req resp
                             if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
                             let afterTriggers = findMergedTriggersUpdate req.Entity TTAfter (Map.keys args) ctx.Triggers
@@ -414,8 +414,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                     return Error (EEOperation e.Details)
         }
 
-    member this.DeleteEntity (req : DeleteEntityRequest) : Task<Result<unit, EntityErrorInfo>> =
-        wrapAPIError rctx "deleteEntity" req <| task {
+    member this.DeleteEntry (req : DeleteEntryRequest) : Task<Result<unit, EntityErrorInfo>> =
+        wrapAPIError rctx "deleteEntry" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -434,9 +434,9 @@ type EntitiesAPI (api : IFunDBAPI) =
                     | Error (BEError e) -> return Error e
                     | Error (BECancelled id) -> return Ok ()
                     | Ok key ->
-                            let comments = deleteEntityComments req.Entity rctx.User.Effective.Type key
+                            let comments = deleteEntryComments req.Entity rctx.User.Effective.Type key
                             let! id =
-                                deleteEntity
+                                deleteEntry
                                     query
                                     rctx.GlobalArguments
                                     ctx.Layout
@@ -445,7 +445,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                     key
                                     (Some comments)
                                     ctx.CancellationToken
-                            do! logAPISuccess rctx "deleteEntity" req
+                            do! logAPISuccess rctx "deleteEntry" req
                             if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
                             let afterTriggers = findMergedTriggersDelete req.Entity TTAfter ctx.Triggers
@@ -461,8 +461,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                     return Error (EEOperation e.Details)
         }
 
-    member this.GetRelatedEntities (req : GetRelatedEntitiesRequest) : Task<Result<ReferencesTree, EntityErrorInfo>> =
-        wrapAPIResult rctx "getRelatedEntities" req <| task {
+    member this.GetRelatedEntries (req : GetRelatedEntriesRequest) : Task<Result<ReferencesTree, EntityErrorInfo>> =
+        wrapAPIResult rctx "getRelatedEntries" req <| task {
             match ctx.Layout.FindEntity(req.Entity) with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -473,9 +473,9 @@ type EntitiesAPI (api : IFunDBAPI) =
             | Some entity ->
                 try
                     let key = convertRawRowKey entity req.Id
-                    let comments = getRelatedEntitiesComments req.Entity rctx.User.Effective.Type key
+                    let comments = getRelatedEntriesComments req.Entity rctx.User.Effective.Type key
                     let! ret =
-                        getRelatedEntities
+                        getRelatedEntries
                             query
                             rctx.GlobalArguments
                             ctx.Layout
@@ -492,14 +492,14 @@ type EntitiesAPI (api : IFunDBAPI) =
                     return Error (EEOperation e.Details)
         }
 
-    member this.RecursiveDeleteEntity (req : DeleteEntityRequest) : Task<Result<ReferencesTree, EntityErrorInfo>> =
+    member this.RecursiveDeleteEntry (req : DeleteEntryRequest) : Task<Result<ReferencesTree, EntityErrorInfo>> =
         task {
-            match! this.GetRelatedEntities { Entity = req.Entity; Id = req.Id } with
+            match! this.GetRelatedEntries { Entity = req.Entity; Id = req.Id } with
             | Error e -> return Error e
             | Ok tree ->
                 let deleteOne entityRef id =
                     unitTask {
-                        match! this.DeleteEntity { Entity = entityRef; Id = RRKPrimary id } with
+                        match! this.DeleteEntry { Entity = entityRef; Id = RRKPrimary id } with
                         | Error e -> return raise <| EarlyStopException(e)
                         | Ok () -> ()
                     }
@@ -547,7 +547,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         task {
             let inline runPendingInsert (pending : PendingMassInsert) =
                 task {
-                    match! this.InsertEntities { Entity = pending.Entity; Entries = pending.Entries } with
+                    match! this.InsertEntries { Entity = pending.Entity; Entries = pending.Entries } with
                     | Error e -> return Error { e with Operation = pending.StartIndex + e.Operation }
                     | Ok resp -> return resp.Ids |> Seq.map TRInsertEntity |> Ok
                 }
@@ -593,9 +593,9 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 pendingInsert <- Some { Entity = insert.Entity; Entries = List(seq { insert.Fields }); StartIndex = i }
                                 return Ok rets
                             | Error e -> return Error e
-                    | TUpdateEntity update -> return! checkAndRun TRUpdateEntity (fun () -> this.UpdateEntity update)
-                    | TDeleteEntity delete -> return! checkAndRunConst TRDeleteEntity (fun () -> this.DeleteEntity delete)
-                    | TRecursiveDeleteEntity delete -> return! checkAndRun TRRecursiveDeleteEntity (fun () -> this.RecursiveDeleteEntity delete)
+                    | TUpdateEntity update -> return! checkAndRun TRUpdateEntity (fun () -> this.UpdateEntry update)
+                    | TDeleteEntity delete -> return! checkAndRunConst TRDeleteEntity (fun () -> this.DeleteEntry delete)
+                    | TRecursiveDeleteEntity delete -> return! checkAndRun TRRecursiveDeleteEntity (fun () -> this.RecursiveDeleteEntry delete)
                     | TCommand cmd -> return! checkAndRunConst TRCommand (fun () -> this.RunCommand cmd)
                 }
 
@@ -626,11 +626,11 @@ type EntitiesAPI (api : IFunDBAPI) =
 
     interface IEntitiesAPI with
         member this.GetEntityInfo req = this.GetEntityInfo req
-        member this.InsertEntities req = this.InsertEntities req
-        member this.UpdateEntity req = this.UpdateEntity req
-        member this.DeleteEntity req = this.DeleteEntity req
-        member this.GetRelatedEntities req = this.GetRelatedEntities req
-        member this.RecursiveDeleteEntity req = this.RecursiveDeleteEntity req
+        member this.InsertEntries req = this.InsertEntries req
+        member this.UpdateEntry req = this.UpdateEntry req
+        member this.DeleteEntry req = this.DeleteEntry req
+        member this.GetRelatedEntries req = this.GetRelatedEntries req
+        member this.RecursiveDeleteEntry req = this.RecursiveDeleteEntry req
         member this.RunCommand req = this.RunCommand req
         member this.RunTransaction req = this.RunTransaction req
         member this.DeferConstraints req = this.DeferConstraints req

@@ -471,7 +471,7 @@ type InsertEntityRequest =
             this.Fields <- fields
 
 [<NoEquality; NoComparison>]
-type UpdateEntityRequest =
+type UpdateEntryRequest =
     { Entity : ResolvedEntityRef
       Id : RawRowKey
       mutable Fields : RawArguments
@@ -483,7 +483,7 @@ type UpdateEntityRequest =
             this.Fields <- fields
 
 [<NoEquality; NoComparison>]
-type DeleteEntityRequest =
+type DeleteEntryRequest =
     { Entity : ResolvedEntityRef
       Id : RawRowKey
     }
@@ -499,9 +499,9 @@ type CommandRequest =
 [<NoEquality; NoComparison>]
 type TransactionOp =
     | [<CaseKey("insert", Type=CaseSerialization.InnerObject)>] TInsertEntity of InsertEntityRequest
-    | [<CaseKey("update", Type=CaseSerialization.InnerObject)>] TUpdateEntity of UpdateEntityRequest
-    | [<CaseKey("delete", Type=CaseSerialization.InnerObject)>] TDeleteEntity of DeleteEntityRequest
-    | [<CaseKey("recursiveDelete", Type=CaseSerialization.InnerObject)>] TRecursiveDeleteEntity of DeleteEntityRequest
+    | [<CaseKey("update", Type=CaseSerialization.InnerObject)>] TUpdateEntity of UpdateEntryRequest
+    | [<CaseKey("delete", Type=CaseSerialization.InnerObject)>] TDeleteEntity of DeleteEntryRequest
+    | [<CaseKey("recursiveDelete", Type=CaseSerialization.InnerObject)>] TRecursiveDeleteEntity of DeleteEntryRequest
     | [<CaseKey("command", Type=CaseSerialization.InnerObject)>] TCommand of CommandRequest
 
 type InsertEntityResponse =
@@ -532,7 +532,7 @@ type TransactionRequest =
 [<NoEquality; NoComparison>]
 type TransactionErrorInfo =
     { Operation : int
-      Inner : EntityErrorInfo
+      Inner : IErrorDetails
     } with
         member this.LogMessage = this.Inner.LogMessage
 
@@ -568,13 +568,13 @@ type GetEntityInfoRequest =
     }
 
 [<NoEquality; NoComparison>]
-type GetRelatedEntitiesRequest =
+type GetRelatedEntriesRequest =
     { Entity : ResolvedEntityRef
       Id : RawRowKey
     }
 
 [<NoEquality; NoComparison>]
-type InsertEntitiesRequest =
+type InsertEntriesRequest =
     { Entity : ResolvedEntityRef
       Entries : RawArguments seq
     }
@@ -585,11 +585,11 @@ type InsertEntitiesResponse =
 
  type IEntitiesAPI =
     abstract member GetEntityInfo : GetEntityInfoRequest -> Task<Result<SerializedEntity, EntityErrorInfo>>
-    abstract member InsertEntities : InsertEntitiesRequest -> Task<Result<InsertEntitiesResponse, TransactionErrorInfo>>
-    abstract member UpdateEntity : UpdateEntityRequest -> Task<Result<UpdateEntityResponse, EntityErrorInfo>>
-    abstract member DeleteEntity : DeleteEntityRequest -> Task<Result<unit, EntityErrorInfo>>
-    abstract member GetRelatedEntities : GetRelatedEntitiesRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
-    abstract member RecursiveDeleteEntity : DeleteEntityRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
+    abstract member InsertEntries : InsertEntriesRequest -> Task<Result<InsertEntitiesResponse, TransactionErrorInfo>>
+    abstract member UpdateEntry : UpdateEntryRequest -> Task<Result<UpdateEntityResponse, EntityErrorInfo>>
+    abstract member DeleteEntry : DeleteEntryRequest -> Task<Result<unit, EntityErrorInfo>>
+    abstract member GetRelatedEntries : GetRelatedEntriesRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
+    abstract member RecursiveDeleteEntry : DeleteEntryRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
     abstract member RunCommand : CommandRequest -> Task<Result<unit, EntityErrorInfo>>
     abstract member RunTransaction : TransactionRequest -> Task<Result<TransactionResponse, TransactionErrorInfo>>
     abstract member DeferConstraints : (unit -> Task<'a>) -> Task<Result<'a, EntityErrorInfo>>

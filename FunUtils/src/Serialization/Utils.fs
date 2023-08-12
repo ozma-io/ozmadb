@@ -62,6 +62,7 @@ let getMemberValue (memberInfo : MemberInfo) : (obj -> obj) option =
 
 // https://stackoverflow.com/questions/56600268/how-do-i-check-t-for-types-not-being-allowed-to-be-null
 let isNullableType (objectType : Type) =
+    let genericType = lazy (objectType.GetGenericTypeDefinition())
     if FSharpType.IsRecord objectType then
         false
     else if FSharpType.IsUnion objectType then
@@ -69,6 +70,8 @@ let isNullableType (objectType : Type) =
         | RefNull -> false
         | representation -> representation.Flags.HasFlag(CompilationRepresentationFlags.UseNullAsTrueValue)
     else if objectType = typeof<string> then
+        false
+    else if objectType.IsGenericType && genericType.Value = typedefof<seq<_>> then
         false
     else
         match objectType.GetCustomAttribute<CompilationMappingAttribute>() with

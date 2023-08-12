@@ -44,7 +44,7 @@ let entitiesApi (serviceProvider : IServiceProvider) : Endpoint list =
                         { Entity = entityRef
                           Id = httpReq.Id
                         }
-                    let! ret = api.Entities.GetRelatedEntities req
+                    let! ret = api.Entities.GetRelatedEntries req
                     return jobReply ret
                 }
             utils.PerformReadJob job
