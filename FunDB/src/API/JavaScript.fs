@@ -365,7 +365,7 @@ class FunDB1 {
 
     // DEPRECATED
     insertEntity(entity, fields) {
-        return this.insertEntry(entity, fields);
+        return this.insertEntry(entity, fields).id;
     }
 
     async insertEntry(entity, fields) {
@@ -383,7 +383,7 @@ class FunDB1 {
 
     // DEPRECATED
     insertEntities(entity, entries) {
-        return this.insertEntries(entity, entries);
+        return this.insertEntries(entity, entries).entries;
     }
 
     insertEntries(entity, entries) {
@@ -392,7 +392,7 @@ class FunDB1 {
 
     // DEPRECATED
     updateEntity(entity, id, fields) {
-        return this.updateEntry(entity, id, fields);
+        return this.updateEntry(entity, id, fields).id;
     };
 
     updateEntry(entity, id, fields) {
