@@ -53,7 +53,6 @@ type RequestErrorInfo =
     | [<CaseKey("unauthorized")>] RIUnauthorized
     | [<CaseKey("accessDenied", IgnoreFields=[|"Details"|])>] RIAccessDenied of Details : string
     | [<CaseKey("concurrentUpdate")>] RIConcurrentUpdate
-    | [<CaseKey("stackOverflow")>] RIStackOverflow of Trace : EventSource[]
     | [<CaseKey("notFinished")>] RINotFinished of Id : JobId
     | [<CaseKey("other", IgnoreFields=[|"Details"|])>] RIOther of Details : string
     with
@@ -71,11 +70,6 @@ type RequestErrorInfo =
             | RIUnauthorized -> "Failed to authorize using the access token"
             | RIAccessDenied msg -> msg
             | RIConcurrentUpdate -> "Concurrent update detected; try again"
-            | RIStackOverflow sources ->
-                sources
-                    |> Seq.map (sprintf "in %O")
-                    |> String.concat "\n"
-                    |> sprintf "Stack depth exceeded:\n%s"
             | RINotFinished id -> "The background job has not yet finished"
             | RIOther msg -> msg
 
@@ -96,7 +90,6 @@ type RequestErrorInfo =
             | RIUnauthorized -> 401
             | RIAccessDenied _ -> 403
             | RIConcurrentUpdate _ -> 503
-            | RIStackOverflow _ -> 500
             | RINotFinished _ -> 500
             | RIOther _ -> 500
 
@@ -691,8 +684,13 @@ type HttpJobUtils (
                         | :? RequestStackOverflowException as e -> yield! findAllSources e
                         | _ -> ()
                     }
-                let allSources = findAllSources topE |> Seq.toArray
-                return jobError <| RIStackOverflow allSources
+                let allSources = findAllSources topE
+                let msg =
+                    sources
+                    |> Seq.map (sprintf "in %O")
+                    |> String.concat "\n"
+                    |> sprintf "Stack depth exceeded:\n%s"
+                return jobError <| RIOther msg
         }
 
     let runJobWithApi (touchAccessedAt : bool) (ictx : InstanceContext) (f : IFunDBAPI -> Task<HttpJobResponse>) (next : HttpFunc) (ctx : HttpContext) =
