@@ -364,8 +364,9 @@ class FunDB1 {
     };
 
     // DEPRECATED
-    insertEntity(entity, fields) {
-        return this.insertEntry(entity, fields).id;
+    async insertEntity(entity, fields) {
+        const ret = await this.insertEntry(entity, fields);
+        return ret.id;
     }
 
     async insertEntry(entity, fields) {
@@ -382,8 +383,9 @@ class FunDB1 {
     };
 
     // DEPRECATED
-    insertEntities(entity, entries) {
-        return this.insertEntries(entity, entries).entries;
+    async insertEntities(entity, entries) {
+        const ret = await this.insertEntries(entity, entries);
+        return ret.entries;
     }
 
     insertEntries(entity, entries) {
@@ -391,8 +393,9 @@ class FunDB1 {
     };
 
     // DEPRECATED
-    updateEntity(entity, id, fields) {
-        return this.updateEntry(entity, id, fields).id;
+    async updateEntity(entity, id, fields) {
+        const ret = await this.updateEntry(entity, id, fields);
+        return ret.id;
     };
 
     updateEntry(entity, id, fields) {
