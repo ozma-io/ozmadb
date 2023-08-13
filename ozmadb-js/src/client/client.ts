@@ -49,8 +49,7 @@ export interface INotFinishedError extends IBasicError {
   id: string;
 }
 
-type CommonClientApiError =
-  | ApiError
+type CommonClientHttpError =
   | IRateExceededError
   | INoEndpointError
   | INoInstanceError
@@ -60,9 +59,11 @@ type CommonClientApiError =
   | ICanceledError
   | IJobNotFoundError;
 
-export type ClientApiError = CommonClientApiError | INetworkFailureError;
+type ClientRawApiError = ApiError | CommonClientHttpError | INotFinishedError;
 
-type ClientRawApiError = CommonClientApiError | INotFinishedError;
+export type ClientHttpError = CommonClientHttpError | INetworkFailureError;
+
+export type ClientApiError = ApiError | ClientHttpError;
 
 export class FunDBError extends Error {
   body: ClientApiError;
