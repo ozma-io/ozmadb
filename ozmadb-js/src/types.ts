@@ -382,11 +382,21 @@ export interface IMigrationError extends IBasicError {
   error: "migration";
 }
 
+export interface IConcurrentUpdateError extends IBasicError {
+  error: "concurrentUpdate";
+}
+
 export interface IOtherError extends IBasicError {
   error: "other";
 }
 
-export type GenericError = IQuotaExceededError | ICommitError | IMigrationConflictError | IMigrationError | IOtherError;
+export type GenericError =
+  | IQuotaExceededError
+  | ICommitError
+  | IMigrationConflictError
+  | IMigrationError
+  | IOtherError
+  | IConcurrentUpdateError;
 
 export interface IForeignKeyError extends IBasicError {
   error: "foreignKey";

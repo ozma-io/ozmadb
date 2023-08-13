@@ -12,6 +12,22 @@ export interface INetworkFailureError extends IBasicError {
   error: "networkFailure";
 }
 
+export interface IRateExceededError extends IBasicError {
+  error: "rateExceeded";
+}
+
+export interface INoEndpointError extends IBasicError {
+  error: "noEndpoint";
+}
+
+export interface INoInstanceError extends IBasicError {
+  error: "noInstance";
+}
+
+export interface IUnauthorizedError extends IBasicError {
+  error: "unauthorized";
+}
+
 export interface IUnsupportedMediaTypeError extends IBasicError {
   error: "unsupportedMediaType";
 }
@@ -33,7 +49,16 @@ export interface INotFinishedError extends IBasicError {
   id: string;
 }
 
-type CommonClientApiError = ApiError | IUnsupportedMediaTypeError | IUnacceptableError | ICanceledError | IJobNotFoundError;
+type CommonClientApiError =
+  | ApiError
+  | IRateExceededError
+  | INoEndpointError
+  | INoInstanceError
+  | IUnauthorizedError
+  | IUnsupportedMediaTypeError
+  | IUnacceptableError
+  | ICanceledError
+  | IJobNotFoundError;
 
 export type ClientApiError = CommonClientApiError | INetworkFailureError;
 
