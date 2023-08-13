@@ -385,7 +385,7 @@ class FunDB1 {
     // DEPRECATED
     async insertEntities(entity, entries) {
         const ret = await this.insertEntries(entity, entries);
-        return ret.entries;
+        return ret.entries.map(entry => entry.id);
     }
 
     insertEntries(entity, entries) {
