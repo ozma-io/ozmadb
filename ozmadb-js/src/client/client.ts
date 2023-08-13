@@ -12,47 +12,32 @@ export interface INetworkFailureError extends IBasicError {
   error: "networkFailure";
 }
 
-export interface IInternalError extends IBasicError {
-  error: "internal";
+export interface IUnsupportedMediaTypeError extends IBasicError {
+  error: "unsupportedMediaType";
 }
 
-export interface IRateExceededError extends IBasicError {
-  error: "rateExceeded";
+export interface IUnacceptableError extends IBasicError {
+  error: "unacceptable";
 }
 
-export interface INoEndpointError extends IBasicError {
-  error: "noEndpoint";
+export interface ICanceledError extends IBasicError {
+  error: "canceled";
 }
 
-export interface INoInstanceError extends IBasicError {
-  error: "noInstance";
+export interface IJobNotFoundError extends IBasicError {
+  error: "jobNotFound";
 }
 
-export interface IUnauthorizedError extends IBasicError {
-  error: "unauthorized";
+export interface INotFinishedError extends IBasicError {
+  error: "notFinished";
+  id: string;
 }
 
-export interface IConcurrentUpdateError extends IBasicError {
-  error: "concurrentUpdate";
-}
+type CommonClientApiError = ApiError | IUnsupportedMediaTypeError | IUnacceptableError | ICanceledError | IJobNotFoundError;
 
-export interface IStackOverflowError extends IBasicError {
-  error: "stackOverflow";
-  trace: EventSource[];
-}
+export type ClientApiError = CommonClientApiError | INetworkFailureError;
 
-export type ClientHttpError = INetworkFailureError
-                            | IInternalError
-                            | IRequestError
-                            | IRateExceededError
-                            | INoEndpointError
-                            | INoInstanceError
-                            | IUnauthorizedError
-                            | IAccessDeniedError
-                            | IConcurrentUpdateError
-                            | IStackOverflowError;
-
-export type ClientApiError = ApiError | ClientHttpError;
+type ClientRawApiError = CommonClientApiError | INotFinishedError;
 
 export class FunDBError extends Error {
   body: ClientApiError;
@@ -63,10 +48,9 @@ export class FunDBError extends Error {
   }
 }
 
-const fetchFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Response> => {
-  let response: Response;
+const fetchRawFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Response> => {
   try {
-    response = await fetch(input, init);
+    return await fetch(input, init);
   } catch (e) {
     if (e instanceof TypeError) {
       throw new FunDBError({ error: "networkFailure", message: e.message });
@@ -74,16 +58,6 @@ const fetchFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Respo
       throw e;
     }
   }
-  if (!response.ok) {
-    const body = await response.json();
-    throw new FunDBError(body as ApiError);
-  }
-  return response;
-};
-
-const fetchJson = async (input: RequestInfo, init?: RequestInit): Promise<unknown> => {
-  const response = await fetchFunDB(input, init);
-  return response.json();
 };
 
 interface IExplainFlags {
@@ -203,6 +177,10 @@ export interface IRestoreSchemasOptions {
   forceAllowBroken?: boolean;
 }
 
+const commonHeaders = {
+  "X-FunDB-LongRunning": "hybrid",
+};
+
 export default class FunDBClient {
   private apiUrl: string;
 
@@ -210,13 +188,51 @@ export default class FunDBClient {
     this.apiUrl = opts.apiUrl;
   }
 
+  private async fetchFunDB(input: RequestInfo, init?: RequestInit): Promise<Response> {
+    const response = await fetchRawFunDB(input, init);
+    if (!response.ok) {
+      const body = await response.json() as ClientRawApiError;
+      if (body.error === "notFinished") {
+        let jobId = body.id;
+        while (true) {
+          // eslint-disable-next-line no-await-in-loop
+          const newResponse = await this.fetchFunDB(`${this.apiUrl}/jobs/${jobId}/result`, {
+            headers: init?.headers ?? {},
+          });
+          if (!newResponse.ok) {
+            // eslint-disable-next-line no-await-in-loop
+            const newBody = await response.json() as ClientRawApiError;
+            if (newBody.error === "notFinished") {
+              jobId = newBody.id;
+            } else {
+              throw new FunDBError(newBody);
+            }
+          } else {
+            return newResponse;
+          }
+        }
+      } else {
+        throw new FunDBError(body);
+      }
+    } else {
+      return response;
+    }
+  }
+
+  private async fetchJson(input: RequestInfo, init?: RequestInit): Promise<unknown> {
+    const response = await this.fetchFunDB(input, init);
+    return response.json();
+  }
+
   private async fetchGetFileApi(subUrl: string, token: string | null, accept: string): Promise<Blob> {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      ...commonHeaders,
+    };
     if (token !== null) {
       headers["Authorization"] = `Bearer ${token}`;
     }
     headers["Accept"] = accept;
-    const response = await fetchFunDB(`${this.apiUrl}/${subUrl}`, {
+    const response = await this.fetchFunDB(`${this.apiUrl}/${subUrl}`, {
       method: "GET",
       headers,
     });
@@ -225,12 +241,13 @@ export default class FunDBClient {
 
   private async fetchJsonApi(subUrl: string, token: string | null, method: string, body?: unknown): Promise<unknown> {
     const headers: Record<string, string> = {
+      ...commonHeaders,
       "Content-Type": "application/json",
     };
     if (token !== null) {
       headers["Authorization"] = `Bearer ${token}`;
     }
-    return fetchJson(`${this.apiUrl}/${subUrl}`, {
+    return this.fetchJson(`${this.apiUrl}/${subUrl}`, {
       method,
       headers,
       body: JSON.stringify(body),
@@ -239,12 +256,13 @@ export default class FunDBClient {
 
   private async fetchSendFileApi(subUrl: string, token: string | null, method: string, contentType: string, body: Blob): Promise<unknown> {
     const headers: Record<string, string> = {
+      ...commonHeaders,
       "Content-Type": contentType,
     };
     if (token !== null) {
       headers["Authorization"] = `Bearer ${token}`;
     }
-    return fetchJson(`${this.apiUrl}/${subUrl}`, {
+    return this.fetchJson(`${this.apiUrl}/${subUrl}`, {
       method,
       headers,
       body,
