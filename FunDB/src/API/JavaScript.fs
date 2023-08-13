@@ -370,8 +370,8 @@ class FunDB1 {
 
     async insertEntry(entity, fields) {
         try {
-            const retIds = await this.insertEntries(entity, [fields]);
-            return retIds[0];
+            const ret = await this.insertEntries(entity, [fields]);
+            return ret.entries[0];
         } catch (e) {
             if (e.error === 'transaction') {
                 throw new FunDBError(e.inner);

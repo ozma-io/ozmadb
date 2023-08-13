@@ -333,7 +333,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                 if req.Entity = usersEntityRef then
                                     scheduleCheckUsersQuota ()
                                 scheduleCheckSizeQuota ()
-                            return Ok { Ids = responses }
+                            return Ok { Entries = responses }
                 with
                 | :? EntityOperationException as e when e.IsUserException ->
                     logger.LogError(e, "Failed to insert entry")
@@ -539,7 +539,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 task {
                     match! this.InsertEntries { Entity = pending.Entity; Entries = pending.Entries } with
                     | Error e -> return Error { e with Operation = pending.StartIndex + e.Operation }
-                    | Ok resp -> return resp.Ids |> Seq.map TRInsertEntity |> Ok
+                    | Ok resp -> return resp.Entries |> Seq.map TRInsertEntity |> Ok
                 }
 
             let mutable pendingInsert = None

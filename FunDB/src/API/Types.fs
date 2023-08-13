@@ -580,7 +580,7 @@ type InsertEntriesRequest =
     }
 
 type InsertEntitiesResponse =
-    { Ids : InsertEntityResponse[]
+    { Entries : InsertEntityResponse[]
     }
 
  type IEntitiesAPI =
