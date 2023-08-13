@@ -16,6 +16,7 @@ let
       libunwind
       kerberos
       lldb
+      openssl
     ];
     extraOutputsToInstall = [ "dev" ];
     profile = ''

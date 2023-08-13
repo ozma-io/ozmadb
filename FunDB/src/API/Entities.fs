@@ -181,11 +181,6 @@ type EntitiesAPI (api : IFunDBAPI) =
                 | :? TriggerRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in trigger {name}", ref)
                         let str = fullUserMessage ex
-                        rctx.WriteEvent (fun event ->
-                            event.Type <- "triggerError"
-                            event.Error <- "exception"
-                            event.Details <- str
-                        )
                         return Error <| EETrigger (ref.Schema, ref.Name, EEException (str, ex.UserData))
             }
 
@@ -221,11 +216,6 @@ type EntitiesAPI (api : IFunDBAPI) =
                 | :? TriggerRunException as ex when ex.IsUserException ->
                         logger.LogError(ex, "Exception in trigger {name}", ref)
                         let str = fullUserMessage ex
-                        rctx.WriteEvent (fun event ->
-                            event.Type <- "triggerError"
-                            event.Error <- "exception"
-                            event.Details <- str
-                        )
                         return Error <| BEError (EETrigger (trigger.Schema, trigger.Name, EEException (str, ex.UserData)))
             }
 

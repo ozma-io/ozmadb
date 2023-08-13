@@ -686,7 +686,7 @@ type HttpJobUtils (
                     }
                 let allSources = findAllSources topE
                 let msg =
-                    sources
+                    allSources
                     |> Seq.map (sprintf "in %O")
                     |> String.concat "\n"
                     |> sprintf "Stack depth exceeded:\n%s"
