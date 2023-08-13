@@ -127,7 +127,6 @@ namespace FunWithFlags.FunDBSchema.System
         // TODO BEGIN: Remove all these along with the old fields
         [Attributes.Index("field", new [] {"\"schema_name\"", "\"entity_name\"", "\"field_name\""})]
         [Attributes.Index("row", new [] {"\"schema_name\"", "\"entity_name\"", "\"row_id\""})]
-        [Attributes.Index("error_type", new [] {"\"schema_name\"", "\"entity_name\"", "\"row_id\""})]
         // TODO END
         // TODO: Uncomment when the field is converted to JSON later.
         // [Attributes.Index("error_type", new [] {"\"error\"->'error'"})]
