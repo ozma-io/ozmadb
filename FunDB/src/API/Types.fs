@@ -184,11 +184,8 @@ and PretendRoleConverter () =
     inherit JsonConverter<PretendRole> ()
 
     override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : PretendRole =
-        match reader.TokenType with
-        | JsonToken.String ->
-            match reader.Value with
-            | :? string as "root" -> PRRoot
-            | _ -> raise <| JsonSerializationException("Invalid value for PretendRole")
+        match reader.Value with
+        | :? string as "root" -> PRRoot
         | _ ->
             let ref = serializer.Deserialize<ResolvedRoleRef>(reader)
             PRRole ref
