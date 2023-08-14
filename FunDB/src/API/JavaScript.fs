@@ -438,7 +438,7 @@ class FunDB1 {
     };
 
     pretendRole(asRole, func) {
-        return internal.pretendRole(asRole, func);
+        return internal.pretendRole({ asRole }, func);
     };
 
     getDomainValues(entity, id, chunk) {
