@@ -282,7 +282,7 @@ export default class FunDBClient {
     return response.blob();
   }
 
-  private async fetchJsonApi(subUrl: string, method: string, body?: unknown): Promise<unknown> {
+  private fetchJsonApi(subUrl: string, method: string, body?: unknown): Promise<unknown> {
     return this.fetchJson(`${this.apiUrl}/${subUrl}`, {
       method,
       headers: {
@@ -292,7 +292,7 @@ export default class FunDBClient {
     });
   }
 
-  private async fetchSendFileApi(subUrl: string, method: string, contentType: string, body: Blob): Promise<unknown> {
+  private fetchSendFileApi(subUrl: string, method: string, contentType: string, body: Blob): Promise<unknown> {
     return this.fetchJson(`${this.apiUrl}/${subUrl}`, {
       method,
       headers: {
@@ -303,19 +303,19 @@ export default class FunDBClient {
   }
 
   // We use `POST` method to ensure we won't bloat URLs and to have full access to Chunk APIs.
-  private getUserView = async (path: string, body: any): Promise<IViewExprResult> => {
+  private getUserView = (path: string, body: any): Promise<IViewExprResult> => {
     return this.fetchJsonApi(`views/${path}/entries`, "POST", body) as Promise<IViewExprResult>;
   };
 
-  private getUserViewInfo = async (path: string, body: any): Promise<IViewInfoResult> => {
+  private getUserViewInfo = (path: string, body: any): Promise<IViewInfoResult> => {
     return this.fetchJsonApi(`views/${path}/info`, "POST", body) as Promise<IViewInfoResult>;
   };
 
-  private getUserViewExplain = async (path: string, body: any): Promise<IViewExplainResult> => {
+  private getUserViewExplain = (path: string, body: any): Promise<IViewExplainResult> => {
     return this.fetchJsonApi(`views/${path}/explain`, "POST", body) as Promise<IViewExplainResult>;
   };
 
-  getAnonymousUserView = async (query: string, args?: Record<string, unknown>, opts?: IEntriesRequestOpts): Promise<IViewExprResult> => {
+  getAnonymousUserView = (query: string, args?: Record<string, unknown>, opts?: IEntriesRequestOpts): Promise<IViewExprResult> => {
     const req: IAnonymousUserViewEntriesRequest = {
       ...opts,
       query,
@@ -324,7 +324,7 @@ export default class FunDBClient {
     return this.getUserView("anonymous", req);
   };
 
-  getNamedUserView = async (ref: IUserViewRef, args?: Record<string, unknown>, opts?: IEntriesRequestOpts): Promise<IViewExprResult> => {
+  getNamedUserView = (ref: IUserViewRef, args?: Record<string, unknown>, opts?: IEntriesRequestOpts): Promise<IViewExprResult> => {
     const req: IUserViewEntriesRequest = {
       ...opts,
       args,
@@ -332,11 +332,11 @@ export default class FunDBClient {
     return this.getUserView(`by_name/${ref.schema}/${ref.name}`, req);
   };
 
-  getNamedUserViewInfo = async (ref: IUserViewRef, opts?: IInfoRequestOpts): Promise<IViewInfoResult> => {
+  getNamedUserViewInfo = (ref: IUserViewRef, opts?: IInfoRequestOpts): Promise<IViewInfoResult> => {
     return this.getUserViewInfo(`by_name/${ref.schema}/${ref.name}`, opts);
   };
 
-  getAnonymousUserViewExplain = async (query: string, args?: Record<string, unknown>, opts?: IEntriesExplainOpts): Promise<IViewExplainResult> => {
+  getAnonymousUserViewExplain = (query: string, args?: Record<string, unknown>, opts?: IEntriesExplainOpts): Promise<IViewExplainResult> => {
     const req: IAnonymousUserViewExplainRequest = {
       ...opts,
       query,
@@ -345,7 +345,7 @@ export default class FunDBClient {
     return this.getUserViewExplain("anonymous", req);
   };
 
-  getNamedUserViewExplain = async (ref: IUserViewRef, args?: Record<string, unknown>, opts?: IEntriesExplainOpts): Promise<IViewExplainResult> => {
+  getNamedUserViewExplain = (ref: IUserViewRef, args?: Record<string, unknown>, opts?: IEntriesExplainOpts): Promise<IViewExplainResult> => {
     const req: IUserViewExplainRequest = {
       ...opts,
       args,
@@ -353,19 +353,19 @@ export default class FunDBClient {
     return this.getUserViewExplain(`by_name/${ref.schema}/${ref.name}`, req);
   };
 
-  getEntityInfo = async (ref: IEntityRef): Promise<IEntity> => {
+  getEntityInfo = (ref: IEntityRef): Promise<IEntity> => {
     return this.fetchJsonApi(`entities/${ref.schema}/${ref.name}/info`, "GET") as Promise<IEntity>;
   };
 
-  runTransaction = async (action: ITransaction): Promise<ITransactionResult> => {
+  runTransaction = (action: ITransaction): Promise<ITransactionResult> => {
     return this.fetchJsonApi("transaction", "POST", action) as Promise<ITransactionResult>;
   };
 
-  runAction = async (ref: IActionRef, args?: Record<string, unknown>): Promise<IActionResult> => {
+  runAction = (ref: IActionRef, args?: Record<string, unknown>): Promise<IActionResult> => {
     return this.fetchJsonApi(`actions/${ref.schema}/${ref.name}/run`, "POST", args ?? {}) as Promise<IActionResult>;
   };
 
-  getDomainValues = async (ref: IFieldRef, rowId?: number, opts?: IEntriesRequestOpts): Promise<IDomainValuesResult> => {
+  getDomainValues = (ref: IFieldRef, rowId?: number, opts?: IEntriesRequestOpts): Promise<IDomainValuesResult> => {
     const req: IDomainsRequest = {
       ...opts,
       rowId,
@@ -373,7 +373,7 @@ export default class FunDBClient {
     return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}/entries`, "POST", req) as Promise<IDomainValuesResult>;
   };
 
-  getDomainExplain = async (ref: IFieldRef, rowId?: number, opts?: IEntriesExplainOpts): Promise<IExplainedQuery> => {
+  getDomainExplain = (ref: IFieldRef, rowId?: number, opts?: IEntriesExplainOpts): Promise<IExplainedQuery> => {
     const req: IDomainsExplainRequest = {
       ...opts,
       rowId,
@@ -381,7 +381,7 @@ export default class FunDBClient {
     return this.fetchJsonApi(`domains/${ref.entity.schema}/${ref.entity.name}/${ref.name}/explain`, "POST", req) as Promise<IExplainedQuery>;
   };
 
-  saveSchemas = async (schemas: string[] | "all", options?: ISaveSchemasOptions): Promise<Blob> => {
+  saveSchemas = (schemas: string[] | "all", options?: ISaveSchemasOptions): Promise<Blob> => {
     const params = new URLSearchParams();
     if (schemas !== "all") {
       schemas.forEach(name => {
@@ -405,7 +405,7 @@ export default class FunDBClient {
     await this.fetchSendFileApi(`layouts?${params}`, "PUT", "application/zip", data);
   };
 
-  getPermissions = async (token: string | null): Promise<IPermissionsInfo> => {
+  getPermissions = (): Promise<IPermissionsInfo> => {
     return this.fetchJsonApi("permissions", "GET") as Promise<IPermissionsInfo>;
   };
 }
