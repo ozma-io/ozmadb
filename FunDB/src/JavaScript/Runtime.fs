@@ -232,12 +232,12 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
         member this.EventLoop = this.EventLoop
         member this.EventLoopScope f = this.EventLoopScope f
 
-let inline runFunctionInRuntime (runtime : IJSRuntime) (func : Function) (cancellationToken : CancellationToken) (args : Value.Value[]) =
+let inline runFunctionInRuntime (func : Function) (cancellationToken : CancellationToken) (args : Value.Value[]) =
     try
         func.Call(cancellationToken, null, args)
     with
     | :? CallbackException as e ->
-        raise <| JavaScriptRuntimeException("", e, isUserException e.InnerException, userExceptionData e.InnerException)
+        raise <| JavaScriptRuntimeException("", e)
     | :? JSException as e ->
         raise <| JavaScriptRuntimeException("", e, true, getJSExceptionUserData e)
     | :? NetJsException as e ->
@@ -254,7 +254,7 @@ let inline runAsyncFunctionInRuntime (runtime : IJSRuntime) (func : Function) (c
                 }
         with
         | :? CallbackException as e ->
-            return raise <| JavaScriptRuntimeException("", e, isUserException e.InnerException, userExceptionData e.InnerException)
+            return raise <| JavaScriptRuntimeException("", e)
         | :? JSException as e ->
             return raise <| JavaScriptRuntimeException("", e, true, getJSExceptionUserData e)
         | :? NetJsException as e ->

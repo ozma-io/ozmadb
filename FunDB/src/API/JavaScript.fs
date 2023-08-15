@@ -273,7 +273,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let req = jsDeserialize context args.[0] : WriteEventRequest
             let handle = Option.get currentHandle
-            handle.Logger.LogInformation("Source {source} wrote event from JavaScript: {details}", handle.API.Request.Source, req.Details)
+            handle.Logger.LogInformation("Source {source} wrote event from JavaScript: {details}", handle.API.Request.Source, req.Details.ToString())
             handle.API.Request.WriteEvent (fun event ->
                 event.Type <- "writeEvent"
                 event.Request <- JsonConvert.SerializeObject req
@@ -287,7 +287,7 @@ type APITemplate (isolate : Isolate) =
                 throwCallError context "Number of arguments must be 1"
             let req = jsDeserialize context args.[0] : WriteEventRequest
             let handle = Option.get currentHandle
-            handle.Logger.LogInformation("Source {source} wrote sync event from JavaScript: {details}", handle.API.Request.Source, req.Details)
+            handle.Logger.LogInformation("Source {source} wrote sync event from JavaScript: {details}", handle.API.Request.Source, req.Details.ToString())
             let run = runVoidApiCall handle context <| fun () ->
                 handle.API.Request.WriteEventSync (fun event ->
                     event.Type <- "writeEvent"

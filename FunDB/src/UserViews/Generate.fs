@@ -59,7 +59,7 @@ type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scri
 
     let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
         try
-            let newViews = runFunctionInRuntime runtime func cancellationToken [|layout|]
+            let newViews = runFunctionInRuntime func cancellationToken [|layout|]
             newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
         with
         | :? JavaScriptRuntimeException as e ->
