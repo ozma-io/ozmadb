@@ -236,16 +236,14 @@ export default class FunDBClient {
       if (body.error === "notFinished") {
         let jobId = body.id;
         while (true) {
-          // Update the token.
-          if (this.token !== null) {
-            headers["Authorization"] = `Bearer ${this.token}`;
-          } else {
-            delete headers["Authorization"];
-          }
           // eslint-disable-next-line no-await-in-loop
           const newResponse = await this.fetchFunDB(
             `${this.apiUrl}/jobs/${jobId}/result`,
-            { ...opts, headers },
+            {
+              headers: this.token === null ? undefined : {
+                "Authorization": `Bearer ${this.token}`,
+              },
+            },
           );
           if (!newResponse.ok) {
             // eslint-disable-next-line no-await-in-loop
