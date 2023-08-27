@@ -515,11 +515,15 @@ let private loadRestoredRows
                             let currPath = getPathString ()
                             raisef RestoreSchemaException "Error at row %i, path %s: attribute not found" rowIndex currPath
                     | (true, attr) ->
-                        match parseValueFromJson field.FieldType field.IsNullable attr with
-                        | None ->
+                        if attr.Type = JTokenType.Null && not field.IsNullable then
                             let currPath = getPathString ()
-                            raisef RestoreSchemaException "Error at row %i, path %s: cannot convert value to type %O" rowIndex currPath field.FieldType
-                        | Some v -> v
+                            raisef RestoreSchemaException "Error at row %i, path %s: value cannot be null" rowIndex currPath
+                        else
+                            match parseValueFromJson field.FieldType attr with
+                            | None ->
+                                let currPath = getPathString ()
+                                raisef RestoreSchemaException "Error at row %i, path %s: cannot convert value to type %O" rowIndex currPath field.FieldType
+                            | Some v -> v
                 | (fieldRef, field) :: nextPath ->
                     let inline getPathString () =
                         Seq.rev (fieldRef.Name :: parentPath) |> Seq.map toFunQLString |> String.concat "."

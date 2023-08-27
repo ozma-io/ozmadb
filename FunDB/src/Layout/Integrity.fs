@@ -152,16 +152,6 @@ let private returnNullStatement = PLPgSQL.StReturn SQL.nullExpr
 let private plainSubEntityColumn = SQL.VEColumn { Table = None; Name = sqlFunSubEntity }
 let private newSubEntityColumn = SQL.VEColumn { Table = Some sqlNewRow; Name = sqlFunSubEntity }
 
-type private CheckTriggerOptions =
-    { FunctionName : SQL.SQLName
-      UpdateTriggerName : SQL.SQLName
-      InsertTriggerName : SQL.SQLName
-      Entity : ResolvedEntityRef
-      AffectedFields : Set<FieldName>
-      ExtraUpdateFieldCondition : ResolvedColumnField -> SQL.ValueExpr -> SQL.ValueExpr -> SQL.ValueExpr
-      Expression : SQL.SelectExpr
-    }
-
 let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFieldRef) (toEntityRef : ResolvedEntityRef) : SQL.DatabaseMeta =
     match makeCheckExpr plainSubEntityColumn layout toEntityRef with
     | None -> SQL.emptyDatabaseMeta
@@ -176,6 +166,7 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
         let toColumn = SQL.VEColumn { Table = Some toRef; Name = sqlFunId }
         let whereExpr = SQL.VEBinaryOp (fromColumn, SQL.BOEq, toColumn)
         let fTable = SQL.fromTable toRef
+        let constraintName = foreignConstraintSQLName entity.HashName field.HashName
         let singleSelect =
             { SQL.emptySingleSelectExpr with
                   Columns = [| SQL.SCExpr (None, checkExpr) |]
@@ -190,12 +181,13 @@ let buildReferenceOfTypeAssertion (layout : Layout) (fromFieldRef : ResolvedFiel
                       Options = [||]
                     }
               Options =
-                Map.ofList
-                    [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "check_violation"))
-                      (PLPgSQL.ROColumn, SQL.VEValue (SQL.VString <| fromFieldRef.Name.ToString()))
-                      (PLPgSQL.ROTable, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Name.ToString()))
-                      (PLPgSQL.ROSchema, SQL.VEValue (SQL.VString <| fromFieldRef.Entity.Schema.ToString()))
-                    ]
+                Map.ofList [
+                    (PLPgSQL.ROErrcode, "23503" |> SQL.VString |> SQL.VEValue)
+                    (PLPgSQL.ROColumn, fromFieldRef.Name |> string |> SQL.VString |> SQL.VEValue)
+                    (PLPgSQL.ROTable, fromFieldRef.Entity.Name |> string |> SQL.VString |> SQL.VEValue)
+                    (PLPgSQL.ROSchema, fromFieldRef.Entity.Schema |> string |> SQL.VString |> SQL.VEValue)
+                    (PLPgSQL.ROConstraint, constraintName |> string |> SQL.VString |> SQL.VEValue)
+                ]
             } : PLPgSQL.RaiseStatement
         let selectExpr : SQL.SelectExpr =
             { CTEs = None
@@ -550,6 +542,7 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
         }
     let select = selectExpr (SSelect singleSelect)
     let (exprInfo, compiled) = compileSelectExpr layout emptyArguments select
+    let constraintName = checkConstraintSQLName entity.HashName constr.HashName
 
     let replacer = ConstraintUseNewConverter(entity.Root)
     let compiled = replacer.UseNewInSelectExpr compiled
@@ -562,11 +555,12 @@ let buildOuterCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedCo
                   Options = [||]
                 }
           Options =
-            Map.ofList
-                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "check_violation"))
-                  (PLPgSQL.ROTable, SQL.VEValue (constrRef.Entity.Name |> string |> SQL.VString))
-                  (PLPgSQL.ROSchema, SQL.VEValue (constrRef.Entity.Schema |> string |> SQL.VString))
-                ]
+            Map.ofList [
+                (PLPgSQL.ROErrcode, SQL.VString "23514" |> SQL.VEValue)
+                (PLPgSQL.ROTable, constrRef.Entity.Name |> string |> SQL.VString |> SQL.VEValue)
+                (PLPgSQL.ROSchema, constrRef.Entity.Schema |> string |> SQL.VString |> SQL.VEValue)
+                (PLPgSQL.ROConstraint, constraintName |> string |> SQL.VString |> SQL.VEValue)
+            ]
         } : PLPgSQL.RaiseStatement
     let checkStmt = PLPgSQL.StIfThenElse ([| (SQL.VENot (SQL.VESubquery compiled), [| PLPgSQL.StRaise raiseCall |]) |], None)
 
@@ -645,9 +639,11 @@ let private getPathTriggerAffected (layout : Layout) (trigger : PathTrigger) : S
 
 let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : ResolvedConstraintRef) (aggCheck : SQL.SingleSelectExpr) (key : PathTriggerKey) (trigger : PathTrigger) : SQL.DatabaseMeta =
     let entity = layout.FindEntity constrRef.Entity |> Option.get
+    let constr = Map.find constrRef.Name entity.CheckConstraints
     let fullTriggerKey = { ConstraintRef = constrRef; Key = key }
     let triggerName = pathTriggerName fullTriggerKey
     let triggerKey = pathTriggerKey fullTriggerKey
+    let constraintName = checkConstraintSQLName entity.HashName constr.HashName
 
     let whereExpr = buildPathTriggerExpression constrRef.Entity key
     let aggCheck =
@@ -668,11 +664,12 @@ let private buildInnerCheckConstraintAssertion (layout : Layout) (constrRef : Re
                   Options = [||]
                 }
           Options =
-            Map.ofList
-                [ (PLPgSQL.ROErrcode, SQL.VEValue (SQL.VString "check_violation"))
-                  (PLPgSQL.ROTable, SQL.VEValue (constrRef.Entity.Name |> string |> SQL.VString))
-                  (PLPgSQL.ROSchema, SQL.VEValue (constrRef.Entity.Schema |> string |> SQL.VString))
-                ]
+            Map.ofList [
+                (PLPgSQL.ROErrcode, SQL.VString "23514" |> SQL.VEValue)
+                (PLPgSQL.ROTable, constrRef.Entity.Name |> string |> SQL.VString |> SQL.VEValue)
+                (PLPgSQL.ROSchema, constrRef.Entity.Schema |> string |> SQL.VString |> SQL.VEValue)
+                (PLPgSQL.ROConstraint, constraintName |> string |> SQL.VString |> SQL.VEValue)
+            ]
         } : PLPgSQL.RaiseStatement
     let checkStmt = PLPgSQL.StIfThenElse ([| (SQL.VENot (SQL.VESubquery checkSelect), [| PLPgSQL.StRaise raiseCall |]) |], None)
 

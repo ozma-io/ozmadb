@@ -106,7 +106,9 @@ let private runQuery
             | :? QueryExecutionException as e ->
             let details =
                 match maybeLayout with
-                | None -> EOEExecution <| UVEExecution (fullUserMessage e)
+                | None ->
+                    let userMessage = fullUserMessage e
+                    EOEExecution <| UVEExecution userMessage
                 | Some layout -> EOEExecution (convertQueryExecutionException layout e)
             return raise <| EntityOperationException(details, e)
     }

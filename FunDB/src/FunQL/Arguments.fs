@@ -264,9 +264,12 @@ let convertQueryArguments (globalArgValues : LocalArgumentsMap) (extraArgValues 
             | PLocal (FunQLName lname) ->
                 match Map.tryFind lname rawArgValues with
                 | Some argStr ->
-                    match parseValueFromJson arg.FieldType arg.Optional argStr with
-                    | None ->  raiseArgumentCheckException ref ACEInvalidType
-                    | Some arg -> Some arg
+                    if argStr.Type = JTokenType.Null && not arg.Optional then
+                        raiseArgumentCheckException ref ACERequired
+                    else
+                        match parseValueFromJson arg.FieldType argStr with
+                        | None ->  raiseArgumentCheckException ref ACEInvalidType
+                        | Some arg -> Some arg
                 | None -> None
             | PGlobal gname -> Some <| Map.find gname globalArgValues
     arguments.Types |> Map.mapMaybe findArgument
@@ -277,7 +280,10 @@ let convertEntityArguments (entity : ResolvedEntity) (rawArgs : RawArguments) : 
         | None -> None
         | Some value when value.Type = JTokenType.Undefined -> None
         | Some value ->
-            match parseValueFromJson field.FieldType field.IsNullable value with
-            | None ->  raise <| ArgumentCheckException { Argument = fieldName; Inner = ACEInvalidType }
-            | Some arg -> Some arg
+            if value.Type = JTokenType.Null && not field.IsNullable then
+                raise <| ArgumentCheckException { Argument = fieldName; Inner = ACERequired }
+            else
+                match parseValueFromJson field.FieldType value with
+                | None ->  raise <| ArgumentCheckException { Argument = fieldName; Inner = ACEInvalidType }
+                | Some arg -> Some arg
     entity.ColumnFields |> Map.mapMaybe getValue

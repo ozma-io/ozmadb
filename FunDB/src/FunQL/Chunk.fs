@@ -130,7 +130,7 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
 
     let resolveChunkValue (name : ArgumentName) (arg : SourceChunkArgument) : FieldValue =
         let argument = OrderedMap.find (PLocal name) info.LocalArguments
-        match parseValueFromJson argument.ArgType true arg.Value with
+        match parseValueFromJson argument.ArgType arg.Value with
         | Some v -> v
         | None -> raisef ChunkException "Couldn't parse value %O to type %O" arg.Value argument.ArgType
 

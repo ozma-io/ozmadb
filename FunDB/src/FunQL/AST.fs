@@ -1942,21 +1942,20 @@ let allowedAggregateFunctions : Map<FunctionName, SQL.FunctionName> =
           (FunQLName "json_object_agg", SQL.SQLName "jsonb_object_agg")
         ]
 
-let private parseSingleValue<'A> (constrFunc : 'A -> FieldValue option) (isNullable : bool) (tok: JToken) : FieldValue option =
+let inline private parseSingleValue<'A>
+        ([<InlineIfLambda>] constrFunc : 'A -> FieldValue option)
+        (tok: JToken) : FieldValue option =
     if tok.Type = JTokenType.Null then
-        if isNullable then
-            Some FNull
-        else
-            None
+        Some FNull
     else
         try
             constrFunc <| tok.ToObject()
         with
         | :? JsonException -> None
 
-let private parseSingleValueStrict f = parseSingleValue (f >> Some)
+let inline private parseSingleValueStrict f = parseSingleValue (f >> Some)
 
-let parseValueFromJson (fieldExprType : FieldType<'e>) : bool -> JToken -> FieldValue option =
+let parseValueFromJson (fieldExprType : FieldType<'e>) : JToken -> FieldValue option =
     match fieldExprType with
     | FTArray SFTString -> parseSingleValueStrict FStringArray
     | FTArray SFTInt -> parseSingleValueStrict FIntArray

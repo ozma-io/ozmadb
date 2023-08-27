@@ -180,6 +180,19 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             | :? PostgresException as e when e.SqlState = "40001" ->
                 return raisefWithInner ConcurrentUpdateException e "Concurrent update detected"
             | :? PostgresException as e ->
+                logger.LogInformation(
+                    "SQL error, state: {state}, position: {position}, where: {where}, schema name: {schema}, table name: {table}, column name: {column}, data type name: {type}, constraint name: {constraint}, detail: {detail}, hint: {hint}",
+                    e.SqlState,
+                    e.Position,
+                    e.Where,
+                    e.SchemaName,
+                    e.TableName,
+                    e.ColumnName,
+                    e.DataTypeName,
+                    e.ConstraintName,
+                    e.Detail,
+                    e.Hint
+                )
                 return raisefWithInner QueryExecutionException e "Error while executing"
         }
 
