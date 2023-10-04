@@ -192,7 +192,7 @@ let private countAndThrow
                 { Expression = SQL.SSelect testExpr
                   Arguments = arguments
                 }
-            let! count = runIntQuery connection None testQuery None argumentValues cancellationToken
+            let! count = runIntQuery connection None testQuery (Some "Check if entry exists") argumentValues cancellationToken
             if count > 0 then
                 raise <| EntityOperationException (EOEAccessDenied "The entry is not accessible")
             else
