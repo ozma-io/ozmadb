@@ -105,7 +105,7 @@ let private usersEntityRef = { Schema = FunQLName "public"; Name = FunQLName "us
 type EntitiesAPI (api : IFunDBAPI) =
     let rctx = api.Request
     let ctx = rctx.Context
-    let logger = ctx.LoggerFactory.CreateLogger<EntitiesAPI>()
+    let logger: ILogger<EntitiesAPI> = ctx.LoggerFactory.CreateLogger<EntitiesAPI>()
     let query = ctx.Transaction.Connection.Query
 
     let checkUsersQuota layout =
@@ -229,7 +229,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         runAfterTrigger (fun script -> script.RunDeleteTriggerAfter entityRef ctx.CancellationToken) entityRef trigger
 
     member this.GetEntityInfo (req : GetEntityInfoRequest) : Task<Result<SerializedEntity, EntityErrorInfo>> =
-        wrapAPIResult rctx "getEntityInfo" req <| task {
+        wrapAPIResult rctx logger "getEntityInfo" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | Some entity ->
                 try
@@ -245,7 +245,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         }
 
     member this.InsertEntries (req : InsertEntriesRequest) : Task<Result<InsertEntitiesResponse, TransactionErrorInfo>> =
-        wrapAPIError rctx "insertEntries" req <| task {
+        wrapAPIError rctx logger "insertEntries" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -341,7 +341,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         }
 
     member this.UpdateEntry (req : UpdateEntryRequest) : Task<Result<UpdateEntityResponse, EntityErrorInfo>> =
-        wrapAPIError rctx "updateEntry" req <| task {
+        wrapAPIError rctx logger "updateEntry" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -405,7 +405,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         }
 
     member this.DeleteEntry (req : DeleteEntryRequest) : Task<Result<unit, EntityErrorInfo>> =
-        wrapAPIError rctx "deleteEntry" req <| task {
+        wrapAPIError rctx logger "deleteEntry" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -452,7 +452,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         }
 
     member this.GetRelatedEntries (req : GetRelatedEntriesRequest) : Task<Result<ReferencesTree, EntityErrorInfo>> =
-        wrapAPIResult rctx "getRelatedEntries" req <| task {
+        wrapAPIResult rctx logger "getRelatedEntries" req <| task {
             match ctx.Layout.FindEntity(req.Entity) with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -501,7 +501,7 @@ type EntitiesAPI (api : IFunDBAPI) =
         }
 
     member this.RunCommand (req : CommandRequest) : Task<Result<unit, EntityErrorInfo>> =
-        wrapUnitAPIResult rctx "runCommand" req <| task {
+        wrapUnitAPIResult rctx logger "runCommand" req <| task {
             try
                 let! cmd = ctx.GetAnonymousCommand rctx.IsPrivileged req.Command
                 let comments = commandComments req.Command rctx.User.Effective.Type req.Args
@@ -535,6 +535,8 @@ type EntitiesAPI (api : IFunDBAPI) =
 
     member this.RunTransaction (req : TransactionRequest) : Task<Result<TransactionResponse, TransactionErrorInfo>> =
         task {
+            logAPIRequest rctx logger "runTransaction" req
+
             let inline runPendingInsert (pending : PendingMassInsert) =
                 task {
                     match! this.InsertEntries { Entity = pending.Entity; Entries = pending.Entries } with
@@ -602,6 +604,7 @@ type EntitiesAPI (api : IFunDBAPI) =
 
     member this.DeferConstraints (func : unit -> Task<'a>) : Task<Result<'a, EntityErrorInfo>> =
         task {
+            logAPIRequest rctx logger "deferConstraints" emptyRequest
             try
                 let! ret = ctx.Transaction.DeferConstraints ctx.CancellationToken func
                 return Ok ret

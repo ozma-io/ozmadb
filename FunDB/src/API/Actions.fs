@@ -15,7 +15,7 @@ type ActionsAPI (api : IFunDBAPI) =
     let logger = ctx.LoggerFactory.CreateLogger<ActionsAPI>()
 
     member this.RunAction (req : RunActionRequest) : Task<Result<ActionResponse, ActionErrorInfo>> =
-        wrapAPIResult rctx "runAction" req <| task {
+        wrapAPIResult rctx logger "runAction" req <| task {
             match ctx.FindAction(req.Action) with
             | None ->
                 let msg = sprintf "Action %O not found" req.Action

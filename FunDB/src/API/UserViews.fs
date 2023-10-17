@@ -105,7 +105,7 @@ type UserViewsAPI (api : IFunDBAPI) =
         }
 
     member this.GetUserViewInfo (req : UserViewInfoRequest) : Task<Result<UserViewInfoResponse, UserViewErrorInfo>> =
-        wrapAPIResult rctx "getUserViewInfo" req <| task {
+        wrapAPIResult rctx logger "getUserViewInfo" req <| task {
             let flags = Option.defaultValue emptyUserViewFlags req.Flags
             match! resolveSource req.Source flags with
             | Error e -> return Error e
@@ -127,7 +127,7 @@ type UserViewsAPI (api : IFunDBAPI) =
         }
 
     member this.GetUserViewExplain (req : UserViewExplainRequest) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
-        wrapAPIResult rctx "getUserViewExplain" req <| task {
+        wrapAPIResult rctx logger "getUserViewExplain" req <| task {
             if not (canExplain rctx.User.Saved.Type) then
                 logger.LogError("Explain access denied")
                 return Error (UVEAccessDenied "Explain access denied")
@@ -173,7 +173,7 @@ type UserViewsAPI (api : IFunDBAPI) =
         }
 
     member this.GetUserView (req : UserViewRequest) : Task<Result<UserViewEntriesResponse, UserViewErrorInfo>> =
-        wrapAPIResult rctx "getUserView" req <| task {
+        wrapAPIResult rctx logger "getUserView" req <| task {
             let flags = Option.defaultValue emptyUserViewFlags req.Flags
             match! resolveSource req.Source flags with
             | Error e -> return Error e

@@ -53,7 +53,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
         ctx.ScheduleBeforeCommit "update_custom_entities" updateCustomEntities
 
     member this.SaveSchemas (req : SaveSchemasRequest) : Task<Result<SaveSchemasResponse, SaveErrorInfo>> =
-        wrapAPIResult rctx "saveSchemas" req <| task {
+        wrapAPIResult rctx logger "saveSchemas" req <| task {
             let names =
                 match req.Schemas with
                 | SSNames names -> Array.toSeq names
@@ -79,7 +79,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
         }
 
     member this.RestoreSchemas (req : RestoreSchemasRequest) : Task<Result<unit, RestoreErrorInfo>> =
-        wrapUnitAPIResult rctx "restoreSchemas" req <| task {
+        wrapUnitAPIResult rctx logger "restoreSchemas" req <| task {
             let flags = Option.defaultValue emptyRestoreSchemasFlags req.Flags
             if not (canRestore rctx.User.Effective.Type) then
                 return Error RREAccessDenied

@@ -983,13 +983,19 @@ let logAPIIfError<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
         | Error error -> logAPIError rctx name request error
     }
 
+let logAPIRequest<'Request> (rctx : IRequestContext) (logger : ILogger) (name :string) (request : 'Request) =
+    let args = JsonConvert.SerializeObject request
+    logger.LogInformation("Request {name} from {source} started with arguments {args}", name, rctx.Source, args)
+
 let inline wrapAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggableResponse and 'Error :> IErrorDetails>
         (rctx : IRequestContext)
+        (logger : ILogger)
         (name : string)
         (request : 'Request)
         (resultTask : Task<Result<'Response, 'Error>>)
         : Task<Result<'Response, 'Error>> =
     task {
+        logAPIRequest rctx logger name request
         let! result = resultTask
         do! logAPIResult rctx name request result
         return result
@@ -997,11 +1003,13 @@ let inline wrapAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggable
 
 let inline wrapUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
         (rctx : IRequestContext)
+        (logger : ILogger)
         (name : string)
         (request : 'Request)
         (resultTask : Task<Result<unit, 'Error>>)
         : Task<Result<unit, 'Error>> =
     task {
+        logAPIRequest rctx logger name request
         let! result = resultTask
         do! logUnitAPIResult rctx name request result
         return result
@@ -1009,11 +1017,13 @@ let inline wrapUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
 
 let inline wrapAPIError<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
         (rctx : IRequestContext)
+        (logger : ILogger)
         (name : string)
         (request : 'Request)
         (resultTask : Task<Result<'Response, 'Error>>)
         : Task<Result<'Response, 'Error>> =
     task {
+        logAPIRequest rctx logger name request
         let! result = resultTask
         do! logAPIIfError rctx name request result
         return result

@@ -113,8 +113,8 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
 
     member this.Rollback () =
         unitVtask {
-            do! transaction.DisposeAsync ()
             do! system.DisposeAsync ()
+            do! transaction.DisposeAsync ()
         }
 
     // Consumers should use this method instead of `System.SaveChangesAsync` to properly handle serialization errors.
@@ -165,8 +165,8 @@ type DatabaseTransaction (conn : DatabaseConnection, isolationLevel : IsolationL
 
     interface IDisposable with
         member this.Dispose () =
-            transaction.Dispose ()
             system.Dispose ()
+            transaction.Dispose ()
 
     interface IAsyncDisposable with
         member this.DisposeAsync () = this.Rollback ()
