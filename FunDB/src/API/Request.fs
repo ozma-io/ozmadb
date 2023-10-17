@@ -203,6 +203,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             let oldSource = source
             source <- newSource
             sourceDepth <- sourceDepth + 1
+            logger.LogInformation("Entering {source}", newSource)
             try
                 try
                     return! func ()
@@ -212,6 +213,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             finally
                 sourceDepth <- sourceDepth - 1
                 source <- oldSource
+                logger.LogInformation("Leaving {source}", newSource)
         }
 
     member this.PretendUser (req : PretendUserRequest) (func : unit -> Task<'a>) : Task<Result<'a, PretendErrorInfo>> =
