@@ -45,7 +45,7 @@ type EntityOperationError =
         match this with
         | EOEExecution e -> e.Message
         | EOEAccessDenied details -> "Access denied"
-        | _ -> this.Message
+        | _ -> this.LogMessage
 
     member this.HTTPResponseCode =
         match this with
