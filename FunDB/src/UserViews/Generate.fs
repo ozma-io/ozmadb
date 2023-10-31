@@ -52,7 +52,7 @@ let private convertUserView (KeyValue (k, v : Value.Value)) =
 type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
+            runtime.CreateDefaultFunction { Path = name; Source = scriptSource; AllowBroken = false }
         with
         | :? NetJsException as e ->
             raisefUserWithInner UserViewGenerateException e "Couldn't initialize user view generator"

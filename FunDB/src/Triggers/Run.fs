@@ -45,7 +45,7 @@ type ArgsTriggerResult =
 type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
+            runtime.CreateDefaultFunction <| moduleFile name scriptSource
         with
         | :? JavaScriptRuntimeException as e ->
             raisefUserWithInner TriggerRunException e ""

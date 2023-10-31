@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.Modules.Resolve
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
+open FunWithFlags.FunDB.Objects.Types
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Utils
 open FunWithFlags.FunDB.Layout.Types
@@ -20,9 +21,9 @@ let private checkName (FunQLName name) : unit =
     if not <| goodName name then
         raisef ResolveModulesException "Invalid module name"
 
-type private Phase1Resolver (layout : Layout) =
+type private Phase1Resolver (layout : Layout, forceAllowBroken : bool) =
     let resolveModulesSchema (schema : SourceModulesSchema) : ModulesSchema =
-        let mapModule path (modul : SourceModule) =
+        let mapModule path (modul : SourceModule) : PossiblyBroken<ResolvedModule> =
             try
                 let normPath = POSIXPath.normalize path
                 if path <> normPath then
@@ -33,9 +34,14 @@ type private Phase1Resolver (layout : Layout) =
                     raisef ResolveModulesException "Path shouldn't be absolute"
                 if POSIXPath.extension path <> Some "mjs" then
                     raisef ResolveModulesException "File should have .mjs extension"
-                { Source = modul.Source
-                }
+                let ret =
+                    { Source = modul.Source
+                      AllowBroken = modul.AllowBroken
+                    }
+                Ok ret
             with
+            | :? ResolveModulesException as e when modul.AllowBroken || forceAllowBroken ->
+                Error { Error = e; AllowBroken = modul.AllowBroken }
             | e -> raisefWithInner ResolveModulesException e "In module %O" path
 
         let modules = Map.map mapModule schema.Modules
@@ -55,6 +61,6 @@ type private Phase1Resolver (layout : Layout) =
         { Schemas = Map.map (fun name -> resolveModulesSchema) source.Schemas
         }
 
-let resolveModules (layout : Layout) (source : SourceModules) : ResolvedModules =
-    let phase1 = Phase1Resolver (layout)
+let resolveModules (layout : Layout) (source : SourceModules) (forceAllowBroken : bool) : ResolvedModules =
+    let phase1 = Phase1Resolver (layout, forceAllowBroken)
     phase1.ResolveModules source

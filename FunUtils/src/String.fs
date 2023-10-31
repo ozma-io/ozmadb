@@ -2,6 +2,7 @@ namespace FunWithFlags.FunUtils
 
 open System
 open System.Text.RegularExpressions
+open FSharpPlus
 
 type StringComparable<'a> (inner : 'a) =
     let mutable innerString = None
@@ -53,3 +54,9 @@ module String =
         bytes |> Seq.map (fun b -> b.ToString("x2")) |> String.concat ""
 
     let comparable a = StringComparable a
+
+    let removeSuffix (suffix : string) (s : string) =
+        if String.endsWith suffix s then
+            s.Substring(0, s.Length - suffix.Length)
+        else
+            s

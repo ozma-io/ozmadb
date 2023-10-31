@@ -78,8 +78,8 @@ let private findBrokenActions (actions : PreparedActions) : ActionRef seq =
 
 let private checkActionName (ref : ActionRef) : Expr<Action -> bool> =
     let checkSchema = checkSchemaName ref.Schema
-    let uvName = string ref.Name
-    <@ fun action -> (%checkSchema) action.Schema && action.Name = uvName @>
+    let name = string ref.Name
+    <@ fun action -> (%checkSchema) action.Schema && action.Name = name @>
 
 let markBrokenActions (db : SystemContext) (actions : PreparedActions) (cancellationToken : CancellationToken) : Task =
     unitTask {

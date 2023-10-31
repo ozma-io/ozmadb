@@ -581,6 +581,8 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Source { get; set; } = null!;
+        [ColumnField("bool", Default="false")]
+        public bool AllowBroken { get; set; }
     }
 
     public class Action

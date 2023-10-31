@@ -16,6 +16,7 @@ open FunWithFlags.FunDBSchema.System
 let private makeSourceAttributeField (modul : Module) : ModulePath * SourceModule =
     let ret =
         { Source = modul.Source
+          AllowBroken = modul.AllowBroken
         }
     (modul.Path, ret)
 

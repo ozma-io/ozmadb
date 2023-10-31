@@ -9,7 +9,6 @@ open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 open FSharpPlus
 open FSharp.Control.Tasks.Affine
-open Npgsql
 open System.Security.Cryptography
 
 open FunWithFlags.FunUtils
@@ -42,6 +41,7 @@ open FunWithFlags.FunDB.Actions.Types
 open FunWithFlags.FunDB.Actions.Run
 open FunWithFlags.FunDB.Actions.Source
 open FunWithFlags.FunDB.Actions.Update
+open FunWithFlags.FunDB.Modules.Types
 open FunWithFlags.FunDB.Modules.Resolve
 open FunWithFlags.FunDB.Modules.Source
 open FunWithFlags.FunDB.Modules.Update
@@ -307,13 +307,12 @@ let checkBrokenAttributes (logger :ILogger) (allowAutoMark : bool) (preload : Pr
                         match maybeAttr with
                         | Error err when not err.AllowBroken ->
                             let isSystem = Map.containsKey schemaName preload.Schemas
-                            let schemaStr = schemaName.ToString()
-                            let defFieldName = ({ Entity = { Schema = attrsSchemaName; Name = attrsEntityName }; Name = attrsFieldName } : ResolvedFieldRef).ToString()
+                            let defFieldName = string ({ Entity = { Schema = attrsSchemaName; Name = attrsEntityName }; Name = attrsFieldName } : ResolvedFieldRef)
                             if isSystem || not allowAutoMark then
                                 critical <- true
-                                logger.LogError(err.Error, "Default attributes from {schema} are broken for field {field}", schemaStr, defFieldName)
+                                logger.LogError(err.Error, "Default attributes from {schema} are broken for field {field}", schemaName, defFieldName)
                             else
-                                logger.LogWarning(err.Error, "Marking default attributes from {schema} for {field} as broken", schemaStr, defFieldName)
+                                logger.LogWarning(err.Error, "Marking default attributes from {schema} for {field} as broken", schemaName, defFieldName)
                         | _ -> ()
         if critical then
             failwith "Cannot mark some default attributes as broken"
@@ -328,17 +327,36 @@ let checkBrokenActions (logger :ILogger) (allowAutoMark : bool) (preload : Prelo
                 match maybeAction with
                 | Error err when not err.AllowBroken ->
                     let isSystem = Map.containsKey schemaName preload.Schemas
-                    let schemaStr = schemaName.ToString()
-                    let actionNameStr = ({ Schema = schemaName; Name = actionName } : ActionRef).ToString()
+                    let actionNameStr = string ({ Schema = schemaName; Name = actionName } : ActionRef)
                     if isSystem || not allowAutoMark then
                         critical <- true
-                        logger.LogError(err.Error, "Action {name} from {schema} is broken", actionNameStr, schemaStr)
+                        logger.LogError(err.Error, "Action {name} from {schema} is broken", actionNameStr, schemaName)
                     else
-                        logger.LogWarning(err.Error, "Marking action {name} from {schema} as broken", actionNameStr, schemaStr)
+                        logger.LogWarning(err.Error, "Marking action {name} from {schema} as broken", actionNameStr, schemaName)
                 | _ -> ()
         if critical then
             failwith "Cannot mark some system actions as broken"
         do! markBrokenActions conn.System actions cancellationToken
+    }
+
+let checkBrokenModules (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (modules : ResolvedModules) (cancellationToken : CancellationToken) =
+    unitTask {
+        let mutable critical = false
+        for KeyValue(schemaName, schema) in modules.Schemas do
+            for KeyValue(modulePath, maybeModule) in schema.Modules do
+                match maybeModule with
+                | Error err when not err.AllowBroken ->
+                    let isSystem = Map.containsKey schemaName preload.Schemas
+                    let moduleNameStr = string ({ Schema = schemaName; Path = modulePath } : ModuleRef)
+                    if isSystem || not allowAutoMark then
+                        critical <- true
+                        logger.LogError(err.Error, "Module {name} from {schema} is broken", moduleNameStr, schemaName)
+                    else
+                        logger.LogWarning(err.Error, "Marking module {name} from {schema} as broken", moduleNameStr, schemaName)
+                | _ -> ()
+        if critical then
+            failwith "Cannot mark some system modules as broken"
+        do! markBrokenModules conn.System modules cancellationToken
     }
 
 let checkBrokenTriggers (logger :ILogger) (allowAutoMark : bool) (preload : Preload) (conn : DatabaseTransaction) (triggers : PreparedTriggers) (cancellationToken : CancellationToken) =
@@ -351,13 +369,12 @@ let checkBrokenTriggers (logger :ILogger) (allowAutoMark : bool) (preload : Prel
                         match maybeTrigger with
                         | Error err when not err.AllowBroken ->
                             let isSystem = Map.containsKey schemaName preload.Schemas
-                            let schemaStr = schemaName.ToString()
-                            let triggerNameStr = ({ Schema = schemaName; Entity = { Schema = triggerSchemaName; Name = triggerEntityName }; Name = triggerName } : TriggerRef).ToString()
+                            let triggerNameStr = string ({ Schema = schemaName; Entity = { Schema = triggerSchemaName; Name = triggerEntityName }; Name = triggerName } : TriggerRef)
                             if isSystem || not allowAutoMark then
                                 critical <- true
-                                logger.LogError(err.Error, "Trigger {name} from {schema} is broken", triggerNameStr, schemaStr)
+                                logger.LogError(err.Error, "Trigger {name} from {schema} is broken", triggerNameStr, schemaName)
                             else
-                                logger.LogWarning(err.Error, "Marking trigger {name} from {schema} as broken", triggerNameStr, schemaStr)
+                                logger.LogWarning(err.Error, "Marking trigger {name} from {schema} as broken", triggerNameStr, schemaName)
                         | _ -> ()
         if critical then
             failwith "Cannot mark some triggers as broken"
@@ -374,7 +391,7 @@ let checkBrokenUserViews (logger :ILogger) (allowAutoMark : bool) (preload : Pre
                 for KeyValue(uvName, maybeUv) in schema.UserViews do
                     match maybeUv with
                     | Error err when not err.AllowBroken ->
-                        let uvName = ({ Schema = schemaName; Name = uvName } : ResolvedUserViewRef).ToString()
+                        let uvName = string ({ Schema = schemaName; Name = uvName } : ResolvedUserViewRef)
                         if isSystem || not allowAutoMark then
                             critical <- true
                             logger.LogError(err.Error, "View {uv} is broken", uvName)
@@ -404,8 +421,8 @@ let checkBrokenPermissions (logger :ILogger) (allowAutoMark : bool) (preload : P
                     for KeyValue(allowedSchemaName, allowedSchema) in role.Permissions.Schemas do
                         for KeyValue(allowedEntityName, maybeEntity) in allowedSchema.Entities do
                             let markRole (e : exn) =
-                                let roleName = ({ Schema = schemaName; Name = roleName } : ResolvedRoleRef).ToString()
-                                let allowedName = ({ Schema = allowedSchemaName; Name = allowedEntityName } : ResolvedEntityRef).ToString()
+                                let roleName = string ({ Schema = schemaName; Name = roleName } : ResolvedRoleRef)
+                                let allowedName = string ({ Schema = allowedSchemaName; Name = allowedEntityName } : ResolvedEntityRef)
                                 if isSystem || not allowAutoMark then
                                     critical <- true
                                     logger.LogError(e, "Role {role} is broken for entity {entity}", roleName, allowedName)

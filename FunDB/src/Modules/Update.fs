@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.Modules.Update
 open System.Threading
 open System.Linq
 open System.Threading.Tasks
+open Microsoft.FSharp.Quotations
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 
@@ -10,6 +11,7 @@ open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Operations.Update
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.Modules.Source
+open FunWithFlags.FunDB.Modules.Types
 open FunWithFlags.FunDBSchema.System
 
 type private ModulesUpdater (db : SystemContext) as this =
@@ -17,6 +19,7 @@ type private ModulesUpdater (db : SystemContext) as this =
 
     let updateModulesField (modul : SourceModule) (existingModule : Module) : unit =
         existingModule.Source <- modul.Source
+        existingModule.AllowBroken <- modul.AllowBroken
 
     let updateModulesDatabase (schema : SourceModulesSchema) (existingSchema : Schema) : unit =
         let oldModulesMap =
@@ -57,3 +60,28 @@ let updateModules (db : SystemContext) (modules : SourceModules) (cancellationTo
             ignore <| updater.UpdateSchemas modules.Schemas schemasMap
             return updater
         }
+
+let private findBrokenModulesSchema (schemaName : SchemaName) (schema : ModulesSchema) : ModuleRef seq =
+    seq {
+        for KeyValue(modulePath, maybeModule) in schema.Modules do
+            match maybeModule with
+            | Error e when not e.AllowBroken -> yield { Schema = schemaName; Path = modulePath }
+            | _ -> ()
+    }
+
+let private findBrokenModules (modules : ResolvedModules) : ModuleRef seq =
+    seq {
+        for KeyValue(schemaName, schema) in modules.Schemas do
+            yield! findBrokenModulesSchema schemaName schema
+    }
+
+let private checkModuleName (ref : ModuleRef) : Expr<Module -> bool> =
+    let checkSchema = checkSchemaName ref.Schema
+    let name = string ref.Path
+    <@ fun action -> (%checkSchema) action.Schema && action.Path = name @>
+
+let markBrokenModules (db : SystemContext) (modules : ResolvedModules) (cancellationToken : CancellationToken) : Task =
+    unitTask {
+        let checks = findBrokenModules modules |> Seq.map checkModuleName
+        do! genericMarkBroken db.Modules checks <@ fun x -> Module(AllowBroken = true) @> cancellationToken
+    }

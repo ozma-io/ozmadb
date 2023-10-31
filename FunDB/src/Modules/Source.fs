@@ -4,6 +4,7 @@ open FunWithFlags.FunDB.FunQL.AST
 
 type SourceModule =
     { Source : string
+      AllowBroken : bool
     }
 
 type ModulePath = string

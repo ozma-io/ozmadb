@@ -26,7 +26,7 @@ type ActionRunException (message : string, innerException : exn, isUserException
 type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction { Path = name; Source = scriptSource }
+            runtime.CreateDefaultFunction <| moduleFile name scriptSource
         with
         | :? JavaScriptRuntimeException as e ->
             raisefWithInner ActionRunException e "Couldn't initialize action"

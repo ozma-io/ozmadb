@@ -107,6 +107,7 @@
     <Compile Include="src/Modules/Types.fs" />
     <Compile Include="src/Modules/Resolve.fs" />
     <Compile Include="src/Modules/Schema.fs" />
+    <Compile Include="src/Modules/Load.fs" />
 
     <Compile Include="src/Actions/Source.fs" />
     <Compile Include="src/Actions/Types.fs" />

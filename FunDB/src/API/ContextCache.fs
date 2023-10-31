@@ -40,7 +40,7 @@ open FunWithFlags.FunDB.Triggers.Run
 open FunWithFlags.FunDB.Triggers.Schema
 open FunWithFlags.FunDB.Triggers.Resolve
 open FunWithFlags.FunDB.Triggers.Merge
-open FunWithFlags.FunDB.Modules.Types
+open FunWithFlags.FunDB.Modules.Load
 open FunWithFlags.FunDB.Modules.Schema
 open FunWithFlags.FunDB.Modules.Resolve
 open FunWithFlags.FunDB.Actions.Types
@@ -257,12 +257,12 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
             | _ -> ()
         }
 
-    let makeRuntime files = IsolateLocal(fun isolate ->
+    let makeRuntime files forceAllowBroken = IsolateLocal(fun isolate ->
         let env =
             { Files = files
               SearchPath = seq { moduleDirectory }
             }
-        JSRuntime(isolate, APITemplate, env)
+        JSRuntime(isolate, APITemplate, env, forceAllowBroken)
     )
 
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
@@ -276,10 +276,12 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let sourceViews = { Schemas = Map.union systemViews.Schemas sourceViews.Schemas } : SourceUserViews
 
                         let! sourceModules = buildSchemaModules transaction.System None cancellationToken
-                        let modules = resolveModules layout sourceModules
+                        let modules = resolveModules layout sourceModules true
 
-                        let jsRuntime = makeRuntime (moduleFiles modules)
+                        let jsRuntime = makeRuntime (moduleFiles modules) true
                         let jsApi = jsRuntime.GetValue isolate
+                        let modules = resolvedLoadedModules modules jsApi
+                        do! checkBrokenModules logger cacheParams.AllowAutoMark preload transaction modules cancellationToken
 
                         let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
                         let triggers = resolveTriggers layout true sourceTriggers
@@ -461,8 +463,8 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                     let actions = resolveActions layout false sourceActions
 
-                    let modules = resolveModules layout sourceModules
-                    let jsRuntime = makeRuntime (moduleFiles modules)
+                    let modules = resolveModules layout sourceModules false
+                    let jsRuntime = makeRuntime (moduleFiles modules) false
 
                     do
                         let myIsolate = jsIsolates.Get ()
@@ -652,13 +654,18 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 raise <| ContextException(GEMigration("Cannot modify preloaded modules"))
                             let modules =
                                 try
-                                    resolveModules layout sourceModules
+                                    resolveModules layout sourceModules false
                                 with
                                 | :? ResolveModulesException as e ->
                                     raise <| ContextException(GEMigration("Failed to resolve modules: " + fullUserMessage e), e)
 
-                            let jsRuntime = makeRuntime (moduleFiles modules)
-                            let jsApi = jsRuntime.GetValue isolate.Value
+                            let jsRuntime = makeRuntime (moduleFiles modules) false
+                            let jsApi =
+                                try
+                                    jsRuntime.GetValue isolate.Value
+                                with
+                                | :? JavaScriptRuntimeException as e ->
+                                    raise <| ContextException(GEMigration("Failed to resolve modules: " + fullUserMessage e), e)
 
                             let! sourceActions = buildSchemaActions transaction.System None cancellationToken
                             if not <| preloadActionsAreUnchanged sourceActions preload then

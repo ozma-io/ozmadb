@@ -14,6 +14,7 @@ open NetJs.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
+open FunWithFlags.FunDB.Objects.Types
 
 let private longJSMessage (shortMessage : string) (innerException : Exception) =
     let stackTrace =
@@ -66,6 +67,13 @@ type Source = string
 type ModuleFile =
     { Path : Path
       Source : Source
+      AllowBroken : bool
+    }
+
+let moduleFile (path : Path) (source : Source) =
+    { Path = path
+      Source = source
+      AllowBroken = false
     }
 
 type private VirtualFSModule =
@@ -90,6 +98,7 @@ and IJSRuntime =
     abstract member Context : Context
     abstract member Isolate : Isolate
     abstract member EventLoop : EventLoop
+    abstract member BrokenModules : Map<Path, BrokenInfo>
     abstract member EventLoopScope : (EventLoop -> Task<'a>) -> Task<'a>
 
 type JSEnvironment =
@@ -118,7 +127,7 @@ let getJSExceptionUserData (e : JSException) : JToken option =
             | :? JsonReaderException as e -> raisefWithInner JavaScriptRuntimeException e "Failed to parse user data"
     | _ -> None
 
-type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateConstructor : Isolate -> 'a, env : JSEnvironment) as this =
+type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateConstructor : Isolate -> 'a, env : JSEnvironment, forceAllowBroken : bool) as this =
     let mutable currentEventLoop = None : EventLoop option
     let template = templateConstructor isolate
 
@@ -127,24 +136,34 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
         context.Global.Set("global", context.Global.Value)
         template.FinishInitialization this context
 
-    let makeModule (file : ModuleFile) =
+    let makeModule (forceAllowBroken : bool) (file : ModuleFile) : Path * PossiblyBroken<VirtualFSModule> =
         let normalized = convertPath file.Path
-        let modul =
-            try
-                Module.Compile(String.New(context.Isolate, file.Source), ScriptOrigin(normalized, IsModule = true))
-            with
-            | :? JSException as e -> raisefUserWithInner JavaScriptRuntimeException e "Uncaught error during compilation"
-        { Path = normalized
-          Module = modul
-          DirPath = POSIXPath.dirName normalized
-        }
+        try
+            let modul = Module.Compile(String.New(context.Isolate, file.Source), ScriptOrigin(normalized, IsModule = true))
+            let ret = 
+                { Path = normalized
+                  Module = modul
+                  DirPath = POSIXPath.dirName normalized
+                }
+            (normalized, Ok ret)
+        with
+        | :? JSException as e when file.AllowBroken || forceAllowBroken ->
+            (normalized, Error { Error = e; AllowBroken = file.AllowBroken })
+        | :? JSException as e ->
+            raisefUserWithInner JavaScriptRuntimeException e "Uncaught error during compilation"
 
+    let rawModules =
+        env.Files |> Seq.map (makeModule forceAllowBroken) |> Seq.cache
     let modules =
-        env.Files |> Seq.map makeModule |> Seq.cache
+        rawModules |> Seq.mapMaybe (fun (path, m) -> Result.getOption m)
     let modulePathsMap =
         modules |> Seq.collect (fun modul -> Seq.map (fun npath -> (npath, modul)) (pathAliases modul.Path)) |> Map.ofSeqUnique
     let moduleIdsMap =
         modules |> Seq.map (fun modul -> (modul.Module.IdentityHash, modul)) |> Map.ofSeq
+    let brokenModules =
+        rawModules
+        |> Seq.mapMaybe (function | (name, Error e) -> Some (name, e); | _ -> None)
+        |> Map.ofSeq
 
     let searchPath = env.SearchPath |> Seq.map convertPath |> Seq.distinct |> Seq.toArray
 
@@ -175,7 +194,11 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
             modul.Module.Instantiate(context, Func<_, _, _> resolveOne)
 
     member this.CreateModule (file : ModuleFile) =
-        let jsModule = makeModule file
+        let jsModule =
+            makeModule false file
+            |> snd
+            |> Result.getOption
+            |> Option.get
         let resolveOne path id =
             let currentModule =
                 if id = jsModule.Module.IdentityHash then
@@ -206,6 +229,7 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
     member this.Isolate = isolate
     member this.EventLoop = Option.get currentEventLoop
     member this.API = template
+    member this.BrokenModules = brokenModules
 
     member this.EventLoopScope (f : EventLoop -> Task<'r>) =
         task {
@@ -227,9 +251,10 @@ type JSRuntime<'a when 'a :> IJavaScriptTemplate> (isolate : Isolate, templateCo
     interface IJSRuntime with
         member this.CreateModule file = this.CreateModule file
         member this.CreateDefaultFunction file = this.CreateDefaultFunction file
-        member this.Context = context
-        member this.Isolate = isolate
+        member this.Context = this.Context
+        member this.Isolate = this.Isolate
         member this.EventLoop = this.EventLoop
+        member this.BrokenModules = this.BrokenModules
         member this.EventLoopScope f = this.EventLoopScope f
 
 let inline runFunctionInRuntime (func : Function) (cancellationToken : CancellationToken) (args : Value.Value[]) =

@@ -41,6 +41,7 @@ open FunWithFlags.FunDB.UserViews.Update
 open FunWithFlags.FunDB.Attributes.Source
 open FunWithFlags.FunDB.Attributes.Schema
 open FunWithFlags.FunDB.Attributes.Update
+open FunWithFlags.FunDB.Modules.Types
 open FunWithFlags.FunDB.Modules.Source
 open FunWithFlags.FunDB.Modules.Schema
 open FunWithFlags.FunDB.Modules.Update
@@ -109,6 +110,13 @@ type PrettyActionMeta =
 
 let private emptyPrettyActionMeta =
     { AllowBroken = false } : PrettyActionMeta
+
+type PrettyModuleMeta =
+    { AllowBroken : bool
+    }
+
+let private emptyModuleActionMeta =
+    { AllowBroken = false } : PrettyModuleMeta
 
 type PrettyUserViewMeta =
     { AllowBroken : bool
@@ -1207,12 +1215,19 @@ let schemasToZipFile (schemas : Map<SchemaName, SchemaDump>) (stream : Stream) =
                     dumpToEntry (sprintf "user_views/%O.yaml" name) uvMeta
 
             for KeyValue(modulePath, modul) in dump.Modules do
+                if not <| modulePath.EndsWith(".mjs") then
+                    failwithf "Unexpected module path in %O: %s" schemaName modulePath
                 useEntry (sprintf "modules/%s" modulePath) <| fun writer -> writer.Write(modul.Source)
+                if modul.AllowBroken then
+                    // Module name should always end in .mjs, and we exploit it here.
+                    let moduleMeta = { AllowBroken = true } : PrettyModuleMeta
+                    let barePath = String.removeSuffix ".mjs" modulePath
+                    dumpToEntry (sprintf "modules/%O.yaml" barePath) moduleMeta
 
             for KeyValue(actionName, action) in dump.Actions do
                 useEntry (sprintf "actions/%O.mjs" actionName) <| fun writer -> writer.Write(action.Function)
                 if action.AllowBroken then
-                    let actionMeta = { AllowBroken = true } : PrettyUserViewsGeneratorScriptMeta
+                    let actionMeta = { AllowBroken = true } : PrettyActionMeta
                     dumpToEntry (sprintf "actions/%O.yaml" actionName) actionMeta
 
             for KeyValue(schemaName, schemaTriggers) in dump.Triggers do
@@ -1269,6 +1284,7 @@ let schemasFromZipFile (stream : Stream) : Map<SchemaName, SchemaDump> =
         | :? JsonSerializationException as e -> raisefUserWithInner RestoreSchemaException e "Error during deserializing archive entry %s" entry.FullName
 
     let mutable encounteredActions : Map<ActionRef, PrettyActionMeta * string> = Map.empty
+    let mutable encounteredModules : Map<ModuleRef, PrettyModuleMeta * string> = Map.empty
     let mutable encounteredTriggers : Map<TriggerRef, PrettyTriggerMeta option * string> = Map.empty
     let mutable encounteredUserViews : Map<ResolvedUserViewRef, PrettyUserViewMeta * string> = Map.empty
     let mutable encounteredUserViewGeneratorScripts : Map<SchemaName, PrettyUserViewsGeneratorScriptMeta * string> = Map.empty
@@ -1321,12 +1337,18 @@ let schemasFromZipFile (stream : Stream) : Map<SchemaName, SchemaDump> =
                     let (prevMeta, prevFunc) = Map.findWithLazyDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
                     encounteredActions <- Map.add ref (prevMeta, rawFunc) encounteredActions
                     emptySchemaDump
-                | CIRegex @"^modules/(.*)$" [rawModuleName] ->
+                | CIRegex @"^modules/(.*)\.yaml$" [rawModuleName] ->
+                    let ref = { Schema = schemaName; Path = rawModuleName + ".mjs" }
+                    let prettyModuleMeta : PrettyModuleMeta = deserializeEntry entry
+                    let (prevMeta, prevFunc) = Map.findWithLazyDefault ref (fun () -> (emptyModuleActionMeta, "")) encounteredModules
+                    encounteredModules <- Map.add ref (prettyModuleMeta, prevFunc) encounteredModules
+                    emptySchemaDump
+                | CIRegex @"^modules/(.*\.mjs)$" [rawModuleName] ->
+                    let ref = { Schema = schemaName; Path = rawModuleName }
                     let rawModule = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let entry = { Source = rawModule }
-                    { emptySchemaDump with
-                        Modules = Map.singleton rawModuleName entry
-                    }
+                    let (prevMeta, prevFunc) = Map.findWithLazyDefault ref (fun () -> (emptyModuleActionMeta, "")) encounteredModules
+                    encounteredModules <- Map.add ref (prevMeta, rawModule) encounteredModules
+                    emptySchemaDump
                 | CIRegex @"^roles/([^/]+)\.yaml$" [rawName] ->
                     let name = FunQLName rawName
                     let role : SourceRole = deserializeEntry entry
@@ -1382,6 +1404,14 @@ let schemasFromZipFile (stream : Stream) : Map<SchemaName, SchemaDump> =
     let dump =
         encounteredActions
             |> Seq.map (convertAction >> uncurry Map.singleton)
+            |> Seq.fold (Map.unionWith mergeSchemaDump) dump
+
+    let convertModule (KeyValue(ref : ModuleRef, (meta : PrettyModuleMeta, source))) =
+        let ret = { emptySchemaDump with Modules = Map.singleton ref.Path { Source = source; AllowBroken = meta.AllowBroken } }
+        (ref.Schema, ret)
+    let dump =
+        encounteredModules
+            |> Seq.map (convertModule >> uncurry Map.singleton)
             |> Seq.fold (Map.unionWith mergeSchemaDump) dump
 
     let convertTrigger (KeyValue(ref : TriggerRef, data)) =
