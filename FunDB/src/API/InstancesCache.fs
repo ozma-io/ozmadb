@@ -21,7 +21,7 @@ type InstancesCacheStore (cacheParams : InstancesCacheParams) =
     let hashedPreload = HashedPreload cacheParams.Preload
 
     // FIXME: random values
-    let instancesMemCache = FluidCache<ContextCacheStore>(8, TimeSpan.FromSeconds(60.0), TimeSpan.FromSeconds(3600.0), (fun () -> DateTime.Now))
+    let instancesMemCache = FluidCache<ContextCacheStore>(16, TimeSpan.FromSeconds(60.0), TimeSpan.FromSeconds(60.0 * 60.0), (fun () -> DateTime.Now))
     let instancesMemIndex = instancesMemCache.AddIndex("ByConnectionString", fun entry -> entry.ConnectionString)
 
     let createInstance (connectionString : string) =
