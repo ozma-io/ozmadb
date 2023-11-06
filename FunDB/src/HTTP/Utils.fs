@@ -428,12 +428,14 @@ type HttpJobUtils (
         ) =
     let redisMultiplexer = serviceProvider.GetService<Redis.IConnectionMultiplexer>()
 
-    let addContext (name : string) (value : string) =
+    let addContext (ctx : HttpContext) (name : string) (value : string) =
         // The documentation says to dispose of the bookmark
         // once the context is exited from. We _don't_ do this,
         // allowing us to keep the context in the long-running jobs. 
         ignore <| LogContext.PushProperty(name, value)
         diagnostic.Set(name, value)
+        // Set the context variables for the metrics exporter.
+        ctx.Items.Add(name, value)
 
     let withUser
             (f : UserTokenInfo -> HttpHandler)
@@ -444,13 +446,13 @@ type HttpJobUtils (
         if isNull client then
             requestError (RIRequest "No azp claim in security token") next ctx
         else
-            addContext "Client" client
+            addContext ctx "Client" client
 
             let emailClaim = ctx.User.FindFirst ClaimTypes.Email
             let email =
                 if isNull emailClaim then None else Some emailClaim.Value
 
-            Option.iter (addContext "Email") email
+            Option.iter (addContext ctx "Email") email
             let info = getUserTokenInfo client email ctx
             f info next ctx
 
@@ -487,7 +489,7 @@ type HttpJobUtils (
             | (true, xInstance) when not <| Seq.isEmpty xInstance -> Seq.last xInstance
             | _ -> ctx.Request.Host.Host
 
-        addContext "Instance" instanceName
+        addContext ctx "Instance" instanceName
         instancesSource.GetInstance instanceName ctx.RequestAborted
 
     let withInstanceContext (f : InstanceContext -> HttpHandler) (next : HttpFunc) (ctx : HttpContext) =

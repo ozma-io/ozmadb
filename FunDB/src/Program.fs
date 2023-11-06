@@ -28,6 +28,7 @@ open Serilog
 open Serilog.Events
 open Microsoft.Extensions.Logging
 open Prometheus
+open Prometheus.HttpMetrics
 
 open FunWithFlags.FunDB.FunQL.Json
 open FunWithFlags.FunDBSchema.Instances
@@ -355,6 +356,14 @@ let private setupHttpUtils (webAppBuilder : WebApplicationBuilder) =
     ignore <| services.AddSingleton<HttpJobUtils>()
 
 let private setupApp (app : IApplicationBuilder) =
+    let configureMetrics (options : HttpMiddlewareExporterOptions) =
+        for name in seq { "Client"; "Email"; "Instance" } do
+            ignore <| options.AddCustomLabel(name.ToLower(), fun context ->
+                match context.Items.TryGetValue(name :> obj) with
+                | (true, value) -> value :?> string
+                | (false, _) -> null
+            )
+
     let configureCors (cfg : CorsPolicyBuilder) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
 
@@ -364,7 +373,7 @@ let private setupApp (app : IApplicationBuilder) =
 
     ignore <| app
         .UseSerilogRequestLogging()
-        .UseHttpMetrics()
+        .UseHttpMetrics(configureMetrics)
         .UseHttpMethodOverride()
         .UseCors(configureCors)
         .UseAuthentication()
