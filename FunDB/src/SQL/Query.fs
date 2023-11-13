@@ -260,9 +260,18 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
             let columns = Array.init reader.FieldCount getColumn
 
             let getValue i =
+                let (name, typ) = columns.[i]
                 try
-                    let (name, typ) = columns.[i]
-                    let rawValue = reader.GetProviderSpecificValue(i)
+                    let rawValue = 
+                        try
+                            reader.GetProviderSpecificValue(i)
+                        with
+                        | :? OverflowException when typ = VTScalar STDecimal ->
+                            reader.GetDouble(i)
+                        | :? OverflowException when typ = VTArray STDecimal ->
+                            reader.GetFieldValue<Nullable<double>[]>(i)
+                        | :? OverflowException as e ->
+                            raisefWithInner QueryException e "Value is out of supported bounds"
                     convertValue typ rawValue
                 with
                 | e ->
