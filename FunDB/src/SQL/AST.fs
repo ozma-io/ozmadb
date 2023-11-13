@@ -132,8 +132,12 @@ type [<StructuralEquality; NoComparison>] Value =
     | VJsonArray of ValueArray<ComparableJToken>
     | VUuidArray of ValueArray<Guid>
     | VNull
+    | VInvalid
     with
-        override this.ToString () = this.ToSQLString()
+        override this.ToString () =
+            match this with
+            | VInvalid -> "(invalid)"
+            | _ -> this.ToSQLString()
 
         member this.ToSQLString () =
             let renderArray func typeName arr =
@@ -171,6 +175,7 @@ type [<StructuralEquality; NoComparison>] Value =
             | VJsonArray vals -> vals |> renderArray (fun j -> renderSqlJson j.Json) "jsonb"
             | VUuidArray vals -> renderArray string "uuid" vals
             | VNull -> "NULL"
+            | VInvalid -> raisef NotSupportedException "Invalid values cannot be represented in SQL"
 
         interface ISQLString with
             member this.ToSQLString () = this.ToSQLString ()
@@ -222,6 +227,7 @@ type ValuePrettyConverter () =
         | VJsonArray vals -> serializeArray id vals
         | VUuidArray vals -> serializeArray id vals
         | VNull -> writer.WriteNull()
+        | VInvalid -> writer.WriteValue("__invalid__")
 
 // Simplified list of PostgreSQL types. Other types are casted to those.
 // Used when interpreting query results and for compiling FunQL.

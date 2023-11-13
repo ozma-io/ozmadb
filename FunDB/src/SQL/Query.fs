@@ -71,6 +71,7 @@ let private convertDecimal : obj -> decimal option = function
 let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
     match (valType, rawValue) with
     | (_, (:? DBNull as value)) -> VNull
+    | (_, (:? Value as value)) -> value
     | (VTScalar STInt, value) ->
         match convertInt value with
         | Some i -> VInt i
@@ -159,6 +160,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VJsonArray vals -> npgsqlArray NpgsqlDbType.Jsonb vals
     | VUuidArray vals -> npgsqlArray NpgsqlDbType.Uuid vals
     | VNull -> (None, upcast DBNull.Value)
+    | VInvalid -> raisef QueryException "Invalid values cannot be serialized"
 
 type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnection) =
     let logger = loggerFactory.CreateLogger<QueryConnection>()
@@ -266,12 +268,8 @@ type QueryConnection (loggerFactory : ILoggerFactory, connection : NpgsqlConnect
                         try
                             reader.GetProviderSpecificValue(i)
                         with
-                        | :? OverflowException when typ = VTScalar STDecimal ->
-                            reader.GetDouble(i)
-                        | :? OverflowException when typ = VTArray STDecimal ->
-                            reader.GetFieldValue<Nullable<double>[]>(i)
-                        | :? OverflowException as e ->
-                            raisefWithInner QueryException e "Value is out of supported bounds"
+                        | :? OverflowException -> VInvalid
+                        | :? InvalidCastException -> VInvalid
                     convertValue typ rawValue
                 with
                 | e ->

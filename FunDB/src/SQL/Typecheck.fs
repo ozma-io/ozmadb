@@ -481,3 +481,4 @@ let valueSimpleType : Value -> SimpleValueType option = function
     | VJsonArray vals -> Some <| VTArray STJson
     | VUuidArray vals -> Some <| VTArray STUuid
     | VNull -> None
+    | VInvalid -> None
