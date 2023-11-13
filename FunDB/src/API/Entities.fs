@@ -3,6 +3,7 @@ module FunWithFlags.FunDB.API.Entities
 open System
 open System.Threading.Tasks
 open System.Collections.Generic
+open System.Linq
 open FSharpPlus
 open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
@@ -113,7 +114,7 @@ type EntitiesAPI (api : IFunDBAPI) =
             match rctx.Quota.MaxUsers with
             | None -> return Ok ()
             | Some maxUsers ->
-                let! currUsers = ctx.Transaction.System.Users.CountAsync ctx.CancellationToken
+                let! currUsers = ctx.Transaction.System.Users.Where(fun user -> user.IsEnabled).CountAsync(ctx.CancellationToken)
                 if currUsers > maxUsers then
                     return Error <| GEQuotaExceeded "Max number of users reached"
                 else
@@ -391,6 +392,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                             do! logAPIResponse rctx "updateEntry" req resp
                             if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
+                            if req.Entity = usersEntityRef && Map.containsKey "is_enabled" req.Fields then
+                                scheduleCheckUsersQuota ()
                             let afterTriggers = findMergedTriggersUpdate req.Entity TTAfter (Map.keys args) ctx.Triggers
                             match! Seq.foldResultTask (applyUpdateTriggerAfter req.Entity id args) () afterTriggers with
                             | Ok () -> return Ok resp
@@ -522,9 +525,9 @@ type EntitiesAPI (api : IFunDBAPI) =
                     let entity = ctx.Layout.FindEntity entityRef |> Option.get
                     if entity.TriggersMigration && anyChildren (fun ent -> ent.Insert || ent.Update || ent.Delete) then
                         ctx.ScheduleMigration ()
+                    if entityRef = usersEntityRef && anyChildren (fun ent -> ent.Insert || ent.Update) then
+                        scheduleCheckUsersQuota ()
                     if anyChildren (fun ent -> ent.Insert) then
-                        if entityRef = usersEntityRef then
-                            scheduleCheckUsersQuota ()
                         scheduleCheckSizeQuota ()
                 return Ok ()
             with
