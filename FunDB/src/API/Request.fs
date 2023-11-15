@@ -203,7 +203,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
             let oldSource = source
             source <- newSource
             sourceDepth <- sourceDepth + 1
-            logger.LogInformation("Entering {source}", newSource)
+            logger.LogInformation("Entering {source}, depth {depth}", newSource, sourceDepth)
             try
                 try
                     return! func ()

@@ -55,7 +55,6 @@ let private parseRemoteResult (remote : RemoteJobRef) (connection : Redis.IDatab
         | SJReply header ->
             let! rawResultData = connection.StringGetAsync(jobDataName)
             if rawResultData.IsNull then
-                eprintfn "Result data for %s is null" jobDataName
                 return RJNotFound
             else
                 let resultData = Redis.RedisValue.op_Implicit(rawResultData) : ReadOnlyMemory<byte>
@@ -74,7 +73,6 @@ let private waitRemoteJob<'a> (remote : RemoteJobRef) (delay : TimeSpan) (cancel
             let conn = remote.Settings.Multiplexer.GetDatabase()
             let! rawResult = conn.StringGetSetExpiryAsync(jobKey, delay + remote.Settings.IdleTimeout)
             if rawResult.IsNull then
-                eprintfn "Result for %s is null" jobName
                 return RJNotFound
             else if not rawResult.IsNullOrEmpty then
                 return! parseRemoteResult remote conn rawResult cancellationToken

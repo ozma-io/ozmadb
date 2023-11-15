@@ -18,10 +18,12 @@ type ICustomFormatException =
     abstract member MessageContainsInnerError : bool
     abstract member ShortMessage : string
 
-let isUserException (e : exn) =
+let rec isUserException (e : exn) =
     match box e with
     | null -> true
     | :? IUserException as e -> e.IsUserException
+    // Needed for traversing `CallbackException` stacks.
+    | _ when not <| isNull e.InnerException-> isUserException e.InnerException
     | _ -> false
 
 let userExceptionData (e : exn) =
