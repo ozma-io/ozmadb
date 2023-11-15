@@ -20,6 +20,8 @@ open StackExchange
 open Newtonsoft.Json
 open Serilog
 open Serilog.Context
+open Serilog.Core
+open Serilog.Events
 open Microsoft.Extensions.Logging
 open Giraffe
 open NodaTime
@@ -109,14 +111,27 @@ type RequestErrorInfo =
 let requestError<'Error when 'Error :> IErrorDetails> (e : 'Error) =
     setHttpHeader "X-FunDB-Error" e.Error >=> setStatusCode e.HTTPResponseCode >=> json e
 
-let errorHandler (e : Exception) (logger : ILogger) : HttpFunc -> HttpContext -> HttpFuncResult =
-    match e with
-    | :? OperationCanceledException ->
-        logger.LogInformation(e, "The request has been canceled.")
-        clearResponse >=> requestError RICanceled
-    | _ ->
-        logger.LogError(e, "An unhandled exception has occurred while executing the request.")
-        clearResponse >=> requestError RIInternal
+let errorHandler (e : Exception) (logger : ILogger) (next : HttpFunc) (ctx : HttpContext) =
+    task {
+        match e with
+        | :? OperationCanceledException ->
+            logger.LogInformation(e, "The request has been canceled.")
+            return! (clearResponse >=> requestError RICanceled) next ctx
+        | _ ->
+            // Re-enrich log context, not sure why it misses these values in the first place.
+            let enricher =
+                { new ILogEventEnricher with
+                    member this.Enrich (event : LogEvent, factory : ILogEventPropertyFactory) =
+                        for KeyValue(name, value) in ctx.Items do
+                            let prop = factory.CreateProperty(name :?> string, value)
+                            event.AddOrUpdateProperty(prop)
+                        let internalProp = factory.CreateProperty("Internal", true)
+                        event.AddOrUpdateProperty(internalProp)
+                }
+            use addedEnricher = LogContext.Push(enricher)
+            logger.LogError(e, "An unhandled exception has occurred while executing the request.")
+            return! (clearResponse >=> requestError RIInternal) next ctx
+    }
 
 let notFoundHandler : HttpFunc -> HttpContext -> HttpFuncResult = requestError RINoEndpoint
 
