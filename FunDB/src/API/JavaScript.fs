@@ -378,7 +378,7 @@ class FunDBCurrent {
                 const inner = e.inner;
                 delete e.operation;
                 delete e.inner;
-                Object.assign(e, e.inner);
+                Object.assign(e, inner);
             }
             throw e;
         }
