@@ -374,10 +374,13 @@ class FunDBCurrent {
             return ret.entries[0];
         } catch (e) {
             if (e.error === 'transaction') {
-                throw new FunDBError(e.inner);
-            } else {
-                throw e;
+                // We want to keep the stack trace, so we mutate the exception.
+                const inner = e.inner;
+                delete e.operation;
+                delete e.inner;
+                Object.assign(e, e.inner);
             }
+            throw e;
         }
     };
 
