@@ -752,7 +752,7 @@ type private Phase2Resolver (
             try
                 typecheckFieldExpr wrappedLayout expr
             with
-            | :? ViewTypecheckException as e -> raisefWithInner ResolveLayoutException e "Failed to typecheck computed column"
+            | :? ViewTypecheckException as e -> raisefWithInner ResolveLayoutException e "Failed to typecheck computed field"
         let virtualInfo =
             match comp.Virtual with
             | None -> None

@@ -166,8 +166,8 @@ type private Typechecker (layout : ILayoutBits) =
     and typecheckFieldExpr : ResolvedFieldExpr -> ResolvedFieldType option = function
         | FEValue value -> fieldValueType value
         | FERef r -> resolvedRefType layout r
-        | FEEntityAttr (eref, attr) -> failwith "Not implemented"
-        | FEFieldAttr (fref, attr) -> failwith "Not implemented"
+        | FEEntityAttr (eref, attr) -> raisef ViewTypecheckException "Not implemented"
+        | FEFieldAttr (fref, attr) -> raisef ViewTypecheckException "Not implemented"
         | FENot e ->
             match typecheckFieldExpr e with
             | Some (FTScalar SFTBool) as typ -> typ
@@ -186,8 +186,8 @@ type private Typechecker (layout : ILayoutBits) =
         | FENotDistinct (a, b) -> Some <| typecheckEqLogical a b
         | FEIn (e, vals) -> Some <| typecheckInValues e vals
         | FENotIn (e, vals) -> Some <| typecheckInValues e vals
-        | FEInQuery (e, query) -> failwith "Not implemented"
-        | FENotInQuery (e, query) -> failwith "Not implemented"
+        | FEInQuery (e, query) -> raisef ViewTypecheckException "Not implemented"
+        | FENotInQuery (e, query) -> raisef ViewTypecheckException "Not implemented"
         | FECast (e, typ) ->
             // We always expect cast to succeed; worst case it's impossible, whatever.
             Some (mapFieldType getResolvedEntityRef typ)
@@ -206,8 +206,8 @@ type private Typechecker (layout : ILayoutBits) =
         | FEFunc (name, args) ->
             let argTypes = Seq.map typecheckFieldExpr args
             Some <| checkFunc name argTypes
-        | FEAggFunc (name, args) -> failwith "Not implemented"
-        | FESubquery query -> failwith "Not implemented"
+        | FEAggFunc (name, args) -> raisef ViewTypecheckException "Not implemented"
+        | FESubquery query -> raisef ViewTypecheckException "Not implemented"
         | FEInheritedFrom (f, nam) -> Some (FTScalar SFTBool)
         | FEOfType (f, nam) -> Some (FTScalar SFTBool)
 
