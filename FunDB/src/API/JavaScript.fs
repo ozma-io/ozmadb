@@ -194,7 +194,7 @@ type APITemplate (isolate : Isolate) =
         let template = ObjectTemplate.New(isolate)
 
         let fundbTemplate = ObjectTemplate.New(isolate)
-        template.Set("internal", fundbTemplate)
+        template.Set("fundbInternal", fundbTemplate)
 
         fundbTemplate.Set("formatFunQLName", FunctionTemplate.New(template.Isolate, fun args ->
             let context = isolate.CurrentContext
@@ -299,8 +299,9 @@ type APITemplate (isolate : Isolate) =
         template
 
     let preludeScriptSource = "
-const internal = global.internal;
-delete global.internal;
+(() => {
+const internal = global.fundbInternal;
+delete global.fundbInternal;
 
 const findInnerByKey = (object, key) => {
     for (value of Object.values(object)) {
@@ -350,7 +351,11 @@ const normalizeSource = (source) => {
     }
 };
 
-class FunDB1 {
+class FunDBCurrent {
+    constructor() {
+        Object.freeze(this);
+    }
+
     getUserView(source, args, chunk) {
         return internal.getUserView({ source: normalizeSource(source), args, chunk });
     };
@@ -362,12 +367,6 @@ class FunDB1 {
     getEntityInfo(entity) {
         return internal.getEntityInfo({ entity });
     };
-
-    // DEPRECATED
-    async insertEntity(entity, fields) {
-        const ret = await this.insertEntry(entity, fields);
-        return ret.id;
-    }
 
     async insertEntry(entity, fields) {
         try {
@@ -458,9 +457,45 @@ class FunDB1 {
     };
 };
 
+class FunDB1 extends FunDBCurrent {
+    // DEPRECATED
+    async insertEntity(entity, fields) {
+        const ret = await this.insertEntry(entity, fields);
+        return ret.id;
+    }
+
+    // DEPRECATED
+    async insertEntities(entity, entries) {
+        const ret = await this.insertEntries(entity, entries);
+        return ret.entries.map(entry => entry.id);
+    }
+
+    // DEPRECATED
+    async updateEntity(entity, id, fields) {
+        const ret = await this.updateEntry(entity, id, fields);
+        return ret.id;
+    };
+
+    // DEPRECATED
+    deleteEntity(entity, id) {
+        return this.deleteEntry(entity, id);
+    };
+
+    // DEPRECATED
+    getRelatedEntities(entity, id) {
+        return this.getRelatedEntries(entity, id);
+    };
+
+    // DEPRECATED
+    recursiveDeleteEntity(entity, id) {
+        return this.recursiveDeleteEntry(entity, id);
+    };
+};
+
 global.FunDB = new FunDB1();
+})();
     "
-    let preludeScript = UnboundScript.Compile(Value.String.New(isolate, preludeScriptSource.Trim()), ScriptOrigin("prelude.js"))
+    let preludeScript = UnboundScript.Compile(Value.String.New(isolate, preludeScriptSource.Trim()), ScriptOrigin("fundb_prelude.js"))
 
     member this.Isolate = isolate
 
