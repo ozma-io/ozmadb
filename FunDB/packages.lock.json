@@ -80,17 +80,17 @@
       },
       "NetJs": {
         "type": "Direct",
-        "requested": "[1.3.*, )",
-        "resolved": "1.3.5",
-        "contentHash": "TwtNXborHbR4HwmrMNy5992Hoqi6HMasLPPViuXARILIg2Vm04TxsjSag2ouoLkwPYPsH4/KX+5SNNmXkaupBg=="
+        "requested": "[1.4.*, )",
+        "resolved": "1.4.0",
+        "contentHash": "9l02dVzXRlTlKsivVQw0zyy87cC9sIeVB6HAxAFqdPccGk2F0WI3hY3p3dpTzwjq0Oee34DCuIDC9wlnCU1tYg=="
       },
       "NetJs.Json": {
         "type": "Direct",
-        "requested": "[1.3.*, )",
-        "resolved": "1.3.3",
-        "contentHash": "6hNEsTfsAhJhNUwjigNEEdzLG6Fd2TboNrczlbPNS1iJxERv8tOWM+HwNLtIN50ZakkfG2Ep+szpUFbkqSuIwQ==",
+        "requested": "[1.4.*, )",
+        "resolved": "1.4.0",
+        "contentHash": "6zBM0VVrwdTxH21BJyQcvpHOrryyWn1rq441CBswV8q96sMb/8cX1x2NBsiJYqdEdgQhx/wfMb2TPlGg87ne/A==",
         "dependencies": {
-          "NetJs": "1.3.3",
+          "NetJs": "1.4.0",
           "Newtonsoft.Json": "13.0.3"
         }
       },
