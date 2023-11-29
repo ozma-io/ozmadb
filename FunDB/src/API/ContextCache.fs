@@ -192,7 +192,11 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
         task {
             try
                 let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
-                return (transaction, tryIntInvariant versionEntry.Value)
+                let version =
+                    match versionEntry with
+                    | null -> None
+                    | entry -> tryIntInvariant entry.Value
+                return (transaction, version)
             with
             | :? PostgresException when transaction.Connection.Connection.State = ConnectionState.Open ->
                 // Most likely we couldn't execute the statement itself because there is no "state" table yet.
