@@ -188,25 +188,29 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
         }
 
     // If `None` cold rebuild is needed.
-    let openAndGetCurrentVersion (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
+    let getCurrentVersion (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) =
         task {
-            let! (transaction, versionEntry) =
-                openAndCheckTransaction cacheParams.LoggerFactory cacheParams.ConnectionString IsolationLevel.Serializable cancellationToken <| fun transaction ->
-                    task {
-                        try
-                            let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
-                            return (transaction, versionEntry)
-                        with
-                        | :? PostgresException when transaction.Connection.Connection.State = ConnectionState.Open ->
-                            // Most likely we couldn't execute the statement itself because there is no "state" table yet.
-                            do! (transaction :> IAsyncDisposable).DisposeAsync ()
-                            let transaction = new DatabaseTransaction (transaction.Connection)
-                            return (transaction, null)
-                    }
-            match versionEntry with
-            | null -> return (transaction, None)
-            | entry -> return (transaction, tryIntInvariant entry.Value)
+            try
+                let! versionEntry = transaction.System.State.FirstOrDefaultAsync((fun x -> x.Name = versionField), cancellationToken)
+                return (transaction, tryIntInvariant versionEntry.Value)
+            with
+            | :? PostgresException when transaction.Connection.Connection.State = ConnectionState.Open ->
+                // Most likely we couldn't execute the statement itself because there is no "state" table yet.
+                do! (transaction :> IAsyncDisposable).DisposeAsync ()
+                let transaction = new DatabaseTransaction (transaction.Connection)
+                return (transaction, None)
         }
+
+    let continueAndGetCurrentVersion (connection : DatabaseConnection) (cancellationToken : CancellationToken) =
+        getCurrentVersion (new DatabaseTransaction(connection)) cancellationToken
+
+    let openAndGetCurrentVersion (cancellationToken : CancellationToken) : Task<DatabaseTransaction * int option> =
+        openAndCheckTransaction
+                cacheParams.LoggerFactory
+                cacheParams.ConnectionString
+                IsolationLevel.Serializable
+                cancellationToken
+                (fun ts -> getCurrentVersion ts cancellationToken)
 
     let ensureAndGetVersion (conn : DatabaseTransaction) (bump : bool) (cancellationToken : CancellationToken) : Task<int> =
         task {
@@ -325,7 +329,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         return reraise' ex
                 }
             let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None userViews cancellationToken
-            let! (transaction, newCurrentVersion) = openAndGetCurrentVersion cancellationToken
+            let! (transaction, newCurrentVersion) = continueAndGetCurrentVersion transaction.Connection cancellationToken
             if newCurrentVersion <> Some currentVersion then
                 let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
                 let layout = resolveLayout false sourceLayout
@@ -415,7 +419,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
     // Called when state update by another instance is detected. More lightweight than full `coldRebuildFromDatabase`.
     let rec rebuildFromDatabase (transaction : DatabaseTransaction) (currentVersion : int) (cancellationToken : CancellationToken) : Task<CachedState option> =
         task {
-            let! (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews) =
+            let! (layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews) =
                 task {
                     try
                         let! sourceLayout = buildFullSchemaLayout transaction.System preload cancellationToken
@@ -438,14 +442,14 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         // To dry-run user views we need to stop the transaction.
                         let! _ = transaction.Rollback ()
                         // `forceAllowBroken` is set to `true` to overcome potential race condition between this call and `forceAllowBroken` update during migration.
-                        return (transaction, layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews)
+                        return (layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews)
                     with
                     | ex ->
                         do! transaction.Rollback ()
                         return reraise' ex
                 }
             let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None userViews cancellationToken
-            let! (transaction, newCurrentVersion) = openAndGetCurrentVersion cancellationToken
+            let! (transaction, newCurrentVersion) = continueAndGetCurrentVersion transaction.Connection cancellationToken
             if newCurrentVersion <> Some currentVersion then
                 match newCurrentVersion with
                 | None -> return! coldRebuildFromDatabase transaction cancellationToken
@@ -787,7 +791,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 task {
                                     if forceAllowBroken then
                                         let! prefetchedViews = dryRunUserViews transaction.Connection.Query layout mergedTriggers true None userViews cancellationToken
-                                        let! (transaction, newVersion) = openAndGetCurrentVersion cancellationToken
+                                        let! (transaction, newVersion) = continueAndGetCurrentVersion transaction.Connection cancellationToken
                                         // In the rare event we have a race condition, don't mark user views as broken -- something might have changed.
                                         // They will be marked later by some other instance.
                                         if newVersion = Some oldState.Version then

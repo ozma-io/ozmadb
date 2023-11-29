@@ -60,7 +60,8 @@ type EventLogger (loggerFactory : ILoggerFactory) =
                             with
                             | ex ->
                                 logger.LogError(ex, "Exception while commiting logged event")
-                        logger.LogInformation("Logged {count} events into databases", totalChanged)
+                        if totalChanged > 0 then
+                            logger.LogInformation("Logged {count} events into databases", totalChanged)
                     finally
                         ignore <| unitTask {
                             for KeyValue(connectionString, transaction) in databaseConnections do

@@ -80,7 +80,7 @@ type RequestErrorInfo =
 
         member this.HTTPResponseCode =
             match this with
-            | RIInternal _ -> 500
+            | RIInternal -> 500
             | RIRateExceeded _ -> 429
             | RIRequest _ -> 400
             | RIUnsupportedMediaType -> 415
@@ -91,7 +91,7 @@ type RequestErrorInfo =
             | RIWrongRegion _ -> 422
             | RIUnauthorized -> 401
             | RIAccessDenied _ -> 403
-            | RIConcurrentUpdate _ -> 503
+            | RIConcurrentUpdate -> 503
             | RINotFinished _ -> 500
             | RIOther _ -> 500
 
