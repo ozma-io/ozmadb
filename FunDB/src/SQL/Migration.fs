@@ -165,10 +165,26 @@ let private normalizeIndex (index : IndexMeta) : IndexMeta =
           Predicate = index.Predicate |> Option.map (fun x -> x.Value |> normalizeLocalExpr |> String.comparable)
     }
 
+let private defaultUsingExpression (name : ColumnName) (fromType : DBValueType) (toType : DBValueType) : ValueExpr option =
+    // Generate USING expression for ALTER COLUMN SET TYPE when needed.
+    match (fromType, toType) with
+    | (VTScalar (SQLRawString "text"), toType) ->
+        let colRef =
+            { Table = None
+              Name = name
+            } : ColumnRef
+        Some (VECast (VEColumn colRef, toType))
+    | _ -> None
+
 let private migrateColumnAttrs (name : ColumnName) (fromMeta : ColumnMeta) (toMeta : ColumnMeta) : TableOperation seq =
     seq {
         if fromMeta.DataType <> toMeta.DataType then
-            yield TOAlterColumnType (name, toMeta.DataType)
+            let usingExpr = defaultUsingExpression name fromMeta.DataType toMeta.DataType
+            let alterMeta =
+                { NewType = toMeta.DataType
+                  Using = usingExpr
+                }
+            yield TOAlterColumnType (name, alterMeta)
         if fromMeta.IsNullable <> toMeta.IsNullable then
             yield TOAlterColumnNull (name, toMeta.IsNullable)
     }

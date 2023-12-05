@@ -395,11 +395,32 @@ let filterDatabaseMeta (f : SchemaName -> bool) (meta : DatabaseMeta) =
       Extensions = meta.Extensions
     }
 
+type AlterColumnType =
+    { NewType : DBValueType
+      Using : ValueExpr option
+    } with
+        override this.ToString () = this.ToSQLString()
+
+        member this.ToSQLString () =
+            let usingStr =
+                match this.Using with
+                | None -> ""
+                | Some using -> sprintf "USING %s" (using.ToSQLString())
+            sprintf "TYPE %s %s" (this.NewType.ToSQLString()) usingStr
+
+        interface ISQLString with
+            member this.ToSQLString () = this.ToSQLString()
+
+let columnType (newType : DBValueType) : AlterColumnType =
+    { NewType = newType
+      Using = None
+    }
+
 [<NoEquality; NoComparison>]
 type TableOperation =
     | TOCreateColumn of ColumnName * ColumnMeta
     | TODropColumn of ColumnName
-    | TOAlterColumnType of ColumnName * DBValueType
+    | TOAlterColumnType of ColumnName * AlterColumnType
     | TOAlterColumnNull of ColumnName * bool
     | TOAlterColumnDefault of ColumnName * ValueExpr option
     with
@@ -409,7 +430,7 @@ type TableOperation =
             match this with
             | TOCreateColumn (name, pars) -> sprintf "ADD COLUMN %s %s" (name.ToSQLString()) (pars.ToSQLString())
             | TODropColumn col -> sprintf "DROP COLUMN %s" (col.ToSQLString())
-            | TOAlterColumnType (col, typ) -> sprintf "ALTER COLUMN %s SET DATA TYPE %s" (col.ToSQLString()) (typ.ToSQLString())
+            | TOAlterColumnType (col, meta) -> sprintf "ALTER COLUMN %s SET DATA %s" (col.ToSQLString()) (meta.ToSQLString())
             | TOAlterColumnNull (col, isNullable) -> sprintf "ALTER COLUMN %s %s NOT NULL" (col.ToSQLString()) (if isNullable then "DROP" else "SET")
             | TOAlterColumnDefault (col, None) -> sprintf "ALTER COLUMN %s DROP DEFAULT" (col.ToSQLString())
             | TOAlterColumnDefault (col, Some def) -> sprintf "ALTER COLUMN %s SET DEFAULT %s" (col.ToSQLString()) (def.ToSQLString())

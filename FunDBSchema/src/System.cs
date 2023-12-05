@@ -118,18 +118,14 @@ namespace FunWithFlags.FunDBSchema.System
 
         [Entity("id", InsertedInternally=true, IsFrozen=true)]
 
-        [Attributes.Index("transaction_timestamp", new [] {"\"transaction_timestamp\""})]
+        [Attributes.Index("transaction_id", new [] {"\"transaction_id\""})]
         [Attributes.Index("type", new [] {"\"type\""})]
         [Attributes.Index("timestamp", new [] {"\"timestamp\""})]
         [Attributes.Index("user_name", new [] {"\"user_name\""})]
-        [Attributes.Index("request_user_view", new [] {"\"request\"->'source'->'schema'", "\"request\"->'source'->'name'"})]
-        [Attributes.Index("request_entity", new [] {"\"request\"->'entity'->'schema'", "\"request\"->'entity'->'name'", "\"request\"->'id'"})]
-        // TODO BEGIN: Remove all these along with the old fields
-        [Attributes.Index("field", new [] {"\"schema_name\"", "\"entity_name\"", "\"field_name\""})]
-        [Attributes.Index("row", new [] {"\"schema_name\"", "\"entity_name\"", "\"row_id\""})]
-        // TODO END
-        // TODO: Uncomment when the field is converted to JSON later.
-        // [Attributes.Index("error_type", new [] {"\"error\"->'error'"})]
+        [Attributes.Index("request_user_view", new [] {"\"request\"->'source'->>'schema'", "\"request\"->'source'->>'name'", "\"timestamp\""}, Predicate="\"request\"->'source'->>'schema' IS NOT NULL AND \"request\"->'source'->>'name' IS NOT NULL")]
+        [Attributes.Index("request_entity_id", new [] {"\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "(\"request\"->>'id')::int", "\"timestamp\""}, Predicate="\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL AND \"request\"->>'id' IS NOT NULL")]
+        [Attributes.Index("request_entity", new [] {"\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "\"timestamp\""}, Predicate="\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL")]
+        [Attributes.Index("error_type", new [] {"\"error\"->>'error'"}, Predicate="\"error\"->>'error' IS NOT NULL")]
         public DbSet<EventEntry> Events { get; set; } = null!;
 
         public SystemContext()
@@ -685,44 +681,21 @@ namespace FunWithFlags.FunDBSchema.System
         public string? UserName { get; set; }
 
         [ColumnField("json", IsImmutable=true, Default="{\"type\": 'api'}")]
-        [Column(TypeName = "jsonb")]
+        [Column(TypeName="jsonb")]
         [Required]
         public string Source { get; set; } = "";
 
         [ColumnField("json", IsImmutable=true)]
-        [Column(TypeName = "jsonb")]
-        // TODO: Remove old entries and declare required after a month.
-        // [Required]
-        public string? Request { get; set; } = "";
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Request { get; set; } = "";
 
         [ColumnField("json", IsImmutable=true)]
-        [Column(TypeName = "jsonb")]
+        [Column(TypeName="jsonb")]
         public string? Response { get; set; }
 
-        // TODO: Replace with "json" after a month
-        [ColumnField("string", IsImmutable=true)]
+        [ColumnField("json", IsImmutable=true)]
+        [Column(TypeName="jsonb")]
         public string? Error { get; set; }
-
-        //
-        // TODO BEGIN: Legacy, remove after a month
-        //
-        [ColumnField("string", IsImmutable=true)]
-        [Required]
-        public string Details { get; set; } = "";
-
-        [ColumnField("string", IsImmutable=true)]
-        public string? SchemaName { get; set; }
-
-        [ColumnField("string", IsImmutable=true)]
-        public string? EntityName { get; set; }
-
-        [ColumnField("string", IsImmutable=true)]
-        public string? FieldName { get; set; }
-
-        [ColumnField("int", IsImmutable=true)]
-        public int? RowId { get; set; }
-        //
-        // END: Legacy, remove after a month
-        //
      }
 }
