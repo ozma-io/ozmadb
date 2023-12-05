@@ -943,7 +943,7 @@ let logAPIError<'Request, 'Error when 'Error :> IErrorDetails>
     if error.ShouldLog then
         rctx.WriteEvent (fun event ->
             let json = JObject.FromObject error
-            json.["error"] <- error.LogMessage
+            json.["message"] <- error.LogMessage
             event.Type <- name
             event.Request <- JsonConvert.SerializeObject request
             event.Error <- json.ToString()
