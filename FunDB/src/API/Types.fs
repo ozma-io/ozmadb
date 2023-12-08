@@ -10,6 +10,7 @@ open Newtonsoft.Json.Linq
 open NodaTime
 open FSharp.Control.Tasks.Affine
 
+open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
 open FunWithFlags.FunDB.Exception
 open FunWithFlags.FunDBSchema.System
@@ -78,12 +79,18 @@ type GenericErrorInfo =
             | GECommit inner -> inner.ShouldLog
             | GEOther details -> false
 
+        member this.Details =
+            match this with
+            | GECommit inner -> inner.Details
+            | _ -> Map.empty
+
         static member private LookupKey = prepareLookupCaseKey<GenericErrorInfo>
         member this.Error =
             GenericErrorInfo.LookupKey this |> Option.get
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.Message = this.Message
@@ -198,8 +205,12 @@ and PretendRoleConverter () =
 type PretendRoleRequest =
     { AsRole : PretendRole
     } with
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         interface ILoggableResponse with
-            member this.ShouldLog = false
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 type PretendUserRequest =
     { AsUser : UserName
@@ -228,6 +239,8 @@ type PretendErrorInfo =
             | PEAccessDenied -> true
             | PENoUserRole -> false
 
+        member this.Details = Map.empty
+
         member this.HTTPResponseCode =
             match this with
             | PEUserNotFound -> 404
@@ -241,6 +254,7 @@ type PretendErrorInfo =
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.LogMessage = this.LogMessage
@@ -297,6 +311,11 @@ type UserViewErrorInfo =
             | UVEOther msg -> false
             | UVEExecution inner -> inner.ShouldLog
 
+        member this.Details =
+            match this with
+            | UVEExecution inner -> inner.Details
+            | _ -> Map.empty
+
         static member private LookupKey = prepareLookupCaseKey<UserViewErrorInfo>
         member this.Error =
             match this with
@@ -305,6 +324,7 @@ type UserViewErrorInfo =
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.Message = this.Message
@@ -335,8 +355,12 @@ type UserViewEntriesResponse =
     { Info : UserViewInfo
       Result : ExecutedViewExpr
     } with
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         interface ILoggableResponse with
-            member this.ShouldLog = false
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 [<NoEquality; NoComparison>]
 type UserViewInfoResponse =
@@ -345,8 +369,12 @@ type UserViewInfoResponse =
       ConstColumnAttributes : ExecutedAttributesMap[]
       ConstArgumentAttributes : Map<ArgumentName, ExecutedAttributesMap>
     } with
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         interface ILoggableResponse with
-            member this.ShouldLog = false
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 type UserViewFlags =
     { [<DataMember(EmitDefaultValue = false)>]
@@ -435,6 +463,13 @@ type EntityErrorInfo =
             | EEOperation inner -> inner.ShouldLog
             | EECommand inner -> inner.ShouldLog
 
+        member this.Details =
+            match this with
+            | EEException (details, data) -> Map.empty
+            | EETrigger (schema, name, inner) -> inner.Details
+            | EEOperation inner -> inner.Details
+            | EECommand inner -> inner.Details
+
         static member private LookupKey = prepareLookupCaseKey<EntityErrorInfo>
         member this.Error =
             match this with
@@ -444,6 +479,7 @@ type EntityErrorInfo =
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.Message = this.Message
@@ -501,22 +537,43 @@ type TransactionOp =
     | [<CaseKey("recursiveDelete", Type=CaseSerialization.InnerObject)>] TRecursiveDeleteEntity of DeleteEntryRequest
     | [<CaseKey("command", Type=CaseSerialization.InnerObject)>] TCommand of CommandRequest
 
-type InsertEntityResponse =
+type InsertEntryResponse =
     { Id : RowId option
     } with
-        interface ILoggableResponse with
-            member this.ShouldLog = true
+        member this.ShouldLog = false
+        member this.Details =
+            match this.Id with
+            | Some id -> Map.singleton "id" (JToken.op_Implicit id)
+            | None -> Map.empty
 
-type UpdateEntityResponse =
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
+
+type UpdateEntryResponse =
     { Id : RowId
     } with
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         interface ILoggableResponse with
-            member this.ShouldLog = true
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
+
+type DeleteEntryResponse =
+    { Id : RowId
+    } with
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 [<SerializeAsObject("type")>]
 type TransactionOpResponse =
-    | [<CaseKey("insert", Type=CaseSerialization.InnerObject)>] TRInsertEntity of InsertEntityResponse
-    | [<CaseKey("update", Type=CaseSerialization.InnerObject)>] TRUpdateEntity of UpdateEntityResponse
+    | [<CaseKey("insert", Type=CaseSerialization.InnerObject)>] TRInsertEntity of InsertEntryResponse
+    | [<CaseKey("update", Type=CaseSerialization.InnerObject)>] TRUpdateEntity of UpdateEntryResponse
     | [<CaseKey("delete", Type=CaseSerialization.InnerObject)>] TRDeleteEntity
     | [<CaseKey("recursiveDelete", Type=CaseSerialization.InnerObject)>] TRRecursiveDeleteEntity of Deleted : ReferencesTree
     | [<CaseKey("command", Type=CaseSerialization.InnerObject)>] TRCommand
@@ -532,16 +589,15 @@ type TransactionErrorInfo =
       Inner : IErrorDetails
     } with
         member this.LogMessage = this.Inner.LogMessage
-
         [<DataMember>]
         member this.Message = this.Inner.Message
-
         member this.HTTPResponseCode = this.Inner.HTTPResponseCode
-
         member this.ShouldLog = this.Inner.ShouldLog
+        member this.Details = this.Inner.Details
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         [<DataMember>]
         member this.Error = "transaction"
@@ -556,8 +612,12 @@ type TransactionErrorInfo =
 type TransactionResponse =
     { Results : TransactionOpResponse[]
     } with
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         interface ILoggableResponse with
-            member this.ShouldLog = true
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 [<NoEquality; NoComparison>]
 type GetEntityInfoRequest =
@@ -576,14 +636,14 @@ type InsertEntriesRequest =
       Entries : RawArguments seq
     }
 
-type InsertEntitiesResponse =
-    { Entries : InsertEntityResponse[]
+type InsertEntriesResponse =
+    { Entries : InsertEntryResponse[]
     }
 
  type IEntitiesAPI =
     abstract member GetEntityInfo : GetEntityInfoRequest -> Task<Result<SerializedEntity, EntityErrorInfo>>
-    abstract member InsertEntries : InsertEntriesRequest -> Task<Result<InsertEntitiesResponse, TransactionErrorInfo>>
-    abstract member UpdateEntry : UpdateEntryRequest -> Task<Result<UpdateEntityResponse, EntityErrorInfo>>
+    abstract member InsertEntries : InsertEntriesRequest -> Task<Result<InsertEntriesResponse, TransactionErrorInfo>>
+    abstract member UpdateEntry : UpdateEntryRequest -> Task<Result<UpdateEntryResponse, EntityErrorInfo>>
     abstract member DeleteEntry : DeleteEntryRequest -> Task<Result<unit, EntityErrorInfo>>
     abstract member GetRelatedEntries : GetRelatedEntriesRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
     abstract member RecursiveDeleteEntry : DeleteEntryRequest -> Task<Result<ReferencesTree, EntityErrorInfo>>
@@ -614,12 +674,15 @@ type SaveErrorInfo =
             | RSEAccessDenied -> true
             | RSERequest msg -> false
 
+        member this.Details = Map.empty
+
         static member private LookupKey = prepareLookupCaseKey<SaveErrorInfo>
         member this.Error =
             SaveErrorInfo.LookupKey this |> Option.get
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.Message = this.Message
@@ -650,12 +713,15 @@ type RestoreErrorInfo =
             | RREAccessDenied -> true
             | RRERequest msg -> false
 
+        member this.Details = Map.empty
+
         static member private LookupKey = prepareLookupCaseKey<RestoreErrorInfo>
         member this.Error =
             RestoreErrorInfo.LookupKey this |> Option.get
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.Message = this.Message
@@ -697,8 +763,12 @@ type SaveSchemasRequest =
 type SaveSchemasResponse =
     { Schemas : Map<SchemaName, SchemaDump>
     } with
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         interface ILoggableResponse with
-            member this.ShouldLog = false
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 [<NoEquality; NoComparison>]
 type RestoreSchemasFlags =
@@ -738,8 +808,12 @@ type RunActionRequest =
 type ActionResponse =
     { Result : JObject option
     } with
-    interface ILoggableResponse with
         member this.ShouldLog = false
+        member this.Details = Map.empty
+
+        interface ILoggableResponse with
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 [<SerializeAsObject("error")>]
 [<NoEquality; NoComparison>]
@@ -769,12 +843,15 @@ type ActionErrorInfo =
             | AEException (details, data) -> Option.isNone data
             | AEOther details -> false
 
+        member this.Details = Map.empty
+
         static member private LookupKey = prepareLookupCaseKey<ActionErrorInfo>
         member this.Error =
             ActionErrorInfo.LookupKey this |> Option.get
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.Message = this.Message
@@ -799,8 +876,12 @@ type DomainValuesResponse =
       PunType : SQL.SimpleValueType
       Hash : string
     } with
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         interface ILoggableResponse with
-            member this.ShouldLog = false
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 [<SerializeAsObject("error")>]
 type DomainErrorInfo =
@@ -828,6 +909,11 @@ type DomainErrorInfo =
             | DERequest details -> false
             | DEDomain inner -> inner.ShouldLog
 
+        member this.Details =
+            match this with
+            | DERequest details -> Map.empty
+            | DEDomain inner -> inner.Details
+
         static member private LookupKey = prepareLookupCaseKey<DomainErrorInfo>
         member this.Error =
             match this with
@@ -836,6 +922,7 @@ type DomainErrorInfo =
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.Message = this.Message
@@ -922,6 +1009,7 @@ let logAPIResponse<'Request, 'Response when 'Response :> ILoggableResponse>
                 event.Type <- name
                 event.Request <- JsonConvert.SerializeObject request
                 event.Response <- JsonConvert.SerializeObject response
+                event.Details <- JsonConvert.SerializeObject response.Details
             )
     }
 
@@ -933,6 +1021,7 @@ let logAPISuccess<'Request>
         event.Type <- name
         event.Request <- JsonConvert.SerializeObject request
         event.Response <- "{}"
+        event.Details <- "{}"
     )
 
 let logAPIError<'Request, 'Error when 'Error :> IErrorDetails>
@@ -947,6 +1036,7 @@ let logAPIError<'Request, 'Error when 'Error :> IErrorDetails>
             event.Type <- name
             event.Request <- JsonConvert.SerializeObject request
             event.Error <- json.ToString()
+            event.Details <- JsonConvert.SerializeObject error.Details
         )
 
 let logAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggableResponse and 'Error :> IErrorDetails>

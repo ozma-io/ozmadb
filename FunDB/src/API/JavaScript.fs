@@ -28,12 +28,15 @@ type APICallErrorInfo =
             match this with
             | ACECall msg -> msg
 
+        member this.ShouldLog = false
+
         static member private LookupKey = prepareLookupCaseKey<APICallErrorInfo>
         member this.Error =
             APICallErrorInfo.LookupKey this |> Option.get
 
         interface ILoggableResponse with
-            member this.ShouldLog = false
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = Map.empty
 
         interface IErrorDetails with
             member this.Message = this.Message

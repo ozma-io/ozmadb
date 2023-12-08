@@ -50,6 +50,11 @@ type DomainError =
         | DEExecution e -> e.ShouldLog
         | DEAccessDenied details -> true
 
+    member this.Details =
+        match this with
+        | DEExecution e -> e.Details
+        | _ -> Map.empty
+
     static member private LookupKey = prepareLookupCaseKey<DomainError>
     member this.Error =
         match this with
@@ -58,6 +63,7 @@ type DomainError =
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
+        member this.Details = this.Details
 
     interface IErrorDetails with
         member this.Message = this.Message

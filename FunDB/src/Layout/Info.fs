@@ -105,9 +105,11 @@ type SerializedEntity =
       HasDeleteTriggers : bool
     } with
     member this.ShouldLog = false
+    member this.Details = Map.empty
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
+        member this.Details = this.Details
 
 
 [<NoEquality; NoComparison>]

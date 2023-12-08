@@ -6,6 +6,7 @@ open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
 open System.Runtime.Serialization
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization
@@ -26,12 +27,15 @@ open FunWithFlags.FunDB.SQL.Query
 module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 
+type RowId = int
+
 [<SerializeAsObject("error")>]
 type EntityOperationError =
     | [<CaseKey(null, Type=CaseSerialization.InnerObject)>] EOEExecution of FunQLExecutionError
     | [<CaseKey("request", IgnoreFields=[|"Details"|])>] EOERequest of Details : string
     | [<CaseKey("entryNotFound")>] EOEEntryNotFound
     | [<CaseKey("accessDenied", IgnoreFields=[|"Details"|])>] EOEAccessDenied of Details : string
+    | [<CaseKey(null, Type=CaseSerialization.InnerObject, IgnoreFields=[|"Id"|])>] EOEWithId of Id : RowId * Inner : EntityOperationError
     with
     member this.LogMessage =
         match this with
@@ -39,12 +43,14 @@ type EntityOperationError =
         | EOERequest msg -> msg
         | EOEEntryNotFound -> "Entry not found"
         | EOEAccessDenied details -> details
+        | EOEWithId (id, inner) -> inner.LogMessage
 
     [<DataMember>]
     member this.Message =
         match this with
         | EOEExecution e -> e.Message
         | EOEAccessDenied details -> "Access denied"
+        | EOEWithId (id, inner) -> inner.Message
         | _ -> this.LogMessage
 
     member this.HTTPResponseCode =
@@ -53,6 +59,7 @@ type EntityOperationError =
         | EOERequest msg -> 422
         | EOEEntryNotFound -> 404
         | EOEAccessDenied details -> 403
+        | EOEWithId (id, inner) -> inner.HTTPResponseCode
 
     member this.ShouldLog =
         match this with
@@ -60,6 +67,14 @@ type EntityOperationError =
         | EOERequest msg -> false
         | EOEEntryNotFound -> false
         | EOEAccessDenied details -> true
+        | EOEWithId (id, inner) -> inner.ShouldLog
+    member this.Details =
+        match this with
+        | EOEExecution e -> e.Details
+        | EOEWithId (id, inner) ->
+            inner.Details
+            |> Map.add "id" (JToken.op_Implicit id)
+        | _ -> Map.empty
 
     static member private LookupKey = prepareLookupCaseKey<EntityOperationError>
     member this.Error =
@@ -69,6 +84,7 @@ type EntityOperationError =
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
+        member this.Details = this.Details
 
     interface IErrorDetails with
         member this.LogMessage = this.LogMessage
@@ -82,8 +98,6 @@ type EntityOperationException (details : EntityOperationError, innerException : 
     new (details : EntityOperationError) = EntityOperationException (details, null)
 
     member this.Details = details
-
-type RowId = int
 
 type RowKey =
     | RKPrimary of RowId
@@ -184,7 +198,7 @@ let private countAndThrow
         else
             let testExpr =
                 { SQL.emptySingleSelectExpr with
-                    Columns = [| SQL.SCExpr (None, SQL.VEAggFunc (SQL.SQLName "count", SQL.AEStar)) |]
+                    Columns = [| SQL.SCExpr (None, SQL.VEColumn { Table = None; Name = sqlFunId }) |]
                     From = Some <| SQL.FTable (SQL.fromTable tableRef)
                     Where = Some whereExpr
                 }
@@ -192,11 +206,11 @@ let private countAndThrow
                 { Expression = SQL.SSelect testExpr
                   Arguments = arguments
                 }
-            let! count = runIntQuery connection None testQuery (Some "Check if entry exists") argumentValues cancellationToken
-            if count > 0 then
-                raise <| EntityOperationException (EOEAccessDenied "The entry is not accessible")
-            else
-                raise <| EntityOperationException EOEEntryNotFound
+            let! maybeId = runOptionalIntQuery connection None testQuery (Some "Check if entry exists") argumentValues cancellationToken
+            match maybeId with
+            | None -> raise <| EntityOperationException EOEEntryNotFound
+            // FIXME: Use int64 here!
+            | Some id -> raise <| EntityOperationException (EOEWithId (int id, EOEAccessDenied "The entry is not accessible"))
     }
 
 let private runQueryAndGetId
@@ -965,9 +979,11 @@ type ReferencesTree =
       Root : ReferencesRowIndex
     } with
         member this.ShouldLog = false
+        member this.Details = Map.empty
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 let iterDeleteReferences (f : ResolvedEntityRef -> RowId -> Task) (tree : ReferencesTree) : Task<Set<ReferencesRowIndex>> =
     task {

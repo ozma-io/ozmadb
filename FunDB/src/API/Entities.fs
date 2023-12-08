@@ -245,7 +245,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                 return Error (EEOperation (EOERequest err))
         }
 
-    member this.InsertEntries (req : InsertEntriesRequest) : Task<Result<InsertEntitiesResponse, TransactionErrorInfo>> =
+    member this.InsertEntries (req : InsertEntriesRequest) : Task<Result<InsertEntriesResponse, TransactionErrorInfo>> =
         wrapAPIError rctx logger "insertEntries" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
@@ -262,7 +262,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     let beforeTriggers = findMergedTriggersInsert req.Entity TTBefore ctx.Triggers
                     let afterTriggers = findMergedTriggersInsert req.Entity TTAfter ctx.Triggers
 
-                    let runSingleId (i, (rawArgs : RawArguments, rowArgs : LocalArgumentsMap)) : Task<Result<InsertEntityResponse, TransactionErrorInfo>> =
+                    let runSingleId (i, (rawArgs : RawArguments, rowArgs : LocalArgumentsMap)) : Task<Result<InsertEntryResponse, TransactionErrorInfo>> =
                         task {
                             match! Seq.foldResultTask (applyInsertTriggerBefore req.Entity entity) rowArgs beforeTriggers with
                             | Error (BEError e) -> return Error { Inner = e; Operation = i }
@@ -281,7 +281,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                         ctx.CancellationToken
                                 let newId = newIds.[0]
                                 let req = { Entity = req.Entity; Fields = rawArgs } : InsertEntityRequest
-                                let resp = { Id = Some newId } : InsertEntityResponse
+                                let resp = { Id = Some newId } : InsertEntryResponse
                                 do! logAPIResponse rctx "insertEntry" req resp
                                 match! Seq.foldResultTask (applyInsertTriggerAfter req.Entity newId args) () afterTriggers with
                                 | Error e -> return Error { Inner = e; Operation = i }
@@ -319,7 +319,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                             (Some comments)
                                             cachedArgs
                                             ctx.CancellationToken
-                                    let responses = Array.map (fun id -> { Id = Some id } : InsertEntityResponse) newIds
+                                    let responses = Array.map (fun id -> { Id = Some id } : InsertEntryResponse) newIds
                                     for (reqArgs, resp) in Seq.zip req.Entries responses do
                                         let singleReq = { Entity = req.Entity; Fields = reqArgs } : InsertEntityRequest
                                         do! logAPIResponse rctx "insertEntry" singleReq resp
@@ -341,7 +341,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                     return Error { Inner = EEOperation e.Details; Operation = 0 }
         }
 
-    member this.UpdateEntry (req : UpdateEntryRequest) : Task<Result<UpdateEntityResponse, EntityErrorInfo>> =
+    member this.UpdateEntry (req : UpdateEntryRequest) : Task<Result<UpdateEntryResponse, EntityErrorInfo>> =
         wrapAPIError rctx logger "updateEntry" req <| task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
@@ -388,7 +388,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                     (Some comments)
                                     args
                                     ctx.CancellationToken
-                            let resp = { Id = id }
+                            let resp = { Id = id } : UpdateEntryResponse
                             do! logAPIResponse rctx "updateEntry" req resp
                             if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
@@ -438,7 +438,8 @@ type EntitiesAPI (api : IFunDBAPI) =
                                     key
                                     (Some comments)
                                     ctx.CancellationToken
-                            do! logAPISuccess rctx "deleteEntry" req
+                            let resp = { Id = id } : DeleteEntryResponse
+                            do! logAPIResponse rctx "deleteEntry" req resp
                             if entity.TriggersMigration then
                                 ctx.ScheduleMigration ()
                             let afterTriggers = findMergedTriggersDelete req.Entity TTAfter ctx.Triggers

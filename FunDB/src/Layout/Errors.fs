@@ -27,6 +27,7 @@ type IntegrityQueryError =
     member this.HTTPResponseCode = 422
 
     member this.ShouldLog = false
+    member this.Details = Map.empty
 
     static member private LookupKey = prepareLookupCaseKey<IntegrityQueryError>
     member this.Error =
@@ -34,6 +35,7 @@ type IntegrityQueryError =
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
+        member this.Details = this.Details
 
     interface IErrorDetails with
         member this.LogMessage = this.LogMessage

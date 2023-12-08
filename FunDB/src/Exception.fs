@@ -71,6 +71,7 @@ let inline raisefUserWithInner<'a, 'b, 'e when 'e :> UserException> (constr : (s
 
 type ILoggableResponse =
     abstract ShouldLog : bool
+    abstract Details : Map<string, JToken>
 
 type IErrorDetails =
     inherit ILoggableResponse

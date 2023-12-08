@@ -49,6 +49,11 @@ type FunQLExecutionError =
         | UVEExecution details -> 500
 
     member this.ShouldLog = false
+    member this.Details =
+        match this with
+        | UVEIntegrity e -> e.Details
+        | UVEArgument e -> e.Details
+        | UVEExecution details -> Map.empty
 
     static member private LookupKey = prepareLookupCaseKey<FunQLExecutionError>
     member this.Error =
@@ -58,6 +63,7 @@ type FunQLExecutionError =
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
+        member this.Details = this.Details
 
     interface IErrorDetails with
         member this.LogMessage = this.LogMessage
@@ -473,9 +479,11 @@ type ExplainedQuery =
       Explanation : JToken
     } with
         member this.ShouldLog = false
+        member this.Details = Map.empty
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 
 type ExplainedViewExpr =
@@ -483,9 +491,11 @@ type ExplainedViewExpr =
       Attributes : ExplainedQuery option
     } with
         member this.ShouldLog = false
+        member this.Details = Map.empty
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
 let explainViewExpr
         (connection : QueryConnection)

@@ -33,12 +33,15 @@ type ArgumentCheckErrorInfo =
 
     member this.ShouldLog = false
 
+    member this.Details = Map.empty
+
     static member private LookupKey = prepareLookupCaseKey<ArgumentCheckErrorInfo>
     member this.Error =
         ArgumentCheckErrorInfo.LookupKey this |> Option.get
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
+        member this.Details = this.Details
 
     interface IErrorDetails with
         member this.LogMessage = this.LogMessage
@@ -63,8 +66,11 @@ type ArgumentCheckError =
 
     member this.Error = "argument"
 
+    member this.Details = this.Inner.Details
+
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
+        member this.Details = this.Details
 
     interface IErrorDetails with
         member this.LogMessage = this.LogMessage

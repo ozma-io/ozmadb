@@ -78,6 +78,9 @@ type RequestErrorInfo =
         [<DataMember>]
         member this.Message = this.LogMessage
 
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         member this.HTTPResponseCode =
             match this with
             | RIInternal -> 500
@@ -100,7 +103,8 @@ type RequestErrorInfo =
             RequestErrorInfo.LookupKey this |> Option.get
 
         interface ILoggableResponse with
-            member this.ShouldLog = false
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = Map.empty
 
         interface IErrorDetails with
             member this.LogMessage = this.LogMessage

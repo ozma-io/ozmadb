@@ -33,6 +33,9 @@ type MiscErrorInfo =
         [<DataMember>]
         member this.Message = this.LogMessage
 
+        member this.ShouldLog = false
+        member this.Details = Map.empty
+
         member this.HTTPResponseCode =
             match this with
             | MEJobNotFound -> 404
@@ -42,7 +45,8 @@ type MiscErrorInfo =
             MiscErrorInfo.LookupKey this |> Option.get
 
         interface ILoggableResponse with
-            member this.ShouldLog = false
+            member this.ShouldLog = this.ShouldLog
+            member this.Details = this.Details
 
         interface IErrorDetails with
             member this.LogMessage = this.LogMessage

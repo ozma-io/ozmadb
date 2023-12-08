@@ -122,10 +122,26 @@ namespace FunWithFlags.FunDBSchema.System
         [Attributes.Index("type", new [] {"\"type\""})]
         [Attributes.Index("timestamp", new [] {"\"timestamp\""})]
         [Attributes.Index("user_name", new [] {"\"user_name\""})]
-        [Attributes.Index("request_user_view", new [] {"\"request\"->'source'->>'schema'", "\"request\"->'source'->>'name'", "\"timestamp\""}, Predicate="\"request\"->'source'->>'schema' IS NOT NULL AND \"request\"->'source'->>'name' IS NOT NULL")]
-        [Attributes.Index("request_entity_id", new [] {"\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "(\"request\"->>'id')::int", "\"timestamp\""}, Predicate="\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL AND \"request\"->>'id' IS NOT NULL")]
-        [Attributes.Index("request_entity", new [] {"\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "\"timestamp\""}, Predicate="\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL")]
-        [Attributes.Index("error_type", new [] {"\"error\"->>'error'"}, Predicate="\"error\"->>'error' IS NOT NULL")]
+        [Attributes.Index(
+            "request_user_view",
+            new [] {"\"request\"->'source'->>'schema'", "\"request\"->'source'->>'name'", "\"timestamp\""},
+            Predicate="\"request\"->'source'->>'schema' IS NOT NULL AND \"request\"->'source'->>'name' IS NOT NULL"
+        )]
+        [Attributes.Index(
+            "request_entity_id",
+            new [] {"\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "(\"details\"->>'id')::int", "\"timestamp\""},
+            Predicate="\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL AND \"details\"->>'id' IS NOT NULL"
+        )]
+        [Attributes.Index(
+            "request_entity",
+            new [] {"\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "\"timestamp\""},
+            Predicate="\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL")
+        ]
+        [Attributes.Index(
+            "error_type",
+            new [] {"\"error\"->>'error'"},
+            Predicate="\"error\"->>'error' IS NOT NULL"
+        )]
         public DbSet<EventEntry> Events { get; set; } = null!;
 
         public SystemContext()
@@ -693,6 +709,11 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("json", IsImmutable=true)]
         [Column(TypeName="jsonb")]
         public string? Response { get; set; }
+
+        [ColumnField("json", IsImmutable=true, Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Details { get; set; } = "";
 
         [ColumnField("json", IsImmutable=true)]
         [Column(TypeName="jsonb")]

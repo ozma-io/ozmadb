@@ -61,6 +61,11 @@ type CommandError =
         | CEAccessDenied details -> true
         | CEOther details -> false
 
+    member this.Details =
+        match this with
+        | CEExecution e -> e.Details
+        | _ -> Map.empty
+
     static member private LookupKey = prepareLookupCaseKey<CommandError>
     member this.Error =
         match this with
@@ -69,6 +74,7 @@ type CommandError =
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
+        member this.Details = this.Details
 
     interface IErrorDetails with
         member this.Message = this.Message
