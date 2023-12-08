@@ -280,7 +280,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                         [args]
                                         ctx.CancellationToken
                                 let newId = newIds.[0]
-                                let req = { Entity = req.Entity; Fields = rawArgs } : InsertEntityRequest
+                                let req = { Entity = req.Entity; Fields = rawArgs } : InsertEntryRequest
                                 let resp = { Id = Some newId } : InsertEntryResponse
                                 do! logAPIResponse rctx "insertEntry" req resp
                                 match! Seq.foldResultTask (applyInsertTriggerAfter req.Entity newId args) () afterTriggers with
@@ -321,7 +321,7 @@ type EntitiesAPI (api : IFunDBAPI) =
                                             ctx.CancellationToken
                                     let responses = Array.map (fun id -> { Id = Some id } : InsertEntryResponse) newIds
                                     for (reqArgs, resp) in Seq.zip req.Entries responses do
-                                        let singleReq = { Entity = req.Entity; Fields = reqArgs } : InsertEntityRequest
+                                        let singleReq = { Entity = req.Entity; Fields = reqArgs } : InsertEntryRequest
                                         do! logAPIResponse rctx "insertEntry" singleReq resp
                                     return Ok responses
                             }

@@ -493,7 +493,7 @@ type RawRowKey =
     | [<CaseKey(null)>] RRKAlt of Alt : ConstraintName * Keys : RawArguments
 
 [<NoEquality; NoComparison>]
-type InsertEntityRequest =
+type InsertEntryRequest =
     { Entity : ResolvedEntityRef
       mutable Fields : RawArguments
     } with
@@ -531,7 +531,7 @@ type CommandRequest =
 [<SerializeAsObject("type")>]
 [<NoEquality; NoComparison>]
 type TransactionOp =
-    | [<CaseKey("insert", Type=CaseSerialization.InnerObject)>] TInsertEntity of InsertEntityRequest
+    | [<CaseKey("insert", Type=CaseSerialization.InnerObject)>] TInsertEntity of InsertEntryRequest
     | [<CaseKey("update", Type=CaseSerialization.InnerObject)>] TUpdateEntity of UpdateEntryRequest
     | [<CaseKey("delete", Type=CaseSerialization.InnerObject)>] TDeleteEntity of DeleteEntryRequest
     | [<CaseKey("recursiveDelete", Type=CaseSerialization.InnerObject)>] TRecursiveDeleteEntity of DeleteEntryRequest
@@ -540,7 +540,8 @@ type TransactionOp =
 type InsertEntryResponse =
     { Id : RowId option
     } with
-        member this.ShouldLog = false
+        member this.ShouldLog = true
+
         member this.Details =
             match this.Id with
             | Some id -> Map.singleton "id" (JToken.op_Implicit id)
@@ -553,8 +554,10 @@ type InsertEntryResponse =
 type UpdateEntryResponse =
     { Id : RowId
     } with
-        member this.ShouldLog = false
-        member this.Details = Map.empty
+        member this.ShouldLog = true
+
+        member this.Details =
+            Map.singleton "id" (JToken.op_Implicit this.Id)
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
@@ -563,8 +566,10 @@ type UpdateEntryResponse =
 type DeleteEntryResponse =
     { Id : RowId
     } with
-        member this.ShouldLog = false
-        member this.Details = Map.empty
+        member this.ShouldLog = true
+
+        member this.Details =
+            Map.singleton "id" (JToken.op_Implicit this.Id)
 
         interface ILoggableResponse with
             member this.ShouldLog = this.ShouldLog
