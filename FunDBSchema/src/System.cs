@@ -713,7 +713,7 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("json", IsImmutable=true, Default="{}")]
         [Column(TypeName="jsonb")]
         [Required]
-        public string Details { get; set; } = "";
+        public string Details { get; set; } = "{}";
 
         [ColumnField("json", IsImmutable=true)]
         [Column(TypeName="jsonb")]
