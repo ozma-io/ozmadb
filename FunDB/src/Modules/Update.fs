@@ -83,5 +83,5 @@ let private checkModuleName (ref : ModuleRef) : Expr<Module -> bool> =
 let markBrokenModules (db : SystemContext) (modules : ResolvedModules) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let checks = findBrokenModules modules |> Seq.map checkModuleName
-        do! genericMarkBroken db.Modules checks <@ fun x -> Module(AllowBroken = true) @> cancellationToken
+        do! genericMarkBroken db.Modules checks cancellationToken
     }

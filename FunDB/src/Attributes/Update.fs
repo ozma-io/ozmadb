@@ -112,4 +112,4 @@ let private checkAttributeName (ref : DefaultAttributeRef) : Expr<FieldAttribute
 
 let markBrokenAttributes (db : SystemContext) (attrs : DefaultAttributes) (cancellationToken : CancellationToken) : Task =
     let checks = findBrokenAttributes attrs |> Seq.map checkAttributeName
-    genericMarkBroken db.FieldsAttributes checks <@ fun x -> FieldAttributes(AllowBroken = true) @> cancellationToken
+    genericMarkBroken db.FieldsAttributes checks cancellationToken

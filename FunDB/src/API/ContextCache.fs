@@ -7,7 +7,6 @@ open System.Reflection
 open System.Data
 open System.IO
 open System.Linq
-open Z.EntityFramework.Plus
 open Microsoft.EntityFrameworkCore
 open System.Threading
 open System.Threading.Tasks
@@ -783,7 +782,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             let! _ =
                                 transaction.System.State.AsQueryable()
                                     .Where(fun x -> x.Name = versionField)
-                                    .UpdateAsync(Expr.toMemberInit <@ fun x -> StateValue(Value = string newVersion) @>, cancellationToken)
+                                    .ExecuteUpdateAsync((fun x -> x.SetProperty((fun x -> x.Value), (fun x -> string newVersion))), cancellationToken)
                             try
                                 let! _ = transaction.Commit(cancellationToken)
                                 ()

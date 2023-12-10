@@ -103,7 +103,7 @@ let markBrokenUserViews (db : SystemContext) (uvs : PrefetchedUserViews) (cancel
     unitTask {
         let broken = findBrokenUserViews uvs
         let genChecks = broken |> Seq.mapMaybe (function ERGenerator ref -> Some ref | _ -> None) |> Seq.map checkUserViewGeneratorSchema
-        do! genericMarkBroken db.UserViewGenerators genChecks <@ fun x -> UserViewGenerator(AllowBroken = true) @> cancellationToken
+        do! genericMarkBroken db.UserViewGenerators genChecks cancellationToken
         let uvChecks = broken |> Seq.mapMaybe (function ERUserView ref -> Some ref | _ -> None) |> Seq.map checkUserViewName
-        do! genericMarkBroken db.UserViews uvChecks <@ fun x -> UserView(AllowBroken = true) @> cancellationToken
+        do! genericMarkBroken db.UserViews uvChecks cancellationToken
     }

@@ -406,7 +406,7 @@ let inline private limitRequestTime (instance : IInstance) ([<InlineIfLambda>] f
 
 let private randomAccessedAtLaxSpan () =
     // A minute +/- ~5 seconds.
-    let minutes = 1.0 + (2.0 * Random.Shared.NextDouble() - 0.5) * 0.09
+    let minutes = 1.0 + (2.0 * Random.Shared.NextDouble() - 1.0) * 0.09
     Duration.FromMilliseconds(int64 (minutes * 60.0 * 1000.0))
 
 let private getLanguage (ctx : HttpContext) =

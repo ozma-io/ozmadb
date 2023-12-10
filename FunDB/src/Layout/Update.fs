@@ -190,4 +190,4 @@ let checkComputedFieldName (ref : ResolvedFieldRef) : Expr<ComputedField -> bool
 
 let markBrokenLayout (db : SystemContext) (layout : Layout) (cancellationToken : CancellationToken) : Task =
     let checks = findBrokenComputedFields layout |> Seq.map checkComputedFieldName
-    genericMarkBroken db.ComputedFields checks <@ fun x -> ComputedField(AllowBroken = true) @> cancellationToken
+    genericMarkBroken db.ComputedFields checks cancellationToken

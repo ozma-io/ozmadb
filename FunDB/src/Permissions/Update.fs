@@ -172,7 +172,7 @@ let markBrokenPermissions (db : SystemContext) (roles : Permissions) (cancellati
     unitTask {
         let broken = findBrokenPermissions roles
         let roleChecks = broken |> Seq.mapMaybe (function ERRole ref -> Some ref | _ -> None) |> Seq.map checkRoleName
-        do! genericMarkBroken db.Roles roleChecks <@ fun x -> Role(AllowBroken = true) @> cancellationToken
+        do! genericMarkBroken db.Roles roleChecks cancellationToken
         let allowedEntityChecks = broken |> Seq.mapMaybe (function EREntity ref -> Some ref | _ -> None) |> Seq.map checkAllowedEntityName
-        do! genericMarkBroken db.RoleEntities allowedEntityChecks <@ fun x -> RoleEntity(AllowBroken = true) @> cancellationToken
+        do! genericMarkBroken db.RoleEntities allowedEntityChecks cancellationToken
     }

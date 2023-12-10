@@ -1,7 +1,6 @@
 open System
 open System.IO
 open System.Threading
-open System.Linq
 open System.Collections.Generic
 open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
@@ -59,11 +58,12 @@ let private deenlistConnectionString (str : string) =
     builder.Enlist <- false
     string builder
 
-type private DatabaseInstances (loggerFactory : ILoggerFactory, homeRegion: string option, connectionString : string, readOnlyConnectionString : string) =
+type private DatabaseInstances (loggerFactory : ILoggerFactory, lifetime : IHostApplicationLifetime, homeRegion: string option, connectionString : string, readOnlyConnectionString : string) =
     let connectionString = deenlistConnectionString connectionString
     let readOnlyConnectionString = deenlistConnectionString readOnlyConnectionString
+    let logger = loggerFactory.CreateLogger<DatabaseInstances>()
 
-    new (loggerFactory : ILoggerFactory, homeRegion: string option, connectionString : string) = DatabaseInstances (loggerFactory, homeRegion, connectionString, connectionString)
+    new (loggerFactory : ILoggerFactory, lifetime : IHostApplicationLifetime, homeRegion: string option, connectionString : string) = DatabaseInstances (loggerFactory, lifetime, homeRegion, connectionString, connectionString)
 
     interface IInstancesSource with
         member this.Region = homeRegion
@@ -107,26 +107,26 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, homeRegion: stri
 
                                 member this.AccessedAt = Option.ofNullable instance.AccessedAt
 
-                                member this.UpdateAccessedAtAndDispose newTime =
-                                    ignore <|
+                                member this.UpdateAccessedAtAndDispose (newTime : Instant) =
+                                    let updateJob () =
                                         unitTask {
-                                            use instances =
-                                                let builder = DbContextOptionsBuilder<InstancesContext> ()
-                                                setupDbContextLogging loggerFactory builder
-                                                ignore <| builder.UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
-                                                new InstancesContext(builder.Options)
                                             try
+                                                use instances =
+                                                    let builder = DbContextOptionsBuilder<InstancesContext> ()
+                                                    setupDbContextLogging loggerFactory builder
+                                                    ignore <| builder.UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
+                                                    new InstancesContext(builder.Options)
                                                 let! _ =
-                                                    (instances.Instances :> IQueryable<Instance>)
-                                                        .Where(fun inst -> inst.Id = instance.Id && (not inst.AccessedAt.HasValue || inst.AccessedAt.Value < newTime))
-                                                        .UpdateFromQueryAsync(fun (inst : Instance) ->
-                                                            inst.AccessedAt <- newTime
-                                                            inst
-                                                        )
+                                                    instances.Instances
+                                                        // This doesn't work: https://github.com/dotnet/efcore/issues/14013
+                                                        // .Where(fun inst -> inst.Id = instance.Id && (not inst.AccessedAt.HasValue || inst.AccessedAt.Value < newTime))
+                                                        .FromSql($"""SELECT * FROM "instances" WHERE "id" = {instance.Id} AND ("accessed_at" IS NULL OR "accessed_at" < {newTime})""")
+                                                        .ExecuteUpdateAsync((fun inst -> inst.SetProperty((fun inst -> inst.AccessedAt), (fun inst -> Nullable(newTime)))), lifetime.ApplicationStopping)
                                                 ()
-                                            finally
-                                                ignore <| instances.DisposeAsync ()
+                                            with
+                                            | e -> logger.LogError(e, "Failed to update AccessedAt")
                                         }
+                                    ignore <| Threading.Tasks.Task.Run(updateJob)
 
                                   member this.Dispose () = ()
                             }
@@ -336,7 +336,8 @@ let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
                 |> Option.ofObj
                 |> Option.defaultValue instancesConnectionString
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
-            DatabaseInstances(logFactory, homeRegion, instancesConnectionString, instancesReadOnlyConnectionString) :> IInstancesSource
+            let lifetime = sp.GetRequiredService<IHostApplicationLifetime>()
+            DatabaseInstances(logFactory, lifetime, homeRegion, instancesConnectionString, instancesReadOnlyConnectionString) :> IInstancesSource
         | "static" ->
             let instance = Instance(
                 Owner = "owner@example.com"

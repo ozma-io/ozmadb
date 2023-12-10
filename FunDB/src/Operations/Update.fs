@@ -10,7 +10,6 @@ open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
 open FSharpPlus
 open Microsoft.FSharp.Quotations
-open Z.EntityFramework.Plus
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
@@ -196,12 +195,20 @@ let private makeSchema (schema : Schema) = schema.Entities |> Seq.ofObj |> Seq.m
 
 let makeAllEntitiesMap (allSchemas : Schema seq) : Map<ResolvedEntityRef, Entity> = allSchemas |> Seq.collect makeSchema |> Map.ofSeq
 
-let genericMarkBroken (queryable : IQueryable<'a>) (checks : Expr<'a -> bool> seq) (setBroken : Expr<'a -> 'a>) (cancellationToken : CancellationToken) : Task =
+let genericMarkBroken (queryable : IQueryable<'a>) (checks : Expr<'a -> bool> seq) (cancellationToken : CancellationToken) : Task =
     unitTask {
         let errors = Seq.cache checks
         if not <| Seq.isEmpty errors then
             let check = errors |> Seq.fold1 (fun a b -> <@ fun field -> (%a) field || (%b) field @>)
-            let! _ = queryable.Where(Expr.toExpressionFunc check).UpdateAsync(Expr.toMemberInit setBroken, cancellationToken)
+            let entityVar = Var("entity", typeof<'a>)
+            let allowBroken = typeof<'a>.GetProperty("AllowBroken")
+            let getAllowBroken =
+                Expr.NewDelegate(typeof<Func<'a, bool>>, [entityVar], Expr.PropertyGet(Expr.Var(entityVar), allowBroken))
+                |> Expr.Cast<Func<'a, bool>>
+            let! _ =
+                queryable
+                    .Where(Expr.toExpressionFunc check)
+                    .ExecuteUpdateAsync((fun row -> row.SetProperty(%getAllowBroken, fun row -> true)), cancellationToken)
             ()
     }
 

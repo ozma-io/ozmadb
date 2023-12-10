@@ -101,8 +101,7 @@ type JobDataWriter =
 
 let getJobDataBytes (rmsManager : RecyclableMemoryStreamManager) (writer : JobDataWriter) (cancellationToken : CancellationToken) : Task<ReadOnlyMemory<byte>> =
     task {
-        // use memoryStream = rmsManager.GetStream("getJobDataBytes")
-        use memoryStream = new MemoryStream()
+        use memoryStream = rmsManager.GetStream("getJobDataBytes")
         match writer with
         | JOAsync writer ->
             do! writer memoryStream cancellationToken
@@ -118,8 +117,7 @@ let streamJobData (rmsManager : RecyclableMemoryStreamManager) (writer : JobData
             setSize None
             do! writer stream cancellationToken
         | JOSync writer ->
-            // use memoryStream = rmsManager.GetStream("streamJobData")
-            use memoryStream = new MemoryStream()
+            use memoryStream = rmsManager.GetStream("streamJobData")
             writer memoryStream cancellationToken
             setSize (Some memoryStream.Position)
             ignore <| memoryStream.Seek(0L, SeekOrigin.Begin)

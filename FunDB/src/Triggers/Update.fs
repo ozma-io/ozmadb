@@ -117,4 +117,4 @@ let private checkTriggerName (ref : TriggerRef) : Expr<Trigger -> bool> =
 
 let markBrokenTriggers (db : SystemContext) (triggers : PreparedTriggers) (cancellationToken : CancellationToken) : Task =
     let checks = findBrokenTriggers triggers |> Seq.map checkTriggerName
-    genericMarkBroken db.Triggers checks <@ fun x -> Trigger(AllowBroken = true) @> cancellationToken
+    genericMarkBroken db.Triggers checks cancellationToken
