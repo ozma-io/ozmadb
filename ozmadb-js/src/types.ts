@@ -495,6 +495,7 @@ export interface IQueryChunk {
   limit?: number;
   offset?: number;
   where?: IChunkWhere;
+  search?: string;
 }
 
 export interface IPermissionsInfo {
