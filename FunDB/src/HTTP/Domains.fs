@@ -51,6 +51,7 @@ let domainsApi (serviceProvider : IServiceProvider) : Endpoint list =
             { Offset = intRequestArg "__offset" ctx
               Limit = intRequestArg "__limit" ctx
               Where = None
+              Search = None
             } : SourceQueryChunk
         let flags =
             { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
@@ -94,10 +95,10 @@ let domainsApi (serviceProvider : IServiceProvider) : Endpoint list =
         task {
             let rowId = intRequestArg "id" ctx
             let chunk =
-                { Offset = intRequestArg "__offset" ctx
-                  Limit = intRequestArg "__limit" ctx
-                  Where = None
-                } : SourceQueryChunk
+                { emptySourceQueryChunk with
+                    Offset = intRequestArg "__offset" ctx
+                    Limit = intRequestArg "__limit" ctx
+                }
             let flags =
                 { ForceRecompile = flagIfDebug <| boolRequestArg "__force_recompile" ctx
                 } : DomainFlags

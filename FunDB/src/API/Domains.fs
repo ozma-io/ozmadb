@@ -61,7 +61,7 @@ type DomainsAPI (api : IFunDBAPI) =
                         | (Some (RRKAlt (constrName, args)), Some rowSpecific) -> failwith "Not implemented"
                         | _ -> (domain.Generic, argValues)
                     let role = getReadRole rctx.User.Effective.Type
-                    let chunk = Option.defaultValue emptyQueryChunk req.Chunk
+                    let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
                     let comment = domainComments req.Field rctx.User.Effective.Type req.Id rctx.GlobalArguments chunk
                     let! ret = getDomainValues ctx.Transaction.Connection.Query ctx.Layout expr (Some comment) role argValues chunk ctx.CancellationToken
                     return Ok
@@ -97,7 +97,7 @@ type DomainsAPI (api : IFunDBAPI) =
                             | (Some (RRKPrimary id), Some rowSpecific) -> (rowSpecific, Map.add (PLocal funId) (FInt id) argValues)
                             | _ -> (domain.Generic, argValues)
                         let role = getReadRole rctx.User.Effective.Type
-                        let chunk = Option.defaultValue emptyQueryChunk req.Chunk
+                        let chunk = Option.defaultValue emptySourceQueryChunk req.Chunk
                         let explainFlags = Option.defaultValue SQL.defaultExplainOptions req.ExplainFlags
                         let! ret = explainDomainValues ctx.Transaction.Connection.Query ctx.Layout expr role (Some argValues) chunk explainFlags ctx.CancellationToken
                         return Ok ret

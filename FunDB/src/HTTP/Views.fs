@@ -76,16 +76,16 @@ let viewsApi (serviceProvider : IServiceProvider) : Endpoint list =
                       NoPuns = boolRequestArg "__no_puns" ctx
                     } : UserViewFlags
                 let chunk =
-                    { Offset = intRequestArg "__offset" ctx
-                      Limit = intRequestArg "__limit" ctx
-                      Where = None
+                    { emptySourceQueryChunk with
+                        Offset = intRequestArg "__offset" ctx
+                        Limit = intRequestArg "__limit" ctx
                     } : SourceQueryChunk
                 let req =
                     { Source = source
                       Args = rawArgs
                       Chunk = Some chunk
                       Flags = Some flags
-                    }
+                    } : UserViewRequest
                 let job api = returnView api req
                 return! utils.PerformReadJob job next ctx
             }
@@ -171,10 +171,10 @@ let viewsApi (serviceProvider : IServiceProvider) : Endpoint list =
                   NoPuns = boolRequestArg "__no_puns" ctx
                 } : UserViewFlags
             let chunk =
-                { Offset = intRequestArg "__offset" ctx
-                  Limit = intRequestArg "__limit" ctx
-                  Where = None
-                } : SourceQueryChunk
+                { emptySourceQueryChunk with
+                    Offset = intRequestArg "__offset" ctx
+                    Limit = intRequestArg "__limit" ctx
+                }
             let explainOpts =
                 { Analyze = tryBoolRequestArg "__analyze" ctx
                   Costs = tryBoolRequestArg "__costs" ctx

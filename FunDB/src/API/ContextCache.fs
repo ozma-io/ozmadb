@@ -447,7 +447,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         // `forceAllowBroken` is set to `true` to overcome potential race condition between this call and `forceAllowBroken` update during migration.
                         return (layout, mergedAttrs, triggers, mergedTriggers, sourceUvs, userViews)
                     with
-                    | ex ->
+                    | ex -> 
                         do! transaction.Rollback ()
                         return reraise' ex
                 }

@@ -133,11 +133,27 @@ module OrderedMap =
 
     let add (key : 'k) (value : 'v) (map : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
         if Map.containsKey key map.Map then
-            map
+            { Order = map.Order
+              Map = Map.add key value map.Map
+            }
         else
             { Order = Array.add key map.Order
               Map = Map.add key value map.Map
             }
+
+    let addWith (resolve : 'v -> 'v -> 'v) (key : 'k) (value : 'v) (map : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
+        match Map.tryFind key map.Map with
+        | None ->
+            { Order = Array.add key map.Order
+              Map = Map.add key value map.Map
+            }
+        | Some oldValue ->
+            { Order = map.Order
+              Map = Map.add key (resolve oldValue value) map.Map
+            }
+
+    let addUnique (k : 'k) (v : 'v) (m : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
+        addWith (fun v1 v2 -> failwithf "Key '%O' already exists" k) k v m
 
     let remove (key : 'k) (map : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
         match Array.tryFindIndex (fun ckey -> ckey = key) map.Order with
@@ -189,6 +205,9 @@ module OrderedMap =
 
     let union (map1 : OrderedMap<'k, 'v>) (map2 : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
         map1 |> toSeq |> Seq.fold (fun cmap (k, v) -> add k v cmap) map2
+
+    let unionUnique (map1 : OrderedMap<'k, 'v>) (map2 : OrderedMap<'k, 'v>) : OrderedMap<'k, 'v> =
+        map1 |> toSeq |> Seq.fold (fun cmap (k, v) -> addUnique k v cmap) map2
 
     let containsKey (key : 'k) (map : OrderedMap<'k, 'v>) : bool =
         Map.containsKey key map.Map

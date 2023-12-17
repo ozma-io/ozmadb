@@ -220,6 +220,33 @@ type private DryRunMainEntity =
       Meta : MainEntityMeta
     }
 
+let private addColumnTypes (info : UserViewInfo) (compiled : CompiledViewExpr) : CompiledViewExpr =
+    let getColumn name = info.Columns |> Array.find (fun c -> c.Name = name)
+    let addType (column : CompiledColumnInfo) =
+        let info =
+            match column.Type with
+            | CTColumn name ->
+                let newColumn = getColumn name
+                { column.Info with ValueType = Some newColumn.ValueType }
+            | CTColumnMeta (name, metaType) ->
+                let newColumn = getColumn name
+                match metaType with
+                | CCCellAttribute attrName ->
+                    let attr = newColumn.CellAttributeTypes.[attrName]
+                    { column.Info with ValueType = Some newColumn.ValueType }
+                | CCPun ->
+                    { column.Info with ValueType = newColumn.PunType }
+            | CTMeta (CMRowAttribute attrName) ->
+                let attr = info.RowAttributeTypes.[attrName]
+                { column.Info with ValueType = Some attr.Type }
+            | CTMeta (CMArgAttribute (argName, attrName)) ->
+                let arg = info.Arguments.[argName]
+                let attr = arg.AttributeTypes.[attrName]
+                { column.Info with ValueType = Some attr.Type }
+            | _ -> column.Info
+        { column with Info = info }
+    { compiled with Columns = Array.map addType compiled.Columns }
+
 type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : QueryConnection, forceAllowBroken : bool, onlyWithAllowBroken : bool option, cancellationToken : CancellationToken) =
     let mutable serializedFields : Map<ResolvedFieldRef, SerializedColumnField> = Map.empty
 
@@ -408,12 +435,12 @@ type private DryRunner (layout : Layout, triggers : MergedTriggers, conn : Query
 
             try
                 return! runViewExpr conn layout limited comment arguments cancellationToken <| fun info res ->
+                    let mergedInfo = mergeViewInfo uv.Resolved uv.Compiled info res
                     let nonpureCompiled =
                         { uv.Compiled with
                               SingleRowQuery = { uv.Compiled.SingleRowQuery with ConstColumns = [||] }
                         }
-                    let nonpureUv = { uv with Compiled = nonpureCompiled }
-                    let mergedInfo = mergeViewInfo uv.Resolved uv.Compiled info res
+                    let nonpureUv = { uv with Compiled = addColumnTypes mergedInfo nonpureCompiled }
                     Task.FromResult
                         { UserView = nonpureUv
                           Info = mergedInfo

@@ -2,6 +2,7 @@ module FunWithFlags.FunDB.FunQL.Chunk
 
 open Newtonsoft.Json.Linq
 open System.Runtime.Serialization
+open FSharpPlus
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDB.Exception
@@ -13,6 +14,8 @@ open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Arguments
 open FunWithFlags.FunDB.FunQL.Resolve
 open FunWithFlags.FunDB.FunQL.Compile
+open FunWithFlags.FunDB.FunQL.Optimize
+module SQL = FunWithFlags.FunDB.SQL.Utils
 module SQL = FunWithFlags.FunDB.SQL.AST
 module SQL = FunWithFlags.FunDB.SQL.Chunk
 
@@ -41,21 +44,34 @@ type SourceQueryChunk =
       Limit : int option
       [<DataMember(EmitDefaultValue = false)>]
       Where : SourceChunkWhere option
+      [<DataMember(EmitDefaultValue = false)>]
+      Search : string option
     }
 
 let emptySourceQueryChunk : SourceQueryChunk =
     { Offset = None
       Limit = None
       Where = None
+      Search = None
     }
 
-type ColumnNamesMap = Map<FieldName, SQL.ColumnName>
+type ChunkColumn =
+    { SQLName : SQL.ColumnName
+      ValueType : SQL.SimpleValueType
+    }
+
+type ChunkColumnsMap = Map<FieldName, ChunkColumn>
 
 type ResolvedChunkWhere =
     { Arguments : ResolvedArgumentsMap
       ArgumentValues : Map<ArgumentName, FieldValue>
-      ColumnNames : ColumnNamesMap
       Expression : ResolvedFieldExpr
+    }
+
+let unionResolvedChunkWhere (a : ResolvedChunkWhere) (b : ResolvedChunkWhere) =
+    { Arguments = OrderedMap.unionUnique a.Arguments b.Arguments
+      ArgumentValues = Map.unionUnique a.ArgumentValues b.ArgumentValues
+      Expression = FEAnd (a.Expression, b.Expression)
     }
 
 type ResolvedQueryChunk =
@@ -63,12 +79,6 @@ type ResolvedQueryChunk =
       Limit : int option
       Where : ResolvedChunkWhere option
     }
-
-let emptyQueryChunk =
-    { Offset = None
-      Limit = None
-      Where = None
-    } : SourceQueryChunk
 
 let private limitOffsetArgument = requiredArgument <| FTScalar SFTInt
 
@@ -96,7 +106,7 @@ let private compileWhereExpr (layout : Layout) (initialArguments : QueryArgument
         (info.Arguments, expr)
     modifyArgumentsInNamespace convertArgument compileExpr initialArguments
 
-let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (chunk : SourceChunkWhere) : ResolvedChunkWhere =
+let private genericResolveWhere (layout : Layout) (columns : ChunkColumnsMap) (chunk : SourceChunkWhere) : ResolvedChunkWhere =
     let parsedExpr =
         match parse tokenizeFunQL fieldExpr chunk.Expression with
         | Ok r -> r
@@ -108,14 +118,14 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
         | Error msg -> raisef ChunkException "Error parsing argument type: %s" msg
     let parsedArguments = Map.map (fun name -> parseChunkArgument) chunk.Arguments |> OrderedMap.ofMap
 
-    let makeCustomMapping (name : FieldName) (colName : SQL.ColumnName) =
+    let makeCustomMapping (name : FieldName) (col : ChunkColumn) =
         let info =
             { customFromField CFUnbound with
-                ForceSQLName = Some colName
+                ForceSQLName = Some col.SQLName
             } : CustomFromField
         let ref = { Entity = None; Name = name } : FieldRef
         (ref, info)
-    let customMapping = Map.mapWithKeys makeCustomMapping namesMap : CustomFromMapping
+    let customMapping = Map.mapWithKeys makeCustomMapping columns : CustomFromMapping
 
     let callbacks = resolveCallbacks layout
     let (info, resolvedExpr) =
@@ -138,23 +148,121 @@ let private genericResolveWhere (layout : Layout) (namesMap : ColumnNamesMap) (c
 
     { Arguments = info.LocalArguments
       ArgumentValues = argValues
-      ColumnNames = namesMap
       Expression = resolvedExpr
     }
 
-let genericResolveChunk (layout : Layout) (namesMap : ColumnNamesMap) (chunk : SourceQueryChunk) : ResolvedQueryChunk =
+type private SearchWord =
+    { Index : int
+      String : string
+      Integer : int option
+    }
+
+let private convertWord (index : int) (word : string) =
+    { Index = index
+      String = word
+      Integer = Parsing.tryIntInvariant word
+    }
+
+let private searchToWhere (columns : ChunkColumnsMap) (search : string) : ResolvedChunkWhere =
+    let mutable arguments : ResolvedArgumentsMap = OrderedMap.empty
+    let mutable argumentValues : Map<ArgumentName, FieldValue> = Map.empty
+
+    let getLikeStringArgument (word : SearchWord) : ResolvedFieldExpr =
+        let argName = FunQLName <| sprintf "__search_%d_like" word.Index
+        if not <| Map.containsKey argName argumentValues then
+            let argValue = sprintf "%%%s%%" (SQL.escapeSqlLike word.String)
+            let argValue = FString argValue
+            arguments <- OrderedMap.add (PLocal argName) (argument (FTScalar SFTString) false) arguments
+            argumentValues <- Map.add argName argValue argumentValues
+        PLocal argName |> VRArgument |> resolvedRefFieldExpr
+
+    let getIntegerArgument (word : SearchWord) : ResolvedFieldExpr option =
+        match word.Integer with
+        | None -> None
+        | Some int ->
+            let argName = FunQLName <| sprintf "__search_%d_int" word.Index
+            if not <| Map.containsKey argName argumentValues then
+                let argValue = FInt int
+                arguments <- OrderedMap.add (PLocal argName) (argument (FTScalar SFTInt) false) arguments
+                argumentValues <- Map.add argName argValue argumentValues
+            PLocal argName |> VRArgument |> resolvedRefFieldExpr |> Some
+
+    let getColumnSearchOp (KeyValue(name : FieldName, info : ChunkColumn)) =
+        let columnRef =
+            lazy (
+                ({ Entity = None; Name = name } : FieldRef)
+                |> VRColumn
+                |> resolvedRefFieldExpr
+            )
+        match info.ValueType with
+        | SQL.VTScalar SQL.STString ->
+            Some (fun (word : SearchWord) ->
+                let arg = getLikeStringArgument word
+                Some <| FEBinaryOp (columnRef.Value, BOILike, arg)
+            )
+        | SQL.VTScalar SQL.STBigInt
+        | SQL.VTScalar SQL.STInt ->
+            Some (fun (word : SearchWord) ->
+                match getIntegerArgument word with
+                | None -> None
+                | Some arg ->
+                    Some <| FEBinaryOp (columnRef.Value, BOEq, arg)
+            )
+        | _ -> None
+
+    let words =
+        search.Split(' ')
+        |> Seq.filter (fun s -> s <> "")
+        |> Seq.mapi convertWord
+        |> Seq.cache
+    let searchOps = columns |> Seq.mapMaybe getColumnSearchOp |> Seq.cache
+
+    let appearsInColumn (word : SearchWord) =
+        searchOps
+            |> Seq.mapMaybe (fun op -> Option.map optimizeFieldExpr (op word))
+            |> orFieldExprs
+
+    let optimized =
+        words
+        |> Seq.map appearsInColumn
+        |> andFieldExprs
+    { Arguments = arguments
+      ArgumentValues = argumentValues
+      Expression = optimized.ToFieldExpr()
+    }
+
+let genericResolveChunk (layout : Layout) (columns : ChunkColumnsMap) (chunk : SourceQueryChunk) : ResolvedQueryChunk =
+    let searchExpr =
+        Option.map (searchToWhere columns) chunk.Search
+    let where = Option.map (genericResolveWhere layout columns) chunk.Where
+    let searchExpr =
+        Option.unionWith unionResolvedChunkWhere searchExpr where
     { Offset = chunk.Offset
       Limit = chunk.Limit
-      Where = Option.map (genericResolveWhere layout namesMap) chunk.Where
+      Where = searchExpr
     }
 
 let resolveViewExprChunk (layout : Layout) (viewExpr : CompiledViewExpr) (chunk : SourceQueryChunk) : ResolvedQueryChunk =
     let getOneColumn (info : CompiledColumnInfo) =
-        match info.Type with
-        | CTColumn name -> Some (name, info.Name)
-        | _ -> None
-    let columnsMap = viewExpr.Columns |> Seq.mapMaybe getOneColumn |> Map.ofSeq
-    genericResolveChunk layout columnsMap chunk
+        match info.Info.ValueType with
+        | None -> None
+        | Some valueType ->
+            let maybeColName =
+                match info.Type with
+                | CTColumn name -> Some name
+                | CTMeta CMMainId -> Some <| FunQLName "__main_id"
+                | CTColumnMeta (FunQLName col, CCPun) -> Some (FunQLName <| sprintf "__pun__%s" col)
+                | _ -> None
+            match maybeColName with
+            | None -> None
+            | Some colName ->
+                let chunkCol =
+                    { SQLName = info.Name
+                      ValueType = valueType
+                    }
+                Some (colName, chunkCol)
+    let columns = viewExpr.Columns |> Seq.mapMaybe getOneColumn |> Map.ofSeq
+    genericResolveChunk layout columns chunk
 
 let queryExprChunk (layout : Layout) (chunk : ResolvedQueryChunk) (query : Query<SQL.SelectExpr>) : LocalArgumentsMap * Query<SQL.SelectExpr> =
     let argValues = Map.empty : LocalArgumentsMap

@@ -167,7 +167,11 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                     filter
             | None -> raisef PermissionsApplyException "Access denied to field %O" ref
 
-        usedEntity.Fields |> Map.toSeq |> Seq.map addFieldRestriction |> Seq.fold andFieldExpr allowedEntity.Select
+        usedEntity.Fields
+            |> Map.toSeq
+            |> Seq.map addFieldRestriction
+            |> Seq.append (Seq.singleton allowedEntity.Select)
+            |> andFieldExprs
 
     let addCheckFilter (usedEntity : UsedEntity) (entityRef : ResolvedEntityRef) (allowedEntity : FlatAllowedDerivedEntity) =
         let addFieldRestriction (name : FieldName, usedField : UsedField) : ResolvedOptimizedFieldExpr =
@@ -180,7 +184,11 @@ type private EntityAccessFilterBuilder (layout : Layout, flatAllowedEntity : Fla
                     OFETrue
             | None -> raisef PermissionsApplyException "Access denied to field %O" ref
 
-        usedEntity.Fields |> Map.toSeq |> Seq.map addFieldRestriction |> Seq.fold andFieldExpr allowedEntity.Check
+        usedEntity.Fields
+            |> Map.toSeq
+            |> Seq.map addFieldRestriction
+            |> Seq.append (Seq.singleton allowedEntity.Check)
+            |> andFieldExprs
 
     let addStandaloneSelectFilter (entityRef : ResolvedEntityRef) (allowedEntity : FlatAllowedDerivedEntity) =
         let usedEntity = Map.findWithDefault entityRef emptyUsedEntity flatUsedEntity.Children
@@ -560,7 +568,10 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
             match Map.tryFind fieldRef allowedRoleEntity.Fields with
             | None -> raisef PermissionsApplyException "Access denied to field %O" fieldRef
             | Some allowedField -> allowedField.Check
-        fields |> Seq.map getFieldCheck |> Seq.fold andFieldExpr check
+        fields
+            |> Seq.map getFieldCheck
+            |> Seq.append (Seq.singleton check)
+            |> andFieldExprs
 
     let tryGetRoleCheck (roleRef, allowedRoleEntity : FlatAllowedRoleEntity) =
         try
@@ -576,5 +587,5 @@ let getSingleCheckExpression (layout : Layout) (role : ResolvedRole) (entityRef 
     allowedEntity.Roles
         |> Map.toSeq
         |> Seq.map tryGetRoleCheck
-        |> Seq.fold orFieldExpr OFEFalse
+        |> orFieldExprs
         |> buildFinalRestriction "check" entityRef

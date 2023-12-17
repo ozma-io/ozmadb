@@ -1736,6 +1736,13 @@ type Argument<'te, 'e, 'f> when 'te :> IFunQLName and 'e :> IFunQLName and 'f :>
 
 type ResolvedArgument = Argument<ResolvedEntityRef, EntityRef, LinkedBoundFieldRef>
 
+let argument (typ : FieldType<'te>) (optional : bool) =
+    { ArgType = typ
+      Optional = optional
+      DefaultValue = None
+      Attributes = Map.empty
+    }
+
 let funId = FunQLName "id"
 let funSubEntity = FunQLName "sub_entity"
 let funSchema = FunQLName "public"

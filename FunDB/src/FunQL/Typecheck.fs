@@ -99,7 +99,7 @@ let resolvedRefType (layout : ILayoutBits) (linked : LinkedBoundFieldRef) : Reso
         let lastEntity = Array.last fieldInfo.Path
         let entity = layout.FindEntity lastEntity |> Option.get
         let field = entity.FindField lastField.Name |> Option.get
-        resolvedFieldType field.Field
+        Some <| resolvedFieldType field.Field
 
 type private Typechecker (layout : ILayoutBits) =
     let rec typecheckBinaryLogical (a : ResolvedFieldExpr) (b : ResolvedFieldExpr) : ResolvedFieldType =

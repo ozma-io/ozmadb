@@ -482,7 +482,8 @@ let private customToFieldMapping (layout : ILayoutBits) (fromEntityId : FromEnti
                       Field = resolvedFieldToBits field.Field
                       ForceRename = field.ForceRename
                     }
-                (resolvedFieldType field.Field, FMBound (BVColumn bound))
+                let fieldType = resolvedFieldType field.Field
+                (Some fieldType, FMBound (BVColumn bound))
         let info =
             { Entity = fieldRef.Entity
               EntityId = fromEntityId
@@ -1324,10 +1325,12 @@ let private subExprSelectFlags =
 
 type ExprResolutionFlags =
     { Privileged : bool
+      AllowInternalNames : bool
     }
 
 let emptyExprResolutionFlags =
     { Privileged = false
+      AllowInternalNames = false
     }
 
 type private FromExprInfo =
@@ -1731,7 +1734,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                         // We delay acquiring computed field types until they are actually used.
                         | Some (BVColumn ({ Field = RComputedField _ } as col)) ->
                             match col.Entity.FindField col.Ref.Name with
-                            | Some { Field = RComputedField comp } -> comp.Type
+                            | Some { Field = RComputedField comp } -> Some comp.Type
                             | _ -> failwith "Impossible"
                         | _ -> None
 
@@ -1998,7 +2001,7 @@ type private QueryResolver (callbacks : ResolveCallbacks, findArgument : FindArg
                     // We erase field information for computed fields from results, as they would be expanded at this point.
                     | RComputedField comp ->
                         match field.Entity.FindField field.Ref.Name with
-                        | Some { Field = RComputedField comp } -> (None, comp.Type)
+                        | Some { Field = RComputedField comp } -> (None, Some comp.Type)
                         | _ -> failwith "Impossible"
                     | _ ->
                         // Field is no longer immediate, and rename is not needed because a name is assigned here.
@@ -3161,8 +3164,12 @@ let private resolveArgument (callbacks : ResolveCallbacks) (arg : ParsedArgument
       Attributes = Map.empty
     }
 
-let private resolveArgumentsMap (callbacks : ResolveCallbacks) (rawArguments : ParsedArgumentsMap) : ResolvedArgumentsMap * FindArgument =
-    let halfLocalArguments = rawArguments |> OrderedMap.map (fun name arg -> resolveArgument callbacks arg)
+let private resolveArgumentsMap (callbacks : ResolveCallbacks) (rawArguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) : ResolvedArgumentsMap * FindArgument =
+    let resolveOne name arg =
+        if not <| flags.AllowInternalNames then
+            checkName name
+        resolveArgument callbacks arg
+    let halfLocalArguments = rawArguments |> OrderedMap.map resolveOne
 
     let getHalfArgument = function
         | PLocal name -> OrderedMap.tryFind name halfLocalArguments
@@ -3184,7 +3191,7 @@ let private resolveArgumentsMap (callbacks : ResolveCallbacks) (rawArguments : P
     (localArguments, getArgument)
 
 let private getArgumentsQualifier (callbacks : ResolveCallbacks) (arguments : ParsedArgumentsMap) (flags : ExprResolutionFlags) =
-    let (localArguments, getArgument) = resolveArgumentsMap callbacks arguments
+    let (localArguments, getArgument) = resolveArgumentsMap callbacks arguments flags
     let qualifier = QueryResolver (callbacks, getArgument, flags)
     (localArguments, qualifier)
 
@@ -3279,7 +3286,7 @@ let makeColumnReference (layout : Layout) (meta : SimpleColumnMeta) (fieldRef : 
     let fieldInfo =
         { Bound = Some (BMColumn boundInfo)
           Column = Some columnInfo
-          Type = resolvedFieldType field.Field
+          Type = Some <| resolvedFieldType field.Field
           Path = meta.PathEntities
         } : FieldRefMeta
     let column =

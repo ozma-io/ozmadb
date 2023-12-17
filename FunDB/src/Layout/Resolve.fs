@@ -748,11 +748,13 @@ type private Phase2Resolver (
                 raisef ResolveLayoutException "Arguments are not allowed in materialized computed fields"
             if usedReferences.HasRestrictedEntities then
                 raisef ResolveLayoutException "Restricted (plain) join arrows are not allowed in materialized computed fields"
-        let exprType =
+        let maybeExprType =
             try
                 typecheckFieldExpr wrappedLayout expr
             with
             | :? ViewTypecheckException as e -> raisefWithInner ResolveLayoutException e "Failed to typecheck computed field"
+        let exprType =
+            Option.getOrFailWith (fun () -> raisef ResolveLayoutException "Computed field type cannot be inferred") maybeExprType
         let virtualInfo =
             match comp.Virtual with
             | None -> None
@@ -1128,7 +1130,7 @@ type private Phase3Resolver (layout : Layout, internallyDeletedEntities : Set<Re
                   raisef ResolveLayoutException "Virtual computed fields cannot be partially materialized: %O" fieldRef
                 flags <- unionResolvedExprFlags flags currComp.Flags
                 usedDatabase <- unionUsedDatabases currComp.UsedDatabase usedDatabase
-                comp.Type
+                Some comp.Type
             let caseTypes = computedFieldCases layout ObjectMap.empty fieldRef comp |> Seq.map getCaseType
 
             match unionTypes caseTypes with

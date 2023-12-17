@@ -16,7 +16,7 @@ let escapeSqlDoubleQuotes (str : string) : string = sprintf "\"%s\"" (str.Replac
 let sqlIdentifierLength = 63
 
 // PostgreSQL C-style escape string constants but without E
-let private genericEscapeSqlSingleQuotes (strBuilder : StringBuilder) (str : string) : string =
+let private buildEscapeSqlSingleQuotes (strBuilder : StringBuilder) (str : string) =
     ignore <| strBuilder.Append('\'')
     for c in str do
         match c with
@@ -39,11 +39,11 @@ let private genericEscapeSqlSingleQuotes (strBuilder : StringBuilder) (str : str
         | c ->
             ignore <| strBuilder.Append(c)
     ignore <| strBuilder.Append('\'')
-    strBuilder.ToString()
 
 let escapeSqlSingleQuotes (str : string) =
     let strBuilder = StringBuilder (2 * str.Length)
-    genericEscapeSqlSingleQuotes strBuilder str
+    buildEscapeSqlSingleQuotes strBuilder str
+    strBuilder.ToString()
 
 let renderSqlName str =
     if String.length str > sqlIdentifierLength then
@@ -53,7 +53,27 @@ let renderSqlName str =
 let renderSqlString (str : string) =
     let strBuilder = StringBuilder (2 * str.Length)
     ignore <| strBuilder.Append('E')
-    genericEscapeSqlSingleQuotes strBuilder str
+    buildEscapeSqlSingleQuotes strBuilder str
+    strBuilder.ToString()
+
+
+// PostgreSQL LIKE operator escape
+let private buildEscapeSqlLike (strBuilder : StringBuilder) (str : string) =
+    for c in str do
+        match c with
+        | '\\' ->
+            ignore <| strBuilder.Append("\\\\")
+        | '%' ->
+            ignore <| strBuilder.Append("\\%")
+        | '_' ->
+            ignore <| strBuilder.Append("\\_")
+        | c ->
+            ignore <| strBuilder.Append(c)
+
+let escapeSqlLike (str : string) =
+    let strBuilder = StringBuilder (2 * str.Length)
+    buildEscapeSqlLike strBuilder str
+    strBuilder.ToString()
 
 let renderSqlBool : bool -> string = function
     | true -> "TRUE"

@@ -121,8 +121,8 @@ type ResolvedComputedField =
       HashName : HashName // Guaranteed to be unique for any own field (column or computed) in an entity.
       Virtual : VirtualField option
       IsMaterialized : bool
+      Type : ResolvedFieldType
       // These don't take virtual field cases into account.
-      Type : ResolvedFieldType option // `None` means unknown type.
       UsedDatabase : UsedDatabase
       Flags : ResolvedExprFlags
       // But this one does.
@@ -160,10 +160,10 @@ let resolvedFieldBitsType : ResolvedFieldBits -> ResolvedFieldType option = func
     | RColumnField { FieldType = typ } -> Some typ
     | RComputedField _ -> None
 
-let resolvedFieldType : ResolvedField -> ResolvedFieldType option = function
-    | RId -> Some (FTScalar SFTInt)
-    | RSubEntity -> Some (FTScalar SFTJson)
-    | RColumnField { FieldType = typ } -> Some typ
+let resolvedFieldType : ResolvedField -> ResolvedFieldType = function
+    | RId -> FTScalar SFTInt
+    | RSubEntity -> FTScalar SFTJson
+    | RColumnField { FieldType = typ } -> typ
     | RComputedField { Type = typ } -> typ
 
 type FieldInfo<'col, 'comp> =
@@ -203,7 +203,11 @@ type IEntityBits =
 let hasSubType (entity : IEntityBits) =
         Option.isSome entity.Parent || entity.IsAbstract || not (Seq.isEmpty entity.Children)
 
-let inline genericFindField (getColumnField : FieldName -> 'col option) (getComputedField : FieldName -> 'comp option) (fields : IEntityBits) : FieldName -> FieldInfo<'col, 'comp> option =
+let inline genericFindField
+        ([<InlineIfLambda>] getColumnField : FieldName -> 'col option)
+        ([<InlineIfLambda>] getComputedField : FieldName -> 'comp option)
+        (fields : IEntityBits)
+        : FieldName -> FieldInfo<'col, 'comp> option =
     let rec traverse (name : FieldName) =
         if name = funId then
             Some { Name = funId; ForceRename = false; Field = RId }

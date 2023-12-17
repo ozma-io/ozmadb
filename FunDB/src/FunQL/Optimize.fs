@@ -146,38 +146,16 @@ let rec mapOptimizedFieldExpr (f : FieldExpr<'e1, 'f1> -> FieldExpr<'e2, 'f2>) (
     | OFEFalse -> OFEFalse
     | OFEExpr expr -> optimizeFieldExpr (f expr.Value)
 
-let fieldExprToAndTerms : OptimizedFieldExpr<'e, 'f> -> HashedFieldExprs<'e, 'f> = function
-    | OFEAnd ands -> ands
-    | expr -> Map.singleton (string expr) expr
+let orFieldExprs (exprs : OptimizedFieldExpr<'e, 'f> seq) : OptimizedFieldExpr<'e, 'f> =
+    let mutable result = OFEFalse
+    let i = exprs.GetEnumerator()
+    while not (optimizedIsTrue result) && i.MoveNext() do
+        result <- orFieldExpr result i.Current
+    result
 
-let fieldExprToOrTerms : OptimizedFieldExpr<'e, 'f> -> HashedFieldExprs<'e, 'f> = function
-    | OFEOr ors -> ors
-    | expr -> Map.singleton (string expr) expr
-
-let orFieldExprsWithFactor (exprs : OptimizedFieldExpr<'e, 'f> seq) : OptimizedFieldExpr<'e, 'f> * OptimizedFieldExpr<'e, 'f> seq =
-    if Seq.isEmpty exprs then
-        (OFETrue, exprs)
-    else
-        let andTerms = exprs |> Seq.map fieldExprToAndTerms
-        let commonFactors = andTerms |> Seq.fold1 Map.intersect
-        if Map.isEmpty commonFactors then
-            (OFETrue, exprs)
-        else
-            let andOrTrue exprs =
-                if Map.isEmpty exprs then OFETrue else OFEAnd exprs
-            let cleanedFactors = andTerms |> Seq.map (Map.difference commonFactors >> andOrTrue)
-            (OFEAnd commonFactors, cleanedFactors)
-
-let andFieldExprsWithFactor (exprs : OptimizedFieldExpr<'e, 'f> seq) : OptimizedFieldExpr<'e, 'f> * OptimizedFieldExpr<'e, 'f> seq =
-    if Seq.isEmpty exprs then
-        (OFEFalse, exprs)
-    else
-        let orTerms = exprs |> Seq.map fieldExprToOrTerms
-        let commonFactors = orTerms |> Seq.fold1 Map.intersect
-        if Map.isEmpty commonFactors then
-            (OFEFalse, exprs)
-        else
-            let orOrFalse exprs =
-                if Map.isEmpty exprs then OFEFalse else OFEOr exprs
-            let cleanedFactors = orTerms |> Seq.map (Map.difference commonFactors >> orOrFalse)
-            (OFEOr commonFactors, cleanedFactors)
+let andFieldExprs (exprs : OptimizedFieldExpr<'e, 'f> seq) : OptimizedFieldExpr<'e, 'f> =
+    let mutable result = OFETrue
+    let i = exprs.GetEnumerator()
+    while not (optimizedIsFalse result) && i.MoveNext() do
+        result <- andFieldExpr result i.Current
+    result

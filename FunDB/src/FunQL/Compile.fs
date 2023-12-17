@@ -105,25 +105,38 @@ type GenericColumnType<'e> =
     | CTColumnMeta of 'e * ColumnMetaType
     | CTColumn of 'e
 
+let compileName (FunQLName name) = SQL.SQLName name
+
+let decompileName (SQL.SQLName name) = FunQLName name
+
+let sqlFunId = compileName funId
+let sqlFunSubEntity = compileName funSubEntity
+let sqlFunView = compileName funView
+
+let sqlFunIdType = SQL.VTScalar SQL.STInt
+
 // FIXME: drop when we implement typecheck.
-let metaSQLType : MetaType -> SQL.SimpleType option = function
+let private metaSQLType : MetaType -> SQL.SimpleValueType option = function
     | CMRowAttribute _ -> None
     | CMArgAttribute _ -> None
-    | CMDomain _ -> Some SQL.STInt
-    | CMId _ -> Some SQL.STInt
-    | CMSubEntity _ -> Some SQL.STString
-    | CMMainId -> Some SQL.STInt
-    | CMMainSubEntity -> Some SQL.STInt
+    | CMDomain _ -> Some (SQL.VTScalar SQL.STInt)
+    | CMId _ -> Some sqlFunIdType
+    | CMSubEntity _ -> Some (SQL.VTScalar SQL.STString)
+    | CMMainId -> Some (SQL.VTScalar SQL.STInt)
+    | CMMainSubEntity -> Some (SQL.VTScalar SQL.STInt)
 
 let private mapColumnTypeFields (f : 'a -> 'b) : GenericColumnType<'a> -> GenericColumnType<'b> = function
     | CTMeta meta -> CTMeta meta
     | CTColumnMeta (name, meta) -> CTColumnMeta (f name, meta)
     | CTColumn name -> CTColumn (f name)
 
-let columnSQLType : GenericColumnType<'a> -> SQL.SimpleType option = function
+let private columnSQLType : GenericColumnType<'a> -> SQL.SimpleValueType option = function
     | CTMeta meta -> metaSQLType meta
     | CTColumnMeta (name, meta) -> None
     | CTColumn name ->None
+
+let private compileSQLColumnType (typ : SQL.SimpleValueType) =
+    typ |> SQL.mapValueType (fun x -> x.ToSQLRawString())
 
 type ColumnType = GenericColumnType<FieldName>
 
@@ -172,6 +185,8 @@ type ColumnMetaInfo =
       Dependency : DependencyStatus
       Internal : bool
       SingleRow : SQL.ValueExpr option
+      // This is not fully filled at the compilation stage for now, but we get it after the dry run.
+      ValueType : SQL.SimpleValueType option
     }
 
 let emptyColumnMetaInfo =
@@ -179,6 +194,7 @@ let emptyColumnMetaInfo =
       Dependency = DSPerRow
       Internal = false
       SingleRow = None
+      ValueType = None
     }
 
 type private ResultMetaColumn =
@@ -360,14 +376,6 @@ type private FromResult =
     { Tables : FromMap
       Joins : JoinPaths
     }
-
-let compileName (FunQLName name) = SQL.SQLName name
-
-let decompileName (SQL.SQLName name) = FunQLName name
-
-let sqlFunId = compileName funId
-let sqlFunSubEntity = compileName funSubEntity
-let sqlFunView = compileName funView
 
 type private JoinId = int
 
@@ -1041,7 +1049,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
                     | None when skipNames -> SQL.nullExpr
                     | None ->
                         match metaSQLType metaCol with
-                        | Some typ -> SQL.VECast (SQL.nullExpr, SQL.VTScalar (typ.ToSQLRawString()))
+                        | Some typ -> SQL.VECast (SQL.nullExpr, compileSQLColumnType typ)
                         // This will break when current query is a recursive one, because PostgreSQL can't derive
                         // type of column and assumes it as `text`.
                         | None -> SQL.nullExpr
@@ -1071,7 +1079,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
                     yield SQL.nullExpr
                 else
                     match metaSQLType metaCol with
-                    | Some typ -> yield SQL.VECast (SQL.nullExpr, SQL.VTScalar (typ.ToSQLRawString()))
+                    | Some typ -> yield SQL.VECast (SQL.nullExpr, compileSQLColumnType typ)
                     | None -> failwithf "Failed to add type to meta column %O" metaCol
             for colSig, col in Seq.zip sign.Columns valsRow do
                 for metaCol in colSig.Meta do
@@ -1898,6 +1906,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
                   Dependency = attr.Dependency
                   Internal = attr.Internal
                   SingleRow = if attr.Dependency = DSPerRow then None else Some colExpr
+                  ValueType = None
                 }
             let col =
                 { Expression = colExpr
@@ -1951,6 +1960,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
                                   Dependency = attr.Attribute.Value.Dependency
                                   Internal = attr.Attribute.Value.Internal
                                   SingleRow = if attr.Attribute.Value.Dependency = DSPerRow then None else Some compiled
+                                  ValueType = None
                                 }
                             let ret =
                                 { Expression = compiled
@@ -1970,6 +1980,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
                           Dependency = attr.Dependency
                           Internal = attr.Internal
                           SingleRow = Some compiled
+                          ValueType = None
                         }
                     let ret =
                         { Expression = compiled
@@ -2345,6 +2356,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
                   Dependency = attr.Dependency
                   Internal = attr.Internal
                   SingleRow = if attr.Dependency = DSPerRow then None else Some ret
+                  ValueType = None
                 }
             paths <- newPaths
             let ret =
@@ -2415,7 +2427,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
             let resRef = getResolvedEntityRef entityRef
             let entity = layout.FindEntity resRef |> Option.get
             let field = entity.FindField fieldName |> Option.get
-            let fieldType = resolvedFieldType field.Field |> Option.get
+            let fieldType = resolvedFieldType field.Field
             compileDomainValues fieldType flags
         | TETypeDomain (fieldType, flags) -> compileDomainValues (getResolvedFieldType fieldType) flags
 
@@ -2895,6 +2907,7 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
                       Dependency = attr.Dependency
                       Internal = attr.Internal
                       SingleRow = Some colExpr
+                      ValueType = None
                     }
                 let column =
                     { Name = columnName colType
@@ -3002,7 +3015,7 @@ let private convertTempColumnInfo (compiler : QueryCompiler) (info : TempColumnI
     let finalName = mapColumnTypeFields getFinalName info.Type
     { Type = finalName
       Name = compiler.ColumnName finalName
-      Info = info.Info
+      Info = { info.Info with ValueType = columnSQLType finalName }
     }
 
 let compileViewExpr (layout : Layout) (defaultAttrs : MergedDefaultAttributes) (viewExpr : ResolvedViewExpr) : CompiledViewExpr =

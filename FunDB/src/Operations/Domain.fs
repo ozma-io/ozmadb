@@ -78,10 +78,18 @@ type DomainRequestException (details : DomainError, innerException : exn) =
 
     member this.Details = details
 
-let private domainColumns =
+let private domainColumns (expr : DomainExpr) : ChunkColumnsMap =
+    let valueChunkColumn =
+        { SQLName = sqlDomainValueName
+          ValueType = sqlFunIdType
+        } : ChunkColumn
+    let punChunkColumn =
+        { SQLName = sqlDomainPunName
+          ValueType = expr.PunValueType
+        } : ChunkColumn
     Map.ofList
-        [ (domainValueName, sqlDomainValueName)
-          (domainPunName, sqlDomainPunName)
+        [ (domainValueName, valueChunkColumn)
+          (domainPunName, punChunkColumn)
         ]
 
 type DomainValue =
@@ -102,7 +110,15 @@ let private convertDomainValue (values : SQL.Value[]) =
       Pun = Some values.[1]
     }
 
-let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : DomainExpr) (comments : string option) (role : ResolvedRole option) (arguments : ArgumentValuesMap) (chunk : SourceQueryChunk) (cancellationToken : CancellationToken) : Task<DomainValues> =
+let getDomainValues
+        (connection : QueryConnection)
+        (layout : Layout)
+        (domain : DomainExpr)
+        (comments : string option)
+        (role : ResolvedRole option)
+        (arguments : ArgumentValuesMap)
+        (chunk : SourceQueryChunk)
+        (cancellationToken : CancellationToken) : Task<DomainValues> =
     task {
         let query =
             match role with
@@ -115,7 +131,7 @@ let getDomainValues (connection : QueryConnection) (layout : Layout) (domain : D
                     | :? PermissionsApplyException as e when e.IsUserException ->
                         raise <| DomainRequestException(DEAccessDenied (fullUserMessage e), e)
                 applyRoleSelectExpr layout appliedDb domain.Query
-        let resolvedChunk = genericResolveChunk layout domainColumns chunk
+        let resolvedChunk = genericResolveChunk layout (domainColumns domain) chunk
         let (argValues, query) = queryExprChunk layout resolvedChunk query
 
         try
@@ -148,7 +164,7 @@ let explainDomainValues (connection : QueryConnection) (layout : Layout) (domain
                     | :? PermissionsApplyException as e ->
                         raise <| DomainRequestException(DEAccessDenied (fullUserMessage e), e)
                 applyRoleSelectExpr layout appliedDb domain.Query
-        let resolvedChunk = genericResolveChunk layout domainColumns chunk
+        let resolvedChunk = genericResolveChunk layout (domainColumns domain) chunk
         let (argValues, query) = queryExprChunk layout resolvedChunk query
         let arguments = Option.defaultWith (fun () -> query.Arguments.Types |> Map.map (fun name arg -> defaultCompiledArgument arg)) maybeArguments
 
