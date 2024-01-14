@@ -135,6 +135,7 @@ type SaveRestoreAPI (api : IFunDBAPI) =
 
                         let newCustomEntities = req.Schemas |> Map.map getCustomEntities
                         updateCustomEntities newCustomEntities
+
                         return Ok ()
                     with
                     | :? RestoreSchemaException as e when e.IsUserException ->

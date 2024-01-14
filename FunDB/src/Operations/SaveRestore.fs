@@ -135,7 +135,7 @@ let private emptyPrettyUserViewsGeneratorScriptMeta =
 
 type PrettySchemaMeta = { Dummy : bool }
 
-type CustomEntitiesMap = Map<ResolvedEntityRef, JObject[]>
+type CustomEntitiesMap = Map<SchemaName, Map<EntityName, JObject[]>>
 
 type SchemaDump =
     { Entities : Map<EntityName, SourceEntity>
@@ -161,7 +161,7 @@ let schemaDumpHasNoSchema (dump : SchemaDump) =
 
 let schemaDumpIsEmpty (dump : SchemaDump) =
     schemaDumpHasNoSchema dump
-    && Map.forall (fun ref entries -> Array.isEmpty entries) dump.CustomEntities
+    && Map.forall (fun schemaName -> Map.forall (fun entityName entries -> Array.isEmpty entries)) dump.CustomEntities
 
 let emptySchemaDump : SchemaDump =
     { Entities = Map.empty
@@ -184,7 +184,7 @@ let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
       Modules = Map.unionUnique a.Modules b.Modules
       Actions = Map.unionUnique a.Actions b.Actions
       Triggers = Map.unionWith mergeSourceTriggersSchema a.Triggers b.Triggers
-      CustomEntities = Map.unionUnique a.CustomEntities b.CustomEntities
+      CustomEntities = Map.unionWith Map.unionUnique a.CustomEntities b.CustomEntities
     }
 
 let private schemaIdByName (connection : DatabaseTransaction) (schemaName : SchemaName) (cancellationToken : CancellationToken) =
@@ -434,7 +434,19 @@ let private saveCustomEntitiesById
                     let! rets = saveCustomEntity connection layout key schemaId cancellationToken <| fun rows -> task { return! rows.ToArrayAsync(cancellationToken) }
                     return Some (ref, Array.concat rets)
         }
-    layout.SaveRestoredEntities |> Seq.mapTask go |> Task.map (Seq.catMaybes >> Map.ofSeq)
+    layout.SaveRestoredEntities
+        |> Seq.mapTask go
+        |> Task.map (
+            Seq.catMaybes
+                >> Seq.groupBy (fun (ref, entries) -> ref.Schema)
+                >> Seq.map (fun (schema, entries) -> (
+                    schema,
+                    entries
+                    |> Seq.map (fun (ref, entries) -> (ref.Name, entries))
+                    |> Map.ofSeq)
+                )
+                >> Map.ofSeq
+        )
 
 let saveCustomEntities
         (connection : DatabaseTransaction)
@@ -980,35 +992,37 @@ type SchemaCustomEntities = Map<SchemaName, CustomEntitiesMap>
 let restoreCustomEntities
         (layout : Layout)
         (connection : DatabaseTransaction)
-        (entitiesMap : SchemaCustomEntities)
+        (allEntitiesMap : SchemaCustomEntities)
         (cancellationToken : CancellationToken) : Task =
     unitTask {
-        let restoredSchemas = entitiesMap |> Map.keys |> Seq.map string |> Seq.toArray
+        let restoredSchemas = allEntitiesMap |> Map.keys |> Seq.map string |> Seq.toArray
         let! schemaIds =
             (query {
                 for schema in connection.System.Schemas do
                     where (restoredSchemas.Contains(schema.Name))
-            }).ToDictionaryAsync((fun schema -> schema.Name), (fun schema -> schema.Id))
+            }).ToDictionaryAsync((fun schema -> FunQLName schema.Name), (fun schema -> schema.Id))
 
-        for KeyValue(schemaName, rowsMap) in entitiesMap do
-            for KeyValue(entityRef, rows) in rowsMap do
-                match layout.FindEntity entityRef with
-                | None ->
-                    raisef RestoreSchemaException "In schema %O: entity %O does not exist" schemaName entityRef
-                | Some entity when Option.isNone entity.SaveRestoreKey ->
-                    raisef RestoreSchemaException "In schema %O: entity %O is not save-restorable" schemaName entityRef
-                | _ -> ()
+        for KeyValue(srcSchemaName, schemasMap) in allEntitiesMap do
+            for KeyValue(schemaName, entitiesMap) in schemasMap do
+                for KeyValue(entityName, rows) in entitiesMap do
+                    let entityRef = { Schema = schemaName; Name = entityName }
+                    match layout.FindEntity entityRef with
+                    | None ->
+                        raisef RestoreSchemaException "In schema %O: entity %O does not exist" schemaName entityRef
+                    | Some entity when Option.isNone entity.SaveRestoreKey ->
+                        raisef RestoreSchemaException "In schema %O: entity %O is not save-restorable" schemaName entityRef
+                    | _ -> ()
 
-        let insertAndUpdateSchema entityRef (schemaName, rowsMap : CustomEntitiesMap) =
-            let schemaId = schemaIds.[string schemaName]
-            let maybeRows = Map.tryFind entityRef rowsMap
+        let insertAndUpdateSchema (entityRef : ResolvedEntityRef) (srcSchemaName, rowsMap : CustomEntitiesMap) =
+            let schemaId = schemaIds.[srcSchemaName]
+            let maybeRows = Map.tryFind entityRef.Schema rowsMap |> Option.bind (Map.tryFind entityRef.Name)
             try
-                restoreCustomEntity layout connection entityRef schemaId schemaName maybeRows cancellationToken
+                restoreCustomEntity layout connection entityRef schemaId srcSchemaName maybeRows cancellationToken
             with
-            | :? RestoreSchemaException as e -> raisefUserWithInner RestoreSchemaException e "In schema %O" schemaName
+            | :? RestoreSchemaException as e -> raisefUserWithInner RestoreSchemaException e "In schema %O" srcSchemaName
 
         let insertAndUpdate entityRef =
-            entitiesMap |> Map.toSeq |> Seq.collectTask (insertAndUpdateSchema entityRef)
+            allEntitiesMap |> Map.toSeq |> Seq.collectTask (insertAndUpdateSchema entityRef)
 
         let! deleteActions =
             layout.SaveRestoredEntities
@@ -1322,9 +1336,10 @@ let schemasToZipFile (schemas : Map<SchemaName, SavedSchemaData>) (stream : Stre
                 let genMeta = { AllowBroken = true } : PrettyUserViewsGeneratorScriptMeta
                 dumpToEntry userViewsGeneratorMetaEntry genMeta
 
-        for KeyValue(customRef, customEntries) in dump.CustomEntities do
-            if not <| Array.isEmpty customEntries then
-                dumpToEntry (sprintf "custom/%O/%O.yaml" customRef.Schema customRef.Name) customEntries
+        for KeyValue(schemaName, schemaEntries) in dump.CustomEntities do
+                for KeyValue(entityName, entityEntries) in schemaEntries do
+                    if not <| Array.isEmpty entityEntries then
+                        dumpToEntry (sprintf "custom/%O/%O.yaml" schemaName entityName) entityEntries
 
     if totalSize > maxSaveRestoreSize then
         failwithf "Total files size in archive is %i, which is too large" totalSize
@@ -1445,10 +1460,9 @@ let schemasFromZipFile (stream : Stream) : Map<SchemaName, SavedSchemaData> =
                     encounteredUserViews <- Map.add ref (prevMeta, rawUv) encounteredUserViews
                     emptySchemaDump
                 | CIRegex @"^custom/([^/]+)/([^/]+)\.yaml$" [rawCustomSchemaName; rawCustomName] ->
-                    let ref = { Schema = FunQLName rawCustomSchemaName; Name = FunQLName rawCustomName }
                     let entries = deserializeEntry entry
                     { emptySchemaDump with
-                        CustomEntities = Map.singleton ref entries
+                        CustomEntities = Map.singleton (FunQLName rawCustomSchemaName) (Map.singleton (FunQLName rawCustomName) entries)
                     }
                 | fileName when fileName = extraDefaultAttributesEntry ->
                     let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
