@@ -54,27 +54,47 @@ type SaveRestoreAPI (api : IFunDBAPI) =
 
     member this.SaveSchemas (req : SaveSchemasRequest) : Task<Result<SaveSchemasResponse, SaveErrorInfo>> =
         wrapAPIResult rctx logger "saveSchemas" req <| task {
-            let names =
-                match req.Schemas with
-                | SSNames names -> Array.toSeq names
-                | SSAll -> Map.keys ctx.Layout.Schemas
-                | SSNonPreloaded ->
+            let schemas =
+                match req with
+                | SRSpecified schemas ->
+                    Map.toSeq schemas
+                | SRAll settings ->
+                    ctx.Layout.Schemas
+                        |> Map.keys
+                        |> Seq.map (fun name -> (name, settings))
+                | SRNonPreloaded settings ->
                     let preloadSchemas = Map.keysSet ctx.Preload.Schemas
                     let allSchemas = Map.keysSet ctx.Layout.Schemas
-                    Set.toSeq (Set.difference allSchemas preloadSchemas)
+                    let schemasSet = Set.difference allSchemas preloadSchemas
+                    Seq.map (fun name -> (name, settings)) schemasSet
             if not (canSave rctx.User.Effective.Type) then
                 return Error RSEAccessDenied
             else
-                let runOne results name =
+                let runOne results (name, settings : SaveSchemaSettings) =
                     task {
                         if not <| Map.containsKey name ctx.Layout.Schemas then
                             let msg = sprintf "Schema %O is not found" name
                             return Error (RSERequest msg)
                         else
-                            let! schema = saveSchema ctx.Transaction ctx.Layout name ctx.CancellationToken
+                            let onlyCustomEnttieies =
+                                match settings.OnlyCustomEntities with
+                                | None | Some OCFalse -> false
+                                | Some OCTrue -> true
+                                | Some OCPreloaded -> Map.containsKey name ctx.Preload.Schemas
+                            let! schema =
+                                if onlyCustomEnttieies then
+                                    task {
+                                        let! customEntities = saveCustomEntities ctx.Transaction ctx.Layout name ctx.CancellationToken
+                                        return SSCustomEntities customEntities
+                                    }
+                                else
+                                    task {
+                                        let! schemaDump = saveSchema ctx.Transaction ctx.Layout name ctx.CancellationToken
+                                        return SSFull schemaDump
+                                    }
                             return Ok <| Map.add name schema results
                     }
-                let! result = names |> Seq.foldResultTask runOne Map.empty
+                let! result = schemas |> Seq.foldResultTask runOne Map.empty
                 return Result.map (fun schemas -> { Schemas = schemas }) result
         }
 
@@ -84,23 +104,36 @@ type SaveRestoreAPI (api : IFunDBAPI) =
             if not (canRestore rctx.User.Effective.Type) then
                 return Error RREAccessDenied
             else
-                let restoredSchemas = Map.keysSet req.Schemas
-                let preloadSchemas = Map.keysSet ctx.Preload.Schemas
-                if not <| Set.isEmpty (Set.intersect restoredSchemas preloadSchemas) then
-                    return Error (RRERequest "Preloaded schemas cannot be restored")
+                let getFullSchema name (data : SavedSchemaData) =
+                    match data with
+                    | SSFull dump -> Some dump
+                    | _ -> None
+
+                let fullSchemas = Map.mapMaybe getFullSchema req.Schemas
+                let fullRestoredSchemas = Map.keysSet fullSchemas
+                let preloadedSchemas = Map.keysSet ctx.Preload.Schemas
+                
+                if not <| Set.isEmpty (Set.intersect fullRestoredSchemas preloadedSchemas) then
+                    return Error (RRERequest "Only custom entities can be restored from preloaded schemas")
                 else
                     try
                         let droppedSchemas =
                             if not flags.DropOthers then
                                 Set.empty
                             else
-                                let emptySchemas = Set.difference (Map.keysSet ctx.Layout.Schemas) preloadSchemas
-                                Set.difference emptySchemas restoredSchemas
-                        let! modified = restoreSchemas ctx.Transaction ctx.Layout req.Schemas ctx.CancellationToken
+                                let emptySchemas = Set.difference (Map.keysSet ctx.Layout.Schemas) preloadedSchemas
+                                Set.difference emptySchemas (Map.keysSet req.Schemas)
+                        let! modifiedMetadata = restoreSchemas ctx.Transaction ctx.Layout fullSchemas ctx.CancellationToken
                         do! deleteSchemas ctx.Layout ctx.Transaction droppedSchemas ctx.CancellationToken
-                        if modified || not (Set.isEmpty droppedSchemas) then
+                        if modifiedMetadata || not (Set.isEmpty droppedSchemas) then
                             ctx.ScheduleMigration ()
-                        let newCustomEntities = req.Schemas |> Map.map (fun name dump -> dump.CustomEntities)
+
+                        let getCustomEntities name (data : SavedSchemaData) =
+                            match data with
+                            | SSFull dump -> dump.CustomEntities
+                            | SSCustomEntities customEntities -> customEntities
+
+                        let newCustomEntities = req.Schemas |> Map.map getCustomEntities
                         updateCustomEntities newCustomEntities
                         return Ok ()
                     with

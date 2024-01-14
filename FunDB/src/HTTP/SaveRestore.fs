@@ -26,10 +26,18 @@ type RestoreSchemasHTTPFlags =
 let saveRestoreApi (serviceProvider : IServiceProvider) : Endpoint list =
     let utils = serviceProvider.GetRequiredService<HttpJobUtils>()
 
-    let saveZipSchemas (schemas : SaveSchemas) : HttpHandler =
+    let saveJsonSchemas (req : SaveSchemasRequest) : HttpHandler =
+        let job (api : IFunDBAPI) = 
+            task {
+                let! ret = api.SaveRestore.SaveSchemas req
+                return jobReply ret
+            }
+        utils.PerformWriteJob job
+
+    let saveZipSchemas (req : SaveSchemasRequest) : HttpHandler =
         let job (api : IFunDBAPI) =
             task {
-                match! api.SaveRestore.SaveSchemas { Schemas = schemas } with
+                match! api.SaveRestore.SaveSchemas req with
                 | Ok dump ->
                     let header =
                         { ResponseCode = 200
@@ -46,38 +54,38 @@ let saveRestoreApi (serviceProvider : IServiceProvider) : Endpoint list =
         // This query is quite expensive, so apply write rate limit.
         utils.PerformWriteJob job
 
-    let saveJsonSchemas (schemas : SaveSchemas) : HttpHandler =
-        let job (api : IFunDBAPI) = 
-            task {
-                let! ret = api.SaveRestore.SaveSchemas { Schemas = schemas }
-                return jobReply ret
-            }
-        utils.PerformWriteJob job
-
     let saveSchemaNegotiationRules =
         dict [
-            "*/*"             , (fun (o : obj) -> saveZipSchemas (o :?> SaveSchemas))
-            "application/json", (fun (o : obj) -> saveJsonSchemas (o :?> SaveSchemas))
-            "application/zip" , (fun (o : obj) -> saveZipSchemas (o :?> SaveSchemas))
+            "*/*"             , (fun (o : obj) -> saveZipSchemas (o :?> SaveSchemasRequest))
+            "application/json", (fun (o : obj) -> saveJsonSchemas (o :?> SaveSchemasRequest))
+            "application/zip" , (fun (o : obj) -> saveZipSchemas (o :?> SaveSchemasRequest))
         ]
 
     let saveSchemas (next : HttpFunc) (ctx : HttpContext) : HttpFuncResult =
         task {
-            let schemas =
+            let skipPreloaded = boolRequestArg "skip_preloaded" ctx
+            let settings =
+                { OnlyCustomEntities =
+                if not skipPreloaded then None else Some OCPreloaded
+                } : SaveSchemaSettings
+            let req : SaveSchemasRequest =
                 match ctx.Request.Query.TryGetValue "schema" with
-                | (true, schemas) -> Seq.map FunQLName schemas |> Array.ofSeq |> SSNames
+                | (true, schemas) ->
+                    Seq.map (fun strName -> (FunQLName strName, settings)) schemas
+                    |> Map.ofSeq
+                    |> SRSpecified
                 | (false, _) ->
-                    if boolRequestArg "skip_preloaded" ctx then
-                        SSNonPreloaded
-                    else
-                        SSAll
-            return! negotiateWith saveSchemaNegotiationRules (requestError RIUnacceptable) schemas next ctx
+                    // `skip_preloaded` now actually controls `OnlyCustomEntities`.
+                    SRAll settings
+            return! negotiateWith saveSchemaNegotiationRules (requestError RIUnacceptable) req next ctx
         }
 
     let restoreJsonSchemas (flags : RestoreSchemasHTTPFlags) =
         safeBindJson <| fun dump ->
             let job (api : IFunDBAPI) =
                 task {
+                    if flags.ForceAllowBroken then
+                        api.Request.Context.SetForceAllowBroken ()
                     let req =
                         { Schemas = dump
                           Flags = Some { DropOthers = flags.DropOthers }
@@ -94,6 +102,8 @@ let saveRestoreApi (serviceProvider : IServiceProvider) : Endpoint list =
             do! ctx.Request.Body.CopyToAsync(stream)
             let job (api : IFunDBAPI) =
                 task {
+                    if flags.ForceAllowBroken then
+                        api.Request.Context.SetForceAllowBroken ()
                     ignore <| stream.Seek(0L, SeekOrigin.Begin)
                     match trySchemasFromZipFile stream with
                     | Error e -> return jobError e

@@ -896,7 +896,7 @@ type private Phase2Resolver (
                     let firstField = Map.find firstColumn entity.ColumnFields
                     match firstField.FieldType with
                     | FTScalar (SFTReference (refEntityRef, opts)) -> Some refEntityRef
-                    | _ -> raisef ResolveLayoutException "First column %O in a save-restore key %O should be a reference to a save-restored entity" firstColumn saveRestoreKey
+                    | _ -> None
 
             for KeyValue(fieldName, field) in entity.ColumnFields do
                 let keyColumn = Array.contains fieldName constr.Columns

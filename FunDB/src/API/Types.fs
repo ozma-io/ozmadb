@@ -734,39 +734,45 @@ type RestoreErrorInfo =
             member this.HTTPResponseCode = this.HTTPResponseCode
             member this.Error = this.Error
 
-type [<JsonConverter(typeof<SaveSchemasConverter>)>] SaveSchemas =
-    | SSNames of SchemaName[]
-    | SSAll
-    | SSNonPreloaded
+type [<JsonConverter(typeof<OnlyCustomEntitiesConverter>)>] OnlyCustomEntities = OCFalse | OCTrue | OCPreloaded
 
-and SaveSchemasConverter () =
-    inherit JsonConverter<SaveSchemas> ()
+and OnlyCustomEntitiesConverter () =
+    inherit JsonConverter<OnlyCustomEntities> ()
 
-    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : SaveSchemas =
+    override this.ReadJson (reader : JsonReader, objectType : Type, existingValue, hasExistingValue, serializer : JsonSerializer) : OnlyCustomEntities =
         match reader.TokenType with
         | JsonToken.String ->
             match reader.ReadAsString() with
-            | "all" -> SSAll
-            | "nonPreloaded" -> SSNonPreloaded
-            | _ -> raise <| JsonSerializationException("Invalid value for SaveSchemas")
+            | "preloaded" -> OCPreloaded
+            | _ -> raise <| JsonSerializationException("Invalid value for OnlyCustomEntities")
+        | JsonToken.Boolean ->
+            let value = reader.ReadAsBoolean()
+            assert value.HasValue
+            if value.Value then
+                OCTrue
+            else
+                OCFalse
         | _ ->
-            let names = serializer.Deserialize<SchemaName[]>(reader)
-            SSNames names
+            raise <| JsonSerializationException("Invalid value for OnlyCustomEntities")
 
-    override this.WriteJson (writer : JsonWriter, value : SaveSchemas, serializer : JsonSerializer) : unit =
+    override this.WriteJson (writer : JsonWriter, value : OnlyCustomEntities, serializer : JsonSerializer) : unit =
         match value with
-        | SSNames names -> serializer.Serialize(writer, names)
-        | SSAll -> writer.WriteValue "all"
-        | SSNonPreloaded -> writer.WriteValue "nonPreloaded"
+        | OCTrue -> writer.WriteValue true
+        | OCFalse -> writer.WriteValue false
+        | OCPreloaded -> writer.WriteValue "preloaded"
 
-[<NoEquality; NoComparison>]
-type SaveSchemasRequest =
-    { Schemas : SaveSchemas
+type SaveSchemaSettings =
+    { OnlyCustomEntities : OnlyCustomEntities option
     }
+
+type [<SerializeAsObject("type"); NoEquality; NoComparison>] SaveSchemasRequest =
+    | [<CaseKey("specified")>] SRSpecified of Schemas : Map<SchemaName, SaveSchemaSettings>
+    | [<CaseKey("all", Type=CaseSerialization.InnerObject)>] SRAll of Settings : SaveSchemaSettings
+    | [<CaseKey("nonPreloaded", Type=CaseSerialization.InnerObject)>] SRNonPreloaded of Settings : SaveSchemaSettings
 
 [<NoEquality; NoComparison>]
 type SaveSchemasResponse =
-    { Schemas : Map<SchemaName, SchemaDump>
+    { Schemas : Map<SchemaName, SavedSchemaData>
     } with
         member this.ShouldLog = false
         member this.Details = Map.empty
@@ -787,7 +793,7 @@ let emptyRestoreSchemasFlags =
 
 [<NoEquality; NoComparison>]
 type RestoreSchemasRequest =
-    { Schemas : Map<SchemaName, SchemaDump>
+    { Schemas : Map<SchemaName, SavedSchemaData>
       [<DataMember(EmitDefaultValue = false)>]
       Flags : RestoreSchemasFlags option
     }

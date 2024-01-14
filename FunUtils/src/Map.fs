@@ -103,3 +103,12 @@ let findOrFailWith (errorFunc : unit -> string) (k : 'k) (m : Map<'k, 'v>) : 'v 
     match Map.tryFind k m with
     | Some r -> r
     | None -> failwith (errorFunc ())
+
+let partitionEither (f : 'k -> 'v -> Choice<'a, 'b>) (m : Map<'k, 'v>) : Map<'k, 'a> * Map<'k, 'b> =
+    let mutable map1 = Map.empty
+    let mutable map2 = Map.empty
+    for KeyValue(name, value) in m do
+        match f name value with
+        | Choice1Of2 v -> map1 <- Map.add name v map1
+        | Choice2Of2 v -> map2 <- Map.add name v map2
+    (map1, map2)
