@@ -1234,7 +1234,7 @@ let myYamlDeserializer = makeYamlDeserializer { defaultYamlDeserializerSettings 
 
 type [<SerializeAsObject("type"); NoEquality; NoComparison>] SavedSchemaData =
     | [<CaseKey("customEntities")>] SSCustomEntities of CustomEntities : CustomEntitiesMap
-    | [<CaseKey("full", Type=CaseSerialization.InnerObject)>] SSFull of Schema : SchemaDump
+    | [<CaseKey("full", Type=CaseSerialization.InnerObject); DefaultCase>] SSFull of Schema : SchemaDump
 
 type PrettySchemaSettings =
     { [<DataMember(EmitDefaultValue = false)>]
