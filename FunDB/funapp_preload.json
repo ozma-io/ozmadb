@@ -17,7 +17,8 @@
           "checkConstraints": {
             "non_empty_name": { "expression": "name <> ''" }
           },
-          "mainField": "name"
+          "mainField": "name",
+          "saveRestoreKey": "name"
         },
 
         "user_settings": {
