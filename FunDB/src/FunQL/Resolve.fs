@@ -384,6 +384,8 @@ let private boundValueToMapping : BoundValue option -> ResolvedFieldMapping = fu
     | Some bound -> FMBound bound
 
 let private resolvedFieldForcedSQLName : GenericResolvedField<ResolvedColumnField, 'comp> -> SQL.ColumnName option when 'comp :> IComputedFieldBits = function
+    | RId -> Some sqlFunId
+    | RSubEntity -> Some sqlFunSubEntity
     | RColumnField col -> Some col.ColumnName
     | RComputedField comp when comp.IsMaterialized -> Some comp.ColumnName
     | _ -> None

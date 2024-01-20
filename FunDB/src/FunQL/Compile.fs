@@ -105,12 +105,6 @@ type GenericColumnType<'e> =
     | CTColumnMeta of 'e * ColumnMetaType
     | CTColumn of 'e
 
-let compileName (FunQLName name) = SQL.SQLName name
-
-let decompileName (SQL.SQLName name) = FunQLName name
-
-let sqlFunId = compileName funId
-let sqlFunSubEntity = compileName funSubEntity
 let sqlFunView = compileName funView
 
 let sqlFunIdType = SQL.VTScalar SQL.STInt

@@ -214,8 +214,7 @@ let inline genericFindField
         else if name = funSubEntity && hasSubType fields then
             Some { Name = funSubEntity; ForceRename = false; Field = RSubEntity }
         else if name = funMain then
-            // We set name `main` by default for main fields, otherwise name may spontaneously clash in the future.
-            let name = Option.get <| traverse fields.MainField
+            // We force renaming main fields, otherwise the name may spontaneously clash in the future.
             Option.map (fun f -> { f with ForceRename = true }) <| traverse fields.MainField
         else
             match getColumnField name with

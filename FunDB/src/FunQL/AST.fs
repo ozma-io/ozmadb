@@ -1751,6 +1751,13 @@ let funMain = FunQLName "__main"
 let funUsers = FunQLName "users"
 let funEvents = FunQLName "events"
 
+let compileName (FunQLName name) = SQL.SQLName name
+
+let decompileName (SQL.SQLName name) = FunQLName name
+
+let sqlFunId = compileName funId
+let sqlFunSubEntity = compileName funSubEntity
+
 let systemColumns = Set.ofList [funId; funSubEntity]
 
 type UsedField =
