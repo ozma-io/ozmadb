@@ -156,6 +156,7 @@ let sqlKnownFunctions : Map<FunctionName, FunctionSignaturesMap> =
           // Numbers
           (SQLName "abs", funScalarIdSignatures [STInt; STDecimal])
           (SQLName "round", funScalarIdSignatures [STInt; STDecimal])
+          (SQLName "trunc", funScalarIdSignatures [STInt; STDecimal])
           // Strings
           (SQLName "upper", funScalarIdSignatures [STString])
           (SQLName "lower", funScalarIdSignatures [STString])

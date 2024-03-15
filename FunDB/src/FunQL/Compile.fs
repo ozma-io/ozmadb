@@ -1640,9 +1640,10 @@ type private QueryCompiler (globalFlags : CompilationFlags, layout : Layout, def
                     SQL.VEFunc (SQL.SQLName "jsonb_build_object", args)
             | FEFunc (name,  args) ->
                 let compArgs = Array.map traverse args
-                match Map.find name allowedFunctions with
-                | FRFunction name -> SQL.VEFunc (name, compArgs)
-                | FRSpecial special -> SQL.VESpecialFunc (special, compArgs)
+                match Map.tryFind name allowedFunctions with
+                | None -> raisef QueryCompileException "Unknown function: %O" name
+                | Some (FRFunction name) -> SQL.VEFunc (name, compArgs)
+                | Some (FRSpecial special) -> SQL.VESpecialFunc (special, compArgs)
             | FEAggFunc (name,  args) -> SQL.VEAggFunc (Map.find name allowedAggregateFunctions, compileAggExpr args)
             | FESubquery query -> SQL.VESubquery (compileSubSelectExpr query)
             | FEInheritedFrom (c, subEntityRef) -> compileTypeCheck true c subEntityRef

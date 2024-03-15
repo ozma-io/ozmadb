@@ -31,6 +31,7 @@ let allowedFunctions : Map<FunctionName, FunctionRepr> =
           // Numbers
           (FunQLName "abs", FRFunction <| SQL.SQLName "abs")
           (FunQLName "round", FRFunction <| SQL.SQLName "round")
+          (FunQLName "trunc", FRFunction <| SQL.SQLName "trunc")
           // Strings
           (FunQLName "upper", FRFunction <| SQL.SQLName "upper")
           (FunQLName "lower", FRFunction <| SQL.SQLName "lower")
