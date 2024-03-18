@@ -52,6 +52,8 @@ type private LayoutUpdater (db : SystemContext) as this =
             let columnNames = Array.map (fun x -> x.ToString()) newUnique.Columns
             oldUnique.Columns <- columnNames
             oldUnique.IsAlternateKey <- newUnique.IsAlternateKey
+            oldUnique.Description <- newUnique.Description
+            oldUnique.Metadata <- newUnique.Metadata
         let createUniqueFunc (FunQLName name) =
             UniqueConstraint (
                 Name = name,
@@ -62,6 +64,8 @@ type private LayoutUpdater (db : SystemContext) as this =
     let updateCheckConstraints (entity : Entity) : Map<FieldName, SourceCheckConstraint> -> Map<FieldName, CheckConstraint> -> Map<FieldName, CheckConstraint> =
         let updateCheckFunc _ (newCheck : SourceCheckConstraint) (oldCheck : CheckConstraint) =
             oldCheck.Expression <- newCheck.Expression
+            oldCheck.Description <- newCheck.Description
+            oldCheck.Metadata <- newCheck.Metadata
         let createCheckFunc (FunQLName name) =
             CheckConstraint (
                 Name = name,

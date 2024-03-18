@@ -43,10 +43,14 @@ let private makeSourceComputedField (field : ComputedField) : SourceComputedFiel
 let private makeSourceUniqueConstraint (constr : UniqueConstraint) : SourceUniqueConstraint =
     { Columns = Array.map FunQLName constr.Columns
       IsAlternateKey = constr.IsAlternateKey
+      Description = constr.Description
+      Metadata = constr.Metadata
     }
 
 let private makeSourceCheckConstraint (constr : CheckConstraint) : SourceCheckConstraint =
     { Expression = constr.Expression
+      Description = constr.Description
+      Metadata = constr.Metadata
     }
 
 let private makeSourceIndex (index : Index) : SourceIndex =

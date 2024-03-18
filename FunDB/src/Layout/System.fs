@@ -46,11 +46,17 @@ let private makeSourceUniqueConstraint (constr : UniqueConstraintAttribute) : Fu
     let res =
         { Columns = Array.map FunQLName constr.Columns
           IsAlternateKey = constr.IsAlternateKey
+          Description = ""
+          Metadata = "{}"
         }
     (FunQLName constr.Name, res)
 
 let private makeSourceCheckConstraint (constr : CheckConstraintAttribute) : FunQLName * SourceCheckConstraint =
-    let res = { Expression = constr.Expression } : SourceCheckConstraint
+    let res =
+        { Expression = constr.Expression
+          Description = ""
+          Metadata = "{}"
+        }
     (FunQLName constr.Name, res)
 
 let private makeSourceIndex (index : IndexAttribute) : FunQLName * SourceIndex =

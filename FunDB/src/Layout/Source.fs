@@ -15,10 +15,18 @@ open FunWithFlags.FunDB.FunQL.AST
 type SourceUniqueConstraint =
     { Columns : FieldName[]
       IsAlternateKey : bool
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type SourceCheckConstraint =
     { Expression : string
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type IndexType =

@@ -150,10 +150,6 @@ let serializeUniqueConstraint (constr : ResolvedUniqueConstraint) : SerializedUn
       InheritedFrom = constr.InheritedFrom
     }
 
-let serializeCheckConstraint (constr : ResolvedCheckConstraint) : SourceCheckConstraint =
-    { Expression = constr.Expression.ToFunQLString()
-    }
-
 let serializeIndexColumn (col : ResolvedIndexColumn) : SerializedIndexColumn =
     { Expr = col.Expr.ToFunQLString()
       OpClass = col.OpClass
