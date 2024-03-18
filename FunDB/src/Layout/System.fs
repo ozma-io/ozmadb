@@ -26,6 +26,8 @@ let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * Sourc
                   else Some field.Default
               IsNullable = isNull requiredAttr && not property.PropertyType.IsPrimitive
               IsImmutable = field.IsImmutable
+              Description = ""
+              Metadata = "{}"
             }
         Some (name, res)
 
@@ -35,6 +37,8 @@ let private makeSourceComputedField (field : ComputedFieldAttribute) : FunQLName
           AllowBroken = false
           IsVirtual = field.IsVirtual
           IsMaterialized = field.IsMaterialized
+          Description = ""
+          Metadata = "{}"
         }
     (FunQLName field.Name, res)
 
@@ -56,6 +60,8 @@ let private makeSourceIndex (index : IndexAttribute) : FunQLName * SourceIndex =
           IsUnique = index.IsUnique
           Predicate = Option.ofObj index.Predicate
           Type = index.Type |> Option.ofObj |> Option.map (fun typ -> indexTypesMap.[typ]) |> Option.defaultValue ITBTree
+          Description = ""
+          Metadata = "{}"
         }
     (FunQLName index.Name, res)
 
@@ -91,6 +97,8 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               IsFrozen = entityAttr.IsFrozen
               Parent = None
               IsAbstract = entityClass.IsAbstract
+              Description = ""
+              Metadata = "{}"
             }
         Some (name, entityClass, res)
 
@@ -107,4 +115,6 @@ let buildSystemSchema (contextClass : Type) : SourceSchema =
 
     let entities = entitiesInfo |> Seq.map (fun (name, propType, entity) -> (name, applyParent entity propType)) |> Map.ofSeq
     { Entities = entities
+      Description = ""
+      Metadata = "{}"
     }

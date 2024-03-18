@@ -71,6 +71,10 @@ type PrettyColumnField =
       IsNullable : bool
       IsImmutable : bool
       DefaultAttributes : SourceAttributesField option
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type PrettyComputedField =
@@ -79,6 +83,10 @@ type PrettyComputedField =
       IsVirtual : bool
       IsMaterialized : bool
       DefaultAttributes : SourceAttributesField option
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type PrettyEntity =
@@ -93,6 +101,10 @@ type PrettyEntity =
       IsFrozen : bool
       Parent : ResolvedEntityRef option
       SystemDefaultAttributes : Map<FieldName, SourceAttributesField>
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type PrettyTriggerMeta =
@@ -133,8 +145,6 @@ type PrettyUserViewsGeneratorScriptMeta =
 let private emptyPrettyUserViewsGeneratorScriptMeta =
     { AllowBroken = false } : PrettyUserViewsGeneratorScriptMeta
 
-type PrettySchemaMeta = { Dummy : bool }
-
 type CustomEntitiesMap = Map<SchemaName, Map<EntityName, JObject[]>>
 
 type SchemaDump =
@@ -147,6 +157,9 @@ type SchemaDump =
       Actions : Map<ActionName, SourceAction>
       Triggers : Map<SchemaName, SourceTriggersSchema>
       CustomEntities : CustomEntitiesMap
+      [<DefaultValue("")>]
+      Description : string
+      Metadata : JObject
     }
 
 let schemaDumpHasNoSchema (dump : SchemaDump) =
@@ -173,6 +186,8 @@ let emptySchemaDump : SchemaDump =
       Actions = Map.empty
       Triggers = Map.empty
       CustomEntities = Map.empty
+      Description = ""
+      Metadata = JObject()
     }
 
 let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
@@ -185,15 +200,17 @@ let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
       Actions = Map.unionUnique a.Actions b.Actions
       Triggers = Map.unionWith mergeSourceTriggersSchema a.Triggers b.Triggers
       CustomEntities = Map.unionWith Map.unionUnique a.CustomEntities b.CustomEntities
+      Description = unionDescription a.Description b.Description
+      Metadata = unionMetadata a.Metadata b.Metadata
     }
 
-let private schemaIdByName (connection : DatabaseTransaction) (schemaName : SchemaName) (cancellationToken : CancellationToken) =
+let private getSchemaByName (connection : DatabaseTransaction) (schemaName : SchemaName) (cancellationToken : CancellationToken) =
     task {
         let schemaStr = string schemaName
-        let! schemaIds = connection.System.Schemas.Where(fun schema -> schema.Name = schemaStr).Select(fun schema -> schema.Id).ToArrayAsync(cancellationToken)
-        if Array.isEmpty schemaIds then
+        let! schemas = connection.System.Schemas.Where(fun schema -> schema.Name = schemaStr).ToArrayAsync(cancellationToken)
+        if Array.isEmpty schemas then
             failwithf "Schema %O not found" schemaName
-        return schemaIds.[0]
+        return schemas.[0]
     }
 
 type private CustomEntityValueSource =
@@ -454,8 +471,8 @@ let saveCustomEntities
         (schemaName : SchemaName)
         (cancellationToken : CancellationToken) : Task<CustomEntitiesMap> =
     task {
-        let! schemaId = schemaIdByName connection schemaName cancellationToken
-        return! saveCustomEntitiesById connection layout schemaId schemaName cancellationToken
+        let! schema = getSchemaByName connection schemaName cancellationToken
+        return! saveCustomEntitiesById connection layout schema.Id schemaName cancellationToken
     }
 
 let private rawValuesName = FunQLName "raw"
@@ -1034,8 +1051,8 @@ let restoreCustomEntities
 
 let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : SchemaName) (cancellationToken : CancellationToken) : Task<SchemaDump> =
     task {
-        let! schemaId = schemaIdByName conn schemaName cancellationToken
-        let schemaCheck = Expr.toExpressionFunc <@ fun (schema : Schema) -> schema.Id = schemaId @>
+        let! schema = getSchemaByName conn schemaName cancellationToken
+        let schemaCheck = Expr.toExpressionFunc <@ fun (someSchema : Schema) -> someSchema.Id = schema.Id @>
 
         let! entitiesData = buildSchemaLayout conn.System (Some schemaCheck) cancellationToken
         let! rolesData = buildSchemaPermissions conn.System (Some schemaCheck) cancellationToken
@@ -1044,7 +1061,7 @@ let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : Sche
         let! modulesMeta = buildSchemaModules conn.System (Some schemaCheck) cancellationToken
         let! actionsMeta = buildSchemaActions conn.System (Some schemaCheck) cancellationToken
         let! triggersData = buildSchemaTriggers conn.System (Some schemaCheck) cancellationToken
-        let! customEntitiesData = saveCustomEntitiesById conn layout schemaId schemaName cancellationToken
+        let! customEntitiesData = saveCustomEntitiesById conn layout schema.Id schemaName cancellationToken
 
         let findOrFail m =
             match Map.tryFind schemaName m with
@@ -1067,12 +1084,19 @@ let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : Sche
               Actions = actions.Actions
               Triggers = triggers.Schemas
               CustomEntities = customEntitiesData
+              Description = schema.Description
+              Metadata = JObject.Parse(schema.Metadata)
             }
     }
 
 let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Map<SchemaName, SchemaDump>) (cancellationToken : CancellationToken) : Task<bool> =
     task {
-        let newLayout = { Schemas = dumps |> Map.map (fun name dump -> { Entities = dump.Entities }) } : SourceLayout
+        let makeSchema name (dump : SchemaDump) : SourceSchema =
+            { Entities = dump.Entities
+              Description = dump.Description
+              Metadata = dump.Metadata.ToString(Formatting.None)
+            }
+        let newLayout = { Schemas = Map.map makeSchema dumps } : SourceLayout
         let newPerms = { Schemas = dumps |> Map.map (fun name dump -> { Roles = dump.Roles }) } : SourcePermissions
         let makeUserView name (dump : SchemaDump) =
             { UserViews = if Option.isSome dump.UserViewsGeneratorScript then Map.empty else dump.UserViews
@@ -1159,6 +1183,8 @@ let private prettifyColumnField (defaultAttrs : SourceAttributesField option) (f
       IsNullable = field.IsNullable
       IsImmutable = field.IsImmutable
       DefaultAttributes = defaultAttrs
+      Description = field.Description
+      Metadata = field.Metadata
     }
 
 let private deprettifyColumnField (field : PrettyColumnField) : SourceAttributesField option * SourceColumnField =
@@ -1167,6 +1193,8 @@ let private deprettifyColumnField (field : PrettyColumnField) : SourceAttributes
           DefaultValue = field.DefaultValue
           IsNullable = field.IsNullable
           IsImmutable = field.IsImmutable
+          Description = field.Description
+          Metadata = field.Metadata
         }
     (field.DefaultAttributes, ret)
 
@@ -1176,6 +1204,8 @@ let private prettifyComputedField (defaultAttrs : SourceAttributesField option) 
       IsVirtual = field.IsVirtual
       IsMaterialized = field.IsMaterialized
       DefaultAttributes = defaultAttrs
+      Description = field.Description
+      Metadata = field.Metadata
     }
 
 let private deprettifyComputedField (field : PrettyComputedField) : SourceAttributesField option * SourceComputedField =
@@ -1184,6 +1214,8 @@ let private deprettifyComputedField (field : PrettyComputedField) : SourceAttrib
           AllowBroken = field.AllowBroken
           IsVirtual = field.IsVirtual
           IsMaterialized = field.IsMaterialized
+          Description = field.Description
+          Metadata = field.Metadata
         } : SourceComputedField
     (field.DefaultAttributes, ret)
 
@@ -1200,6 +1232,8 @@ let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : Sou
       IsFrozen = entity.IsFrozen
       Parent = entity.Parent
       SystemDefaultAttributes = defaultAttrs.Fields |> Map.filter (fun name attrs -> Set.contains name systemColumns)
+      Description = entity.Description
+      Metadata = entity.Metadata
     }
 
 let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity option * SourceEntity =
@@ -1229,6 +1263,8 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
           IsAbstract = entity.IsAbstract
           IsFrozen = entity.IsFrozen
           Parent = entity.Parent
+          Description = entity.Description
+          Metadata = entity.Metadata
         }
     let attrsRet = if Map.isEmpty defaultAttrs then None else Some { Fields = defaultAttrs }
     (attrsRet, ret)
@@ -1253,10 +1289,15 @@ type [<SerializeAsObject("type"); NoEquality; NoComparison>] SavedSchemaData =
 type PrettySchemaSettings =
     { [<DataMember(EmitDefaultValue = false)>]
       OnlyCustomEntities : bool
+      [<DefaultValue("")>]
+      Description : string
+      Metadata : JObject
     }
 
 let emptyPrettySchemaSettings : PrettySchemaSettings =
     { OnlyCustomEntities = false
+      Description = ""
+      Metadata = JObject()
     }
 
 // This should be called only with a `MemoryStream` or a compatible stream,
@@ -1283,7 +1324,11 @@ let schemasToZipFile (schemas : Map<SchemaName, SavedSchemaData>) (stream : Stre
             | SSCustomEntities entities -> ({ emptySchemaDump with CustomEntities = entities }, true)
             | SSFull dump -> (dump, false)
 
-        let settings = { OnlyCustomEntities = onlyCustomEntities } : PrettySchemaSettings
+        let settings =
+            { OnlyCustomEntities = onlyCustomEntities
+              Description = dump.Description
+              Metadata = dump.Metadata
+            } : PrettySchemaSettings
         dumpToEntry "schema.yaml" settings
 
         for KeyValue(name, entity) in dump.Entities do

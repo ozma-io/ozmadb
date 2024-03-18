@@ -2,6 +2,8 @@ module FunWithFlags.FunDB.Layout.Source
 
 open FSharpPlus
 open System.Runtime.Serialization
+open System.ComponentModel
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
@@ -43,6 +45,10 @@ type SourceIndex =
       IsUnique : bool
       Type : IndexType
       Predicate : string option
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type SourceColumnField =
@@ -50,6 +56,10 @@ type SourceColumnField =
       DefaultValue : string option
       IsNullable : bool
       IsImmutable : bool
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type SourceComputedField =
@@ -57,6 +67,10 @@ type SourceComputedField =
       AllowBroken : bool
       IsVirtual : bool
       IsMaterialized : bool
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type SourceEntity =
@@ -80,18 +94,48 @@ type SourceEntity =
       IsAbstract : bool
       IsFrozen : bool
       Parent : ResolvedEntityRef option
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type SourceSchema =
     { Entities : Map<EntityName, SourceEntity>
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 let emptySourceSchema : SourceSchema =
     { Entities = Map.empty
+      Description = ""
+      Metadata = "{}"
     }
+
+let unionDescription (a : string) (b : string) : string =
+    match (a, b) with
+    | ("", b) -> b
+    | (a, "") -> a
+    | _ -> failwith "Cannot union non-empty descriptions"
+
+let unionMetadata (a : JObject) (b : JObject) : JObject =
+    match (a.HasValues, b.HasValues) with
+    | (_, false) -> a
+    | (false, _) -> b
+    | _ -> failwith "Cannot union non-empty metadata"
+
+let unionRawMetadata (a : string) (b : string) : string =
+    match (a, b) with
+    | ("{}", b) -> b
+    | (a, "{}") -> a
+    | _ -> failwith "Cannot union non-empty metadata"
 
 let unionSourceSchema (a : SourceSchema) (b : SourceSchema) : SourceSchema =
     { Entities = Map.unionUnique a.Entities b.Entities
+      Description = unionDescription a.Description b.Description
+      Metadata = unionRawMetadata a.Metadata b.Metadata
     }
 
 type IEntitiesSet =

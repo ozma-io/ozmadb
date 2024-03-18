@@ -256,6 +256,14 @@ namespace FunWithFlags.FunDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
+
         public List<Entity>? Entities { get; set; }
         public List<Role>? Roles { get; set; }
         public List<FieldAttributes>? FieldsAttributes { get; set; }
@@ -273,6 +281,14 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
+
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
 
         [ColumnField("reference(public.schemas)", IsImmutable=true)]
         public int SchemaId { get; set; }
@@ -309,6 +325,14 @@ namespace FunWithFlags.FunDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
+
         [ColumnField("reference(public.entities) on delete cascade", IsImmutable=true)]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
@@ -334,6 +358,14 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string", IsImmutable=true)]
         [Required]
         public string Name { get; set; } = null!;
+
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
 
         [ColumnField("reference(public.entities) on delete cascade", IsImmutable=true)]
         public int EntityId { get; set; }
@@ -361,6 +393,14 @@ namespace FunWithFlags.FunDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
@@ -382,6 +422,14 @@ namespace FunWithFlags.FunDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
@@ -399,6 +447,14 @@ namespace FunWithFlags.FunDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
+
         [ColumnField("reference(public.entities) on delete cascade")]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
@@ -410,7 +466,7 @@ namespace FunWithFlags.FunDBSchema.System
 
         [ColumnField("array(string)", Default="array[]")]
         [Required]
-        public string[] IncludedExpressions { get; set; } = null!;
+        public string[] IncludedExpressions { get; set; } = new string[0];
 
         [ColumnField("bool", Default="false")]
         public bool IsUnique { get; set; }
@@ -420,7 +476,7 @@ namespace FunWithFlags.FunDBSchema.System
 
         [ColumnField("enum('btree', 'gist', 'gin')", Default="'btree'")]
         [Required]
-        public string Type { get; set; } = null!;
+        public string Type { get; set; } = "btree";
     }
 
     public class UserViewGenerator
@@ -470,6 +526,14 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Name { get; set; } = null!;
+
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
 
         [ColumnField("bool", Default="false")]
         public bool AllowBroken { get; set; }
@@ -647,7 +711,7 @@ namespace FunWithFlags.FunDBSchema.System
         public bool OnInsert { get; set; }
 
         [ColumnField("array(string)", Default="array[]")]
-        public string[] OnUpdateFields { get; set; } = null!;
+        public string[] OnUpdateFields { get; set; } = new string[0];
 
         [ColumnField("bool", Default="false")]
         public bool OnDelete { get; set; }
@@ -665,6 +729,14 @@ namespace FunWithFlags.FunDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
+        [ColumnField("string", Default="''")]
+        [Required]
+        public string Description { get; set; } = "";
+        [ColumnField("json", Default="{}")]
+        [Column(TypeName="jsonb")]
+        [Required]
+        public string Metadata { get; set; } = "{}";
+
         [ColumnField("bool", Default="false")]
         public bool IsRoot { get; set; }
 
@@ -673,7 +745,7 @@ namespace FunWithFlags.FunDBSchema.System
         public Role? Role { get; set; }
 
         [ColumnField("bool", Default="true")]
-        public bool IsEnabled { get; set; }
+        public bool IsEnabled { get; set; } = true;
     }
 
     public class EventEntry
@@ -681,7 +753,7 @@ namespace FunWithFlags.FunDBSchema.System
         public int Id { get; set; }
 
         [ColumnField("int", IsImmutable=true, Default="-1")]
-        public int TransactionId { get; set; }
+        public int TransactionId { get; set; } = -1;
 
         [ColumnField("datetime", IsImmutable=true)]
         public Instant TransactionTimestamp { get; set; }
@@ -699,18 +771,18 @@ namespace FunWithFlags.FunDBSchema.System
         [ColumnField("json", IsImmutable=true, Default="{\"type\": 'api'}")]
         [Column(TypeName="jsonb")]
         [Required]
-        public string Source { get; set; } = "";
+        public string Source { get; set; } = "{\"type\": \"api\"}";
 
         [ColumnField("json", IsImmutable=true)]
         [Column(TypeName="jsonb")]
         [Required]
-        public string Request { get; set; } = "";
+        public string Request { get; set; } = null!;
 
         [ColumnField("json", IsImmutable=true)]
         [Column(TypeName="jsonb")]
         public string? Response { get; set; }
 
-        [ColumnField("json", IsImmutable=true, Default="{}")]
+        [ColumnField("json", Default="{}")]
         [Column(TypeName="jsonb")]
         [Required]
         public string Details { get; set; } = "{}";

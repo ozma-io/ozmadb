@@ -23,6 +23,8 @@ type private LayoutUpdater (db : SystemContext) as this =
             oldColumn.IsImmutable <- newColumn.IsImmutable
             oldColumn.Default <- Option.toObj newColumn.DefaultValue
             oldColumn.Type <- newColumn.Type
+            oldColumn.Description <- newColumn.Description
+            oldColumn.Metadata <- newColumn.Metadata
         let createColumnFunc (FunQLName name) =
             ColumnField (
                 Name = name,
@@ -36,6 +38,8 @@ type private LayoutUpdater (db : SystemContext) as this =
             oldComputed.AllowBroken <- newComputed.AllowBroken
             oldComputed.IsVirtual <- newComputed.IsVirtual
             oldComputed.IsMaterialized <- newComputed.IsMaterialized
+            oldComputed.Description <- newComputed.Description
+            oldComputed.Metadata <- newComputed.Metadata
         let createComputedFunc (FunQLName name) =
             ComputedField (
                 Name = name,
@@ -100,6 +104,8 @@ type private LayoutUpdater (db : SystemContext) as this =
             existingEntity.SaveRestoreKey <- null
         | Some key ->
             existingEntity.SaveRestoreKey <- string key
+        existingEntity.Description <- entity.Description
+        existingEntity.Metadata <- entity.Metadata
 
     let updateSchema (schema : SourceSchema) (existingSchema : Schema) =
         let entitiesMap = existingSchema.Entities |> Seq.ofObj |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
@@ -111,6 +117,8 @@ type private LayoutUpdater (db : SystemContext) as this =
                 Schema = existingSchema
             )
         ignore <| this.UpdateDifference updateFunc createFunc (Map.filter (fun name entity -> not entity.IsHidden) schema.Entities) entitiesMap
+        existingSchema.Description <- schema.Description
+        existingSchema.Metadata <- schema.Metadata
 
     let updateParents (schemas : Map<SchemaName, SourceSchema>) (existingSchemas : Map<SchemaName, Schema>) =
         let parents = existingSchemas |> Map.values |> makeAllEntitiesMap

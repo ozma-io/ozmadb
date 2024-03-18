@@ -27,7 +27,7 @@ type TriggerRunException (message : string, innerException : exn, isUserExceptio
 
 [<SerializeAsObject("type")>]
 type SerializedTriggerSource =
-    | [<CaseKey("insert")>] TSInsert of NewId : int option
+    | [<CaseKey("insert")>] TSInsert of Id : int option
     | [<CaseKey("update")>] TSUpdate of Id : int
     | [<CaseKey("delete")>] TSDelete of Id : int option
 

@@ -5,6 +5,7 @@ open System.Linq
 open System.Text
 open System.Threading
 open System.Threading.Tasks
+open System.ComponentModel
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 open FSharpPlus
@@ -16,7 +17,6 @@ open FunWithFlags.FunDB.SQL.Meta
 open FunWithFlags.FunDB.SQL.Migration
 open FunWithFlags.FunDB.FunQL.AST
 open FunWithFlags.FunDB.FunQL.Resolve
-open FunWithFlags.FunDB.FunQL.Compile
 open FunWithFlags.FunDB.Layout.System
 open FunWithFlags.FunDB.Layout.Types
 open FunWithFlags.FunDB.Layout.Schema
@@ -67,6 +67,10 @@ type SourcePreloadedSchema =
       Actions : Map<ActionName, SourceAction>
       Triggers : Map<SchemaName, SourceTriggersSchema>
       UserViewGenerator : string option // Path to .js file
+      [<DefaultValue("")>]
+      Description : string
+      [<DefaultValue("{}")>]
+      Metadata : string
     }
 
 type SourcePreload =
@@ -131,6 +135,8 @@ let private normalizeRole (role : SourceRole) =
 let private resolvePreloadedSchema (dirname : string) (preload : SourcePreloadedSchema) : PreloadedSchema =
     let schema =
         { Entities = preload.Entities
+          Description = preload.Description
+          Metadata = preload.Metadata
         } : SourceSchema
     let permissions = { Roles = Map.map (fun name -> normalizeRole) preload.Roles }
     let defaultAttributes = { Schemas = preload.DefaultAttributes } : SourceAttributesDatabase

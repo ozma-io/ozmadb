@@ -27,6 +27,8 @@ let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
           else Some field.Default
       IsNullable = field.IsNullable
       IsImmutable = field.IsImmutable
+      Description = field.Description
+      Metadata = field.Metadata
     }
 
 let private makeSourceComputedField (field : ComputedField) : SourceComputedField =
@@ -34,6 +36,8 @@ let private makeSourceComputedField (field : ComputedField) : SourceComputedFiel
       AllowBroken = field.AllowBroken
       IsVirtual = field.IsVirtual
       IsMaterialized = field.IsMaterialized
+      Description = field.Description
+      Metadata = field.Metadata
     }
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraint) : SourceUniqueConstraint =
@@ -51,6 +55,8 @@ let private makeSourceIndex (index : Index) : SourceIndex =
       IsUnique = index.IsUnique
       Predicate = Option.ofObj index.Predicate
       Type = indexTypesMap.[index.Type]
+      Description = index.Description
+      Metadata = index.Metadata
     }
 
 let private makeSourceEntity (entity : Entity) : SourceEntity =
@@ -75,10 +81,14 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         then None
         else Some { Schema = FunQLName entity.Parent.Schema.Name; Name = FunQLName entity.Parent.Name }
       IsAbstract = entity.IsAbstract
+      Description = entity.Description
+      Metadata = entity.Metadata
     }
 
 let private makeSourceSchema (schema : Schema) : SourceSchema =
     { Entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
+      Description = schema.Description
+      Metadata = schema.Metadata
     }
 
 let buildSchemaLayout (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceLayout> =
@@ -106,6 +116,8 @@ let private applyHiddenLayoutSchemaData (sourceSchema : SourceSchema) (systemSch
               IsHidden = systemEntity.IsHidden
         }
     { Entities = Map.unionWith mergeOne sourceSchema.Entities systemSchema.Entities
+      Description = sourceSchema.Description
+      Metadata = sourceSchema.Metadata
     }
 
 let applyHiddenLayoutData (sourceLayout : SourceLayout) (systemLayout : SourceLayout) : SourceLayout =
