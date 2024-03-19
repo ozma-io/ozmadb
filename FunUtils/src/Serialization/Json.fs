@@ -9,6 +9,7 @@ open Newtonsoft.Json.Linq
 open Microsoft.FSharp.Collections
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Reflection
 open FunWithFlags.FunUtils.Serialization.Utils
 
 type JToken = Linq.JToken

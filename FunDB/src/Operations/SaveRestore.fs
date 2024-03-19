@@ -73,7 +73,7 @@ type PrettyColumnField =
       DefaultAttributes : SourceAttributesField option
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type PrettyComputedField =
@@ -84,7 +84,7 @@ type PrettyComputedField =
       DefaultAttributes : SourceAttributesField option
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type PrettyEntity =
@@ -101,7 +101,7 @@ type PrettyEntity =
       SystemDefaultAttributes : Map<FieldName, SourceAttributesField>
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type PrettyTriggerMeta =
@@ -142,7 +142,7 @@ type PrettyUserViewsGeneratorScriptMeta =
 let private emptyPrettyUserViewsGeneratorScriptMeta =
     { AllowBroken = false } : PrettyUserViewsGeneratorScriptMeta
 
-type CustomEntitiesMap = Map<SchemaName, Map<EntityName, JObject[]>>
+type CustomEntitiesMap = Map<SchemaName, Map<EntityName, JsonMap[]>>
 
 type SchemaDump =
     { Entities : Map<EntityName, SourceEntity>
@@ -156,7 +156,7 @@ type SchemaDump =
       CustomEntities : CustomEntitiesMap
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 let schemaDumpHasNoSchema (dump : SchemaDump) =
@@ -184,7 +184,7 @@ let emptySchemaDump : SchemaDump =
       Triggers = Map.empty
       CustomEntities = Map.empty
       Description = ""
-      Metadata = JObject()
+      Metadata = JsonMap.empty
     }
 
 let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
@@ -298,7 +298,7 @@ let private saveOneCustomEntity
         (key : PreparedSaveRestoreKey)
         (schemaId : int)
         (cancellationToken : CancellationToken)
-        (f : IAsyncEnumerable<JObject> -> Task<'a>) : Task<'a> =
+        (f : IAsyncEnumerable<JsonMap> -> Task<'a>) : Task<'a> =
     task {
         let builder = ColumnSourceBuilder(layout, key.FlatColumns.Length)
 
@@ -370,11 +370,11 @@ let private saveOneCustomEntity
             if key.Ref = entityRef then
                 None
             else
-                Some <| JObject.FromObject(entityRef)
+                Some <| JsonMap.fromObject entityRef
         return! connection.Connection.Query.ExecuteQuery (string compiled) argumentValues cancellationToken <| fun columns rows ->
             task {
                 let processRow (row : SQL.Value[]) =
-                    let rec mapObject (sources : CustomEntityObjectSource) : bool * JObject =
+                    let rec mapObject (sources : CustomEntityObjectSource) : bool * JsonMap =
                         let obj = JObject()
                         let mutable nonNullFound = false
                         for KeyValue(fieldName, source) in sources do
@@ -389,15 +389,15 @@ let private saveOneCustomEntity
                             | CVSRef (ref, refSources) ->
                                 let (innerHasData, inner) = mapObject refSources
                                 if innerHasData then
-                                    obj.[string fieldName] <- inner :> JToken
+                                    obj.[string fieldName] <- inner.Map :> JToken
                                     nonNullFound <- true
                                 else
                                     obj.[string fieldName] <- JValue.CreateNull()
-                        (nonNullFound, obj)
+                        (nonNullFound, JsonMap obj)
                     let (nonNullFound, obj) = mapObject combinedSources
                     match subEntityObject with
                     | None -> ()
-                    | Some subEntity -> obj.[subEntityKey] <- subEntity
+                    | Some subEntity -> obj.Map.[subEntityKey] <- subEntity.Map
                     obj
 
                 let mapped = rows.Select(processRow)
@@ -411,7 +411,7 @@ let private saveCustomEntity
         (key : PreparedSaveRestoreKey)
         (schemaId : int)
         (cancellationToken : CancellationToken)
-        (f : IAsyncEnumerable<JObject> -> Task<'a>) : Task<'a seq> =
+        (f : IAsyncEnumerable<JsonMap> -> Task<'a>) : Task<'a seq> =
     task {
         let mutable results = []
 
@@ -520,11 +520,11 @@ let private loadRestoredRows
         (entityRef : ResolvedEntityRef)
         (key : PreparedSaveRestoreKey)
         (schemaId : int)
-        (rows : JObject seq)
+        (rows : JsonMap seq)
         (cancellationToken : CancellationToken) : Task<SQL.TableRef * Set<FieldName>> =
     task {
-        let addUsedFields usedFields (row : JObject) =
-            row.Properties() |> Seq.fold (fun usedFields prop -> Set.add prop.Name usedFields) usedFields
+        let addUsedFields usedFields (row : JsonMap) =
+            row |> Seq.fold (fun usedFields prop -> Set.add prop.Key usedFields) usedFields
 
         let usedFields = rows |> Seq.fold addUsedFields Set.empty
 
@@ -577,8 +577,8 @@ let private loadRestoredRows
 
         let indexArgument = requiredArgument (FTScalar SFTInt)
 
-        let getSourceRow (rowIndex : int, topRow : JObject) =
-            let rec getRowValue (parentPath : FieldName list) (attrs : JObject) : (ResolvedFieldRef * ResolvedColumnField) list -> FieldValue = function
+        let getSourceRow (rowIndex : int, topRow : JsonMap) =
+            let rec getRowValue (parentPath : FieldName list) (attrs : JsonMap) : (ResolvedFieldRef * ResolvedColumnField) list -> FieldValue = function
                 | [] -> failwith "Impossible"
                 | [(fieldRef, field)] ->
                     let inline getPathString () =
@@ -618,7 +618,7 @@ let private loadRestoredRows
                     | (false, _) -> returnKeyNull ()
                     | (true, attr) ->
                         match attr with
-                        | :? JObject as innerAttrs -> getRowValue (fieldRef.Name :: parentPath) innerAttrs nextPath
+                        | :? JObject as innerAttrs -> getRowValue (fieldRef.Name :: parentPath) (JsonMap innerAttrs) nextPath
                         | value when value.Type = JTokenType.Null -> returnKeyNull ()
                         | _ ->
                             let currPath = getPathString ()
@@ -941,7 +941,7 @@ let private restoreOneCustomEntity
         (entityRef : ResolvedEntityRef)
         (key : PreparedSaveRestoreKey)
         (schemaId : int)
-        (rows : JObject seq)
+        (rows : JsonMap seq)
         (cancellationToken : CancellationToken) : Task<unit -> Task> =
     task {
         if Seq.isEmpty rows then
@@ -959,7 +959,7 @@ let private restoreCustomEntity
         (entityRef : ResolvedEntityRef)
         (schemaId : int)
         (schemaName : SchemaName)
-        (maybeRows : JObject[] option)
+        (maybeRows : JsonMap[] option)
         (cancellationToken : CancellationToken) : Task<(unit -> Task) seq> =
     let key = prepareSaveRestoreKey layout entityRef
 
@@ -969,7 +969,7 @@ let private restoreCustomEntity
         if Option.isNone key.SchemaNamePath && schemaName <> entityRef.Schema then
             raisef RestoreSchemaException "Custom entities that don't reference schemas can only exist in the same schema"
         let rows = Option.defaultValue [||] maybeRows
-        let getSubEntity (row : JObject) =
+        let getSubEntity (row : JsonMap) =
             match row.TryGetValue(subEntityKey) with
             | (false, _) -> entityRef
             | (true, subEntityToken) ->
@@ -1082,7 +1082,7 @@ let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : Sche
               Triggers = triggers.Schemas
               CustomEntities = customEntitiesData
               Description = schema.Description
-              Metadata = JObject.Parse(schema.Metadata)
+              Metadata = JsonMap.parse schema.Metadata
             }
     }
 
@@ -1288,13 +1288,13 @@ type PrettySchemaSettings =
       OnlyCustomEntities : bool
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 let emptyPrettySchemaSettings : PrettySchemaSettings =
     { OnlyCustomEntities = false
       Description = ""
-      Metadata = JObject()
+      Metadata = JsonMap.empty
     }
 
 // This should be called only with a `MemoryStream` or a compatible stream,

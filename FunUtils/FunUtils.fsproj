@@ -1,12 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net7.0</TargetFramework>
-
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
   </PropertyGroup>
-
   <ItemGroup>
     <Compile Include="src/Utils.fs" />
     <Compile Include="src/Task.fs" />
@@ -30,17 +27,16 @@
     <Compile Include="src/OrderedSet.fs" />
     <Compile Include="src/ObjectMap.fs" />
     <Compile Include="src/Exn.fs" />
-
+    <Compile Include="src/Reflection.fs" />
+    <Compile Include="src/JsonMap.fs" />
     <Compile Include="src/Serialization/Utils.fs" />
     <Compile Include="src/Serialization/Json.fs" />
     <Compile Include="src/Serialization/Yaml.fs" />
   </ItemGroup>
-
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.*" />
     <PackageReference Include="YamlDotNet" Version="13.1.*" />
     <PackageReference Include="Ply" Version="0.3.*" />
     <PackageReference Include="FSharpPlus" Version="1.4.*" />
   </ItemGroup>
-
 </Project>

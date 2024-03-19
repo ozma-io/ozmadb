@@ -8,7 +8,6 @@ open System.Threading.Tasks
 open System.ComponentModel
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
-open Newtonsoft.Json.Linq
 open FSharpPlus
 open FSharp.Control.Tasks.Affine
 open System.Security.Cryptography
@@ -70,7 +69,7 @@ type SourcePreloadedSchema =
       UserViewGenerator : string option // Path to .js file
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type SourcePreload =

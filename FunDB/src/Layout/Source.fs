@@ -3,7 +3,6 @@ module FunWithFlags.FunDB.Layout.Source
 open FSharpPlus
 open System.Runtime.Serialization
 open System.ComponentModel
-open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunUtils.Serialization.Utils
@@ -17,14 +16,14 @@ type SourceUniqueConstraint =
       IsAlternateKey : bool
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type SourceCheckConstraint =
     { Expression : string
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type IndexType =
@@ -53,7 +52,7 @@ type SourceIndex =
       Predicate : string option
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type SourceColumnField =
@@ -63,7 +62,7 @@ type SourceColumnField =
       IsImmutable : bool
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type SourceComputedField =
@@ -73,7 +72,7 @@ type SourceComputedField =
       IsMaterialized : bool
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type SourceEntity =
@@ -99,20 +98,20 @@ type SourceEntity =
       Parent : ResolvedEntityRef option
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 type SourceSchema =
     { Entities : Map<EntityName, SourceEntity>
       [<DefaultValue("")>]
       Description : string
-      Metadata : JObject
+      Metadata : JsonMap
     }
 
 let emptySourceSchema : SourceSchema =
     { Entities = Map.empty
       Description = ""
-      Metadata = JObject()
+      Metadata = JsonMap.empty
     }
 
 let unionDescription (a : string) (b : string) : string =
@@ -121,8 +120,8 @@ let unionDescription (a : string) (b : string) : string =
     | (a, "") -> a
     | _ -> failwith "Cannot union non-empty descriptions"
 
-let unionMetadata (a : JObject) (b : JObject) : JObject =
-    match (a.HasValues, b.HasValues) with
+let unionMetadata (a : JsonMap) (b : JsonMap) : JsonMap =
+    match (a.Count > 0, b.Count > 0) with
     | (_, false) -> a
     | (false, _) -> b
     | _ -> failwith "Cannot union non-empty metadata"

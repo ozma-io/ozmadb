@@ -28,7 +28,7 @@ let private makeSourceColumnField (property : PropertyInfo) : (FunQLName * Sourc
               IsNullable = isNull requiredAttr && not property.PropertyType.IsPrimitive
               IsImmutable = field.IsImmutable
               Description = ""
-              Metadata = JObject()
+              Metadata = JsonMap.empty
             }
         Some (name, res)
 
@@ -39,7 +39,7 @@ let private makeSourceComputedField (field : ComputedFieldAttribute) : FunQLName
           IsVirtual = field.IsVirtual
           IsMaterialized = field.IsMaterialized
           Description = ""
-          Metadata = JObject()
+          Metadata = JsonMap.empty
         }
     (FunQLName field.Name, res)
 
@@ -48,7 +48,7 @@ let private makeSourceUniqueConstraint (constr : UniqueConstraintAttribute) : Fu
         { Columns = Array.map FunQLName constr.Columns
           IsAlternateKey = constr.IsAlternateKey
           Description = ""
-          Metadata = JObject()
+          Metadata = JsonMap.empty
         }
     (FunQLName constr.Name, res)
 
@@ -56,7 +56,7 @@ let private makeSourceCheckConstraint (constr : CheckConstraintAttribute) : FunQ
     let res =
         { Expression = constr.Expression
           Description = ""
-          Metadata = JObject()
+          Metadata = JsonMap.empty
         }
     (FunQLName constr.Name, res)
 
@@ -68,7 +68,7 @@ let private makeSourceIndex (index : IndexAttribute) : FunQLName * SourceIndex =
           Predicate = Option.ofObj index.Predicate
           Type = index.Type |> Option.ofObj |> Option.map (fun typ -> indexTypesMap.[typ]) |> Option.defaultValue ITBTree
           Description = ""
-          Metadata = JObject()
+          Metadata = JsonMap.empty
         }
     (FunQLName index.Name, res)
 
@@ -105,7 +105,7 @@ let private makeSourceEntity (prop : PropertyInfo) : (FunQLName * Type * SourceE
               Parent = None
               IsAbstract = entityClass.IsAbstract
               Description = ""
-              Metadata = JObject()
+              Metadata = JsonMap.empty
             }
         Some (name, entityClass, res)
 
@@ -123,5 +123,5 @@ let buildSystemSchema (contextClass : Type) : SourceSchema =
     let entities = entitiesInfo |> Seq.map (fun (name, propType, entity) -> (name, applyParent entity propType)) |> Map.ofSeq
     { Entities = entities
       Description = ""
-      Metadata = JObject()
+      Metadata = JsonMap.empty
     }

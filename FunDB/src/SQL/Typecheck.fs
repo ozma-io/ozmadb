@@ -3,7 +3,7 @@ module FunWithFlags.FunDB.SQL.Typecheck
 open FSharpPlus
 
 open Microsoft.FSharp.Reflection
-open FunWithFlags.FunUtils.Serialization.Utils
+open FunWithFlags.FunUtils.Reflection
 open FunWithFlags.FunUtils
 
 open FunWithFlags.FunDB.SQL.AST

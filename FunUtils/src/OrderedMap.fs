@@ -11,11 +11,6 @@ type OrderedMap<'k, 'v> when 'k : comparison =
 
     member this.Count = this.Order.Length
 
-    member this.Contains (KeyValue(key, value)) =
-        match Map.tryFind key this.Map with
-        | Some currValue when Unchecked.equals value currValue -> true
-        | _ -> false
-
     member this.GetEnumerator () =
         let ret = this.Order |> Seq.map (fun k -> KeyValuePair(k, Map.find k this.Map))
         ret.GetEnumerator ()
@@ -48,7 +43,7 @@ type OrderedMap<'k, 'v> when 'k : comparison =
         member this.IsReadOnly = true
         member this.Add _ = raise <| NotSupportedException ()
         member this.Clear () = raise <| NotSupportedException ()
-        member this.Contains pair = this.Contains pair
+        member this.Contains pair = (this.Map :> ICollection<KeyValuePair<'k, 'v>>).Contains pair
         member this.CopyTo (arr, arrayIndex) = this.CopyTo (arr, arrayIndex)
         member this.Remove _ = raise <| NotSupportedException ()
 

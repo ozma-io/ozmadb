@@ -29,7 +29,7 @@ let private makeSourceColumnField (field : ColumnField) : SourceColumnField =
       IsNullable = field.IsNullable
       IsImmutable = field.IsImmutable
       Description = field.Description
-      Metadata = JObject.Parse(field.Metadata)
+      Metadata = JsonMap.parse field.Metadata
     }
 
 let private makeSourceComputedField (field : ComputedField) : SourceComputedField =
@@ -38,20 +38,20 @@ let private makeSourceComputedField (field : ComputedField) : SourceComputedFiel
       IsVirtual = field.IsVirtual
       IsMaterialized = field.IsMaterialized
       Description = field.Description
-      Metadata = JObject.Parse(field.Metadata)
+      Metadata = JsonMap.parse field.Metadata
     }
 
 let private makeSourceUniqueConstraint (constr : UniqueConstraint) : SourceUniqueConstraint =
     { Columns = Array.map FunQLName constr.Columns
       IsAlternateKey = constr.IsAlternateKey
       Description = constr.Description
-      Metadata = JObject.Parse(constr.Metadata)
+      Metadata = JsonMap.parse constr.Metadata
     }
 
 let private makeSourceCheckConstraint (constr : CheckConstraint) : SourceCheckConstraint =
     { Expression = constr.Expression
       Description = constr.Description
-      Metadata = JObject.Parse(constr.Metadata)
+      Metadata = JsonMap.parse constr.Metadata
     }
 
 let private makeSourceIndex (index : Index) : SourceIndex =
@@ -61,7 +61,7 @@ let private makeSourceIndex (index : Index) : SourceIndex =
       Predicate = Option.ofObj index.Predicate
       Type = indexTypesMap.[index.Type]
       Description = index.Description
-      Metadata = JObject.Parse(index.Metadata)
+      Metadata = JsonMap.parse index.Metadata
     }
 
 let private makeSourceEntity (entity : Entity) : SourceEntity =
@@ -87,13 +87,13 @@ let private makeSourceEntity (entity : Entity) : SourceEntity =
         else Some { Schema = FunQLName entity.Parent.Schema.Name; Name = FunQLName entity.Parent.Name }
       IsAbstract = entity.IsAbstract
       Description = entity.Description
-      Metadata = JObject.Parse(entity.Metadata)
+      Metadata = JsonMap.parse entity.Metadata
     }
 
 let private makeSourceSchema (schema : Schema) : SourceSchema =
     { Entities = schema.Entities |> Seq.map (fun entity -> (FunQLName entity.Name, makeSourceEntity entity)) |> Map.ofSeqUnique
       Description = schema.Description
-      Metadata = JObject.Parse(schema.Metadata)
+      Metadata = JsonMap.parse schema.Metadata
     }
 
 let buildSchemaLayout (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceLayout> =

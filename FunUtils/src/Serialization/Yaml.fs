@@ -14,6 +14,7 @@ open YamlDotNet.Serialization.Utilities
 open Microsoft.FSharp.Reflection
 
 open FunWithFlags.FunUtils
+open FunWithFlags.FunUtils.Reflection
 open FunWithFlags.FunUtils.Serialization.Utils
 
 type TypedScalar =
