@@ -17,16 +17,14 @@ type SourceUniqueConstraint =
       IsAlternateKey : bool
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type SourceCheckConstraint =
     { Expression : string
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type IndexType =
@@ -55,8 +53,7 @@ type SourceIndex =
       Predicate : string option
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type SourceColumnField =
@@ -66,8 +63,7 @@ type SourceColumnField =
       IsImmutable : bool
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type SourceComputedField =
@@ -77,8 +73,7 @@ type SourceComputedField =
       IsMaterialized : bool
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type SourceEntity =
@@ -104,22 +99,20 @@ type SourceEntity =
       Parent : ResolvedEntityRef option
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type SourceSchema =
     { Entities : Map<EntityName, SourceEntity>
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 let emptySourceSchema : SourceSchema =
     { Entities = Map.empty
       Description = ""
-      Metadata = "{}"
+      Metadata = JObject()
     }
 
 let unionDescription (a : string) (b : string) : string =
@@ -134,16 +127,10 @@ let unionMetadata (a : JObject) (b : JObject) : JObject =
     | (false, _) -> b
     | _ -> failwith "Cannot union non-empty metadata"
 
-let unionRawMetadata (a : string) (b : string) : string =
-    match (a, b) with
-    | ("{}", b) -> b
-    | (a, "{}") -> a
-    | _ -> failwith "Cannot union non-empty metadata"
-
 let unionSourceSchema (a : SourceSchema) (b : SourceSchema) : SourceSchema =
     { Entities = Map.unionUnique a.Entities b.Entities
       Description = unionDescription a.Description b.Description
-      Metadata = unionRawMetadata a.Metadata b.Metadata
+      Metadata = unionMetadata a.Metadata b.Metadata
     }
 
 type IEntitiesSet =

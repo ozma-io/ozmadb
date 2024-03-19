@@ -6,6 +6,7 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open FSharp.Control.Tasks.Affine
+open Newtonsoft.Json
 
 open FunWithFlags.FunUtils
 open FunWithFlags.FunDBSchema.System
@@ -24,7 +25,7 @@ type private LayoutUpdater (db : SystemContext) as this =
             oldColumn.Default <- Option.toObj newColumn.DefaultValue
             oldColumn.Type <- newColumn.Type
             oldColumn.Description <- newColumn.Description
-            oldColumn.Metadata <- newColumn.Metadata
+            oldColumn.Metadata <- newColumn.Metadata.ToString(Formatting.None)
         let createColumnFunc (FunQLName name) =
             ColumnField (
                 Name = name,
@@ -39,7 +40,7 @@ type private LayoutUpdater (db : SystemContext) as this =
             oldComputed.IsVirtual <- newComputed.IsVirtual
             oldComputed.IsMaterialized <- newComputed.IsMaterialized
             oldComputed.Description <- newComputed.Description
-            oldComputed.Metadata <- newComputed.Metadata
+            oldComputed.Metadata <- newComputed.Metadata.ToString(Formatting.None)
         let createComputedFunc (FunQLName name) =
             ComputedField (
                 Name = name,
@@ -53,7 +54,7 @@ type private LayoutUpdater (db : SystemContext) as this =
             oldUnique.Columns <- columnNames
             oldUnique.IsAlternateKey <- newUnique.IsAlternateKey
             oldUnique.Description <- newUnique.Description
-            oldUnique.Metadata <- newUnique.Metadata
+            oldUnique.Metadata <- newUnique.Metadata.ToString(Formatting.None)
         let createUniqueFunc (FunQLName name) =
             UniqueConstraint (
                 Name = name,
@@ -65,7 +66,7 @@ type private LayoutUpdater (db : SystemContext) as this =
         let updateCheckFunc _ (newCheck : SourceCheckConstraint) (oldCheck : CheckConstraint) =
             oldCheck.Expression <- newCheck.Expression
             oldCheck.Description <- newCheck.Description
-            oldCheck.Metadata <- newCheck.Metadata
+            oldCheck.Metadata <- newCheck.Metadata.ToString(Formatting.None)
         let createCheckFunc (FunQLName name) =
             CheckConstraint (
                 Name = name,
@@ -81,7 +82,7 @@ type private LayoutUpdater (db : SystemContext) as this =
             oldIndex.Predicate <- Option.toObj newIndex.Predicate
             oldIndex.Type <- string newIndex.Type
             oldIndex.Description <- newIndex.Description
-            oldIndex.Metadata <- newIndex.Metadata
+            oldIndex.Metadata <- newIndex.Metadata.ToString(Formatting.None)
         let createIndexFunc (FunQLName name) =
             Index (
                 Name = name,
@@ -111,7 +112,7 @@ type private LayoutUpdater (db : SystemContext) as this =
         | Some key ->
             existingEntity.SaveRestoreKey <- string key
         existingEntity.Description <- entity.Description
-        existingEntity.Metadata <- entity.Metadata
+        existingEntity.Metadata <- entity.Metadata.ToString(Formatting.None)
 
     let updateSchema (schema : SourceSchema) (existingSchema : Schema) =
         let entitiesMap = existingSchema.Entities |> Seq.ofObj |> Seq.map (fun entity -> (FunQLName entity.Name, entity)) |> Map.ofSeq
@@ -124,7 +125,7 @@ type private LayoutUpdater (db : SystemContext) as this =
             )
         ignore <| this.UpdateDifference updateFunc createFunc (Map.filter (fun name entity -> not entity.IsHidden) schema.Entities) entitiesMap
         existingSchema.Description <- schema.Description
-        existingSchema.Metadata <- schema.Metadata
+        existingSchema.Metadata <- schema.Metadata.ToString(Formatting.None)
 
     let updateParents (schemas : Map<SchemaName, SourceSchema>) (existingSchemas : Map<SchemaName, Schema>) =
         let parents = existingSchemas |> Map.values |> makeAllEntitiesMap

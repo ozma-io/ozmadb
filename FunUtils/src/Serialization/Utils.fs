@@ -5,10 +5,10 @@ open System
 open System.Globalization
 open System.Collections.Generic
 open System.Runtime.Serialization
-open System.Text.Json.Serialization
 open System.Reflection
 open System.ComponentModel
 open Microsoft.FSharp.Reflection
+open Newtonsoft.Json.Linq
 
 open FunWithFlags.FunUtils
 
@@ -214,6 +214,8 @@ let getOption (map : UnionCase[]) : OptionInfo option =
 let getTypeDefaultValue (objectType : Type) : obj option =
     if objectType = typeof<string> then
         None
+    else if objectType = typeof<JObject> then
+        Some (JObject() :> obj)
     else if isNullableType objectType then
         Some null
     else if FSharpType.IsUnion objectType then

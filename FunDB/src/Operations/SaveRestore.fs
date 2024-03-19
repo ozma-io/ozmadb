@@ -73,8 +73,7 @@ type PrettyColumnField =
       DefaultAttributes : SourceAttributesField option
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type PrettyComputedField =
@@ -85,8 +84,7 @@ type PrettyComputedField =
       DefaultAttributes : SourceAttributesField option
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type PrettyEntity =
@@ -103,8 +101,7 @@ type PrettyEntity =
       SystemDefaultAttributes : Map<FieldName, SourceAttributesField>
       [<DefaultValue("")>]
       Description : string
-      [<DefaultValue("{}")>]
-      Metadata : string
+      Metadata : JObject
     }
 
 type PrettyTriggerMeta =
@@ -1094,7 +1091,7 @@ let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Ma
         let makeSchema name (dump : SchemaDump) : SourceSchema =
             { Entities = dump.Entities
               Description = dump.Description
-              Metadata = dump.Metadata.ToString(Formatting.None)
+              Metadata = dump.Metadata
             }
         let newLayout = { Schemas = Map.map makeSchema dumps } : SourceLayout
         let newPerms = { Schemas = dumps |> Map.map (fun name dump -> { Roles = dump.Roles }) } : SourcePermissions
