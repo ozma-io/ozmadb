@@ -1,7 +1,9 @@
 import {
   AnyServerMessage, CommonError, IChangeHeightRequestData, ICurrentValue, IReadyRequestData,
   IRequest, IUpdateValueRequestData, Response, apiVersion, Link, IGotoRequestData, IHrefLinkOpts, HrefTarget,
-  IQueryLink, IHrefLink, RawLink,
+  RawLink,
+  IIDTokenResponse,
+  IIDTokenRequestData,
 } from "./types";
 import { redirectClick } from "./utils";
 
@@ -52,7 +54,7 @@ export default class FunAppEmbeddedClient {
     });
   }
 
-  private async sendRequest<R extends { type: string }>(request: R): Promise<any> {
+  private async sendRequest<R extends { type: string }>(request: R): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = this.lastId++;
       const msg: IRequest<R> = {
@@ -60,7 +62,7 @@ export default class FunAppEmbeddedClient {
         id,
         request,
       };
-      this.requests[id] = (response: Response<any, CommonError>) => {
+      this.requests[id] = (response: Response<unknown, CommonError>) => {
         if (response.status === "ok") {
           resolve(response.result);
         } else {
@@ -139,6 +141,14 @@ export default class FunAppEmbeddedClient {
       link,
     };
     await this.sendRequest(gotoMessage);
+  }
+
+  async getIdToken(): Promise<IIDTokenResponse> {
+    const idTokenMessage: IIDTokenRequestData = {
+      type: "idToken",
+    };
+    const ret = await this.sendRequest(idTokenMessage);
+    return ret as IIDTokenResponse;
   }
 
   linkClick(event: MouseEvent, opts?: IHrefLinkOpts | RawLink): void {

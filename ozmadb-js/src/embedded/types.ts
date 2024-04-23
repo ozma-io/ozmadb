@@ -100,8 +100,19 @@ export interface IUpdateValuePush {
 export type GotoRequest = IRequest<IGotoRequestData>;
 export type GotoResponse = Response<undefined, CommonError>;
 
-export type PageClientMessage = ReadyRequest | GotoRequest;
-export type PageServerMessage = ReadyResponse | GotoResponse;
+export interface IIDTokenRequestData {
+  type: "idToken";
+}
+
+export interface IIDTokenResponse {
+  idToken?: string;
+}
+
+export type IDTokenRequest = IRequest<IIDTokenRequestData>;
+export type IDTokenResponse = Response<IIDTokenResponse, CommonError>;
+
+export type PageClientMessage = ReadyRequest | GotoRequest | IDTokenRequest;
+export type PageServerMessage = ReadyResponse | GotoResponse | IDTokenResponse;
 
 export type ControlClientMessage = PageClientMessage | ChangeHeightRequest | UpdateValueRequest;
 export type ControlServerMessage = PageServerMessage | ChangeHeightResponse | UpdateValueResponse | IUpdateValuePush;
